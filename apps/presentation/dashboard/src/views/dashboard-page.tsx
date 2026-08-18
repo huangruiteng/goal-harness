@@ -821,7 +821,13 @@ function personalManagerMatches(question: string, keywords: string[]) {
 function isManagerProjectionQuestion(question: string) {
   return personalManagerMatches(question, [
     "我现在该做什么",
+    "该做什么",
+    "下一步",
     "哪些 Goal 在等我",
+    "哪些 Goal 正在等我",
+    "等我",
+    "优先处理",
+    "全局待办",
     "Agent 在做什么",
     "哪些 Goal 需要我",
   ]);
@@ -846,19 +852,7 @@ function answerPersonalManagerQuestion(
     };
   }
 
-  if (personalManagerMatches(question, ["等我", "阻塞", "需要我"])) {
-    if (model.userTodos.length === 0) {
-      return { text: "目前没有 Goal 在等你，开放用户待办为 0。", lines: [] };
-    }
-    return {
-      text: `有 ${model.userTodos.length} 项开放用户待办，阻塞项优先：`,
-      lines: model.userTodos.slice(0, 3).map((todo) =>
-        `${personalGoalTitle(todo.goalId)} · ${todo.blocking ? "阻塞" : "待处理"} · ${todo.text}`
-      ),
-    };
-  }
-
-  const asksForNextAction = personalManagerMatches(question, ["现在", "下一步", "我该", "该做什么"]);
+  const asksForNextAction = personalManagerMatches(question, ["现在", "下一步", "我该", "该做什么", "优先处理"]);
   if (asksForNextAction) {
     const nextTodo = model.userTodos[0];
     if (nextTodo) {
@@ -884,6 +878,18 @@ function answerPersonalManagerQuestion(
       };
     }
     return { text: "当前系统很安静，没有需要你立即处理的事项。", lines: [] };
+  }
+
+  if (personalManagerMatches(question, ["等我", "阻塞", "需要我", "全局待办"])) {
+    if (model.userTodos.length === 0) {
+      return { text: "目前没有 Goal 在等你，开放用户待办为 0。", lines: [] };
+    }
+    return {
+      text: `有 ${model.userTodos.length} 项开放用户待办，阻塞项优先：`,
+      lines: model.userTodos.slice(0, 3).map((todo) =>
+        `${personalGoalTitle(todo.goalId)} · ${todo.blocking ? "阻塞" : "待处理"} · ${todo.text}`
+      ),
+    };
   }
 
   if (personalManagerMatches(question, ["状态", "异常", "修复", "健康"])) {

@@ -453,24 +453,24 @@ async function main() {
     await managerNavigation.getByRole("button", { name: "总览", exact: true }).click();
     await page.locator(".personal-home-board").waitFor({ state: "visible" });
 
-    await page.getByRole("button", { name: "向 Agent 获取进度报告" }).click();
+    await page.getByRole("button", { name: "汇总所有 Goal 进展" }).click();
     const reportDeadline = Date.now() + 5_000;
-    while (!api.turnRequests.some((turn) => turn.message.includes("已完成、执行中、阻塞和下一步")) && Date.now() < reportDeadline) {
+    while (!api.turnRequests.some((turn) => turn.message.includes("汇总所有活跃 Goal 的最新进展与阻塞")) && Date.now() < reportDeadline) {
       await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     }
-    if (!api.turnRequests.some((turn) => turn.message.includes("已完成、执行中、阻塞和下一步"))) throw new Error("Progress report shortcut did not send a useful scoped request");
-    while (await page.getByRole("button", { name: "向 Agent 获取进度报告" }).isDisabled()) await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    if (!api.turnRequests.some((turn) => turn.message.includes("汇总所有活跃 Goal 的最新进展与阻塞"))) throw new Error("Progress report shortcut did not send a useful scoped request");
+    while (await page.getByRole("button", { name: "汇总所有 Goal 进展" }).isDisabled()) await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     await page.locator(".personal-manager-conversation-tray").waitFor({ state: "visible" });
     if (!(await page.getByTestId("personal-home-lane-running").isVisible())) throw new Error("Manager send replaced the four-lane home overview");
     const managerUrlBefore = page.url();
-    await page.getByRole("button", { name: "将“我现在该做什么”填入编辑框" }).click();
+    await page.getByRole("button", { name: "将“有哪些 Goal 正在等我”填入编辑框" }).click();
     await page.getByLabel("向 LoopX 发送消息").fill("我现在该做什么？只读回答，不要创建或修改任何状态。");
     await page.getByRole("button", { name: "发送", exact: true }).click();
     await page.getByText(/^先处理「.+」：.+/u).waitFor({ state: "visible" });
     await page.getByText("查看完整对话", { exact: true }).waitFor({ state: "visible" });
     if (page.url() !== managerUrlBefore) throw new Error(`Manager send navigated away from the overview: ${managerUrlBefore} -> ${page.url()}`);
     await page.screenshot({ path: resolve(outputDir, "manager-conversation-tray-compact.png"), fullPage: false, animations: "disabled" });
-    await page.locator(".personal-manager-conversation-tray").click({ position: { x: 48, y: 32 } });
+    await page.getByText("查看完整对话", { exact: true }).click();
     await page.getByRole("navigation", { name: "管家视图" }).waitFor({ state: "visible" });
     if (await page.locator(".personal-home-board").isVisible()) throw new Error("Full manager Chat left the Goal overview visible behind the conversation");
     if (await page.locator(".personal-manager-conversation-tray").count()) throw new Error("Full manager Chat kept the compact home tray visible");
@@ -492,7 +492,7 @@ async function main() {
       name: "loopx-smoke.png",
     });
     await page.getByRole("img", { name: "loopx-smoke.png" }).waitFor({ state: "visible" });
-    if (await page.getByRole("button", { name: "发送" }).isDisabled()) throw new Error("A valid image attachment did not enable the composer send action");
+    if (await page.getByRole("button", { name: "发送", exact: true }).isDisabled()) throw new Error("A valid image attachment did not enable the composer send action");
     await page.getByRole("button", { name: "移除图片 loopx-smoke.png" }).click();
     pass(18, "The visible attachment button opens a file chooser; a valid PNG renders a preview and enables send.");
 
@@ -507,7 +507,7 @@ async function main() {
     await page.getByRole("button", { name: "移除图片 loopx-pasted.png" }).click();
     pass(19, "Pasting a clipboard PNG attaches through the same validated composer path.");
 
-    await page.getByRole("button", { name: "创建 Goal" }).click();
+    await page.getByRole("button", { name: "创建新 Goal" }).click();
     const goalDraft = await page.getByLabel("向 LoopX 发送消息").inputValue();
     for (const field of ["目标：", "完成标准：", "执行边界（可选）：", "关联仓库（可选）：", "通知方式（可选）："]) {
       if (!goalDraft.includes(field)) throw new Error(`Create Goal draft missing ${field}`);

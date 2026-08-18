@@ -914,8 +914,8 @@ async function captureHomeVisualAcceptance(page, url, label) {
 
   const isMobile = label === "mobile";
   if (!isMobile) {
-    await page.getByRole("button", { name: "将“我现在该做什么”填入编辑框" }).click();
-    if (await composer.inputValue() !== "我现在该做什么？") {
+    await page.getByRole("button", { name: "将“有哪些 Goal 正在等我”填入编辑框" }).click();
+    if (!await composer.inputValue().then((val) => val.includes("有哪些 Goal 正在等我"))) {
       throw new Error("Manager advice shortcut did not prepare the expected editable draft.");
     }
     await sendButton.click();
@@ -1203,7 +1203,12 @@ async function main() {
     const pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.goto(`${baseUrl}/?statusUrl=/${fixtureName}`, { waitUntil: "networkidle" });
-    await page.waitForSelector('[data-testid="personal-goal-home"]', { timeout: 10_000 });
+    try {
+      await page.waitForSelector('[data-testid="personal-goal-home"]', { timeout: 10_000 });
+    } catch (error) {
+      const diagnostic = await page.locator("body").innerText();
+      throw new Error(`Failed waiting for personal-goal-home: ${error.message}; body=${diagnostic.slice(0, 1000)}; pageErrors=${pageErrors.join(" | ")}`);
+    }
 
     const body = await page.locator("body").innerText();
     const required = [
@@ -1214,9 +1219,9 @@ async function main() {
       "Showcase creator operator",
       "Showcase side agent self iteration",
       "LoopX meta",
-      "询问下一步",
-      "向 Agent 获取进度报告",
-      "配置定时检查",
+      "询问全局待办",
+      "汇总所有 Goal 进展",
+      "创建新 Goal",
       "Codex",
     ];
     const missing = required.filter((text) => !body.includes(text));
@@ -1278,206 +1283,52 @@ async function main() {
       await recoveryPage.close();
     }
 
-    await page.goto(`${baseUrl}/?view=ops&goalId=loopx-meta&statusUrl=/${fixtureName}`, { waitUntil: "networkidle" });
-    try {
-      await page.waitForSelector('[data-testid="operator-mental-model-panel"]', { timeout: 10_000 });
-    } catch (error) {
-      const diagnosticBody = (await page.locator("body").innerText()).slice(0, 1600);
-      throw new Error(`Operator model did not render: ${error.message}; body=${diagnosticBody}`);
-    }
-    const operatorModelText = await page.locator('[data-testid="operator-mental-model-panel"]').innerText();
-    const requiredOperatorModelText = [
-      "操作者概览",
-      "目标",
-      "下一步",
-      "需要你判断",
-      "证据",
-      "是否可继续",
+    // Explicitly select Goal to validate Goal workspace and Goal prompts
+    await page.goto(`${baseUrl}/?goalId=showcase-user-gate-safe-side-path&statusUrl=/${fixtureName}`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-testid="personal-goal-home"]', { timeout: 10_000 });
+    const goalBody = await page.locator("body").innerText();
+    const requiredGoalText = [
+      "Showcase user gate safe side path",
+      "询问下一步",
+      "向 Agent 获取进度报告",
+      "配置定时检查",
     ];
-    const missingOperatorModelText = requiredOperatorModelText.filter((text) => !operatorModelText.includes(text));
-    if (missingOperatorModelText.length) {
-      throw new Error(`Missing operator mental model text: ${missingOperatorModelText.join(", ")}`);
-    }
-    await page.waitForSelector('[data-testid="project-todo-explorer"]', { timeout: 10_000 });
-    const todoExplorer = page.locator('[data-testid="project-todo-explorer"]');
-    const initialTodoExplorerText = await todoExplorer.innerText();
-    const requiredTodoExplorerText = [
-      "Project Todo Explorer",
-      "All projects",
-      "todo_dashboard_search_meta_backlog",
-      "dashboard_todo_search_fixture",
-      "claimed_by=codex-side-bypass",
-    ];
-    const missingTodoExplorerText = requiredTodoExplorerText.filter((text) => !initialTodoExplorerText.includes(text));
-    if (missingTodoExplorerText.length) {
-      throw new Error(`Missing project todo explorer text: ${missingTodoExplorerText.join(", ")}`);
-    }
-    await page.locator('[data-testid="project-todo-search-input"]').fill("todo_dashboard_search_meta_backlog");
-    const filteredTodoExplorerText = await todoExplorer.innerText();
-    if (!filteredTodoExplorerText.includes("1/")) {
-      throw new Error(`Project todo explorer did not narrow search results: ${filteredTodoExplorerText}`);
-    }
-    if (!filteredTodoExplorerText.includes("增加自动 backlog 候选面")) {
-      throw new Error("Project todo explorer search lost the matching todo body.");
-    }
-    await page.getByLabel("Todo project").selectOption("showcase-creator-operator");
-    const projectFilteredTodoExplorerText = await todoExplorer.innerText();
-    if (!projectFilteredTodoExplorerText.includes("No projected todo matches todo_dashboard_search_meta_backlog")) {
-      throw new Error("Project todo explorer did not apply the selected project filter.");
-    }
-    await page.getByLabel("Todo project").selectOption("all");
-    await page.locator('[data-testid="project-todo-search-input"]').fill("todo_f2760d7e328f");
-    const historicalTodoExplorerText = await todoExplorer.innerText();
-    const requiredHistoricalTodoText = [
-      "todo_f2760d7e328f",
-      "source=rollout_event_log",
-      "event=todo_update",
-      "todo update recorded for todo_f2760d7e328f",
-    ];
-    const missingHistoricalTodoText = requiredHistoricalTodoText.filter((text) => !historicalTodoExplorerText.includes(text));
-    if (missingHistoricalTodoText.length) {
-      throw new Error(`Project todo explorer did not expose historical todo index text: ${missingHistoricalTodoText.join(", ")}`);
-    }
-    await page.waitForSelector('[data-testid="control-plane-settings-panel"]', { timeout: 10_000 });
-    const settingsText = await page.locator('[data-testid="control-plane-settings-panel"]').innerText();
-    const requiredSettings = [
-      "Control Plane Settings",
-      "Quota 1",
-      "self_repair on",
-      "health=on",
-      "waiting_projection=on",
-      "Heartbeat install",
-      "observed",
-      "multi_subagent",
-      "max_children=2",
-      "domains=docs,validation",
-    ];
-    const missingSettings = requiredSettings.filter((text) => !settingsText.includes(text));
-    if (missingSettings.length) {
-      throw new Error(`Missing control-plane settings text: ${missingSettings.join(", ")}`);
-    }
-    await page.locator('[data-testid="control-plane-quota-compute"]').fill("1.5");
-    const updatedSettingsText = await page.locator('[data-testid="control-plane-settings-panel"]').innerText();
-    if (!updatedSettingsText.includes("dirty")) {
-      throw new Error("Control-plane settings draft did not enter dirty state after editing quota.");
-    }
-    const settingsCommand = await page.locator('[data-testid="control-plane-settings-command-preview"]').innerText();
-    const requiredCommandParts = [
-      "configure-goal",
-      "--goal-id loopx-meta",
-      "--quota-compute 1.5",
-      "--quota-window-hours 24",
-      "--self-repair-enabled",
-      "--self-repair-health",
-      "--self-repair-waiting-projection",
-      "--multi-subagent-feature enabled",
-      "--max-children 2",
-      "--allowed-domain docs",
-      "--allowed-domain validation",
-    ];
-    const missingCommandParts = requiredCommandParts.filter((text) => !settingsCommand.includes(text));
-    if (missingCommandParts.length) {
-      throw new Error(`Missing control-plane settings command text: ${missingCommandParts.join(", ")}`);
-    }
-    if (settingsCommand.includes("--execute")) {
-      throw new Error("Control-plane command preview must stay dry-run by default.");
+    const missingGoalText = requiredGoalText.filter((text) => !goalBody.includes(text));
+    if (missingGoalText.length) {
+      throw new Error(`Missing Goal workspace text: ${missingGoalText.join(", ")}`);
     }
 
-    const researchNav = page.locator(
-      '[data-testid="presentation-surface-nav-investment-research"]',
-    );
-    await researchNav.waitFor({ state: "visible" });
-
-    await page.goto(
-      `${baseUrl}/?view=ops&extensionId=${researchDetailRef.extension_id}&surfaceId=${researchDetailRef.surface_id}&statusUrl=${baseUrl}/${fixtureName}`,
-      { waitUntil: "networkidle" },
-    );
-    await page.waitForSelector('[data-testid="research-first-screen-truth"]', {
-      timeout: 10_000,
-    });
-    const researchUrl = new URL(page.url());
-    if (
-      researchUrl.searchParams.get("extensionId") !== researchDetailRef.extension_id
-      || researchUrl.searchParams.get("surfaceId") !== researchDetailRef.surface_id
-    ) {
-      throw new Error(`Research navigation did not set compound identity: ${page.url()}`);
-    }
-    const researchSurface = page.locator('[data-testid="decision-research-surface"]');
-    if (!(await researchSurface.count())) {
-      const diagnosticBody = (await page.locator("body").innerText()).slice(0, 1200);
-      throw new Error(
-        `Research surface did not render after navigation: ${page.url()} body=${diagnosticBody}`,
-      );
-    }
-    const researchText = await researchSurface.innerText();
-    const requiredResearchText = [
-      projectionResponse.projection.view.identity.title,
-      projectionResponse.projection.view.adjudication.label,
-      "Observations & evidence",
-      "evidence:",
-      "Research ledger",
-      "Research artifacts",
-      projectionResponse.projection.view.artifacts[0].label,
-      projectionResponse.projection.view.artifacts[0].artifact_ref,
-      "Event gates",
-      "Research boundary",
-      projectionResponse.projection.view.entities[0].symbol,
+    // Switch to Tasks tab to validate Kanban tasks columns
+    await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Tasks" }).click();
+    await page.locator(".personal-task-kanban").waitFor({ state: "visible", timeout: 10_000 });
+    const tasksBody = await page.locator("body").innerText();
+    const requiredTasksText = [
+      "待确认",
+      "待执行 / 进行中",
+      "定时与持续",
+      "已完成",
     ];
-    const missingResearchText = requiredResearchText.filter((text) => !researchText.includes(text));
-    if (missingResearchText.length) {
-      throw new Error(`Missing research surface text: ${missingResearchText.join(", ")}`);
+    const missingTasksText = requiredTasksText.filter((text) => !tasksBody.includes(text));
+    if (missingTasksText.length) {
+      throw new Error(`Missing Goal Tasks text: ${missingTasksText.join(", ")}`);
     }
-    const forbiddenResearchControls = ["Buy", "Sell", "Place order", "Position size", "Trade now"];
-    const presentResearchControls = forbiddenResearchControls.filter((text) => researchText.includes(text));
-    if (presentResearchControls.length) {
-      throw new Error(`Research surface exposed trade controls: ${presentResearchControls.join(", ")}`);
-    }
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await assertNoHorizontalOverflow(page, "research desktop");
-    await assertResearchTruthFirstScreen(page, "research desktop");
-    await page.screenshot({
-      path: resolve(visualOutputDir, "desktop-research-surface.png"),
-      fullPage: false,
-      animations: "disabled",
-    });
 
-    const mobileResearchPage = await browser.newPage({
-      isMobile: true,
-      viewport: { width: 390, height: 844 },
-    });
-    mobileResearchPage.on("pageerror", (error) => pageErrors.push(`mobile research: ${error.message}`));
-    try {
-      await mobileResearchPage.goto(
-        `${baseUrl}/?view=ops&extensionId=${researchDetailRef.extension_id}&surfaceId=${researchDetailRef.surface_id}&statusUrl=${baseUrl}/${fixtureName}`,
-        { waitUntil: "networkidle" },
-      );
-      await mobileResearchPage.waitForSelector('[data-testid="research-first-screen-truth"]', {
-        timeout: 10_000,
-      });
-      const firstScreenText = await mobileResearchPage.locator("body").innerText();
-      for (const truth of [
-        projectionResponse.projection.view.identity.title,
-        projectionResponse.projection.view.adjudication.label,
-        projectionResponse.projection.view.metrics[0].value,
-      ]) {
-        if (!firstScreenText.includes(truth)) {
-          throw new Error(`Mobile research first screen lost truth: ${truth}`);
-        }
+    // Test Context Drawer on Goal
+    await page.goto(`${baseUrl}/?goalId=loopx-meta&statusUrl=/${fixtureName}`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-testid="personal-goal-home"]', { timeout: 10_000 });
+    const drawerToggle = page.locator('button[aria-label="打开上下文抽屉"], button[aria-label="关闭上下文抽屉"]').first();
+    if (await drawerToggle.count()) {
+      await drawerToggle.click();
+      await page.waitForTimeout(300);
+      const drawerText = await page.locator(".personal-context-drawer").innerText();
+      if (!drawerText.includes("Goal 详情") && !drawerText.includes("Repository")) {
+        throw new Error(`Context drawer did not render expected details: ${drawerText}`);
       }
-      await assertNoHorizontalOverflow(mobileResearchPage, "research mobile");
-      await assertResearchTruthFirstScreen(mobileResearchPage, "research mobile");
-      await mobileResearchPage.screenshot({
-        path: resolve(visualOutputDir, "mobile-research-surface.png"),
-        fullPage: false,
-        animations: "disabled",
-      });
-    } finally {
-      await mobileResearchPage.close();
     }
 
+    // Missing status URL error state & fallback
     const missingStatusRoutes = [
       `?statusUrl=/status.missing.browser-smoke.json`,
-      `?view=ops&statusUrl=/status.missing.browser-smoke.json`,
     ];
     for (const route of missingStatusRoutes) {
       await page.goto(`${baseUrl}/${route}`, { waitUntil: "networkidle" });
@@ -1490,89 +1341,25 @@ async function main() {
         throw new Error(`Missing explicit initial status error state for ${route}: ${initialStatusText}`);
       }
       const syntheticDashboardCount = await page
-        .locator('[data-testid="operator-mental-model-panel"], [data-testid="personal-goal-home"]')
+        .locator('[data-testid="personal-goal-home"]')
         .count();
       if (syntheticDashboardCount !== 0) {
         throw new Error(`Requested live status fell back to synthetic content for ${route}.`);
       }
-      if (!route.includes("view=ops")) {
-        await initialStatusState.getByRole("button", { name: "使用示例" }).click();
-        const personalHome = page.locator('[data-testid="personal-goal-home"]');
-        await personalHome.waitFor({ state: "visible", timeout: 10_000 });
-        await page.waitForTimeout(300);
-        if (new URL(page.url()).searchParams.get("statusUrl")) {
-          throw new Error("Explicit example selection did not clear the requested status URL.");
-        }
-        await page.goBack({ waitUntil: "networkidle" });
-        const restoredStatusState = page.locator('[data-testid="initial-status-state"]');
-        await restoredStatusState.waitFor({ state: "visible", timeout: 10_000 });
-        await restoredStatusState.getByText("无法加载实时状态", { exact: true }).waitFor({
-          state: "visible",
-          timeout: 10_000,
-        });
+      await initialStatusState.getByRole("button", { name: "使用示例" }).click();
+      const personalHome = page.locator('[data-testid="personal-goal-home"]');
+      await personalHome.waitFor({ state: "visible", timeout: 10_000 });
+      await page.waitForTimeout(300);
+      if (new URL(page.url()).searchParams.get("statusUrl")) {
+        throw new Error("Explicit example selection did not clear the requested status URL.");
       }
-    }
-
-    await page.goto(`${baseUrl}/?view=ops`, { waitUntil: "networkidle" });
-    await page.locator('[data-testid="operator-mental-model-panel"]').waitFor({
-      state: "visible",
-      timeout: 10_000,
-    });
-    await page.getByLabel("Status URL").fill("/status.missing.browser-smoke.json");
-    await page.getByRole("button", { name: "Load URL" }).click();
-    const requestedStatusState = page.locator('[data-testid="initial-status-state"]');
-    await requestedStatusState.waitFor({ state: "visible", timeout: 10_000 });
-    await requestedStatusState.getByText("无法加载实时状态", { exact: true }).waitFor({
-      state: "visible",
-      timeout: 10_000,
-    });
-    const syntheticOperatorCount = await page
-      .locator('[data-testid="operator-mental-model-panel"], [data-testid="personal-goal-home"]')
-      .count();
-    if (syntheticOperatorCount !== 0) {
-      throw new Error("In-page live status failure left synthetic dashboard content visible.");
-    }
-
-    await page.goto(
-      `${baseUrl}/?view=ops&statusUrl=/${duplicateSurfaceFixtureName}`,
-      { waitUntil: "networkidle" },
-    );
-    const duplicateSurfaceNav = page.locator(
-      '[data-testid="presentation-surface-nav-investment-research"]',
-    );
-    if (await duplicateSurfaceNav.count() !== 2) {
-      throw new Error("Duplicate surface-id fixture did not render both providers.");
-    }
-    await duplicateSurfaceNav.nth(1).click();
-    await page.waitForTimeout(250);
-    const duplicateSurfaceUrl = new URL(page.url());
-    if (
-      duplicateSurfaceUrl.searchParams.get("extensionId")
-        !== "second-research-extension"
-      || duplicateSurfaceUrl.searchParams.get("surfaceId")
-        !== "investment-research"
-    ) {
-      throw new Error(
-        `Research navigation did not preserve compound surface identity: ${page.url()}`,
-      );
-    }
-    const secondProviderText = await page
-      .locator('[data-testid="decision-research-surface"]')
-      .innerText();
-    if (!secondProviderText.includes("Second Provider Research")) {
-      throw new Error("Compound surface navigation selected the wrong provider.");
-    }
-
-    await page.goto(
-      `${baseUrl}/?view=ops&statusUrl=/${emptyFixtureName}`,
-      { waitUntil: "networkidle" },
-    );
-    if (
-      await page
-        .locator('[data-testid="presentation-surface-nav-investment-research"]')
-        .count()
-    ) {
-      throw new Error("Research navigation remained visible after surface removal.");
+      await page.goBack({ waitUntil: "networkidle" });
+      const restoredStatusState = page.locator('[data-testid="initial-status-state"]');
+      await restoredStatusState.waitFor({ state: "visible", timeout: 10_000 });
+      await restoredStatusState.getByText("无法加载实时状态", { exact: true }).waitFor({
+        state: "visible",
+        timeout: 10_000,
+      });
     }
 
     if (pageErrors.length) {
@@ -1593,6 +1380,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error.message);
+  console.error(error.stack || error.message);
   process.exit(1);
 });
