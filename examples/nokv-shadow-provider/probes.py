@@ -28,6 +28,9 @@ sys.path.insert(
     ),
 )
 
+from loopx.control_plane.todos.completion_state import (  # noqa: E402
+    completion_continuation_for_write,
+)
 from loopx.control_plane.todos.durable_completion import (  # noqa: E402
     project_durable_completion_outcome,
 )
@@ -641,9 +644,13 @@ def _evolve_completion_head(provider, todo_mutations: dict) -> None:
 
     The v0 authority proof only knows ``claim_work``; durable completion is a
     later slice.  Each mutated todo is committed the way the future atomic
-    ``complete_todo_with_successor`` write will leave it (``status="done"`` plus
-    the declared continuation fields), so the probes read the bytes back through
-    the provider seam rather than through an in-memory fixture.
+    ``complete_todo_with_successor`` write will leave it (``status="done"``,
+    the declared continuation fields, and the explicit
+    ``completion_continuation`` the LoopX lifecycle records durably), so the
+    probes read the bytes back through the provider seam rather than through
+    an in-memory fixture.  The continuation is derived with the same LoopX
+    helper the lifecycle write uses; a mutation may pin an explicit
+    ``completion_continuation`` to model a contradictory record.
     """
     head, generation = load_head(provider, "goal-completion")
     todos = head["coordination"]["todos"]
@@ -653,6 +660,11 @@ def _evolve_completion_head(provider, todo_mutations: dict) -> None:
         record["todo_revision"] = record["todo_revision"] + 1
         for key, value in fields.items():
             record[key] = value
+        if "completion_continuation" not in record:
+            record["completion_continuation"] = completion_continuation_for_write(
+                no_followup=record.get("no_followup") is True,
+                has_successor=bool(record.get("successor_todo_ids")),
+            )
         todos[todo_id] = record
     result = provider.compare_and_put(generation, head)
     assert result["result"] == "applied", result
@@ -733,47 +745,67 @@ def probe_durable_completion_fail_closed() -> None:
     bootstrap(
         provider,
         "goal-completion",
-        ["todo_done04", "todo_done05", "todo_next01"],
+        ["todo_done04", "todo_done05", "todo_done06", "todo_next01"],
     )
     _evolve_completion_head(
         provider,
         {
             # Contradiction: both no_followup and a (existing) successor.
-            "todo_done04": {"no_followup": True, "successor_todo_ids": ["todo_next01"]},
+            "todo_done04": {
+                "no_followup": True,
+                "successor_todo_ids": ["todo_next01"],
+                "completion_continuation": "no_followup",
+            },
             # Dangling: one declared successor exists, one does not.
             "todo_done05": {
                 "successor_todo_ids": ["todo_next01", "todo_missing9"]
+            },
+            # The explicit continuation contradicts the recorded fields.
+            "todo_done06": {
+                "successor_todo_ids": ["todo_next01"],
+                "completion_continuation": "active_goal",
             },
         },
     )
     head, _generation = load_head(provider, "goal-completion")
     todos = head["coordination"]["todos"]
     existing = set(todos)
+    expected_failures = {
+        "todo_done04": "both no_followup and successor_todo_ids",
+        "todo_done05": "declares missing successor Todo ids: todo_missing9",
+        "todo_done06": "completion_continuation contradicts successor_todo_ids",
+    }
+    for todo_id, expected in expected_failures.items():
+        try:
+            project_durable_completion_outcome(
+                todo={"todo_id": todo_id, **todos[todo_id]},
+                expected_todo_id=todo_id,
+                existing_todo_ids=existing,
+            )
+        except ValueError as exc:
+            assert expected in str(exc), (todo_id, str(exc))
+        else:
+            raise AssertionError(f"{todo_id} did not fail closed")
+    # A durably done record without its explicit continuation is not
+    # projectable: the seam fails closed instead of guessing.
+    stripped = {"todo_id": "todo_done05", **todos["todo_done05"]}
+    del stripped["completion_continuation"]
+    stripped["successor_todo_ids"] = ["todo_next01"]
     try:
         project_durable_completion_outcome(
-            todo={"todo_id": "todo_done04", **todos["todo_done04"]},
-            expected_todo_id="todo_done04",
-            existing_todo_ids=existing,
+            todo=stripped, expected_todo_id="todo_done05", existing_todo_ids=existing
         )
     except ValueError as exc:
-        assert "both no_followup and successor_todo_ids" in str(exc)
+        assert "missing completion_continuation" in str(exc)
     else:
-        raise AssertionError("contradictory durable state did not fail closed")
-    try:
-        project_durable_completion_outcome(
-            todo={"todo_id": "todo_done05", **todos["todo_done05"]},
-            expected_todo_id="todo_done05",
-            existing_todo_ids=existing,
-        )
-    except ValueError as exc:
-        assert "declares missing successor Todo ids: todo_missing9" in str(exc)
-    else:
-        raise AssertionError("dangling successor did not fail closed")
+        raise AssertionError("missing completion_continuation did not fail closed")
     out(
         "contract.durable_completion_fail_closed",
         ok=True,
         contradiction_rejected=True,
         dangling_successor_rejected=True,
+        continuation_contradiction_rejected=True,
+        missing_continuation_rejected=True,
     )
 
 

@@ -127,8 +127,10 @@ It must prove all of the following:
 - a hand-evolved post-completion head read back through the provider byte-CAS
   projects to the same typed continuation outcomes (`successor | no_followup |
   active_goal`) as the LoopX durable-completion seam, failing closed on a
-  contradictory record (both `no_followup` and successors) and on a dangling
-  declared successor, with replay-stable projections.
+  contradictory record (both `no_followup` and successors), on a dangling
+  declared successor, on an explicit `completion_continuation` that
+  contradicts the recorded fields, and on a done record that omits its
+  explicit continuation, with replay-stable projections.
 
 The durable-completion probes are the read-side comparison registered by the
 RFC's later runtime qualification slice. They do not implement or qualify the
