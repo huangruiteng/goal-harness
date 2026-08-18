@@ -65,6 +65,7 @@ def build_autonomous_replan_cli_actions(
     settlement_args: str,
     scoped_cli_args: str,
     quota_spend_action: str,
+    replan_settlement_bound: bool,
 ) -> list[str]:
     packet = (
         payload.get("replan_action_packet")
@@ -92,18 +93,22 @@ def build_autonomous_replan_cli_actions(
         "--progress-probe-kind <probe-kind> "
         "--progress-evidence-id <evidence-id>"
     )
-    return [
-        (
-            f"loopx --format json refresh-state --goal-id {goal_id} "
-            "--progress-scope agent_lane "
-            "--classification bounded_replan_progress "
-            "--delivery-batch-scale single_surface "
-            "--delivery-outcome outcome_progress "
-            f"{typed_progress_args}"
-            f"{settlement_args}{scoped_cli_args}"
-        ),
-        quota_spend_action,
-    ]
+    delivery_args = (
+        "--delivery-batch-scale single_surface "
+        "--delivery-outcome outcome_progress "
+        if replan_settlement_bound
+        else ""
+    )
+    refresh_action = (
+        f"loopx --format json refresh-state --goal-id {goal_id} "
+        "--progress-scope agent_lane "
+        "--classification bounded_replan_progress "
+        f"{delivery_args}{typed_progress_args}"
+        f"{settlement_args}{scoped_cli_args}"
+    )
+    if not replan_settlement_bound:
+        return [refresh_action]
+    return [refresh_action, quota_spend_action]
 
 
 def ensure_replan_novelty_policy(

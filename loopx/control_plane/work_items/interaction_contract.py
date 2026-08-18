@@ -929,6 +929,12 @@ def interaction_next_cli_actions(
             typed_quota_guard,
         ]
     if mode == "autonomous_replan":
+        settlement_identity = (
+            settlement_plan.get("identity")
+            if isinstance(settlement_plan, Mapping)
+            and isinstance(settlement_plan.get("identity"), Mapping)
+            else {}
+        )
         return build_autonomous_replan_cli_actions(
             payload,
             goal_id=goal_id,
@@ -939,6 +945,9 @@ def interaction_next_cli_actions(
                 scoped_cli_args=scoped_cli_args,
                 payload=payload,
                 settlement_plan=settlement_plan,
+            ),
+            replan_settlement_bound=bool(
+                settlement_identity.get("replan_obligation_id")
             ),
         )
     return _terminal_cli_actions(
