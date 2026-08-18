@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..todos.contract import normalize_todo_id
 from ..todos.projection import todo_priority_label, todo_priority_rank
 
 
@@ -109,6 +110,43 @@ def work_lane_contract_is_due_monitor_attempt(
         and contract.get("monitor_kind") == WORK_LANE_TODO_MONITOR_DUE_KIND
         and contract.get("must_attempt_work") is True
     )
+
+
+def preserve_heartbeat_receipt_bound_work_lane(
+    contract: dict[str, Any] | None,
+    *,
+    selected_todo: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Keep a committed same-turn Todo binding ahead of a newly due monitor."""
+
+    if not isinstance(contract, dict) or not work_lane_contract_is_due_monitor_attempt(
+        contract
+    ):
+        return contract
+    if not isinstance(selected_todo, dict):
+        return contract
+    todo_id = normalize_todo_id(selected_todo.get("todo_id"))
+    if not todo_id or selected_todo.get("selection_binding") != "heartbeat_receipt":
+        return contract
+    return {
+        "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
+        "lane": "advancement_task",
+        "next_lane": str(contract.get("lane") or "continuous_monitor"),
+        "obligation": "continue_heartbeat_receipt_bound_todo",
+        "must_attempt_work": True,
+        "selection_binding": "heartbeat_receipt",
+        "selected_todo_id": todo_id,
+        "reason_codes": [
+            "heartbeat_receipt_bound_replay",
+            "same_turn_settlement_identity",
+        ],
+        "monitor_policy": "defer_new_priority_selection_until_next_turn",
+        "deferred_work_lane": contract,
+        "action": (
+            "continue the Todo already bound to this heartbeat turn; reconsider "
+            "newly due monitor priority on the next turn"
+        ),
+    }
 
 
 def work_lane_contract_is_lark_inbox_reply_due(

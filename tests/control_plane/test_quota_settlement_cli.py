@@ -12,6 +12,7 @@ GOAL_ID = "settlement-cli-fixture"
 AGENT_ID = "codex-settlement-cli"
 TODO_ID = "todo_fixture_settlement"
 REENTRY_TODO_ID = "todo_fixture_network_reentry"
+DUE_MONITOR_TODO_ID = "todo_fixture_due_monitor"
 TURN_ID = "turn-settlement-cli-1"
 
 
@@ -177,6 +178,24 @@ def _configure_runtime_capability_reentry_fixture(project: Path) -> None:
             f"  <!-- loopx:todo todo_id={REENTRY_TODO_ID} status=open "
             "task_class=advancement_task action_kind=inspect_target "
             "required_capabilities=network -->\n",
+        ),
+        encoding="utf-8",
+    )
+
+
+def _append_newly_due_monitor(project: Path) -> None:
+    state_path = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    state_text = state_path.read_text(encoding="utf-8")
+    state_path.write_text(
+        state_text.replace(
+            "## Agent Todo\n\n",
+            "## Agent Todo\n\n"
+            "- [ ] [P0-monitor] Observe the newly due public target.\n"
+            f"  <!-- loopx:todo todo_id={DUE_MONITOR_TODO_ID} status=open "
+            "task_class=continuous_monitor action_kind=observe "
+            f"claimed_by={AGENT_ID} target_key=due-monitor-fixture "
+            "required_capabilities=network%2Cexternal_evidence_poll "
+            "cadence=1m next_due_at=2000-01-01T00%3A00%3A00Z -->\n",
         ),
         encoding="utf-8",
     )
@@ -769,6 +788,164 @@ def test_runtime_capability_reentry_preserves_receipt_bound_todo_and_rejects_exp
     assert "explicitly requested Todo" in conflict["reason"]
     assert conflict["heartbeat_receipt"]["status"] == "write_failed"
     assert _heartbeat_receipt_count(runtime, TURN_ID) == 1
+
+
+def test_same_turn_receipt_replay_defers_newly_due_higher_priority_monitor(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    guard_args = (
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        TURN_ID,
+        "--scan-path",
+        str(project),
+    )
+
+    first_rc, first = _run_cli(registry_path, runtime, *guard_args)
+    assert first_rc == 0, first
+    assert first["selected_todo"]["todo_id"] == TODO_ID
+    assert first["heartbeat_receipt"]["settlement_identity"]["todo_id"] == TODO_ID
+
+    _append_newly_due_monitor(project)
+    capability_args = (
+        "--available-capability",
+        "network",
+        "--available-capability",
+        "external_evidence_poll",
+    )
+    replay_rc, replay = _run_cli(
+        registry_path,
+        runtime,
+        *guard_args,
+        *capability_args,
+    )
+
+    assert replay_rc == 0, replay
+    assert replay["selected_todo"]["todo_id"] == TODO_ID
+    assert replay["selected_todo"]["selection_binding"] == "heartbeat_receipt"
+    assert replay["agent_lane_next_action"]["todo_id"] == TODO_ID
+    assert replay["work_lane_contract"]["selection_binding"] == "heartbeat_receipt"
+    assert replay["work_lane_contract"]["selected_todo_id"] == TODO_ID
+    assert (
+        replay["work_lane_contract"]["deferred_work_lane"]["selected_todo_id"]
+        == DUE_MONITOR_TODO_ID
+    )
+    assert replay["heartbeat_receipt"]["status"] == "replayed"
+    plan = replay["interaction_contract"]["cli_channel"]["settlement_plan"]
+    assert plan["identity"]["todo_id"] == TODO_ID
+    assert _heartbeat_receipt_count(runtime, TURN_ID) == 1
+
+    next_turn_rc, next_turn = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        "turn-settlement-cli-2",
+        "--scan-path",
+        str(project),
+        *capability_args,
+    )
+    assert next_turn_rc == 0, next_turn
+    assert next_turn["selected_todo"]["todo_id"] == DUE_MONITOR_TODO_ID
+
+    binding = (
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        TODO_ID,
+        "--turn-instance-id",
+        TURN_ID,
+    )
+    complete_args = (
+        "todo",
+        "complete",
+        "--goal-id",
+        GOAL_ID,
+        *binding,
+        "--claimed-by",
+        AGENT_ID,
+        "--evidence",
+        "receipt-bound delivery validated",
+        "--next-agent-todo",
+        "Continue after the receipt-bound delivery.",
+        "--next-claimed-by",
+        AGENT_ID,
+        "--next-action-kind",
+        "implement",
+    )
+    complete_rc, complete = _run_cli(registry_path, runtime, *complete_args)
+    complete_replay_rc, complete_replay = _run_cli(
+        registry_path,
+        runtime,
+        *complete_args,
+    )
+    assert complete_rc == 0, complete
+    assert complete_replay_rc == 0, complete_replay
+    assert complete_replay["idempotent_replay"] is True
+
+    refresh_args = (
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--classification",
+        "receipt_bound_delivery_validated",
+        "--delivery-batch-scale",
+        "single_surface",
+        "--delivery-outcome",
+        "outcome_progress",
+        *binding,
+        "--no-global-sync",
+        "--suppress-external-sinks",
+    )
+    refresh_rc, refresh = _run_cli(registry_path, runtime, *refresh_args)
+    refresh_replay_rc, refresh_replay = _run_cli(
+        registry_path,
+        runtime,
+        *refresh_args,
+    )
+    assert refresh_rc == 0, refresh
+    assert refresh_replay_rc == 0, refresh_replay
+    assert refresh_replay["idempotent_replay"] is True
+    assert _classification_count(runtime, "receipt_bound_delivery_validated") == 1
+
+    spend_args = (
+        "quota",
+        "spend-slot",
+        "--goal-id",
+        GOAL_ID,
+        "--slots",
+        "1",
+        "--source",
+        "heartbeat",
+        "--execute",
+        *binding,
+        "--scan-path",
+        str(project),
+    )
+    spend_rc, spend = _run_cli(registry_path, runtime, *spend_args)
+    spend_replay_rc, spend_replay = _run_cli(
+        registry_path,
+        runtime,
+        *spend_args,
+    )
+    assert spend_rc == 0, spend
+    assert spend_replay_rc == 0, spend_replay
+    assert spend_replay["idempotent_replay"] is True
+    assert spend_replay["appended"] is False
+    assert _spend_run_count(runtime) == 1
 
 
 def test_read_only_settlement_omits_non_causal_delivery_workspace(

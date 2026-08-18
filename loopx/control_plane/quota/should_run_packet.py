@@ -667,9 +667,10 @@ def _resolve_quota_should_run_route(
     due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(
         prepared.work_lane_contract
     )
-    agent_lane_next_action = None
+    agent_lane_next_action = prepared.receipt_bound_agent_next_action
     if (
-        not due_monitor_attempt
+        agent_lane_next_action is None
+        and not due_monitor_attempt
         and not prepared.inbox_reply_due
         and not task_orchestration_contract_is_actionable(
             prepared.task_orchestration_contract

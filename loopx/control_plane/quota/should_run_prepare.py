@@ -10,6 +10,7 @@ from ...quota import (
     _resolve_reward_memory_experiment_from_status,
 )
 from ..agents.agent_lane_recommendation import (
+    build_agent_lane_next_action,
     scope_status_item_to_agent_lane as _scope_status_item_to_agent_lane,
 )
 from ..agents.agent_scope import (
@@ -82,6 +83,7 @@ from ..work_items.capability_monitor_fallback import (
 from ..work_items.primary_action import protocol_action_text as _protocol_action_text
 from ..work_items.work_lane import (
     lark_inbox_reply_due_work_lane_contract,
+    preserve_heartbeat_receipt_bound_work_lane,
     scoped_user_gate_due_monitor_contract,
     work_lane_contract_is_lark_inbox_reply_due,
 )
@@ -118,6 +120,7 @@ class _QuotaDecisionPreparation:
     monitor_debt_arbitration: dict[str, Any]
     agent_monitor_only: bool
     work_lane_contract: dict[str, Any] | None
+    receipt_bound_agent_next_action: dict[str, Any] | None
     task_orchestration_contract: dict[str, Any] | None
     capability_gate: dict[str, Any] | None
     capability_monitor_fallback: dict[str, Any] | None
@@ -551,8 +554,40 @@ def _prepare_quota_should_run_item(
         current_contract=work_lane_contract,
     )
     inbox_reply_due = work_lane_contract_is_lark_inbox_reply_due(work_lane_contract)
+    receipt_bound_agent_next_action = None
+    if (
+        receipt_bound_todo_id
+        and not inbox_reply_due
+        and not task_orchestration_contract_is_actionable(task_orchestration_contract)
+    ):
+        candidate = build_agent_lane_next_action(
+            agent_identity=agent_identity,
+            agent_todo_summary=agent_todo_summary,
+            capability_gate=capability_gate,
+            scoped_user_gate_fallback=scoped_user_gate_fallback,
+            receipt_bound_todo_id=receipt_bound_todo_id,
+            active_next_action=(
+                item.get("active_state_next_action")
+                or (
+                    item.get("project_asset", {}).get("next_action")
+                    if isinstance(item.get("project_asset"), dict)
+                    else None
+                )
+            ),
+        )
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("selection_binding") == "heartbeat_receipt"
+        ):
+            receipt_bound_agent_next_action = candidate
+            preserved_work_lane = preserve_heartbeat_receipt_bound_work_lane(
+                work_lane_contract,
+                selected_todo=candidate,
+            )
+            if isinstance(preserved_work_lane, dict):
+                work_lane_contract = preserved_work_lane
     work_lane_selected_todo = _selected_todo_projection(
-        agent_lane_next_action=None,
+        agent_lane_next_action=receipt_bound_agent_next_action,
         work_lane_contract=work_lane_contract,
     )
     if inbox_reply_due:
@@ -658,6 +693,7 @@ def _prepare_quota_should_run_item(
         monitor_debt_arbitration=monitor_debt_arbitration,
         agent_monitor_only=agent_monitor_only,
         work_lane_contract=work_lane_contract,
+        receipt_bound_agent_next_action=receipt_bound_agent_next_action,
         task_orchestration_contract=task_orchestration_contract,
         capability_gate=capability_gate,
         capability_monitor_fallback=capability_monitor_fallback,
