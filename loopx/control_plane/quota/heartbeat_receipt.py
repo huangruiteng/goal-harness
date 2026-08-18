@@ -208,9 +208,21 @@ def upgrade_identityless_heartbeat_receipt(
         )
         if existing_identity is not None:
             if existing_identity != expected_identity:
+                if (
+                    existing_identity[0] is SettlementBindingKind.TODO
+                    and expected_identity[0] is SettlementBindingKind.TODO
+                ):
+                    conflict_target = "current selected Todo"
+                elif (
+                    existing_identity[0] is SettlementBindingKind.AUTONOMOUS_REPLAN
+                    and expected_identity[0] is SettlementBindingKind.AUTONOMOUS_REPLAN
+                ):
+                    conflict_target = "current autonomous replan obligation"
+                else:
+                    conflict_target = "current settlement binding"
                 raise HeartbeatReceiptIdentityConflictError(
                     "heartbeat receipt settlement identity conflicts with the "
-                    "current settlement binding"
+                    f"{conflict_target}"
                 )
             existing_details_value = effective.get("details")
             existing_details = (
