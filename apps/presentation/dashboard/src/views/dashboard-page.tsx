@@ -704,7 +704,7 @@ function isPersonalGoalTerminal(row: GoalDirectoryRow) {
 }
 
 function personalGoalRegistryFinding(payload: StatusPayload, row: GoalDirectoryRow) {
-  return payload.global_registry.findings.find((finding) =>
+  return payload.global_registry?.findings?.find((finding) =>
     finding.severity === "high"
     && (finding.goal_id === row.goal.id || finding.goal_ids.includes(row.goal.id)),
   );
@@ -888,9 +888,9 @@ function answerPersonalManagerQuestion(
 
   if (personalManagerMatches(question, ["状态", "异常", "修复", "健康"])) {
     const globalHealthFailed = !payload.ok
-      || !payload.contract.ok
-      || !payload.global_registry.ok
-      || payload.global_registry.summary.high > 0;
+      || !payload.contract?.ok
+      || !payload.global_registry?.ok
+      || (payload.global_registry?.summary?.high ?? 0) > 0;
     const repairGoals = model.goals.filter((goal) => goal.state === "需修复");
     const lines = repairGoals.slice(0, globalHealthFailed ? 2 : 3)
       .map((goal) => `${goal.title} · ${goal.agentSentence}`);
@@ -1019,7 +1019,11 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
     systemHealthIssues.push("状态载荷未标记为正常 (payload.ok === false)");
   }
   if (payload.contract && !payload.contract.ok) {
-    systemHealthIssues.push(`契约检查未通过: ${payload.contract.summary || "请检查控制面契约"}`);
+    const summary = payload.contract.summary;
+    const detail = summary
+      ? `${summary.errors} 项错误 / ${summary.warnings} 项警告`
+      : (payload.contract.errors?.[0] || "请检查控制面契约");
+    systemHealthIssues.push(`契约检查未通过: ${detail}`);
   }
   if (payload.global_registry) {
     if (!payload.global_registry.ok) {
@@ -1108,9 +1112,9 @@ function PersonalGoalHome({
   const sessionDiscoveryKey = model.goals.map((goal) => `${goal.goalId}:${goal.agentId}`).join("|");
   const contextId = selectedGoal?.goalId ?? "manager";
   const managerSummary = !payload.ok
-    || !payload.contract.ok
-    || !payload.global_registry.ok
-    || payload.global_registry.summary.high > 0
+    || !payload.contract?.ok
+    || !payload.global_registry?.ok
+    || (payload.global_registry?.summary?.high ?? 0) > 0
     ? "LoopX 当前存在状态问题，可以打开运行详情查看原因。"
     : model.openUserTodoCount > 0
       ? `你有 ${model.openUserTodoCount} 项需要处理，其中 ${model.blockingTodoCount} 项正在阻塞 Agent。`

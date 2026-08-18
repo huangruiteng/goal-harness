@@ -767,13 +767,15 @@ export function PersonalWorkspacePage({
       || (item.kind === "proposal" && sessionProposalIds.includes(item.proposal.previewId))),
     [items, sessionProposalIds],
   );
+  const lastChatItem = managerChatItems[managerChatItems.length - 1];
+  const latestMessageTextLength = lastChatItem?.kind === "message" ? lastChatItem.message.text.length : 0;
   useEffect(() => {
     if (!managerChatOpen || !channelScrollRef.current) return;
     const frame = window.requestAnimationFrame(() => {
       if (channelScrollRef.current) channelScrollRef.current.scrollTop = channelScrollRef.current.scrollHeight;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [managerChatItems.length, managerChatOpen]);
+  }, [managerChatItems.length, managerChatOpen, latestMessageTextLength]);
   const drawerSelection = useMemo<WorkspaceDrawerSelection | null>(() => {
     if (selection?.kind === "notifications") return null;
     if (selection?.kind !== "run") return selection;

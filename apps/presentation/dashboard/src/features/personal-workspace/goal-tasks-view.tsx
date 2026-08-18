@@ -82,7 +82,7 @@ export function GoalTasksView({
           const age = attentionAgeLabel(attention.updatedAt);
           return (
             <button key={attention.todoId} onClick={() => onSelect({ item: attention, kind: "attention" })} type="button">
-              <span className="is-attention">!</span>
+              <span aria-hidden="true" className="is-attention">!</span>
               <strong>{attention.text}</strong>
               <small>
                 <span className={`personal-row-status ${attention.blocking ? "is-blocking" : "is-pending"}`}>{attention.blocking ? "阻塞" : "待处理"}</span>
