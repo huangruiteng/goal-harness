@@ -161,22 +161,32 @@ def quota_rollout_todo_id(
     payload: Mapping[str, object],
     args: argparse.Namespace,
 ) -> str | None:
-    selected_todo = (
-        payload.get("selected_todo")
-        if isinstance(payload.get("selected_todo"), Mapping)
-        else {}
-    )
-    return (
-        normalize_todo_id(payload.get("todo_id"))
-        or normalize_todo_id(selected_todo.get("todo_id"))
-        or normalize_todo_id(args.todo_id)
-    )
+    todo_id, _ = quota_rollout_settlement_binding(payload, args)
+    return todo_id
 
 
-def quota_rollout_replan_obligation_id(
+def quota_rollout_settlement_binding(
     payload: Mapping[str, object],
     args: argparse.Namespace,
-) -> str | None:
+) -> tuple[str | None, str | None]:
+    """Resolve one rollout binding without mixing authority levels.
+
+    Explicit settlement arguments and the typed plan are causal identities.
+    The current selected Todo is a later projection, while a replan action
+    packet is only a diagnostic fallback when no concrete Todo is selected.
+    """
+
+    explicit_todo_id = normalize_todo_id(getattr(args, "todo_id", None))
+    explicit_replan_obligation_id = normalize_todo_replan_obligation_id(
+        getattr(args, "replan_obligation_id", None)
+    )
+    if explicit_todo_id and explicit_replan_obligation_id:
+        raise ValueError(
+            "quota rollout cannot bind both todo_id and replan_obligation_id"
+        )
+    if explicit_todo_id or explicit_replan_obligation_id:
+        return explicit_todo_id, explicit_replan_obligation_id
+
     interaction = (
         payload.get("interaction_contract")
         if isinstance(payload.get("interaction_contract"), Mapping)
@@ -197,22 +207,46 @@ def quota_rollout_replan_obligation_id(
         if isinstance(settlement_plan.get("identity"), Mapping)
         else {}
     )
+    planned_todo_id = normalize_todo_id(identity.get("todo_id"))
+    planned_replan_obligation_id = normalize_todo_replan_obligation_id(
+        identity.get("replan_obligation_id")
+    )
+    if planned_todo_id and planned_replan_obligation_id:
+        raise ValueError(
+            "quota settlement plan cannot bind both todo_id and "
+            "replan_obligation_id"
+        )
+    if planned_todo_id or planned_replan_obligation_id:
+        return planned_todo_id, planned_replan_obligation_id
+
+    selected_todo = (
+        payload.get("selected_todo")
+        if isinstance(payload.get("selected_todo"), Mapping)
+        else {}
+    )
+    selected_todo_id = (
+        normalize_todo_id(payload.get("todo_id"))
+        or normalize_todo_id(selected_todo.get("todo_id"))
+    )
+    if selected_todo_id:
+        return selected_todo_id, None
+
     replan_packet = (
         payload.get("replan_action_packet")
         if isinstance(payload.get("replan_action_packet"), Mapping)
         else {}
     )
-    return (
-        normalize_todo_replan_obligation_id(
-            getattr(args, "replan_obligation_id", None)
-        )
-        or normalize_todo_replan_obligation_id(
-            identity.get("replan_obligation_id")
-        )
-        or normalize_todo_replan_obligation_id(
-            replan_packet.get("obligation_id")
-        )
+    return None, normalize_todo_replan_obligation_id(
+        replan_packet.get("obligation_id")
     )
+
+
+def quota_rollout_replan_obligation_id(
+    payload: Mapping[str, object],
+    args: argparse.Namespace,
+) -> str | None:
+    _, replan_obligation_id = quota_rollout_settlement_binding(payload, args)
+    return replan_obligation_id
 def quota_rollout_details(
     payload: Mapping[str, object],
     args: argparse.Namespace,

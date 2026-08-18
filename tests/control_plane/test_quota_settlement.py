@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,6 +20,10 @@ from loopx.control_plane.quota.settlement import (
     require_settlement_terminal_closeout,
     resolve_heartbeat_settlement_identity,
     settlement_step_command,
+)
+from loopx.control_plane.quota.settlement_cli import (
+    quota_rollout_replan_obligation_id,
+    quota_rollout_todo_id,
 )
 from loopx.control_plane.scheduler.execution_context import (
     SchedulerRuntimeProfile,
@@ -50,10 +55,66 @@ def test_quota_reexports_the_core_settlement_algebra() -> None:
     assert quota_effect_program.SettlementResult is core_effect_program.SettlementResult
 
 
+def test_settlement_identity_rejects_dual_binding_before_projection() -> None:
+    with pytest.raises(ValueError, match="cannot bind both"):
+        SettlementIdentity(
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            todo_id=TODO_ID,
+            turn_instance_id=TURN_ID,
+            replan_obligation_id="replan-0000000000000001",
+        )
+
+
+def test_selected_todo_suppresses_stale_replan_packet_binding() -> None:
+    payload = {
+        "selected_todo": {"todo_id": TODO_ID},
+        "replan_action_packet": {
+            "obligation_id": "replan-0000000000000001",
+        },
+    }
+    args = SimpleNamespace(todo_id=None, replan_obligation_id=None)
+
+    assert quota_rollout_todo_id(payload, args) == TODO_ID
+    assert quota_rollout_replan_obligation_id(payload, args) is None
+
+
+def test_explicit_replan_binding_survives_newly_selected_todo() -> None:
+    obligation_id = "replan-0000000000000001"
+    payload = {"selected_todo": {"todo_id": TODO_ID}}
+    args = SimpleNamespace(
+        todo_id=None,
+        replan_obligation_id=obligation_id,
+    )
+
+    assert quota_rollout_todo_id(payload, args) is None
+    assert quota_rollout_replan_obligation_id(payload, args) == obligation_id
+
+
+def test_rollout_projection_rejects_corrupted_dual_bound_plan() -> None:
+    payload = {
+        "interaction_contract": {
+            "cli_channel": {
+                "settlement_plan": {
+                    "identity": {
+                        "todo_id": TODO_ID,
+                        "replan_obligation_id": "replan-0000000000000001",
+                    }
+                }
+            }
+        }
+    }
+    args = SimpleNamespace(todo_id=None, replan_obligation_id=None)
+
+    with pytest.raises(ValueError, match="cannot bind both"):
+        quota_rollout_todo_id(payload, args)
+
+
 def _append_guard_receipt(
     runtime_root: Path,
     *,
     todo_id: str = TODO_ID,
+    replan_obligation_id: str | None = None,
     effect_id: str | None = None,
 ) -> None:
     path = rollout_event_log_path(runtime_root, GOAL_ID)
@@ -69,6 +130,11 @@ def _append_guard_receipt(
                 "run_id": TURN_ID,
                 "details": {
                     "todo_id": todo_id,
+                    **(
+                        {"replan_obligation_id": replan_obligation_id}
+                        if replan_obligation_id is not None
+                        else {}
+                    ),
                     **(
                         {"settlement_effect_id": effect_id}
                         if effect_id is not None
@@ -334,6 +400,26 @@ def test_guard_receipt_rejects_different_effect_identity(tmp_path: Path) -> None
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert "different-effect" in result.failure.reason
+
+
+def test_guard_receipt_rejects_corrupted_dual_binding(tmp_path: Path) -> None:
+    _append_guard_receipt(
+        tmp_path,
+        replan_obligation_id="replan-0000000000000001",
+        effect_id=f"{GOAL_ID}:{AGENT_ID}:{TODO_ID}:{TURN_ID}",
+    )
+
+    result = resolve_heartbeat_settlement_identity(
+        tmp_path,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        todo_id=TODO_ID,
+        turn_instance_id=TURN_ID,
+    )
+
+    assert result.failure is not None
+    assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
+    assert "conflicting Todo and autonomous replan bindings" in result.failure.reason
 
 
 def test_guard_receipt_returns_typed_failure_for_effect_without_todo(

@@ -108,6 +108,12 @@ class SettlementStepKind(StrEnum):
     TERMINAL_CLOSEOUT = "terminal_closeout"
 
 
+class SettlementBindingKind(StrEnum):
+    TODO = "todo"
+    AUTONOMOUS_REPLAN = "autonomous_replan"
+    UNBOUND = "unbound"
+
+
 class SettlementFailureKind(StrEnum):
     INVALID_IDENTITY = "invalid_identity"
     RECEIPT_MISSING = "receipt_missing"
@@ -129,13 +135,28 @@ class SettlementIdentity:
     turn_instance_id: str
     replan_obligation_id: str | None = None
 
+    def __post_init__(self) -> None:
+        todo_id = str(self.todo_id or "").strip()
+        replan_obligation_id = str(self.replan_obligation_id or "").strip()
+        if todo_id and replan_obligation_id:
+            raise ValueError(
+                "settlement identity cannot bind both todo_id and "
+                "replan_obligation_id"
+            )
+        object.__setattr__(self, "todo_id", todo_id or None)
+        object.__setattr__(
+            self,
+            "replan_obligation_id",
+            replan_obligation_id or None,
+        )
+
     @property
-    def binding_kind(self) -> str:
+    def binding_kind(self) -> SettlementBindingKind:
         if self.todo_id:
-            return "todo"
+            return SettlementBindingKind.TODO
         if self.replan_obligation_id:
-            return "autonomous_replan"
-        return "unbound"
+            return SettlementBindingKind.AUTONOMOUS_REPLAN
+        return SettlementBindingKind.UNBOUND
 
     @property
     def binding_id(self) -> str:
