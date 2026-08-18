@@ -1262,134 +1262,78 @@ class ChatRequestHandler(LarkChatRequestMixin, BaseHTTPRequestHandler):
             )
             return
         if path == CHAT_ENDPOINTS_PATH:
-            self._send_json(
+            return self._send_json(
                 {
                     "ok": True,
                     "schema_version": "loopx_chat_endpoint_list_v1",
                     "endpoints": self.server.runtime_controller.capabilities(),
                 }
             )
-            return
-        if path == CHAT_SESSIONS_PATH:
-            self._list_sessions()
-            return
-        if path == CHAT_ACTIONS_PATH:
-            self._action_list()
-            return
-        if path == CHAT_GOAL_CONTEXTS_PATH:
-            self._goal_contexts()
-            return
-        if path == CHAT_LARK_APPS_PATH:
-            self._lark_apps()
-            return
+        get_dispatch = {
+            CHAT_SESSIONS_PATH: self._list_sessions,
+            CHAT_ACTIONS_PATH: self._action_list,
+            CHAT_GOAL_CONTEXTS_PATH: self._goal_contexts,
+            CHAT_LARK_APPS_PATH: self._lark_apps,
+            CHAT_LARK_CHATS_PATH: self._lark_chats,
+            CHAT_LARK_CONNECTIONS_PATH: self._lark_connections,
+            CHAT_GOAL_CHANNEL_TARGETS_PATH: self._goal_channel_targets,
+            DEFAULT_CHAT_STATUS_PATH: self._status,
+        }
+        if path in get_dispatch:
+            return get_dispatch[path]()
         setup_parts = path.strip("/").split("/")
         if len(setup_parts) == 5 and setup_parts[:4] == ["api", "chat", "lark", "app-setups"]:
-            self._lark_setup_snapshot(setup_parts[4])
-            return
-        if path == CHAT_LARK_CHATS_PATH:
-            self._lark_chats()
-            return
-        if path == CHAT_LARK_CONNECTIONS_PATH:
-            self._lark_connections()
-            return
-        if path == CHAT_GOAL_CHANNEL_TARGETS_PATH:
-            self._goal_channel_targets()
-            return
+            return self._lark_setup_snapshot(setup_parts[4])
         action_parts = path.strip("/").split("/")
         if len(action_parts) == 3 and action_parts[:2] == ["api", "actions"]:
-            self._action_snapshot(action_parts[2])
-            return
+            return self._action_snapshot(action_parts[2])
         session_parts = path.strip("/").split("/")
         if len(session_parts) == 4 and session_parts[:3] == ["api", "chat", "sessions"]:
-            self._session_snapshot(session_parts[3])
-            return
-        if (
-            len(session_parts) == 7
-            and session_parts[:3] == ["api", "chat", "sessions"]
-            and session_parts[4] == "turns"
-            and session_parts[6] == "events"
-        ):
-            self._turn_events(session_parts[3], session_parts[5])
-            return
-        if path == DEFAULT_CHAT_STATUS_PATH:
-            self._status()
-            return
+            return self._session_snapshot(session_parts[3])
+        if len(session_parts) == 7 and session_parts[:3] == ["api", "chat", "sessions"] and session_parts[4] == "turns" and session_parts[6] == "events":
+            return self._turn_events(session_parts[3], session_parts[5])
         if path == "/":
             self.send_response(302)
             self.send_header("Location", DEFAULT_CHAT_PATH)
-            self.end_headers()
-            return
+            return self.end_headers()
         if path == "/chat" or path.startswith("/chat/"):
-            self._serve_asset(path)
-            return
+            return self._serve_asset(path)
         self._send_error("unknown path", status=404)
 
     def do_POST(self) -> None:
         if not self._require_loopback_origin():
             return
         path = urlparse(self.path).path
-        if path == CHAT_SESSIONS_PATH:
-            self._create_session()
-            return
-        if path == CHAT_PROJECTION_MESSAGES_PATH:
-            self._record_projection_exchange()
-            return
+        post_dispatch = {
+            CHAT_SESSIONS_PATH: self._create_session,
+            CHAT_PROJECTION_MESSAGES_PATH: self._record_projection_exchange,
+            CHAT_ACTION_PREVIEW_PATH: self._action_preview,
+            CHAT_TODO_DRY_RUN_PATH: lambda: self._todo(apply=False),
+            CHAT_TODO_APPLY_PATH: lambda: self._todo(apply=True),
+            CHAT_GOAL_CHANNEL_SETUP_PATH: self._goal_channel_setup,
+            CHAT_GOAL_CHANNEL_CONFIGURE_PATH: self._goal_channel_configure,
+            CHAT_LARK_APP_SETUPS_PATH: self._lark_setup_start,
+            CHAT_LARK_CONNECTIONS_PATH: self._lark_connect,
+        }
+        if path in post_dispatch:
+            return post_dispatch[path]()
         session_action_parts = path.strip("/").split("/")
-        if (
-            len(session_action_parts) == 5
-            and session_action_parts[:3] == ["api", "chat", "sessions"]
-            and session_action_parts[4] == "resume"
-        ):
-            self._resume_session(session_action_parts[3])
-            return
-        if path == CHAT_ACTION_PREVIEW_PATH:
-            self._action_preview()
-            return
+        if len(session_action_parts) == 5 and session_action_parts[:3] == ["api", "chat", "sessions"] and session_action_parts[4] == "resume":
+            return self._resume_session(session_action_parts[3])
         action_parts = path.strip("/").split("/")
-        if (
-            len(action_parts) == 4
-            and action_parts[:2] == ["api", "actions"]
-            and action_parts[3] in {"apply", "cancel", "regenerate", "reject", "defer"}
-        ):
+        if len(action_parts) == 4 and action_parts[:2] == ["api", "actions"] and action_parts[3] in {"apply", "cancel", "regenerate", "reject", "defer"}:
             if action_parts[3] == "apply":
-                self._action_apply(action_parts[2])
-            elif action_parts[3] == "cancel":
-                self._action_cancel(action_parts[2])
-            else:
-                self._action_transition(action_parts[2], action_parts[3])
-            return
+                return self._action_apply(action_parts[2])
+            if action_parts[3] == "cancel":
+                return self._action_cancel(action_parts[2])
+            return self._action_transition(action_parts[2], action_parts[3])
         prefix = f"{CHAT_SESSIONS_PATH}/"
         if path.startswith(prefix) and path.endswith("/turns"):
             session_id = path[len(prefix) : -len("/turns")].strip("/")
-            self._session_turn(session_id)
-            return
+            return self._session_turn(session_id)
         parts = path.strip("/").split("/")
-        if (
-            len(parts) == 7
-            and parts[:3] == ["api", "chat", "sessions"]
-            and parts[4] == "turns"
-            and parts[6] == "interrupt"
-        ):
-            self._interrupt_turn(parts[3], parts[5])
-            return
-        if path == CHAT_TODO_DRY_RUN_PATH:
-            self._todo(apply=False)
-            return
-        if path == CHAT_TODO_APPLY_PATH:
-            self._todo(apply=True)
-            return
-        if path == CHAT_GOAL_CHANNEL_SETUP_PATH:
-            self._goal_channel_setup()
-            return
-        if path == CHAT_GOAL_CHANNEL_CONFIGURE_PATH:
-            self._goal_channel_configure()
-            return
-        if path == CHAT_LARK_APP_SETUPS_PATH:
-            self._lark_setup_start()
-            return
-        if path == CHAT_LARK_CONNECTIONS_PATH:
-            self._lark_connect()
-            return
+        if len(parts) == 7 and parts[:3] == ["api", "chat", "sessions"] and parts[4] == "turns" and parts[6] == "interrupt":
+            return self._interrupt_turn(parts[3], parts[5])
         self._send_error("unknown path", status=404)
 
     def do_DELETE(self) -> None:
@@ -1398,19 +1342,15 @@ class ChatRequestHandler(LarkChatRequestMixin, BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         setup_parts = path.strip("/").split("/")
         if len(setup_parts) == 5 and setup_parts[:4] == ["api", "chat", "lark", "app-setups"]:
-            self._lark_setup_cancel(setup_parts[4])
-            return
+            return self._lark_setup_cancel(setup_parts[4])
         if path == CHAT_LARK_CONNECTIONS_PATH:
-            self._lark_disconnect()
-            return
+            return self._lark_disconnect()
         prefix = f"{CHAT_SESSIONS_PATH}/"
         if not path.startswith(prefix):
-            self._send_error("unknown path", status=404)
-            return
+            return self._send_error("unknown path", status=404)
         session_id = path[len(prefix) :].strip("/")
         if not self.server.runtime_controller.close_session(session_id):
-            self._send_error("chat session was not found", status=404)
-            return
+            return self._send_error("chat session was not found", status=404)
         self._send_json({"ok": True, "session_id": session_id, "closed": True})
 
     def log_message(self, format: str, *args: object) -> None:
