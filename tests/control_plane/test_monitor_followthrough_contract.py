@@ -279,8 +279,15 @@ def test_unchanged_due_poll_reloads_status_before_followthrough_decision(
     )
 
 
+@pytest.mark.parametrize(
+    ("material_change", "result_hash"),
+    [(False, "unchanged-42"), (True, "material-42")],
+    ids=["quiet", "material"],
+)
 def test_turn_scoped_monitor_poll_preserves_receipt_todo_after_capability_reentry(
     tmp_path: Path,
+    material_change: bool,
+    result_hash: str,
 ) -> None:
     registry, runtime, _state = _write_fixture(tmp_path)
     admitted = _add_monitor(
@@ -345,8 +352,8 @@ def test_turn_scoped_monitor_poll_preserves_receipt_todo_after_capability_reentr
         "--target-key",
         "public-issue:42",
         "--result-hash",
-        "material-42",
-        "--material-change",
+        result_hash,
+        *(("--material-change",) if material_change else ()),
         "--execute",
     )
     result = run_json_cli(
@@ -360,6 +367,7 @@ def test_turn_scoped_monitor_poll_preserves_receipt_todo_after_capability_reentr
         "heartbeat_receipt"
     )
     assert result["todo_writeback"]["todo_id"] == admitted["todo_id"]
+    assert result["material_change"] is material_change
     assert result["turn_instance_id"] == turn_id
     assert result["replayed"] is False
 
@@ -372,7 +380,7 @@ def test_turn_scoped_monitor_poll_preserves_receipt_todo_after_capability_reentr
     assert replay["appended"] is False
 
     different_replay_command = list(command)
-    different_replay_command[different_replay_command.index("material-42")] = (
+    different_replay_command[different_replay_command.index(result_hash)] = (
         "different-observation"
     )
     returncode, replay_conflict = run_json_cli_result(
