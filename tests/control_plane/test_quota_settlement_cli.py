@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -164,6 +165,89 @@ def _configure_read_only_todo(project: Path) -> Path:
         encoding="utf-8",
     )
     return state_path
+
+
+def _configure_autonomous_replan_fixture(
+    project: Path,
+    runtime: Path,
+    registry_path: Path,
+) -> None:
+    state_path = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    state_path.write_text(
+        "---\n"
+        "status: active\n"
+        "owner_mode: goal\n"
+        'objective: "Settle one Todo-less autonomous replan."\n'
+        "updated_at: 2026-01-01T00:00:00+00:00\n"
+        "---\n\n"
+        "# Autonomous Replan Settlement Fixture\n\n"
+        "## Objective\n\n"
+        "Settle one Todo-less autonomous replan.\n\n"
+        "## Next Action\n\n"
+        "- Replan the repeated monitor observation.\n\n"
+        "## Agent Todo\n\n"
+        "- [ ] [P1-monitor] Observe the stable public fixture.\n"
+        "  <!-- loopx:todo todo_id=todo_replan_monitor status=open "
+        "task_class=continuous_monitor action_kind=observe "
+        f"claimed_by={AGENT_ID} target_key=replan-settlement-fixture "
+        "cadence=1d next_due_at=2999-01-01T00%3A00%3A00Z -->\n",
+        encoding="utf-8",
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["status"] = "active"
+    registry_path.write_text(
+        json.dumps(registry, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    runs_dir = runtime / "goals" / GOAL_ID / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    runs: list[dict[str, Any]] = []
+    for minute in (1, 2):
+        generated_at = f"2026-01-01T00:0{minute}:00+00:00"
+        run = {
+            "generated_at": generated_at,
+            "goal_id": GOAL_ID,
+            "agent_id": AGENT_ID,
+            "classification": "bounded_fixture_probe",
+            "delivery_batch_scale": "single_surface",
+            "delivery_outcome": "surface_only",
+            "progress_observation": {
+                "schema_version": "typed_progress_observation_v0",
+                "result_class": "unchanged",
+                "work_item_id": "todo_replan_monitor",
+                "surface_id": "surface-existing",
+                "hypothesis_id": "hypothesis-existing",
+                "probe_kind": "probe-existing",
+                "evidence_ids": ["evidence-existing"],
+            },
+        }
+        json_path = runs_dir / f"replan-{minute}.json"
+        markdown_path = runs_dir / f"replan-{minute}.md"
+        json_path.write_text(json.dumps(run) + "\n", encoding="utf-8")
+        markdown_path.write_text("# Replan fixture\n", encoding="utf-8")
+        runs.append(
+            {
+                **run,
+                "json_path": str(json_path),
+                "markdown_path": str(markdown_path),
+            }
+        )
+    (runs_dir / "index.jsonl").write_text(
+        "".join(json.dumps(run) + "\n" for run in runs),
+        encoding="utf-8",
+    )
+
+
+def _projected_cli_args(command: str, *, turn_instance_id: str) -> tuple[str, ...]:
+    tokens = shlex.split(command)
+    command_names = {"refresh-state", "quota"}
+    command_index = next(
+        index for index, token in enumerate(tokens) if token in command_names
+    )
+    return tuple(
+        turn_instance_id if token == "${LOOPX_TURN:?}" else token
+        for token in tokens[command_index:]
+    )
 
 
 def _initialize_git_checkout(project: Path) -> None:
@@ -504,6 +588,107 @@ def test_same_turn_identityless_guard_upgrades_and_settles_full_chain(
     assert _spend_run_count(runtime) == 1
     assert _heartbeat_receipt_count(runtime, TURN_ID) == 2
 
+
+def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_autonomous_replan_fixture(project, runtime, registry_path)
+    turn_instance_id = "turn-autonomous-replan-settlement-1"
+
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--scan-path",
+        str(project),
+    )
+
+    assert guard_rc == 0, guard
+    assert guard["decision"] == "autonomous_replan_required", guard
+    assert guard.get("selected_todo") is None, guard
+    obligation_id = guard["replan_action_packet"]["obligation_id"]
+    identity = guard["heartbeat_receipt"]["settlement_identity"]
+    assert identity["binding_kind"] == "autonomous_replan"
+    assert identity["replan_obligation_id"] == obligation_id
+    assert "todo_id" not in identity
+    cli_channel = guard["interaction_contract"]["cli_channel"]
+    plan_identity = cli_channel["settlement_plan"]["identity"]
+    assert plan_identity["binding_kind"] == identity["binding_kind"]
+    assert plan_identity["binding_id"] == identity["binding_id"]
+    assert plan_identity["replan_obligation_id"] == obligation_id
+    assert plan_identity["turn_instance_id"] == "${LOOPX_TURN:?}"
+    actions = cli_channel["next_cli_actions"]
+    refresh_command = next(action for action in actions if "refresh-state" in action)
+    spend_command = next(action for action in actions if "spend-slot" in action)
+    for command in (refresh_command, spend_command):
+        assert f"--replan-obligation-id {obligation_id}" in command
+        assert '--turn-instance-id "${LOOPX_TURN:?}"' in command
+        assert "--todo-id" not in command
+
+    refresh_command = (
+        refresh_command.replace(
+            "<advanced|blocked|exploration_exhausted|no_followup>",
+            "advanced",
+        )
+        .replace("<surface-id>", "surface-new")
+        .replace("<hypothesis-id>", "hypothesis-new")
+        .replace("<probe-kind>", "probe-new")
+        .replace("<evidence-id>", "evidence-new")
+    )
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        *_projected_cli_args(
+            refresh_command,
+            turn_instance_id=turn_instance_id,
+        ),
+    )
+
+    assert refresh_rc == 0, refresh.get("error") or refresh
+    assert refresh["settlement_result"]["ok"] is True
+    assert [
+        receipt["step_kind"]
+        for receipt in refresh["settlement_result"]["receipts"]
+    ] == ["validation", "durable_writeback"]
+
+    spend_args = _projected_cli_args(
+        spend_command,
+        turn_instance_id=turn_instance_id,
+    )
+    spend_rc, spend = _run_cli(
+        registry_path,
+        runtime,
+        *spend_args,
+        "--scan-path",
+        str(project),
+    )
+    replay_rc, replay = _run_cli(
+        registry_path,
+        runtime,
+        *spend_args,
+        "--scan-path",
+        str(project),
+    )
+
+    assert spend_rc == 0, spend
+    assert spend["settlement_result"]["ok"] is True
+    assert [
+        receipt["step_kind"]
+        for receipt in spend["settlement_result"]["receipts"]
+    ] == ["validation", "durable_writeback", "quota_spend"]
+    assert replay_rc == 0, replay
+    assert replay["idempotent_replay"] is True
+    assert replay["appended"] is False
+    assert _spend_run_count(runtime) == 1
 
 def test_read_only_settlement_omits_non_causal_delivery_workspace(
     tmp_path: Path,

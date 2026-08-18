@@ -76,6 +76,7 @@ from .control_plane.todos.contract import (
     TODO_TASK_CLASS_MONITOR,
     TODO_TASK_CLASS_USER_GATE,
     normalize_todo_claimed_by,
+    normalize_todo_replan_obligation_id,
 )
 from .control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from .control_plane.todos.completion_validation_accountability import (
@@ -491,7 +492,12 @@ def build_state_refresh_record(
     if settlement_identity:
         record["settlement_identity"] = settlement_identity.as_dict()
         record["turn_instance_id"] = settlement_identity.turn_instance_id
-        record["todo_id"] = settlement_identity.todo_id
+        if settlement_identity.todo_id:
+            record["todo_id"] = settlement_identity.todo_id
+        if settlement_identity.replan_obligation_id:
+            record["replan_obligation_id"] = (
+                settlement_identity.replan_obligation_id
+            )
     if autonomous_replan_recorded:
         record["autonomous_replan_ack"] = {
             "schema_version": "autonomous_replan_ack_v0",
@@ -562,6 +568,7 @@ def _build_state_refresh_output_projections(
         "settlement_identity",
         "turn_instance_id",
         "todo_id",
+        "replan_obligation_id",
     ):
         if field in record:
             index_record[field] = record[field]
@@ -819,6 +826,7 @@ def refresh_state_run(
     delivery_workspace_path: Path | None = None,
     todo_id: str | None = None,
     turn_instance_id: str | None = None,
+    replan_obligation_id: str | None = None,
     agent_id: str | None = None,
     agent_lane: str | None = None,
     progress_scope: str | None = None,
@@ -837,6 +845,13 @@ def refresh_state_run(
     validate_public_safe_text("classification", classification)
     normalized_agent_id = (agent_id or "").strip()
     normalized_agent_lane = (agent_lane or "").strip()
+    normalized_replan_obligation_id = normalize_todo_replan_obligation_id(
+        replan_obligation_id
+    )
+    if replan_obligation_id and not normalized_replan_obligation_id:
+        raise ValueError("--replan-obligation-id is not a valid typed obligation id")
+    if todo_id and normalized_replan_obligation_id:
+        raise ValueError("--replan-obligation-id cannot be combined with --todo-id")
     if normalized_agent_id:
         validate_public_safe_text("agent_id", normalized_agent_id)
     if normalized_agent_lane:
@@ -870,7 +885,7 @@ def refresh_state_run(
     settlement_identity = None
     settlement_result = None
     delivery_workspace_causality = None
-    if todo_id or turn_instance_id:
+    if todo_id or normalized_replan_obligation_id or turn_instance_id:
         if normalized_delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES:
             raise ValueError(
                 "turn-scoped refresh-state requires an accountable --delivery-outcome"
@@ -881,6 +896,7 @@ def refresh_state_run(
             agent_id=normalized_agent_id or None,
             todo_id=todo_id,
             turn_instance_id=turn_instance_id,
+            replan_obligation_id=normalized_replan_obligation_id,
         )
         if settlement_result.failure is not None:
             raise ValueError(settlement_result.failure.reason)

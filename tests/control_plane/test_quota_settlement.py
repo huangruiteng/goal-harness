@@ -217,6 +217,28 @@ def test_codex_app_plan_projects_one_identity_across_settlement_steps() -> None:
     assert plan["host_handoff"]["inside_agent_settlement"] is False
 
 
+@pytest.mark.parametrize(
+    ("todo_id", "replan_obligation_id"),
+    [
+        (None, None),
+        (TODO_ID, "replan-0000000000000001"),
+    ],
+)
+def test_codex_app_plan_rejects_ambiguous_settlement_binding(
+    todo_id: str | None,
+    replan_obligation_id: str | None,
+) -> None:
+    with pytest.raises(ValueError, match="requires exactly one"):
+        build_codex_app_settlement_plan(
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            todo_id=todo_id,
+            replan_obligation_id=replan_obligation_id,
+            scoped_cli_args=f" --agent-id {AGENT_ID}",
+            lifecycle_actor_args=f" --agent-id {AGENT_ID}",
+        )
+
+
 def test_standard_codex_app_actions_use_typed_settlement_before_turn_driver() -> None:
     todo_id = "todo_123456789abc"
     actions = interaction_next_cli_actions(

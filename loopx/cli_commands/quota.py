@@ -35,10 +35,12 @@ from ..control_plane.quota.scheduler_ack import (
 from ..control_plane.quota.settlement_cli import (
     attach_spend_settlement_result,
     quota_rollout_details,
+    quota_rollout_replan_obligation_id,
     quota_rollout_todo_id,
     render_existing_heartbeat_receipt_payload,
     reconcile_existing_heartbeat_receipt_for_turn,
 )
+from ..control_plane.quota.effect_program import SettlementIdentity
 from ..control_plane.quota.turn_envelope import build_turn_envelope
 from ..control_plane.runtime.status_projection_cache import (
     load_status_projection_cache,
@@ -209,6 +211,14 @@ def _prepare_quota_command_context(
         raise QuotaCommandValidationError(
             "--turn-instance-id is only valid with `quota should-run` or "
             "`quota spend-slot`"
+        )
+    if getattr(args, "replan_obligation_id", None) and command != "spend-slot":
+        raise QuotaCommandValidationError(
+            "--replan-obligation-id is only valid with `quota spend-slot`"
+        )
+    if getattr(args, "replan_obligation_id", None) and getattr(args, "todo_id", None):
+        raise QuotaCommandValidationError(
+            "--replan-obligation-id cannot be combined with --todo-id"
         )
     if heartbeat_turn_id and not args.agent_id:
         raise QuotaCommandValidationError(
@@ -712,6 +722,7 @@ def handle_quota_command(
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
                 todo_id=args.todo_id,
                 turn_instance_id=heartbeat_turn_id,
+                replan_obligation_id=args.replan_obligation_id,
             )
         elif args.quota_command == "void-slot":
             payload = void_quota_slot(
@@ -755,10 +766,14 @@ def handle_quota_command(
     )
     if should_log_quota:
         rollout_todo_id = quota_rollout_todo_id(payload, args)
+        rollout_replan_obligation_id = quota_rollout_replan_obligation_id(
+            payload, args
+        )
         rollout_details = quota_rollout_details(
             payload,
             args,
             todo_id=rollout_todo_id,
+            replan_obligation_id=rollout_replan_obligation_id,
         )
         if heartbeat_turn_id and args.quota_command == "should-run":
             if not heartbeat_receipt_ready:
@@ -782,14 +797,24 @@ def handle_quota_command(
                     appended=heartbeat_receipt_existing_appended,
                 )
             else:
+                settlement_identity = (
+                    SettlementIdentity(
+                        goal_id=args.goal_id,
+                        agent_id=args.agent_id,
+                        todo_id=rollout_todo_id,
+                        turn_instance_id=heartbeat_turn_id,
+                        replan_obligation_id=rollout_replan_obligation_id,
+                    )
+                    if rollout_todo_id or rollout_replan_obligation_id
+                    else None
+                )
                 rollout_details.update(
                     {
                         "turn_instance_id": heartbeat_turn_id,
                         "stall_observation": heartbeat_stall_observation,
                         "settlement_effect_id": (
-                            f"{args.goal_id}:{args.agent_id}:{rollout_todo_id}:"
-                            f"{heartbeat_turn_id}"
-                            if rollout_todo_id
+                            settlement_identity.effect_id
+                            if settlement_identity is not None
                             else ""
                         ),
                     }
@@ -877,6 +902,7 @@ def handle_quota_command(
                     agent_id=args.agent_id,
                     todo_id=rollout_todo_id,
                     turn_instance_id=heartbeat_turn_id,
+                    replan_obligation_id=rollout_replan_obligation_id,
                 )
     if bool(getattr(args, "turn_envelope", False)):
         payload = build_turn_envelope(

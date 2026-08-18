@@ -165,6 +165,14 @@ def register_quota_command(
             "reuse the same id through writeback, spend, and retries."
         ),
     )
+    quota_parser.add_argument(
+        "--replan-obligation-id",
+        help=(
+            "Typed autonomous replan obligation binding for `quota spend-slot`. "
+            "Use the exact value projected by the original turn-scoped guard; "
+            "cannot be combined with --todo-id."
+        ),
+    )
     quota_parser.add_argument("--slots", type=int, default=1, help="Slots to account for `quota spend-slot`.")
     quota_parser.add_argument(
         "--source",

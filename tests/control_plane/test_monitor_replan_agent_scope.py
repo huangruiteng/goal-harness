@@ -655,8 +655,8 @@ def test_nonblocking_user_action_does_not_suppress_empty_frontier_replan() -> No
     assert "--progress-evidence-id <evidence-id>" in refresh_action
     assert "typed-progress-identifiers-and-evidence" not in refresh_action
     assert refresh_action.startswith("loopx --format json refresh-state ")
-    assert "--delivery-batch-scale" not in refresh_action
-    assert "--delivery-outcome" not in refresh_action
+    assert "--delivery-batch-scale single_surface" in refresh_action
+    assert "--delivery-outcome outcome_progress" in refresh_action
     rendered_action = (
         refresh_action.replace(
             "<advanced|blocked|exploration_exhausted|no_followup>",
@@ -670,6 +670,7 @@ def test_nonblocking_user_action_does_not_suppress_empty_frontier_replan() -> No
     parsed = build_parser().parse_args(shlex.split(rendered_action)[1:])
     assert parsed.command == "refresh-state"
     assert parsed.progress_result_class == "advanced"
+    assert any("spend-slot" in action for action in cli_actions), cli_actions
     assert not any("todo add" in action for action in cli_actions), cli_actions
 
 

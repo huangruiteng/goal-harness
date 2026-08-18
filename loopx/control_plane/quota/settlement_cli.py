@@ -6,7 +6,10 @@ import argparse
 from collections.abc import Mapping
 from pathlib import Path
 
-from ..todos.contract import normalize_todo_id
+from ..todos.contract import (
+    normalize_todo_id,
+    normalize_todo_replan_obligation_id,
+)
 from .effect_program import SettlementIdentity
 from .heartbeat_receipt import (
     heartbeat_receipt_view,
@@ -38,7 +41,10 @@ def reconcile_existing_heartbeat_receipt(
     receipt_status = "replayed"
     receipt_appended = False
     rollout_todo_id = quota_rollout_todo_id(payload, args)
-    if rollout_todo_id:
+    rollout_replan_obligation_id = quota_rollout_replan_obligation_id(
+        payload, args
+    )
+    if rollout_todo_id or rollout_replan_obligation_id:
         existing_details_value = receipt.get("details")
         existing_details = (
             existing_details_value
@@ -46,18 +52,24 @@ def reconcile_existing_heartbeat_receipt(
             else {}
         )
         existing_todo_id = str(existing_details.get("todo_id") or "").strip()
+        existing_replan_obligation_id = normalize_todo_replan_obligation_id(
+            existing_details.get("replan_obligation_id")
+        )
         existing_effect_id = str(
             existing_details.get("settlement_effect_id") or ""
         ).strip()
         expected_effect_id = SettlementIdentity(
             goal_id=args.goal_id,
             agent_id=args.agent_id,
-            todo_id=rollout_todo_id,
+            todo_id=rollout_todo_id or None,
             turn_instance_id=turn_instance_id,
+            replan_obligation_id=rollout_replan_obligation_id,
         ).effect_id
-        if existing_todo_id and existing_effect_id:
+        if (existing_todo_id or existing_replan_obligation_id) and existing_effect_id:
             if (
                 existing_todo_id != rollout_todo_id
+                or existing_replan_obligation_id
+                != rollout_replan_obligation_id
                 or existing_effect_id != expected_effect_id
             ):
                 raise ValueError(
@@ -69,6 +81,7 @@ def reconcile_existing_heartbeat_receipt(
                 payload,
                 args,
                 todo_id=rollout_todo_id,
+                replan_obligation_id=rollout_replan_obligation_id,
             )
             receipt, upgraded = upgrade_identityless_heartbeat_receipt(
                 runtime_root,
@@ -76,6 +89,7 @@ def reconcile_existing_heartbeat_receipt(
                 agent_id=args.agent_id,
                 turn_instance_id=turn_instance_id,
                 todo_id=rollout_todo_id,
+                replan_obligation_id=rollout_replan_obligation_id,
                 settlement_effect_id=expected_effect_id,
                 status=str(
                     payload.get("effective_action")
@@ -159,11 +173,52 @@ def quota_rollout_todo_id(
     )
 
 
+def quota_rollout_replan_obligation_id(
+    payload: Mapping[str, object],
+    args: argparse.Namespace,
+) -> str | None:
+    interaction = (
+        payload.get("interaction_contract")
+        if isinstance(payload.get("interaction_contract"), Mapping)
+        else {}
+    )
+    cli_channel = (
+        interaction.get("cli_channel")
+        if isinstance(interaction.get("cli_channel"), Mapping)
+        else {}
+    )
+    settlement_plan = (
+        cli_channel.get("settlement_plan")
+        if isinstance(cli_channel.get("settlement_plan"), Mapping)
+        else {}
+    )
+    identity = (
+        settlement_plan.get("identity")
+        if isinstance(settlement_plan.get("identity"), Mapping)
+        else {}
+    )
+    replan_packet = (
+        payload.get("replan_action_packet")
+        if isinstance(payload.get("replan_action_packet"), Mapping)
+        else {}
+    )
+    return (
+        normalize_todo_replan_obligation_id(
+            getattr(args, "replan_obligation_id", None)
+        )
+        or normalize_todo_replan_obligation_id(
+            identity.get("replan_obligation_id")
+        )
+        or normalize_todo_replan_obligation_id(
+            replan_packet.get("obligation_id")
+        )
+    )
 def quota_rollout_details(
     payload: Mapping[str, object],
     args: argparse.Namespace,
     *,
     todo_id: str | None,
+    replan_obligation_id: str | None = None,
 ) -> dict[str, object]:
     successor_todo_ids = (
         payload.get("successor_todo_ids")
@@ -185,6 +240,7 @@ def quota_rollout_details(
         "slots": payload.get("slots") or "",
         "source": payload.get("source") or "",
         "todo_id": todo_id or "",
+        "replan_obligation_id": replan_obligation_id or "",
         "target_key": payload.get("target_key") or "",
         "successor_todo_ids": ",".join(
             str(successor_id)
@@ -211,6 +267,7 @@ def attach_spend_settlement_result(
     agent_id: str | None,
     todo_id: str | None,
     turn_instance_id: str,
+    replan_obligation_id: str | None = None,
 ) -> None:
     guard_result = resolve_heartbeat_settlement_identity(
         runtime_root,
@@ -218,6 +275,7 @@ def attach_spend_settlement_result(
         agent_id=agent_id,
         todo_id=todo_id,
         turn_instance_id=turn_instance_id,
+        replan_obligation_id=replan_obligation_id,
     )
     identity = guard_result.value
     if identity is None:

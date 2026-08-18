@@ -11,7 +11,8 @@ from ...rollout_event_log import (
     load_rollout_events,
     rollout_event_log_path,
 )
-from .effect_program import SETTLEMENT_IDENTITY_SCHEMA_VERSION, SettlementIdentity
+from .effect_program import SettlementIdentity
+from ..todos.contract import normalize_todo_replan_obligation_id
 from .settlement_workspace_causality import (
     delivery_workspace_causality_from_event_details,
 )
@@ -38,19 +39,26 @@ def _heartbeat_receipt_events(
 
 def _receipt_settlement_identity(
     event: Mapping[str, object],
-) -> tuple[str, str] | None:
+) -> tuple[str, str, str] | None:
     details_value = event.get("details")
     details: Mapping[str, object] = (
         details_value if isinstance(details_value, Mapping) else {}
     )
     todo_id = str(details.get("todo_id") or "").strip()
+    replan_obligation_id = normalize_todo_replan_obligation_id(
+        details.get("replan_obligation_id")
+    )
     effect_id = str(details.get("settlement_effect_id") or "").strip()
-    if effect_id and not todo_id:
+    if todo_id and replan_obligation_id:
         raise ValueError(
-            "heartbeat receipt has an effect identity without a Todo; refuse to "
-            "infer or upgrade it"
+            "heartbeat receipt has conflicting Todo and autonomous replan bindings"
         )
-    if not todo_id:
+    if effect_id and not todo_id and not replan_obligation_id:
+        raise ValueError(
+            "heartbeat receipt has an effect identity without a Todo or "
+            "autonomous replan binding; refuse to infer or upgrade it"
+        )
+    if not todo_id and not replan_obligation_id:
         return None
     if not effect_id:
         goal_id = str(event.get("goal_id") or "").strip()
@@ -59,10 +67,15 @@ def _receipt_settlement_identity(
         effect_id = SettlementIdentity(
             goal_id=goal_id,
             agent_id=agent_id,
-            todo_id=todo_id,
+            todo_id=todo_id or None,
             turn_instance_id=turn_instance_id,
+            replan_obligation_id=replan_obligation_id,
         ).effect_id
-    return todo_id, effect_id
+    return (
+        "todo" if todo_id else "autonomous_replan",
+        todo_id or str(replan_obligation_id),
+        effect_id,
+    )
 
 
 def _effective_heartbeat_receipt(
@@ -109,7 +122,8 @@ def upgrade_identityless_heartbeat_receipt(
     goal_id: str,
     agent_id: str,
     turn_instance_id: str,
-    todo_id: str,
+    todo_id: str | None = None,
+    replan_obligation_id: str | None = None,
     settlement_effect_id: str,
     status: str,
     summary: str,
@@ -122,18 +136,33 @@ def upgrade_identityless_heartbeat_receipt(
     effect id, and effect-only or conflicting identities fail closed.
     """
 
-    normalized_todo_id = str(todo_id).strip()
+    normalized_todo_id = str(todo_id or "").strip()
+    normalized_replan_obligation_id = normalize_todo_replan_obligation_id(
+        replan_obligation_id
+    )
     normalized_effect_id = str(settlement_effect_id).strip()
-    expected_effect_id = SettlementIdentity(
-        goal_id=goal_id,
-        agent_id=agent_id,
-        todo_id=normalized_todo_id,
-        turn_instance_id=turn_instance_id,
-    ).effect_id
-    if not normalized_todo_id or normalized_effect_id != expected_effect_id:
+    if bool(normalized_todo_id) == bool(normalized_replan_obligation_id):
         raise ValueError(
-            "heartbeat receipt upgrade requires the deterministic selected Todo "
-            "settlement identity"
+            "heartbeat receipt upgrade requires exactly one deterministic "
+            "settlement binding"
+        )
+    try:
+        expected_identity_value = SettlementIdentity(
+            goal_id=goal_id,
+            agent_id=agent_id,
+            todo_id=normalized_todo_id or None,
+            turn_instance_id=turn_instance_id,
+            replan_obligation_id=normalized_replan_obligation_id,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "heartbeat receipt upgrade requires exactly one deterministic "
+            "settlement binding"
+        ) from exc
+    expected_effect_id = expected_identity_value.effect_id
+    if normalized_effect_id != expected_effect_id:
+        raise ValueError(
+            "heartbeat receipt upgrade requires the deterministic settlement identity"
         )
 
     log_path = rollout_event_log_path(runtime_root, goal_id)
@@ -166,7 +195,11 @@ def upgrade_identityless_heartbeat_receipt(
                 "identity-less heartbeat receipt is missing; rerun the original guard"
             )
         existing_identity = _receipt_settlement_identity(effective)
-        expected_identity = (normalized_todo_id, normalized_effect_id)
+        expected_identity = (
+            expected_identity_value.binding_kind,
+            expected_identity_value.binding_id,
+            normalized_effect_id,
+        )
         if existing_identity is not None:
             if existing_identity != expected_identity:
                 raise ValueError(
@@ -187,6 +220,7 @@ def upgrade_identityless_heartbeat_receipt(
             {
                 "turn_instance_id": turn_instance_id,
                 "todo_id": normalized_todo_id,
+                "replan_obligation_id": normalized_replan_obligation_id or "",
                 "settlement_effect_id": normalized_effect_id,
                 "settlement_receipt_revision": "identity_upgrade",
             }
@@ -196,7 +230,7 @@ def upgrade_identityless_heartbeat_receipt(
             goal_id=goal_id,
             event_kind="quota_should_run",
             agent_id=agent_id,
-            todo_id=normalized_todo_id,
+            todo_id=normalized_todo_id or None,
             run_id=turn_instance_id,
             status=status,
             summary=summary,
@@ -228,19 +262,22 @@ def heartbeat_receipt_view(
         "recorded_at": event.get("recorded_at"),
     }
     todo_id = str(details.get("todo_id") or "").strip()
+    replan_obligation_id = normalize_todo_replan_obligation_id(
+        details.get("replan_obligation_id")
+    )
     effect_id = str(details.get("settlement_effect_id") or "").strip()
-    if todo_id and effect_id:
-        receipt["settlement_identity"] = {
-            "schema_version": SETTLEMENT_IDENTITY_SCHEMA_VERSION,
-            "effect_id": effect_id,
-            "goal_id": event.get("goal_id"),
-            "agent_id": event.get("agent_id"),
-            "todo_id": todo_id,
-            "turn_instance_id": turn_instance_id,
-        }
+    if (todo_id or replan_obligation_id) and effect_id:
+        identity = SettlementIdentity(
+            goal_id=str(event.get("goal_id") or ""),
+            agent_id=str(event.get("agent_id") or ""),
+            todo_id=todo_id or None,
+            turn_instance_id=turn_instance_id,
+            replan_obligation_id=replan_obligation_id,
+        )
+        receipt["settlement_identity"] = identity.as_dict()
         workspace_causality = delivery_workspace_causality_from_event_details(
             details,
-            todo_id=todo_id,
+            todo_id=todo_id or None,
         )
         if workspace_causality:
             receipt["delivery_workspace_causality"] = workspace_causality
