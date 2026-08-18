@@ -4,7 +4,7 @@ import fnmatch
 import json
 import re
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,7 @@ from ..todos.handoff_mode import (
     HANDOFF_MODE_SOFT_CLAIM,
     HandoffModeError,
     goal_handoff_mode_for_goal,
+    resolve_todo_completion_handoff,
 )
 
 TASK_LEASE_SCHEMA_VERSION = "task_lease_v0"
@@ -497,6 +498,51 @@ def hold_task_lease_mutation_fence(
         fence = _VerifiedTaskLeaseFence(fence_payload)
         fence.release_hook = lambda: remove_lease(lease_path)
         yield fence
+
+
+def enter_terminal_todo_lease_fence(
+    stack: ExitStack,
+    *,
+    registry_path: Path,
+    goal_id: str,
+    todo_id: str,
+    todo: dict[str, Any],
+    actor_agent_id: str | None,
+    state_text: str,
+    mutation_authority: dict[str, Any],
+    idempotency_key: str | None = None,
+    expected_version: int | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Resolve the goal handoff and hold the lease fence for one terminal write.
+
+    Every transition that moves an existing todo to ``done`` (complete and
+    supersede alike) is a completion for the lease contract: it must cross
+    the same per-goal lease fence with the same typed outcomes, so a leased
+    todo cannot be retired keylessly through a sibling verb. The caller keeps
+    the state-file lock and ``stack`` open across its write and then calls
+    ``release_verified_task_lease_fence`` with the commit outcome.
+    """
+
+    handoff = resolve_todo_completion_handoff(
+        state_text=state_text,
+        mutation_authority=mutation_authority,
+    )
+    fence = stack.enter_context(
+        hold_task_lease_mutation_fence(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            todo_id=todo_id,
+            todo=todo,
+            actor_agent_id=actor_agent_id,
+            idempotency_key=idempotency_key,
+            expected_version=expected_version,
+            require_active_when_key_supplied=(
+                idempotency_key is not None or expected_version is not None
+            ),
+            handoff=handoff,
+        )
+    )
+    return handoff, fence
 
 
 def release_verified_task_lease_fence(
