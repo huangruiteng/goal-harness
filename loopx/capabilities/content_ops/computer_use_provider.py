@@ -28,6 +28,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Protocol
 
+from .item_lifecycle import require_content_ops_item
 from .schemas import CONTENT_OPS_BROWSER_ACTION_REQUEST_PACKET_SCHEMA_VERSION
 
 ACTION_REQUEST_SCHEMA_VERSION = "computer_use_action_request_v0"
@@ -244,7 +245,15 @@ def build_content_ops_browser_action_request(
     there is nothing approved yet to write.
     """
 
-    state = str(item["state"])
+    # Normalize/validate first -- require_content_ops_item returns a fresh
+    # dict, it never mutates `item` in place, so every field below reads from
+    # its return value, not the raw parameter. Without this, a caller handing
+    # in an item straight from JSON (e.g. the item-browser-request CLI, which
+    # does no validation of its own) would hit a raw KeyError on a legacy
+    # item missing approval_sequence instead of a clean, already-tested error.
+    normalized_item = require_content_ops_item(item)
+    item_id = normalized_item["item_id"]
+    state = str(normalized_item["state"])
     if state in {"captured", "draft"}:
         action_request: dict[str, Any] = {
             "schema_version": ACTION_REQUEST_SCHEMA_VERSION,
@@ -267,12 +276,12 @@ def build_content_ops_browser_action_request(
             ),
         }
     elif state == "approved":
-        # Deliberately not "approved" or "delivery_ready" -- delivery_ready locks
-        # the approval to a specific provider_id/account_ref/time window via
-        # delivery_intent, and this vertical slice does not yet cross-check that
-        # lock against the CUA action_request. Extending to delivery_ready is a
-        # real, separate follow-up, not something to support untested.
-        approval_sequence = int(item["approval_sequence"])
+        # Only "approved" issues a new external_write request. Once a completed
+        # receipt for that request lands, the reducer moves the item to
+        # "delivery_ready" via set_delivery_intent specifically so the approval
+        # gate is consumed and this branch can never fire again for the same
+        # approval -- see the "delivery_ready" branch below.
+        approval_sequence = int(normalized_item["approval_sequence"])
         if approval_sequence < 1:
             raise ContentOpsCuaContractViolation(
                 f"item in state {state!r} must have a positive approval_sequence"
@@ -289,18 +298,29 @@ def build_content_ops_browser_action_request(
                 "forbidden_effect_classes": ["credential_use"],
             },
             "gate_binding": {
-                "gate_id": f"gate_{item['item_id']}_publish",
+                "gate_id": f"gate_{item_id}_publish",
                 "revision": approval_sequence,
                 "status": "open",
             },
             "stop_condition": "stop if the live gate revision has changed since approval",
             "validation_target": "submit is clicked only under the exact approved gate revision",
         }
+    elif state == "delivery_ready":
+        # The gate is already consumed: a completed external_write receipt
+        # moves approved -> delivery_ready via set_delivery_intent precisely so
+        # the same approval can never issue a second external-write request.
+        # Recording the real delivery (record_delivery, with a verified
+        # public_url) is content-ops's existing readback flow, not this one.
+        raise ContentOpsCuaContractViolation(
+            "content item state 'delivery_ready' has no browser action request; "
+            "the external write for this approval was already attempted -- "
+            "record the verified delivery through content-ops's existing "
+            "readback tooling, or revoke_approval to re-authorize a new attempt"
+        )
     else:
         raise ContentOpsCuaContractViolation(
             f"content item state {state!r} has no browser action request; "
-            "review_ready has nothing approved yet to write, delivery_ready's "
-            "delivery_intent lock is not yet cross-checked here, and published/"
+            "review_ready has nothing approved yet to write, and published/"
             "terminal states have nothing left to attempt"
         )
     check_action_request_shape(action_request)
@@ -325,17 +345,22 @@ def build_content_ops_browser_action_request_packet(
     see computer_use_reducer.apply_content_ops_browser_receipt.
     """
 
+    # Normalize once here too: build_content_ops_browser_action_request also
+    # normalizes internally (require_content_ops_item is idempotent and
+    # cheap), but this function reads item_id/state/revision directly for the
+    # sidecar below and must not do that on a possibly-legacy raw `item`.
+    normalized_item = require_content_ops_item(item)
     action_request = build_content_ops_browser_action_request(
-        item=item, goal_id=goal_id, todo_id=todo_id, provider_id=provider_id
+        item=normalized_item, goal_id=goal_id, todo_id=todo_id, provider_id=provider_id
     )
     return {
         "ok": True,
         "schema_version": CONTENT_OPS_BROWSER_ACTION_REQUEST_PACKET_SCHEMA_VERSION,
-        "item_id": item["item_id"],
+        "item_id": normalized_item["item_id"],
         "action_request": action_request,
         "expected_transition": {
-            "expected_state": item["state"],
-            "expected_revision": item["revision"],
+            "expected_state": normalized_item["state"],
+            "expected_revision": normalized_item["revision"],
         },
     }
 

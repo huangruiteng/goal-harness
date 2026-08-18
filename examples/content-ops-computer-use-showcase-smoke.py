@@ -42,6 +42,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.capabilities.content_ops.computer_use_provider import (  # noqa: E402
+    ContentOpsCuaContractViolation,
     FakeComputerUseProvider,
     build_content_ops_browser_action_request_packet,
 )
@@ -250,10 +251,27 @@ def run_approved_write_under_current_gate_scenario() -> None:
     )
     assert packet["ok"] is True
     assert packet["decision"] == "confirmed_external_write_attempted"
-    assert packet["item"]["state"] == "approved", (
-        "the receipt schema has no public_url field; recording delivery stays "
-        "with content-ops's existing readback tooling, not this CUA receipt"
+    assert packet["item"]["state"] == "delivery_ready", (
+        "a completed write consumes the approval gate via set_delivery_intent; "
+        "the receipt schema has no public_url field, so recording the real "
+        "delivery stays with content-ops's existing readback tooling -- but "
+        "the item must not stay 'approved', or the same gate could issue and "
+        "attempt an identical external_write request a second time"
     )
+
+    # Negative case: the gate is consumed. The same item can no longer
+    # produce a new external_write request at all.
+    try:
+        build_content_ops_browser_action_request_packet(
+            item=packet["item"], goal_id=GOAL_ID, todo_id=TODO_ID
+        )
+    except ContentOpsCuaContractViolation:
+        pass
+    else:
+        raise AssertionError(
+            "a delivery_ready item must not be able to issue a second "
+            "external_write action request for the same approval"
+        )
 
 
 def main() -> int:

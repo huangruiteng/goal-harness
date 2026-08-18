@@ -31,7 +31,11 @@ from .computer_use_provider import (
     check_receipt_matches_request,
     check_receipt_shape,
 )
-from .item_lifecycle import apply_content_ops_item_event, project_content_ops_item
+from .item_lifecycle import (
+    apply_content_ops_item_event,
+    project_content_ops_item,
+    require_content_ops_item,
+)
 from .schemas import CONTENT_OPS_BROWSER_RECEIPT_PACKET_SCHEMA_VERSION
 
 _EVENT_ID_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -60,6 +64,12 @@ def reduce_content_ops_browser_receipt(
     check_action_request_shape(action_request)
     check_receipt_shape(receipt)
     check_receipt_matches_request(receipt, action_request)
+    # Normalize/validate the item before reading any field from it -- same
+    # requirement as computer_use_provider.py's request builder, and for the
+    # same reason: a caller handing in an item straight from JSON (e.g. the
+    # item-browser-receipt CLI, which does no validation of its own) must not
+    # hit a raw KeyError on a legacy item missing approval_sequence.
+    item = require_content_ops_item(item)
 
     gate_binding = action_request.get("gate_binding")
     if gate_binding is not None:
@@ -126,15 +136,30 @@ def reduce_content_ops_browser_receipt(
                 "a 'completed' receipt for a request whose effect_class is not "
                 "external_write is out of contract for this reducer"
             )
+        approval = item.get("approval")
+        if not isinstance(approval, Mapping):
+            raise ValueError(
+                "a 'completed' external_write receipt requires an approved item"
+            )
         return {
             "decision": "confirmed_external_write_attempted",
             "reason": (
-                "provider reports the approved write completed; recording a durable "
-                "public_url/receipt_ref is content-ops's existing readback-verified "
-                "delivery flow, not something a compact CUA receipt can carry -- "
-                "the receipt schema has no field for it"
+                "provider reports the approved write completed; this consumes the "
+                "approval gate via set_delivery_intent (approved -> delivery_ready) "
+                "so the same gate cannot issue a second external_write request -- "
+                "recording a durable public_url/receipt_ref stays content-ops's "
+                "existing readback-verified delivery flow, since the receipt schema "
+                "has no field for it"
             ),
-            "proposed_event": None,
+            "proposed_event": {
+                "action": "set_delivery_intent",
+                "expected_state": item["state"],
+                "expected_revision": item["revision"],
+                "payload": {
+                    "provider_id": receipt["provider_id"],
+                    "effect_kind": approval["effect_kind"],
+                },
+            },
         }
 
     raise ValueError(f"unsupported receipt.stop_reason {stop_reason!r}")
@@ -186,6 +211,13 @@ def apply_content_ops_browser_receipt(
     result -- see test_bare_action_request_retry_against_a_refreshed_item_is_rejected_not_silently_wrong.
     """
 
+    # Normalize once: echoed back below (and handed to apply_content_ops_item_event
+    # further down, which normalizes internally regardless) as the canonical
+    # form, the same "heal on every read/write" behavior every other
+    # content-ops writer already has -- a legacy item's missing
+    # approval_sequence gets filled in going forward rather than being
+    # tolerated forever on every subsequent call.
+    item = require_content_ops_item(item)
     decision = reduce_content_ops_browser_receipt(
         item=item, action_request=action_request, receipt=receipt
     )
