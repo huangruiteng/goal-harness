@@ -71,6 +71,11 @@ VISION_REPLAN_REQUIRED_OUTCOMES = (
     "coverage_backed_exploration_exhausted",
     "coverage_backed_no_followup",
 )
+FRESH_VISION_PATH_DISPOSITIONS = frozenset(
+    {"continue", "no_change", "replan"}
+)
+
+
 def _stable_id(value: Any, *, field: str, required: bool = False) -> str | None:
     normalized = str(value or "").strip()
     if not normalized:
@@ -423,7 +428,7 @@ def semantic_delta_from_writeback(
         ]
         if (
             str(patch.get("acceptance_summary") or "").strip()
-            and path_outcome in {"continue", "no_change", "replan"}
+            and path_outcome in FRESH_VISION_PATH_DISPOSITIONS
             and evidence_refs
             and "fresh_vision_path_outcome" not in outcomes
         ):

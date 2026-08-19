@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..runtime.time import parse_timestamp
+from .progress_observation import FRESH_VISION_PATH_DISPOSITIONS
 
 AUTONOMOUS_REPLAN_ACK_MATERIAL_RUN_WINDOW = 20
 
@@ -80,6 +81,24 @@ def compact_autonomous_replan_ack(run: dict[str, Any] | None) -> dict[str, Any] 
             if semantic_delta.get(field) is not None
         },
     }
+    outcomes = semantic_delta.get("outcomes")
+    if (
+        isinstance(outcomes, list)
+        and "fresh_vision_path_outcome" in outcomes
+    ):
+        agent_vision = (
+            run.get("agent_vision")
+            if isinstance(run.get("agent_vision"), dict)
+            else {}
+        )
+        path_delta = (
+            agent_vision.get("path_delta")
+            if isinstance(agent_vision.get("path_delta"), dict)
+            else {}
+        )
+        path_disposition = str(path_delta.get("outcome") or "").strip()
+        if path_disposition in FRESH_VISION_PATH_DISPOSITIONS:
+            result["path_disposition"] = path_disposition
     delta_contract = ack.get("delta_contract")
     if isinstance(delta_contract, dict):
         result["delta_contract"] = {
