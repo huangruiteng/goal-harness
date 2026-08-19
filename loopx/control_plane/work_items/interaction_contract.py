@@ -32,6 +32,7 @@ from ..todos.write_hint import build_capability_resolution_writeback_actions
 from .autonomous_replan_obligation import (
     build_autonomous_replan_cli_actions,
     replan_obligation_id_from_packet,
+    todo_lifecycle_settlement_obligation,
 )
 from .primary_action import (
     build_primary_action_projection,
@@ -1010,6 +1011,8 @@ def _interaction_spend_policy(
             "no spend or advancement checkpoint for capability verification; rerun "
             "quota in the same turn"
         )
+    if mode == "autonomous_replan" and not spend_after_validation:
+        return "no spend for Todo lifecycle settlement; rerun quota after the transition"
     if mode == "autonomous_replan":
         return (
             "spend only after accountable replan delta; no spend for "
@@ -1469,7 +1472,10 @@ def build_interaction_contract(
         user_required=user_required,
         must_attempt=must_attempt,
     )
-    spend_after_validation = _interaction_spend_after_validation(mode)
+    spend_after_validation = (
+        _interaction_spend_after_validation(mode)
+        and todo_lifecycle_settlement_obligation(payload) is None
+    )
     required_reads = _interaction_required_reads(payload)
     capability_reentry = build_runtime_capability_reentry_packet(
         payload,

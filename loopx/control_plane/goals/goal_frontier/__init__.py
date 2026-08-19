@@ -23,6 +23,7 @@ from ...work_items.autonomous_replan_ack import (
 )
 from ...work_items.autonomous_replan_obligation import (
     MONITOR_NO_CHANGE_STREAK_THRESHOLD,
+    TODO_LIFECYCLE_SETTLEMENT_RESOLUTION_MODE,
     build_autonomous_replan_obligation_payload,
     ensure_replan_novelty_policy,
     with_replan_novelty_guidance,
@@ -1252,7 +1253,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                 "do not invent a user gate or add a lifecycle-only filler Todo"
             ),
             extra_fields={
-                "resolution_mode": "todo_lifecycle_settlement",
+                "resolution_mode": TODO_LIFECYCLE_SETTLEMENT_RESOLUTION_MODE,
                 "satisfying_semantic_outcomes": ["new_runnable_successor"],
             },
         )

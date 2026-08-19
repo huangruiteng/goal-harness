@@ -8,6 +8,7 @@ from ..agents.agent_scope_frontier import (
 )
 from ..todos.contract import TODO_TASK_CLASS_ADVANCEMENT
 from ..todos.projection import todo_item_is_actionable_open, todo_item_task_class
+from .autonomous_replan_obligation import todo_lifecycle_settlement_obligation
 
 
 def protocol_action_text(value: Any, *, limit: int = 220) -> str | None:
@@ -223,6 +224,15 @@ def resolve_canonical_primary_action(payload: dict[str, Any], *, mode: str) -> s
             "write a compact blocker when it is absent"
         )
     if mode == "autonomous_replan":
+        lifecycle_settlement = todo_lifecycle_settlement_obligation(payload)
+        if lifecycle_settlement is not None:
+            return protocol_action_text(
+                lifecycle_settlement.get("recommended_action"),
+                limit=360,
+            ) or (
+                "settle the exact completed Todo lifecycle or link a real runnable "
+                "successor; do not create lifecycle-only filler"
+            )
         return protocol_replan_action_packet_instruction(payload)
     if mode == "monitor_quiet_skip":
         return (

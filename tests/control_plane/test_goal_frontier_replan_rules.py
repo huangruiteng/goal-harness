@@ -19,6 +19,7 @@ from loopx.control_plane.goals.goal_frontier.replan_rules import (
 from loopx.control_plane.todos.addition import require_replan_successor_scope
 from loopx.control_plane.todos.summary_item import compact_todo_summary_item
 from loopx.control_plane.work_items.interaction_contract import (
+    build_interaction_contract,
     interaction_next_cli_actions,
 )
 
@@ -266,6 +267,52 @@ def test_todo_succession_gap_cli_actions_do_not_require_semantic_refresh() -> No
         "loopx --format json quota should-run --goal-id goal-example "
         "--agent-id current-agent --available-capability shell"
     )
+
+
+def test_todo_succession_gap_interaction_contract_is_model_actionable() -> None:
+    contract = build_interaction_contract(
+        {
+            "goal_id": "goal-example",
+            "agent_identity": {"agent_id": "current-agent"},
+            "execution_obligation": {
+                "kind": "autonomous_replan_required",
+                "must_attempt_work": True,
+                "delivery_allowed": True,
+            },
+            "autonomous_replan_obligation": {
+                "resolution_mode": "todo_lifecycle_settlement",
+                "recommended_action": (
+                    "settle the exact completed Todo(s) todo_111111111111 through "
+                    "loopx todo complete --no-follow-up when no real work remains; "
+                    "otherwise link a real runnable successor"
+                ),
+                "triggers": [
+                    {
+                        "kind": "completed_advancement_without_successor",
+                        "todo_id": "todo_111111111111",
+                        "completion_turn_key": "turn-implement",
+                    }
+                ],
+            },
+        },
+        available_capabilities=["shell"],
+    )
+
+    assert contract["mode"] == "autonomous_replan"
+    assert "todo_111111111111" in contract["agent_channel"]["primary_action"]
+    assert "produce one typed outcome" not in contract["agent_channel"][
+        "primary_action"
+    ]
+    assert contract["cli_channel"]["spend_after_validation"] is False
+    assert contract["cli_channel"]["spend_policy"] == (
+        "no spend for Todo lifecycle settlement; rerun quota after the transition"
+    )
+    assert "settlement_plan" not in contract["cli_channel"]
+    actions = contract["cli_channel"]["next_cli_actions"]
+    assert "--todo-id todo_111111111111" in actions[0]
+    assert "--turn-instance-id turn-implement" in actions[0]
+    assert all("refresh-state" not in action for action in actions)
+    assert all("spend-slot" not in action for action in actions)
 
 
 @pytest.mark.parametrize("other_agent_count", [1, 2, 8])

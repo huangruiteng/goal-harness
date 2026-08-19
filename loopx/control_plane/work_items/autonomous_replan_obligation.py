@@ -27,6 +27,7 @@ AckRecorded = Callable[[dict[str, Any]], bool]
 MAX_AUTONOMOUS_REPLAN_TRIGGERS = 3
 AUTONOMOUS_REPLAN_STALL_THRESHOLD = 2
 REPLAN_NOVELTY_POLICY_SCHEMA_VERSION = "replan_evidence_delivery_policy_v0"
+TODO_LIFECYCLE_SETTLEMENT_RESOLUTION_MODE = "todo_lifecycle_settlement"
 REPLAN_NOVELTY_GUIDANCE = (
     " Use the host-projected coverage ledger and produce a typed semantic delta; "
     "repeated observations cannot close replan."
@@ -59,6 +60,21 @@ def replan_obligation_id_from_packet(value: Any) -> str | None:
     return normalize_todo_replan_obligation_id(packet.get("obligation_id"))
 
 
+def todo_lifecycle_settlement_obligation(
+    value: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Return the lifecycle-settlement subtype from a status payload or obligation."""
+
+    obligation = (
+        value.get("autonomous_replan_obligation")
+        if isinstance(value.get("autonomous_replan_obligation"), Mapping)
+        else value
+    )
+    if obligation.get("resolution_mode") != TODO_LIFECYCLE_SETTLEMENT_RESOLUTION_MODE:
+        return None
+    return obligation
+
+
 def build_autonomous_replan_cli_actions(
     payload: Mapping[str, Any],
     *,
@@ -69,12 +85,8 @@ def build_autonomous_replan_cli_actions(
     replan_settlement_bound: bool,
     lifecycle_actor_args: str = "",
 ) -> list[str]:
-    obligation = (
-        payload.get("autonomous_replan_obligation")
-        if isinstance(payload.get("autonomous_replan_obligation"), Mapping)
-        else payload
-    )
-    if obligation.get("resolution_mode") == "todo_lifecycle_settlement":
+    obligation = todo_lifecycle_settlement_obligation(payload)
+    if obligation is not None:
         triggers = [
             item
             for item in obligation.get("triggers") or []
@@ -99,8 +111,7 @@ def build_autonomous_replan_cli_actions(
                 "when no real successor remains for completed Todo "
                 f"{todo_id}: loopx todo complete --goal-id {goal_id} "
                 f"--todo-id {todo_id}{completion_turn_arg}{lifecycle_actor_args} "
-                "--no-follow-up --note '<public-safe no-follow-up rationale>' "
-                "--execute"
+                "--no-follow-up --note '<public-safe no-follow-up rationale>'"
             )
         actions.extend(
             [
@@ -165,7 +176,10 @@ def ensure_replan_novelty_policy(
     """Upgrade any legacy obligation onto the policy-owned evidence path."""
 
     normalized = dict(obligation)
-    if normalized.get("resolution_mode") == "todo_lifecycle_settlement":
+    if (
+        normalized.get("resolution_mode")
+        == TODO_LIFECYCLE_SETTLEMENT_RESOLUTION_MODE
+    ):
         normalized["recommended_action"] = str(
             normalized.get("recommended_action")
             or "settle the exact completed Todo lifecycle"
