@@ -27,9 +27,9 @@ state, but it cannot make an agent continue automatically.
 ```text
 Connect the current project to LoopX.
 Do not clone the LoopX repository for ordinary use. If `loopx` is not on PATH,
-install or repair it with the official no-clone installer:
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+install it from PyPI with Python 3.11+:
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 
 Then run `loopx doctor`. Work only from the current project root:
 1. If LoopX state already exists, reuse it and do not create or overwrite a
@@ -208,9 +208,10 @@ First-run path:
 
 ```text
 Connect this repo to LoopX from this visible Codex CLI TUI. Do not clone the
-LoopX repository for ordinary use. If `loopx` is not on PATH, install or repair
-it with the official no-clone installer:
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
+LoopX repository for ordinary use. If `loopx` is not on PATH, install it from
+PyPI with Python 3.11+:
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 
 Then run `loopx doctor`. Work only from this project root: if LoopX state
 already exists, reuse it and do not create or overwrite a goal or the active objective; if the project
@@ -349,43 +350,35 @@ Maintainers can validate the public fresh-clone path with:
 python3 examples/fresh-clone-quickstart-smoke.py
 ```
 
-## No-Clone Install
+## Install And Upgrade
 
-Install or update LoopX without cloning the repository:
+Install the current release from PyPI without cloning the repository:
 
 ```bash
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 loopx doctor
 ```
 
-The installer downloads a GitHub archive, writes a stable local release snapshot
-under `~/.local/share/loopx/releases/`, installs the CLI wrapper under
-`~/.local/bin`, installs the `man loopx` page under
-`~/.local/share/man`, and installs the reusable LoopX skills under
-`~/.codex/skills`.
+The wheel contains the CLI and reusable LoopX workflow skills.
+`workflow-skills --install` materializes those skills under
+`~/.codex/skills` and writes a revision readback. Restart the host after first
+install so it reloads them. See [Installing LoopX](installing-loopx.md) for
+managed-environment, host-surface, rollback, and archive-fallback details.
 
-`loopx doctor` reports `install_freshness`. For a productized upgrade path, use
-the explicit self-update interface:
+For a PyPI install, upgrade the package and then refresh host material from the
+same distribution:
 
 ```bash
-loopx update --check
-loopx update --dry-run
-loopx update --execute
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
+loopx slash-commands --install
+loopx doctor
 ```
 
-`--check` and `--dry-run` are read-only. For a GitHub repo/ref source,
-`--check` also performs a bounded version read from that exact ref. If the
-network is unavailable, it keeps the local health result and says that the
-latest source version could not be confirmed; a custom archive URL skips the
-comparison because LoopX cannot assume it matches the configured repo/ref.
-`--execute` reruns the no-clone installer, reports the source archive, keeps the
-previous release snapshot as a rollback target when possible, and validates the
-result with `loopx doctor`.
-
-This is the recommended install repair path for Codex CLI users because an
-agent can run it from inside the TUI without asking the user to clone this
-repository first.
+The GitHub Pages archive installer remains available as a fallback. Archive
+installs keep their existing `loopx update --check|--dry-run|--execute` path;
+do not mix that updater with the active PyPI executable.
 
 ## Contributor Install
 

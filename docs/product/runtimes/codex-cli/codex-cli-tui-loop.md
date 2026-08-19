@@ -23,8 +23,9 @@ The best first-run experience is one TUI setup message:
 ```text
 Connect this repo to LoopX from this visible Codex CLI TUI. Do not clone the
 LoopX repository for ordinary use. If `loopx` is not on PATH, install or repair
-it with the official no-clone installer:
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
+it from PyPI with Python 3.11+:
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 
 Then run `loopx doctor`. Work only from this project root: if LoopX state
 already exists, reuse it and do not create or overwrite a goal; if the project
@@ -43,8 +44,8 @@ the loop is heartbeat automation every 3 minutes with `<thin task_body>`. The
 message should be enough for a terminal agent to:
 
 - run `loopx doctor`;
-- install or repair the local CLI if it is missing, using the no-clone archive
-  installer before asking the user to clone the LoopX repo;
+- install or repair the local CLI if it is missing, using PyPI and the packaged
+  workflow-skill installer before asking the user to clone the LoopX repo;
 - reuse existing LoopX state without creating or overwriting a goal;
 - connect the repo when needed, using bootstrap only for clear initialization;
 - ensure `.loopx/`, `.codex/goals/`, and `.local/` stay local;
@@ -101,7 +102,7 @@ loopx codex-cli-tui-bootstrap-smoke-bundle --project . --goal-id <goal-id> --age
 ```
 
 This packet is for product and release validation, not an extra user step. It
-checks the no-clone install repair path, the copy-only paste block, the quota
+checks the PyPI-first install repair path, the copy-only paste block, the quota
 guard command, and the bounded writeback/spend commands without launching
 Codex, reading transcripts, inspecting session files, mutating a session, or
 spending quota.

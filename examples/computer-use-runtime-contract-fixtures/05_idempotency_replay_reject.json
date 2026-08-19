@@ -1,0 +1,28 @@
+{
+  "case_id": "05_idempotency_replay_reject",
+  "description": "Receipt reuses an idempotency_key that has already been processed; must not be double-accepted.",
+  "expect": "reject",
+  "expected_reason_contains": "already processed",
+  "seen_idempotency_keys": ["todo_publish_approved_draft_attempt_1"],
+  "receipt": {
+    "schema_version": "computer_use_receipt_v0",
+    "goal_id": "loopx-meta",
+    "todo_id": "todo_publish_approved_draft",
+    "provider_id": "computer_use_runtime",
+    "attempted_action_unit": "publish_after_approved_gate",
+    "stop_reason": "completed",
+    "observed_facts": {
+      "screen_reached": true,
+      "draft_present": true,
+      "final_action_clicked": true,
+      "unknown_modal": false
+    },
+    "evidence": {
+      "handle_kind": "host_replay_or_screenshot_pointer",
+      "raw_evidence_copied": false,
+      "private_source_redacted": true
+    },
+    "idempotency_key": "todo_publish_approved_draft_attempt_1",
+    "session_reference": "provider_owned_opaque_session_handle_4"
+  }
+}

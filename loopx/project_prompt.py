@@ -59,7 +59,7 @@ fi
 {cli_bin_arg} doctor >/dev/null"""
 
 
-def render_codex_cli_no_clone_preflight(
+def render_codex_cli_install_preflight(
     *,
     cli_bin: str = "loopx",
     doctor_agent_type: str | None = None,
@@ -72,11 +72,18 @@ def render_codex_cli_no_clone_preflight(
     )
     return f"""export PATH="$HOME/.local/bin:$PATH"
 if ! command -v {cli_bin_arg} >/dev/null 2>&1; then
-  if command -v curl >/dev/null 2>&1; then
+  if command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then
+    python3 -m pip install --upgrade loopx
+    if command -v {cli_bin_arg} >/dev/null 2>&1; then
+      {cli_bin_arg} workflow-skills --install --cli-bin {cli_bin_arg}
+    fi
+  fi
+  if ! command -v {cli_bin_arg} >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
     curl -fsSL {NO_CLONE_INSTALL_URL} | bash
     export PATH="$HOME/.local/bin:$PATH"
-  else
-    echo "loopx is not on PATH and curl is unavailable; install curl or use a contributor clone with scripts/install-local.sh" >&2
+  fi
+  if ! command -v {cli_bin_arg} >/dev/null 2>&1; then
+    echo "loopx is not on PATH; use a Python 3.11+ environment, the archive fallback, or a contributor checkout" >&2
     exit 1
   fi
 fi
@@ -435,7 +442,7 @@ def build_codex_cli_bootstrap_message(
         agent_id=agent_id,
         scheduler_execution_context=CODEX_CLI_VISIBLE_SCHEDULER_CONTEXT,
     )
-    install_repair_command = render_codex_cli_no_clone_preflight(cli_bin=cli_bin)
+    install_repair_command = render_codex_cli_install_preflight(cli_bin=cli_bin)
     refresh_command = render_refresh_state_command(
         resolved_goal_id,
         cli_bin=cli_bin,
@@ -449,7 +456,7 @@ def build_codex_cli_bootstrap_message(
         progress_scope="agent_lane" if agent_id else None,
     )
     first_run_validation_checklist = [
-        f"{cli_bin} doctor passed after no-clone install repair or existing install",
+        f"{cli_bin} doctor passed after PyPI install repair or an existing install",
         "repo bootstrap/connect completed conservatively or a concrete install/connect blocker was shown",
         f"thin heartbeat task_body generated from {cli_bin} heartbeat-prompt --thin, not hand-written",
         "host loop surface activated from the thin task_body: Codex CLI /goal or Codex App heartbeat automation initially every 3 minutes, then following quota scheduler_hint",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from ..control_plane.quota.error_codes import QuotaCommandValidationError
 from ..control_plane.todos.contract import TODO_CONTINUATION_POLICY_VALUES
 
 QUOTA_SHOULD_RUN_DETAIL_SECTIONS = (
@@ -79,22 +80,28 @@ def register_quota_monitor_poll_request_arguments(
 def validate_quota_command_request(args: argparse.Namespace) -> None:
     command = args.quota_command
     if command not in {"status", "plan"} and not args.goal_id:
-        raise ValueError(f"`loopx quota {command}` requires --goal-id")
+        raise QuotaCommandValidationError(
+            f"`loopx quota {command}` requires --goal-id"
+        )
     scheduler_commands = {
         "scheduler-ack",
         "scheduler-ack-current",
         "scheduler-fail-current",
     }
     if command in scheduler_commands and not args.agent_id:
-        raise ValueError(f"`loopx quota {command}` requires --agent-id")
+        raise QuotaCommandValidationError(
+            f"`loopx quota {command}` requires --agent-id"
+        )
     if command == "void-slot" and not args.void_generated_at:
-        raise ValueError("`loopx quota void-slot` requires --void-generated-at")
+        raise QuotaCommandValidationError(
+            "`loopx quota void-slot` requires --void-generated-at"
+        )
     if (
         command not in {"status", "plan", "should-run"}
         and args.dry_run
         and args.execute
     ):
-        raise ValueError(
+        raise QuotaCommandValidationError(
             f"`loopx quota {command}` accepts only one of --dry-run or --execute"
         )
 

@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from loopx.cli_commands import explore as explore_cli  # noqa: E402
+from loopx.cli_commands import explore_feishu_commands as explore_feishu  # noqa: E402
 from loopx.extensions.lark.presentation.explore_singleflight import (  # noqa: E402
     explore_feishu_sync_singleflight,
     singleflight_issue_fix_material_sync,
@@ -93,10 +94,10 @@ def main() -> None:
             original_load_registry = explore_cli.load_registry
             original_resolve_runtime_root = explore_cli.resolve_runtime_root
             original_projection_for = explore_cli._projection_for
-            original_target_config = explore_cli._target_config
-            original_sync_results = explore_cli.sync_explore_results_to_lark
-            original_read_config = explore_cli.read_lark_explore_local_config
-            original_sync_visual = explore_cli.sync_explore_visual_to_lark
+            original_target_config = explore_feishu._target_config
+            original_sync_results = explore_feishu.sync_explore_results_to_lark
+            original_read_config = explore_feishu.read_lark_explore_local_config
+            original_sync_visual = explore_feishu.sync_explore_visual_to_lark
             direct_calls: list[str] = []
             explore_cli.load_registry = lambda _path: {}
             explore_cli.resolve_runtime_root = lambda _registry, _arg: root
@@ -107,13 +108,13 @@ def main() -> None:
                 "edges": [],
                 "findings": [],
             }
-            explore_cli._target_config = lambda _args, **_kwargs: object()
-            explore_cli.sync_explore_results_to_lark = lambda *_args, **_kwargs: (
+            explore_feishu._target_config = lambda _args, **_kwargs: object()
+            explore_feishu.sync_explore_results_to_lark = lambda *_args, **_kwargs: (
                 direct_calls.append("rows")
                 or {"ok": True, "status": "synced", "execute": True}
             )
-            explore_cli.read_lark_explore_local_config = lambda _path: {}
-            explore_cli.sync_explore_visual_to_lark = lambda *_args, **_kwargs: (
+            explore_feishu.read_lark_explore_local_config = lambda _path: {}
+            explore_feishu.sync_explore_visual_to_lark = lambda *_args, **_kwargs: (
                 direct_calls.append("visual")
                 or {"ok": True, "status": "published", "execute": True}
             )
@@ -138,10 +139,10 @@ def main() -> None:
                 explore_cli.load_registry = original_load_registry
                 explore_cli.resolve_runtime_root = original_resolve_runtime_root
                 explore_cli._projection_for = original_projection_for
-                explore_cli._target_config = original_target_config
-                explore_cli.sync_explore_results_to_lark = original_sync_results
-                explore_cli.read_lark_explore_local_config = original_read_config
-                explore_cli.sync_explore_visual_to_lark = original_sync_visual
+                explore_feishu._target_config = original_target_config
+                explore_feishu.sync_explore_results_to_lark = original_sync_results
+                explore_feishu.read_lark_explore_local_config = original_read_config
+                explore_feishu.sync_explore_visual_to_lark = original_sync_visual
             assert result == 0, result
             assert captured[0]["status"] == "synced", captured
             assert captured[0]["visual_sync"]["status"] == "published", captured

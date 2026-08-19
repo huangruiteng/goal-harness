@@ -15,10 +15,15 @@ from ..control_plane.quota.cli_projection import (
 )
 from ..control_plane.goals.path_resolution import resolve_goal_local_path
 from ..control_plane.quota.goal_boundary import registry_goal_by_id
-from ..control_plane.quota.error_codes import quota_error_code
+from ..control_plane.quota.error_codes import (
+    HeartbeatReceiptIdentityConflictError,
+    QuotaCommandValidationError,
+    quota_error_code,
+)
 from ..control_plane.quota.heartbeat_receipt import (
     fail_heartbeat_receipt,
     find_heartbeat_receipt,
+    heartbeat_receipt_settlement_todo_id,
     heartbeat_receipt_view,
 )
 from ..control_plane.quota.host_poll_receipts import (
@@ -32,10 +37,12 @@ from ..control_plane.quota.scheduler_ack import (
 from ..control_plane.quota.settlement_cli import (
     attach_spend_settlement_result,
     quota_rollout_details,
+    quota_rollout_replan_obligation_id,
     quota_rollout_todo_id,
     render_existing_heartbeat_receipt_payload,
     reconcile_existing_heartbeat_receipt_for_turn,
 )
+from ..control_plane.quota.effect_program import SettlementIdentity
 from ..control_plane.quota.turn_envelope import build_turn_envelope
 from ..control_plane.runtime.status_projection_cache import (
     load_status_projection_cache,
@@ -79,6 +86,7 @@ from .quota_request import (
     quota_detail_sections_from_args,
     validate_quota_command_request,
 )
+from .quota_monitor_poll import record_quota_monitor_poll_for_cli
 from .quota_registration import register_quota_command as register_quota_command
 
 PrintPayload = Callable[
@@ -129,12 +137,12 @@ def _scheduler_execution_context_from_args(
         args.execution_mode,
     )
     if args.codex_app and (args.runtime_profile or any(explicit_scheduler_fields)):
-        raise ValueError(
+        raise QuotaCommandValidationError(
             "--codex-app cannot be combined with --runtime-profile, "
             "--host-surface, --scheduler-owner, or --execution-mode"
         )
     if args.runtime_profile and any(explicit_scheduler_fields):
-        raise ValueError(
+        raise QuotaCommandValidationError(
             "--runtime-profile cannot be combined with --host-surface, "
             "--scheduler-owner, or --execution-mode"
         )
@@ -163,10 +171,12 @@ def _prepare_quota_command_context(
 ) -> _QuotaCommandContext:
     command = args.quota_command
     if bool(getattr(args, "turn_envelope", False)) and command != "should-run":
-        raise ValueError("--turn-envelope is only valid with `quota should-run`")
+        raise QuotaCommandValidationError(
+            "--turn-envelope is only valid with `quota should-run`"
+        )
     requested_details = set(getattr(args, "include_details", None) or ())
     if requested_details and command not in {"should-run", "monitor-poll"}:
-        raise ValueError(
+        raise QuotaCommandValidationError(
             "--include-detail is only valid with `quota should-run` or "
             "`quota monitor-poll`"
         )
@@ -178,7 +188,7 @@ def _prepare_quota_command_context(
         )
         unsupported_details = sorted(requested_details - allowed_details)
         if unsupported_details:
-            raise ValueError(
+            raise QuotaCommandValidationError(
                 f"`quota {command}` does not accept --include-detail "
                 f"{', '.join(unsupported_details)}"
             )
@@ -186,24 +196,52 @@ def _prepare_quota_command_context(
         bool(getattr(args, "include_scheduler_detail", False))
         and command != "should-run"
     ):
-        raise ValueError(
+        raise QuotaCommandValidationError(
             "--include-scheduler-detail is only valid with `quota should-run`"
         )
     if bool(getattr(args, "record_host_poll", False)) and command != "should-run":
-        raise ValueError("--record-host-poll is only valid with `quota should-run`")
+        raise QuotaCommandValidationError(
+            "--record-host-poll is only valid with `quota should-run`"
+        )
 
-    heartbeat_turn_id = normalize_turn_instance_id(
-        getattr(args, "turn_instance_id", None)
-    )
-    if heartbeat_turn_id and command not in {"should-run", "spend-slot"}:
-        raise ValueError(
-            "--turn-instance-id is only valid with `quota should-run` or "
-            "`quota spend-slot`"
+    try:
+        heartbeat_turn_id = normalize_turn_instance_id(
+            getattr(args, "turn_instance_id", None)
+        )
+    except ValueError as exc:
+        raise QuotaCommandValidationError(str(exc)) from exc
+    if heartbeat_turn_id and command not in {
+        "should-run",
+        "monitor-poll",
+        "spend-slot",
+    }:
+        raise QuotaCommandValidationError(
+            "--turn-instance-id is only valid with `quota should-run`, "
+            "`quota monitor-poll`, or `quota spend-slot`"
+        )
+    if getattr(args, "replan_obligation_id", None) and command != "spend-slot":
+        raise QuotaCommandValidationError(
+            "--replan-obligation-id is only valid with `quota spend-slot`"
+        )
+    if getattr(args, "replan_obligation_id", None) and getattr(args, "todo_id", None):
+        raise QuotaCommandValidationError(
+            "--replan-obligation-id cannot be combined with --todo-id"
         )
     if heartbeat_turn_id and not args.agent_id:
-        raise ValueError("turn-scoped quota settlement requires --agent-id")
+        raise QuotaCommandValidationError(
+            "turn-scoped quota settlement requires --agent-id"
+        )
     if heartbeat_turn_id and command == "should-run" and bool(args.dry_run):
-        raise ValueError("turn-scoped `quota should-run` cannot use --dry-run")
+        raise QuotaCommandValidationError(
+            "turn-scoped `quota should-run` cannot use --dry-run"
+        )
+
+    scheduler_context = (
+        _scheduler_execution_context_from_args(args)
+        if command in QUOTA_SCHEDULER_COMMANDS
+        else None
+    )
+    validate_quota_command_request(args)
 
     scan_roots = [Path(item).expanduser() for item in args.scan_path]
     if not scan_roots:
@@ -221,11 +259,6 @@ def _prepare_quota_command_context(
     status_goal_id = args.goal_id if command not in {"status", "plan"} else None
     projection_cache_ttl_seconds = int(
         getattr(args, "projection_cache_ttl_seconds", 120)
-    )
-    scheduler_context = (
-        _scheduler_execution_context_from_args(args)
-        if command in QUOTA_SCHEDULER_COMMANDS
-        else None
     )
     status_payload = None
     cache_metadata = None
@@ -264,7 +297,6 @@ def _prepare_quota_command_context(
     elif isinstance(status_payload.get("projection_cache"), dict):
         cache_metadata = dict(status_payload["projection_cache"])
 
-    validate_quota_command_request(args)
     return _QuotaCommandContext(
         runtime_root=runtime_root,
         scan_roots=scan_roots,
@@ -279,6 +311,17 @@ def _prepare_quota_command_context(
     )
 
 
+def _verbose_debug_fields(error: Exception, *, verbose: bool) -> dict[str, object]:
+    if not verbose:
+        return {}
+    return {
+        "verbose_debug": {
+            "error_type": type(error).__name__,
+            "error": str(error),
+        }
+    }
+
+
 def _quota_failure_payload(
     args: argparse.Namespace,
     *,
@@ -288,6 +331,9 @@ def _quota_failure_payload(
 ) -> dict[str, object]:
     command = args.quota_command
     lock_timeout_fields = lock_timeout_error_fields(error)
+    verbose_debug = _verbose_debug_fields(
+        error, verbose=bool(getattr(args, "verbose", False))
+    )
     if command not in QUOTA_EVENT_KINDS:
         return {
             "ok": False,
@@ -295,7 +341,7 @@ def _quota_failure_payload(
             "registry": str(registry_path),
             "runtime_root": runtime_root_arg,
             "error_code": quota_error_code(error),
-            "error": str(error),
+            "error": "quota collection failed",
             "summary": {
                 "registered_goals": 0,
                 "health_blockers": 1,
@@ -309,13 +355,21 @@ def _quota_failure_payload(
                     "status": "quota_collection_failed",
                     "waiting_on": "codex",
                     "severity": "high",
-                    "recommended_action": str(error),
+                    "recommended_action": (
+                        "fix quota/status collection before spending automatic compute"
+                    ),
                     "source": "quota",
                 }
             ],
+            **verbose_debug,
             **lock_timeout_fields,
         }
 
+    public_reason = (
+        str(error)
+        if isinstance(error, HeartbeatReceiptIdentityConflictError)
+        else "quota collection failed"
+    )
     payload: dict[str, object] = {
         "ok": False,
         "mode": command,
@@ -323,7 +377,7 @@ def _quota_failure_payload(
         "decision": "skip",
         "should_run": False,
         "error_code": quota_error_code(error),
-        "reason": str(error),
+        "reason": public_reason,
         "state": "blocked_health",
         "waiting_on": "codex",
         "status": "quota_collection_failed",
@@ -331,6 +385,7 @@ def _quota_failure_payload(
         "recommended_action": (
             "fix quota/status collection before spending automatic compute"
         ),
+        **verbose_debug,
         **lock_timeout_fields,
     }
     if lock_timeout_fields:
@@ -366,6 +421,86 @@ def _quota_failure_payload(
             }
         )
     return payload
+
+
+def _quota_validation_failure_payload(
+    args: argparse.Namespace,
+    exc: QuotaCommandValidationError,
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+) -> dict[str, object]:
+    command = args.quota_command
+    if command not in QUOTA_EVENT_KINDS:
+        return {
+            "ok": False,
+            "mode": command,
+            "registry": str(registry_path),
+            "runtime_root": runtime_root_arg,
+            "error_code": "QUOTA_VALIDATION_FAILED",
+            "error": str(exc),
+            "summary": {
+                "registered_goals": 0,
+                "health_blockers": 0,
+                "next_automatic_turn": None,
+                "states": {},
+            },
+            "groups": {},
+            "health_items": [],
+        }
+    return {
+        "ok": False,
+        "mode": command,
+        "goal_id": args.goal_id,
+        "decision": "skip",
+        "should_run": False,
+        "error_code": "QUOTA_VALIDATION_FAILED",
+        "reason": str(exc),
+        "state": "blocked_validation",
+        "waiting_on": "codex",
+        "status": "quota_validation_failed",
+        "source": "quota",
+        "recommended_action": "fix the command arguments before retrying",
+    }
+
+
+def _quota_scheduler_fail_current_payload(
+    status_payload: dict[str, object],
+    args: argparse.Namespace,
+    *,
+    runtime_root: Path,
+    scheduler_context: Mapping[str, object] | SchedulerExecutionContextResolution | None,
+    operator_inbox_urgency_projector: Callable[..., dict[str, object]],
+) -> dict[str, object]:
+    observed_rrule = str(args.codex_app_current_rrule or "").strip()
+    if not observed_rrule:
+        host_observation = resolve_codex_app_automation_rrule(
+            goal_id=args.goal_id,
+            agent_id=args.agent_id,
+        )
+        if host_observation.get("available") is True:
+            observed_rrule = str(host_observation.get("rrule") or "")
+    failure_decision = build_quota_should_run(
+        status_payload,
+        goal_id=args.goal_id,
+        agent_id=args.agent_id,
+        available_capabilities=args.available_capabilities,
+        codex_app_current_rrule=observed_rrule,
+        scheduler_execution_context=scheduler_context,
+        operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+    )
+    return record_quota_scheduler_failure_for_decision(
+        failure_decision,
+        runtime_root=runtime_root,
+        goal_id=args.goal_id,
+        agent_id=args.agent_id,
+        execute=bool(args.execute),
+        surface=args.surface,
+        state_key=args.state_key,
+        failed_rrule=args.failed_rrule,
+        observed_host_rrule=observed_rrule,
+        failure_kind=args.failure_kind,
+    )
 
 
 def _quota_renderer(
@@ -418,6 +553,18 @@ def handle_quota_command(
         scheduler_context = context.scheduler_context
         operator_inbox_urgency_projector = context.operator_inbox_urgency_projector
         if args.quota_command == "should-run":
+            receipt_bound_todo_id = None
+            if heartbeat_turn_id:
+                heartbeat_receipt_existing = find_heartbeat_receipt(
+                    runtime_root,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    turn_instance_id=heartbeat_turn_id,
+                )
+                if heartbeat_receipt_existing:
+                    receipt_bound_todo_id = heartbeat_receipt_settlement_todo_id(
+                        heartbeat_receipt_existing
+                    )
             payload = build_live_quota_should_run_decision(
                 status_payload,
                 goal_id=args.goal_id,
@@ -433,14 +580,9 @@ def handle_quota_command(
                 bounded_research_frontier_projector=(
                     project_live_explore_composition_frontier
                 ),
+                receipt_bound_todo_id=receipt_bound_todo_id,
             )
             if heartbeat_turn_id:
-                heartbeat_receipt_existing = find_heartbeat_receipt(
-                    runtime_root,
-                    goal_id=args.goal_id,
-                    agent_id=args.agent_id,
-                    turn_instance_id=heartbeat_turn_id,
-                )
                 if heartbeat_receipt_existing:
                     (
                         heartbeat_receipt_existing,
@@ -509,6 +651,7 @@ def handle_quota_command(
                             bounded_research_frontier_projector=(
                                 project_live_explore_composition_frontier
                             ),
+                            receipt_bound_todo_id=receipt_bound_todo_id,
                         )
                         cache_metadata = None
                         heartbeat_stall_observation = (
@@ -523,35 +666,15 @@ def handle_quota_command(
                         heartbeat_stall_observation = "not_applicable"
                     heartbeat_receipt_ready = True
         elif args.quota_command == "monitor-poll":
-            payload = record_quota_monitor_poll(
-                status_payload,
-                goal_id=args.goal_id,
+            payload = record_quota_monitor_poll_for_cli(
+                args,
+                status_payload=status_payload,
                 registry_path=registry_path,
-                execute=bool(args.execute),
-                source=args.source,
-                reason_summary=args.reason_summary,
-                agent_id=args.agent_id,
-                available_capabilities=args.available_capabilities,
-                todo_id=args.todo_id,
-                target_key=args.target_key,
-                result_hash=args.result_hash,
-                material_change=bool(args.material_change),
-                cadence=args.cadence,
-                next_due_at=args.next_due_at,
-                next_agent_todo=args.next_agent_todo,
-                next_action_kind=args.next_action_kind,
-                next_task_repository=args.next_task_repository,
-                next_required_capabilities=args.next_required_capabilities,
-                next_continuation_policy=args.next_continuation_policy,
-                next_target_key=args.next_target_key,
-                next_user_todo=args.next_user_todo,
-                next_user_task_class=args.next_user_task_class,
-                next_claimed_by=args.next_claimed_by,
+                runtime_root=runtime_root,
+                turn_instance_id=heartbeat_turn_id,
                 scheduler_execution_context=scheduler_context,
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
-                bounded_research_frontier_projector=(
-                    project_live_explore_composition_frontier
-                ),
+                monitor_poll_recorder=record_quota_monitor_poll,
                 status_reloader=lambda: collect_status(
                     registry_path=registry_path,
                     runtime_root_override=runtime_root_arg,
@@ -580,34 +703,12 @@ def handle_quota_command(
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
             )
         elif args.quota_command == "scheduler-fail-current":
-            observed_rrule = str(args.codex_app_current_rrule or "").strip()
-            if not observed_rrule:
-                host_observation = resolve_codex_app_automation_rrule(
-                    goal_id=args.goal_id,
-                    agent_id=args.agent_id,
-                )
-                if host_observation.get("available") is True:
-                    observed_rrule = str(host_observation.get("rrule") or "")
-            failure_decision = build_quota_should_run(
+            payload = _quota_scheduler_fail_current_payload(
                 status_payload,
-                goal_id=args.goal_id,
-                agent_id=args.agent_id,
-                available_capabilities=args.available_capabilities,
-                codex_app_current_rrule=observed_rrule,
-                scheduler_execution_context=scheduler_context,
-                operator_inbox_urgency_projector=operator_inbox_urgency_projector,
-            )
-            payload = record_quota_scheduler_failure_for_decision(
-                failure_decision,
+                args,
                 runtime_root=runtime_root,
-                goal_id=args.goal_id,
-                agent_id=args.agent_id,
-                execute=bool(args.execute),
-                surface=args.surface,
-                state_key=args.state_key,
-                failed_rrule=args.failed_rrule,
-                observed_host_rrule=observed_rrule,
-                failure_kind=args.failure_kind,
+                scheduler_context=scheduler_context,
+                operator_inbox_urgency_projector=operator_inbox_urgency_projector,
             )
         elif args.quota_command == "spend-slot":
             payload = spend_quota_slot(
@@ -621,6 +722,7 @@ def handle_quota_command(
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
                 todo_id=args.todo_id,
                 turn_instance_id=heartbeat_turn_id,
+                replan_obligation_id=args.replan_obligation_id,
             )
         elif args.quota_command == "void-slot":
             payload = void_quota_slot(
@@ -637,6 +739,14 @@ def handle_quota_command(
             payload = build_quota_plan(status_payload, mode=args.quota_command)
         if cache_metadata:
             payload["status_projection_cache"] = cache_metadata
+    except QuotaCommandValidationError as exc:
+        # Only typed CLI validation diagnostics are public-safe by contract.
+        payload = _quota_validation_failure_payload(
+            args,
+            exc,
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root_arg,
+        )
     except Exception as exc:  # noqa: BLE001 - CLI fail-safe boundary; error_code is typed below.
         payload = _quota_failure_payload(
             args,
@@ -656,10 +766,14 @@ def handle_quota_command(
     )
     if should_log_quota:
         rollout_todo_id = quota_rollout_todo_id(payload, args)
+        rollout_replan_obligation_id = quota_rollout_replan_obligation_id(
+            payload, args
+        )
         rollout_details = quota_rollout_details(
             payload,
             args,
             todo_id=rollout_todo_id,
+            replan_obligation_id=rollout_replan_obligation_id,
         )
         if heartbeat_turn_id and args.quota_command == "should-run":
             if not heartbeat_receipt_ready:
@@ -683,14 +797,24 @@ def handle_quota_command(
                     appended=heartbeat_receipt_existing_appended,
                 )
             else:
+                settlement_identity = (
+                    SettlementIdentity(
+                        goal_id=args.goal_id,
+                        agent_id=args.agent_id,
+                        todo_id=rollout_todo_id,
+                        turn_instance_id=heartbeat_turn_id,
+                        replan_obligation_id=rollout_replan_obligation_id,
+                    )
+                    if rollout_todo_id or rollout_replan_obligation_id
+                    else None
+                )
                 rollout_details.update(
                     {
                         "turn_instance_id": heartbeat_turn_id,
                         "stall_observation": heartbeat_stall_observation,
                         "settlement_effect_id": (
-                            f"{args.goal_id}:{args.agent_id}:{rollout_todo_id}:"
-                            f"{heartbeat_turn_id}"
-                            if rollout_todo_id
+                            settlement_identity.effect_id
+                            if settlement_identity is not None
                             else ""
                         ),
                     }
@@ -778,6 +902,7 @@ def handle_quota_command(
                     agent_id=args.agent_id,
                     todo_id=rollout_todo_id,
                     turn_instance_id=heartbeat_turn_id,
+                    replan_obligation_id=rollout_replan_obligation_id,
                 )
     if bool(getattr(args, "turn_envelope", False)):
         payload = build_turn_envelope(

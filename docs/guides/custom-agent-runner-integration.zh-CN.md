@@ -49,8 +49,7 @@ transition policy 可复用时，才值得新增 Capability；外部实现放在
 先在拥有项目 workspace 的机器上安装 CLI：
 
 ```bash
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
 loopx doctor --agent-type other-agent
 ```
 

@@ -63,13 +63,18 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert requirements["typed_state_rule"]["required_when"] == "code_change"
     assert "substring denylists" in requirements["typed_state_rule"]["rule"]
     assert "domain-neutral" in requirements["domain_neutrality"]["rule"]
-    assert "silent behavior changes" in requirements["behavior_change_disclosure"][
-        "rule"
-    ]
+    assert (
+        "silent behavior changes" in requirements["behavior_change_disclosure"]["rule"]
+    )
     assert "must_attempt_work" in requirements["guidance_vs_obligation"]["rule"]
     assert contract["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert contract["completion_gate"]["stale_head_verdict_allowed"] is False
     assert contract["finding_contract"]["findings_first"] is True
+    verdict = contract["verdict_policy"]
+    assert verdict["open_pr_blocking_finding"] == "REQUEST_CHANGES"
+    assert verdict["open_pr_non_blocking_finding"] == "APPROVE"
+    assert verdict["open_pr_no_finding"] == "APPROVE"
+    assert "author-owned PR" in verdict["author_owned_no_blocker_fallback"]
 
 
 def test_runtime_plan_requires_symbol_map_and_negative_walkthrough() -> None:

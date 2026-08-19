@@ -144,6 +144,30 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
     )
 
 
+def test_runtime_capability_reentry_does_not_switch_from_selected_todo() -> None:
+    payload = {
+        **_blocked_payload(missing=["network"]),
+        "effective_action": "bounded_delivery",
+        "selected_todo": {
+            "todo_id": "todo_selected",
+            "task_class": "advancement_task",
+        },
+        "execution_obligation": {
+            "must_attempt_work": True,
+            "delivery_allowed": True,
+        },
+    }
+
+    contract = build_interaction_contract(
+        payload,
+        available_capabilities=["shell"],
+        scheduler_execution_context=MANAGED_AGENT_CONTEXT,
+    )
+
+    assert "runtime_capability_reentry" not in contract["cli_channel"]
+    assert contract["agent_channel"].get("next_task_action") is None
+
+
 def test_verified_reentry_inherits_capability_into_followup_actions() -> None:
     contract = build_interaction_contract(
         {

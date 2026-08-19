@@ -72,6 +72,7 @@ class NativeGoalConfig:
     approval_policy: str = "never"
     sandbox: str = "workspace-write"
     sandbox_policy: Mapping[str, Any] | None = None
+    required_skill_ids: tuple[str, ...] = ()
 
     def validate(self) -> None:
         if not self.cwd.strip():
@@ -86,6 +87,11 @@ class NativeGoalConfig:
             or self.token_budget <= 0
         ):
             raise ValueError("token_budget must be a positive integer when provided")
+        for skill_id in self.required_skill_ids:
+            if not isinstance(skill_id, str) or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", skill_id
+            ):
+                raise ValueError("required_skill_ids must contain safe skill ids")
 
 
 @dataclass
@@ -112,6 +118,57 @@ class NativeGoalTurn:
     turn_started_count: int = 0
     turn_completed_count: int = 0
     goal_status_poll_count: int = 0
+    required_skill_ids: tuple[str, ...] = ()
+    discovered_required_skill_ids: tuple[str, ...] = ()
+    skill_catalog_count: int = 0
+    skill_error_count: int = 0
+
+
+def _read_required_skills(
+    transport: NativeGoalTransport,
+    *,
+    cwd: str,
+    required_skill_ids: tuple[str, ...],
+) -> tuple[tuple[str, ...], int, int]:
+    """Prove required skills through the app-server discovery surface."""
+
+    required = tuple(dict.fromkeys(required_skill_ids))
+    if not required:
+        return (), 0, 0
+    result = transport.request(
+        "skills/list",
+        {"cwds": [cwd], "forceReload": True},
+    )
+    data = result.get("data")
+    if not isinstance(data, list) or not data:
+        raise NativeGoalProtocolError("skills_list_data_missing")
+    matching = [
+        row
+        for row in data
+        if isinstance(row, Mapping) and str(row.get("cwd") or "") == cwd
+    ]
+    if len(matching) != 1:
+        raise NativeGoalProtocolError("skills_list_cwd_mismatch")
+    row = matching[0]
+    errors = row.get("errors")
+    if not isinstance(errors, list):
+        raise NativeGoalProtocolError("skills_list_errors_missing")
+    if errors:
+        raise NativeGoalProtocolError(f"skills_list_errors:{len(errors)}")
+    skills = row.get("skills")
+    if not isinstance(skills, list):
+        raise NativeGoalProtocolError("skills_list_catalog_missing")
+    names = {
+        str(skill.get("name") or "")
+        for skill in skills
+        if isinstance(skill, Mapping) and skill.get("enabled") is not False
+    }
+    missing = [skill_id for skill_id in required if skill_id not in names]
+    if missing:
+        raise NativeGoalProtocolError(
+            "required_skills_missing:" + ",".join(sorted(missing))
+        )
+    return required, len(skills), 0
 
 
 def attach_native_goal(
@@ -137,6 +194,14 @@ def attach_native_goal(
     methods.append("initialize")
     transport.notify("initialized", {})
     methods.append("initialized")
+
+    discovered_skills, skill_catalog_count, skill_error_count = _read_required_skills(
+        transport,
+        cwd=config.cwd,
+        required_skill_ids=config.required_skill_ids,
+    )
+    if config.required_skill_ids:
+        methods.append("skills/list")
 
     thread_params: dict[str, Any] = {
         "cwd": config.cwd,
@@ -183,6 +248,10 @@ def attach_native_goal(
         task_instruction_chars=len(config.task_instruction),
         token_budget_present=config.token_budget is not None,
         methods=methods,
+        required_skill_ids=tuple(dict.fromkeys(config.required_skill_ids)),
+        discovered_required_skill_ids=discovered_skills,
+        skill_catalog_count=skill_catalog_count,
+        skill_error_count=skill_error_count,
     )
 
 
@@ -629,6 +698,15 @@ def compact_native_goal_receipt(turn: NativeGoalTurn) -> dict[str, Any]:
         "turn_completed_count": turn.turn_completed_count,
         "goal_continuation_turn_completed_count": max(0, turn.turn_completed_count - 1),
         "goal_status_poll_count": turn.goal_status_poll_count,
+        "required_skill_ids": list(turn.required_skill_ids),
+        "discovered_required_skill_ids": list(turn.discovered_required_skill_ids),
+        "skill_catalog_count": turn.skill_catalog_count,
+        "skill_error_count": turn.skill_error_count,
+        "required_skills_discovered": (
+            turn.discovered_required_skill_ids == turn.required_skill_ids
+            if turn.required_skill_ids
+            else None
+        ),
         "error_signatures": list(turn.error_signatures),
         "public_boundary": {
             "raw_objective_recorded": False,

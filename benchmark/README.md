@@ -27,8 +27,11 @@ publication authority.
   the benchmark toolkit's installed native Goal runtime. The runnable
   [`deepswe/run_native_codex_goal.py`](deepswe/run_native_codex_goal.py) example
   connects that runtime to a real `codex app-server`. Benchmark-family adapters
-  should import the installed runtime and retain only their isolation,
-  environment bridge, verifier, and scoring concerns.
+  should import the installed runtime and its formal isolated profile helper,
+  then retain only their isolation, environment bridge, verifier, and scoring
+  concerns. The profile helper renders the real Goal prompt with its installed
+  CLI and proves that the prompt, discovered skills, and release-snapshot CLI
+  belong to one pinned product path.
 
 Legacy runners and dated packets are archived under
 [`deprecate/benchmark-legacy/`](../deprecate/benchmark-legacy/README.md). They are

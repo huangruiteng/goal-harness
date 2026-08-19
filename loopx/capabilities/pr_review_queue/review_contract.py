@@ -375,8 +375,16 @@ def build_review_execution_contract() -> dict[str, Any]:
         },
         "verdict_policy": {
             "open_pr_blocking_finding": "REQUEST_CHANGES",
-            "open_pr_non_blocking_finding": "COMMENT",
-            "open_pr_no_finding": "COMMENT unless approval was explicitly requested through merge policy",
+            "open_pr_non_blocking_finding": "APPROVE",
+            "open_pr_no_finding": "APPROVE",
+            "author_owned_no_blocker_fallback": (
+                "COMMENTED review titled 'Approval conclusion (author-owned PR; "
+                "GitHub blocks formal self-approval)'"
+            ),
+            "author_owned_blocker_fallback": (
+                "COMMENTED review titled 'Request changes conclusion (author-owned "
+                "PR; GitHub blocks formal self-review)'"
+            ),
             "merged_pr": "POST_MERGE_AUDIT_COMMENT when a new actionable finding exists",
             "publication_exceptions": [
                 "explicit local-only request",

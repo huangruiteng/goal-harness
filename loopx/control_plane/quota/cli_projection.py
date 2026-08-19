@@ -105,6 +105,7 @@ _RETAINED_MONITOR_POLL_SELECTED_TODO_FIELDS = (
     "unblocks_todo_id",
     "agent_id",
     "selected_by",
+    "selection_binding",
 )
 _RETAINED_MONITOR_POLL_INTERACTION_FIELDS = {
     "user_channel": (

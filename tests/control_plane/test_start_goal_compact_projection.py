@@ -835,7 +835,7 @@ def test_start_goal_binds_selected_lane_before_todo_writeback(
     }
 
 
-def test_start_goal_with_unbound_thread_defaults_to_fresh_registration(
+def test_start_goal_with_unbound_thread_requires_existing_lane_selection(
     tmp_path: Path,
 ) -> None:
     project = _write_connected_project(tmp_path)
@@ -857,16 +857,16 @@ def test_start_goal_with_unbound_thread_defaults_to_fresh_registration(
 
     gate = payload["guided_transaction"]["identity_selection_gate"]
     assert payload["guided_transaction"]["blocked_by"] == "agent_identity_selection"
-    assert gate["state"] == "fresh_agent_registration_required"
-    assert gate["default_action"] == "register_fresh_agent"
-    assert gate["fresh_agent_registration"]["recommended"] is True
+    assert gate["state"] == "thread_binding_selection_required"
+    assert gate["default_action"] == "select_agent_identity"
+    assert gate["fresh_agent_registration"] is None
     assert all(
         choice["requires_explicit_takeover_intent"] is True
         for choice in gate["choices"]
     )
 
 
-def test_start_goal_unbound_thread_does_not_reuse_the_only_registered_agent(
+def test_start_goal_unbound_thread_requires_lane_selection_even_for_single_registered_agent(
     tmp_path: Path,
 ) -> None:
     project = _write_connected_project(tmp_path)
@@ -885,9 +885,10 @@ def test_start_goal_unbound_thread_does_not_reuse_the_only_registered_agent(
     assert payload["agent_id"] is None
     assert payload["guided_transaction"]["blocked_by"] == "agent_identity_selection"
     gate = payload["guided_transaction"]["identity_selection_gate"]
-    assert gate["state"] == "fresh_agent_registration_required"
-    assert gate["default_action"] == "register_fresh_agent"
-    assert gate["fresh_agent_registration"]["recommended"] is True
+    assert gate["state"] == "thread_binding_selection_required"
+    assert gate["default_action"] == "select_agent_identity"
+    assert gate["fresh_agent_registration"] is None
+    assert gate["choices"][0]["agent_id"] == AGENT_ID
 
 
 def test_start_goal_without_thread_id_requires_explicit_lane_selection(tmp_path: Path) -> None:
@@ -912,7 +913,7 @@ def test_start_goal_without_thread_id_requires_explicit_lane_selection(tmp_path:
     assert gate["choices"][0]["requires_explicit_takeover_intent"] is True
 
 
-def test_cli_codex_app_unbound_ambient_thread_defaults_to_fresh_registration(
+def test_cli_codex_app_unbound_ambient_thread_requires_lane_selection(
     tmp_path: Path, monkeypatch
 ) -> None:
     project = _write_connected_project(tmp_path)
@@ -941,6 +942,134 @@ def test_cli_codex_app_unbound_ambient_thread_defaults_to_fresh_registration(
     payload = json.loads(output.getvalue())
     assert payload["thread_id"] == "thread-new-session"
     assert payload["agent_id"] is None
+    gate = payload["guided_transaction"]["identity_selection_gate"]
+    assert gate["state"] == "thread_binding_selection_required"
+    assert gate["default_action"] == "select_agent_identity"
+    assert gate["fresh_agent_registration"] is None
+    assert gate["choices"][0]["agent_id"] == AGENT_ID
+
+
+def test_cli_codex_app_ssh_reuses_ambient_thread_binding(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = _write_connected_project(tmp_path)
+    registry_path = project / ".loopx" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["coordination"]["thread_agent_bindings"] = [
+        {
+            "thread_id": "thread-ssh-ambient",
+            "host_surface": "codex-app-ssh",
+            "agent_id": AGENT_ID,
+        }
+    ]
+    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-ssh-ambient")
+
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--goal-id",
+                GOAL_ID,
+                "--host-surface",
+                "codex-app-ssh",
+                "--goal-text",
+                GOAL_TEXT,
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(output.getvalue())
+    assert payload["thread_id"] == "thread-ssh-ambient"
+    assert payload["agent_id"] == AGENT_ID
+    assert payload["thread_agent_binding"]["status"] == "bound"
+    assert payload["guided_transaction"].get("blocked_by") is None
+
+
+def test_cli_codex_app_ssh_unbound_ambient_thread_requires_lane_selection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = _write_connected_project(tmp_path)
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-ssh-new")
+
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--goal-id",
+                GOAL_ID,
+                "--host-surface",
+                "codex-app-ssh",
+                "--goal-text",
+                GOAL_TEXT,
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(output.getvalue())
+    assert payload["thread_id"] == "thread-ssh-new"
+    assert payload["agent_id"] is None
+    gate = payload["guided_transaction"]["identity_selection_gate"]
+    assert gate["state"] == "thread_binding_selection_required"
+    assert gate["default_action"] == "select_agent_identity"
+    assert gate["fresh_agent_registration"] is None
+    assert gate["choices"][0]["agent_id"] == AGENT_ID
+
+
+def test_start_goal_non_codex_surface_with_registered_agents_requires_lane_selection(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        cli_bin="loopx",
+        host_surface="claude-code",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+
+    gate = payload["guided_transaction"]["identity_selection_gate"]
+    assert payload["guided_transaction"]["blocked_by"] == "agent_identity_selection"
+    assert gate["state"] == "thread_binding_selection_required"
+    assert gate["default_action"] == "select_agent_identity"
+    assert gate["fresh_agent_registration"] is None
+    assert gate["choices"][0]["agent_id"] == AGENT_ID
+
+
+def test_start_goal_non_codex_surface_without_registered_agents_defaults_to_fresh(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    registry_path = project / ".loopx" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["coordination"]["registered_agents"] = []
+    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        cli_bin="loopx",
+        host_surface="claude-code",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+
     gate = payload["guided_transaction"]["identity_selection_gate"]
     assert gate["state"] == "fresh_agent_registration_required"
     assert gate["default_action"] == "register_fresh_agent"

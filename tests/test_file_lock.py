@@ -12,13 +12,18 @@ from loopx.file_lock import (
     LockAcquireTimeoutError,
     exclusive_file_lock,
     fcntl,
+    lock_holder_path,
     lock_incident_path,
+    msvcrt,
     try_exclusive_file_lock,
 )
 from loopx.presentation.markdown import append_operator_action_markdown
 
 
-pytestmark = pytest.mark.skipif(fcntl is None, reason="POSIX flock is required")
+pytestmark = pytest.mark.skipif(
+    fcntl is None and msvcrt is None,
+    reason="a supported kernel file-lock backend is required",
+)
 
 
 def _start_stalled_holder(target: Path) -> subprocess.Popen[str]:
@@ -65,16 +70,18 @@ def test_exclusive_lock_persists_public_safe_holder_metadata(tmp_path: Path) -> 
         agent_id="agent-a",
         operation="todo-update",
     ) as lock_path:
-        holder = json.loads(lock_path.read_text(encoding="utf-8"))
+        holder_path = lock_holder_path(target)
+        holder = json.loads(holder_path.read_text(encoding="utf-8"))
         assert holder["pid"] > 0
         assert holder["agent_id"] == "agent-a"
         assert holder["operation"] == "todo-update"
         assert holder["acquired_at"].endswith("Z")
         assert "released_at" not in holder
 
-    released = json.loads(lock_path.read_text(encoding="utf-8"))
+    released = json.loads(holder_path.read_text(encoding="utf-8"))
     assert released["released_at"].endswith("Z")
     assert lock_path.exists()
+    assert holder_path.exists()
 
 
 def test_stalled_holder_times_out_and_records_independent_incident(tmp_path: Path) -> None:

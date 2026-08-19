@@ -42,6 +42,9 @@ def load_quota_plan_fixture() -> ModuleType:
 
 
 def run_quota(root: Path, registry_path: Path, runtime: Path, *args: str) -> tuple[dict, int]:
+    quota_args = list(args)
+    if "--scan-root" not in quota_args and "--scan-path" not in quota_args:
+        quota_args.extend(["--scan-root", str(root)])
     result = subprocess.run(
         [
             sys.executable,
@@ -54,7 +57,7 @@ def run_quota(root: Path, registry_path: Path, runtime: Path, *args: str) -> tup
             "--format",
             "json",
             "quota",
-            *args,
+            *quota_args,
         ],
         cwd=REPO_ROOT,
         check=False,
@@ -68,10 +71,15 @@ def run_quota(root: Path, registry_path: Path, runtime: Path, *args: str) -> tup
 def is_state_or_accounting_command(action: str) -> bool:
     tokens = shlex.split(action)
     command_index = next(
-        index
-        for index, token in enumerate(tokens)
-        if token == "loopx" or token.endswith("/loopx")
+        (
+            index
+            for index, token in enumerate(tokens)
+            if token == "loopx" or token.endswith("/loopx")
+        ),
+        None,
     )
+    if command_index is None:
+        return False
     after = tokens[command_index + 1 :]
     parsed_subcommands: list[str] = []
     skip_next = False
@@ -104,6 +112,9 @@ def assert_state_or_accounting_command_classification() -> None:
     )
     assert not is_state_or_accounting_command(
         "loopx status --goal-id refresh-state"
+    )
+    assert not is_state_or_accounting_command(
+        "gh pr view 123 --json statusCheckRollup"
     )
 
 

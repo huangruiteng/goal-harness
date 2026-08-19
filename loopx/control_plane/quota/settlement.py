@@ -7,7 +7,11 @@ from typing import Any
 
 from ...rollout_event_log import load_rollout_events, rollout_event_log_path
 from ...turn_identity import normalize_turn_instance_id
-from ..todos.contract import normalize_todo_claimed_by, normalize_todo_id
+from ..todos.contract import (
+    normalize_todo_claimed_by,
+    normalize_todo_id,
+    normalize_todo_replan_obligation_id,
+)
 from ..work_items.delivery_outcome import (
     ACCOUNTABLE_DELIVERY_OUTCOMES,
     normalize_delivery_outcome,
@@ -98,9 +102,13 @@ def resolve_heartbeat_settlement_identity(
     agent_id: str | None,
     todo_id: str | None,
     turn_instance_id: str | None,
+    replan_obligation_id: str | None = None,
 ) -> SettlementResult[SettlementIdentity]:
     normalized_agent_id = normalize_todo_claimed_by(agent_id)
     normalized_todo_id = normalize_todo_id(todo_id)
+    normalized_replan_obligation_id = normalize_todo_replan_obligation_id(
+        replan_obligation_id
+    )
     try:
         normalized_turn_id = normalize_turn_instance_id(turn_instance_id)
     except ValueError as exc:
@@ -109,13 +117,17 @@ def resolve_heartbeat_settlement_identity(
             step_kind=SettlementStepKind.VALIDATION,
             reason=str(exc),
         )
-    if not normalized_agent_id or not normalized_todo_id or not normalized_turn_id:
+    if (
+        not normalized_agent_id
+        or not normalized_turn_id
+        or bool(normalized_todo_id) == bool(normalized_replan_obligation_id)
+    ):
         return SettlementResult.failed(
             kind=SettlementFailureKind.INVALID_IDENTITY,
             step_kind=SettlementStepKind.VALIDATION,
             reason=(
-                "turn-scoped settlement requires agent_id, todo_id, and "
-                "turn_instance_id"
+                "turn-scoped settlement requires agent_id, turn_instance_id, and "
+                "exactly one todo_id or replan_obligation_id"
             ),
         )
     try:
@@ -139,14 +151,24 @@ def resolve_heartbeat_settlement_identity(
     details_value = receipt_event.get("details")
     details = details_value if isinstance(details_value, Mapping) else {}
     receipt_todo_id = normalize_todo_id(details.get("todo_id"))
-    if receipt_todo_id != normalized_todo_id:
+    receipt_replan_obligation_id = normalize_todo_replan_obligation_id(
+        details.get("replan_obligation_id")
+    )
+    if (
+        receipt_todo_id != normalized_todo_id
+        or receipt_replan_obligation_id != normalized_replan_obligation_id
+    ):
         return SettlementResult.failed(
             kind=SettlementFailureKind.IDENTITY_MISMATCH,
             step_kind=SettlementStepKind.VALIDATION,
             reason=(
-                "settlement Todo does not match the original quota guard: "
-                f"receipt todo is {receipt_todo_id or 'missing'} but requested "
-                f"todo is {normalized_todo_id}"
+                "settlement binding does not match the original quota guard: "
+                f"receipt todo={receipt_todo_id or 'missing'} and "
+                "replan_obligation_id="
+                f"{receipt_replan_obligation_id or 'missing'}, requested "
+                f"todo={normalized_todo_id or 'missing'} and "
+                "replan_obligation_id="
+                f"{normalized_replan_obligation_id or 'missing'}"
             ),
         )
     identity = SettlementIdentity(
@@ -154,6 +176,7 @@ def resolve_heartbeat_settlement_identity(
         agent_id=normalized_agent_id,
         todo_id=normalized_todo_id,
         turn_instance_id=normalized_turn_id,
+        replan_obligation_id=normalized_replan_obligation_id,
     )
     receipt_effect_id = str(details.get("settlement_effect_id") or "").strip()
     if not effect_ids_match(receipt_effect_id, identity.effect_id):
@@ -291,7 +314,7 @@ def find_settlement_writeback(
     for run in reversed(_run_index_records(runtime_root, identity.goal_id)):
         if str(run.get("turn_instance_id") or "") != identity.turn_instance_id:
             continue
-        if normalize_todo_id(run.get("todo_id")) != identity.todo_id:
+        if not _run_matches_settlement_binding(run, identity):
             continue
         run_agent_id = normalize_todo_claimed_by(run.get("agent_id"))
         if run_agent_id != identity.agent_id:
@@ -303,6 +326,19 @@ def find_settlement_writeback(
             continue
         return run
     return None
+
+
+def _run_matches_settlement_binding(
+    run: Mapping[str, Any],
+    identity: SettlementIdentity,
+) -> bool:
+    return bool(
+        normalize_todo_id(run.get("todo_id")) == identity.todo_id
+        and normalize_todo_replan_obligation_id(
+            run.get("replan_obligation_id")
+        )
+        == identity.replan_obligation_id
+    )
 
 
 def find_settlement_step_event(
@@ -400,7 +436,7 @@ def find_settlement_spend_run(
             continue
         if str(run.get("turn_instance_id") or "") != identity.turn_instance_id:
             continue
-        if normalize_todo_id(run.get("todo_id")) != identity.todo_id:
+        if not _run_matches_settlement_binding(run, identity):
             continue
         if normalize_todo_claimed_by(run.get("agent_id")) != identity.agent_id:
             continue

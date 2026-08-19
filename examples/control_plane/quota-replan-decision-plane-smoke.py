@@ -737,7 +737,7 @@ def assert_completed_advancement_without_successor_beats_monitor_quiet_skip() ->
     assert obligation["agent_id"] == SIDE_AGENT, guard
     assert obligation["triggers"][0]["kind"] == "completed_advancement_without_successor", guard
     assert obligation["triggers"][0]["todo_id"] == "todo_completed_without_successor", guard
-    assert "record explicit no-follow-up" in obligation["recommended_action"], guard
+    assert "loopx todo complete --no-follow-up" in obligation["recommended_action"], guard
     assert guard["autonomous_replan_scope"]["scope"] == "explicit_agent_owner", guard
     assert guard["autonomous_replan_scope"]["applies"] is True, guard
     frontier = guard["goal_frontier_projection"]

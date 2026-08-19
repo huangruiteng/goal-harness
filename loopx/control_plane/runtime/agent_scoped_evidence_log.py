@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
+from ..todos.contract import normalize_todo_id_list
 from .public_safety import public_safe_compact_text
 from .time import parse_timestamp
 
@@ -13,6 +14,8 @@ SCHEMA_VERSION = "agent_scoped_evidence_log_v0"
 REQUIRED_READ_SCHEMA_VERSION = "loopx_agent_required_read_v0"
 READ_RECEIPT_SCHEMA_VERSION = "evidence_log_read_receipt_v0"
 MAX_PROJECTED_READ_RECEIPTS = 12
+_MIN_TIMESTAMP = datetime.min.replace(tzinfo=timezone.utc)
+
 
 def _compact_text(value: Any, *, limit: int = 220) -> str | None:
     return public_safe_compact_text(value, limit=limit)
@@ -170,19 +173,21 @@ def project_evidence_log_read_receipts(
     ]
     return sorted(
         receipts,
-        key=lambda item: str(item.get("recorded_at") or ""),
+        key=_sort_key,
         reverse=True,
     )[: max(0, int(limit))]
 
 
 def _run_mentions_todo(run: Mapping[str, Any], todo_id: str) -> bool:
+    structured_todo_id = str(run.get("todo_id") or "").strip()
+    if structured_todo_id:
+        return structured_todo_id == todo_id
     needles = (
-        run.get("todo_id"),
         run.get("classification"),
         run.get("recommended_action"),
         run.get("health_check"),
     )
-    return any(todo_id in str(value or "") for value in needles)
+    return any(todo_id in normalize_todo_id_list(value) for value in needles)
 
 
 def _run_matches(
@@ -206,8 +211,23 @@ def _run_matches(
     return True
 
 
-def _sort_key(row: Mapping[str, Any]) -> tuple[str, str]:
-    return (str(row.get("recorded_at") or ""), str(row.get("source") or ""))
+def _chronology_key(value: Any) -> tuple[int, datetime, str]:
+    raw = str(value or "")
+    try:
+        parsed = parse_timestamp(value)
+    except OverflowError:
+        # UTC conversion can overflow at datetime's representable boundaries.
+        parsed = None
+    if parsed is None:
+        # Keep malformed legacy rows deterministic, but never let them outrank
+        # a row with a valid timestamp.
+        return (0, _MIN_TIMESTAMP, raw)
+    return (1, parsed, raw)
+
+
+def _sort_key(row: Mapping[str, Any]) -> tuple[int, datetime, str, str]:
+    rank, recorded_at, raw = _chronology_key(row.get("recorded_at"))
+    return (rank, recorded_at, raw, str(row.get("source") or ""))
 
 
 def goal_history_runs(
@@ -327,7 +347,10 @@ def _other_agent_frontier(
         if not other_agent or other_agent == agent_id:
             continue
         current = latest_by_agent.get(other_agent)
-        if current is None or str(run.get("generated_at") or "") > str(current.get("recorded_at") or ""):
+        is_newer = current is None or _chronology_key(
+            run.get("generated_at")
+        ) > _chronology_key(current.get("recorded_at"))
+        if is_newer:
             row = _safe_run_history_row(run)
             row["agent_id"] = other_agent
             latest_by_agent[other_agent] = row

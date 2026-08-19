@@ -97,6 +97,7 @@ commands delegate to those providers.
 | `finance_market_snapshot` | none | migrated to standalone extension | migration packet only; no Finance execution | none |
 | `botmail_identity` | `content-ops` | mapped | install-check only | exact send gate required |
 | `community_channel` | `content-ops` | mapped | install-check and plan | exact account/message gate required |
+| `community_discussion_public_sources` | `periodic-report` | extension package `loopx-community-discussion` | `loopx-community-discussion scan --owner <owner> --repo <repo> --format json` | none (digest delivery is a separate exact-gated external write) |
 
 `migrated` means the implementation module is owned by the outcome capability.
 `native` means the command already lived there. `mapped` records the intended

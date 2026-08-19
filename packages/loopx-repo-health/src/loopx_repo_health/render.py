@@ -48,9 +48,22 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
         "| surface | count | uniques |",
         "| --- | --- | --- |",
     ]
-    for surface in ("views", "clones"):
+    for surface in ("views", "clones", "docs_views"):
         item = traffic.get(surface, {})
         lines.append(f"| {surface} | {item.get('count', 0)} | {item.get('uniques', 0)} |")
+    paths = traffic.get("paths") or []
+    if paths:
+        lines += [
+            "",
+            "### Top paths",
+            "",
+            "| path | title | count | uniques |",
+            "| --- | --- | --- | --- |",
+        ]
+        for row in paths[:10]:
+            lines.append(
+                f"| {row.get('path', '')} | {row.get('title', '')} | {row.get('count', 0)} | {row.get('uniques', 0)} |"
+            )
     lines += [
         "",
         "## Latency",

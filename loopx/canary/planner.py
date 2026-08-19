@@ -1030,6 +1030,9 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
             "scoped identity",
             "runtime loop",
             "host runtime",
+            "computer use",
+            "computer_use_runtime",
+            "computer-use-runtime-v0",
         ),
         "checks": [
             {
@@ -1051,6 +1054,11 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
                 "command": "python3 examples/worker-bridge-install-contract-smoke.py",
                 "tier": "default",
                 "reason": "checks generic worker bridge install/status contracts without private runtime material",
+            },
+            {
+                "command": "python3 examples/computer-use-runtime-contract-smoke.py",
+                "tier": "default",
+                "reason": "checks the computer_use_runtime_v0 provider boundary: gate-before-write, unknown-modal handling, raw-evidence stripping, and rejection of provider-authored writeback",
             },
             {
                 "command": "python3 examples/host-integration-surface-smoke.py",

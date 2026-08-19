@@ -169,16 +169,29 @@ creator dogfooding、reproducible demo 和证据强度标签见
 
 ## 试用 LoopX
 
-要求：Python 3.11+、`curl`、`tar`，以及 macOS 或 Linux shell。普通用户不需要
-Git；Python package 除标准库外没有 runtime 依赖。
+要求：Python 3.11+。使用 console scripts 已加入 `PATH` 的 Python 环境；macOS
+和 Linux 使用 POSIX shell，原生 Windows 使用 PowerShell 7。普通用户不需要
+Git，package 除标准库外没有 runtime 依赖。
 
-无需 clone，直接安装：
+无需 clone，直接从 PyPI 安装：
 
 ```bash
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 loopx doctor
 ```
+
+原生 Windows PowerShell 7 可直接使用同一 PyPI release，不需要 POSIX 兼容层：
+
+```powershell
+py -3.11 -m pip install --upgrade loopx
+loopx workflow-skills --install
+loopx doctor
+```
+
+首次安装后重启 Agent host，使其重新加载 workflow skills。`pipx`、host command
+surfaces、原生 Windows checkout 安装、升级、回滚、卸载与 archive fallback 见
+[Installing LoopX](docs/guides/installing-loopx.md)。
 
 然后在项目根目录连接：
 
@@ -205,6 +218,7 @@ loopx start-goal --guided --project . --goal-text "你的长程目标"
 | Codex App over SSH | `loopx agent-onboard --agent-type codex-app-ssh --project .` | 返回的可见 `/goal <task_body>` |
 | Codex CLI | 在项目里启动 `codex`，让它连接并诊断 LoopX，然后用 `$loopx <复杂任务>` 或 `/skills`。 | 可见 `/goal <task_body>`；默认不走隐藏 headless 执行 |
 | Claude Code | 安装 opt-in adapter，然后运行 `/loopx <任务>`，再运行 `/loop`。 | 由 LoopX gate 的原生 Claude Code `/loop` |
+| KunlunCode | 运行 `loopx-kunluncode connect --project . --goal-id <goal-id> --agent-id <registered-agent-id>`，添加一条有边界的 todo，再运行 `loopx-kunluncode run --project .`。 | 经 app-server 驱动原生 Goal Pro；只有 strict verification 通过后，LoopX 才写回完成与 quota |
 | OpenCode | 安装静态 command facade；recurring goal 显式 opt in `--with-goal-bridge`。 | OpenCode command facade 与显式 goal bridge |
 | Pi | 用 `loopx slash-commands --install --surface pi` 安装 opt-in goal extension，然后在受信任的 Pi 会话里用 `/loopx <任务>`。 | 由 LoopX quota gate 的可见 Pi goal extension（`loopx_goal_activate` + `agent_settled` 续跑） |
 | Cursor、shell、自有 runner | 使用同一 installer 和 `loopx doctor`，再手动连接或由 runner 调用。 | 你的 shell、scheduler 或 runner |
@@ -213,7 +227,8 @@ loopx start-goal --guided --project . --goal-text "你的长程目标"
 [Getting Started](docs/guides/getting-started.md)。Host 集成还可以查看
 [Codex App host command registry](docs/reference/protocols/codex-app-host-command-registry-v0.md)、
 [Codex CLI packaged install](docs/product/runtimes/codex-cli/codex-cli-packaged-install.md)和
-[Claude Code adapter](loopx/claude_goal_mode/README.md)。
+[Claude Code adapter](loopx/claude_goal_mode/README.md)，以及
+[KunlunCode 原生 Goal adapter](docs/guides/kunluncode-adapter.zh-CN.md)。
 
 自有 runner 请先看
 [最小自定义 Runtime 示例](docs/guides/minimal-custom-runtime-example.zh-CN.md)

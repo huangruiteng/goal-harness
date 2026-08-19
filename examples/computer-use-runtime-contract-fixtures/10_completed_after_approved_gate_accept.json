@@ -1,0 +1,49 @@
+{
+  "case_id": "10_completed_after_approved_gate_accept",
+  "description": "Provider clicks the final submit action only after an approved, current gate binding; ui_state permits the click, so stop_reason must be completed.",
+  "expect": "accept",
+  "request": {
+    "schema_version": "computer_use_action_request_v0",
+    "goal_id": "loopx-meta",
+    "todo_id": "todo_publish_approved_draft",
+    "provider_id": "computer_use_runtime",
+    "action_unit": "publish_after_approved_gate",
+    "effect_class": "external_write",
+    "write_scope": {
+      "allowed_actions": ["click the approved submit control"],
+      "forbidden_effect_classes": ["credential_use"]
+    },
+    "gate_binding": {
+      "gate_id": "gate_contact_form_publish",
+      "revision": 5,
+      "status": "open"
+    },
+    "stop_condition": "stop if the live gate revision has changed since approval",
+    "validation_target": "submit is clicked only under the exact approved gate revision"
+  },
+  "receipt": {
+    "schema_version": "computer_use_receipt_v0",
+    "goal_id": "loopx-meta",
+    "todo_id": "todo_publish_approved_draft",
+    "provider_id": "computer_use_runtime",
+    "attempted_action_unit": "publish_after_approved_gate",
+    "stop_reason": "completed",
+    "observed_facts": {
+      "screen_reached": true,
+      "draft_present": true,
+      "final_action_clicked": true,
+      "unknown_modal": false
+    },
+    "evidence": {
+      "handle_kind": "host_replay_or_screenshot_pointer",
+      "raw_evidence_copied": false,
+      "private_source_redacted": true
+    },
+    "idempotency_key": "todo_publish_approved_draft_attempt_2",
+    "session_reference": "provider_owned_opaque_session_handle_7"
+  },
+  "ui_state": {
+    "unexpected_modal_present": false,
+    "submit_click_permitted": true
+  }
+}

@@ -148,6 +148,7 @@ def build_quota_should_run(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+    receipt_bound_todo_id: str | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = str(goal_id or "").strip()
     resolved_scheduler_context = resolve_scheduler_execution_context(
@@ -208,6 +209,7 @@ def build_quota_should_run(
             goal_health_ok=goal_health_ok,
             item=item,
             health_items=health_items,
+            receipt_bound_todo_id=receipt_bound_todo_id,
         )
         return _build_quota_should_run_payload(
             prepared,

@@ -11,6 +11,8 @@ import re
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from loopx.skill_install_readback import (
     PACKAGED_HOST_SKILL_IDS,
     ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
@@ -151,6 +153,21 @@ class TestReadbackLifecycle:
             source_root=REPO_ROOT)
         assert not ins["ready"]
         assert ins["status"] == "skills_dir_not_configured"
+
+    def test_rejects_crossed_install_profile(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td) / "skills"
+            for sid in PACKAGED_HOST_SKILL_IDS:
+                _write_fixture_skill(d, sid)
+
+            with pytest.raises(ValueError, match="supported profile"):
+                build_skill_install_readback(
+                    skills_dir=d,
+                    skill_ids=PACKAGED_HOST_SKILL_IDS,
+                    source_root=REPO_ROOT,
+                    owner="loopx_install_script",
+                    integration_mode="python_distribution_cli",
+                )
 
 
 # -- Install dedupe -----------------------------------------------------------

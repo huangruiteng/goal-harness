@@ -47,8 +47,10 @@ def main() -> int:
         "--jobs \"${SMOKE_JOBS}\"",
         "--no-execute",
         "--json",
+        'python -m pip install --disable-pip-version-check "jsonschema>=4.23,<5"',
         "actions/upload-artifact@",
-        "smoke-results/full-public-shard-${{ matrix.shard }}.json",
+        "$RUNNER_TEMP/loopx-smoke-results/full-public-shard-${{ matrix.shard }}.json",
+        "${{ runner.temp }}/loopx-smoke-results/full-public-shard-${{ matrix.shard }}.json",
     ]:
         assert required in text, required
 
@@ -56,6 +58,7 @@ def main() -> int:
     assert "contents: write" not in text
     assert "pull-requests: write" not in text
     assert "sec" + "rets." not in text
+    assert "mkdir -p smoke-results" not in text
 
     matrix = [
         (int(match.group("shard")), int(match.group("offset")))

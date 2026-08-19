@@ -4,13 +4,20 @@ import json
 
 import pytest
 
-from loopx.control_plane.quota.error_codes import quota_error_code
+from loopx.control_plane.quota.error_codes import (
+    QuotaCommandValidationError,
+    quota_error_code,
+)
 
 
 @pytest.mark.parametrize(
     ("exc", "expected"),
     [
-        (ValueError("bad argument"), "quota_invalid_arguments"),
+        (
+            QuotaCommandValidationError("bad argument"),
+            "quota_invalid_arguments",
+        ),
+        (ValueError("bad state value"), "quota_unexpected_collection_error"),
         (OSError("state unavailable"), "quota_state_io_failed"),
         (PermissionError("state denied"), "quota_state_permission_denied"),
         (KeyError("missing"), "quota_state_missing_field"),

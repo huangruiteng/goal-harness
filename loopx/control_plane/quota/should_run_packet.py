@@ -667,9 +667,10 @@ def _resolve_quota_should_run_route(
     due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(
         prepared.work_lane_contract
     )
-    agent_lane_next_action = None
+    agent_lane_next_action = prepared.receipt_bound_agent_next_action
     if (
-        not due_monitor_attempt
+        agent_lane_next_action is None
+        and not due_monitor_attempt
         and not prepared.inbox_reply_due
         and not task_orchestration_contract_is_actionable(
             prepared.task_orchestration_contract
@@ -681,6 +682,7 @@ def _resolve_quota_should_run_route(
             agent_todo_summary=prepared.agent_todo_summary,
             capability_gate=prepared.capability_gate,
             scoped_user_gate_fallback=prepared.scoped_user_gate_fallback,
+            receipt_bound_todo_id=prepared.receipt_bound_todo_id,
             active_next_action=(
                 item.get("active_state_next_action")
                 or (

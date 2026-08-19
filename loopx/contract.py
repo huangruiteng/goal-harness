@@ -157,8 +157,6 @@ LOCAL_PRIVATE_STATE_PARTS = {
     ".goal-wrapper.local",
     ".local",
     ".loopx",
-    "logs",
-    "runtime",
 }
 LOCAL_PRIVATE_STATE_FILE_NAMES = {"ACTIVE_GOAL_STATE.md", "ACTIVE_GOAL_STATE.md.lock"}
 TERMINAL_TODO_STATUSES = {TODO_STATUS_DONE, TODO_STATUS_DEFERRED, "completed", "closed", "archived"}
@@ -214,8 +212,12 @@ def _git_probe(path: Path) -> dict[str, Any]:
     }
 
 
-def _is_local_private_state_path(path: Path) -> bool:
-    parts = set(path.parts)
+def _is_local_private_state_path(path: Path, scan_root: Path) -> bool:
+    try:
+        relative = path.relative_to(scan_root)
+    except ValueError:
+        relative = path
+    parts = set(relative.parts)
     return bool(parts & LOCAL_PRIVATE_STATE_PARTS) or path.name in LOCAL_PRIVATE_STATE_FILE_NAMES
 
 
@@ -762,7 +764,7 @@ def scan_public_boundary(
     for path in files:
         root = file_roots.get(path, path)
         git: dict[str, Any] | None = None
-        if _is_local_private_state_path(path):
+        if _is_local_private_state_path(path, root):
             git = _git_probe(path)
             if not git.get("tracked"):
                 skipped_private_state_files.append(rel_or_abs(path, root))
@@ -785,7 +787,10 @@ def scan_public_boundary(
                     if name == "credential" and _credential_hits_are_all_references(line):
                         credential_reference_hits.append(hit)
                         continue
-                    if name == "private_doc_url":
+                    if (
+                        name == "private_doc_url"
+                        and policy.get("tracked_private_doc_urls") == "allow"
+                    ):
                         git = git or _git_probe(path)
                     if git is not None and _hit_allowed_by_policy(name, git, policy):
                         allowed_hits.append(hit)

@@ -63,12 +63,26 @@ def validate_snapshot(payload: dict[str, Any]) -> list[str]:
                 violations.append(f"counts.{metric} must be a non-negative integer")
     traffic = payload.get("traffic_14d")
     if isinstance(traffic, dict):
-        for surface in ("views", "clones"):
+        for surface in ("views", "clones", "docs_views"):
             item = traffic.get(surface)
             if not isinstance(item, dict) or not all(
                 isinstance(item.get(k), int) and item[k] >= 0 for k in ("count", "uniques")
             ):
                 violations.append(f"traffic_14d.{surface} must have non-negative count/uniques")
+        paths = traffic.get("paths")
+        if not isinstance(paths, list):
+            violations.append("traffic_14d.paths must be an array")
+        else:
+            for row in paths:
+                if not isinstance(row, dict):
+                    violations.append("traffic_14d.paths rows must be objects")
+                    continue
+                for key in ("path", "title"):
+                    if not isinstance(row.get(key), str):
+                        violations.append(f"traffic_14d.paths row {key} must be a string")
+                for key in ("count", "uniques"):
+                    if not isinstance(row.get(key), int) or row[key] < 0:
+                        violations.append(f"traffic_14d.paths row {key} must be a non-negative integer")
     else:
         violations.append("traffic_14d must be an object")
     latency = payload.get("latency")

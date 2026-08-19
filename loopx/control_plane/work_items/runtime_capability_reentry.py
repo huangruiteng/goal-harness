@@ -9,6 +9,7 @@ from ..scheduler.execution_context import (
     SchedulerExecutionContextResolution,
     render_scheduler_execution_args,
 )
+from ..todos.contract import normalize_todo_id
 
 
 RUNTIME_CAPABILITY_REENTRY_SCHEMA_VERSION = "runtime_capability_reentry_v0"
@@ -93,6 +94,13 @@ def build_runtime_capability_reentry_packet(
     if not scheduler_args:
         return None
 
+    selected_todo = (
+        payload.get("selected_todo")
+        if isinstance(payload.get("selected_todo"), Mapping)
+        else {}
+    )
+    selected_todo_id = normalize_todo_id(selected_todo.get("todo_id"))
+
     goal_id = str(payload.get("goal_id") or "<GOAL_ID>")
     agent_identity = (
         payload.get("agent_identity")
@@ -121,6 +129,12 @@ def build_runtime_capability_reentry_packet(
             capability,
         )
         if verification_target is None:
+            continue
+        if (
+            selected_todo_id
+            and normalize_todo_id(verification_target.get("todo_id"))
+            != selected_todo_id
+        ):
             continue
         cli_args = [
             *base_args,

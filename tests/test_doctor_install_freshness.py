@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 import subprocess
 from pathlib import Path
 
 from loopx import __version__
 from loopx.doctor import (
+    REQUIRED_INSTALLED_SKILL_PHRASES,
     build_install_freshness,
+    current_script_invocation_path,
     git_revision_relation,
+    installed_skill_summary,
     trusted_release_ref_for_root,
 )
 
@@ -27,6 +31,13 @@ def _commit(root: Path, text: str) -> str:
     _git(root, "add", "fixture.txt")
     _git(root, "commit", "-m", text)
     return _git(root, "rev-parse", "HEAD")
+
+
+def _write_required_skills(root: Path) -> None:
+    for skill_name, phrases in REQUIRED_INSTALLED_SKILL_PHRASES.items():
+        skill_path = root / skill_name / "SKILL.md"
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        skill_path.write_text("\n".join(phrases) + "\n", encoding="utf-8")
 
 
 def _freshness(
@@ -165,10 +176,14 @@ def test_main_channel_upgrade_command_preserves_source_ref(tmp_path: Path) -> No
     )
 
     command = str(freshness["no_clone_upgrade_command"])
-    assert (
-        "curl -fsSL https://huangruiteng.github.io/loopx/install.sh "
-        "| env LOOPX_REF=main bash"
-    ) in command
+    if os.name == "nt":
+        assert "pwsh -NoLogo -NoProfile -File" in command
+        assert "install-windows.ps1" in command
+    else:
+        assert (
+            "curl -fsSL https://huangruiteng.github.io/loopx/install.sh "
+            "| env LOOPX_REF=main bash"
+        ) in command
     assert freshness["upgrade_command"] == command
 
 
@@ -186,7 +201,10 @@ def test_stable_channel_upgrade_command_keeps_public_default(tmp_path: Path) -> 
 
     command = str(freshness["no_clone_upgrade_command"])
     assert "LOOPX_REF=" not in command
-    assert "huangruiteng.github.io/loopx/install.sh | bash" in command
+    if os.name == "nt":
+        assert "install-windows.ps1" in command
+    else:
+        assert "huangruiteng.github.io/loopx/install.sh | bash" in command
     assert freshness["upgrade_command"] == command
 
 
@@ -228,9 +246,158 @@ def test_other_agent_freshness_does_not_require_codex_skill_directory(
     assert freshness["requires_upgrade"] is False
     assert freshness["installed_skills_required"] is False
     assert freshness["doctor_after_upgrade"] == "loopx doctor --agent-type other-agent"
-    assert str(freshness["upgrade_command"]).endswith(
-        "loopx doctor --agent-type other-agent"
+    expected_suffix = (
+        "loopx doctor --agent-type 'other-agent'"
+        if os.name == "nt"
+        else "loopx doctor --agent-type other-agent"
     )
+    assert str(freshness["upgrade_command"]).endswith(expected_suffix)
+
+
+def test_external_agents_skill_root_is_accepted_without_copying(tmp_path: Path) -> None:
+    codex_skills = tmp_path / ".codex" / "skills"
+    agents_skills = tmp_path / ".agents" / "skills"
+    _write_required_skills(agents_skills)
+
+    skills = installed_skill_summary((codex_skills, agents_skills))
+    freshness = build_install_freshness(
+        command_path=tmp_path / "loopx",
+        release_root=None,
+        repo_root=tmp_path,
+        skills=skills,
+    )
+
+    assert all(skill["exists"] for skill in skills.values())
+    assert all(skill["required_phrases"] for skill in skills.values())
+    assert all(skill["managed_externally"] for skill in skills.values())
+    assert all(skill["route_count"] == 1 for skill in skills.values())
+    assert freshness["status"] == "live_checkout"
+    assert freshness["externally_managed_skills"] is True
+    expected_skip = "-SkipSkills" if os.name == "nt" else "LOOPX_INSTALL_SKILL=0"
+    assert expected_skip in str(freshness["upgrade_command"])
+    assert expected_skip in str(freshness["contributor_upgrade_command"])
+
+
+def test_duplicate_skill_routes_fail_closed(tmp_path: Path) -> None:
+    codex_skills = tmp_path / ".codex" / "skills"
+    agents_skills = tmp_path / ".agents" / "skills"
+    _write_required_skills(codex_skills)
+    _write_required_skills(agents_skills)
+
+    skills = installed_skill_summary((codex_skills, agents_skills))
+    freshness = build_install_freshness(
+        command_path=tmp_path / "loopx",
+        release_root=None,
+        repo_root=tmp_path,
+        skills=skills,
+    )
+
+    assert all(skill["route_conflict"] for skill in skills.values())
+    assert all(skill["route_count"] == 2 for skill in skills.values())
+    assert all(not skill["required_phrases"] for skill in skills.values())
+    assert freshness["status"] == "repair_recommended"
+    assert freshness["externally_managed_skills"] is False
+
+
+def test_python_distribution_uses_pip_native_upgrade_path(tmp_path: Path) -> None:
+    freshness = build_install_freshness(
+        command_path=tmp_path / "loopx",
+        release_root=None,
+        repo_root=tmp_path,
+        skills={
+            "loopx-project": {
+                "exists": True,
+                "required_phrases": True,
+            }
+        },
+        python_distribution={
+            "available": True,
+            "kind": "python_distribution",
+            "version": "0.4.8",
+            "installer": "pip",
+        },
+    )
+
+    assert freshness["status"] == "python_distribution"
+    assert freshness["requires_upgrade"] is False
+    assert freshness["install_kind"] == "python_distribution"
+    assert freshness["python_distribution_version"] == "0.4.8"
+    assert "-m pip install --upgrade loopx" in str(freshness["upgrade_command"])
+    assert "loopx workflow-skills --install" in str(freshness["upgrade_command"])
+    if os.name == "nt":
+        assert "install-windows.ps1" in str(freshness["no_clone_upgrade_command"])
+    else:
+        assert "huangruiteng.github.io" in str(
+            freshness["no_clone_upgrade_command"]
+        )
+
+
+def test_python_distribution_ignores_archive_manifest_version(tmp_path: Path) -> None:
+    freshness = build_install_freshness(
+        command_path=tmp_path / "bin" / "loopx",
+        release_root=tmp_path / "releases" / "20260713T030000Z",
+        repo_root=tmp_path,
+        skills={"loopx-project": {"exists": True, "required_phrases": True}},
+        release_manifest={
+            "available": True,
+            "manifest": {
+                "package": {"version": "0.4.7"},
+                "source": {"git_commit": "a" * 40},
+            },
+        },
+        freshness_source={
+            "label": "loopx/loopx@main",
+            "git_commit": "b" * 40,
+            "revision_relation": "installed_behind",
+        },
+        python_distribution={
+            "available": True,
+            "kind": "python_distribution",
+            "version": "0.4.8",
+            "installer": "pip",
+        },
+        now=datetime(2026, 7, 13, 4, tzinfo=timezone.utc),
+    )
+
+    assert freshness["status"] == "python_distribution"
+    assert freshness["requires_upgrade"] is False
+    assert freshness["manifest_package_version_matches_runtime"] is False
+
+
+def test_current_python_console_script_is_recognized(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    console_script = tmp_path / "venv" / "bin" / "loopx"
+    console_script.parent.mkdir(parents=True)
+    console_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr("loopx.doctor.sys.argv", [str(console_script), "doctor"])
+
+    assert current_script_invocation_path() == console_script.resolve()
+
+
+def test_python_distribution_missing_skills_recommends_repair(tmp_path: Path) -> None:
+    freshness = build_install_freshness(
+        command_path=tmp_path / "loopx",
+        release_root=None,
+        repo_root=tmp_path,
+        skills={
+            "loopx-project": {
+                "exists": False,
+                "required_phrases": False,
+            }
+        },
+        python_distribution={
+            "available": True,
+            "kind": "python_distribution",
+            "version": "0.4.8",
+            "installer": "pip",
+        },
+    )
+
+    assert freshness["status"] == "repair_recommended"
+    assert freshness["requires_upgrade"] is True
+    assert "loopx workflow-skills --install" in str(freshness["upgrade_command"])
 
 
 def test_trusted_release_ref_matches_manifest_repository(tmp_path: Path) -> None:

@@ -9,6 +9,7 @@ from typing import Any, Generic, TypeVar, cast
 # Identity remains stable while the plan and receipt versions advance with the
 # typed terminal-closeout step shared by quota and Turn adapters.
 SETTLEMENT_IDENTITY_SCHEMA_VERSION = "quota_settlement_identity_v0"
+SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION = "quota_settlement_identity_v1"
 SETTLEMENT_PLAN_SCHEMA_VERSION = "quota_settlement_plan_v1"
 SETTLEMENT_RECEIPT_SCHEMA_VERSION = "quota_settlement_receipt_v1"
 
@@ -107,6 +108,12 @@ class SettlementStepKind(StrEnum):
     TERMINAL_CLOSEOUT = "terminal_closeout"
 
 
+class SettlementBindingKind(StrEnum):
+    TODO = "todo"
+    AUTONOMOUS_REPLAN = "autonomous_replan"
+    UNBOUND = "unbound"
+
+
 class SettlementFailureKind(StrEnum):
     INVALID_IDENTITY = "invalid_identity"
     RECEIPT_MISSING = "receipt_missing"
@@ -124,21 +131,74 @@ class SettlementFailureKind(StrEnum):
 class SettlementIdentity:
     goal_id: str
     agent_id: str
-    todo_id: str
+    todo_id: str | None
     turn_instance_id: str
+    replan_obligation_id: str | None = None
+
+    def __post_init__(self) -> None:
+        todo_id = str(self.todo_id or "").strip()
+        replan_obligation_id = str(self.replan_obligation_id or "").strip()
+        if todo_id and replan_obligation_id:
+            raise ValueError(
+                "settlement identity cannot bind both todo_id and "
+                "replan_obligation_id"
+            )
+        object.__setattr__(self, "todo_id", todo_id or None)
+        object.__setattr__(
+            self,
+            "replan_obligation_id",
+            replan_obligation_id or None,
+        )
+
+    @property
+    def binding_kind(self) -> SettlementBindingKind:
+        if self.todo_id:
+            return SettlementBindingKind.TODO
+        if self.replan_obligation_id:
+            return SettlementBindingKind.AUTONOMOUS_REPLAN
+        return SettlementBindingKind.UNBOUND
+
+    @property
+    def binding_id(self) -> str:
+        return str(self.todo_id or self.replan_obligation_id or "").strip()
 
     @property
     def effect_id(self) -> str:
-        return f"{self.goal_id}:{self.agent_id}:{self.todo_id}:{self.turn_instance_id}"
+        if self.todo_id:
+            # Preserve the v0 Todo-bound effect id for compatibility with
+            # already-persisted receipts.
+            return (
+                f"{self.goal_id}:{self.agent_id}:{self.todo_id}:"
+                f"{self.turn_instance_id}"
+            )
+        if self.replan_obligation_id:
+            return (
+                f"{self.goal_id}:{self.agent_id}:autonomous_replan:"
+                f"{self.replan_obligation_id}:{self.turn_instance_id}"
+            )
+        return (
+            f"{self.goal_id}:{self.agent_id}::{self.turn_instance_id}"
+        )
 
     def as_dict(self) -> dict[str, str]:
+        if self.todo_id or not self.replan_obligation_id:
+            return {
+                "schema_version": SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+                "effect_id": self.effect_id,
+                "goal_id": self.goal_id,
+                "agent_id": self.agent_id,
+                "todo_id": str(self.todo_id or ""),
+                "turn_instance_id": self.turn_instance_id,
+            }
         return {
-            "schema_version": SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+            "schema_version": SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION,
             "effect_id": self.effect_id,
             "goal_id": self.goal_id,
             "agent_id": self.agent_id,
-            "todo_id": self.todo_id,
             "turn_instance_id": self.turn_instance_id,
+            "binding_kind": self.binding_kind,
+            "binding_id": self.binding_id,
+            "replan_obligation_id": str(self.replan_obligation_id),
         }
 
 

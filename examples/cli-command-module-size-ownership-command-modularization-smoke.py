@@ -9,10 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 CLI_COMMANDS = ROOT / "loopx" / "cli_commands"
 
 DEFAULT_MAX_LINES = 1000
-LEGACY_MODULE_LIMITS = {
-    "benchmark_review_lifecycle.py": 1300,
-    "terminal_bench_environment_result.py": 1280,
-}
 STARTER_MODULE_LIMITS = {
     "starter.py": 180,
     "starter_bootstrap.py": 220,
@@ -69,15 +65,12 @@ def line_count(path: Path) -> int:
 
 
 def module_limit(module_name: str) -> int:
-    if module_name in STARTER_MODULE_LIMITS:
-        return STARTER_MODULE_LIMITS[module_name]
-    return LEGACY_MODULE_LIMITS.get(module_name, DEFAULT_MAX_LINES)
+    return STARTER_MODULE_LIMITS.get(module_name, DEFAULT_MAX_LINES)
 
 
 def assert_module_size_budgets() -> None:
     module_names = {path.name for path in python_modules()}
-    expected_budgets = set(STARTER_MODULE_LIMITS) | set(LEGACY_MODULE_LIMITS)
-    stale_budgets = sorted(expected_budgets - module_names)
+    stale_budgets = sorted(set(STARTER_MODULE_LIMITS) - module_names)
     require(not stale_budgets, f"size budgets reference missing modules: {stale_budgets}")
 
     for path in python_modules():
@@ -87,14 +80,6 @@ def assert_module_size_budgets() -> None:
             count <= limit,
             f"{path.name} has {count} lines, above budget {limit}; "
             "extract a cohesive command owner before adding more code",
-        )
-
-    for module_name in sorted(LEGACY_MODULE_LIMITS):
-        path = CLI_COMMANDS / module_name
-        count = line_count(path)
-        require(
-            count > DEFAULT_MAX_LINES,
-            f"{module_name} is down to {count} lines; remove its legacy size budget",
         )
 
 

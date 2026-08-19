@@ -11,16 +11,162 @@ Benchmark adapters that use the Codex app-server Goal API should import
 `loopx.capabilities.benchmark_toolkit.native_codex_goal`. The module provides the
 real stdio JSON-RPC process transport, the ordered Goal transaction, terminal event
 correlation, Goal-status polling across automatic continuation turns, and a
-public-safe receipt. A runner supplies its own isolated process command,
-environment, sandbox policy, task bridge, and timeout; it should not copy the
-Goal state machine.
+public-safe receipt. A runner supplies its environment, sandbox policy, task bridge,
+and timeout; it should not copy the Goal state machine.
+
+On Linux, a host-side runner may use `native_codex_isolation` to build the isolated
+process command. Its synthetic root contains a read-only system runtime, fresh
+`/proc`, `/run`, and `/tmp`, runner-created work children, one explicitly selected
+task workspace at the returned `host-visible` alias, and an optional formal LoopX
+profile at its verified absolute path. The surrounding host root, original task
+path, ambient host `/tmp`, nested host mounts, symlinked work children, and
+`/proc/1/root` escape path are absent. The helper requires unprivileged user, mount,
+and PID namespaces plus `pivot_root` and fails closed when its roots overlap.
+
+```python
+from loopx.capabilities.benchmark_toolkit.native_codex_isolation import (
+    build_native_codex_isolation_envelope,
+    rebase_native_codex_loopx_workspace_state,
+)
+
+envelope = build_native_codex_isolation_envelope(
+    executable="codex",
+    process_args=["app-server", "--listen", "stdio://", "--enable", "goals"],
+    work_dir=runner_work_dir,
+    private_root=controller_private_root,
+    workspace_source=task_workspace,
+    profile_root=profile.root,
+)
+# If the selected workspace already contains LoopX control state, relocate its
+# generated path references before launch and restore them after termination.
+rebase_native_codex_loopx_workspace_state(
+    task_workspace,
+    source_root=task_workspace,
+    target_root=envelope.workspace_alias,
+)
+# Pass envelope.process_command to probe_native_goal_process or
+# run_native_goal_process_until_terminal, and use envelope.workspace_alias as cwd.
+# In a finally block after the process terminates:
+rebase_native_codex_loopx_workspace_state(
+    task_workspace,
+    source_root=envelope.workspace_alias,
+    target_root=task_workspace,
+)
+```
+
+The relocation helper is deliberately narrow: it rewrites only LoopX registries
+and generated run-history JSON, JSONL, and Markdown under the selected workspace.
+It validates every candidate before writing, updates files atomically, rejects
+symlinked control-state paths, and leaves task files, model output, trajectories,
+verifier evidence, and arbitrary workspace prose untouched. This keeps formally
+installed LoopX state readable after the temporary `host-visible` alias disappears.
+The two canonical registries form one consistency boundary: both absent means no
+control state, while only one present fails closed. If an abrupt process kill skips
+the reverse rewrite, a subsequent launch using the same deterministic work
+directory first recovers stale alias references.
+
+The profile bind is writable because Codex and an installed LoopX release may need
+runtime state. It must therefore be a per-run profile or a runner-restored pinned
+snapshot, never ambient state shared across trials.
+
+This is a filesystem/process envelope, not a complete benchmark sandbox. It grants
+no model credential, task-command bridge, shell-network policy, evaluator denial,
+cross-trial denial, verifier ordering, upload, submission, or scoring authority.
+The runner must still attest those boundaries independently. Platforms without the
+required Linux namespace primitives must use an equivalent runner-owned isolation
+boundary instead of silently falling back to the ambient host.
 
 The runnable source example is
 [`benchmark/deepswe/run_native_codex_goal.py`](../../../benchmark/deepswe/run_native_codex_goal.py).
 Its `--preflight-only` mode proves a live Codex initialize/thread/Goal attachment
 without invoking a model. Full mode starts one turn and waits for a correlated
 terminal event, then keeps draining Codex-owned continuation turns until the Goal
-leaves `active`. The same total timeout covers the full Goal lifecycle.
+leaves `active`. The same total timeout covers the full Goal lifecycle. Add
+`--isolate`, `--isolation-work-dir`, and `--private-root` to make this envelope the
+real process path; `--profile-root` adds the optional per-run formal profile. The
+launcher performs recovery, pre-launch rebase, and `finally` restoration around
+both preflight and full Goal modes.
+
+The same adapter publishes `public_trajectory_summary_v0` from the compact
+`native_codex_goal_turn_receipt_v0` lifecycle fields. The benchmark toolkit owns
+the strict reducer because public/private evidence reduction is already part of
+this capability; the DeepSWE research adapter is its first active caller. The
+summary carries only typed counts, status labels, and content-free notification
+kind counts. It never reopens event payloads, and it marks message and tool-call
+semantics unavailable rather than guessing them. Missing, malformed, or
+inconsistent lifecycle facts fail closed. The similarly named archived reducer
+under `deprecate/benchmark-legacy/` is historical evidence, not a dependency or
+compatibility entry point for this native-runner contract.
+
+### Formal installed profile and skill discovery
+
+A treatment that only supplies a Goal prompt and a source-checkout CLI has not
+proved the real LoopX product path. The prompt, installed skills, and installed
+CLI are three independent inputs. Use `native_codex_profile` to create an isolated
+local release through LoopX's shipped `scripts/install-local.sh` instead of copying
+skill files or importing an arbitrary checkout:
+
+```python
+from loopx.capabilities.benchmark_toolkit.native_codex_goal import NativeGoalConfig
+from loopx.capabilities.benchmark_toolkit.native_codex_profile import (
+    install_native_codex_profile,
+    native_codex_app_server_environment,
+    render_native_codex_goal_prompt,
+)
+
+profile = install_native_codex_profile(loopx_source, isolated_profile_root)
+prompt = render_native_codex_goal_prompt(
+    profile,
+    project_root=task_visible_cwd,
+    goal_id=goal_id,
+    agent_id=agent_id,
+    runtime_registry_path=case_runtime_registry,
+)
+config = NativeGoalConfig(
+    cwd=task_visible_cwd,
+    objective=prompt.task_body,
+    task_instruction=task_instruction,
+    required_skill_ids=profile.required_skill_ids,
+)
+process_env = native_codex_app_server_environment(
+    profile,
+    provider_env_key=runner_provider_env_key,
+    base_env=runner_environment,
+)
+```
+
+The profile installer redirects the release, executable, manual, home, and Codex
+skill roots into the supplied isolated directory. It uses the fixed installer path,
+including its generated `$loopx` entry skill and packaged workflow-skill readback;
+unrelated interactive slash-command surfaces are disabled for this non-interactive
+worker. Inspection verifies a release-snapshot CLI, exact source revision, clean
+source by default, skill-tree digests, and `doctor --agent-type codex-app-ssh`.
+
+`render_native_codex_goal_prompt` calls `heartbeat-prompt --thin` through the
+release-snapshot CLI, requires the `codex_app_ssh_goal` profile and interface budget,
+and proves that the returned body names that installed CLI. For an isolated case it
+also replaces the generic global-registry token with the explicit case registry.
+Use `native_codex_app_server_environment` for app-server so the same profile
+supplies `HOME`, `CODEX_HOME`, and `PATH` while exactly one runner-declared model
+provider value is restored. The lower-level `native_codex_profile_environment`
+remains credential-free by default. The runner must still exclude the provider
+key from agent shell and tool environments; this helper grants no such tool
+access. Setting `required_skill_ids` makes the native runtime call the real
+app-server `skills/list` surface before `thread/start`;
+missing skills, discovery errors, or a wrong cwd fail before any model turn. The
+path-free profile, prompt, and Goal receipts can then prove all three inputs without
+publishing installation paths, prompt text, or skill bodies.
+
+Run the formal installer plus no-model readback smoke with:
+
+```bash
+python examples/benchmark-native-goal-installed-profile-smoke.py \
+  --require-app-server
+```
+
+The helper installs only into its target directory. It grants no credential,
+network, task, evaluator, upload, submission, or scoring authority; those remain
+runner-owned boundaries.
 
 The toolkit borrows the useful contracts already established by modern benchmark
 runners: an ATIF-compatible agent trajectory, a separately owned verifier phase,
@@ -59,6 +205,18 @@ Qualification rejects a run when it detects any of the following:
 - host escape, credential probing or exposure, or shell network access;
 - malformed or incomplete ATIF tool evidence;
 - missing runner authority or any required runtime isolation attestation.
+
+Credential-probe detection reads typed command fields, then classifies direct
+environment commands, runtime-language enumeration or sensitive-name lookups, and
+procfs reads. Neighboring tool prose and commands that only inspect or write source
+text are not executed credential reads. Launching a child with an explicit
+environment is also not itself a credential read; sensitive values are still
+scanned in every tool argument and observation.
+
+Access-request markers are evaluated only on tool calls that can perform or request
+resource access. Exact known controller-only calls such as `update_plan` carry
+narrative metadata and are excluded from that scan; an actual sensitive value in
+their arguments still fails qualification. Unknown tool names remain fail-closed.
 
 `benchmark_cheating_detected` is narrower than `integrity_qualified=false`.
 Restricted evaluation or cross-trial access is classified as cheating. Missing
@@ -99,6 +257,37 @@ evidence channels are required.
 paths. Path-like values fail closed and are emitted only as `redacted`, so a runner
 cannot move an operator directory into the public receipt through identifier fields.
 
+### Exact-job container binding
+
+Runtime evidence must belong to the same job as the score. An image-only Docker
+lookup is ambiguous as soon as two benchmark arms use the same image concurrently.
+Before inspecting isolation settings, bind the container with the runner-owned job
+or trial label, the service label, and the expected image:
+
+```python
+from loopx.capabilities.benchmark_toolkit import (
+    compact_docker_container_binding_receipt,
+    select_exact_docker_container,
+)
+
+binding = select_exact_docker_container(
+    ancestor_image="benchmark-runner:fixture",
+    required_labels={
+        "com.docker.compose.project": job_id,
+        "com.docker.compose.service": "main",
+    },
+)
+container_name = binding.container_name  # private runner state; do not publish
+receipt = compact_docker_container_binding_receipt(binding)
+```
+
+The selector fails closed unless exactly one running container matches. The compact
+`benchmark_exact_container_binding_v0` receipt records only the required label keys,
+match count, and a SHA-256 selector digest; it excludes the raw container identity
+and label values. The helper grants no Docker or runner authority. Callers that need
+a privileged wrapper must supply their own `command_runner` and keep that authority
+outside the receipt.
+
 Benchmark-specific private roots can be added without committing them through an
 ignored `benchmark_integrity_policy_v0` file:
 
@@ -134,6 +323,67 @@ not establish task correctness, official score authority, experiment parity, or 
 LoopX advantage. `score_claim_eligible=true` only permits the official score and
 matched-pair gates to run; `score_claim_countable` and `matched_pair_countable` stay
 false in this receipt. Those remain separate verifier and comparison contracts.
+
+## Post-run case insight monitor
+
+Benchmark startup should create one `continuous_monitor` todo. Whenever a case
+reaches a new material scored state, that monitor runs a post-run analyst brief and
+writes one private `benchmark_case_insight_v0` artifact. This monitor is part of the
+benchmark lifecycle, not an optional cleanup pass.
+
+Use this analyst hint:
+
+> After the solver has stopped and scoring is complete, read the task, real
+> trajectory, final patch or workspace, hidden tests, grader or verifier, and full
+> failure and score details; explain the decisive evidence, why the outcome
+> happened, whether it was expected, and what LoopX should test or change next.
+
+The solver and analyst are separate roles. The solver remains unable to access
+hidden tests, evaluator sources, expected answers, or official feedback. Only the
+post-run analyst may read the complete private evaluation evidence, and only after
+the solver is terminal and scoring is complete.
+
+Record the result in this compact shape:
+
+```json
+{
+  "schema_version": "benchmark_case_insight_v0",
+  "case": {
+    "benchmark_id": "<public-id>",
+    "case_id": "<public-id>",
+    "arm": "<baseline-or-treatment>"
+  },
+  "outcome": {
+    "status": "<completed-or-runner-invalid>",
+    "score": "<official-score-or-null>",
+    "countable": "<true-or-false>"
+  },
+  "evidence_reviewed": [
+    "task",
+    "real_trajectory",
+    "final_patch_or_workspace",
+    "hidden_tests",
+    "grader_or_verifier",
+    "failure_and_score_details"
+  ],
+  "insight": {
+    "approach_summary": "<what-the-solver-tried>",
+    "decisive_evidence": ["<specific-observation>"],
+    "why_this_outcome": "<causal-explanation>",
+    "expectedness": "<expected-surprising-mixed-or-unknown>",
+    "baseline_treatment_difference": "<difference-or-not-yet-compared>",
+    "loopx_implication": "<reusable-product-or-experiment-insight>",
+    "next_probe": "<smallest-discriminating-next-step>"
+  },
+  "confidence": "<high-medium-or-low>",
+  "reuse_boundary": "<diagnostic-only-heldout-generalization-or-declared-feedback>"
+}
+```
+
+Keep the artifact and its raw evidence in private benchmark storage. Publish only a
+redacted reusable conclusion. Do not feed case-specific hidden evidence into a
+later scored solver unless the experiment explicitly declares that feedback loop;
+use held-out cases before making a general product claim.
 
 ## Related commands
 

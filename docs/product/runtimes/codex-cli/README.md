@@ -8,9 +8,9 @@ bounded partner path rather than the default user experience.
 
 - [TUI-first LoopX loop](codex-cli-tui-loop.md): one visible TUI message starts
   LoopX, with session-attached automation as the preferred follow-up.
-- [Packaged install](codex-cli-packaged-install.md): no-clone install, update,
+- [Packaged install](codex-cli-packaged-install.md): PyPI install, update,
   and start path; clone-plus-canary remains a contributor route.
-- [First-run rehearsal](codex-cli-first-run-rehearsal.md): connects no-clone
+- [First-run rehearsal](codex-cli-first-run-rehearsal.md): connects PyPI
   install, one-message TUI bootstrap, and proof-capture fixtures.
 - [No-clone release verification](codex-cli-no-clone-release-verification.md):
   proves installer, bootstrap message, bundle, and proof fixtures stay aligned.

@@ -7,6 +7,9 @@ from typing import Any
 from ..extensions.runtime import extension_catalog_entries
 from .benchmark_toolkit.catalog_entry import BENCHMARK_TOOLKIT_CATALOG_ENTRY
 from .integration_branch.catalog_entry import INTEGRATION_BRANCH_CATALOG_ENTRY
+from .repository_change_window.catalog_entry import (
+    REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY,
+)
 from .change_quality.catalog_entry import CHANGE_QUALITY_CATALOG_ENTRY
 from .pr_review_queue.catalog_entry import PR_REVIEW_CATALOG_ENTRY
 from .issue_fix.catalog_entry import ISSUE_FIX_CATALOG_ENTRY
@@ -30,6 +33,7 @@ CAPABILITY_DETAIL_SCHEMA_VERSION = "loopx_capability_detail_v0"
 BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
     BENCHMARK_TOOLKIT_CATALOG_ENTRY,
     INTEGRATION_BRANCH_CATALOG_ENTRY,
+    REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY,
     CHANGE_QUALITY_CATALOG_ENTRY,
     PR_REVIEW_CATALOG_ENTRY,
     ISSUE_FIX_CATALOG_ENTRY,

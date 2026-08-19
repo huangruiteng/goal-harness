@@ -17,7 +17,7 @@ from .host_loop_activation import (
 from .install_contract import NO_CLONE_INSTALL_URL
 from .project_prompt import (
     render_available_capability_args,
-    render_codex_cli_no_clone_preflight,
+    render_codex_cli_install_preflight,
     render_quota_guard_command,
     shell_arg,
 )
@@ -396,7 +396,7 @@ def build_agent_onboarding_packet(
         available_capabilities=normalized_available_capabilities,
     )
     commands: dict[str, Any] = {
-        "doctor_or_install": render_codex_cli_no_clone_preflight(
+        "doctor_or_install": render_codex_cli_install_preflight(
             cli_bin=cli_bin,
             doctor_agent_type=canonical_agent_type,
         ),

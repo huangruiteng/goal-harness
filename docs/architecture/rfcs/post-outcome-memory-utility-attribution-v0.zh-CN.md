@@ -82,13 +82,13 @@ LoopX 应在现有 `reward_memory` 能力中增加 provider-neutral 的结果后
 
 ```json
 {
-  "schema": "memory_utility_observation_v0",
+  "schema_version": "memory_utility_observation_v0",
   "observation_id": "muo_<stable_digest>",
   "scope": {
     "agent_id": "agent_opaque",
     "project_id": "project_opaque",
     "corpus_id": "corpus_opaque",
-    "surface": "reward_memory"
+    "surface_id": "reward_memory"
   },
   "application_receipt_id": "rma_<opaque>",
   "memory_ref_digests": ["sha256:<digest>"],
@@ -101,7 +101,13 @@ LoopX 应在现有 `reward_memory` 能力中增加 provider-neutral 的结果后
   "confidence": 0.42,
   "reason_codes": ["multiple_memories_not_disambiguated"],
   "evidence_refs": ["evidence_opaque"],
-  "created_at": "2026-08-15T00:00:00Z"
+  "evaluator_ref": "evaluator_opaque",
+  "evaluation_version": "evaluation_v0",
+  "created_at": "2026-08-15T00:00:00Z",
+  "grants_new_action_authority": false,
+  "provider_write_performed": false,
+  "external_writes_performed": false,
+  "raw_content_captured": false
 }
 ```
 
@@ -128,6 +134,9 @@ LoopX 应在现有 `reward_memory` 能力中增加 provider-neutral 的结果后
 3. `deterministic_effect`：能区分记忆贡献的 artifact、test 或 effect 证据；
 4. `evaluator_inference`：模型基于 public-safe receipt 与 outcome 作出的判断；
 5. `insufficient`：lineage 存在，但无法归因。
+
+前三类较强证据必须在 proposal 中至少带一个 opaque `evidence_ref`；
+`insufficient` 可以不带 evidence reference。即使 label 是 `unknown`，也不能绕过这条 provenance 要求。
 
 仅有模型推断属于弱证据。它可以留下来做校准与 review，但 profile 必须能禁止它移动一个已经由强证据建立的 rank prior。
 

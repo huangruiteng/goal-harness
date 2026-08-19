@@ -992,7 +992,9 @@ def assert_should_run_turn_receipt_is_idempotent() -> None:
             "--turn-instance-id",
             "",
         )
-        assert empty_turn["status"] == "quota_collection_failed", empty_turn
+        assert empty_turn["status"] == "quota_validation_failed", empty_turn
+        assert empty_turn["state"] == "blocked_validation", empty_turn
+        assert empty_turn["error_code"] == "QUOTA_VALIDATION_FAILED", empty_turn
         assert "turn_instance_id must be 1-128" in empty_turn["reason"], empty_turn
         command = (
             "quota",

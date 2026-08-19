@@ -363,6 +363,10 @@ def validate_todo_complete_options(args: argparse.Namespace) -> None:
 def validate_todo_supersede_options(args: argparse.Namespace) -> None:
     if not args.todo_id:
         raise ValueError("todo supersede requires --todo-id")
+    if args.task_lease_expected_version is not None and not args.task_lease_idempotency_key:
+        raise ValueError(
+            "--task-lease-expected-version requires --task-lease-idempotency-key"
+        )
     if args.explore_result_node_refs or args.clear_explore_result_node_refs:
         raise ValueError("todo supersede does not update --explore-result-node-ref; use todo update first")
     if args.decision_outcome:
@@ -467,7 +471,7 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
             "--replan-obligation-id is supported only by todo add"
         )
     if (
-        args.todo_command != "complete"
+        args.todo_command not in {"complete", "supersede"}
         and (
             args.task_lease_idempotency_key
             or args.task_lease_expected_version is not None
@@ -475,7 +479,7 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
     ):
         raise ValueError(
             "--task-lease-idempotency-key and --task-lease-expected-version "
-            "are supported only by todo complete"
+            "are supported only by todo complete and todo supersede"
         )
     if args.capability_binding_ref and args.todo_command != "add":
         raise ValueError(

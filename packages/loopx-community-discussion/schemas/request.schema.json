@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loopx_community_discussion_request_v0",
+  "title": "loopx-community-discussion extension request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "owner",
+    "repo"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "loopx_community_discussion_request_v0"
+    },
+    "owner": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "repo": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "days": {
+      "default": 14,
+      "minimum": 1,
+      "maximum": 90,
+      "type": "integer"
+    }
+  }
+}

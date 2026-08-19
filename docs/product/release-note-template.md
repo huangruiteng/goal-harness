@@ -160,20 +160,21 @@ opt-in surface, replace the no-change declaration with one entry per surface:
 
 ## Install / Update
 
-New users should install from the named stable ref. Existing users should
-preview the update, then execute it explicitly:
+New PyPI users and existing PyPI users use the same package-native path:
+
+```bash
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
+loopx slash-commands --install
+loopx doctor
+```
+
+Archive-fallback users should preview and execute their archive update
+explicitly:
 
 ```bash
 loopx update --check --ref stable
 loopx update --execute --ref stable
-loopx doctor
-```
-
-Fresh installs (no existing LoopX):
-
-```bash
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
 loopx doctor
 ```
 

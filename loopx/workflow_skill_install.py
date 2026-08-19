@@ -1,0 +1,370 @@
+from __future__ import annotations
+
+from contextlib import contextmanager
+from importlib.metadata import PackageNotFoundError, distribution
+import json
+import os
+from pathlib import Path, PurePosixPath
+import shutil
+import shlex
+import tempfile
+from typing import Any, Iterator, Mapping
+
+from .skill_install_readback import (
+    ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
+    PACKAGED_HOST_SKILL_IDS,
+    PYTHON_DISTRIBUTION_SKILL_INSTALL_MODE,
+    PYTHON_DISTRIBUTION_SKILL_INSTALL_OWNER,
+    SKILL_INSTALL_OWNERS,
+    SKILL_INSTALL_READBACK_FILENAME,
+    hash_skill_tree,
+    inspect_skill_install_readback,
+    write_skill_install_readback,
+)
+from .slash_command_install import materialize_loopx_entry_skill
+
+
+WORKFLOW_SKILL_INSTALL_SCHEMA_VERSION = "loopx_workflow_skill_install_v0"
+MANAGED_ENTRY_STATUSES = {
+    "created",
+    "updated",
+    "unchanged",
+    "upgraded_legacy_managed",
+}
+MANAGED_ENTRY_PREVIEW_STATUSES = {*MANAGED_ENTRY_STATUSES, "would_create"}
+_PACKAGED_SKILL_SENTINEL = PurePosixPath(
+    "share/loopx/skills/loopx-project/SKILL.md"
+)
+
+
+def _valid_source_root(path: Path) -> bool:
+    return all(
+        (path / skill_id / "SKILL.md").is_file()
+        for skill_id in PACKAGED_HOST_SKILL_IDS
+    )
+
+
+def resolve_workflow_skill_source() -> dict[str, Any]:
+    """Find the canonical workflow skills in a checkout or installed wheel."""
+
+    checkout_root = Path(__file__).resolve().parents[1]
+    checkout_skills = checkout_root / "skills"
+    if _valid_source_root(checkout_skills):
+        return {
+            "available": True,
+            "kind": "source_checkout",
+            "skills_root": checkout_skills,
+            "source_root": checkout_root,
+            "reason": "workflow skills are available from the source checkout",
+        }
+
+    try:
+        installed = distribution("loopx")
+    except PackageNotFoundError:
+        installed = None
+    if installed is not None:
+        for item in installed.files or ():
+            item_path = PurePosixPath(item.as_posix())
+            if not item_path.as_posix().endswith(_PACKAGED_SKILL_SENTINEL.as_posix()):
+                continue
+            sentinel = Path(item.locate()).resolve()
+            skills_root = sentinel.parents[1]
+            if _valid_source_root(skills_root):
+                return {
+                    "available": True,
+                    "kind": "python_distribution",
+                    "skills_root": skills_root,
+                    "source_root": Path(installed.locate_file("")).resolve(),
+                    "distribution_version": installed.version,
+                    "reason": "workflow skills are available from the installed Python distribution",
+                }
+
+    return {
+        "available": False,
+        "kind": "missing",
+        "skills_root": None,
+        "source_root": checkout_root,
+        "reason": (
+            "the active LoopX installation does not contain the packaged workflow skills; "
+            "upgrade LoopX before installing host skills"
+        ),
+    }
+
+
+def default_workflow_skills_dir(env: Mapping[str, str] | None = None) -> Path:
+    source_env = os.environ if env is None else env
+    configured = str(source_env.get("CODEX_HOME") or "").strip()
+    codex_root = Path(configured).expanduser() if configured else Path.home() / ".codex"
+    return codex_root / "skills"
+
+
+@contextmanager
+def _exclusive_install_lock(skills_dir: Path) -> Iterator[None]:
+    import fcntl
+
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = skills_dir / ".loopx-workflow-skills.lock"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _install_one_skill(source: Path, target: Path) -> str:
+    if target.is_dir() and hash_skill_tree(source) == hash_skill_tree(target):
+        return "unchanged"
+
+    temporary = Path(
+        tempfile.mkdtemp(prefix=f".{target.name}.tmp.", dir=target.parent)
+    )
+    backup: Path | None = None
+    try:
+        shutil.copytree(source, temporary, dirs_exist_ok=True)
+        if target.exists():
+            backup = target.with_name(f".{target.name}.previous.{os.getpid()}")
+            if backup.exists():
+                shutil.rmtree(backup)
+            target.replace(backup)
+        temporary.replace(target)
+    except BaseException:
+        if not target.exists() and backup and backup.exists():
+            backup.replace(target)
+        raise
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+        if backup and backup.exists():
+            shutil.rmtree(backup)
+    return "updated" if backup else "created"
+
+
+def _load_manifest(skills_dir: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(
+            (skills_dir / SKILL_INSTALL_READBACK_FILENAME).read_text(encoding="utf-8")
+        )
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _uninstall_managed_skills(skills_dir: Path) -> dict[str, Any]:
+    manifest = _load_manifest(skills_dir)
+    if not manifest or manifest.get("owner") not in SKILL_INSTALL_OWNERS:
+        return {
+            "ok": False,
+            "removed": [],
+            "preserved_modified": [],
+            "reason": "no LoopX-managed workflow-skill readback is available",
+        }
+
+    skills = manifest.get("skills")
+    items = skills.get("items") if isinstance(skills, dict) else {}
+    if not isinstance(items, dict):
+        items = {}
+    managed_ids = [
+        str(item)
+        for item in manifest.get("materialized_skill_ids") or []
+        if str(item).strip()
+    ]
+    removed: list[str] = []
+    preserved_modified: list[str] = []
+    for skill_id in managed_ids:
+        target = skills_dir / skill_id
+        recorded = items.get(skill_id)
+        if not target.exists():
+            continue
+        if not isinstance(recorded, dict) or recorded != hash_skill_tree(target):
+            preserved_modified.append(skill_id)
+            continue
+        shutil.rmtree(target)
+        removed.append(skill_id)
+
+    manifest_path = skills_dir / SKILL_INSTALL_READBACK_FILENAME
+    if not preserved_modified:
+        manifest_path.unlink(missing_ok=True)
+    return {
+        "ok": not preserved_modified,
+        "removed": removed,
+        "preserved_modified": preserved_modified,
+        "reason": (
+            "removed LoopX-managed workflow skills"
+            if not preserved_modified
+            else "preserved workflow skills whose content changed after installation"
+        ),
+    }
+
+
+def workflow_skill_install(
+    *,
+    skills_dir: Path | None = None,
+    execute: bool = False,
+    uninstall: bool = False,
+    cli_bin: str = "loopx",
+) -> dict[str, Any]:
+    target_root = (skills_dir or default_workflow_skills_dir()).expanduser().resolve()
+    source = resolve_workflow_skill_source()
+    source_root = Path(source["source_root"])
+    before = inspect_skill_install_readback(
+        skills_dir=target_root,
+        required_skill_ids=ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
+        source_root=source_root,
+    )
+    if uninstall:
+        result = (
+            _uninstall_managed_skills(target_root)
+            if execute
+            else {
+                "ok": True,
+                "removed": [],
+                "preserved_modified": [],
+                "reason": "uninstall preview; pass --uninstall to execute",
+            }
+        )
+        return {
+            "ok": result["ok"],
+            "schema_version": WORKFLOW_SKILL_INSTALL_SCHEMA_VERSION,
+            "operation": "uninstall" if execute else "uninstall_preview",
+            "skills_dir": str(target_root),
+            "source": _public_source(source),
+            "before": before,
+            "result": result,
+        }
+
+    if not source.get("available"):
+        return {
+            "ok": False,
+            "schema_version": WORKFLOW_SKILL_INSTALL_SCHEMA_VERSION,
+            "operation": "install" if execute else "inspect",
+            "skills_dir": str(target_root),
+            "source": _public_source(source),
+            "before": before,
+            "reason": source["reason"],
+        }
+
+    if not execute:
+        return {
+            "ok": True,
+            "schema_version": WORKFLOW_SKILL_INSTALL_SCHEMA_VERSION,
+            "operation": "inspect",
+            "skills_dir": str(target_root),
+            "source": _public_source(source),
+            "before": before,
+            "install_required": not before.get("ready"),
+            "install_command": shlex.join(
+                ["loopx", "workflow-skills", "--install", "--skills-dir", str(target_root)]
+            ),
+        }
+
+    entry_preview = materialize_loopx_entry_skill(
+        skills_dir=target_root,
+        execute=False,
+        cli_bin=cli_bin,
+    )
+    if entry_preview["status"] not in MANAGED_ENTRY_PREVIEW_STATUSES:
+        return {
+            "ok": False,
+            "schema_version": WORKFLOW_SKILL_INSTALL_SCHEMA_VERSION,
+            "operation": "install",
+            "skills_dir": str(target_root),
+            "source": _public_source(source),
+            "before": before,
+            "entry": entry_preview,
+            "reason": "the managed $loopx entry skill cannot be materialized safely",
+        }
+
+    installed: dict[str, str] = {}
+    with _exclusive_install_lock(target_root):
+        for skill_id in PACKAGED_HOST_SKILL_IDS:
+            installed[skill_id] = _install_one_skill(
+                Path(source["skills_root"]) / skill_id,
+                target_root / skill_id,
+            )
+        entry = materialize_loopx_entry_skill(
+            skills_dir=target_root,
+            execute=True,
+            cli_bin=cli_bin,
+        )
+        if entry["status"] not in MANAGED_ENTRY_STATUSES:
+            return {
+                "ok": False,
+                "schema_version": WORKFLOW_SKILL_INSTALL_SCHEMA_VERSION,
+                "operation": "install",
+                "skills_dir": str(target_root),
+                "source": _public_source(source),
+                "installed": installed,
+                "entry": entry,
+                "reason": "the managed $loopx entry skill could not be materialized",
+            }
+        write_skill_install_readback(
+            skills_dir=target_root,
+            skill_ids=ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
+            source_root=source_root,
+            owner=PYTHON_DISTRIBUTION_SKILL_INSTALL_OWNER,
+            integration_mode=PYTHON_DISTRIBUTION_SKILL_INSTALL_MODE,
+        )
+
+    after = inspect_skill_install_readback(
+        skills_dir=target_root,
+        required_skill_ids=ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
+        source_root=source_root,
+    )
+    return {
+        "ok": bool(after.get("ready")),
+        "schema_version": WORKFLOW_SKILL_INSTALL_SCHEMA_VERSION,
+        "operation": "install",
+        "skills_dir": str(target_root),
+        "source": _public_source(source),
+        "installed": installed,
+        "entry": entry,
+        "after": after,
+        "rollback_command": shlex.join(
+            [
+                "loopx",
+                "workflow-skills",
+                "--uninstall",
+                "--skills-dir",
+                str(target_root),
+            ]
+        ),
+    }
+
+
+def _public_source(source: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "available": bool(source.get("available")),
+        "kind": source.get("kind"),
+        "distribution_version": source.get("distribution_version"),
+        "reason": source.get("reason"),
+    }
+
+
+def render_workflow_skill_install_markdown(payload: Mapping[str, Any]) -> str:
+    source = payload.get("source") or {}
+    lines = [
+        "# LoopX Workflow Skills",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- operation: `{payload.get('operation')}`",
+        f"- skills_dir: `{payload.get('skills_dir')}`",
+        f"- source: `{source.get('kind')}`",
+        f"- ready_before: `{(payload.get('before') or {}).get('ready')}`",
+    ]
+    if payload.get("install_command"):
+        lines.append(f"- install: `{payload['install_command']}`")
+    if payload.get("rollback_command"):
+        lines.append(f"- rollback: `{payload['rollback_command']}`")
+    result = payload.get("result") or {}
+    if result:
+        lines.extend(
+            [
+                f"- removed: `{','.join(result.get('removed') or [])}`",
+                f"- preserved_modified: `{','.join(result.get('preserved_modified') or [])}`",
+                f"- reason: {result.get('reason')}",
+            ]
+        )
+    if payload.get("reason"):
+        lines.append(f"- reason: {payload['reason']}")
+    return "\n".join(lines) + "\n"

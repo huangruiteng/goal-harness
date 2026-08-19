@@ -580,6 +580,14 @@ be bypassed. An evidence-backed peer
 transition. This closeout records `self_merged=false` and does not
 create a successor review todo for observation-only work.
 
+User-role todos may still write `done` through `todo update --status done`;
+when the todo declares `validation_command` (or the `validation_command_argv`
+declared via `--validation-command-json`),
+that update runs the same completion validation gate as `todo complete` and
+fails closed with a typed `validation_blocked_completion` receipt instead of
+committing `done`. Todos without a declared command keep the unchanged fast
+path.
+
 Use `--resume-when` when deferring a successor that should wake up after a
 machine-readable condition instead of living only in prose:
 
@@ -634,6 +642,9 @@ loopx todo complete \
 The version check is optional; the idempotency key is required while the lease
 is active. A missing or mismatched key fails before Todo or successor state is
 written, including when two host processes intentionally share one `agent_id`.
+`todo supersede` moves the same todo to done and crosses the same fence with
+the same two options; a leased todo cannot be retired keylessly through either
+verb.
 
 ## Parsed Schema
 

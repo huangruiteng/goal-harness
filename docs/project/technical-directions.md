@@ -161,6 +161,12 @@ describes a possible future.
 4. Keep discussion and direction tracking in the umbrella issue; keep concrete
    implementation and review in its own issue or PR.
 
+Periodic [Open Strategy Reviews](../community/open-strategy-reviews.md) may
+compare up to four directions when cross-cutting questions benefit from live
+discussion. The review is advisory: it records a disposition, owner, next
+artifact or evidence request, and review trigger. It does not vote a direction
+into `main`, change an RFC stage, or authorize implementation.
+
 A material stage, owner, integration-branch, promotion-gate, or scope change
 must update this page through a PR. The RFC index and task board should change
 in the same PR when their routing changes. After merge, maintainers update the
