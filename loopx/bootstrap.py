@@ -446,6 +446,7 @@ def render_state_markdown(
     onboarding_scan: dict[str, Any] | None = None,
     accept_onboarding_agent_todos: bool = False,
     begin_autonomous_advance: bool = False,
+    codex_app_heartbeat: str = "ask",
     include_connection_validation: bool = True,
     handoff_mode: str = HANDOFF_MODE_LEGACY,
 ) -> str:
@@ -930,6 +931,7 @@ def bootstrap_project(
                     onboarding_scan=onboarding_scan,
                     accept_onboarding_agent_todos=accept_onboarding_agent_todos,
                     begin_autonomous_advance=begin_autonomous_advance,
+                    codex_app_heartbeat=codex_app_heartbeat,
                     include_connection_validation=include_connection_validation,
                     handoff_mode=declared_handoff_mode,
                 ),
