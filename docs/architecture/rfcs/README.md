@@ -71,6 +71,10 @@ promote a proposal beyond that status.
 
 ## Draft Integration Proposals
 
+- [Attached App Session Frontend v0](attached-app-session-frontend-v0.md):
+  attach the LoopX frontend to an already-running Codex App session, preserve
+  its automation-prompt/visible-host execution driver, and defer managed CLI
+  Turn launch to a separate future mode.
 - [Agent IM, LoopX, and OpenViking collaboration v0](agent-im-openviking-collaboration-v0.md):
   separate runtime delivery, durable control state, and scoped context while
   preserving direct agent-to-LoopX interaction.
