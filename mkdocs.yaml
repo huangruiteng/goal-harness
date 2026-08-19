@@ -89,6 +89,7 @@ nav:
       - guides/README.md
       - Quick Start: guides/getting-started.md
       - Installation: guides/installing-loopx.md
+      - Personal Workspace Guide: guides/personal-workspace-user-guide.md
       - Newcomer Command Path: guides/newcomer-command-path.md
       - Minimal Custom Runtime Example: guides/minimal-custom-runtime-example.md
       - Custom Runner Integration: guides/custom-agent-runner-integration.md
