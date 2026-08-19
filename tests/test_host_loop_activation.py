@@ -278,6 +278,8 @@ def test_deepseek_harness_is_an_exact_host_type_with_external_loop_activation() 
     assert packet["host_surface"] == "deepseek_harness_automation_loop", packet
     assert packet["activation_method"] == "external_loop_driver", packet
     assert "--runtime-profile generic_cli" in packet["commands"]["heartbeat_prompt"], packet
+    assert "loopx.dsh_goal_mode" in packet["entry_command_hint"], packet
+    # The historical launcher stays a documented compatibility path.
     assert "scripts/dsh_turn_host_adapter.py" in packet["entry_command_hint"], packet
 
 

@@ -11,7 +11,7 @@ LoopX Turn protocol:
 ```text
 LoopX quota should-run
     -> loopx turn run-once
-    -> scripts/dsh_turn_host_adapter.py
+    -> loopx.dsh_goal_mode adapter (python -m loopx.dsh_goal_mode)
     -> DeepSeek Harness Python SDK / dsh runtime
     -> typed loopx_turn_result_v0
     -> independent validator
@@ -20,7 +20,10 @@ LoopX quota should-run
 
 ## What This Connector Adds
 
-- A thin `scripts/dsh_turn_host_adapter.py` that translates
+- A thin adapter, now a first-class goal-mode subpackage at
+  `loopx/dsh_goal_mode/` (run with `python -m loopx.dsh_goal_mode`; the
+  historical `scripts/dsh_turn_host_adapter.py` launcher still works),
+  that translates
   `loopx_turn_host_request_v0` into one bounded dsh session prompt and parses
   the model's final JSON result back into `loopx_turn_result_v0`.
 - A `deepseek-harness` agent type in LoopX onboarding so users can request the
@@ -76,7 +79,7 @@ loopx turn run-once \
   --host generic-cli \
   --execution-mode isolated-headless \
   --project "$PWD" \
-  --host-adapter-command-json '["python3", "scripts/dsh_turn_host_adapter.py", "--cordis", "/path/to/cordis.yml", "--model", "deepseek-v4-flash"]' \
+  --host-adapter-command-json '["python3", "-m", "loopx.dsh_goal_mode", "--cordis", "/path/to/cordis.yml", "--model", "deepseek-v4-flash"]' \
   --validation-command-json '["python3", "/path/to/verify-postcondition.py"]' \
   --execute
 ```

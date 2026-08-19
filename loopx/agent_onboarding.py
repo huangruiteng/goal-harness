@@ -314,7 +314,9 @@ def _start_instruction(agent_type: str) -> str:
     if agent_type == "deepseek-harness":
         return (
             "Install `loopx[deepseek-harness]`, prepare a dsh cordis.yml, and run "
-            "`loopx turn run-once` with `scripts/dsh_turn_host_adapter.py` as the "
+            "`loopx turn run-once` with the `loopx.dsh_goal_mode` adapter "
+            "(`python -m loopx.dsh_goal_mode`; the legacy "
+            "`scripts/dsh_turn_host_adapter.py` launcher still works) as the "
             "generic-cli host adapter; every tick starts from `quota should-run`."
         )
     if agent_type == "ark-managed-agent":

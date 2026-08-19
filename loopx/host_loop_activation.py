@@ -236,7 +236,7 @@ AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
     "deepseek-harness": {
         "display_name": "DeepSeek Harness",
         "host_loop": "DeepSeek Harness headless/automation loop gated by LoopX quota",
-        "entry": "loopx turn run-once with scripts/dsh_turn_host_adapter.py",
+        "entry": "loopx turn run-once with loopx.dsh_goal_mode (python -m loopx.dsh_goal_mode; compat: scripts/dsh_turn_host_adapter.py)",
         "accepted_inputs": [
             "deepseek-harness",
             "deepseek_harness",
@@ -1104,7 +1104,10 @@ def _cursor_agent_activation(commands: dict[str, str], cli_bin: str) -> dict[str
 def _deepseek_harness_activation(commands: dict[str, str]) -> dict[str, Any]:
     return {
         "host_surface": "deepseek_harness_automation_loop",
-        "entry_command_hint": "loopx turn run-once with scripts/dsh_turn_host_adapter.py",
+        "entry_command_hint": (
+            "loopx turn run-once with loopx.dsh_goal_mode "
+            "(python -m loopx.dsh_goal_mode; compat: scripts/dsh_turn_host_adapter.py)"
+        ),
         "activation_method": "external_loop_driver",
         "activation_input_command": commands["heartbeat_prompt_json"],
         "host_mutation": {
@@ -1121,8 +1124,9 @@ def _deepseek_harness_activation(commands: dict[str, str]) -> dict[str, Any]:
             "Install the optional DeepSeek Harness SDK (`loopx[deepseek-harness]`).",
             "Prepare a dsh cordis.yml and any DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL settings.",
             "Run the heartbeat-prompt JSON command after project state and todos are written.",
-            "Wire `loopx turn run-once` with `--host generic-cli` and "
-            "the `scripts/dsh_turn_host_adapter.py` host adapter command.",
+            "Wire `loopx turn run-once` with `--host generic-cli` and the "
+            "`loopx.dsh_goal_mode` host adapter (`python -m loopx.dsh_goal_mode`; "
+            "the legacy `scripts/dsh_turn_host_adapter.py` launcher still works).",
             "Start every automatic tick from quota should-run and stop when it says stop.",
         ],
         "success_criteria": [

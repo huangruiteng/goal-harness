@@ -221,14 +221,16 @@ loopx start-goal --guided --project . --goal-text "你的长程目标"
 | KunlunCode | 运行 `loopx-kunluncode connect --project . --goal-id <goal-id> --agent-id <registered-agent-id>`，添加一条有边界的 todo，再运行 `loopx-kunluncode run --project .`。 | 经 app-server 驱动原生 Goal Pro；只有 strict verification 通过后，LoopX 才写回完成与 quota |
 | OpenCode | 安装静态 command facade；recurring goal 显式 opt in `--with-goal-bridge`。 | OpenCode command facade 与显式 goal bridge |
 | Pi | 用 `loopx slash-commands --install --surface pi` 安装 opt-in goal extension，然后在受信任的 Pi 会话里用 `/loopx <任务>`。 | 由 LoopX quota gate 的可见 Pi goal extension（`loopx_goal_activate` + `agent_settled` 续跑） |
+| DeepSeek Harness（dsh） | 安装 `loopx[deepseek-harness]`，准备 dsh `cordis.yml`，然后用 [dsh goal-mode adapter](loopx/dsh_goal_mode/README.md) 配合 `loopx turn run-once`。 | 经 LoopX Turn 的 headless dsh 工作段，每个 tick 由 `quota should-run` gate |
 | Cursor、shell、自有 runner | 使用同一 installer 和 `loopx doctor`，再手动连接或由 runner 调用。 | 你的 shell、scheduler 或 runner |
 
 可直接粘贴的完整 setup message、host-specific 路由和故障恢复见
 [Getting Started](docs/guides/getting-started.md)。Host 集成还可以查看
 [Codex App host command registry](docs/reference/protocols/codex-app-host-command-registry-v0.md)、
 [Codex CLI packaged install](docs/product/runtimes/codex-cli/codex-cli-packaged-install.md)和
-[Claude Code adapter](loopx/claude_goal_mode/README.md)，以及
-[KunlunCode 原生 Goal adapter](docs/guides/kunluncode-adapter.zh-CN.md)。
+[Claude Code adapter](loopx/claude_goal_mode/README.md)、
+[KunlunCode 原生 Goal adapter](docs/guides/kunluncode-adapter.zh-CN.md)，以及
+[DeepSeek Harness turn adapter](loopx/dsh_goal_mode/README.md)。
 
 自有 runner 请先看
 [最小自定义 Runtime 示例](docs/guides/minimal-custom-runtime-example.zh-CN.md)

@@ -245,14 +245,16 @@ LoopX should reuse existing state rather than overwrite it. Keep `.loopx/`,
 | KunlunCode | Run `loopx-kunluncode connect --project . --goal-id <goal-id> --agent-id <registered-agent-id>`, add a bounded todo, then run `loopx-kunluncode run --project .`. | Native Goal Pro through app-server; LoopX writes completion and quota only after strict verification |
 | OpenCode | Install the static command facade; opt in to `--with-goal-bridge` for recurring goals. | OpenCode command facade and explicit goal bridge |
 | Pi | Install the opt-in goal extension with `loopx slash-commands --install --surface pi`, then use `/loopx <task>` from a trusted Pi session. | Visible Pi goal extension gated by LoopX quota (`loopx_goal_activate` + `agent_settled` continuation) |
+| DeepSeek Harness (dsh) | Install `loopx[deepseek-harness]`, prepare a dsh `cordis.yml`, then use the [dsh goal-mode adapter](loopx/dsh_goal_mode/README.md) with `loopx turn run-once`. | Headless dsh segments through LoopX Turn, each tick gated by `quota should-run` |
 | Cursor, shell, or custom runner | Use the installer and `loopx doctor`; connect manually or call LoopX from your runner. | Your shell, scheduler, or runner |
 
 The exact, copy-ready setup messages and host recovery paths live in
 [Getting Started](docs/guides/getting-started.md). Host integrations can inspect
 the [Codex App host command registry contract](docs/reference/protocols/codex-app-host-command-registry-v0.md),
 the [Codex CLI packaged install path](docs/product/runtimes/codex-cli/codex-cli-packaged-install.md),
-the [Claude Code adapter](loopx/claude_goal_mode/README.md), or the
-[KunlunCode native Goal adapter](loopx/kunluncode_goal_mode/README.md).
+the [Claude Code adapter](loopx/claude_goal_mode/README.md), the
+[KunlunCode native Goal adapter](loopx/kunluncode_goal_mode/README.md), or the
+[DeepSeek Harness turn adapter](loopx/dsh_goal_mode/README.md).
 
 For custom runners, start with the
 [minimal custom runtime example](docs/guides/minimal-custom-runtime-example.md)
