@@ -1,21 +1,28 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from pathlib import Path
+import hashlib
+import json
 import re
 import tomllib
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from ..capabilities.documentation import normalize_documentation_contract
 
-
 EXTENSION_MANIFEST_SCHEMA_VERSION = "loopx_extension_manifest_v0"
+EXTERNAL_CAPABILITY_PROFILE_SCHEMA_VERSION = (
+    "loopx_external_domain_capability_profile_v0"
+)
 LOOPX_EXTENSION_API_VERSION = 1
 MAX_EXTENSION_ID_LENGTH = 48
+MAX_INTEGRATION_PROFILE_BYTES = 64 * 1024
 _API_CLAUSE = re.compile(r"^(>=|<=|==|>|<)?\s*(\d+)$")
 _EXTENSION_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _PROTOCOL_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}_v\d+$")
+_OPERATION_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _PYTHON_MODULE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
+_EXTERNAL_CAPABILITY_EFFECT_CLASSES = frozenset({"read_only", "external_write"})
 _PYTHON_CALLABLE_RE = re.compile(
     r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*$"
 )
@@ -257,6 +264,195 @@ def _runtime_contract(
     return runtime
 
 
+def _integration_profile(
+    manifest_path: Path,
+    profile_ref: object,
+    *,
+    capability_id: str,
+    runtime: Mapping[str, Any] | None,
+    context: str,
+) -> tuple[dict[str, Any], str]:
+    if runtime is None:
+        raise ValueError(f"{context} integration_profile requires an executable runtime")
+    ref = str(profile_ref or "").strip()
+    if not ref:
+        raise ValueError(f"{context} integration_profile must be a relative JSON path")
+    relative = Path(ref)
+    if relative.is_absolute():
+        raise ValueError(f"{context} integration_profile must be a relative JSON path")
+    extension_root = manifest_path.resolve().parent
+    profile_path = (extension_root / relative).resolve()
+    try:
+        profile_path.relative_to(extension_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"{context} integration_profile must stay inside the extension root"
+        ) from exc
+    try:
+        raw_bytes = profile_path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"{context} integration_profile is unreadable") from exc
+    if len(raw_bytes) > MAX_INTEGRATION_PROFILE_BYTES:
+        raise ValueError(
+            f"{context} integration_profile exceeds {MAX_INTEGRATION_PROFILE_BYTES} bytes"
+        )
+    try:
+        value = json.loads(raw_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{context} integration_profile must be a JSON object") from exc
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{context} integration_profile must be a JSON object")
+    allowed_profile_fields = {
+        "schema_version",
+        "capability_id",
+        "protocol",
+        "operations",
+    }
+    unknown_profile_fields = sorted(set(value) - allowed_profile_fields)
+    if unknown_profile_fields:
+        raise ValueError(
+            f"{context} integration_profile has unsupported fields "
+            f"{unknown_profile_fields}"
+        )
+    if value.get("schema_version") != EXTERNAL_CAPABILITY_PROFILE_SCHEMA_VERSION:
+        raise ValueError(
+            f"{context} integration_profile must use "
+            f"{EXTERNAL_CAPABILITY_PROFILE_SCHEMA_VERSION}"
+        )
+    if value.get("capability_id") != capability_id:
+        raise ValueError(
+            f"{context} integration_profile capability_id must match `{capability_id}`"
+        )
+    protocol = _required_string(value, "protocol", context=f"{context} profile")
+    if protocol != runtime.get("protocol"):
+        raise ValueError(
+            f"{context} integration_profile protocol must match runtime protocol "
+            f"`{runtime.get('protocol')}`"
+        )
+    operations = value.get("operations")
+    if not isinstance(operations, list) or not 1 <= len(operations) <= 32:
+        raise ValueError(
+            f"{context} integration_profile operations must contain 1 to 32 objects"
+        )
+    normalized_operations: list[dict[str, Any]] = []
+    operation_ids: set[str] = set()
+    for index, item in enumerate(operations):
+        operation_context = f"{context} integration_profile operations[{index}]"
+        if not isinstance(item, Mapping):
+            raise ValueError(f"{operation_context} must be an object")
+        allowed_operation_fields = {
+            "id",
+            "effect_class",
+            "required_permission",
+            "request_schema",
+            "result_schema",
+            "todo_contract",
+        }
+        unknown_operation_fields = sorted(set(item) - allowed_operation_fields)
+        if unknown_operation_fields:
+            raise ValueError(
+                f"{operation_context} has unsupported fields "
+                f"{unknown_operation_fields}"
+            )
+        operation_id = _required_string(item, "id", context=operation_context)
+        if not _OPERATION_RE.fullmatch(operation_id):
+            raise ValueError(
+                f"{operation_context} id must be a lower-snake operation token"
+            )
+        if operation_id in operation_ids:
+            raise ValueError(
+                f"{context} integration_profile has duplicate operation `{operation_id}`"
+            )
+        operation_ids.add(operation_id)
+        effect_class = _required_string(
+            item, "effect_class", context=operation_context
+        )
+        if effect_class not in _EXTERNAL_CAPABILITY_EFFECT_CLASSES:
+            raise ValueError(
+                f"{operation_context} effect_class must be one of "
+                f"{sorted(_EXTERNAL_CAPABILITY_EFFECT_CLASSES)}"
+            )
+        permission = _required_string(
+            item, "required_permission", context=operation_context
+        )
+        if permission not in runtime.get("required_permissions", []):
+            raise ValueError(
+                f"{operation_context} required_permission must be declared by runtime"
+            )
+        request_schema = _required_string(
+            item, "request_schema", context=operation_context
+        )
+        result_schema = _required_string(
+            item, "result_schema", context=operation_context
+        )
+        if not _PROTOCOL_RE.fullmatch(request_schema) or not _PROTOCOL_RE.fullmatch(
+            result_schema
+        ):
+            raise ValueError(
+                f"{operation_context} request_schema and result_schema must be "
+                "versioned lower-snake tokens"
+            )
+        normalized_operation = {
+            "id": operation_id,
+            "effect_class": effect_class,
+            "required_permission": permission,
+            "request_schema": request_schema,
+            "result_schema": result_schema,
+        }
+        todo_contract = item.get("todo_contract")
+        if todo_contract is not None:
+            if not isinstance(todo_contract, Mapping):
+                raise ValueError(f"{operation_context} todo_contract must be an object")
+            if set(todo_contract) - {
+                "action_kinds",
+                "target_key_prefixes",
+                "capability_binding_refs",
+            }:
+                raise ValueError(
+                    f"{operation_context} todo_contract has unsupported fields"
+                )
+            action_kinds = _string_list(
+                todo_contract,
+                "action_kinds",
+                context=f"{operation_context} todo_contract",
+            )
+            target_prefixes = _string_list(
+                todo_contract,
+                "target_key_prefixes",
+                context=f"{operation_context} todo_contract",
+            )
+            capability_binding_refs = _string_list(
+                todo_contract,
+                "capability_binding_refs",
+                context=f"{operation_context} todo_contract",
+            )
+            if not action_kinds or not target_prefixes or not capability_binding_refs:
+                raise ValueError(
+                    f"{operation_context} todo_contract requires action_kinds and "
+                    "target_key_prefixes and capability_binding_refs"
+                )
+            normalized_operation["todo_contract"] = {
+                "action_kinds": action_kinds,
+                "target_key_prefixes": target_prefixes,
+                "capability_binding_refs": capability_binding_refs,
+            }
+        normalized_operations.append(normalized_operation)
+    normalized = {
+        "schema_version": EXTERNAL_CAPABILITY_PROFILE_SCHEMA_VERSION,
+        "capability_id": capability_id,
+        "protocol": protocol,
+        "operations": normalized_operations,
+    }
+    serialized = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = "sha256:" + hashlib.sha256(serialized).hexdigest()
+    return normalized, digest
+
+
 def _require_compatible_loopx_api(requirement: str, *, context: str) -> None:
     clauses = [clause.strip() for clause in requirement.split(",")]
     if not clauses or any(not clause for clause in clauses):
@@ -353,6 +549,17 @@ def load_extension_manifest(path: str | Path) -> dict[str, Any]:
                 **documentation,
                 "aliases": [dict(alias) for alias in documentation["aliases"]],
             }
+        profile_ref = item.get("integration_profile")
+        if profile_ref is not None:
+            profile, profile_digest = _integration_profile(
+                manifest_path,
+                profile_ref,
+                capability_id=str(capability["id"]),
+                runtime=runtime,
+                context=item_context,
+            )
+            capability["integration_profile"] = profile
+            capability["integration_profile_digest"] = profile_digest
         capabilities.append(capability)
 
     implementations: list[dict[str, Any]] = []
