@@ -21,6 +21,7 @@ from loopx.control_plane.quota.heartbeat_receipt import (
 )
 from loopx.control_plane.quota.settlement import (
     build_codex_app_settlement_plan,
+    infer_persisted_heartbeat_settlement_identity,
     require_settlement_terminal_closeout,
     resolve_heartbeat_settlement_identity,
     settlement_step_command,
@@ -166,6 +167,13 @@ def _append_guard_receipt(
         + "\n",
         encoding="utf-8",
     )
+
+
+def _append_run_index_record(runtime_root: Path, record: dict) -> None:
+    path = runtime_root / "goals" / GOAL_ID / "runs" / "index.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record) + "\n")
 
 
 def test_terminal_closeout_receipt_rejects_ordinary_completion_event(
@@ -458,3 +466,68 @@ def test_guard_receipt_returns_typed_failure_for_effect_without_todo(
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert "effect identity without a Todo" in result.failure.reason
+
+
+def test_typed_material_poll_is_recovered_not_shadowed(tmp_path: Path) -> None:
+    _append_guard_receipt(tmp_path)
+    _append_run_index_record(
+        tmp_path,
+        {
+            "classification": "quota_slot_spent",
+            "agent_id": AGENT_ID,
+            "todo_id": TODO_ID,
+            "turn_instance_id": "turn-settlement-stale",
+        },
+    )
+    _append_run_index_record(
+        tmp_path,
+        {
+            "classification": "quota_monitor_poll",
+            "material_change": True,
+            "delivery_outcome": "outcome_progress",
+            "agent_id": AGENT_ID,
+            "todo_id": TODO_ID,
+            "turn_instance_id": TURN_ID,
+        },
+    )
+
+    result = infer_persisted_heartbeat_settlement_identity(
+        tmp_path,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        todo_id=TODO_ID,
+    )
+
+    assert result is not None
+    assert result.value is not None
+    assert result.value.turn_instance_id == TURN_ID
+
+
+def test_unknown_non_neutral_record_fails_closed(tmp_path: Path) -> None:
+    _append_guard_receipt(tmp_path)
+    _append_run_index_record(
+        tmp_path,
+        {
+            "classification": "quota_slot_spent",
+            "agent_id": AGENT_ID,
+            "todo_id": TODO_ID,
+            "turn_instance_id": TURN_ID,
+        },
+    )
+    _append_run_index_record(
+        tmp_path,
+        {
+            "classification": "quota_monitor_poll",
+            "material_change": True,
+            "agent_id": AGENT_ID,
+        },
+    )
+
+    result = infer_persisted_heartbeat_settlement_identity(
+        tmp_path,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        todo_id=TODO_ID,
+    )
+
+    assert result is None

@@ -265,7 +265,8 @@ def infer_persisted_heartbeat_settlement_identity(
             or delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES
         ):
             candidate = run
-        break
+            break
+        return None
 
     if candidate is None:
         return None
