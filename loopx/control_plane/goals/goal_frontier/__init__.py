@@ -1187,6 +1187,13 @@ def derive_goal_frontier_replan_obligation_from_summaries(
     if not replan_rule.derives_obligation:
         return None
     if replan_rule.rule is GoalFrontierReplanRule.TODO_SUCCESSION_GAP:
+        settlement_items = succession_gap_items[:3]
+        settlement_todo_ids = [
+            str(item.get("todo_id") or "").strip()
+            for item in settlement_items
+            if str(item.get("todo_id") or "").strip()
+        ]
+        settlement_summary = ", ".join(settlement_todo_ids)
         triggers = [
             {
                 "kind": TODO_SUCCESSION_GAP_TRIGGER,
@@ -1197,8 +1204,9 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                 or "completed advancement needs a successor or no-followup rationale",
                 "agent_id": agent_id,
                 "claimed_by": item.get("claimed_by"),
+                "completion_turn_key": item.get("completion_turn_key"),
             }
-            for item in succession_gap_items[:3]
+            for item in settlement_items
         ]
         return build_autonomous_replan_obligation_payload(
             schema_version=AUTONOMOUS_REPLAN_OBLIGATION_SCHEMA_VERSION,
@@ -1208,33 +1216,43 @@ def derive_goal_frontier_replan_obligation_from_summaries(
             trigger_count=len(succession_gap_items),
             triggers=triggers,
             guidance_actions=[
-                "create_successor",
-                "link_successor",
                 "record_no_followup",
+                "link_successor",
+                "create_successor",
             ],
             todo_actions=[
+                {
+                    "action": "settle",
+                    "role": "agent",
+                    "priority": "P0",
+                    "todo_ids": settlement_todo_ids,
+                    "text": (
+                        "settle the exact completed Todos through no-follow-up or "
+                        "link each to a real runnable successor"
+                    ),
+                },
                 {
                     "action": "add",
                     "role": "agent",
                     "priority": "P0",
                     "text": (
-                        "run a bounded successor replan: create or link the next "
-                        "runnable advancement Todo, or settle the completed Todo "
-                        "through loopx todo complete --no-follow-up; do not invent "
-                        "a user gate"
+                        "create a typed runnable successor only when concrete "
+                        "technical or validation work remains"
                     ),
-                }
+                },
             ],
             stop_condition=(
                 "stop if the successor decision requires private material, "
                 "credentials, destructive git, production actions, or owner-only decisions"
             ),
             recommended_action=(
-                "before another quiet poll, add/link the next advancement Todo or "
-                "settle the completed Todo through loopx todo complete "
-                "--no-follow-up; do not invent a user gate"
+                "settle the exact completed Todo(s) "
+                f"{settlement_summary} through loopx todo complete --no-follow-up "
+                "when no real work remains; otherwise link a real runnable successor. "
+                "do not invent a user gate or add a lifecycle-only filler Todo"
             ),
             extra_fields={
+                "resolution_mode": "todo_lifecycle_settlement",
                 "satisfying_semantic_outcomes": ["new_runnable_successor"],
             },
         )

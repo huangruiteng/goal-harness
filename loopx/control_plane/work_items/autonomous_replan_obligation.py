@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
-from typing import Any, Callable, Optional
+import shlex
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from ..runtime.time import parse_timestamp
 from ..todos.contract import (
@@ -19,7 +20,7 @@ from ..todos.deferred_resume import (
 from .progress_observation import typed_progress_repeat_trigger
 
 
-PublicSafeText = Callable[..., Optional[str]]
+PublicSafeText = Callable[..., str | None]
 AckRecorded = Callable[[dict[str, Any]], bool]
 
 
@@ -66,7 +67,54 @@ def build_autonomous_replan_cli_actions(
     scoped_cli_args: str,
     quota_spend_action: str,
     replan_settlement_bound: bool,
+    lifecycle_actor_args: str = "",
 ) -> list[str]:
+    obligation = (
+        payload.get("autonomous_replan_obligation")
+        if isinstance(payload.get("autonomous_replan_obligation"), Mapping)
+        else payload
+    )
+    if obligation.get("resolution_mode") == "todo_lifecycle_settlement":
+        triggers = [
+            item
+            for item in obligation.get("triggers") or []
+            if isinstance(item, Mapping)
+            and item.get("kind") == "completed_advancement_without_successor"
+            and normalize_todo_id(item.get("todo_id"))
+        ]
+        actions: list[str] = []
+        for trigger in triggers[:3]:
+            todo_id = normalize_todo_id(trigger.get("todo_id"))
+            if todo_id is None:
+                continue
+            completion_turn_key = str(
+                trigger.get("completion_turn_key") or ""
+            ).strip()
+            completion_turn_arg = (
+                f" --turn-instance-id {shlex.quote(completion_turn_key)}"
+                if completion_turn_key
+                else ""
+            )
+            actions.append(
+                "when no real successor remains for completed Todo "
+                f"{todo_id}: loopx todo complete --goal-id {goal_id} "
+                f"--todo-id {todo_id}{completion_turn_arg}{lifecycle_actor_args} "
+                "--no-follow-up --note '<public-safe no-follow-up rationale>' "
+                "--execute"
+            )
+        actions.extend(
+            [
+                (
+                    "otherwise link or create one real runnable successor for the "
+                    "exact completed Todo; do not create lifecycle-only filler"
+                ),
+                (
+                    f"loopx --format json quota should-run --goal-id {goal_id}"
+                    f"{scoped_cli_args}"
+                ),
+            ]
+        )
+        return actions
     packet = (
         payload.get("replan_action_packet")
         if isinstance(payload.get("replan_action_packet"), Mapping)
@@ -117,10 +165,20 @@ def ensure_replan_novelty_policy(
     """Upgrade any legacy obligation onto the policy-owned evidence path."""
 
     normalized = dict(obligation)
-    normalized["recommended_action"] = with_replan_novelty_guidance(
-        str(normalized.get("recommended_action") or "run a bounded autonomous replan")
-    )
-    normalized["replan_novelty_policy"] = build_replan_novelty_policy()
+    if normalized.get("resolution_mode") == "todo_lifecycle_settlement":
+        normalized["recommended_action"] = str(
+            normalized.get("recommended_action")
+            or "settle the exact completed Todo lifecycle"
+        ).strip()
+        normalized["replan_novelty_policy"] = {
+            **build_replan_novelty_policy(),
+            "writeback": "todo_lifecycle_or_typed_successor",
+        }
+    else:
+        normalized["recommended_action"] = with_replan_novelty_guidance(
+            str(normalized.get("recommended_action") or "run a bounded autonomous replan")
+        )
+        normalized["replan_novelty_policy"] = build_replan_novelty_policy()
     trigger_identity = [
         {
             key: trigger.get(key)

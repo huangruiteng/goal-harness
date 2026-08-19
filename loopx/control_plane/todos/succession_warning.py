@@ -97,6 +97,7 @@ def _compact_succession_warning_item(item: dict[str, Any]) -> dict[str, Any]:
         "route_id",
         "route_key",
         "completed_at",
+        "completion_turn_key",
         "updated_at",
         "superseded_by",
         "done",

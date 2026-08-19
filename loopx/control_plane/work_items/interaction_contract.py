@@ -949,6 +949,7 @@ def interaction_next_cli_actions(
             replan_settlement_bound=bool(
                 settlement_identity.get("replan_obligation_id")
             ),
+            lifecycle_actor_args=lifecycle_actor_args,
         )
     return _terminal_cli_actions(
         mode=mode,
