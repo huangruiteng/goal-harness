@@ -206,6 +206,78 @@ standalone extensions.
 Direct provider binaries are implementation and debugging surfaces; they are
 not the supported management API.
 
+### Turn-bound external capability providers
+
+An extension that owns a new domain capability may attach one relative JSON
+`integration_profile` to its `[[provides]]` record. LoopX reads, validates, and
+snapshots this profile during manifest installation; later invocation resolves
+only the enabled, doctor-ready active revision. The profile is data, not an
+import or executable path.
+
+```toml
+[runtime]
+protocol = "requirement_projection_provider_v0"
+entrypoint = "example-requirement-provider"
+required_permissions = ["requirement.read"]
+
+[[provides]]
+id = "requirement-delivery"
+kind = "requirement_delivery"
+title = "Requirement delivery"
+visibility = "public"
+integration_profile = "integration-profile.json"
+```
+
+```json
+{
+  "schema_version": "loopx_external_domain_capability_profile_v0",
+  "capability_id": "requirement-delivery",
+  "protocol": "requirement_projection_provider_v0",
+  "operations": [
+    {
+      "id": "observe",
+      "effect_class": "read_only",
+      "required_permission": "requirement.read",
+      "request_schema": "loopx_external_domain_capability_request_v0",
+      "result_schema": "loopx_external_domain_capability_result_v0",
+      "todo_contract": {
+        "action_kinds": ["requirement_observe"],
+        "target_key_prefixes": ["requirement:"],
+        "capability_binding_refs": ["requirement-provider-v1"]
+      }
+    }
+  ]
+}
+```
+
+Preview or execute the provider only as a child of an already planned Turn:
+
+```bash
+loopx capability invoke requirement-delivery \
+  --operation observe \
+  --turn-plan-json turn-plan.json \
+  --input-json provider-input.json
+
+loopx capability invoke requirement-delivery \
+  --operation observe \
+  --turn-plan-json turn-plan.json \
+  --input-json provider-input.json \
+  --execute
+```
+
+The input object contains `context_refs` plus a bounded domain `input` object.
+LoopX independently recomputes the Turn action hash and transaction key, checks
+the exact Goal, Agent, Todo, action kind, target key, and capability binding,
+and derives a deterministic child invocation id. Managed runtime limits still
+apply. The v0 route admits read-only operations only: provider results must not
+contain domain mutations, transition proposals, effect receipts, raw payloads,
+credential-like fields, or private-looking strings.
+
+This child invocation does not itself write LoopX state or spend quota. The
+owning Turn remains the transaction and settlement authority. The Turn plan is
+a local typed binding, not a security token or proof of a remote issuer; service
+authentication and authorization remain the provider's responsibility.
+
 The generic runner is deliberately non-effectful and grants no operation
 effects. Both manifest `permissions` and runtime `required_permissions` must
 be empty. Any operation needing read, write, send, publish, manage, or another
