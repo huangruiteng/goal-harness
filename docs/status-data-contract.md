@@ -454,7 +454,7 @@ goals must stay out of the eligible lane even when they have a high
     "available": true,
     "source": "run_history",
     "sample_run_count": 2,
-    "proxy_note": "run-history proxy; excludes token counts and raw thread logs",
+    "proxy_note": "run-history proxy; carries aggregate token/cost/duration, excludes raw thread logs",
     "totals": {
       "runs_24h": 2,
       "runs_7d": 2,
@@ -484,7 +484,9 @@ first-screen UI are `ok`, `contract`, and `attention_queue`.
 `status_contract`, `event_ledger_summary`, `promotion_readiness_summary`,
 `promotion_gate`, `decision_freshness_summary`, and `usage_summary` are optional and should be
 treated as compact protocol or run-history projections, not as the ledger
-itself, billing telemetry, token telemetry, or a release operation source. A
+itself, authoritative billing telemetry, or a release operation source.
+`usage_summary` carries aggregate token/cost/duration when runs report usage,
+but it remains a run-history proxy, not billing of record. A
 missing `status_contract` means an older status producer; loopback dashboards
 should surface that as a daemon freshness warning rather than silently hiding
 newer panels.
@@ -2122,9 +2124,12 @@ projection and cannot clear the warning.
 ## Usage Summary
 
 `usage_summary` is an optional dashboard-friendly proxy derived from the same
-compact run history. It is not billing telemetry and intentionally excludes
-token counts, raw thread logs, local project paths, private artifact contents,
-or anything that would require reading a Codex session transcript.
+compact run history. When a run reports usage, the summary carries aggregate
+input/output/cache token counts, an estimated cost, and wall-time duration for
+the goal; runs that report nothing contribute nothing. It remains a proxy, not
+billing telemetry: it still excludes raw thread logs, local project paths,
+private artifact contents, or anything that would require reading a Codex
+session transcript. Only aggregate numeric usage is captured.
 
 The summary currently reports:
 
@@ -2142,6 +2147,14 @@ The summary currently reports:
   `state_refreshed`, so dashboards can spot automation loops that keep spending
   or refreshing state without producing a fresh delivery, validation, mapping,
   blocker, or gate signal.
+- `input_tokens_24h` / `input_tokens_7d`, `output_tokens_24h` /
+  `output_tokens_7d`, `cache_tokens_24h` / `cache_tokens_7d`: aggregate token
+  counts for runs that report a normalized `usage` block. Metric fields are
+  omitted for a window with no normalized usage sample; a 24h field can be
+  absent while the corresponding 7d field remains present.
+- `cost_usd_24h` / `cost_usd_7d`: aggregate estimated cost in USD, rounded to
+  six decimals, computed by the reporting runtime.
+- `duration_ms_24h` / `duration_ms_7d`: aggregate wall-time in milliseconds.
 - `project_share_24h`: per-goal share of observed 24h runs, rounded to three
   decimals.
 

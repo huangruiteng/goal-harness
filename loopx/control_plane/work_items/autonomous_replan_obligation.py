@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import Any, Callable, Optional
 
 from ..runtime.time import parse_timestamp
@@ -9,6 +10,7 @@ from ..todos.contract import (
     normalize_todo_claimed_by,
     normalize_todo_id,
     normalize_todo_id_list,
+    normalize_todo_replan_obligation_id,
 )
 from ..todos.deferred_resume import (
     todo_summary_deferred_items,
@@ -49,6 +51,64 @@ def with_replan_novelty_guidance(action: str) -> str:
     if marker in normalized:
         return normalized
     return normalized + REPLAN_NOVELTY_GUIDANCE
+
+
+def replan_obligation_id_from_packet(value: Any) -> str | None:
+    packet = value if isinstance(value, Mapping) else {}
+    return normalize_todo_replan_obligation_id(packet.get("obligation_id"))
+
+
+def build_autonomous_replan_cli_actions(
+    payload: Mapping[str, Any],
+    *,
+    goal_id: str,
+    settlement_args: str,
+    scoped_cli_args: str,
+    quota_spend_action: str,
+    replan_settlement_bound: bool,
+) -> list[str]:
+    packet = (
+        payload.get("replan_action_packet")
+        if isinstance(payload.get("replan_action_packet"), Mapping)
+        else {}
+    )
+    writeback_contract = (
+        packet.get("writeback_contract")
+        if isinstance(packet.get("writeback_contract"), Mapping)
+        else {}
+    )
+    successor_command = str(
+        writeback_contract.get("successor_command") or ""
+    ).strip()
+    if successor_command:
+        return [
+            "execute replan_action_packet.writeback_contract.successor_command",
+            "on host_action=end_current_heartbeat: stop",
+        ]
+    typed_progress_args = (
+        "--progress-result-class "
+        "<advanced|blocked|exploration_exhausted|no_followup> "
+        "--progress-surface-id <surface-id> "
+        "--progress-hypothesis-id <hypothesis-id> "
+        "--progress-probe-kind <probe-kind> "
+        "--progress-evidence-id <evidence-id>"
+    )
+    delivery_args = (
+        "--delivery-batch-scale single_surface "
+        "--delivery-outcome outcome_progress "
+        if replan_settlement_bound
+        else ""
+    )
+    refresh_action = (
+        f"loopx --format json refresh-state --goal-id {goal_id} "
+        "--progress-scope agent_lane "
+        "--classification bounded_replan_progress "
+        f"{delivery_args}{typed_progress_args}"
+        f"{settlement_args}{scoped_cli_args}"
+    )
+    if not replan_settlement_bound:
+        return [refresh_action]
+    return [refresh_action, quota_spend_action]
 
 
 def ensure_replan_novelty_policy(

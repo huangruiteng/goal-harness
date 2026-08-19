@@ -11,9 +11,10 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 DOC = (
     ROOT
-    / "docs"
+    / "loopx"
     / "capabilities"
-    / "value-connectors"
+    / "value_connectors"
+    / "docs"
     / "finance-market-snapshot-probe.md"
 )
 

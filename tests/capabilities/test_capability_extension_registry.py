@@ -25,6 +25,7 @@ from loopx.extensions.runtime import (
 BUILTIN_IDS = [
     "benchmark-toolkit",
     "integration-branch-reconcile",
+    "repository-change-window",
     "change-quality-qualification",
     "pull-request-review",
     "issue-fix",

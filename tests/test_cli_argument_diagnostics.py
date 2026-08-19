@@ -176,6 +176,7 @@ def test_quota_include_detail_rejects_non_should_run_command(
     assert exit_code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
+    assert payload["error_code"] == "QUOTA_VALIDATION_FAILED"
     assert payload["error"] == (
         "--include-detail is only valid with `quota should-run` or "
         "`quota monitor-poll`"
@@ -210,6 +211,9 @@ def test_quota_include_detail_rejects_other_command_sections(
     assert exit_code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
+    assert payload["error_code"] == "QUOTA_VALIDATION_FAILED"
+    assert payload["state"] == "blocked_validation"
+    assert payload["status"] == "quota_validation_failed"
     assert payload["reason"] == (
         f"`quota {command}` does not accept --include-detail {section}"
     )
@@ -366,6 +370,73 @@ def test_deprecated_scheduler_detail_alias_is_hidden_from_help(
     help_text = capsys.readouterr().out
     assert "--include-detail" in help_text
     assert "--include-scheduler-detail" not in help_text
+
+
+def test_quota_collection_failure_payload_is_path_free_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from loopx.cli_commands import quota as quota_command
+
+    def fail_collect_status(**_kwargs: object) -> dict[str, object]:
+        raise FileNotFoundError("/private/internal/secret.json")
+
+    monkeypatch.setattr(quota_command, "collect_status", fail_collect_status)
+
+    exit_code = main(["--format", "json", "quota", "status"])
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error_code"] == "quota_state_io_failed"
+    assert payload["error"] == "quota collection failed"
+    assert "verbose_debug" not in payload
+    assert "/private/internal/secret.json" not in json.dumps(payload, sort_keys=True)
+
+
+def test_quota_runtime_value_error_is_not_treated_as_public_safe_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from loopx.cli_commands import quota as quota_command
+
+    def fail_collect_status(**_kwargs: object) -> dict[str, object]:
+        raise ValueError("/private/internal/runtime-secret.json")
+
+    monkeypatch.setattr(quota_command, "collect_status", fail_collect_status)
+
+    exit_code = main(["--format", "json", "quota", "status"])
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error_code"] == "quota_unexpected_collection_error"
+    assert payload["error"] == "quota collection failed"
+    assert "verbose_debug" not in payload
+    assert "/private/internal/runtime-secret.json" not in json.dumps(
+        payload, sort_keys=True
+    )
+
+
+def test_quota_collection_failure_verbose_surfaces_raw_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from loopx.cli_commands import quota as quota_command
+
+    def fail_collect_status(**_kwargs: object) -> dict[str, object]:
+        raise FileNotFoundError("/private/internal/secret.json")
+
+    monkeypatch.setattr(quota_command, "collect_status", fail_collect_status)
+
+    exit_code = main(["--format", "json", "quota", "status", "--verbose"])
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"] == "quota collection failed"
+    assert payload["verbose_debug"]["error_type"] == "FileNotFoundError"
+    assert payload["verbose_debug"]["error"] == "/private/internal/secret.json"
 
 
 @pytest.mark.parametrize(

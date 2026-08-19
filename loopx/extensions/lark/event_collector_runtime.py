@@ -54,6 +54,36 @@ def _run_json(
         return {}
 
 
+def _run_json_with_status(
+    runner: CommandRunner,
+    argv: Sequence[str],
+    *,
+    timeout_seconds: float = 30,
+) -> tuple[object, str]:
+    try:
+        result = runner(
+            list(argv),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return {}, "message_context_lookup_failed"
+    except (OSError, subprocess.SubprocessError):
+        return {}, "message_context_lookup_failed"
+    try:
+        payload: object = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError):
+        payload = {}
+    provider_code = str(payload.get("code") or "") if isinstance(payload, Mapping) else ""
+    if result.returncode != 0:
+        if provider_code == "230027":
+            return {}, "message_context_permission_required"
+        return {}, "message_context_lookup_failed"
+    return payload, "message_context_available"
+
+
 def _find_string_by_key(value: object, keys: set[str]) -> str | None:
     if isinstance(value, Mapping):
         for key, child in value.items():
@@ -131,6 +161,45 @@ def _read_message(
     return None
 
 
+def _read_message_with_status(
+    *,
+    runner: CommandRunner,
+    command_prefix: Sequence[str],
+    profile: str,
+    message_id: str,
+    attempts: int,
+    sleeper: Sleeper,
+) -> tuple[Mapping[str, Any] | None, str]:
+    status = "message_context_unavailable"
+    for attempt in range(max(1, attempts)):
+        payload, current_status = _run_json_with_status(
+            runner,
+            [
+                *command_prefix,
+                "--profile",
+                profile,
+                "im",
+                "+messages-mget",
+                "--message-ids",
+                message_id,
+                "--as",
+                "bot",
+                "--no-reactions",
+                "--format",
+                "json",
+            ],
+        )
+        if current_status == "message_context_permission_required":
+            return None, current_status
+        if current_status == "message_context_lookup_failed":
+            status = current_status
+        if message := _find_message(payload, message_id):
+            return message, "message_context_verified"
+        if attempt + 1 < max(1, attempts):
+            sleeper(0.5 * (attempt + 1))
+    return None, status
+
+
 def _sender_identity(message: Mapping[str, Any]) -> tuple[str, str]:
     sender = message.get("sender")
     sender = sender if isinstance(sender, Mapping) else {}
@@ -162,10 +231,11 @@ def enrich_lark_event_reply_context(
     enriched = dict(event)
     enriched["reply_context_verified"] = False
     enriched["reply_to_bot"] = False
+    enriched["message_context_status"] = "message_context_unavailable"
     message_id = str(event.get("message_id") or "").strip()
     if not MESSAGE_ID_PATTERN.fullmatch(message_id):
         return enriched
-    current = _read_message(
+    current, current_status = _read_message_with_status(
         runner=runner,
         command_prefix=command_prefix,
         profile=profile,
@@ -173,8 +243,21 @@ def enrich_lark_event_reply_context(
         attempts=attempts,
         sleeper=sleeper,
     )
+    enriched["message_context_status"] = current_status
     if current is None or str(current.get("chat_id") or "") != configured_chat_id:
         return enriched
+
+    # The compact lark-cli event stream intentionally carries only stable event
+    # envelope fields. Message-level routing fields live on the message lookup
+    # response, so copy them into the canonical event before deciding whether
+    # this bot was addressed and which Goal Topic owns the message.
+    for field in ("content", "mentions", "mentioned"):
+        value = current.get(field)
+        if value not in (None, "", [], False):
+            enriched[field] = value
+    current_sender_type, current_sender_id = _sender_identity(current)
+    if current_sender_id:
+        enriched["sender_id"] = current_sender_id
 
     parent_id = str(current.get("parent_id") or "").strip()
     root_id = str(current.get("root_id") or "").strip()
@@ -182,10 +265,11 @@ def enrich_lark_event_reply_context(
         enriched["root_id"] = root_id
     if not MESSAGE_ID_PATTERN.fullmatch(parent_id):
         enriched["reply_context_verified"] = True
+        enriched["message_context_status"] = "message_context_verified"
         return enriched
     enriched["parent_id"] = parent_id
 
-    parent = _read_message(
+    parent, parent_status = _read_message_with_status(
         runner=runner,
         command_prefix=command_prefix,
         profile=profile,
@@ -193,11 +277,13 @@ def enrich_lark_event_reply_context(
         attempts=attempts,
         sleeper=sleeper,
     )
+    if parent_status != "message_context_verified":
+        enriched["message_context_status"] = parent_status
     if parent is None or str(parent.get("chat_id") or "") != configured_chat_id:
         return enriched
-    current_sender_type, _ = _sender_identity(current)
     parent_sender_type, parent_sender_id = _sender_identity(parent)
     enriched["reply_context_verified"] = True
+    enriched["message_context_status"] = "message_context_verified"
     enriched["reply_to_bot"] = bool(
         current_sender_type == "user"
         and parent_sender_type == "app"

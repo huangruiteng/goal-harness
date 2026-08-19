@@ -40,11 +40,12 @@ def assert_doc() -> None:
 
     must_have = (
         "Codex CLI First-Run Rehearsal",
-        "no-clone install/update through the GitHub archive installer",
+        "PyPI install/update with packaged workflow skills and an archive fallback",
         "one-message Codex CLI TUI bootstrap",
         "proof-capture fixtures for later visible automation",
         "Start LoopX for this repo",
-        "huangruiteng.github.io/loopx/install.sh",
+        "python3 -m pip install --upgrade loopx",
+        "loopx workflow-skills --install",
         "loopx codex-cli-bootstrap-message --project . --goal-id <goal-id> --message-only",
         "loopx codex-cli-tui-bootstrap-smoke-bundle",
         "loopx --format json codex-cli-visible-attach-acceptance",
@@ -73,7 +74,7 @@ def assert_indexes() -> None:
     assert link in product, product
     assert "product/README.md" in docs, docs
     assert f"../product/runtimes/codex-cli/{link}" in getting_started, getting_started
-    assert "no-clone install" in product, product
+    assert "PyPI" in product, product
     assert "one-message TUI bootstrap" in product, product
     assert "proof-capture fixtures" in getting_started, getting_started
 
@@ -94,7 +95,8 @@ def assert_cli_surfaces_align() -> None:
     assert not message.startswith("/goal "), message
     assert "setup/bootstrap instruction" in normalized, message
     assert "/goal <thin task_body>" in normalized, message
-    assert "huangruiteng.github.io/loopx/install.sh" in normalized, message
+    assert "python3 -m pip install --upgrade loopx" in normalized, message
+    assert "workflow-skills --install" in normalized, message
     assert "Codex CLI TUI" in normalized, message
     assert "quota should-run" in normalized, message
     assert "quota spend-slot" in normalized, message

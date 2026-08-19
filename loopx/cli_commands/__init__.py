@@ -54,6 +54,7 @@ from .project_lifecycle import (
 from .project import handle_project_command, register_project_commands
 from .preset import handle_preset_command, register_preset_commands
 from .presentation import handle_presentation_command, register_presentation_commands
+from .dash import handle_dash_command, register_dash_commands
 from .pr_review import handle_pr_review_command, register_pr_review_command
 from .quota import handle_quota_command, register_quota_command
 from .ready_score import handle_ready_score_command, register_ready_score_command
@@ -122,6 +123,10 @@ from .task_lease import handle_task_lease_command, register_task_lease_command
 from .todo import handle_todo_command, register_todo_command
 from .version import handle_version_command, register_version_command
 from .worker_bridge import handle_worker_bridge_command, register_worker_bridge_commands
+from .workflow_skills import (
+    handle_workflow_skills_command,
+    register_workflow_skills_command,
+)
 
 __all__ = [
     "handle_turn_command",
@@ -168,6 +173,7 @@ __all__ = [
     "handle_new_project_prompt_command",
     "handle_preset_command",
     "handle_presentation_command",
+    "handle_dash_command",
     "handle_project_lifecycle_command",
     "handle_project_command",
     "handle_pr_review_command",
@@ -190,6 +196,7 @@ __all__ = [
     "handle_todo_command",
     "handle_version_command",
     "handle_worker_bridge_command",
+    "handle_workflow_skills_command",
     "register_turn_commands",
     "register_host_mode_plan_command",
     "register_benchmark_boundary_commands",
@@ -215,6 +222,7 @@ __all__ = [
     "register_pr_review_command",
     "register_preset_commands",
     "register_presentation_commands",
+    "register_dash_commands",
     "register_quota_command",
     "register_ready_score_command",
     "register_review_batch_commands",
@@ -233,4 +241,5 @@ __all__ = [
     "register_todo_command",
     "register_version_command",
     "register_worker_bridge_commands",
+    "register_workflow_skills_command",
 ]

@@ -236,6 +236,52 @@
               ],
               "type": "object"
             },
+            "docs_views": {
+              "properties": {
+                "count": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "uniques": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "count",
+                "uniques"
+              ],
+              "type": "object"
+            },
+            "paths": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "count": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "uniques": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "path",
+                  "title",
+                  "count",
+                  "uniques"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
             "views": {
               "properties": {
                 "count": {
@@ -256,7 +302,9 @@
           },
           "required": [
             "views",
-            "clones"
+            "clones",
+            "paths",
+            "docs_views"
           ],
           "type": "object"
         }

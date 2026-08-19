@@ -76,6 +76,15 @@ def register_quota_command(
         ),
     )
     quota_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help=(
+            "Include the raw exception detail in failure payloads for maintainer "
+            "diagnosis. Off by default so the public failure payload stays "
+            "path-free."
+        ),
+    )
+    quota_parser.add_argument(
         "--include-scheduler-detail",
         action="store_true",
         # Deprecated compatibility alias. Remove in the next breaking release.
@@ -151,9 +160,18 @@ def register_quota_command(
     quota_parser.add_argument(
         "--turn-instance-id",
         help=(
-            "Stable heartbeat settlement id for `quota should-run` and "
-            "`quota spend-slot`. The guard persists one idempotent receipt; "
-            "reuse the same id through writeback, spend, and retries."
+            "Stable heartbeat settlement id for `quota should-run`, "
+            "`quota monitor-poll`, and `quota spend-slot`. The guard persists "
+            "one idempotent receipt; reuse the same id through monitor "
+            "writeback, refresh-state, spend, and retries."
+        ),
+    )
+    quota_parser.add_argument(
+        "--replan-obligation-id",
+        help=(
+            "Typed autonomous replan obligation binding for `quota spend-slot`. "
+            "Use the exact value projected by the original turn-scoped guard; "
+            "cannot be combined with --todo-id."
         ),
     )
     quota_parser.add_argument("--slots", type=int, default=1, help="Slots to account for `quota spend-slot`.")

@@ -87,6 +87,7 @@ def main() -> int:
         old_output = run_status(fake_bin, home, schema_version=1)
         assert "- com.loopx.status: loaded" in old_output, old_output
         assert "- com.loopx.dashboard: loaded" in old_output, old_output
+        assert "- com.loopx.chat: loaded" in old_output, old_output
         assert "- status_contract: schema_version=1 producer=loopx status expected>=2" in old_output, old_output
         assert "- control_plane_write_api: disabled" in old_output, old_output
         assert "warning: status feed is using an old contract; run:" in old_output, old_output
@@ -104,8 +105,13 @@ def main() -> int:
         install_env = {"LOOPX_DASHBOARD_DIST_DIR": str(dashboard_dist)}
         run_script(fake_bin, home, ["install"], schema_version=2, extra_env=install_env)
         status_plist = home / "Library" / "LaunchAgents" / "com.loopx.status.plist"
+        chat_plist = home / "Library" / "LaunchAgents" / "com.loopx.chat.plist"
         default_plist = status_plist.read_text(encoding="utf-8")
+        default_chat_plist = chat_plist.read_text(encoding="utf-8")
         assert "--enable-control-plane-write-api" not in default_plist, default_plist
+        assert " chat --global-registry " in default_chat_plist, default_chat_plist
+        assert "--port 8767" in default_chat_plist, default_chat_plist
+        assert "--no-open" in default_chat_plist, default_chat_plist
 
         run_script(
             fake_bin,

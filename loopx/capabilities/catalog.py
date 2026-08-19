@@ -7,6 +7,9 @@ from typing import Any
 from ..extensions.runtime import extension_catalog_entries
 from .benchmark_toolkit.catalog_entry import BENCHMARK_TOOLKIT_CATALOG_ENTRY
 from .integration_branch.catalog_entry import INTEGRATION_BRANCH_CATALOG_ENTRY
+from .repository_change_window.catalog_entry import (
+    REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY,
+)
 from .change_quality.catalog_entry import CHANGE_QUALITY_CATALOG_ENTRY
 from .pr_review_queue.catalog_entry import PR_REVIEW_CATALOG_ENTRY
 from .issue_fix.catalog_entry import ISSUE_FIX_CATALOG_ENTRY
@@ -30,6 +33,7 @@ CAPABILITY_DETAIL_SCHEMA_VERSION = "loopx_capability_detail_v0"
 BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
     BENCHMARK_TOOLKIT_CATALOG_ENTRY,
     INTEGRATION_BRANCH_CATALOG_ENTRY,
+    REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY,
     CHANGE_QUALITY_CATALOG_ENTRY,
     PR_REVIEW_CATALOG_ENTRY,
     ISSUE_FIX_CATALOG_ENTRY,
@@ -217,6 +221,24 @@ def render_capability_detail_markdown(payload: dict[str, Any]) -> str:
                 f"  - boundary: {item.get('write_boundary')}",
             ]
         )
+    agent_usage = record.get("agent_usage")
+    if isinstance(agent_usage, Mapping):
+        lines.extend(["", "## Agent Usage", ""])
+        start_hint = agent_usage.get("benchmark_start_hint") or agent_usage.get(
+            "start_hint"
+        )
+        if start_hint:
+            lines.extend([str(start_hint), ""])
+        for step in agent_usage.get("required_sequence") or []:
+            lines.append(f"- `{step}`")
+        board_commands = agent_usage.get("board_commands")
+        if isinstance(board_commands, Mapping):
+            lines.append("")
+            for name, command in board_commands.items():
+                lines.append(f"- {name}: `{command}`")
+        selection_rule = agent_usage.get("selection_rule")
+        if selection_rule:
+            lines.extend(["", f"- selection rule: {selection_rule}"])
     lines.extend(["", "## Implemented Protocols", ""])
     for item in record.get("implemented_protocols") or []:
         if not isinstance(item, Mapping):

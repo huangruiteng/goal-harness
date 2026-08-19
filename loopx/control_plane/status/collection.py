@@ -28,6 +28,7 @@ class StatusCollectionContext:
     build_status_contract: StatusCallback
     build_contract_health_projection: StatusCallback
     build_agent_management_projection: StatusCallback
+    build_goal_channel_notification_projection: StatusCallback
     status_control_plane_context_limit: int
     max_todo_index_items: int
 
@@ -42,6 +43,7 @@ def collect_status(
     include_task_graph: bool = False,
     goal_id: str | None = None,
     available_capabilities: Any = None,
+    include_public_boundary_scan: bool = True,
 ) -> dict[str, Any]:
     display_limit = max(0, limit)
     control_plane_limit = max(display_limit, context.status_control_plane_context_limit)
@@ -71,6 +73,7 @@ def collect_status(
         scan_roots=scan_roots,
         limit=limit,
         goal_id_filter=goal_filter,
+        include_public_boundary_scan=include_public_boundary_scan,
     )
     contract = project_contract_health_for_goal(contract, goal_id=goal_filter)
     queue = context.build_attention_queue(
@@ -112,7 +115,11 @@ def collect_status(
         "warnings": contract.get("warnings") or [],
         "checks": contract.get("checks") or [],
     }
-    for key in ("error_diagnostics", "global_errors", "goal_errors"):
+    for key in (
+        "error_diagnostics",
+        "global_errors",
+        "goal_errors",
+    ):
         if contract.get(key):
             contract_projection[key] = contract[key]
     payload = {
@@ -137,4 +144,26 @@ def collect_status(
     )
     if agent_management_projection.get("agents"):
         payload["agent_management_projection"] = agent_management_projection
+    try:
+        goal_channel_notification_projection = (
+            context.build_goal_channel_notification_projection(
+                registry_path=registry_path,
+                registry=registry,
+                goal_id=goal_filter,
+            )
+        )
+    except Exception:
+        goal_channel_notification_projection = None
+    notification_rows = (
+        goal_channel_notification_projection.get("goals")
+        if isinstance(goal_channel_notification_projection, dict)
+        else None
+    )
+    if isinstance(notification_rows, list) and any(
+        isinstance(row, dict) and row.get("configured") is True
+        for row in notification_rows
+    ):
+        payload["goal_channel_notification_projection"] = (
+            goal_channel_notification_projection
+        )
     return payload

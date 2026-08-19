@@ -59,6 +59,7 @@ next_real_step = "Keep explicit enablement bounded."
     assert [item["id"] for item in baseline["capabilities"]] == [
         "benchmark-toolkit",
         "integration-branch-reconcile",
+        "repository-change-window",
         "change-quality-qualification",
         "pull-request-review",
         "issue-fix",

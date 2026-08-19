@@ -1,0 +1,73 @@
+import { useEffect, useRef, type ReactNode } from "react";
+
+export function WorkspaceShell({
+  drawer,
+  drawerOpen,
+  main,
+  mobileSidebarOpen = false,
+  onCloseMobileSidebar,
+  sidebar,
+  theme = "paper",
+}: {
+  drawer?: ReactNode;
+  drawerOpen: boolean;
+  main: ReactNode;
+  mobileSidebarOpen?: boolean;
+  onCloseMobileSidebar?: () => void;
+  sidebar: ReactNode;
+  theme?: "brutal" | "paper";
+}) {
+  const sidebarRef = useRef<HTMLElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const sidebar = sidebarRef.current;
+    const focusable = sidebar?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], select:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    focusable?.[0]?.focus();
+
+    function trapSidebarFocus(event: KeyboardEvent) {
+      if (event.key !== "Tab" || !focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", trapSidebarFocus);
+    return () => {
+      document.removeEventListener("keydown", trapSidebarFocus);
+      restoreFocusRef.current?.focus();
+      restoreFocusRef.current = null;
+    };
+  }, [mobileSidebarOpen]);
+
+  return (
+    <section className={`personal-workspace-shell${drawerOpen ? " has-drawer" : ""}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}`} data-pw-theme={theme}>
+      {mobileSidebarOpen ? <button aria-hidden className="personal-sidebar-backdrop" onClick={onCloseMobileSidebar} tabIndex={-1} type="button" /> : null}
+      <aside
+        aria-label={mobileSidebarOpen ? "Goal 导航" : undefined}
+        aria-modal={mobileSidebarOpen ? true : undefined}
+        className="personal-workspace-sidebar"
+        data-workspace-sidebar
+        ref={sidebarRef}
+        role={mobileSidebarOpen ? "dialog" : undefined}
+      >
+        <div className="personal-workspace-sidebar-inner">
+          {mobileSidebarOpen ? <button className="personal-sr-only" onClick={onCloseMobileSidebar} type="button">关闭 Goal 导航</button> : null}
+          {sidebar}
+        </div>
+      </aside>
+      <main aria-hidden={mobileSidebarOpen || undefined} className="personal-workspace-main" inert={mobileSidebarOpen || undefined}>{main}</main>
+      {drawerOpen ? <aside className="personal-workspace-drawer" data-context-drawer>{drawer}</aside> : null}
+    </section>
+  );
+}

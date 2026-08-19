@@ -1,4 +1,4 @@
-.TH LOOPX 1 "" "LoopX 0.4.8" "User Commands"
+.TH LOOPX 1 "" "LoopX 0.4.9" "User Commands"
 .SH NAME
 loopx \- control-plane helper for long-running agent work
 .SH SYNOPSIS
@@ -60,6 +60,12 @@ Generate the lower\-level host handoff packet.
 \fBloopx status\fR
 Show goals, gates, attention queue, and next action.
 .TP
+\fBloopx dashboard\fR
+Start the local dashboard, status service, and Agent Chat service with one command.
+.TP
+\fBloopx chat \-\-goal\-id <goal\-id>\fR
+Open Goal Studio, ask the read\-only Agent for a bounded Todo, and approve its preview before writeback.
+.TP
 \fBloopx diagnose \-\-goal\-id <goal\-id>\fR
 Build a compact evidence packet when behavior is surprising.
 .TP
@@ -99,6 +105,9 @@ Use installed slash skills for `/loopx`; enable the adapter only when native `/l
 .TP
 \fBOpenCode goal bridge\fR
 Opt into `\-\-with\-goal\-bridge`, then use `loopx_goal_activate` to bind the quota\-gated bridge.
+.TP
+\fBKunlunCode native Goal controller\fR
+Run `loopx\-kunluncode connect`, verify the managed MCP entry, then let `loopx\-kunluncode run` create or resume a verifier\-gated native Goal Pro.
 .TP
 \fBOther agent or shell\fR
 Use a CLI, task, automation, heartbeat, or scheduler hook; otherwise drive LoopX manually.
@@ -154,6 +163,9 @@ Check, dry\-run, or execute the no\-clone update path.
 .TP
 \fBloopx project\-skill \-\-help\fR
 Install, inspect, or remove release\-owned skills in selected project agent hosts.
+.TP
+\fBloopx workflow\-skills\fR
+Inspect, install, or remove packaged user\-level LoopX workflow skills.
 .SH MAINTAINER AND ADAPTER COMMANDS
 .TP
 \fBloopx check\fR
@@ -164,6 +176,9 @@ Qualify one exact final diff against an enabled project policy and receipt contr
 .TP
 \fBloopx integration\-branch \-\-help\fR
 Detect reviewed source\-branch drift and rebuild one local integration branch.
+.TP
+\fBloopx change\-window \-\-help\fR
+Apply a repository\-local schedule and inspect blocked unmerged work in the shared ledger.
 .TP
 \fBloopx registry\fR
 Inspect registered goals and adapters.

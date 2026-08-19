@@ -79,6 +79,7 @@ def main() -> None:
         "goals": [
             {
                 "id": "loopx-meta",
+                "display_name": "LoopX Control Plane",
                 "domain": "loopx-platform",
                 "status": "active-read-only",
                 "registry_member": True,
@@ -204,6 +205,7 @@ def main() -> None:
     assert len(full["recent_runs"]) == 2, full
 
     meta = full["goals"][0]
+    assert meta["display_name"] == "LoopX Control Plane", meta
     assert meta["quota"] is not None, meta
     assert meta["coordination"]["agent_model"] == "peer_v1", meta
     assert "primary_agent" not in meta["coordination"], meta

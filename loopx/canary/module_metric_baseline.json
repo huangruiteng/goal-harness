@@ -10,10 +10,20 @@
       "dict_any_count": 0,
       "lines": 2240
     },
+    "loopx/chat_actions.py": {
+      "any_count": 52,
+      "dict_any_count": 0,
+      "lines": 1590
+    },
     "loopx/canary/planner.py": {
       "any_count": 22,
       "dict_any_count": 0,
-      "lines": 1984
+      "lines": 1992
+    },
+    "loopx/chat_server.py": {
+      "any_count": 25,
+      "dict_any_count": 0,
+      "lines": 1513
     },
     "loopx/capabilities/auto_research/demo_e2e.py": {
       "any_count": 0,
@@ -103,7 +113,7 @@
     "loopx/todos.py": {
       "any_count": 48,
       "dict_any_count": 0,
-      "lines": 2229
+      "lines": 2249
     },
     "loopx/worker_bridge.py": {
       "any_count": 28,

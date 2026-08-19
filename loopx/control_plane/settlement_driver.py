@@ -85,24 +85,40 @@ def settlement_identity_from_plan(
             step_kind=SettlementStepKind.VALIDATION,
             reason="Turn settlement plan has no identity",
         )
-    required = (
-        "goal_id",
-        "agent_id",
-        "todo_id",
-        "turn_instance_id",
-    )
+    required = ("goal_id", "agent_id", "turn_instance_id")
     if any(not str(identity.get(field) or "").strip() for field in required):
         return SettlementResult.failed(
             kind=SettlementFailureKind.INVALID_IDENTITY,
             step_kind=SettlementStepKind.VALIDATION,
             reason="Turn settlement plan has an incomplete identity",
         )
-    built = SettlementIdentity(
-        goal_id=str(identity["goal_id"]),
-        agent_id=str(identity["agent_id"]),
-        todo_id=str(identity["todo_id"]),
-        turn_instance_id=str(identity["turn_instance_id"]),
-    )
+    if bool(str(identity.get("todo_id") or "").strip()) == bool(
+        str(identity.get("replan_obligation_id") or "").strip()
+    ):
+        return SettlementResult.failed(
+            kind=SettlementFailureKind.INVALID_IDENTITY,
+            step_kind=SettlementStepKind.VALIDATION,
+            reason=(
+                "Turn settlement plan requires exactly one Todo or autonomous "
+                "replan obligation binding"
+            ),
+        )
+    try:
+        built = SettlementIdentity(
+            goal_id=str(identity["goal_id"]),
+            agent_id=str(identity["agent_id"]),
+            todo_id=str(identity.get("todo_id") or "") or None,
+            turn_instance_id=str(identity["turn_instance_id"]),
+            replan_obligation_id=(
+                str(identity.get("replan_obligation_id") or "") or None
+            ),
+        )
+    except ValueError as exc:
+        return SettlementResult.failed(
+            kind=SettlementFailureKind.INVALID_IDENTITY,
+            step_kind=SettlementStepKind.VALIDATION,
+            reason=str(exc),
+        )
     effect_id = str(identity.get("effect_id") or "").strip()
     if not effect_id:
         return SettlementResult.failed(

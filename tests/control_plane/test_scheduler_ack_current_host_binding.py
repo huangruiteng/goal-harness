@@ -6,7 +6,7 @@ from pathlib import Path
 
 from examples.control_plane.quota_plan_fixtures import SCOPED_AGENT_ID, write_cli_fixture
 from loopx.cli_commands import quota as quota_command
-from loopx.control_plane.testing.canary_harness import run_json_cli
+from loopx.control_plane.testing.canary_harness import run_json_cli, run_json_cli_result
 from loopx.status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK
 
 
@@ -42,7 +42,7 @@ def _quota(
     runtime_root: Path,
     project: Path,
 ) -> dict:
-    return run_json_cli(
+    _returncode, payload = run_json_cli_result(
         "quota",
         "should-run",
         "--goal-id",
@@ -54,6 +54,7 @@ def _quota(
         runtime_root=runtime_root,
         cwd=project,
     )
+    return payload
 
 
 def test_scheduler_ack_current_replays_host_binding_after_update(

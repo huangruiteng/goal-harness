@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
     "id": "pull-request-review",
     "origin": "builtin",
@@ -24,8 +23,8 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
     "default_enabled": False,
     "real_world_anchor": "maintainer review of a changing public GitHub PR queue",
     "user_value": (
-        "Turn one complete open-PR observation into a deterministic exact-head "
-        "review candidate without repeating unchanged work or granting review writes."
+        "Turn complete open-PR observations into age-fair exact-head review "
+        "candidates without repeating handled work or granting external writes."
     ),
     "entry_command": (
         "loopx pr-review --repo <owner/repo> --state open "
@@ -50,6 +49,16 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
             "purpose": "Classify a complete queue and advance from explicitly handled exact heads to the next unhandled candidate.",
             "write_boundary": "reads one caller-supplied local observation; emits a preview only and grants no external authority",
         },
+        {
+            "command": (
+                "loopx pr-review --repo <owner/repo> --state open "
+                "--autonomous-observation --observation-state-file "
+                "<ignored-local-checkpoint.json> "
+                "[--handled-exact-head NUMBER@HEAD_OID] --format json"
+            ),
+            "purpose": "Atomically continue age-fair review scheduling across Codex tasks.",
+            "write_boundary": "writes only the explicit public-safe local checkpoint; grants no GitHub, Todo, push, or merge authority",
+        },
     ],
     "implemented_protocols": [
         {
@@ -73,6 +82,16 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "loopx/capabilities/pr_review_queue/README.md",
         },
         {
+            "schema_version": "pull_request_review_monitor_checkpoint_v0",
+            "module": "loopx.cli_commands.pr_review",
+            "doc": "loopx/capabilities/pr_review_queue/README.md",
+        },
+        {
+            "schema_version": "pull_request_review_conclusion_v0",
+            "module": "loopx.pr_review",
+            "doc": "loopx/capabilities/pr_review_queue/README.md",
+        },
+        {
             "schema_version": "pull_request_review_candidate_v0",
             "module": "loopx.capabilities.pr_review_queue.core",
             "doc": "loopx/capabilities/pr_review_queue/README.md",
@@ -91,9 +110,11 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
     "boundaries": [
         "The shared execution contract owns review depth, evidence completeness, exact-head freshness, symbol-map, walkthrough, validation, failure, and code-volume requirements; host skills only route and publish it.",
         "A queue is observed only when result_completeness.complete=true; partial or failed reads are not_observed and never count as unchanged.",
-        "Fingerprints cover exact head, review decision, check state, draft state, and mergeability for every open PR.",
+        "Fingerprints cover exact head, formal conclusion, next action, check state, draft state, and mergeability for every open PR.",
+        "Current-head review_ready_at, not updatedAt, owns age-fair ordering; one new head after REQUEST_CHANGES may use a bounded fast-feedback slot.",
+        "A complete exact-head conclusion requires the five Chinese sections, a state-aligned English verdict, and formal state or the verdict-specific titled author-owned fallback.",
         "One observation emits at most one exact-head advancement Todo preview; unchanged observations emit no duplicate candidate and may advance only from an explicit handled exact-head cursor.",
-        "The capability reuses the existing pr-review GitHub scan and normalized packet; it does not add a second provider or capture review bodies and logs.",
+        "The capability reuses the existing pr-review GitHub scan and normalized packet; review bodies are inspected for format but never emitted or checkpointed.",
         "Candidate selection grants no GitHub review, comment, push, merge, quota, or Todo-write authority; those remain with their existing policy surfaces.",
     ],
     "next_real_step": (

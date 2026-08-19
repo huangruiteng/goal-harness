@@ -87,7 +87,7 @@ def assert_docs() -> None:
         "codex-cli-bootstrap-message",
         "codex-cli-tui-bootstrap-smoke-bundle",
         "codex-cli-visible-attach-acceptance",
-        "Current release route: **ready as the default candidate, with one boundary**.",
+        "Current archive route: **qualified as the recovery fallback, with one boundary**.",
         "network access to GitHub archive endpoints",
         "same-TUI automation is not the default path",
         "python3 examples/release/codex-cli-no-clone-release-verification-smoke.py",
@@ -161,7 +161,8 @@ def assert_installed_release(
     assert not message.startswith("/goal "), message
     assert "setup/bootstrap instruction" in normalized_message, message
     assert "/goal <thin task_body>" in normalized_message, message
-    assert "huangruiteng.github.io/loopx/install.sh" in normalized_message, message
+    assert "python3 -m pip install --upgrade loopx" in normalized_message, message
+    assert "workflow-skills --install" in normalized_message, message
     assert "Codex CLI TUI" in normalized_message, message
     assert "quota should-run" in normalized_message, message
     assert "quota spend-slot" in normalized_message, message

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
+from email.parser import Parser
 from pathlib import Path
 import shutil
 import subprocess
@@ -15,6 +16,23 @@ SKILL_INSTALL_READBACK_SCHEMA_VERSION = "loopx_skill_install_readback_v0"
 SKILL_INSTALL_READBACK_FILENAME = ".loopx-skill-install.json"
 SKILL_INSTALL_OWNER = "loopx_install_script"
 SKILL_INSTALL_INTEGRATION_MODE = "fixed_install_script"
+PYTHON_DISTRIBUTION_SKILL_INSTALL_OWNER = "loopx_workflow_skills_cli"
+PYTHON_DISTRIBUTION_SKILL_INSTALL_MODE = "python_distribution_cli"
+SKILL_INSTALL_OWNERS = {
+    SKILL_INSTALL_OWNER,
+    PYTHON_DISTRIBUTION_SKILL_INSTALL_OWNER,
+}
+SKILL_INSTALL_INTEGRATION_MODES = {
+    SKILL_INSTALL_INTEGRATION_MODE,
+    PYTHON_DISTRIBUTION_SKILL_INSTALL_MODE,
+}
+SKILL_INSTALL_PROFILES = {
+    (SKILL_INSTALL_OWNER, SKILL_INSTALL_INTEGRATION_MODE),
+    (
+        PYTHON_DISTRIBUTION_SKILL_INSTALL_OWNER,
+        PYTHON_DISTRIBUTION_SKILL_INSTALL_MODE,
+    ),
+}
 LOOPX_MANAGED_SLASH_COMMAND_MARKER = "<!-- loopx-managed-slash-command:v1"
 PACKAGED_HOST_SKILL_IDS = [
     "loopx-project",
@@ -258,6 +276,22 @@ def _source_readback(
             "git_dirty": release_source.get("git_dirty"),
         }
 
+    for metadata_path in sorted(source_root.glob("loopx-*.dist-info/METADATA")):
+        try:
+            metadata = Parser().parsestr(metadata_path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if metadata.get("Name", "").strip().lower() != "loopx":
+            continue
+        version = metadata.get("Version", "").strip()
+        if version:
+            return {
+                "kind": "python_distribution",
+                "revision": version,
+                "revision_kind": "package_version",
+                "git_dirty": False,
+            }
+
     commit = _git_value(source_root, "rev-parse", "HEAD")
     status = _git_value(source_root, "status", "--porcelain")
     return {
@@ -285,7 +319,17 @@ def build_skill_install_readback(
     skill_ids: Sequence[str],
     source_root: Path,
     installed_at: str | None = None,
+    owner: str = SKILL_INSTALL_OWNER,
+    integration_mode: str = SKILL_INSTALL_INTEGRATION_MODE,
 ) -> dict[str, Any]:
+    if owner not in SKILL_INSTALL_OWNERS:
+        raise ValueError(f"unsupported skill install owner: {owner}")
+    if integration_mode not in SKILL_INSTALL_INTEGRATION_MODES:
+        raise ValueError(f"unsupported skill install integration mode: {integration_mode}")
+    if (owner, integration_mode) not in SKILL_INSTALL_PROFILES:
+        raise ValueError(
+            "skill install owner and integration mode do not form a supported profile"
+        )
     normalized_ids = sorted(
         {skill_id.strip() for skill_id in skill_ids if skill_id.strip()}
     )
@@ -299,8 +343,8 @@ def build_skill_install_readback(
         source["revision_kind"] = "skills_digest"
     return {
         "schema_version": SKILL_INSTALL_READBACK_SCHEMA_VERSION,
-        "owner": SKILL_INSTALL_OWNER,
-        "integration_mode": SKILL_INSTALL_INTEGRATION_MODE,
+        "owner": owner,
+        "integration_mode": integration_mode,
         "installed_at": installed_at
         or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "source": source,
@@ -318,6 +362,8 @@ def write_skill_install_readback(
     skill_ids: Sequence[str],
     source_root: Path,
     installed_at: str | None = None,
+    owner: str = SKILL_INSTALL_OWNER,
+    integration_mode: str = SKILL_INSTALL_INTEGRATION_MODE,
 ) -> Path:
     skills_dir.mkdir(parents=True, exist_ok=True)
     payload = build_skill_install_readback(
@@ -325,6 +371,8 @@ def write_skill_install_readback(
         skill_ids=skill_ids,
         source_root=source_root,
         installed_at=installed_at,
+        owner=owner,
+        integration_mode=integration_mode,
     )
     target = skills_dir / SKILL_INSTALL_READBACK_FILENAME
     with tempfile.NamedTemporaryFile(
@@ -434,8 +482,11 @@ def inspect_skill_install_readback(
     manifest_valid = bool(
         isinstance(manifest, dict)
         and manifest.get("schema_version") == SKILL_INSTALL_READBACK_SCHEMA_VERSION
-        and manifest.get("owner") == SKILL_INSTALL_OWNER
-        and manifest.get("integration_mode") == SKILL_INSTALL_INTEGRATION_MODE
+        and (
+            manifest.get("owner"),
+            manifest.get("integration_mode"),
+        )
+        in SKILL_INSTALL_PROFILES
         and set(required_ids).issubset(manifest_ids)
         and source_revision
     )
@@ -452,7 +503,7 @@ def inspect_skill_install_readback(
     ready = not missing_ids and integrity_ok
     if ready:
         status = "ready_for_host_load"
-        reason = "required workflow skills match the fixed-installer readback"
+        reason = "required workflow skills match the managed install readback"
     elif manifest_error:
         status, reason = "manifest_missing_or_invalid", manifest_error
     elif missing_ids:
@@ -460,7 +511,7 @@ def inspect_skill_install_readback(
         reason = f"missing required workflow skills: {','.join(missing_ids)}"
     elif not manifest_valid:
         status = "manifest_contract_invalid"
-        reason = "install readback does not satisfy the fixed-installer contract"
+        reason = "install readback does not satisfy the managed install contract"
     elif not manifest_digest_valid:
         status = "manifest_digest_mismatch"
         reason = "install readback skill manifest digest does not match its items"
@@ -475,7 +526,7 @@ def inspect_skill_install_readback(
         )
     else:
         status = "manifest_contract_invalid"
-        reason = "install readback does not satisfy the fixed-installer contract"
+        reason = "install readback does not satisfy the managed install contract"
 
     return {
         "schema_version": SKILL_INSTALL_READBACK_SCHEMA_VERSION,

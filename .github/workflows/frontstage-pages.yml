@@ -25,11 +25,13 @@ on:
       - "examples/export-frontstage-share-bundle.mjs"
       - "examples/frontstage-share-bundle-smoke.mjs"
       - "examples/readme-star-history-smoke.py"
+      - "examples/frontstage-stargazer-fetch-smoke.py"
       - "examples/dev-book-publication-smoke.py"
       - "examples/goal-channel-frontstage-fixture.py"
       - "examples/showcase-catalog-smoke.py"
       - "examples/status.example.json"
       - "scripts/render-star-history.py"
+      - "scripts/fetch-github-stargazers.sh"
       - "scripts/install-from-github.sh"
   push:
     branches:
@@ -54,11 +56,13 @@ on:
       - "examples/export-frontstage-share-bundle.mjs"
       - "examples/frontstage-share-bundle-smoke.mjs"
       - "examples/readme-star-history-smoke.py"
+      - "examples/frontstage-stargazer-fetch-smoke.py"
       - "examples/dev-book-publication-smoke.py"
       - "examples/goal-channel-frontstage-fixture.py"
       - "examples/showcase-catalog-smoke.py"
       - "examples/status.example.json"
       - "scripts/render-star-history.py"
+      - "scripts/fetch-github-stargazers.sh"
       - "scripts/install-from-github.sh"
 
 permissions:
@@ -119,6 +123,9 @@ jobs:
       - name: Validate README star history
         run: python3 examples/readme-star-history-smoke.py
 
+      - name: Validate stargazer fetch contract
+        run: python3 examples/frontstage-stargazer-fetch-smoke.py
+
       - name: Validate Developer Book publication
         run: python3 examples/dev-book-publication-smoke.py
 
@@ -133,56 +140,15 @@ jobs:
       - name: Fetch complete GitHub stargazer history
         if: github.event_name != 'pull_request'
         env:
-          # Since July 2026, GitHub restricts this endpoint to repository
-          # collaborators. Keep this credential read-only and repo-scoped.
+          # List-stargazers rejects the GitHub Actions installation token even
+          # with Metadata: read. Keep this existing fine-grained token limited
+          # to this public repository and read-only metadata.
           GH_TOKEN: ${{ secrets.STAR_HISTORY_READ_TOKEN }}
         run: |
-          set -euo pipefail
-          if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "::error title=Missing star-history credential::Set STAR_HISTORY_READ_TOKEN to a fine-grained PAT limited to this repository with Metadata: read." >&2
-            exit 1
-          fi
-          owner="${GITHUB_REPOSITORY%%/*}"
-          repo="${GITHUB_REPOSITORY#*/}"
-          count_query='query($owner: String!, $repo: String!) {
-            repository(owner: $owner, name: $repo) {
-              stargazers { totalCount }
-            }
-          }'
-          history_query='query($owner: String!, $repo: String!, $endCursor: String) {
-            repository(owner: $owner, name: $repo) {
-              stargazers(first: 100, after: $endCursor, orderBy: {field: STARRED_AT, direction: ASC}) {
-                edges { starredAt }
-                pageInfo { hasNextPage endCursor }
-              }
-            }
-          }'
-          for attempt in 1 2 3; do
-            count_before="$(gh api graphql -f query="$count_query" -F owner="$owner" -F repo="$repo" --jq .data.repository.stargazers.totalCount)"
-            gh api graphql --paginate --slurp \
-              -f query="$history_query" \
-              -F owner="$owner" \
-              -F repo="$repo" \
-              > "$RUNNER_TEMP/loopx-stargazer-pages.json"
-            jq '[.[].data.repository.stargazers.edges[] | {starred_at: .starredAt}]' \
-              "$RUNNER_TEMP/loopx-stargazer-pages.json" \
-              > "$RUNNER_TEMP/loopx-stargazers.json"
-            count_after="$(gh api graphql -f query="$count_query" -F owner="$owner" -F repo="$repo" --jq .data.repository.stargazers.totalCount)"
-            fetched_count="$(jq 'length' "$RUNNER_TEMP/loopx-stargazers.json")"
-            has_next_page="$(jq -r 'last.data.repository.stargazers.pageInfo.hasNextPage' "$RUNNER_TEMP/loopx-stargazer-pages.json")"
-            if [[ "$count_before" == "$count_after" && "$has_next_page" == "false" && "$fetched_count" -le "$count_after" ]]; then
-              printf '%s\n' "$fetched_count" > "$RUNNER_TEMP/loopx-stargazers-count"
-              if [[ "$fetched_count" != "$count_after" ]]; then
-                echo "::warning title=Aggregate-only stargazers omitted::Fetched all $fetched_count enumerable stargazer events; GitHub reports $count_after aggregate stars." >&2
-              fi
-              break
-            fi
-            if [[ "$attempt" == 3 ]]; then
-              echo "stargazer snapshot changed or pagination was incomplete: before=$count_before fetched=$fetched_count after=$count_after has_next_page=$has_next_page" >&2
-              exit 1
-            fi
-            sleep 5
-          done
+          scripts/fetch-github-stargazers.sh \
+            "$GITHUB_REPOSITORY" \
+            "$RUNNER_TEMP/loopx-stargazers.json" \
+            "$RUNNER_TEMP/loopx-stargazers-count"
 
       - name: Generate verified public star history
         if: github.event_name != 'pull_request'

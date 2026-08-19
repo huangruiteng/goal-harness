@@ -29,6 +29,10 @@ from ..todos.contract import (
 from ..todos.projection import todo_item_task_class
 from ..todos.user_gate import open_todo_count
 from ..todos.write_hint import build_capability_resolution_writeback_actions
+from .autonomous_replan_obligation import (
+    build_autonomous_replan_cli_actions,
+    replan_obligation_id_from_packet,
+)
 from .primary_action import (
     build_primary_action_projection,
     protocol_action_label as _protocol_action_label,
@@ -589,7 +593,12 @@ def _codex_app_settlement_plan(
     goal_id = str(payload.get("goal_id") or "").strip()
     agent_id = str(agent_identity.get("agent_id") or "").strip()
     todo_id = normalize_todo_id(selected_todo.get("todo_id"))
-    if not goal_id or not agent_id or not todo_id:
+    replan_obligation_id = (
+        replan_obligation_id_from_packet(payload.get("replan_action_packet"))
+        if todo_id is None
+        else None
+    )
+    if not goal_id or not agent_id or bool(todo_id) == bool(replan_obligation_id):
         return None
     scoped_cli_args = _scoped_cli_args(
         agent_identity,
@@ -599,6 +608,7 @@ def _codex_app_settlement_plan(
         goal_id=goal_id,
         agent_id=agent_id,
         todo_id=todo_id,
+        replan_obligation_id=replan_obligation_id,
         scoped_cli_args=scoped_cli_args,
         lifecycle_actor_args=f" --agent-id {shlex.quote(agent_id)}",
     ).as_dict()
@@ -919,51 +929,27 @@ def interaction_next_cli_actions(
             typed_quota_guard,
         ]
     if mode == "autonomous_replan":
-        packet = (
-            payload.get("replan_action_packet")
-            if isinstance(payload.get("replan_action_packet"), dict)
+        settlement_identity = (
+            settlement_plan.get("identity")
+            if isinstance(settlement_plan, Mapping)
+            and isinstance(settlement_plan.get("identity"), Mapping)
             else {}
         )
-        writeback_contract = (
-            packet.get("writeback_contract")
-            if isinstance(packet.get("writeback_contract"), dict)
-            else {}
+        return build_autonomous_replan_cli_actions(
+            payload,
+            goal_id=goal_id,
+            settlement_args=settlement_args,
+            scoped_cli_args=scoped_cli_args,
+            quota_spend_action=_quota_spend_action(
+                goal_id,
+                scoped_cli_args=scoped_cli_args,
+                payload=payload,
+                settlement_plan=settlement_plan,
+            ),
+            replan_settlement_bound=bool(
+                settlement_identity.get("replan_obligation_id")
+            ),
         )
-        successor_command = str(
-            writeback_contract.get("successor_command") or ""
-        ).strip()
-        successor_ref = (
-            "execute replan_action_packet.writeback_contract.successor_command"
-            if successor_command
-            else ""
-        )
-        successor_boundary = "on host_action=end_current_heartbeat: stop"
-        if successor_command:
-            return [successor_ref, successor_boundary]
-        typed_progress_args = (
-            "--progress-result-class "
-            "<advanced|blocked|exploration_exhausted|no_followup> "
-            "--progress-surface-id <surface-id> "
-            "--progress-hypothesis-id <hypothesis-id> "
-            "--progress-probe-kind <probe-kind> "
-            "--progress-evidence-id <evidence-id>"
-        )
-        refresh_command = (
-            f"loopx --format json refresh-state --goal-id {goal_id} "
-            "--progress-scope agent_lane "
-            "--classification bounded_replan_progress "
-            f"{typed_progress_args}"
-            f"{settlement_args}{scoped_cli_args}"
-        )
-        return [
-            action
-            for action in (
-                successor_ref,
-                refresh_command,
-                successor_boundary if successor_command else "",
-            )
-            if action
-        ]
     return _terminal_cli_actions(
         mode=mode,
         goal_id=goal_id,

@@ -284,6 +284,14 @@ def register_project_lifecycle_commands(
         ),
     )
     refresh_state_parser.add_argument(
+        "--replan-obligation-id",
+        help=(
+            "Autonomous replan obligation from the original turn-scoped quota "
+            "guard. Requires --turn-instance-id and an accountable delivery "
+            "outcome; cannot be combined with --todo-id."
+        ),
+    )
+    refresh_state_parser.add_argument(
         "--turn-instance-id",
         help=(
             "Stable quota guard turn id for settlement writeback. Reuse the same "
@@ -640,6 +648,9 @@ def handle_project_lifecycle_command(
                 ),
                 todo_id=getattr(args, "todo_id", None),
                 turn_instance_id=getattr(args, "turn_instance_id", None),
+                replan_obligation_id=getattr(
+                    args, "replan_obligation_id", None
+                ),
                 agent_id=args.agent_id,
                 agent_lane=args.agent_lane,
                 progress_scope=args.progress_scope,
@@ -683,7 +694,10 @@ def handle_project_lifecycle_command(
             payload.get("ok")
             and payload.get("receipt_repair_required")
             and getattr(args, "turn_instance_id", None)
-            and getattr(args, "todo_id", None)
+            and (
+                getattr(args, "todo_id", None)
+                or getattr(args, "replan_obligation_id", None)
+            )
         )
         if material_refresh_ready or settlement_receipt_repair:
             append_cli_rollout_event(
@@ -719,17 +733,30 @@ def handle_project_lifecycle_command(
                         if isinstance(payload.get("settlement_identity"), dict)
                         else None
                     ),
+                    "replan_obligation_id": getattr(
+                        args, "replan_obligation_id", None
+                    )
+                    or "",
                 },
                 idempotency_fields=(
-                    ["goal_id", "event_kind", "agent_id", "todo_id", "run_id"]
+                    [
+                        "goal_id",
+                        "event_kind",
+                        "agent_id",
+                        *(
+                            ["todo_id"]
+                            if getattr(args, "todo_id", None)
+                            else []
+                        ),
+                        "run_id",
+                    ]
                     if getattr(args, "turn_instance_id", None)
                     else None
                 ),
             )
-            if getattr(args, "turn_instance_id", None) and getattr(
-                args,
-                "todo_id",
-                None,
+            if getattr(args, "turn_instance_id", None) and (
+                getattr(args, "todo_id", None)
+                or getattr(args, "replan_obligation_id", None)
             ):
                 runtime_root = resolve_runtime_root(
                     load_registry(registry_path),
@@ -741,6 +768,9 @@ def handle_project_lifecycle_command(
                     agent_id=args.agent_id,
                     todo_id=getattr(args, "todo_id", None),
                     turn_instance_id=getattr(args, "turn_instance_id", None),
+                    replan_obligation_id=getattr(
+                        args, "replan_obligation_id", None
+                    ),
                 ).bind(
                     lambda identity: require_settlement_writeback(
                         runtime_root,

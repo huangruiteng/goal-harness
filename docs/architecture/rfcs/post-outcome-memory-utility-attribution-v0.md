@@ -113,13 +113,13 @@ fields needed for replay and audit:
 
 ```json
 {
-  "schema": "memory_utility_observation_v0",
+  "schema_version": "memory_utility_observation_v0",
   "observation_id": "muo_<stable_digest>",
   "scope": {
     "agent_id": "agent_opaque",
     "project_id": "project_opaque",
     "corpus_id": "corpus_opaque",
-    "surface": "reward_memory"
+    "surface_id": "reward_memory"
   },
   "application_receipt_id": "rma_<opaque>",
   "memory_ref_digests": ["sha256:<digest>"],
@@ -132,7 +132,13 @@ fields needed for replay and audit:
   "confidence": 0.42,
   "reason_codes": ["multiple_memories_not_disambiguated"],
   "evidence_refs": ["evidence_opaque"],
-  "created_at": "2026-08-15T00:00:00Z"
+  "evaluator_ref": "evaluator_opaque",
+  "evaluation_version": "evaluation_v0",
+  "created_at": "2026-08-15T00:00:00Z",
+  "grants_new_action_authority": false,
+  "provider_write_performed": false,
+  "external_writes_performed": false,
+  "raw_content_captured": false
 }
 ```
 
@@ -170,6 +176,10 @@ Evidence strength is typed rather than inferred from prose:
 4. `evaluator_inference`: a model judgment over public-safe receipts and
    outcomes;
 5. `insufficient`: lineage exists but attribution does not.
+
+The three stronger bases require at least one opaque `evidence_ref` in the
+proposal; `insufficient` may have no evidence reference. An unknown label does
+not waive this provenance requirement.
 
 Model inference alone is weak evidence. It may be retained for calibration and
 review, but profiles MUST be able to prevent it from moving a strong rank

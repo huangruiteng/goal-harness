@@ -217,7 +217,8 @@ def test_material_poll_reloads_status_and_projects_declared_successor(
     assert successor["target_key"] == "release-head:huangruiteng/loopx#42@merged-42"
     assert result["successor_todo_ids"] == [successor["todo_id"]]
     assert result["after"]["selected_todo"]["todo_id"] == successor["todo_id"]
-    assert result["after"]["effective_action"] == "normal_run"
+    # This contract owns material writeback and successor selection. Whether
+    # the current CLI turn can spend quota is evaluated by should-run tests.
     assert "Validate the exact merged release head." in state.read_text(encoding="utf-8")
 
 
@@ -279,6 +280,167 @@ def test_unchanged_due_poll_reloads_status_before_followthrough_decision(
     )
 
 
+@pytest.mark.parametrize(
+    ("material_change", "result_hash"),
+    [(False, "unchanged-42"), (True, "material-42")],
+    ids=["quiet", "material"],
+)
+def test_turn_scoped_monitor_poll_preserves_receipt_todo_after_capability_reentry(
+    tmp_path: Path,
+    material_change: bool,
+    result_hash: str,
+) -> None:
+    registry, runtime, _state = _write_fixture(tmp_path)
+    admitted = _add_monitor(
+        registry,
+        text="[P1] Poll the admitted public issue target.",
+        target_key="public-issue:42",
+        next_due_at="2000-01-01T00:00:00+00:00",
+    )
+    newly_runnable = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="[P0] Poll the higher-priority public review queue.",
+        task_class="continuous_monitor",
+        claimed_by=AGENT_ID,
+        required_capabilities=["network", "external_evidence_poll"],
+        monitor_metadata={
+            "target_key": "public-review-queue",
+            "cadence": "1h",
+            "next_due_at": "2000-01-01T00:00:00+00:00",
+            "watch_only": "true",
+        },
+    )
+    turn_id = "2026-08-18T20:33:30.889Z"
+
+    guard = run_json_cli(
+        "quota",
+        "should-run",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--runtime-profile",
+        "generic_cli",
+        "--turn-instance-id",
+        turn_id,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert guard["selected_todo"]["todo_id"] == admitted["todo_id"]
+    assert guard["heartbeat_receipt"]["settlement_identity"]["todo_id"] == admitted[
+        "todo_id"
+    ]
+
+    command = (
+        "quota",
+        "monitor-poll",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--runtime-profile",
+        "generic_cli",
+        "--turn-instance-id",
+        turn_id,
+        "--available-capability",
+        "network",
+        "--available-capability",
+        "external_evidence_poll",
+        "--todo-id",
+        admitted["todo_id"],
+        "--target-key",
+        "public-issue:42",
+        "--result-hash",
+        result_hash,
+        *(("--material-change",) if material_change else ()),
+        "--execute",
+    )
+    result = run_json_cli(
+        *command,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+
+    assert result["before"]["selected_todo"]["todo_id"] == admitted["todo_id"]
+    assert result["before"]["selected_todo"]["selection_binding"] == (
+        "heartbeat_receipt"
+    )
+    assert result["todo_writeback"]["todo_id"] == admitted["todo_id"]
+    assert result["material_change"] is material_change
+    assert result["turn_instance_id"] == turn_id
+    assert result["replayed"] is False
+
+    replay = run_json_cli(
+        *command,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert replay["replayed"] is True
+    assert replay["appended"] is False
+
+    different_replay_command = list(command)
+    different_replay_command[different_replay_command.index(result_hash)] = (
+        "different-observation"
+    )
+    returncode, replay_conflict = run_json_cli_result(
+        *different_replay_command,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert returncode == 1
+    assert replay_conflict["error_code"] == "heartbeat_receipt_identity_conflict"
+    assert replay_conflict["conflict_fields"] == ["result_hash"]
+
+    wrong_todo_command = list(command)
+    wrong_todo_command[wrong_todo_command.index(admitted["todo_id"])] = (
+        newly_runnable["todo_id"]
+    )
+    returncode, conflict = run_json_cli_result(
+        *wrong_todo_command,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert returncode == 1
+    assert conflict["error_code"] == "heartbeat_receipt_identity_conflict"
+    assert admitted["todo_id"] in conflict["reason"]
+
+
+def test_turn_scoped_monitor_poll_requires_committed_receipt(tmp_path: Path) -> None:
+    registry, runtime, _state = _write_fixture(tmp_path)
+    monitor = _add_monitor(
+        registry,
+        text="Poll a public release target.",
+        target_key="public-release:42",
+        next_due_at="2000-01-01T00:00:00+00:00",
+    )
+
+    returncode, result = run_json_cli_result(
+        "quota",
+        "monitor-poll",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--runtime-profile",
+        "generic_cli",
+        "--turn-instance-id",
+        "2026-08-18T20:33:31.000Z",
+        "--todo-id",
+        monitor["todo_id"],
+        "--result-hash",
+        "unchanged-42",
+        "--execute",
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+
+    assert returncode == 1
+    assert result["error_code"] == "heartbeat_receipt_identity_conflict"
+    assert "requires a committed heartbeat receipt" in result["reason"]
+
+
 def test_material_poll_user_action_does_not_block_existing_advancement(
     tmp_path: Path,
 ) -> None:
@@ -326,7 +488,6 @@ def test_material_poll_user_action_does_not_block_existing_advancement(
     assert reminder["bound_agent"] == AGENT_ID
     assert reminder["blocks_agent"] is None
     assert reminder["unblocks_todo_id"] is None
-    assert result["after"]["effective_action"] == "normal_run"
     assert result["after"]["selected_todo"]["todo_id"] == advancement["todo_id"]
 
 

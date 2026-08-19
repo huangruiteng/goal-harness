@@ -10,13 +10,58 @@ import json
 import os
 from pathlib import Path
 import re
+import tempfile
 import time
-from typing import Iterator
+import importlib
+from typing import Any, Iterator, TextIO
 
 try:  # pragma: no cover - exercised on POSIX hosts in integration smokes.
-    import fcntl
+    fcntl: Any = importlib.import_module("fcntl")
 except ImportError:  # pragma: no cover
-    fcntl = None  # type: ignore[assignment]
+    fcntl = None
+
+try:  # pragma: no cover - imported only on Windows hosts.
+    msvcrt: Any = importlib.import_module("msvcrt")
+except ImportError:  # pragma: no cover
+    msvcrt = None
+
+
+def _prepare_windows_lock(lock_file: TextIO) -> None:
+    lock_file.seek(0, 2)
+    if lock_file.tell() == 0:
+        lock_file.write("0")
+        lock_file.flush()
+    lock_file.seek(0)
+
+
+def _try_acquire_kernel_lock(lock_file: TextIO) -> bool:
+    if fcntl is not None:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if not _lock_is_busy(exc):
+                raise
+            return False
+        return True
+    if msvcrt is None:
+        raise RuntimeError("no supported file-lock backend is available")
+
+    _prepare_windows_lock(lock_file)
+    try:
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError as exc:
+        if not _lock_is_busy(exc):
+            raise
+        return False
+    return True
+
+
+def _release_kernel_lock(lock_file: TextIO) -> None:
+    if fcntl is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    elif msvcrt is not None:
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 LOCK_ACQUIRE_TIMEOUT_ERROR_CODE = "lock_acquire_timeout"
@@ -76,6 +121,13 @@ def _lock_path(path: Path) -> Path:
     return path.with_name(f"{path.name}.lock")
 
 
+def lock_holder_path(path: Path) -> Path:
+    lock_path = _lock_path(path)
+    if os.name == "nt":
+        return lock_path.with_name(f"{lock_path.name}.holder.json")
+    return lock_path
+
+
 def lock_incident_path(path: Path) -> Path:
     lock_path = _lock_path(path)
     return lock_path.with_name(f"{lock_path.name}.incidents.jsonl")
@@ -118,7 +170,7 @@ def _holder_record(
     }
 
 
-def _write_holder_record(lock_file, record: dict[str, object]) -> None:
+def _write_holder_record(lock_file: TextIO, record: dict[str, object]) -> None:
     lock_file.seek(0)
     lock_file.truncate()
     json.dump(record, lock_file, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
@@ -127,10 +179,59 @@ def _write_holder_record(lock_file, record: dict[str, object]) -> None:
     os.fsync(lock_file.fileno())
 
 
-def _mark_released(lock_file, record: dict[str, object]) -> None:
+def _write_holder_sidecar(holder_path: Path, record: dict[str, object]) -> None:
+    holder_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{holder_path.name}.",
+        suffix=".tmp",
+        dir=holder_path.parent,
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as holder_file:
+            json.dump(
+                record,
+                holder_file,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            holder_file.write("\n")
+            holder_file.flush()
+            os.fsync(holder_file.fileno())
+        os.replace(temporary_path, holder_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def _persist_holder_record(
+    lock_file: TextIO,
+    *,
+    lock_path: Path,
+    holder_path: Path,
+    record: dict[str, object],
+) -> None:
+    if holder_path == lock_path:
+        _write_holder_record(lock_file, record)
+        return
+    _write_holder_sidecar(holder_path, record)
+
+
+def _mark_released(
+    lock_file: TextIO,
+    *,
+    lock_path: Path,
+    holder_path: Path,
+    record: dict[str, object],
+) -> None:
     released = {**record, "released_at": _utc_now_iso()}
     try:
-        _write_holder_record(lock_file, released)
+        _persist_holder_record(
+            lock_file,
+            lock_path=lock_path,
+            holder_path=holder_path,
+            record=released,
+        )
     except OSError:
         # Releasing the kernel lock is more important than refreshing advisory
         # metadata; a future holder overwrites the complete record.
@@ -240,7 +341,7 @@ def _timeout_error(
     agent_id: str | None,
     operation: str | None,
 ) -> LockAcquireTimeoutError:
-    holder = _read_holder_record(_lock_path(path))
+    holder = _read_holder_record(lock_holder_path(path))
     waiter = {
         **_identity(agent_id=agent_id, operation=operation, policy=policy),
         "started_at": started_at,
@@ -283,7 +384,7 @@ def exclusive_file_lock(
     agent_id: str | None = None,
     operation: str | None = None,
 ) -> Iterator[Path]:
-    """Hold a sibling lock file with a finite POSIX acquisition deadline."""
+    """Hold a sibling lock file with a finite cross-platform deadline."""
 
     selected_policy = _policy(policy)
     defaults = LOCK_POLICIES[selected_policy]
@@ -294,45 +395,48 @@ def exclusive_file_lock(
         else max(0.001, poll_interval_seconds)
     )
     lock_path = _lock_path(path)
+    holder_path = lock_holder_path(path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     with os.fdopen(descriptor, "r+", encoding="utf-8") as lock_file:
-        if fcntl is not None:
-            started = time.monotonic()
-            started_at = _utc_now_iso()
-            deadline = started + timeout
-            while True:
-                try:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except OSError as exc:
-                    if not _lock_is_busy(exc):
-                        raise
-                    now = time.monotonic()
-                    if now >= deadline:
-                        raise _timeout_error(
-                            path,
-                            policy=selected_policy,
-                            timeout_seconds=timeout,
-                            waited_seconds=now - started,
-                            started_at=started_at,
-                            agent_id=agent_id,
-                            operation=operation,
-                        ) from None
-                    time.sleep(min(poll_interval, max(0.0, deadline - now)))
+        started = time.monotonic()
+        started_at = _utc_now_iso()
+        deadline = started + timeout
+        while not _try_acquire_kernel_lock(lock_file):
+            now = time.monotonic()
+            if now >= deadline:
+                raise _timeout_error(
+                    path,
+                    policy=selected_policy,
+                    timeout_seconds=timeout,
+                    waited_seconds=now - started,
+                    started_at=started_at,
+                    agent_id=agent_id,
+                    operation=operation,
+                ) from None
+            time.sleep(min(poll_interval, max(0.0, deadline - now)))
         record = _holder_record(
             path,
             agent_id=agent_id,
             operation=operation,
             policy=selected_policy,
         )
-        _write_holder_record(lock_file, record)
         try:
+            _persist_holder_record(
+                lock_file,
+                lock_path=lock_path,
+                holder_path=holder_path,
+                record=record,
+            )
             yield lock_path
         finally:
-            _mark_released(lock_file, record)
-            if fcntl is not None:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            _mark_released(
+                lock_file,
+                lock_path=lock_path,
+                holder_path=holder_path,
+                record=record,
+            )
+            _release_kernel_lock(lock_file)
 
 
 @contextmanager
@@ -342,30 +446,18 @@ def try_exclusive_file_lock(
     agent_id: str | None = None,
     operation: str | None = None,
 ) -> Iterator[Path | None]:
-    """Try once to hold a sibling lock file for single-flight work."""
+    """Try once to hold a sibling lock file for single-flight work.
+
+    ``None`` means another process already owns the lock. POSIX uses ``flock``;
+    Windows uses the standard-library ``msvcrt`` byte-range lock.
+    """
 
     lock_path = _lock_path(path)
+    holder_path = lock_holder_path(path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     with os.fdopen(descriptor, "r+", encoding="utf-8") as lock_file:
-        if fcntl is None:  # pragma: no cover - non-POSIX compatibility path.
-            record = _holder_record(
-                path,
-                agent_id=agent_id,
-                operation=operation,
-                policy=LockAcquisitionPolicy.SINGLE_FLIGHT,
-            )
-            _write_holder_record(lock_file, record)
-            try:
-                yield lock_path
-            finally:
-                _mark_released(lock_file, record)
-            return
-        try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            if not _lock_is_busy(exc):
-                raise
+        if not _try_acquire_kernel_lock(lock_file):
             yield None
             return
         record = _holder_record(
@@ -374,9 +466,19 @@ def try_exclusive_file_lock(
             operation=operation,
             policy=LockAcquisitionPolicy.SINGLE_FLIGHT,
         )
-        _write_holder_record(lock_file, record)
         try:
+            _persist_holder_record(
+                lock_file,
+                lock_path=lock_path,
+                holder_path=holder_path,
+                record=record,
+            )
             yield lock_path
         finally:
-            _mark_released(lock_file, record)
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            _mark_released(
+                lock_file,
+                lock_path=lock_path,
+                holder_path=holder_path,
+                record=record,
+            )
+            _release_kernel_lock(lock_file)

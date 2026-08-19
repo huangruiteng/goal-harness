@@ -52,8 +52,8 @@ New to LoopX? Start with the
 ## Quick Start
 
 ```bash
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 loopx doctor
 
 cd /path/to/your-project

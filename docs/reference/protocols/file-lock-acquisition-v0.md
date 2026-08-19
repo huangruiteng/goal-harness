@@ -1,9 +1,9 @@
 # File Lock Acquisition v0
 
-LoopX uses sibling POSIX `flock` files to serialize local read-modify-write
-operations. A lock file is durable metadata; the kernel lock, not the file's
-existence, determines ownership. Operators and automation must never delete a
-lock file to recover a waiter.
+LoopX uses sibling kernel-lock files to serialize local read-modify-write
+operations: POSIX uses `flock`, while Windows uses an `msvcrt` byte-range lock.
+The kernel lock, not the file's existence, determines ownership. Operators and
+automation must never delete a lock file to recover a waiter.
 
 ## Acquisition Policies
 
@@ -20,11 +20,17 @@ unbounded `LOCK_EX` wait is not part of this contract.
 
 ## Holder And Incident Records
 
-After acquisition, the holder overwrites the lock file with public-safe JSON:
+After acquisition, the holder writes public-safe JSON to the POSIX `*.lock`
+file or atomically overwrites the Windows `*.lock.holder.json` sidecar:
 
 - stable hashed `lock_id` (never an absolute target path);
 - PID, agent id, operation, policy, and acquisition time;
 - release time after a normal exit.
+
+Windows metadata is separate because a byte-range lock prevents another file
+handle from reading the locked byte. POSIX retains the existing single-file
+contract, where advisory metadata and `flock` share `*.lock`. In both cases the
+kernel lock, not the metadata file's existence, is authoritative.
 
 A timeout appends one `file_lock_incident_v0` row to the sibling
 `*.lock.incidents.jsonl` channel. That append uses `O_APPEND` directly and does
@@ -39,8 +45,8 @@ does not hide or delay the typed timeout.
 3. Terminate the process only after that confirmation and within the operator's
    existing authority.
 4. Retry according to the policy after the process exits. Do not delete the
-   lock file; a later owner will overwrite its metadata.
+   lock file; a later owner will overwrite the holder sidecar.
 
 An absent PID or stale metadata is evidence to investigate, not permission to
-remove a lock file. The kernel releases `flock` ownership when its process or
-file descriptor exits.
+remove a lock file. The kernel releases `flock` or `msvcrt` ownership when its
+process or file descriptor exits.

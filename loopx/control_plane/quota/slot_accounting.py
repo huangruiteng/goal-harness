@@ -16,7 +16,11 @@ from ..runtime.run_artifacts import (
     run_file_stem,
 )
 from ..runtime.time import now_local_iso
-from ..todos.contract import normalize_todo_claimed_by, normalize_todo_id
+from ..todos.contract import (
+    normalize_todo_claimed_by,
+    normalize_todo_id,
+    normalize_todo_replan_obligation_id,
+)
 from ..work_items.delivery_outcome import (
     ACCOUNTABLE_DELIVERY_OUTCOMES,
     normalize_delivery_outcome,
@@ -50,6 +54,7 @@ def _todo_binding_error(
     goal_id: str,
     before: dict[str, Any],
     requested_todo_id: str | None,
+    requested_replan_obligation_id: str | None,
     agent_id: str | None,
     settlement_identity: SettlementIdentity | None = None,
 ) -> str | None:
@@ -59,11 +64,15 @@ def _todo_binding_error(
         else {}
     )
     if settlement_identity is not None:
-        if requested_todo_id != settlement_identity.todo_id:
+        if (
+            requested_todo_id != settlement_identity.todo_id
+            or requested_replan_obligation_id
+            != settlement_identity.replan_obligation_id
+        ):
             return (
-                "quota spend Todo does not match the original settlement identity: "
-                f"expected {settlement_identity.todo_id} but received "
-                f"{requested_todo_id or 'missing'}"
+                "quota spend binding does not match the original settlement "
+                f"identity: expected {settlement_identity.binding_kind}="
+                f"{settlement_identity.binding_id}"
             )
         return completion_validation_spend_error(
             status_payload,
@@ -105,6 +114,7 @@ def _resolve_preview_settlement(
     goal_id: str,
     agent_id: str | None,
     todo_id: str | None,
+    replan_obligation_id: str | None,
     turn_instance_id: str | None,
 ) -> dict[str, Any]:
     if turn_instance_id and source != DEFAULT_SLOT_SPEND_SOURCE:
@@ -122,6 +132,7 @@ def _resolve_preview_settlement(
             agent_id=agent_id,
             todo_id=todo_id,
             turn_instance_id=turn_instance_id,
+            replan_obligation_id=replan_obligation_id,
         )
         if turn_instance_id
         else infer_persisted_heartbeat_settlement_identity(
@@ -342,6 +353,7 @@ def build_quota_slot_preview_for_decision(
     agent_id: str | None = None,
     workspace_path: Path | None = None,
     todo_id: str | None = None,
+    replan_obligation_id: str | None = None,
     turn_instance_id: str | None = None,
     source: str = DEFAULT_SLOT_SPEND_SOURCE,
 ) -> dict[str, Any]:
@@ -349,6 +361,9 @@ def build_quota_slot_preview_for_decision(
     safe_slots = max(1, _int_number(slots, default=1))
     safe_requested_agent_id = normalize_todo_claimed_by(agent_id)
     normalized_todo_id = normalize_todo_id(todo_id) if todo_id else None
+    normalized_replan_obligation_id = normalize_todo_replan_obligation_id(
+        replan_obligation_id
+    )
     raw_runtime_root = status_payload.get("runtime_root")
     settlement_identity = None
     settlement_result = None
@@ -360,6 +375,7 @@ def build_quota_slot_preview_for_decision(
         goal_id=safe_goal_id,
         agent_id=safe_requested_agent_id,
         todo_id=normalized_todo_id,
+        replan_obligation_id=normalized_replan_obligation_id,
         turn_instance_id=turn_instance_id,
     )
     settlement_identity = settlement.get("identity")
@@ -393,6 +409,7 @@ def build_quota_slot_preview_for_decision(
         goal_id=safe_goal_id,
         before=before,
         requested_todo_id=normalized_todo_id,
+        requested_replan_obligation_id=normalized_replan_obligation_id,
         agent_id=safe_requested_agent_id,
         settlement_identity=settlement_identity,
     )
@@ -638,6 +655,7 @@ def build_quota_slot_preview_for_decision(
             "so the visible total can stay flat if an older spend expires."
         ),
         "todo_id": normalized_todo_id,
+        "replan_obligation_id": normalized_replan_obligation_id,
         "turn_instance_id": (
             settlement_identity.turn_instance_id
             if settlement_identity is not None
@@ -772,6 +790,7 @@ def build_quota_slot_spend_event(
             "event_type": QUOTA_SLOT_SPENT_CLASSIFICATION,
             "source": safe_source,
             "todo_id": preview.get("todo_id"),
+            "replan_obligation_id": preview.get("replan_obligation_id"),
             "turn_instance_id": preview.get("turn_instance_id"),
             "settlement_identity": preview.get("settlement_identity"),
             "slots": slots,
@@ -817,7 +836,12 @@ def build_quota_slot_spend_event(
         record["quota_event"]["agent_id"] = safe_agent_id
     if preview.get("turn_instance_id"):
         record["turn_instance_id"] = preview["turn_instance_id"]
-        record["todo_id"] = preview.get("todo_id")
+        if preview.get("todo_id"):
+            record["todo_id"] = preview["todo_id"]
+        if preview.get("replan_obligation_id"):
+            record["replan_obligation_id"] = preview[
+                "replan_obligation_id"
+            ]
         record["settlement_identity"] = preview.get("settlement_identity")
     return record
 
@@ -1089,7 +1113,12 @@ def record_quota_slot_spend_from_preview(
     }
     if record.get("agent_id"):
         index_record["agent_id"] = record["agent_id"]
-    for field in ("turn_instance_id", "todo_id", "settlement_identity"):
+    for field in (
+        "turn_instance_id",
+        "todo_id",
+        "replan_obligation_id",
+        "settlement_identity",
+    ):
         if record.get(field):
             index_record[field] = record[field]
 

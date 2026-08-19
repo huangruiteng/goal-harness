@@ -10,6 +10,7 @@ from loopx.control_plane.testing.cli_output_differential import (
     CLI_OUTPUT_FIXTURE_CONTRACT_VERSION,
     CLI_OUTPUT_PROBE_SCHEMA_VERSION,
     compare_cli_output_receipts,
+    select_cli_output_base_ref,
 )
 from loopx.control_plane.testing.cli_output_semantics import (
     action_signature_coverages,
@@ -45,6 +46,35 @@ def _receipt(*rows: dict[str, object]) -> dict[str, object]:
         "fixture_contract_version": CLI_OUTPUT_FIXTURE_CONTRACT_VERSION,
         "rows": list(rows),
     }
+
+
+def test_sync_commit_uses_main_as_cli_output_base() -> None:
+    ancestors = {
+        ("origin/main", "HEAD"),
+    }
+
+    selected = select_cli_output_base_ref(
+        "origin/integration",
+        main_ref="origin/main",
+        is_ancestor=lambda ancestor, descendant: (ancestor, descendant) in ancestors,
+    )
+
+    assert selected == "origin/main"
+
+
+def test_regular_integration_pr_keeps_requested_cli_output_base() -> None:
+    ancestors = {
+        ("origin/main", "HEAD"),
+        ("origin/main", "origin/integration"),
+    }
+
+    selected = select_cli_output_base_ref(
+        "origin/integration",
+        main_ref="origin/main",
+        is_ancestor=lambda ancestor, descendant: (ancestor, descendant) in ancestors,
+    )
+
+    assert selected == "origin/integration"
 
 
 def test_measurement_records_semantic_shape_without_runtime_hash_noise() -> None:

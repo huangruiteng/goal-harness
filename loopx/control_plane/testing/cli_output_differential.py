@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from ..quota.turn_envelope import (
     ACTION_SIGNATURE_COVERAGE_V0,
@@ -15,6 +15,22 @@ CLI_OUTPUT_FIXTURE_CONTRACT_VERSION = "loopx_cli_output_public_fixture_v0"
 CLI_OUTPUT_DIFFERENTIAL_SCHEMA_VERSION = "loopx_cli_output_differential_v0"
 
 Metric = Literal["chars", "utf8_bytes", "lines", "compact_payload_chars"]
+
+
+def select_cli_output_base_ref(
+    requested_ref: str,
+    *,
+    main_ref: str,
+    is_ancestor: Callable[[str, str], bool],
+) -> str:
+    """Choose main for a sync commit that brings main into a stale PR base."""
+    if requested_ref == main_ref:
+        return requested_ref
+    head_contains_main = is_ancestor(main_ref, "HEAD")
+    requested_contains_main = is_ancestor(main_ref, requested_ref)
+    if head_contains_main and not requested_contains_main:
+        return main_ref
+    return requested_ref
 
 
 @dataclass(frozen=True)

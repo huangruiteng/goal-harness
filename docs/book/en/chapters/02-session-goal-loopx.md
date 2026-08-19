@@ -47,7 +47,7 @@ LoopX coordinates Goals, Agents, and Hosts, but each identity answers a differen
 | Identity | Question it answers | Stability and selection rule |
 | --- | --- | --- |
 | `goal_id` | Which long-running project boundary are we advancing? | Binds registry state, Todos, Gates, and evidence lineage; reuse requires the exact existing id |
-| `agent_id` | Which peer or work lane owns the current responsibility? | Binds claims, Vision, quota, and writeback; new onboarding defaults to a fresh identity |
+| `agent_id` | Which peer or work lane owns the current responsibility? | Binds claims, Vision, quota, and writeback; new onboarding defaults to a fresh identity only when no registered lane exists or `--new-peer` is explicit |
 | `host_surface` / runtime profile | Which product surface executes and wakes this turn? | Binds App heartbeat, a visible Goal, or another Host loop; declare the surface that is actually running |
 
 Reusing a Goal does not imply that a new session should take over an existing Agent identity. The current

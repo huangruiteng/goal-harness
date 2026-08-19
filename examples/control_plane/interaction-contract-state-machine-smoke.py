@@ -498,25 +498,36 @@ def assert_monitor_quiet_skip_is_no_spend() -> None:
     assert "LOOPX_TURN" in contract["cli_channel"]["next_cli_actions"][0], contract
 
 
-def assert_autonomous_replan_preempts_monitor_quiet() -> None:
-    payload = finalize(
-        base_payload(
-            should_run=True,
-            effective_action="autonomous_replan_required",
-            work_lane=monitor_quiet_lane(),
-            heartbeat_mode="autonomous_replan_required",
-        )
+def assert_autonomous_replan_projects_accountable_settlement() -> None:
+    payload = base_payload(
+        should_run=True,
+        effective_action="autonomous_replan_required",
+        work_lane=monitor_quiet_lane(),
+        heartbeat_mode="autonomous_replan_required",
     )
+    payload["replan_action_packet"] = {
+        "obligation_id": "replan-0000000000000001",
+        "writeback_contract": {},
+    }
+    payload = finalize(payload)
     contract = payload["interaction_contract"]
     assert contract["mode"] == "autonomous_replan", payload
     assert contract["agent_channel"]["must_attempt"] is True, contract
     assert contract["cli_channel"]["spend_after_validation"] is True, contract
     assert "accountable replan delta" in contract["cli_channel"]["spend_policy"], contract
     assert "surface_only" in contract["cli_channel"]["spend_policy"], contract
-    assert not any(
-        "spend-slot" in action
-        for action in contract["cli_channel"]["next_cli_actions"]
+    settlement = contract["cli_channel"]["settlement_plan"]
+    assert settlement["identity"]["binding_kind"] == "autonomous_replan", contract
+    assert settlement["identity"]["replan_obligation_id"] == (
+        "replan-0000000000000001"
     ), contract
+    actions = contract["cli_channel"]["next_cli_actions"]
+    assert "--delivery-outcome outcome_progress" in actions[0], actions
+    assert "--replan-obligation-id replan-0000000000000001" in actions[0], actions
+    assert "--turn-instance-id" in actions[0], actions
+    assert "spend-slot" in actions[1], actions
+    assert "--replan-obligation-id replan-0000000000000001" in actions[1], actions
+    assert "--turn-instance-id" in actions[1], actions
     assert payload["scheduler_hint"]["action"] == "run_now", payload
 
 
@@ -580,7 +591,7 @@ def main() -> int:
     assert_user_notice_can_coexist_with_bounded_delivery()
     assert_user_action_is_non_blocking_notice()
     assert_monitor_quiet_skip_is_no_spend()
-    assert_autonomous_replan_preempts_monitor_quiet()
+    assert_autonomous_replan_projects_accountable_settlement()
     assert_agent_scope_wait_is_quiet_noop()
     assert_successor_replan_is_validated_spend_path()
     assert_required_reads_are_mirrored_into_execution_channels()

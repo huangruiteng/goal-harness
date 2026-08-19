@@ -189,17 +189,32 @@ More inspectable surfaces:
 
 ## Try LoopX
 
-Requirements: Python 3.11+, `curl`, `tar`, and a macOS or Linux shell. Git is
-only needed for contributor clone/canary workflows. The Python package has no
-runtime dependencies outside the standard library.
+Requirements: Python 3.11+. Use an active Python environment whose console
+scripts are on `PATH`; macOS and Linux use a POSIX shell, while native Windows
+uses PowerShell 7. Git is only needed for contributor clone/canary workflows.
+The package has no runtime dependencies outside the standard library.
 
-Install without cloning:
+Install from PyPI without cloning:
 
 ```bash
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 loopx doctor
 ```
+
+On native Windows PowerShell 7, use the same PyPI release without a POSIX
+compatibility layer:
+
+```powershell
+py -3.11 -m pip install --upgrade loopx
+loopx workflow-skills --install
+loopx doctor
+```
+
+Restart your agent host after first install so it reloads the workflow skills.
+See [Installing LoopX](docs/guides/installing-loopx.md) for `pipx`, host
+command surfaces, native Windows checkout installation, upgrade, rollback,
+uninstall, and the archive fallback.
 
 Then connect from your project root:
 
@@ -227,6 +242,7 @@ LoopX should reuse existing state rather than overwrite it. Keep `.loopx/`,
 | Codex App over SSH | `loopx agent-onboard --agent-type codex-app-ssh --project .` | The returned visible `/goal <task_body>` |
 | Codex CLI | Start `codex` in the project, ask it to connect and diagnose LoopX, then use `$loopx <complex task>` or `/skills`. | Visible `/goal <task_body>`; no hidden headless execution by default |
 | Claude Code | Install the opt-in adapter, then run `/loopx <task>` followed by `/loop`. | Native Claude Code `/loop` gated by LoopX |
+| KunlunCode | Run `loopx-kunluncode connect --project . --goal-id <goal-id> --agent-id <registered-agent-id>`, add a bounded todo, then run `loopx-kunluncode run --project .`. | Native Goal Pro through app-server; LoopX writes completion and quota only after strict verification |
 | OpenCode | Install the static command facade; opt in to `--with-goal-bridge` for recurring goals. | OpenCode command facade and explicit goal bridge |
 | Pi | Install the opt-in goal extension with `loopx slash-commands --install --surface pi`, then use `/loopx <task>` from a trusted Pi session. | Visible Pi goal extension gated by LoopX quota (`loopx_goal_activate` + `agent_settled` continuation) |
 | Cursor, shell, or custom runner | Use the installer and `loopx doctor`; connect manually or call LoopX from your runner. | Your shell, scheduler, or runner |
@@ -235,7 +251,8 @@ The exact, copy-ready setup messages and host recovery paths live in
 [Getting Started](docs/guides/getting-started.md). Host integrations can inspect
 the [Codex App host command registry contract](docs/reference/protocols/codex-app-host-command-registry-v0.md),
 the [Codex CLI packaged install path](docs/product/runtimes/codex-cli/codex-cli-packaged-install.md),
-or the [Claude Code adapter](loopx/claude_goal_mode/README.md).
+the [Claude Code adapter](loopx/claude_goal_mode/README.md), or the
+[KunlunCode native Goal adapter](loopx/kunluncode_goal_mode/README.md).
 
 For custom runners, start with the
 [minimal custom runtime example](docs/guides/minimal-custom-runtime-example.md)
@@ -324,6 +341,7 @@ evidence → recovery; continuation → governance.
 | Quota and interaction contract | Decides whether a turn should deliver, ask, wait, self-repair, or stay quiet. | `loopx quota should-run`, [quota allocation](docs/quota-allocation.md) |
 | Agent runtime bridges | Keeps Codex App, Codex CLI, Claude Code, and generic workers aligned with the same guard. | `loopx heartbeat-prompt`, `loopx codex-cli-bootstrap-message`, `loopx worker-bridge` |
 | Operator surfaces | Renders compact status without making the browser the state authority. | `loopx serve-status`, [dashboard](apps/presentation/dashboard/README.md) |
+| Session dash | Starts a live single-page panel that tracks fleet progress: sessions, their goals, and each goal's status/todo progress, with result statistics; auto-refreshes in place. | `loopx dash`, [session dash design](docs/product/surfaces/session-dash-panel-design.md) |
 | External projections | Projects todos and gates into collaboration surfaces while LoopX remains authoritative. | `loopx lark-kanban`, [Lark Kanban adapter](docs/integrations/lark-kanban-control-plane-adapter.md) |
 | Domain capabilities | Packages repeatable work lanes such as issue fixing, content operations, value connector planning, ML experiment advice, benchmark evidence, and Explore. | `loopx issue-fix`, `loopx content-ops`, `loopx value-connectors`, `loopx ml-experiment`, `loopx benchmark`, [Explore](loopx/capabilities/explore/README.md) |
 | Experimental context learning | Lets named registered agents trial provider-neutral Reward Memory through ignored, default-off project configuration. OpenViking is one provider option, not a global dependency. | `loopx reward-memory experiment-status`, [Reward Memory architecture](loopx/capabilities/reward_memory/README.md) |

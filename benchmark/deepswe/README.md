@@ -75,9 +75,35 @@ python benchmark/deepswe/run_native_codex_goal.py \
 ```
 
 Use `--preflight-only` to verify initialize, thread creation, and Goal
-attachment without starting a model turn. A benchmark adapter can reuse the
-same runtime directly while keeping its environment bridge active in another
-task:
+attachment without starting a model turn. On Linux, the same runnable can opt
+into the toolkit's host-filesystem boundary:
+
+```bash
+python benchmark/deepswe/run_native_codex_goal.py \
+  --cwd <task-worktree> \
+  --objective-file <objective.txt> \
+  --task-file <task.txt> \
+  --isolate \
+  --isolation-work-dir <runner-created-per-run-dir> \
+  --private-root <controller-private-root> \
+  --profile-root <per-run-installed-profile>
+```
+
+Isolation is explicit; the default invocation is unchanged. The work directory
+must be outside the private root and task workspace. The optional profile is a
+writable process input, so create it per run or restore it from a pinned snapshot
+rather than sharing it across trials. Use a deterministic per-run work directory:
+if the worker is killed before normal cleanup, the next identical invocation
+repairs stale workspace-alias references before launch and restores host paths on
+exit.
+
+When task-local LoopX control state exists, both `.loopx/registry.json` and
+`.loopx/runtime/registry.global.json` must exist. Neither file means there is no
+control state to relocate; only one file is treated as incomplete state and fails
+closed.
+
+A benchmark adapter can reuse the same runtime directly while keeping its
+environment bridge active in another task:
 
 ```python
 from loopx.capabilities.benchmark_toolkit.native_codex_goal import (
@@ -152,6 +178,8 @@ Before each launch, a no-agent preflight must prove:
 - formal installed LoopX CLI and skill readback from the pinned revision;
 - real app-server discovery of the required LoopX skills;
 - worker-before-verifier ordering;
+- exact-job container binding before runtime isolation inspection when concurrent
+  jobs can share an image;
 - compact result and terminal-closeout destinations.
 
 The runner owns task execution and verifier invocation. LoopX settlement occurs
@@ -175,3 +203,21 @@ Keep raw tasks, trajectories, tool arguments, logs, diffs, credentials,
 verifier output, private audit references, and local paths in ignored private
 storage. Promote concrete result tables only after the matched study is solid
 enough to support the stated claim level.
+
+### Public trajectory lifecycle summary
+
+The runnable native Goal adapter now emits a nested
+`public_trajectory_summary_v0` beside its existing compact receipt. The summary
+is derived only from the receipt's typed Goal lifecycle counters: notification
+kinds, item-event counts, completed turns, continuation turns, error events, and
+Goal-status polls. `goal_terminal` means the adapter observed a completed turn
+and then read a non-active Goal status; `attached`, `in_progress`, and
+`turn_terminal` remain explicitly incomplete.
+
+The summary does not inspect or retain event payloads, task or assistant text,
+tool arguments or output, verifier output, credentials, or paths. Its item-type
+counts are event counts, not inferred tool-call counts; the coverage block keeps
+that limitation machine-readable. Malformed, missing, or internally
+inconsistent lifecycle facts fail closed instead of producing a partial public
+artifact. This is the active native-runner contract and does not restore or
+depend on the archived legacy benchmark reducer.

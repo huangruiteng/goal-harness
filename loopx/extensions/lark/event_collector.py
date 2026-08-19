@@ -166,7 +166,8 @@ def _jq_projection(chat_id: str) -> str:
     return (
         f"select(.chat_id == {chat_literal}) | "
         '{schema_version:"lark_event_inbox_event_v0",'
-        "event_id:(.event_id // .message_id),message_id:.message_id,"
+        "event_id:(.event_id // .message_id // .id),"
+        "message_id:(.message_id // .id),"
         "create_time:.create_time,content:.content,sender_id:.sender_id,"
         "chat_id:.chat_id}"
     )

@@ -23,6 +23,10 @@ from .capabilities.integration_branch.cli import (
     handle_integration_branch_command,
     register_integration_branch_commands,
 )
+from .capabilities.repository_change_window.cli import (
+    handle_repository_change_window_command,
+    register_repository_change_window_commands,
+)
 from .capabilities.decision_context.cli import (
     handle_decision_context_command,
     register_decision_context_commands,
@@ -78,6 +82,7 @@ from .cli_commands import (
     handle_multi_agent_command,
     handle_preset_command,
     handle_presentation_command,
+    handle_dash_command,
     handle_project_command,
     handle_project_lifecycle_command,
     handle_pr_review_command,
@@ -97,6 +102,7 @@ from .cli_commands import (
     handle_version_command,
     handle_host_mode_plan_command,
     handle_worker_bridge_command,
+    handle_workflow_skills_command,
     register_benchmark_command_group,
     register_turn_commands,
     register_bootstrap_connect_command,
@@ -117,6 +123,7 @@ from .cli_commands import (
     register_multi_agent_commands,
     register_preset_commands,
     register_presentation_commands,
+    register_dash_commands,
     register_project_commands,
     register_project_lifecycle_commands,
     register_pr_review_command,
@@ -135,6 +142,7 @@ from .cli_commands import (
     register_version_command,
     register_host_mode_plan_command,
     register_worker_bridge_commands,
+    register_workflow_skills_command,
 )
 from .cli_commands.opencode2_goal_worker import (
     handle_opencode2_goal_worker_command,
@@ -239,6 +247,8 @@ def build_parser() -> LoopXArgumentParser:
 
     register_integration_branch_commands(sub, add_subcommand_format)
 
+    register_repository_change_window_commands(sub, add_subcommand_format)
+
     register_content_ops_commands(sub, add_subcommand_format)
 
     register_decision_context_commands(sub, add_subcommand_format)
@@ -270,6 +280,7 @@ def build_parser() -> LoopXArgumentParser:
     register_host_mode_plan_command(sub, add_subcommand_format)
     register_preset_commands(sub, add_subcommand_format)
     register_presentation_commands(sub, add_subcommand_format)
+    register_dash_commands(sub, add_subcommand_format)
     register_project_commands(sub, add_subcommand_format)
     register_ready_score_command(sub, add_subcommand_format)
 
@@ -288,6 +299,7 @@ def build_parser() -> LoopXArgumentParser:
     register_summary_all_command(sub, add_subcommand_format)
     register_pr_review_command(sub, add_subcommand_format)
     register_slash_commands_command(sub, add_subcommand_format)
+    register_workflow_skills_command(sub, add_subcommand_format)
     register_dreaming_commands(sub, add_subcommand_format)
     register_evidence_log_command(sub, add_subcommand_format)
     register_explore_commands(sub, add_subcommand_format)
@@ -309,6 +321,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(raw_argv)
     args.format = resolve_global_output_format(args)
+    if os.environ.get("LOOPX_KUNLUNCODE_OUTER_CONTROLLER") == "1":
+        from .kunluncode_goal_mode.guards import native_controller_cli_write_block
+
+        native_write_block = native_controller_cli_write_block(args)
+        if native_write_block is not None:
+            print(
+                json.dumps(native_write_block, ensure_ascii=False, indent=2),
+                file=sys.stderr,
+            )
+            return 2
     registry_path = Path(args.registry).expanduser()
     registry_was_configured = user_supplied_registry(raw_argv) or bool(
         os.environ.get("LOOPX_REGISTRY")
@@ -350,6 +372,7 @@ def main(argv: list[str] | None = None) -> int:
             "new-project-prompt",
             "start-goal",
             "slash-commands",
+            "workflow-skills",
             "heartbeat-prompt",
             "supervisor-event",
             "supervisor-observe",
@@ -394,6 +417,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         return handle_doctor_command(args, print_payload)
+
+    workflow_skills_result = handle_workflow_skills_command(
+        args,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if workflow_skills_result is not None:
+        return workflow_skills_result
 
     if args.command == "first-run-report":
         return handle_first_run_report_command(args, print_payload)
@@ -465,6 +496,16 @@ def main(argv: list[str] | None = None) -> int:
     if integration_branch_result is not None:
         return integration_branch_result
 
+    repository_change_window_result = handle_repository_change_window_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if repository_change_window_result is not None:
+        return repository_change_window_result
+
     if args.command == "ml-experiment":
         return handle_ml_experiment_command(args, output_format=output_format, print_payload=print_payload)
 
@@ -520,6 +561,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     if presentation_result is not None:
         return presentation_result
+
+    dash_result = handle_dash_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        print_payload=print_payload,
+        output_format=output_format,
+    )
+    if dash_result is not None:
+        return dash_result
 
     project_result = handle_project_command(
         args,
@@ -638,6 +689,7 @@ def main(argv: list[str] | None = None) -> int:
 
     benchmark_result = handle_benchmark_command(
         args,
+        registry_path=registry_path,
         print_payload=print_payload,
         output_format=output_format,
     )

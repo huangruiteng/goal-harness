@@ -10,7 +10,7 @@ import pytest
 
 import loopx.control_plane.todos.completion_validation as completion_validation_module
 from loopx.status import parse_active_state_todos
-from loopx.todos import add_goal_todo, complete_goal_todo
+from loopx.todos import add_goal_todo, complete_goal_todo, update_goal_todo
 
 GOAL_ID = "todo-completion-validation"
 AGENT = "codex-author"
@@ -466,3 +466,142 @@ def test_empty_argv_declaration_reports_neutral_message(
     assert receipt is not None
     assert receipt["status"] == "command_malformed"
     assert "validation command must not be empty" in receipt["summary"]
+
+
+def _user_todo(state: Path, todo_id: str) -> dict:
+    todos = parse_active_state_todos(state.read_text(encoding="utf-8"))
+    return next(
+        item
+        for item in todos["user_todos"]["items"]
+        if item["todo_id"] == todo_id
+    )
+
+
+def _spy_validation_runner(monkeypatch: pytest.MonkeyPatch) -> dict:
+    original_runner = completion_validation_module.run_caller_validation
+    calls = {"count": 0}
+
+    def counting_runner(*args, **kwargs):  # type: ignore[no-untyped-def]
+        calls["count"] += 1
+        return original_runner(*args, **kwargs)
+
+    monkeypatch.setattr(
+        completion_validation_module, "run_caller_validation", counting_runner
+    )
+    return calls
+
+
+def test_user_todo_update_done_runs_declared_validation_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="user",
+        text="Operator-recorded outcome.",
+        task_class="user_action",
+        validation_command=_FAIL_COMMAND,
+        validation_label="caller-declared smoke",
+    )
+    calls = _spy_validation_runner(monkeypatch)
+    result = update_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=str(todo["todo_id"]),
+        status="done",
+        evidence="claim of completion",
+    )
+    # The declared command ran once and blocked the update: nothing committed.
+    assert calls["count"] == 1
+    assert result["ok"] is False
+    assert result["changed"] is False
+    assert result["validation_blocked_completion"] is True
+    receipt = result["validation"]
+    assert receipt["passed"] is False
+    assert receipt["exit_code"] == 1
+    assert receipt["stdout_captured"] is False
+    assert _user_todo(state, str(todo["todo_id"]))["status"] == "open"
+
+
+def test_user_todo_update_done_without_declaration_keeps_fast_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="user",
+        text="Operator-recorded outcome.",
+        task_class="user_action",
+    )
+    calls = _spy_validation_runner(monkeypatch)
+    result = update_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=str(todo["todo_id"]),
+        status="done",
+    )
+    assert calls["count"] == 0
+    assert result["ok"] is True
+    assert "validation_blocked_completion" not in result
+    assert _user_todo(state, str(todo["todo_id"]))["status"] == "done"
+
+
+def test_repeated_done_update_does_not_rerun_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="user",
+        text="Operator-recorded outcome.",
+        task_class="user_action",
+        validation_command=_PASS_COMMAND,
+    )
+    calls = _spy_validation_runner(monkeypatch)
+    first = update_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=str(todo["todo_id"]),
+        status="done",
+        evidence="validated completion",
+    )
+    assert first["ok"] is True
+    assert calls["count"] == 1  # the passing command ran once via the update gate
+    assert _user_todo(state, str(todo["todo_id"]))["status"] == "done"
+
+    second = update_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=str(todo["todo_id"]),
+        status="done",
+        note="re-acknowledged",
+    )
+    # Already-completed short-circuit: the command is not re-run.
+    assert second["ok"] is True
+    assert calls["count"] == 1
+    assert _user_todo(state, str(todo["todo_id"]))["status"] == "done"
+
+
+def test_agent_todo_update_done_keeps_guard_error_without_running_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = _add_todo(registry, validation_command=_FAIL_COMMAND)
+    calls = _spy_validation_runner(monkeypatch)
+    with pytest.raises(ValueError, match="must use complete_goal_todo"):
+        update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=str(todo["todo_id"]),
+            status="done",
+        )
+    # The gate never runs for agent sections; the pre-existing guard fires.
+    assert calls["count"] == 0
+    assert _agent_todo(state, str(todo["todo_id"]))["status"] == "open"

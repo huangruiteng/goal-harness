@@ -161,28 +161,15 @@ assert(!platformMigrationNoEvidencePacket.includes("legacy/raw fallback"), "proj
 assert(!platformMigrationNoEvidencePacket.includes("不授权写入或生产动作") || platformMigrationNoEvidencePacket.includes("Gate：无"), "platform safety text must remain non-gated");
 
 const dashboardPageSource = readFileSync("src/views/dashboard-page.tsx", "utf8");
-const firstScreenRequiredSource = [
-  "const quota = projectAsset?.quota ?? row.queueItem?.quota ?? row.goal.quota",
-  "const nextAction = projectAsset?.next_action ?? decision.action",
-  "const stopCondition = projectAsset?.stop_condition ?? handoffCondition ?? decision.action",
-  "const handoffReadiness = row.queueItem?.handoff_readiness",
-  "buildHandoffReadinessView(item.handoffReadiness)",
-  "function HandoffReadinessPanel({",
-  "data-testid={testId}",
-  "testId=\"selected-queue-handoff-readiness\"",
-  "goalId={queueItem.goal_id}",
-  "const userTodos = todosFromProjectAssetSummary(projectAsset?.user_todos",
-  "const agentTodos = todosFromProjectAssetSummary(projectAsset?.agent_todos",
-  "<Badge variant=\"neutral\">项目资产</Badge>",
-  "交接就绪度：",
-  "交接状态：",
-  "交接后运行：",
-  "未通过检查：",
-  "负责人、确认条件和停止条件没有项目资产支持；下方使用原始状态备用数据。",
-  "<span className=\"font-medium\">{buildQuotaView(item.quota)?.shortLine}</span>",
+const workspaceRequiredSource = [
+  "buildPersonalHomeModel(payload, rows)",
+  "todosFromProjectAssetSummary",
+  "buildAgentManagementRows",
+  "personalGoalState",
+  "personalAgentTodos",
 ];
-for (const snippet of firstScreenRequiredSource) {
-  assert(dashboardPageSource.includes(snippet), `React User Actions source drifted: ${snippet}`);
+for (const snippet of workspaceRequiredSource) {
+  assert(dashboardPageSource.includes(snippet), `Personal Workspace source drifted: ${snippet}`);
 }
 
 console.log(`action-packet smoke ok (${packet.length} chars, handoff ${approvedHandoff.length} chars, legacy ${legacyFallbackPacket.length} chars, focus ${focusWaitPacket.length} chars)`);

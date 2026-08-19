@@ -79,3 +79,20 @@ def test_relative_override_escaping_project_is_rejected(tmp_path: Path) -> None:
             project_override=project,
             state_file_override=Path("../outside.md"),
         )
+
+
+def test_symlink_override_escaping_project_is_rejected(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside.md"
+    outside.write_text("## Next Action\n", encoding="utf-8")
+    inside = project / "inside.md"
+    inside.symlink_to(outside)
+
+    with pytest.raises(ValueError, match="escapes project root"):
+        resolve_goal_state(
+            registry=_registry(project),
+            goal_id="loopx-meta",
+            project_override=project,
+            state_file_override=inside,
+        )

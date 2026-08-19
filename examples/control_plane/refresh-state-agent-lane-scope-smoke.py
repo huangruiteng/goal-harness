@@ -106,9 +106,26 @@ def expect_value_error(message: str, callback) -> None:
     assert error and message in error, error
 
 
+def fixture_delivery_workspace(
+    current_path: Path | None = None,
+    *,
+    peer_independent_worktree_required: bool = False,
+) -> dict[str, object]:
+    del current_path
+    return {
+        "schema_version": "delivery_workspace_v0",
+        "task_repository": "git:github.com/loopx/refresh-state-fixture",
+        "repository_source": "smoke_fixture",
+        "workspace_kind": "independent_git_worktree",
+        "peer_independent_worktree_required": peer_independent_worktree_required,
+    }
+
+
 def main() -> None:
     original_now_local = state_refresh.now_local
+    original_capture_delivery_workspace = state_refresh.capture_delivery_workspace
     try:
+        state_refresh.capture_delivery_workspace = fixture_delivery_workspace
         with tempfile.TemporaryDirectory(prefix="loopx-agent-lane-refresh-") as raw_tmp:
             registry_path, runtime, project = write_fixture(Path(raw_tmp))
             state_path = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
@@ -425,6 +442,7 @@ def main() -> None:
             assert "next_action_projection_warning" not in primary_goal_item, primary_goal_item
     finally:
         state_refresh.now_local = original_now_local
+        state_refresh.capture_delivery_workspace = original_capture_delivery_workspace
 
     print("refresh-state-agent-lane-scope-smoke ok")
 

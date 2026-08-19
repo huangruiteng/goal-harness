@@ -183,6 +183,10 @@ def assert_context_orchestration() -> None:
                 "available_capabilities": kwargs.get("available_capabilities"),
             },
         ),
+        build_goal_channel_notification_projection=lambda **kwargs: record(
+            "build_goal_channel_notification_projection",
+            {"goals": [], "goal_id": kwargs.get("goal_id")},
+        ),
         status_control_plane_context_limit=20,
         max_todo_index_items=240,
     )
@@ -201,10 +205,20 @@ def assert_context_orchestration() -> None:
     assert payload["run_history"]["display_limit"] == 2, payload
     assert payload["todo_index"]["limit"] == 240, payload
     assert "agent_management_projection" not in payload, payload
-    assert calls[-1][1]["available_capabilities"] == [
+    assert "goal_channel_notification_projection" not in payload, payload
+    agent_management_call = next(
+        call for call in calls if call[0] == "build_agent_management_projection"
+    )
+    assert agent_management_call[1]["available_capabilities"] == [
         "network",
         "material_lifecycle",
-    ], calls[-1]
+    ], agent_management_call
+    goal_channel_call = next(
+        call
+        for call in calls
+        if call[0] == "build_goal_channel_notification_projection"
+    )
+    assert goal_channel_call[1]["goal_id"] == GOAL_ID, goal_channel_call
     assert [name for name, _ in calls][:4] == [
         "load_registry",
         "collect_global_registry_health",

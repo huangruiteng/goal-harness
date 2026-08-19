@@ -49,6 +49,7 @@ def main() -> None:
         "update_parser = sub.add_parser",
         "registry_boundary_parser = sub.add_parser",
         "serve_status_parser = sub.add_parser",
+        "chat_parser = sub.add_parser",
         "resolve_heartbeat_active_state(",
         "build_heartbeat_prompt(",
         "build_promotion_gate(",
@@ -58,6 +59,7 @@ def main() -> None:
         "inspect_registry(",
         "inspect_registry_boundary(",
         "serve_status(",
+        "serve_chat(",
         'if args.command == "backup-state":',
         'if args.command == "heartbeat-prompt":',
         'if args.command == "promotion-gate":',
@@ -66,6 +68,7 @@ def main() -> None:
         'if args.command == "registry":',
         'if args.command == "registry-boundary":',
         'if args.command == "serve-status":',
+        'if args.command == "chat":',
     ]
     for marker in forbidden_cli_markers:
         require(marker not in cli_source, f"support/control marker leaked into cli.py: {marker}")
@@ -76,6 +79,7 @@ def main() -> None:
         "handle_support_control_command",
         "resolve_heartbeat_active_state",
         "backup-state",
+        "chat",
         "heartbeat-prompt",
         "promotion-gate",
         "upgrade-plan",
@@ -104,6 +108,7 @@ def main() -> None:
         "registry": (),
         "registry-boundary": ("--path", "--require-not-tracked", "--require-gitignored"),
         "serve-status": ("--global-registry", "--enable-reward-write-api", "--enable-control-plane-write-api"),
+        "chat": ("--goal-id", "--codex-bin", "--no-open", "--global-registry"),
     }.items():
         help_text = require_success(run_cli(command, "--help"))
         for option in options:

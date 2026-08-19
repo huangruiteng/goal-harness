@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from loopx.control_plane.testing.cli_output_differential import (  # noqa: E402
     compare_cli_output_receipts,
+    select_cli_output_base_ref,
 )
 
 
@@ -85,13 +86,41 @@ def _load_receipt(path: Path) -> dict:
     return payload
 
 
+def _is_ancestor(ancestor: str, descendant: str) -> bool:
+    completed = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=REPO_ROOT,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if completed.returncode == 0:
+        return True
+    if completed.returncode == 1:
+        return False
+    raise RuntimeError(
+        f"cannot compare CLI output refs {ancestor} and {descendant}: "
+        f"{completed.stderr.strip()}"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--base-ref",
         default=os.environ.get("LOOPX_CLI_OUTPUT_BASE_REF", "origin/main"),
     )
+    parser.add_argument(
+        "--main-ref",
+        default=os.environ.get("LOOPX_CLI_OUTPUT_MAIN_REF", "origin/main"),
+    )
     args = parser.parse_args()
+    base_ref = select_cli_output_base_ref(
+        args.base_ref,
+        main_ref=args.main_ref,
+        is_ancestor=_is_ancestor,
+    )
     if not PROBE_TEST.is_file():
         raise RuntimeError(f"missing probe source: {PROBE_TEST.relative_to(REPO_ROOT)}")
     if not PROBE_RUNNER.is_file():
@@ -115,7 +144,7 @@ def main() -> int:
         shutil.copy2(SEMANTICS_SOURCE, semantics_source)
 
         _run(
-            ["git", "worktree", "add", "--detach", str(base_root), args.base_ref],
+            ["git", "worktree", "add", "--detach", str(base_root), base_ref],
             cwd=REPO_ROOT,
         )
         try:
@@ -175,6 +204,7 @@ def main() -> int:
             )
         print(
             "cli-output-base-head-differential-smoke ok "
+            f"base_ref={base_ref} "
             f"base={comparison['base_row_count']} "
             f"candidate={comparison['candidate_row_count']} "
             f"candidate_only={comparison['candidate_only_row_count']} "

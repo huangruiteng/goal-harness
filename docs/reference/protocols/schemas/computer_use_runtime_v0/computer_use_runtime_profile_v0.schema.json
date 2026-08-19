@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "computer_use_runtime_profile_v0",
+  "title": "computer_use_runtime_profile_v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "provider_id",
+    "host_kind",
+    "visibility",
+    "provider_primitives",
+    "boundary"
+  ],
+  "properties": {
+    "schema_version": { "const": "computer_use_runtime_profile_v0" },
+    "provider_id": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "host_kind": {
+      "type": "string",
+      "enum": ["browser_runtime", "desktop_runtime", "browser_or_desktop_runtime"]
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["visible", "replayable", "visible_or_replayable"]
+    },
+    "provider_primitives": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["screenshots", "external_write", "private_source_read"],
+      "properties": {
+        "screenshots": { "type": "string", "enum": ["host_owned", "unsupported"] },
+        "accessibility_tree": {
+          "type": "string",
+          "enum": ["optional", "supported", "unsupported"]
+        },
+        "browser_session": {
+          "type": "string",
+          "enum": ["optional", "supported", "unsupported"]
+        },
+        "record_replay": {
+          "type": "string",
+          "enum": ["optional", "supported", "unsupported"]
+        },
+        "external_write": { "type": "string", "enum": ["gated", "unsupported"] },
+        "private_source_read": { "type": "string", "enum": ["gated", "unsupported"] }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credentials_copied",
+        "cookies_exported",
+        "raw_screenshots_copied",
+        "raw_private_bodies_copied",
+        "external_write_allowed_without_gate"
+      ],
+      "properties": {
+        "credentials_copied": { "const": false },
+        "cookies_exported": { "const": false },
+        "raw_screenshots_copied": { "const": false },
+        "raw_private_bodies_copied": { "const": false },
+        "external_write_allowed_without_gate": { "const": false }
+      }
+    }
+  }
+}

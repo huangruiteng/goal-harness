@@ -255,6 +255,8 @@ def _event_attention_kind(
     bot_display_name: str,
     capture_scope: str,
 ) -> str | None:
+    if lark_event_mentions_bot(event, bot_display_name=bot_display_name):
+        return "direct_mention"
     normalized = dict(event)
     normalized["reply_to_operator"] = bool(
         event.get("reply_context_verified") is True
@@ -266,6 +268,30 @@ def _event_attention_kind(
         capture_scope=capture_scope,
     )
     return "reply_to_bot" if kind == "reply_to_operator" else kind
+
+
+def _normalized_mention_name(value: Any) -> str:
+    return " ".join(str(value or "").strip().lstrip("@").split()).casefold()
+
+
+def lark_event_mentions_bot(
+    event: Mapping[str, Any], *, bot_display_name: str
+) -> bool:
+    """Recognize provider-native direct mentions without message readback."""
+
+    if event.get("mentioned") is True:
+        return True
+    expected = _normalized_mention_name(bot_display_name)
+    mentions = event.get("mentions")
+    return bool(
+        expected
+        and isinstance(mentions, list)
+        and any(
+            isinstance(mention, Mapping)
+            and _normalized_mention_name(mention.get("name")) == expected
+            for mention in mentions
+        )
+    )
 
 
 def ingest_lark_event_inbox(

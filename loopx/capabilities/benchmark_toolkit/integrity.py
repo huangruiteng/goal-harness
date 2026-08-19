@@ -9,6 +9,8 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .environment_access import credential_probe_present
+
 BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION = "benchmark_integrity_policy_v0"
 BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION = (
     "benchmark_runtime_integrity_attestation_v0"
@@ -69,11 +71,6 @@ _DEFAULT_DENIED_ARGUMENT_MARKERS: dict[str, tuple[str, ...]] = {
         "/proc/1/root",
         "unshare --user",
     ),
-    "credential_probe": (
-        "printenv",
-        "/proc/1/environ",
-        "codex_goal_api_key",
-    ),
     "external_network_request": (
         "curl http://",
         "curl https://",
@@ -96,16 +93,15 @@ _SENSITIVE_VALUE_PATTERN = re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{12,}"
 _PATH_LIKE_LABEL_PATTERN = re.compile(
     r"(?i)^(?:[~/\\]|[a-z]:[\\/])|(?:^|[\\/])\.\.(?:[\\/]|$)|[\\/]"
 )
-_CREDENTIAL_PROBE_PATTERN = re.compile(
-    r"(?is)\bos\s*\.\s*(?:environ|getenv)\b"
-    r"|\bgetenv\s*\("
-    r"|\bsubprocess\s*\.\s*(?:run|popen|call|check_call|check_output)\b"
-    r".{0,240}\benv\s*="
-)
 _EXTERNAL_NETWORK_COMMAND_PATTERN = re.compile(
     r"(?is)\b(?:curl|wget)\b.{0,240}https?://"
     r"|\bgit\s+clone\b.{0,240}https?://"
 )
+# ATIF currently carries a function name rather than a typed side-effect class.
+# Keep this exact allowlist deliberately small: these calls only update controller
+# metadata, so their narrative arguments cannot themselves access benchmark data.
+# Unknown tools remain fail-closed and continue through the access-request scan.
+_NON_ACCESS_CONTROL_TOOLS = frozenset({"update_plan"})
 
 
 def _safe_label(value: object, *, limit: int = 120) -> str:
@@ -150,9 +146,10 @@ def _marker_present(text: str, marker: str) -> bool:
         # A bare sensitive filename must not match an unrelated absolute-path
         # basename. Explicit protected roots are separate path markers above.
         boundary += r"/\\"
-    return re.search(
-        rf"(?<![{boundary}]){re.escape(marker)}(?![{boundary}])", text
-    ) is not None
+    return (
+        re.search(rf"(?<![{boundary}]){re.escape(marker)}(?![{boundary}])", text)
+        is not None
+    )
 
 
 def _validated_policy(
@@ -264,19 +261,22 @@ def build_benchmark_integrity_qualification(
             function_name = _safe_label(
                 raw_call.get("function_name") or "unknown", limit=80
             )
-            arguments = _canonical_text(raw_call.get("arguments") or {})
+            raw_arguments = raw_call.get("arguments") or {}
+            arguments = _canonical_text(raw_arguments)
             lowered = arguments.lower()
-            categories = {
-                category
-                for category, category_markers in markers.items()
-                if any(_marker_present(lowered, marker) for marker in category_markers)
-            }
-            if re.search(r'(?i)(?:^|["\s:=])env(?:["\s]|$)', arguments):
-                categories.add("credential_probe")
-            if _CREDENTIAL_PROBE_PATTERN.search(arguments):
-                categories.add("credential_probe")
-            if _EXTERNAL_NETWORK_COMMAND_PATTERN.search(arguments):
-                categories.add("external_network_request")
+            categories: set[str] = set()
+            if function_name.lower() not in _NON_ACCESS_CONTROL_TOOLS:
+                categories = {
+                    category
+                    for category, category_markers in markers.items()
+                    if any(
+                        _marker_present(lowered, marker) for marker in category_markers
+                    )
+                }
+                if credential_probe_present(function_name, raw_arguments):
+                    categories.add("credential_probe")
+                if _EXTERNAL_NETWORK_COMMAND_PATTERN.search(arguments):
+                    categories.add("external_network_request")
             if _sensitive_value_present(arguments, secrets):
                 categories.add("credential_value_observed")
             for category in sorted(categories):

@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from .control_plane.runtime.time import now_local_iso
+from .control_plane.todos.handoff_mode import (
+    HANDOFF_MODE_LEGACY,
+    goal_handoff_mode,
+)
 from .control_plane.todos.active_state_editing import (
     TODO_SECTION_HEADINGS,
     insertion_anchor,
@@ -18,7 +22,10 @@ from .execution_profile import (
     execution_profile_summary,
 )
 from .global_registry import sync_project_registry_to_global
-from .install_contract import NO_CLONE_INSTALL_URL
+from .install_contract import (
+    ARCHIVE_FALLBACK_INSTALL_COMMAND,
+    DEFAULT_INSTALL_REPAIR_COMMAND,
+)
 from .onboarding import build_onboarding_scan
 from .orchestration import (
     DEFAULT_ORCHESTRATION_MODE,
@@ -33,11 +40,6 @@ DEFAULT_OBJECTIVE = "Improve this project through bounded, verified goal segment
 DEFAULT_DOMAIN = "project-goal-control-plane"
 GENERIC_ONBOARDING_ADAPTER_KINDS = frozenset(
     {"generic_project_goal_v0", "read_only_project_map_v0"}
-)
-NO_CLONE_INSTALL_REPAIR_COMMAND = (
-    f"curl -fsSL {NO_CLONE_INSTALL_URL} | bash\n"
-    'export PATH="$HOME/.local/bin:$PATH"\n'
-    "loopx doctor"
 )
 HEARTBEAT_OPT_IN_STATUS_REQUIRED = (
     "requires explicit heartbeat=yes/no before a recurring Codex App automation is installed"
@@ -305,12 +307,17 @@ def onboarding_next_action(
     accept_onboarding_agent_todos: bool,
     begin_autonomous_advance: bool,
     codex_app_heartbeat: str,
+    include_connection_validation: bool = True,
 ) -> str:
     if not onboarding_scan:
-        validation_action = onboarding_connection_validation_action(adapter_kind)
+        validation_action = (
+            onboarding_connection_validation_action(adapter_kind)
+            if include_connection_validation
+            else None
+        )
         if validation_action:
             return validation_action["text"]
-        return "Initial routing is owned by the connected domain adapter."
+        return "Review the first Goal Todo and advance only within its declared execution boundary."
     need_heartbeat_choice = codex_app_heartbeat == "ask"
     if not accept_onboarding_agent_todos or not begin_autonomous_advance or need_heartbeat_choice:
         asks: list[str] = []
@@ -359,10 +366,15 @@ def apply_onboarding_todos_to_state(
     accept_onboarding_agent_todos: bool,
     begin_autonomous_advance: bool,
     codex_app_heartbeat: str,
+    include_connection_validation: bool = True,
 ) -> str:
     if not onboarding_scan:
         lines = text.splitlines()
-        action = onboarding_connection_validation_action(adapter_kind)
+        action = (
+            onboarding_connection_validation_action(adapter_kind)
+            if include_connection_validation
+            else None
+        )
         if action:
             add_todo_to_lines(
                 lines,
@@ -435,6 +447,8 @@ def render_state_markdown(
     accept_onboarding_agent_todos: bool = False,
     begin_autonomous_advance: bool = False,
     codex_app_heartbeat: str = "ask",
+    include_connection_validation: bool = True,
+    handoff_mode: str = HANDOFF_MODE_LEGACY,
 ) -> str:
     safe_objective = objective.replace('"', '\\"')
     profile_summary = execution_profile_summary(execution_profile)
@@ -451,6 +465,13 @@ def render_state_markdown(
         accept_onboarding_agent_todos=accept_onboarding_agent_todos,
         begin_autonomous_advance=begin_autonomous_advance,
         codex_app_heartbeat=codex_app_heartbeat,
+        include_connection_validation=include_connection_validation,
+    )
+    # ``handoff_mode`` travels in the state front matter (RFC shared-goal
+    # authority, Appendix B). Legacy is the absent default and is never
+    # materialized, so an untouched goal keeps its byte-for-byte shape.
+    handoff_mode_line = (
+        f"handoff_mode: {handoff_mode}\n" if handoff_mode != HANDOFF_MODE_LEGACY else ""
     )
     state_text = f"""---
 status: active
@@ -458,7 +479,7 @@ owner_mode: goal
 objective: "{safe_objective}"
 updated_at: {updated_at}
 adapter_id: {goal_id}
----
+{handoff_mode_line}---
 
 # Active Goal State
 
@@ -515,6 +536,7 @@ adapter_id: {goal_id}
         accept_onboarding_agent_todos=accept_onboarding_agent_todos,
         begin_autonomous_advance=begin_autonomous_advance,
         codex_app_heartbeat=codex_app_heartbeat,
+        include_connection_validation=include_connection_validation,
     )
 
 
@@ -556,6 +578,7 @@ def build_goal_entry(
     allowed_domains: list[str],
     write_scope: list[str],
     execution_profile: dict[str, Any] | None,
+    display_name: str | None = None,
 ) -> dict[str, Any]:
     authority_sources = []
     if goal_doc:
@@ -568,6 +591,7 @@ def build_goal_entry(
         )
     return {
         "id": goal_id,
+        **({"display_name": display_name} if display_name else {}),
         "domain": domain,
         "status": "active",
         "role": role,
@@ -667,6 +691,8 @@ def bootstrap_project(
     onboarding_max_status_paths: int = 12,
     onboarding_max_top_level_files: int = 24,
     preserve_todos: bool = False,
+    display_name: str | None = None,
+    include_connection_validation: bool = True,
     force: bool,
     dry_run: bool,
     sync_global: bool,
@@ -729,6 +755,7 @@ def bootstrap_project(
         allowed_domains=allowed_domains or [],
         write_scope=write_scope or [],
         execution_profile=execution_profile,
+        display_name=display_name,
     )
     registry, registry_goal_action = merge_goal(registry, goal_entry, force=force)
 
@@ -767,12 +794,18 @@ def bootstrap_project(
         "replaced": "would-replace",
     }
     force_bootstrap_warning = None
+    declared_handoff_mode = HANDOFF_MODE_LEGACY
     if state_exists and force:
+        # A forced rebuild replaces todos, never the goal's handoff contract:
+        # the declared mode is carried into the rewritten front matter, and an
+        # invalid declaration fails closed before anything is rewritten.
+        declared_handoff_mode = goal_handoff_mode(state_file.read_text(encoding="utf-8"))
         force_bootstrap_warning = {
             "kind": "force_reconnect_existing_active_state",
             "state_file": str(state_file),
             "state_action": state_action,
             "will_replace_active_state": state_action == "replaced",
+            "handoff_mode": declared_handoff_mode,
             "preserve_todos_requested": bool(preserve_todos),
             "recommended_scope_migration": (
                 "Use configure-goal --write-scope ... --execute to change write scope "
@@ -873,10 +906,11 @@ def bootstrap_project(
                     "Fix global registry write access, then rerun this command.",
                     "Use --no-global-sync only for an explicit local-only setup.",
                 ],
-                "install_repair_command": NO_CLONE_INSTALL_REPAIR_COMMAND,
+                "install_repair_command": DEFAULT_INSTALL_REPAIR_COMMAND,
+                "archive_fallback_install_command": ARCHIVE_FALLBACK_INSTALL_COMMAND,
                 "install_repair_note": (
-                    "If this local LoopX install is missing or stale, rerun the no-clone installer, "
-                    "refresh PATH, and confirm with loopx doctor before continuing project delivery."
+                    "If this local LoopX install is missing or stale, repair the PyPI distribution "
+                    "and packaged workflow skills, then confirm with loopx doctor before continuing."
                 ),
                 "private_boundary_note": "Add .loopx/ and .codex/goals/ to the project .gitignore if the goal state contains private evidence.",
                 "error": str(global_writability.get("error") or "global registry is not writable"),
@@ -898,6 +932,8 @@ def bootstrap_project(
                     accept_onboarding_agent_todos=accept_onboarding_agent_todos,
                     begin_autonomous_advance=begin_autonomous_advance,
                     codex_app_heartbeat=codex_app_heartbeat,
+                    include_connection_validation=include_connection_validation,
+                    handoff_mode=declared_handoff_mode,
                 ),
                 encoding="utf-8",
             )
@@ -962,10 +998,11 @@ def bootstrap_project(
             f"loopx --registry {runtime_root / 'registry.global.json'} status",
             f"loopx --registry {relative_state_file(project, registry_path)} history --goal-id {goal_id}",
         ],
-        "install_repair_command": NO_CLONE_INSTALL_REPAIR_COMMAND,
+        "install_repair_command": DEFAULT_INSTALL_REPAIR_COMMAND,
+        "archive_fallback_install_command": ARCHIVE_FALLBACK_INSTALL_COMMAND,
         "install_repair_note": (
-            "If this local LoopX install is missing or stale, rerun the no-clone installer, "
-            "refresh PATH, and confirm with loopx doctor before continuing project delivery."
+            "If this local LoopX install is missing or stale, repair the PyPI distribution "
+            "and packaged workflow skills, then confirm with loopx doctor before continuing."
         ),
         "private_boundary_note": "Add .loopx/ and .codex/goals/ to the project .gitignore if the goal state contains private evidence.",
     }
@@ -1107,6 +1144,17 @@ def render_bootstrap_markdown(payload: dict[str, Any]) -> str:
                 str(payload.get("install_repair_note") or ""),
                 "```bash",
                 str(payload.get("install_repair_command")),
+                "```",
+            ]
+        )
+    if payload.get("archive_fallback_install_command"):
+        lines.extend(
+            [
+                "",
+                "### Archive Fallback",
+                "Use this only when an appropriate Python package environment is unavailable.",
+                "```bash",
+                str(payload.get("archive_fallback_install_command")),
                 "```",
             ]
         )

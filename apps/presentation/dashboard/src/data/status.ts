@@ -191,6 +191,22 @@ export const agentManagementProjectionSchema = z.object({
   agents: z.array(agentManagementRowSchema).optional().default([]),
 }).passthrough();
 
+export const goalChannelNotificationRowSchema = z.object({
+  goal_id: z.string(),
+  configured: z.boolean().optional().default(false),
+  enabled: z.boolean().optional().default(false),
+  human_gate_auto_notify_enabled: z.boolean().optional().default(false),
+  target_ref: z.string().optional().nullable(),
+  receipt_count: z.number().optional().default(0),
+  last_notified_at: z.string().optional().nullable(),
+}).passthrough();
+
+export const goalChannelNotificationProjectionSchema = z.object({
+  schema_version: z.string().optional().nullable(),
+  generated_at: z.string().optional().nullable(),
+  goals: z.array(goalChannelNotificationRowSchema).optional().default([]),
+}).passthrough();
+
 export const projectAssetTodoSummarySchema = z.object({
   source_section: z.string().optional().nullable(),
   open: z.number().optional().default(0),
@@ -457,6 +473,7 @@ export const runRecordSchema = z.object({
 
 export const runGoalSchema = z.object({
   id: z.string(),
+  display_name: z.string().optional().nullable(),
   domain: z.string().optional().nullable(),
   status: z.string().optional().nullable(),
   lifecycle_phase: z.string().optional().nullable(),
@@ -523,6 +540,16 @@ export const usageTotalsSchema = z.object({
   automation_run_count_7d: z.number().optional().default(0),
   progress_signal_run_count_24h: z.number().optional().default(0),
   progress_signal_run_count_7d: z.number().optional().default(0),
+  input_tokens_24h: z.number().optional().default(0),
+  input_tokens_7d: z.number().optional().default(0),
+  output_tokens_24h: z.number().optional().default(0),
+  output_tokens_7d: z.number().optional().default(0),
+  cache_tokens_24h: z.number().optional().default(0),
+  cache_tokens_7d: z.number().optional().default(0),
+  cost_usd_24h: z.number().optional().default(0),
+  cost_usd_7d: z.number().optional().default(0),
+  duration_ms_24h: z.number().optional().default(0),
+  duration_ms_7d: z.number().optional().default(0),
 });
 
 export const usageGoalSchema = usageTotalsSchema.extend({
@@ -539,6 +566,16 @@ const defaultUsageTotals = {
   automation_run_count_7d: 0,
   progress_signal_run_count_24h: 0,
   progress_signal_run_count_7d: 0,
+  input_tokens_24h: 0,
+  input_tokens_7d: 0,
+  output_tokens_24h: 0,
+  output_tokens_7d: 0,
+  cache_tokens_24h: 0,
+  cache_tokens_7d: 0,
+  cost_usd_24h: 0,
+  cost_usd_7d: 0,
+  duration_ms_24h: 0,
+  duration_ms_7d: 0,
 };
 
 export const usageSummarySchema = z.object({
@@ -838,6 +875,7 @@ export const statusPayloadSchema = z.object({
   usage_summary: usageSummarySchema.default(null),
   todo_index: todoIndexSchema.optional().nullable().default(null),
   agent_management_projection: agentManagementProjectionSchema.optional().nullable().default(null),
+  goal_channel_notification_projection: goalChannelNotificationProjectionSchema.optional().nullable().default(null),
   presentation_surfaces: presentationSurfaceCollectionSchema.optional().default(
     emptyPresentationSurfaceCollection,
   ),
@@ -891,6 +929,8 @@ export type AgentManagementWorkspaceRef = z.infer<typeof agentManagementWorkspac
 export type AgentManagementStaleClaimHint = z.infer<typeof agentManagementStaleClaimHintSchema>;
 export type AgentManagementHandoffNote = z.infer<typeof agentManagementHandoffNoteSchema>;
 export type AgentManagementProjection = z.infer<typeof agentManagementProjectionSchema>;
+export type GoalChannelNotificationRow = z.infer<typeof goalChannelNotificationRowSchema>;
+export type GoalChannelNotificationProjection = z.infer<typeof goalChannelNotificationProjectionSchema>;
 export type ReviewMaterial = z.infer<typeof reviewMaterialSchema>;
 export type ProjectMap = z.infer<typeof projectMapSchema>;
 export type GlobalRegistryHealth = z.infer<typeof globalRegistryHealthSchema>;

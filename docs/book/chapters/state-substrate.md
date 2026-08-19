@@ -51,7 +51,7 @@ Todo 写入、Agent 注册和 Host activation 都不应发生。目标文本相�
 共享一部分 acceptance，都不是静默合并 Goal 的依据。
 
 还要把 Goal reuse 与 Agent takeover 分开。新 Agent 可以读取同一 Goal 的公共 frontier 和历史，
-但默认注册 fresh `agent_id`；复用已有 Agent identity 需要用户明确选择那个精确 id。这样历史
+但在无已注册 lane 时默认注册 fresh `agent_id`；复用已有 Agent identity 需要用户明确选择那个精确 id。这样历史
 lineage 能连续，执行责任却不会被新 session 冒名继承。
 
 因此，恢复模型不是：

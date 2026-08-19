@@ -298,10 +298,10 @@ loopx todo complete --goal-id <goal-id> --todo-id <todo_id> --claimed-by <agent-
 
 The acquire key is an execution-instance fence. A lifecycle writer cannot rely
 on `agent_id` alone because multiple host processes may share one registered
-peer identity. While an effective lease exists, `todo complete` holds the lease
-lock through canonical state writeback and rejects a missing, stale, or
-mismatched key before creating successors. Hosts may also pass
-`--task-lease-expected-version` for an explicit version CAS.
+peer identity. While an effective lease exists, `todo complete` and
+`todo supersede` hold the lease lock through canonical state writeback and
+reject a missing, stale, or mismatched key before creating successors. Hosts
+may also pass `--task-lease-expected-version` for an explicit version CAS.
 
 If the host adapter is unavailable, the user or automation can run those
 commands and preserve the same state transitions. If a host offers an operation

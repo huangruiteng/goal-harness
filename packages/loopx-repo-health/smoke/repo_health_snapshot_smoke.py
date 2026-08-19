@@ -43,6 +43,27 @@ def _fixture() -> dict:
         "traffic_14d": {
             "views": {"count": 88117, "uniques": 27496},
             "clones": {"count": 29250, "uniques": 4602},
+            "paths": [
+                {
+                    "path": "/README.md",
+                    "title": "loopx",
+                    "count": 21403,
+                    "uniques": 13201,
+                },
+                {
+                    "path": "/docs/architecture.md",
+                    "title": "Architecture",
+                    "count": 5210,
+                    "uniques": 3120,
+                },
+                {
+                    "path": "/issues",
+                    "title": "Issues",
+                    "count": 9801,
+                    "uniques": 5110,
+                },
+            ],
+            "docs_views": {"count": 26613, "uniques": 16321},
         },
         "latency": {
             "pr_merge_p25_min": 12.0,
@@ -84,9 +105,50 @@ def _run_offline() -> int:
         print("FAIL: negative traffic accepted", file=sys.stderr)
         return 1
 
+    broken = copy.deepcopy(fixture)
+    broken["traffic_14d"]["paths"] = [{"path": "/docs", "title": "Docs", "count": -1, "uniques": 0}]
+    if validate_snapshot(broken) == []:
+        print("FAIL: negative path traffic accepted", file=sys.stderr)
+        return 1
+
+    from loopx_repo_health.github import is_docs_path
+
+    docs_examples = [
+        "/README.md",
+        "/readme",
+        "/docs/getting-started.md",
+        "/wiki/Home",
+        "/blob/main/docs/guide.md",
+        "/tree/main/docs",
+        "/huangruiteng/loopx/blob/main/README.zh-CN.md",
+        "/huangruiteng/loopx/blob/main/docs/guides/getting-started.md",
+        "/huangruiteng/loopx/tree/main/docs",
+    ]
+    for path in docs_examples:
+        if not is_docs_path(path):
+            print(f"FAIL: {path} should classify as docs", file=sys.stderr)
+            return 1
+    non_docs_examples = [
+        "/issues",
+        "/pulls",
+        "/",
+        "/blob/main/loopx/cli.py",
+        "/releases",
+        "/huangruiteng/loopx",
+        "/huangruiteng/loopx/pulls",
+        "/huangruiteng/loopx/blob/main/loopx/cli.py",
+    ]
+    for path in non_docs_examples:
+        if is_docs_path(path):
+            print(f"FAIL: {path} should not classify as docs", file=sys.stderr)
+            return 1
+
     md = render_markdown(fixture)
     if "Repo Health: huangruiteng/loopx" not in md or "| stars | 4804 |" not in md:
         print("FAIL: markdown projection missing expected rows", file=sys.stderr)
+        return 1
+    if "| docs_views | 26613 | 16321 |" not in md or "| /docs/architecture.md |" not in md:
+        print("FAIL: markdown projection missing docs/top-path rows", file=sys.stderr)
         return 1
 
     print("ok: offline contract smoke passed")

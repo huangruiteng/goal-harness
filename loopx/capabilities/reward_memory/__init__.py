@@ -34,6 +34,12 @@ from .dogfood import (
     build_reward_memory_dogfood_receipt,
     build_reward_memory_operator_control,
 )
+from .memory_utility import (
+    MEMORY_UTILITY_OBSERVATION_SCHEMA_VERSION,
+    build_reward_memory_utility_observation,
+    reward_memory_application_receipt_id,
+    validate_reward_memory_utility_observation,
+)
 from .registry import (
     build_reward_memory_corpus_registry_packet,
     normalize_reward_memory_corpus,
@@ -57,6 +63,8 @@ __all__ = [
     "build_reward_memory_dogfood_batch",
     "build_reward_memory_dogfood_receipt",
     "build_reward_memory_operator_control",
+    "build_reward_memory_utility_observation",
+    "reward_memory_application_receipt_id",
     "build_reward_memory_route_packet",
     "build_reward_memory_recall_request",
     "execute_reward_memory_recall",
@@ -64,6 +72,7 @@ __all__ = [
     "normalize_reward_memory_provider_binding",
     "normalize_reward_memory_standing_policy",
     "normalize_reward_memory_corpus",
+    "MEMORY_UTILITY_OBSERVATION_SCHEMA_VERSION",
     "issue_fix_verified_contributor_candidate_fixture",
     "pr_3237_regression_observation",
     "reward_memory_health_case",
@@ -72,4 +81,5 @@ __all__ = [
     "run_reward_memory_automatic_ingest_hook",
     "run_reward_memory_automatic_recall_hook",
     "semantic_preference_inventory_to_reward_corpora",
+    "validate_reward_memory_utility_observation",
 ]

@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "community_discussion_scan_v0",
+  "title": "LoopX community discussion scan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scan_at",
+    "window_days",
+    "repo",
+    "stats",
+    "facts",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "community_discussion_scan_v0"
+    },
+    "scan_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "window_days": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "repo": {
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "name"
+      ],
+      "type": "object"
+    },
+    "stats": {
+      "additionalProperties": false,
+      "properties": {
+        "raw_facts": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "deduped_facts": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_errors": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "strong": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "raw_facts",
+        "deduped_facts",
+        "source_errors",
+        "strong"
+      ],
+      "type": "object"
+    },
+    "facts": {
+      "items": {
+        "$ref": "fact.schema.json"
+      },
+      "type": "array"
+    },
+    "evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rate_limit_remaining": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sources",
+        "warnings"
+      ],
+      "type": "object"
+    }
+  }
+}

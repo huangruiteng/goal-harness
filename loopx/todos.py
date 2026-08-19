@@ -119,6 +119,7 @@ from .control_plane.todos.handoff_mode import (
     resolve_todo_completion_handoff,
 )
 from .control_plane.work_items.task_lease import (
+    enter_terminal_todo_lease_fence,
     hold_task_lease_mutation_fence,
     release_verified_task_lease_fence,
 )
@@ -605,6 +606,7 @@ def add_todo_to_lines(
     validation_label: str | None = None,
     validation_timeout_seconds: int | None = None,
     monitor_metadata: dict[str, Any] | None = None,
+    note: str | None = None,
     evidence: str | None = None,
     updated_at: str | None = None,
 ) -> dict[str, Any]:
@@ -719,6 +721,7 @@ def add_todo_to_lines(
                 else None
             ),
             **normalized_monitor_metadata,
+            note=note,
             evidence=evidence,
             updated_at=updated_at,
         )
@@ -736,12 +739,20 @@ def add_todo_to_lines(
         }
         if status:
             status_changed = set_todo_marker(lines, block, normalized_status)
-        if task_class:
-            updates["task_class"] = task_class
-        if action_kind:
-            updates["action_kind"] = action_kind
-        if task_domain:
-            updates["task_domain"] = task_domain
+        for metadata_field, metadata_value in (
+            ("task_class", task_class),
+            ("action_kind", action_kind),
+            ("task_domain", task_domain),
+            ("task_repository", task_repository),
+            ("continuation_policy", continuation_policy),
+            ("claimed_by", claimed_by),
+            ("blocks_agent", blocks_agent),
+            ("unblocks_todo_id", unblocks_todo_id),
+            ("note", note),
+            ("evidence", evidence),
+        ):
+            if metadata_value:
+                updates[metadata_field] = metadata_value
         if capability_binding_ref:
             requested_binding_ref = normalize_todo_capability_binding_ref(
                 capability_binding_ref
@@ -761,10 +772,6 @@ def add_todo_to_lines(
                     "capability_binding_ref is immutable once set"
                 )
             updates["capability_binding_ref"] = requested_binding_ref
-        if task_repository:
-            updates["task_repository"] = task_repository
-        if continuation_policy:
-            updates["continuation_policy"] = continuation_policy
         if required_write_scopes is not None:
             updates["required_write_scopes"] = required_write_scopes
         if required_capabilities is not None:
@@ -777,22 +784,16 @@ def add_todo_to_lines(
             updates["decision_scope"] = decision_scope
         if required_decision_scopes is not None:
             updates["required_decision_scopes"] = required_decision_scopes
-        if claimed_by:
-            updates["claimed_by"] = claimed_by
         if bound_agent:
             updates["bound_agent"] = bound_agent
             updates["goal_bound"] = None
         elif goal_bound is not None:
             updates["bound_agent"] = None
             updates["goal_bound"] = goal_bound
-        if blocks_agent:
-            updates["blocks_agent"] = blocks_agent
         if excluded_agents is not None:
             updates["excluded_agents"] = excluded_agents
         if global_gate is not None:
             updates["global_gate"] = global_gate
-        if unblocks_todo_id:
-            updates["unblocks_todo_id"] = unblocks_todo_id
         if replan_obligation_id:
             updates["replan_obligation_id"] = require_replan_successor_rebinding(
                 existing_obligation_id=block.get("replan_obligation_id"),
@@ -801,8 +802,6 @@ def add_todo_to_lines(
         if normalized_resume_when:
             updates["resume_when"] = normalized_resume_when
         updates.update(normalized_monitor_metadata)
-        if evidence:
-            updates["evidence"] = evidence
         if updated_at and not block.get("updated_at"):
             updates["updated_at"] = updated_at
         metadata_line = metadata_line_for_todo_block(block, updates)
@@ -870,6 +869,7 @@ def add_todo_to_lines(
         "next_due_at": effective_metadata.get("next_due_at"),
         "expires_at": effective_metadata.get("expires_at"),
         "watch_only": effective_metadata.get("watch_only"),
+        "note": effective_metadata.get("note") or note,
         "evidence": effective_metadata.get("evidence") or evidence,
         "updated_at": effective_metadata.get("updated_at") or updated_at,
     }
@@ -882,6 +882,7 @@ def add_goal_todo(
     role: str,
     text: str,
     status: str | None = None,
+    note: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
     task_domain: str | None = None,
@@ -1111,6 +1112,7 @@ def add_goal_todo(
             validation_label=validation_label,
             validation_timeout_seconds=validation_timeout_seconds,
             monitor_metadata=normalized_monitor_metadata,
+            note=note,
             updated_at=updated_at,
         )
         added = bool(add_result["added"])
@@ -1162,6 +1164,7 @@ def add_goal_todo(
         "next_due_at": add_result.get("next_due_at"),
         "expires_at": add_result.get("expires_at"),
         "watch_only": add_result.get("watch_only"),
+        "note": add_result.get("note"),
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,
@@ -1254,6 +1257,34 @@ def update_goal_todo(
         project=project,
         state_file=state_file,
     )
+    # Run caller-approved validation BEFORE acquiring the mutation lock when
+    # this update writes a completion, mirroring complete_goal_todo's pre-lock
+    # gate (the MUTATION lock deadline is 5s). Agent-role completions keep the
+    # existing in-lock guard error below, so this covers the remaining paths
+    # that can write `status=done` directly (user-role todos with a declared
+    # validation command). Returns a typed failure payload (ok=False) when
+    # validation blocks; otherwise None.
+    if status:
+        # normalize_todo_status returns None (never raises) for an invalid
+        # status, which simply skips this gate; the in-lock write path then
+        # surfaces the same invalid-status error as before.
+        if normalize_todo_status(status) == TODO_STATUS_DONE:
+            update_block_match = find_todo_block(
+                resolved_state_file.read_text(encoding="utf-8").splitlines(),
+                todo_id=todo_id,
+                role=role,
+            )
+            if update_block_match and (role or update_block_match[0]) != "agent":
+                validation_failure = run_completion_validation_gate(
+                    state_file=resolved_state_file,
+                    todo_id=todo_id,
+                    role=role,
+                    registry_path=registry_path,
+                    goal_id=goal_id,
+                    dry_run=dry_run,
+                )
+                if validation_failure is not None:
+                    return validation_failure
     with exclusive_file_lock(
         resolved_state_file,
         agent_id=agent_id or claimed_by,
@@ -1477,14 +1508,13 @@ def update_goal_todo(
             task_class=target_task_class,
         )
         effective_monitor_metadata = {
-            key: existing_block.get(key)
-            for key in (
-                "expires_at",
-                "watch_only",
-            )
-            if existing_block.get(key) is not None
+            k: v
+            for k, v in {
+                **{key: existing_block.get(key) for key in ("expires_at", "watch_only") if existing_block.get(key) is not None},
+                **normalized_monitor_metadata,
+            }.items()
+            if v is not None
         }
-        effective_monitor_metadata.update(normalized_monitor_metadata)
         if enforce_monitor_boundedness:
             todo_monitor_metadata.require_continuous_monitor_boundedness(
                 task_class=target_task_class,
@@ -1967,6 +1997,7 @@ def supersede_goal_todo(
     next_continuation_policy: str | None = None,
     next_excluded_agents: list[str] | None = None,
     agent_id: str | None = None, authority_reason: str | None = None,
+    task_lease_idempotency_key: str | None = None, task_lease_expected_version: int | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -1986,10 +2017,8 @@ def supersede_goal_todo(
         state_file=state_file,
     )
     with exclusive_file_lock(
-        resolved_state_file,
-        agent_id=agent_id,
-        operation="todo_supersede",
-    ):
+        resolved_state_file, agent_id=agent_id, operation="todo_supersede",
+    ), ExitStack() as lease_fence_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         updated_at = now_local()
@@ -2009,21 +2038,17 @@ def supersede_goal_todo(
             todo=authority_todo,
             actor_agent_id=agent_id, authority_reason=authority_reason,
         )
+        completion_handoff, task_lease_fence = enter_terminal_todo_lease_fence(
+            lease_fence_stack, registry_path=registry_path, goal_id=goal_id, todo_id=todo_id,
+            todo=authority_todo, actor_agent_id=agent_id, state_text=original, mutation_authority=mutation_authority,
+            idempotency_key=task_lease_idempotency_key, expected_version=task_lease_expected_version,
+        )
         effective_next_claimed_by = (
-            require_registered_agent_id(
-                registry_path=registry_path,
-                goal_id=goal_id,
-                agent_id=next_claimed_by,
-                field="next_claimed_by",
-            )
-            if next_claimed_by
-            else None
+            require_registered_agent_id(registry_path=registry_path, goal_id=goal_id, agent_id=next_claimed_by, field="next_claimed_by")
+            if next_claimed_by else None
         )
         effective_next_excluded_agents = require_registered_todo_excluded_agents(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            excluded_agents=next_excluded_agents,
-            field="next_excluded_agents",
+            registry_path=registry_path, goal_id=goal_id, excluded_agents=next_excluded_agents, field="next_excluded_agents",
         )
         if effective_next_claimed_by and not next_agent_todo:
             raise ValueError("--next-claimed-by requires --next-agent-todo")
@@ -2155,6 +2180,7 @@ def supersede_goal_todo(
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
             resolved_state_file.write_text(new_text, encoding="utf-8")
+        release_verified_task_lease_fence(task_lease_fence, committed=changed and not dry_run)
     return {
         "ok": True,
         "dry_run": dry_run,
@@ -2163,6 +2189,7 @@ def supersede_goal_todo(
         **update_result,
         "changed": changed,
         "mutation_authority": mutation_authority,
+        "task_lease_fence": task_lease_fence, **completion_handoff,
         "next_todos": next_results,
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,

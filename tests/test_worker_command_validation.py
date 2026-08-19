@@ -45,6 +45,23 @@ def test_validate_worker_command_rejects_unsafe_commands(command: str) -> None:
         validate_worker_command(command, field="worker_turn_command")
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ENV=x python3 worker.py",
+        "LD_PRELOAD=/tmp/x python3",
+        "evil *",
+        "evil ?",
+        "a\tb",
+    ],
+)
+def test_validate_worker_command_rejects_env_assignment_and_glob_variants(
+    command: str,
+) -> None:
+    with pytest.raises(ValueError, match="unsafe shell metacharacters"):
+        validate_worker_command(command, field="worker_turn_command")
+
+
 def test_spec_builder_rejects_unsafe_worker_command() -> None:
     spec = {
         "goal_id": "loopx-meta",

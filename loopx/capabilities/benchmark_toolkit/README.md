@@ -11,16 +11,92 @@ Benchmark adapters that use the Codex app-server Goal API should import
 `loopx.capabilities.benchmark_toolkit.native_codex_goal`. The module provides the
 real stdio JSON-RPC process transport, the ordered Goal transaction, terminal event
 correlation, Goal-status polling across automatic continuation turns, and a
-public-safe receipt. A runner supplies its own isolated process command,
-environment, sandbox policy, task bridge, and timeout; it should not copy the
-Goal state machine.
+public-safe receipt. A runner supplies its environment, sandbox policy, task bridge,
+and timeout; it should not copy the Goal state machine.
+
+On Linux, a host-side runner may use `native_codex_isolation` to build the isolated
+process command. Its synthetic root contains a read-only system runtime, fresh
+`/proc`, `/run`, and `/tmp`, runner-created work children, one explicitly selected
+task workspace at the returned `host-visible` alias, and an optional formal LoopX
+profile at its verified absolute path. The surrounding host root, original task
+path, ambient host `/tmp`, nested host mounts, symlinked work children, and
+`/proc/1/root` escape path are absent. The helper requires unprivileged user, mount,
+and PID namespaces plus `pivot_root` and fails closed when its roots overlap.
+
+```python
+from loopx.capabilities.benchmark_toolkit.native_codex_isolation import (
+    build_native_codex_isolation_envelope,
+    rebase_native_codex_loopx_workspace_state,
+)
+
+envelope = build_native_codex_isolation_envelope(
+    executable="codex",
+    process_args=["app-server", "--listen", "stdio://", "--enable", "goals"],
+    work_dir=runner_work_dir,
+    private_root=controller_private_root,
+    workspace_source=task_workspace,
+    profile_root=profile.root,
+)
+# If the selected workspace already contains LoopX control state, relocate its
+# generated path references before launch and restore them after termination.
+rebase_native_codex_loopx_workspace_state(
+    task_workspace,
+    source_root=task_workspace,
+    target_root=envelope.workspace_alias,
+)
+# Pass envelope.process_command to probe_native_goal_process or
+# run_native_goal_process_until_terminal, and use envelope.workspace_alias as cwd.
+# In a finally block after the process terminates:
+rebase_native_codex_loopx_workspace_state(
+    task_workspace,
+    source_root=envelope.workspace_alias,
+    target_root=task_workspace,
+)
+```
+
+The relocation helper is deliberately narrow: it rewrites only LoopX registries
+and generated run-history JSON, JSONL, and Markdown under the selected workspace.
+It validates every candidate before writing, updates files atomically, rejects
+symlinked control-state paths, and leaves task files, model output, trajectories,
+verifier evidence, and arbitrary workspace prose untouched. This keeps formally
+installed LoopX state readable after the temporary `host-visible` alias disappears.
+The two canonical registries form one consistency boundary: both absent means no
+control state, while only one present fails closed. If an abrupt process kill skips
+the reverse rewrite, a subsequent launch using the same deterministic work
+directory first recovers stale alias references.
+
+The profile bind is writable because Codex and an installed LoopX release may need
+runtime state. It must therefore be a per-run profile or a runner-restored pinned
+snapshot, never ambient state shared across trials.
+
+This is a filesystem/process envelope, not a complete benchmark sandbox. It grants
+no model credential, task-command bridge, shell-network policy, evaluator denial,
+cross-trial denial, verifier ordering, upload, submission, or scoring authority.
+The runner must still attest those boundaries independently. Platforms without the
+required Linux namespace primitives must use an equivalent runner-owned isolation
+boundary instead of silently falling back to the ambient host.
 
 The runnable source example is
 [`benchmark/deepswe/run_native_codex_goal.py`](../../../benchmark/deepswe/run_native_codex_goal.py).
 Its `--preflight-only` mode proves a live Codex initialize/thread/Goal attachment
 without invoking a model. Full mode starts one turn and waits for a correlated
 terminal event, then keeps draining Codex-owned continuation turns until the Goal
-leaves `active`. The same total timeout covers the full Goal lifecycle.
+leaves `active`. The same total timeout covers the full Goal lifecycle. Add
+`--isolate`, `--isolation-work-dir`, and `--private-root` to make this envelope the
+real process path; `--profile-root` adds the optional per-run formal profile. The
+launcher performs recovery, pre-launch rebase, and `finally` restoration around
+both preflight and full Goal modes.
+
+The same adapter publishes `public_trajectory_summary_v0` from the compact
+`native_codex_goal_turn_receipt_v0` lifecycle fields. The benchmark toolkit owns
+the strict reducer because public/private evidence reduction is already part of
+this capability; the DeepSWE research adapter is its first active caller. The
+summary carries only typed counts, status labels, and content-free notification
+kind counts. It never reopens event payloads, and it marks message and tool-call
+semantics unavailable rather than guessing them. Missing, malformed, or
+inconsistent lifecycle facts fail closed. The similarly named archived reducer
+under `deprecate/benchmark-legacy/` is historical evidence, not a dependency or
+compatibility entry point for this native-runner contract.
 
 ### Formal installed profile and skill discovery
 
@@ -130,6 +206,18 @@ Qualification rejects a run when it detects any of the following:
 - malformed or incomplete ATIF tool evidence;
 - missing runner authority or any required runtime isolation attestation.
 
+Credential-probe detection reads typed command fields, then classifies direct
+environment commands, runtime-language enumeration or sensitive-name lookups, and
+procfs reads. Neighboring tool prose and commands that only inspect or write source
+text are not executed credential reads. Launching a child with an explicit
+environment is also not itself a credential read; sensitive values are still
+scanned in every tool argument and observation.
+
+Access-request markers are evaluated only on tool calls that can perform or request
+resource access. Exact known controller-only calls such as `update_plan` carry
+narrative metadata and are excluded from that scan; an actual sensitive value in
+their arguments still fails qualification. Unknown tool names remain fail-closed.
+
 `benchmark_cheating_detected` is narrower than `integrity_qualified=false`.
 Restricted evaluation or cross-trial access is classified as cheating. Missing
 isolation proof or a credential leak still makes the run uncountable, but LoopX does
@@ -169,6 +257,37 @@ evidence channels are required.
 paths. Path-like values fail closed and are emitted only as `redacted`, so a runner
 cannot move an operator directory into the public receipt through identifier fields.
 
+### Exact-job container binding
+
+Runtime evidence must belong to the same job as the score. An image-only Docker
+lookup is ambiguous as soon as two benchmark arms use the same image concurrently.
+Before inspecting isolation settings, bind the container with the runner-owned job
+or trial label, the service label, and the expected image:
+
+```python
+from loopx.capabilities.benchmark_toolkit import (
+    compact_docker_container_binding_receipt,
+    select_exact_docker_container,
+)
+
+binding = select_exact_docker_container(
+    ancestor_image="benchmark-runner:fixture",
+    required_labels={
+        "com.docker.compose.project": job_id,
+        "com.docker.compose.service": "main",
+    },
+)
+container_name = binding.container_name  # private runner state; do not publish
+receipt = compact_docker_container_binding_receipt(binding)
+```
+
+The selector fails closed unless exactly one running container matches. The compact
+`benchmark_exact_container_binding_v0` receipt records only the required label keys,
+match count, and a SHA-256 selector digest; it excludes the raw container identity
+and label values. The helper grants no Docker or runner authority. Callers that need
+a privileged wrapper must supply their own `command_runner` and keep that authority
+outside the receipt.
+
 Benchmark-specific private roots can be added without committing them through an
 ignored `benchmark_integrity_policy_v0` file:
 
@@ -190,20 +309,134 @@ receipt.
 
 A countable experiment uses the toolkit in this order:
 
-1. Declare a `run_permission_policy_v0` and preflight the runner boundary.
-2. Launch one frozen case/arm; do not expose evaluator sources or official feedback.
-3. Capture ATIF tool evidence and a runner-owned runtime attestation.
-4. Run `integrity-qualification`; stop on any blocker.
-5. Run the independent verifier only after the agent phase.
-6. Reduce the official result through the benchmark-owned scoring path.
-7. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
-   comparison claim or ledger update.
+1. Read the project experiment board before selecting or launching another case.
+2. Declare a `run_permission_policy_v0` and preflight the runner boundary.
+3. Upsert the planned or running row, then launch one frozen case/arm; do not expose
+   evaluator sources or official feedback.
+4. Capture ATIF tool evidence and a runner-owned runtime attestation.
+5. Run `integrity-qualification`; stop on any blocker.
+6. Run the independent verifier only after the agent phase.
+7. Reduce the official result through the benchmark-owned scoring path.
+8. Upsert terminal score, countability, effort, treatment fidelity, and insight
+   status, then read the matched-comparison projection.
+9. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
+   comparison claim.
 
 Integrity qualification is necessary but not sufficient for a score claim. It does
 not establish task correctness, official score authority, experiment parity, or a
 LoopX advantage. `score_claim_eligible=true` only permits the official score and
 matched-pair gates to run; `score_claim_countable` and `matched_pair_countable` stay
 false in this receipt. Those remain separate verifier and comparison contracts.
+
+## Experiment board
+
+The project-local experiment board keeps baseline, standard control or treatment,
+and diagnostic explore runs in one compact projection. It is not a second score
+authority and never stores raw task text, trajectories, logs, hidden evaluation,
+verifier output, credentials, or local paths.
+
+An agent using this capability should start or resume a study by reading the board:
+
+```bash
+loopx benchmark experiment-board-show \
+  --goal-id <goal-id> \
+  --format json
+```
+
+Preview and then execute an idempotent row update when a run starts or reaches a
+terminal state:
+
+```bash
+loopx benchmark experiment-board-upsert \
+  --goal-id <goal-id> \
+  --row-json <compact-row.json> \
+  --format json
+
+loopx benchmark experiment-board-upsert \
+  --goal-id <goal-id> \
+  --row-json <compact-row.json> \
+  --execute \
+  --format json
+```
+
+The default ledger is locked, atomically updated, and keyed by benchmark, study,
+case, and run identity. A compact row carries arm role, exact and comparison
+protocol ids, model, score metrics, countability, treatment fidelity, bounded
+effort, and an optional insight status or public-safe handle. Unknown fields and
+path-like references fail closed.
+
+Every non-baseline row names an exact `comparison_anchor_run_id`. Standard control
+or treatment rows anchor to a baseline. Explore rows use `diagnostic_only` claim
+scope and may anchor to the baseline or fixed standard arm they are examining.
+Matched comparisons require compatible benchmark, study, case, model, primary
+metric, comparison protocol, score countability, and treatment fidelity. Exact
+protocol revisions remain visible as a warning even when a declared comparison
+protocol says an older credible score remains semantically comparable.
+
+Full post-run analysis stays in private `benchmark_case_insight_v0` storage. The
+board records only its compact status or handle, so reading the board cannot widen
+the solving agent's evidence boundary.
+
+## Post-run case insight monitor
+
+Benchmark startup should create one `continuous_monitor` todo. Whenever a case
+reaches a new material scored state, that monitor runs a post-run analyst brief and
+writes one private `benchmark_case_insight_v0` artifact. This monitor is part of the
+benchmark lifecycle, not an optional cleanup pass.
+
+Use this analyst hint:
+
+> After the solver has stopped and scoring is complete, read the task, real
+> trajectory, final patch or workspace, hidden tests, grader or verifier, and full
+> failure and score details; explain the decisive evidence, why the outcome
+> happened, whether it was expected, and what LoopX should test or change next.
+
+The solver and analyst are separate roles. The solver remains unable to access
+hidden tests, evaluator sources, expected answers, or official feedback. Only the
+post-run analyst may read the complete private evaluation evidence, and only after
+the solver is terminal and scoring is complete.
+
+Record the result in this compact shape:
+
+```json
+{
+  "schema_version": "benchmark_case_insight_v0",
+  "case": {
+    "benchmark_id": "<public-id>",
+    "case_id": "<public-id>",
+    "arm": "<baseline-or-treatment>"
+  },
+  "outcome": {
+    "status": "<completed-or-runner-invalid>",
+    "score": "<official-score-or-null>",
+    "countable": "<true-or-false>"
+  },
+  "evidence_reviewed": [
+    "task",
+    "real_trajectory",
+    "final_patch_or_workspace",
+    "hidden_tests",
+    "grader_or_verifier",
+    "failure_and_score_details"
+  ],
+  "insight": {
+    "approach_summary": "<what-the-solver-tried>",
+    "decisive_evidence": ["<specific-observation>"],
+    "why_this_outcome": "<causal-explanation>",
+    "expectedness": "<expected-surprising-mixed-or-unknown>",
+    "baseline_treatment_difference": "<difference-or-not-yet-compared>",
+    "loopx_implication": "<reusable-product-or-experiment-insight>",
+    "next_probe": "<smallest-discriminating-next-step>"
+  },
+  "confidence": "<high-medium-or-low>",
+  "reuse_boundary": "<diagnostic-only-heldout-generalization-or-declared-feedback>"
+}
+```
+
+Keep the artifact and its raw evidence in private benchmark storage. Publish only a
+redacted reusable conclusion. Do not feed case-specific hidden evidence into a
+later scored solver unless the experiment explicitly declares that feedback loop;
+use held-out cases before making a general product claim.
 
 ## Related commands
 

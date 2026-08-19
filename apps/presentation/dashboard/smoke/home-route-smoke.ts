@@ -2,9 +2,7 @@
 import { readFileSync } from "node:fs";
 
 function assert(condition: boolean, message: string) {
-  if (!condition) {
-    throw new Error(message);
-  }
+  if (!condition) throw new Error(message);
 }
 
 function includes(source: string, snippet: string, label: string) {
@@ -17,137 +15,81 @@ function excludes(source: string, snippet: string, label: string) {
 
 const routerSource = readFileSync("src/router.tsx", "utf8");
 const dashboardSource = readFileSync("src/views/dashboard-page.tsx", "utf8");
-const readmeSource = readFileSync("README.md", "utf8");
-const contractSource = readFileSync("../../../docs/status-data-contract.md", "utf8");
+const workspacePageSource = readFileSync("src/features/personal-workspace/personal-workspace-page.tsx", "utf8");
+const sidebarSource = readFileSync("src/features/personal-workspace/goal-sidebar.tsx", "utf8");
+const shellSource = readFileSync("src/features/personal-workspace/workspace-shell.tsx", "utf8");
+const drawerSource = readFileSync("src/features/personal-workspace/context-drawer.tsx", "utf8");
+const timelineSource = readFileSync("src/features/personal-workspace/channel-timeline.tsx", "utf8");
+const modelSource = readFileSync("src/features/personal-workspace/personal-workspace-model.ts", "utf8");
+const chatDataSource = readFileSync("src/data/chat.ts", "utf8");
+const stylesSource = readFileSync("src/features/personal-workspace/personal-workspace.css", "utf8");
 const packageSource = readFileSync("package.json", "utf8");
-const exampleSource = readFileSync("../../../examples/status.example.json", "utf8");
+const viteSource = readFileSync("vite.config.ts", "utf8");
+const dashboardDevSource = readFileSync("../../../scripts/dashboard-dev.sh", "utf8");
+const designSource = readFileSync("design.md", "utf8");
 
-const shareGoalSpecStart = dashboardSource.indexOf("const shareGoalSpecs");
-const shareGoalSpecEnd = dashboardSource.indexOf("const shareStatusLabel", shareGoalSpecStart);
-assert(shareGoalSpecStart >= 0 && shareGoalSpecEnd > shareGoalSpecStart, "missing share goal spec block");
-const shareGoalSpecBlock = dashboardSource.slice(shareGoalSpecStart, shareGoalSpecEnd);
-const shareGoalIds = [...shareGoalSpecBlock.matchAll(/id: "([^"]+)"/g)].map((match) => match[1]);
-assert(shareGoalIds.length >= 4, "expected public showcase goal specs");
-for (const goalId of shareGoalIds) {
-  assert(
-    goalId.startsWith("showcase-") || goalId === "loopx-meta",
-    `public dashboard goal spec must use showcase/meta id: ${goalId}`,
-  );
-}
+excludes(routerSource, 'view: z.enum(["ops", "share"])', "legacy dual-view routing removed");
+excludes(routerSource, 'chatRoute', "legacy standalone chat route removed");
+includes(dashboardSource, 'data-testid="personal-goal-home"', "personal workspace route");
+includes(dashboardSource, "<PersonalWorkspacePage", "personal workspace rendering");
+includes(dashboardSource, "buildPersonalHomeModel(payload, rows)", "public-safe workspace projection");
+includes(dashboardSource, "fetchChatSessions({", "persisted session discovery");
+includes(dashboardSource, "interruptChatTurn", "interruptible Agent turn");
+includes(dashboardSource, "sendChatTurnStreaming", "streaming Agent turn");
 
-includes(routerSource, 'view: z.enum(["ops", "share"]).optional()', "optional view search param");
-includes(routerSource, 'todoGoalId: z.string().optional().default("all")', "todo project search param");
-includes(routerSource, 'todoQuery: z.string().optional().default("")', "todo query search param");
-includes(routerSource, 'todoRole: z.enum(["all", "user", "agent"]).optional().default("all")', "todo role search param");
-includes(routerSource, 'todoStatus: z.enum(["all", "open", "done", "blocked", "deferred"]).optional().default("all")', "todo status search param");
-excludes(routerSource, 'view: z.enum(["ops", "share"]).optional().default("share")', "share default route mode");
+includes(shellSource, "data-workspace-sidebar", "single workspace sidebar");
+includes(shellSource, "data-context-drawer", "polymorphic context drawer");
+includes(sidebarSource, "LoopX 管家", "manager channel");
+includes(sidebarSource, "Goals", "Goal directory");
+excludes(sidebarSource, "<span>需要你</span>", "legacy attention sub-navigation");
+excludes(sidebarSource, "<span>运行中</span>", "legacy running sub-navigation");
+excludes(sidebarSource, "<span>最近产出</span>", "legacy output sub-navigation");
+includes(sidebarSource, 'aria-label="创建 Goal"', "Goal creation entry");
+excludes(dashboardSource, 'className="personal-global-rail"', "unexplained icon rail");
+excludes(dashboardSource, '>查看</button>', "repeated row View button");
+excludes(dashboardSource, '>纠偏</button>', "repeated row correction button");
 
-includes(dashboardSource, 'const defaultGlobalStatusUrl = "http://127.0.0.1:8766/status.json";', "global default status URL");
-includes(dashboardSource, 'return view === "ops" ? "ops" : undefined;', "canonical URL omits non-ops view");
-includes(dashboardSource, 'if (search.view !== "ops" && source.kind === "example") {', "non-ops loads global status source once");
-includes(
-  dashboardSource,
-  '[exampleModeRequested, search.statusUrl, search.view, source.kind, source.label]',
-  "status URL change reload effect",
-);
-includes(dashboardSource, 'void loadFromUrl(defaultGlobalStatusUrl);', "home loads global status source");
-includes(dashboardSource, 'data-testid="share-overview"', "control-plane home test id");
-includes(dashboardSource, 'data-testid={`share-top-todos-${view.spec.id}`}', "share top todo list test id");
-includes(dashboardSource, 'data-testid={`share-decision-frame-${view.spec.id}`}', "first-screen decision frame test id");
-includes(dashboardSource, "第一屏决策帧", "first-screen decision frame label");
-includes(dashboardSource, "等待方", "first-screen waiting owner label");
-includes(dashboardSource, "推荐动作", "first-screen recommended action label");
-includes(dashboardSource, "安全边界", "first-screen safety boundary label");
-includes(dashboardSource, "首个用户 Todo", "first-screen first user todo label");
-includes(dashboardSource, "最高优 Agent Todo", "first-screen top agent todo label");
-includes(dashboardSource, "Todo 投影缺口", "first-screen todo projection gap label");
-includes(dashboardSource, "前 4 个 Todo", "share top-four todo label");
-includes(dashboardSource, "已完成", "share todo done status");
-includes(dashboardSource, "决策需重新确认", "share decision freshness warning");
-includes(dashboardSource, "这不是仓库回滚", "share decision non-rollback copy");
-includes(dashboardSource, "仅含合成数据", "showcase synthetic-only boundary");
-includes(dashboardSource, '单面改动', "Chinese delivery scale label");
-includes(dashboardSource, '阻塞说明', "Chinese blocker label");
-includes(dashboardSource, '配额守卫', "Chinese quota guard label");
-includes(dashboardSource, '状态写回', "Chinese state writeback label");
-includes(dashboardSource, '<h1 className="text-2xl font-semibold">Goal 控制台</h1>', "ops workbench fallback");
-includes(dashboardSource, 'data-testid="operator-mental-model-panel"', "operator mental model panel test id");
-includes(dashboardSource, "操作者概览", "operator mental model title");
-includes(dashboardSource, "首屏把控制面状态整理成五个需要关注的问题。", "operator mental model helper");
-includes(dashboardSource, "下一步", "operator mental model next step label");
-includes(dashboardSource, "需要你判断", "operator mental model judgment label");
-includes(dashboardSource, "是否可继续", "operator mental model continue label");
-includes(dashboardSource, 'data-testid="project-todo-explorer"', "project todo explorer test id");
-includes(dashboardSource, 'data-testid="project-todo-search-input"', "project todo search input test id");
-includes(dashboardSource, 'data-testid="project-todo-id"', "project todo id rendering");
-includes(dashboardSource, "项目 Todo 浏览器", "project todo explorer title");
-includes(dashboardSource, "全部项目", "project todo all-project selector");
-includes(dashboardSource, "todoExplorerProjectOptions", "project todo auto project options");
-includes(dashboardSource, "selectedTodoGoalId", "project todo selected project prop");
-includes(dashboardSource, "claimed_by=", "project todo claimed owner metadata");
-includes(dashboardSource, "action=", "project todo action metadata");
-includes(dashboardSource, "source={item.source}", "project todo source metadata");
-includes(dashboardSource, "latest_event_kind", "project todo historical event metadata");
-includes(dashboardSource, "todoIndex={payload.todo_index}", "project todo index wiring");
-includes(dashboardSource, 'data-testid="agent-management-panel"', "agent management panel test id");
-includes(dashboardSource, 'data-testid="agent-management-row"', "agent management row test id");
-includes(dashboardSource, 'data-testid="agent-management-copy-command"', "agent management copy command test id");
-includes(dashboardSource, 'data-testid="agent-management-handoff-note"', "agent management handoff note test id");
-includes(dashboardSource, 'data-testid="agent-management-workspace-ref"', "agent management workspace hint test id");
-includes(dashboardSource, 'data-testid="agent-management-stale-claim-hint"', "agent management stale claim hint test id");
-includes(dashboardSource, "Agent 管理", "agent management title");
-includes(dashboardSource, "已认领 Todo", "agent management claimed todo label");
-includes(dashboardSource, "最近活动", "agent management activity label");
-includes(dashboardSource, "下一步安全动作", "agent management next action label");
-includes(dashboardSource, "工作区提示", "agent management workspace label");
-includes(dashboardSource, "认领状态可能过期", "agent management stale warning label");
-includes(dashboardSource, "仅提醒", "agent management stale warning-only boundary");
-includes(dashboardSource, "交接信息", "agent management handoff note label");
-includes(dashboardSource, "证据引用", "agent management evidence label");
-includes(dashboardSource, "的只读命令", "agent management read-only command label");
-includes(dashboardSource, "buildAgentManagementRows", "agent management projection builder");
-includes(dashboardSource, "agentManagementProjection={payload.agent_management_projection}", "agent management live projection wiring");
-includes(dashboardSource, "agent_id", "agent management agent id metadata");
-includes(exampleSource, '"todo_index"', "example todo index projection");
-includes(exampleSource, '"source": "live_loopx_status_public_slice"', "example live LoopX status source");
-includes(exampleSource, '"public_safe_export": true', "example public-safe export marker");
-includes(exampleSource, '"agent_id": "codex-main-control"', "example main-control agent row");
-includes(exampleSource, '"agent_id": "codex-product-capability"', "example product-capability agent row");
-includes(exampleSource, '"agent_id": "codex-side-bypass"', "example side-bypass agent row");
-includes(exampleSource, '"agent_id": "codex-value-explorer"', "example value-explorer agent row");
-includes(exampleSource, '"todo_id": "todo_2bf560b48a0c"', "example real main-control todo id");
-includes(exampleSource, '"todo_id": "todo_584f55f8f3b4"', "example real value-explorer todo id");
-includes(exampleSource, '"claimed_by": "codex-value-explorer"', "example claimed agent row");
-includes(exampleSource, '"stale_claim_hint": {', "example live stale claim hint projection");
-excludes(exampleSource, "todo_example_", "synthetic todo rows in bundled example");
-excludes(exampleSource, "experiment-controller-goal", "legacy synthetic goal in bundled example");
-excludes(exampleSource, "department-", "private department label in bundled example");
-excludes(exampleSource, "/Users/", "local absolute path in bundled example");
-excludes(exampleSource, "/private/", "private temp path in bundled example");
-excludes(dashboardSource, "raw internal slot constraints", "raw internal constraint copy");
-includes(contractSource, "todo_id", "status contract todo id metadata");
-includes(readFileSync("src/data/goal-channel-frontstage.ts", "utf8"), "generated_at: z.string().optional().nullable()", "goal channel generated_at optional live status compatibility");
-includes(packageSource, '"smoke:home-route"', "home route smoke script");
-includes(packageSource, '"smoke:home-browser"', "home browser smoke script");
-includes(packageSource, '"smoke:demo-readiness"', "demo readiness smoke script");
-includes(readmeSource, "npm run smoke:home-browser", "README home browser smoke command");
-includes(readmeSource, "npm run smoke:demo-readiness", "README demo readiness smoke command");
-includes(readmeSource, "--skip-browser", "README demo readiness CI skip-browser command");
-includes(readmeSource, "Fresh Clone Public Preview", "README fresh-clone preview section");
-includes(readmeSource, "npm ci", "README fresh-clone npm dependency install");
-includes(readmeSource, "examples/status.example.json", "README bundled public status fixture");
-includes(readmeSource, "without `view=share`", "README home smoke canonical route expectation");
+includes(timelineSource, 'aria-live="polite"', "streaming timeline live region");
+includes(workspacePageSource, 'kind: "attention"', "attention row projection");
+includes(workspacePageSource, 'kind: "run"', "run row projection");
+includes(workspacePageSource, 'kind: "output"', "output row projection");
+includes(workspacePageSource, 'kind: "schedule"', "schedule row projection");
+includes(workspacePageSource, 'kind: "proposal"', "typed proposal projection");
+includes(workspacePageSource, 'actionKind: "goal.create"', "natural language Goal preview");
+includes(workspacePageSource, '"heartbeat.bind" : "monitor.create"', "heartbeat and monitor classification");
+includes(workspacePageSource, 'error.payload.error_code === "protected_action"', "protected host Gate rendering");
+includes(workspacePageSource, 'todo.taskClass === "continuous_monitor"', "canonical continuous monitor projection");
 
-for (const [source, sourceLabel] of [
-  [readmeSource, "dashboard README"],
-  [contractSource, "status data contract"],
-] as const) {
-  includes(source, "control-plane home", `${sourceLabel} canonical home`);
-  includes(source, "?view=ops", `${sourceLabel} ops fallback`);
-  includes(source, "view=share", `${sourceLabel} legacy share compatibility`);
-}
+includes(drawerSource, 'data-context-kind={selection.kind}', "typed drawer mode");
+includes(drawerSource, 'role="dialog"', "accessible drawer dialog");
+includes(drawerSource, 'event.key === "Escape"', "drawer Escape handling");
+includes(drawerSource, "callbacks.onCorrectRun", "same-session correction action");
+includes(drawerSource, "callbacks.onInterruptRun", "turn interruption action");
+includes(drawerSource, "设置 Heartbeat", "Goal heartbeat entry");
+includes(drawerSource, "添加定时检查", "Goal monitor entry");
+includes(drawerSource, "高级诊断", "collapsed diagnostics");
+includes(drawerSource, "session_id:", "diagnostic Session id");
+includes(drawerSource, "turn_id:", "diagnostic Turn id");
 
-includes(contractSource, "translate raw machine fields", "status contract translation expectation");
-includes(contractSource, "single_surface", "status contract raw machine token example");
+includes(chatDataSource, "export async function previewTypedAction", "generic action preview client");
+includes(chatDataSource, "export async function loadTypedAction", "generic action load client");
+includes(chatDataSource, "export async function applyTypedAction", "generic action apply client");
+includes(chatDataSource, "export async function cancelTypedAction", "generic action cancel client");
+includes(modelSource, '"goal.create"', "Goal action contract");
+includes(modelSource, '"agent.bind"', "Agent binding action contract");
+includes(modelSource, '"run.correct"', "run correction action contract");
+
+includes(stylesSource, "@media (max-width: 720px)", "mobile workspace layout");
+includes(stylesSource, "prefers-reduced-motion", "reduced-motion behavior");
+includes(viteSource, '"/status.json"', "status proxy");
+includes(viteSource, '"/api/actions"', "typed action proxy");
+includes(packageSource, '"dev": "bash ../../../scripts/dashboard-dev.sh"', "one-command dashboard launcher");
+includes(dashboardDevSource, "serve-status", "status service launcher");
+includes(dashboardDevSource, "loopx.cli chat", "Chat service launcher");
+includes(dashboardDevSource, "wait_for_service", "launcher readiness gate");
+
+includes(designSource, "## Business Object Mapping", "business object mapping");
+includes(designSource, "## Control-Plane API Requirements", "typed control-plane contract");
+includes(designSource, "## Acceptance Criteria", "design acceptance criteria");
 
 console.log("home-route smoke ok");

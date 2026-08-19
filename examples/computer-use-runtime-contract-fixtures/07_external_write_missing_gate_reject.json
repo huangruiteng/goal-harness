@@ -1,0 +1,20 @@
+{
+  "case_id": "07_external_write_missing_gate_reject",
+  "description": "Action request declares effect_class external_write without any gate_binding; must be rejected before a provider ever attempts the action.",
+  "expect": "reject",
+  "expected_reason_contains": "gate_binding",
+  "request": {
+    "schema_version": "computer_use_action_request_v0",
+    "goal_id": "loopx-meta",
+    "todo_id": "todo_publish_without_gate",
+    "provider_id": "computer_use_runtime",
+    "action_unit": "publish_after_approved_gate",
+    "effect_class": "external_write",
+    "write_scope": {
+      "allowed_actions": ["click the approved submit control"],
+      "forbidden_effect_classes": ["credential_use"]
+    },
+    "stop_condition": "stop if no gate is bound",
+    "validation_target": "submit is never attempted without a bound gate"
+  }
+}

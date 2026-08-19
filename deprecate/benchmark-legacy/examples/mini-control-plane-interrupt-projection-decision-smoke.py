@@ -6,8 +6,15 @@ from __future__ import annotations
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-TOPIC_DIR = REPO_ROOT / "docs" / "research" / "long-horizon-agent-benchmarks"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+TOPIC_DIR = (
+    REPO_ROOT
+    / "deprecate"
+    / "benchmark-legacy"
+    / "docs"
+    / "research"
+    / "long-horizon-agent-benchmarks"
+)
 README = TOPIC_DIR / "README.md"
 DECISION_DOC = TOPIC_DIR / "mini-control-plane-interrupt-projection-decision-v0.md"
 STATUS = REPO_ROOT / "loopx" / "status.py"

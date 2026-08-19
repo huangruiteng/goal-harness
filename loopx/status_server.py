@@ -832,6 +832,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
                 runtime_root_override=self.server.runtime_root_override,
                 scan_roots=self.server.scan_roots,
                 limit=self.server.limit,
+                include_public_boundary_scan=False,
             )
             payload["local_dashboard_api"] = self._local_dashboard_api_payload()
         except Exception as exc:  # noqa: BLE001 - the HTTP layer should preserve diagnostics.

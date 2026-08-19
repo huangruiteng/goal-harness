@@ -89,6 +89,7 @@ def build_run_history(
         goals.append(
             {
                 "id": goal.get("id"),
+                "display_name": goal.get("display_name"),
                 "domain": goal.get("domain"),
                 "status": goal.get("status"),
                 "lifecycle_phase": lifecycle_fields["lifecycle_phase"],
