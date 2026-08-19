@@ -422,7 +422,12 @@ def register_content_ops_commands(
         "item-browser-request",
         help=(
             "Generate a bounded computer_use_action_request_v0 for an item's "
-            "current state, for a host browser/CUA tool to attempt."
+            "current state, for a host browser/CUA tool to attempt. For an "
+            "'approved' item this durably declares delivery intent first "
+            "(approved -> delivery_ready) -- WRITES to the item -- before "
+            "returning a request; you MUST persist the packet's `item` field "
+            "before invoking a provider, and calling this again on an "
+            "already-delivery_ready item fails closed rather than retrying."
         ),
     )
     add_subcommand_format(item_browser_request_parser)
@@ -435,6 +440,14 @@ def register_content_ops_commands(
     item_browser_request_parser.add_argument("--todo-id", required=True)
     item_browser_request_parser.add_argument(
         "--provider-id", default="computer_use_runtime"
+    )
+    item_browser_request_parser.add_argument(
+        "--occurred-at",
+        required=True,
+        help=(
+            "Used only if this call durably declares delivery intent "
+            "(approved item); ignored otherwise."
+        ),
     )
     item_browser_receipt_parser = content_ops_sub.add_parser(
         "item-browser-receipt",
@@ -651,29 +664,39 @@ def handle_content_ops_command(
                 goal_id=args.goal_id,
                 todo_id=args.todo_id,
                 provider_id=args.provider_id,
+                occurred_at=args.occurred_at,
             )
             renderer = render_content_ops_browser_action_request_markdown
         elif args.content_ops_command == "item-browser-receipt":
             action_request_payload = _load_json_object(args.action_request_json)
             if "action_request" in action_request_payload:
-                # The full item-browser-request packet -- preferred, carries
-                # expected_transition so a receipt replay stays safe even if the
-                # item has since moved on.
+                # The full item-browser-request packet -- preferred. Carries
+                # expected_transition (safe replay even if the item has moved
+                # on) and item_id, which is *always* enforced on this path --
+                # a caller using the packet gets item-binding protection
+                # automatically, not as something they could forget to opt into.
                 action_request = action_request_payload["action_request"]
                 expected_transition = action_request_payload.get("expected_transition")
+                expected_item_id = action_request_payload.get("item_id")
             else:
                 # A bare computer_use_action_request_v0 (e.g. hand-built by a
                 # caller that never went through item-browser-request). Retries
                 # are only safe here if the caller keeps resubmitting the same,
                 # unrefreshed --item-json; see apply_content_ops_browser_receipt.
+                # This path does NOT get the expected_item_id check (there is no
+                # packet to source it from) -- only the unconditional
+                # gate_id-derivation check inside the reducer still protects an
+                # external_write/credential_use request taken this way.
                 action_request = action_request_payload
                 expected_transition = None
+                expected_item_id = None
             payload = apply_content_ops_browser_receipt(
                 item=_load_json_object(args.item_json),
                 action_request=action_request,
                 receipt=_load_json_object(args.receipt_json),
                 occurred_at=args.occurred_at,
                 expected_transition=expected_transition,
+                expected_item_id=expected_item_id,
             )
             renderer = render_content_ops_browser_receipt_markdown
         elif args.content_ops_command == "queue-status":

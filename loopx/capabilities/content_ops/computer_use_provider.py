@@ -28,7 +28,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from .item_lifecycle import require_content_ops_item
+from .item_lifecycle import apply_content_ops_item_event, require_content_ops_item
 from .schemas import CONTENT_OPS_BROWSER_ACTION_REQUEST_PACKET_SCHEMA_VERSION
 
 ACTION_REQUEST_SCHEMA_VERSION = "computer_use_action_request_v0"
@@ -143,6 +143,17 @@ def check_action_request_shape(action_request: Mapping[str, Any]) -> None:
             raise ContentOpsCuaContractViolation(
                 f"gate_binding.status must be one of {sorted(_GATE_STATUSES)}"
             )
+        if effect_class in _EFFECT_CLASSES_REQUIRING_GATE and gate_binding.get("status") != "open":
+            # Per the protocol's Failure And Recovery section, a provider must
+            # refuse "an action request whose effect_class requires a gate that
+            # is not open" -- this was previously only a prose expectation; a
+            # request with a merely-well-formed (but closed/pending) status
+            # enum value could still reach a provider and be attempted.
+            raise ContentOpsCuaContractViolation(
+                f"action_request with effect_class={effect_class!r} requires "
+                f"gate_binding.status='open'; got {gate_binding.get('status')!r} -- "
+                "a provider must refuse an action whose gate is not open, not attempt it"
+            )
     leaks = _scan_for_leaked_content(action_request)
     if leaks:
         raise ContentOpsCuaContractViolation(
@@ -243,6 +254,17 @@ def build_content_ops_browser_action_request(
     generated from LoopX todo/gate state ... by the owning capability, not
     from an ad hoc prompt." Draft/captured items never get a gate_binding --
     there is nothing approved yet to write.
+
+    Pure function, never writes: for the external-write case it requires the
+    item to already be "delivery_ready" (delivery intent already durably
+    declared) rather than "approved". It does NOT itself protect against
+    being called twice for the same delivery_ready item -- that retry
+    protection lives in build_content_ops_browser_action_request_packet
+    (which is what item-browser-request actually calls), the only place with
+    enough context (the item's state *before* this call) to tell "just
+    declared, safe to build from" apart from "already declared by an earlier
+    call, refuse". A caller of this lower-level function directly is
+    responsible for its own retry safety.
     """
 
     # Normalize/validate first -- require_content_ops_item returns a fresh
@@ -276,11 +298,25 @@ def build_content_ops_browser_action_request(
             ),
         }
     elif state == "approved":
-        # Only "approved" issues a new external_write request. Once a completed
-        # receipt for that request lands, the reducer moves the item to
-        # "delivery_ready" via set_delivery_intent specifically so the approval
-        # gate is consumed and this branch can never fire again for the same
-        # approval -- see the "delivery_ready" branch below.
+        # An "approved" item has authorization but has not yet had its delivery
+        # intent durably declared -- that declaration (approved -> delivery_ready
+        # via set_delivery_intent) is the fence against the external effect
+        # happening before any durable commit, and it belongs to the orchestrating
+        # caller (build_content_ops_browser_action_request_packet), not here.
+        raise ContentOpsCuaContractViolation(
+            "content item state 'approved' has no browser action request yet; "
+            "delivery intent must be durably declared first (approved -> "
+            "delivery_ready via set_delivery_intent) before any provider can be "
+            "invoked -- build_content_ops_browser_action_request_packet does "
+            "this automatically, which is what item-browser-request calls"
+        )
+    elif state == "delivery_ready":
+        # Delivery intent was already durably declared for this exact approval
+        # (approved -> delivery_ready happened before this function was ever
+        # called with a request a provider could act on). approval_sequence is
+        # what makes gate_binding.revision a stable identity for this specific
+        # declared attempt, unique because set_delivery_intent is one-directional
+        # and state-checked: it can only ever succeed once per approval_sequence.
         approval_sequence = int(normalized_item["approval_sequence"])
         if approval_sequence < 1:
             raise ContentOpsCuaContractViolation(
@@ -305,18 +341,6 @@ def build_content_ops_browser_action_request(
             "stop_condition": "stop if the live gate revision has changed since approval",
             "validation_target": "submit is clicked only under the exact approved gate revision",
         }
-    elif state == "delivery_ready":
-        # The gate is already consumed: a completed external_write receipt
-        # moves approved -> delivery_ready via set_delivery_intent precisely so
-        # the same approval can never issue a second external-write request.
-        # Recording the real delivery (record_delivery, with a verified
-        # public_url) is content-ops's existing readback flow, not this one.
-        raise ContentOpsCuaContractViolation(
-            "content item state 'delivery_ready' has no browser action request; "
-            "the external write for this approval was already attempted -- "
-            "record the verified delivery through content-ops's existing "
-            "readback tooling, or revoke_approval to re-authorize a new attempt"
-        )
     else:
         raise ContentOpsCuaContractViolation(
             f"content item state {state!r} has no browser action request; "
@@ -332,35 +356,92 @@ def build_content_ops_browser_action_request_packet(
     item: Mapping[str, Any],
     goal_id: str,
     todo_id: str,
+    occurred_at: str,
     provider_id: str = "computer_use_runtime",
 ) -> dict[str, Any]:
     """CLI-facing wrapper: the bounded request a host browser/CUA tool should attempt.
 
-    Carries an ``expected_transition`` sidecar pinned to the item snapshot at
-    request-build time -- *outside* the wire-shaped ``action_request`` object,
-    since computer_use_action_request_v0 is closed (``additionalProperties:
-    false``) and cannot carry it. Passing this whole packet back into
-    ``item-browser-receipt`` (rather than just the inner ``action_request``)
-    is what makes a receipt replay safe even if the item has since moved on:
-    see computer_use_reducer.apply_content_ops_browser_receipt.
+    This is the orchestrating layer that makes the external-write path
+    durably fenced *before* any provider is ever invoked, not just an
+    unwrapped call to build_content_ops_browser_action_request:
+
+    - an "approved" item has delivery intent durably declared right here
+      (approved -> delivery_ready via the existing, already-tested
+      set_delivery_intent action) before this function ever returns a
+      request a provider could act on;
+    - an item that is *already* "delivery_ready" when this function is
+      called is refused outright, not silently handed a fresh identical
+      request -- set_delivery_intent can only ever succeed once per
+      approval_sequence (state-checked), so "already delivery_ready" always
+      means a declare already happened, whether from an earlier call to this
+      function or a crashed/lost attempt. This is deliberately conservative:
+      even a caller who declared intent manually via `item-transition
+      set_delivery_intent` and is calling this for the first time will be
+      refused the same way, since nothing durable distinguishes that from a
+      lost retry. That is a disclosed limitation, not an oversight -- use
+      `item-transition`/content-ops's existing readback tooling directly in
+      that case, or `revoke_approval` to establish a fresh approval_sequence.
+
+    IMPORTANT: the returned packet's "item" field may already reflect that
+    durable declare transition. The caller MUST persist it (e.g. overwrite
+    their --item-json file) *before* invoking a provider with the returned
+    action_request -- the fence above only holds if this is actually saved;
+    otherwise it only exists in this process's memory.
+
+    Also carries an ``expected_transition`` sidecar pinned to the item
+    snapshot as returned by this call -- *outside* the wire-shaped
+    ``action_request`` object, since computer_use_action_request_v0 is
+    closed (``additionalProperties: false``) and cannot carry it. Passing
+    this whole packet back into ``item-browser-receipt`` (rather than just
+    the inner ``action_request``) is what makes a receipt replay safe even
+    if the item has since moved on: see
+    computer_use_reducer.apply_content_ops_browser_receipt.
     """
 
-    # Normalize once here too: build_content_ops_browser_action_request also
-    # normalizes internally (require_content_ops_item is idempotent and
-    # cheap), but this function reads item_id/state/revision directly for the
-    # sidecar below and must not do that on a possibly-legacy raw `item`.
     normalized_item = require_content_ops_item(item)
+    original_state = str(normalized_item["state"])
+    if original_state == "delivery_ready":
+        raise ContentOpsCuaContractViolation(
+            "content item state 'delivery_ready' has no browser action request; "
+            "delivery intent for this approval was already declared -- do not "
+            "retry via item-browser-request; verify what actually happened and "
+            "use content-ops's existing readback tooling, or revoke_approval to "
+            "re-authorize a new attempt"
+        )
+    if original_state == "approved":
+        approval = normalized_item.get("approval")
+        if not isinstance(approval, Mapping):
+            raise ContentOpsCuaContractViolation("approved item is missing its approval record")
+        declare_event = {
+            "event_id": (
+                f"cua_declare_intent_{normalized_item['item_id']}_"
+                f"{normalized_item['approval_sequence']}"
+            ),
+            "action": "set_delivery_intent",
+            "expected_state": "approved",
+            "expected_revision": normalized_item["revision"],
+            "occurred_at": occurred_at,
+            "payload": {
+                "provider_id": provider_id,
+                "effect_kind": approval["effect_kind"],
+            },
+        }
+        working_item = apply_content_ops_item_event(normalized_item, declare_event)["item"]
+    else:
+        working_item = normalized_item
+
     action_request = build_content_ops_browser_action_request(
-        item=normalized_item, goal_id=goal_id, todo_id=todo_id, provider_id=provider_id
+        item=working_item, goal_id=goal_id, todo_id=todo_id, provider_id=provider_id
     )
     return {
         "ok": True,
         "schema_version": CONTENT_OPS_BROWSER_ACTION_REQUEST_PACKET_SCHEMA_VERSION,
-        "item_id": normalized_item["item_id"],
+        "item_id": working_item["item_id"],
+        "item": working_item,
         "action_request": action_request,
         "expected_transition": {
-            "expected_state": normalized_item["state"],
-            "expected_revision": normalized_item["revision"],
+            "expected_state": working_item["state"],
+            "expected_revision": working_item["revision"],
         },
     }
 
@@ -386,6 +467,12 @@ def render_content_ops_browser_action_request_markdown(packet: Mapping[str, Any]
             f"- expected_transition: state=`{expected_transition.get('expected_state')}` "
             f"revision=`{expected_transition.get('expected_revision')}`"
         )
+    lines.append(
+        "- IMPORTANT: persist the `item` field of this packet (e.g. overwrite "
+        "--item-json) before invoking a provider with `action_request` -- if "
+        "this call durably declared delivery intent, that fence only holds "
+        "once it is saved."
+    )
     raw_gate_binding = request.get("gate_binding")
     gate_binding: Mapping[str, Any] | None = (
         raw_gate_binding if isinstance(raw_gate_binding, Mapping) else None

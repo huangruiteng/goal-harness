@@ -29,6 +29,7 @@ from loopx.capabilities.content_ops.computer_use_provider import (
     ContentOpsCuaContractViolation,
     FakeComputerUseProvider,
     build_content_ops_browser_action_request,
+    build_content_ops_browser_action_request_packet,
     check_action_request_shape,
     check_receipt_shape,
 )
@@ -95,6 +96,36 @@ def _approve(item: dict[str, Any], *, event_id: str, approval_ref: str) -> dict[
     return packet["item"]
 
 
+def _declare_delivery_intent(
+    item: dict[str, Any],
+    *,
+    event_id: str,
+    provider_id: str = "computer_use_runtime",
+    occurred_at: str = "2026-08-18T09:12:00+00:00",
+) -> dict[str, Any]:
+    """Directly construct a delivery_ready item via the existing
+    set_delivery_intent action -- bypassing build_content_ops_browser_action_request_packet's
+    own orchestration, for tests that want to exercise a lower-level function
+    in isolation without also exercising the packet's declare-then-build
+    behavior itself."""
+
+    packet = apply_content_ops_item_event(
+        item,
+        {
+            "event_id": event_id,
+            "action": "set_delivery_intent",
+            "expected_state": item["state"],
+            "expected_revision": item["revision"],
+            "occurred_at": occurred_at,
+            "payload": {
+                "provider_id": provider_id,
+                "effect_kind": item["approval"]["effect_kind"],
+            },
+        },
+    )
+    return packet["item"]
+
+
 def test_draft_action_request_has_no_gate_binding_and_passes_real_validator() -> None:
     item = _item()
     request = build_content_ops_browser_action_request(
@@ -105,8 +136,20 @@ def test_draft_action_request_has_no_gate_binding_and_passes_real_validator() ->
     real_validate_action_request(request)
 
 
-def test_approved_action_request_binds_gate_to_approval_sequence() -> None:
+def test_approved_item_has_no_request_until_delivery_intent_is_declared() -> None:
+    """build_content_ops_browser_action_request is pure and never writes --
+    an "approved" item alone is not enough to get a request; delivery intent
+    must already be durably declared (delivery_ready) first."""
+
     item = _apply_review_and_approve()
+    assert item["state"] == "approved"
+    with pytest.raises(ContentOpsCuaContractViolation, match="delivery intent must be durably declared"):
+        build_content_ops_browser_action_request(item=item, goal_id=GOAL_ID, todo_id=TODO_ID)
+
+
+def test_delivery_ready_action_request_binds_gate_to_approval_sequence() -> None:
+    item = _declare_delivery_intent(_apply_review_and_approve(), event_id="event-declare-1")
+    assert item["state"] == "delivery_ready"
     assert item["approval_sequence"] == 1
     request = build_content_ops_browser_action_request(
         item=item, goal_id=GOAL_ID, todo_id=TODO_ID
@@ -122,32 +165,98 @@ def test_approved_action_request_binds_gate_to_approval_sequence() -> None:
         real_validate_action_request(request, known_gate_revision=2)
 
 
+def test_packet_declares_delivery_intent_before_returning_a_request_and_refuses_on_retry() -> None:
+    """The actual durable-fence behavior item-browser-request relies on:
+    build_content_ops_browser_action_request_packet durably transitions an
+    approved item to delivery_ready *before* ever returning a request a
+    provider could act on, and refuses outright on a second call for the
+    same (now already-delivery_ready) item -- fail closed on retry, not a
+    silent rebuild of an identical request."""
+
+    item = _apply_review_and_approve()
+    assert item["state"] == "approved"
+
+    packet = build_content_ops_browser_action_request_packet(
+        item=item, goal_id=GOAL_ID, todo_id=TODO_ID, occurred_at="2026-08-18T09:12:00+00:00"
+    )
+    assert packet["ok"] is True
+    assert packet["item"]["state"] == "delivery_ready"
+    assert packet["action_request"]["gate_binding"]["revision"] == 1
+    assert packet["expected_transition"] == {
+        "expected_state": "delivery_ready",
+        "expected_revision": item["revision"],
+    }
+
+    # "restart": call it again using the item exactly as the first call
+    # returned it (what a caller must persist before invoking a provider).
+    with pytest.raises(ContentOpsCuaContractViolation, match="already declared"):
+        build_content_ops_browser_action_request_packet(
+            item=packet["item"],
+            goal_id=GOAL_ID,
+            todo_id=TODO_ID,
+            occurred_at="2026-08-18T09:13:00+00:00",
+        )
+
+
+def test_provider_already_executed_but_never_landed_must_not_execute_again_after_restart() -> None:
+    """The exact scenario from review: the provider has already executed
+    (we hold a completed receipt) but nothing about that was ever applied
+    anywhere (simulating a crash/lost receipt before any commit). After
+    "restart" -- a fresh call with only the durably-persisted item in hand --
+    a second external-write request must not be producible."""
+
+    item = _apply_review_and_approve()
+    packet = build_content_ops_browser_action_request_packet(
+        item=item, goal_id=GOAL_ID, todo_id=TODO_ID, occurred_at="2026-08-18T09:12:00+00:00"
+    )
+    provider = FakeComputerUseProvider(
+        {"screen_reachable": True, "submit_click_permitted": True},
+        session_reference="fake_crash_session",
+    )
+    receipt = provider.attempt(packet["action_request"])
+    assert receipt["stop_reason"] == "completed"
+    # Simulate the crash: the receipt is never processed by item-browser-receipt
+    # at all. "Restart" means only packet["item"] (already persisted) survives.
+
+    with pytest.raises(ContentOpsCuaContractViolation, match="already declared"):
+        build_content_ops_browser_action_request_packet(
+            item=packet["item"],
+            goal_id=GOAL_ID,
+            todo_id=TODO_ID,
+            occurred_at="2026-08-18T09:20:00+00:00",
+        )
+
+
 def test_legacy_approved_item_needs_a_fresh_approve_before_it_can_drive_cua() -> None:
     """A content_ops_item_v0 approved before approval_sequence existed --
     e.g. handed straight from a JSON file to item-browser-request, which
     does no validation of its own -- must fail closed rather than crash or
     silently issue a request at an inferred-nothing gate revision. Only a
     fresh approve event (establishing real, CUA-aware gate identity) unlocks
-    it. Also exercises build_content_ops_browser_action_request normalizing
-    its raw `item` input via require_content_ops_item before reading any
-    field, the same defensive pattern the rest of content-ops already uses."""
+    it. set_delivery_intent itself does not care about approval_sequence (it
+    only checks approval/effect_kind), so a legacy item CAN still reach
+    delivery_ready with approval_sequence=0 -- the check that matters lives
+    in build_content_ops_browser_action_request's delivery_ready branch,
+    which is where this must actually fail."""
 
     legacy_approved = dict(_apply_review_and_approve())
     del legacy_approved["approval_sequence"]
 
+    legacy_delivery_ready = _declare_delivery_intent(legacy_approved, event_id="event-declare-legacy")
+    assert legacy_delivery_ready["approval_sequence"] == 0
     with pytest.raises(ContentOpsCuaContractViolation, match="positive approval_sequence"):
         build_content_ops_browser_action_request(
-            item=legacy_approved, goal_id=GOAL_ID, todo_id=TODO_ID
+            item=legacy_delivery_ready, goal_id=GOAL_ID, todo_id=TODO_ID
         )
 
-    # approve only runs from review_ready, so re-establishing gate authority
-    # for an already-approved legacy item goes through revoke_approval first.
+    # Re-establishing real, CUA-aware gate authority goes through
+    # revoke_approval (allowed from delivery_ready) then a fresh approve.
     back_to_review = apply_content_ops_item_event(
-        legacy_approved,
+        legacy_delivery_ready,
         {
             "event_id": "event-revoke-legacy",
             "action": "revoke_approval",
-            "expected_state": "approved",
+            "expected_state": "delivery_ready",
             "expected_revision": 1,
             "occurred_at": "2026-08-18T09:11:00+00:00",
             "payload": {"reason": "re-establish CUA-aware gate authority"},
@@ -157,8 +266,9 @@ def test_legacy_approved_item_needs_a_fresh_approve_before_it_can_drive_cua() ->
         back_to_review, event_id="event-approve-legacy", approval_ref="decision:legacy-1"
     )
     assert reapproved["approval_sequence"] == 1
+    redeclared = _declare_delivery_intent(reapproved, event_id="event-declare-legacy-2")
     request = build_content_ops_browser_action_request(
-        item=reapproved, goal_id=GOAL_ID, todo_id=TODO_ID
+        item=redeclared, goal_id=GOAL_ID, todo_id=TODO_ID
     )
     assert request["gate_binding"]["revision"] == 1
 
@@ -281,12 +391,13 @@ def test_unreachable_screen_hands_off_without_any_state_transition() -> None:
 
 
 def test_stale_gate_revision_after_revoke_and_reapprove_is_rejected() -> None:
-    item = _apply_review_and_approve()
+    item = _declare_delivery_intent(_apply_review_and_approve(), event_id="event-declare-stale")
     stale_request = build_content_ops_browser_action_request(
         item=item, goal_id=GOAL_ID, todo_id=TODO_ID
     )
     assert stale_request["gate_binding"]["revision"] == 1
 
+    # revoke_approval is allowed from delivery_ready too.
     revoked = apply_content_ops_item_event(
         item,
         {
@@ -332,7 +443,7 @@ def test_reducer_normalizes_a_legacy_item_before_the_gate_staleness_check() -> N
     validation of its own -- would crash with a raw KeyError instead of
     being handled by the same, already-tested logic as everywhere else."""
 
-    item = _apply_review_and_approve()
+    item = _declare_delivery_intent(_apply_review_and_approve(), event_id="event-declare-legacy-recv")
     request = build_content_ops_browser_action_request(
         item=item, goal_id=GOAL_ID, todo_id=TODO_ID
     )
@@ -368,16 +479,16 @@ def test_reducer_normalizes_a_legacy_item_before_the_gate_staleness_check() -> N
     assert packet["item"]["approval_sequence"] == 0
 
 
-def test_completed_write_consumes_the_gate_via_set_delivery_intent() -> None:
-    """A completed external_write receipt must not leave the item in
-    "approved" -- that would let the exact same gate issue a second,
-    identical external_write request and be attempted again. The reducer
-    consumes the gate by proposing set_delivery_intent (approved ->
-    delivery_ready), which needs no fabricated public_url/receipt_ref --
-    recording the real delivery still stays with content-ops's existing
-    readback tooling, not this reducer."""
+def test_completed_write_under_current_gate_is_confirmed_with_no_further_transition() -> None:
+    """The durable fence against a duplicate external effect now happens
+    *before* this receipt is ever processed (delivery intent was already
+    declared -- see test_packet_declares_delivery_intent_before_returning_a_request_and_refuses_on_retry
+    and test_provider_already_executed_but_never_landed_must_not_execute_again_after_restart).
+    So a completed receipt for the current, live gate proposes nothing
+    further: record_delivery (with a real public_url) stays content-ops's
+    existing readback-verified delivery flow, not this reducer's job."""
 
-    item = _apply_review_and_approve()
+    item = _declare_delivery_intent(_apply_review_and_approve(), event_id="event-declare-completed")
     request = build_content_ops_browser_action_request(
         item=item, goal_id=GOAL_ID, todo_id=TODO_ID
     )
@@ -391,53 +502,57 @@ def test_completed_write_consumes_the_gate_via_set_delivery_intent() -> None:
 
     decision = reduce_content_ops_browser_receipt(item=item, action_request=request, receipt=receipt)
     assert decision["decision"] == "confirmed_external_write_attempted"
-    assert decision["proposed_event"] == {
-        "action": "set_delivery_intent",
-        "expected_state": "approved",
-        "expected_revision": item["revision"],
-        "payload": {
-            "provider_id": receipt["provider_id"],
-            "effect_kind": item["approval"]["effect_kind"],
-        },
-    }
+    assert decision["proposed_event"] is None
 
-    event = {
-        "event_id": receipt["idempotency_key"],
-        "occurred_at": "2026-08-18T09:20:00+00:00",
-        **decision["proposed_event"],
-    }
-    packet = apply_content_ops_item_event(item, event)
-    assert packet["item"]["state"] == "delivery_ready"
+    packet = apply_content_ops_browser_receipt(
+        item=item, action_request=request, receipt=receipt, occurred_at="2026-08-18T09:20:00+00:00"
+    )
+    assert packet["ok"] is True
+    assert packet["item"]["state"] == "delivery_ready", "unchanged: nothing left to apply"
 
 
-def test_completed_write_gate_cannot_be_reissued_after_it_is_consumed() -> None:
-    """The negative case: once a completed receipt has consumed the gate
-    (approved -> delivery_ready), building a new browser action request for
-    the same item must fail rather than silently producing an identical
-    external_write request that could be attempted a second time."""
+def test_completed_receipt_for_an_item_that_moved_past_delivery_ready_is_stale() -> None:
+    """A stale replay of an old completed receipt after the item has since
+    moved on through other means (e.g. an already-completed record_delivery
+    via content-ops's existing tooling) must not be silently accepted just
+    because the gate revision still numerically matches."""
 
-    item = _apply_review_and_approve()
+    item = _declare_delivery_intent(_apply_review_and_approve(), event_id="event-declare-moved-on")
     request = build_content_ops_browser_action_request(
         item=item, goal_id=GOAL_ID, todo_id=TODO_ID
     )
     provider = FakeComputerUseProvider(
         {"screen_reachable": True, "submit_click_permitted": True},
-        session_reference="fake_session_5",
+        session_reference="fake_session_moved_on",
     )
     receipt = provider.attempt(request)
-    decision = reduce_content_ops_browser_receipt(item=item, action_request=request, receipt=receipt)
-    event = {
-        "event_id": receipt["idempotency_key"],
-        "occurred_at": "2026-08-18T09:20:00+00:00",
-        **decision["proposed_event"],
-    }
-    delivery_ready_item = apply_content_ops_item_event(item, event)["item"]
-    assert delivery_ready_item["state"] == "delivery_ready"
 
-    with pytest.raises(ContentOpsCuaContractViolation, match="already attempted"):
-        build_content_ops_browser_action_request(
-            item=delivery_ready_item, goal_id=GOAL_ID, todo_id=TODO_ID
-        )
+    published = apply_content_ops_item_event(
+        item,
+        {
+            "event_id": "event-record-delivery",
+            "action": "record_delivery",
+            "expected_state": "delivery_ready",
+            "expected_revision": item["revision"],
+            "occurred_at": "2026-08-18T09:25:00+00:00",
+            "payload": {
+                "provider_id": "computer_use_runtime",
+                "effect_kind": item["approval"]["effect_kind"],
+                "content_digest": item["content_digest"],
+                "public_url": "https://x.com/example/status/1",
+                "receipt_ref": "receipt:x-1",
+            },
+        },
+    )["item"]
+    assert published["state"] == "published"
+    assert published["approval_sequence"] == item["approval_sequence"], (
+        "record_delivery does not touch approval_sequence, so the stale receipt's "
+        "gate revision still numerically matches -- state must still be checked"
+    )
+
+    decision = reduce_content_ops_browser_receipt(item=published, action_request=request, receipt=receipt)
+    assert decision["decision"] == "rejected_stale_gate"
+    assert decision["proposed_event"] is None
 
 
 def test_provider_authored_writeback_field_is_rejected_by_both_validators() -> None:
@@ -474,6 +589,180 @@ def test_smuggled_credential_in_evidence_is_rejected_by_both_validators() -> Non
         real_validate_receipt(receipt)
 
 
+def _approved_delivery_ready_item(item_id: str, *, declare_event_id: str) -> dict[str, Any]:
+    item = build_content_ops_item(
+        item_id=item_id,
+        item_kind="post",
+        channel="x",
+        content_digest=DIGEST_V1,
+        content_ref=f"draft:{item_id}",
+        created_at="2026-08-18T09:00:00+00:00",
+    )
+    item = apply_content_ops_item_event(
+        item,
+        {
+            "event_id": "event-review",
+            "action": "submit_review",
+            "expected_state": "captured",
+            "expected_revision": 1,
+            "occurred_at": "2026-08-18T09:05:00+00:00",
+            "payload": {},
+        },
+    )["item"]
+    item = _approve(item, event_id="event-approve", approval_ref=f"decision:{item_id}")
+    return _declare_delivery_intent(item, event_id=declare_event_id)
+
+
+def test_receipt_built_for_a_different_item_cannot_advance_this_one() -> None:
+    """The concrete A-on-B reproduction from review: two different items,
+    both delivery_ready with the same approval_sequence (a plausible,
+    ordinary coincidence -- both are simply on their first approval). A's
+    request/receipt must not be able to advance B, even though the gate
+    revision numbers line up, because gate_binding.gate_id already encodes
+    which item a gate belongs to and the reducer must check it."""
+
+    item_a = _approved_delivery_ready_item("cua-item-a", declare_event_id="event-declare-a")
+    item_b = _approved_delivery_ready_item("cua-item-b", declare_event_id="event-declare-b")
+    assert item_a["approval_sequence"] == item_b["approval_sequence"] == 1
+
+    request_for_a = build_content_ops_browser_action_request(
+        item=item_a, goal_id=GOAL_ID, todo_id=TODO_ID
+    )
+    provider = FakeComputerUseProvider(
+        {"screen_reachable": True, "submit_click_permitted": True},
+        session_reference="fake_session_a",
+    )
+    receipt_for_a = provider.attempt(request_for_a)
+
+    # Unconditional protection: reduce_content_ops_browser_receipt itself
+    # derives the expected gate_id from item_b and refuses, with no
+    # expected_item_id needed -- this is what protects a bare/hand-built
+    # request path too.
+    decision = reduce_content_ops_browser_receipt(
+        item=item_b, action_request=request_for_a, receipt=receipt_for_a
+    )
+    assert decision["decision"] == "rejected_item_mismatch"
+    assert decision["proposed_event"] is None
+
+    packet = apply_content_ops_browser_receipt(
+        item=item_b,
+        action_request=request_for_a,
+        receipt=receipt_for_a,
+        occurred_at="2026-08-18T09:20:00+00:00",
+    )
+    assert packet["ok"] is False
+    assert packet["decision"] == "rejected_item_mismatch"
+    assert packet["item"]["state"] == "delivery_ready", "B must be completely untouched"
+
+    # The packet-path check (expected_item_id) catches the same thing even
+    # for a request with no gate_binding at all (the draft path).
+    draft_item_a = _item()
+    draft_request_a = build_content_ops_browser_action_request(
+        item=draft_item_a, goal_id=GOAL_ID, todo_id=TODO_ID
+    )
+    draft_provider = FakeComputerUseProvider(
+        {"screen_reachable": True}, session_reference="fake_session_draft_a"
+    )
+    draft_receipt_a = draft_provider.attempt(draft_request_a)
+    draft_item_b = build_content_ops_item(
+        item_id="cua-draft-item-b",
+        item_kind="post",
+        channel="x",
+        content_digest=DIGEST_V1,
+        content_ref="draft:cua-draft-item-b",
+        created_at="2026-08-18T09:00:00+00:00",
+    )
+    mismatch = apply_content_ops_browser_receipt(
+        item=draft_item_b,
+        action_request=draft_request_a,
+        receipt=draft_receipt_a,
+        occurred_at="2026-08-18T09:20:00+00:00",
+        expected_item_id=draft_item_a["item_id"],
+    )
+    assert mismatch["ok"] is False
+    assert mismatch["decision"] == "rejected_item_mismatch"
+    assert mismatch["item"]["state"] == "captured", "B must be completely untouched"
+
+
+def test_gated_write_with_non_open_status_is_rejected_by_both_shape_check_and_provider() -> None:
+    """The protocol's Failure And Recovery obligation -- a provider must
+    refuse an action request whose effect_class requires a gate that is not
+    open -- was previously only prose; a merely well-formed 'closed' or
+    'pending' status enum value could still reach and be attempted by a
+    provider."""
+
+    item = _approved_delivery_ready_item("cua-item-gate-status", declare_event_id="event-declare-status")
+    request = build_content_ops_browser_action_request(item=item, goal_id=GOAL_ID, todo_id=TODO_ID)
+    assert request["gate_binding"]["status"] == "open"
+
+    for bad_status in ("closed", "pending"):
+        tampered = dict(request, gate_binding=dict(request["gate_binding"], status=bad_status))
+        with pytest.raises(ContentOpsCuaContractViolation, match="requires gate_binding.status='open'"):
+            check_action_request_shape(tampered)
+        with pytest.raises(RealContractViolation):
+            real_validate_action_request(tampered)
+
+        provider = FakeComputerUseProvider(
+            {"screen_reachable": True, "submit_click_permitted": True},
+            session_reference=f"fake_session_gate_{bad_status}",
+        )
+        with pytest.raises(ContentOpsCuaContractViolation, match="requires gate_binding.status='open'"):
+            provider.attempt(tampered)
+
+
+def test_completed_receipt_with_final_action_not_clicked_is_rejected() -> None:
+    """The exact reproduction from review: shape validation alone does not
+    catch an internally contradictory receipt (completed, but
+    final_action_clicked=false) -- that domain judgment belongs to the
+    reducer, not the wire schema."""
+
+    item = _approved_delivery_ready_item("cua-item-facts-1", declare_event_id="event-declare-facts-1")
+    request = build_content_ops_browser_action_request(item=item, goal_id=GOAL_ID, todo_id=TODO_ID)
+    provider = FakeComputerUseProvider(
+        {"screen_reachable": True, "submit_click_permitted": True},
+        session_reference="fake_session_facts_1",
+    )
+    receipt = provider.attempt(request)
+    assert receipt["stop_reason"] == "completed"
+    contradictory = dict(
+        receipt,
+        observed_facts=dict(receipt["observed_facts"], final_action_clicked=False),
+    )
+    # Shape check alone (field types only) does not catch this.
+    check_receipt_shape(contradictory)
+
+    decision = reduce_content_ops_browser_receipt(
+        item=item, action_request=request, receipt=contradictory
+    )
+    assert decision["decision"] == "rejected_inconsistent_facts"
+    assert decision["proposed_event"] is None
+
+
+def test_stopped_at_gate_receipt_with_final_action_clicked_is_rejected() -> None:
+    """A different stop_reason's invariant: stopped_at_gate claims the final
+    submit control was *not* clicked -- a receipt claiming both cannot be
+    trusted."""
+
+    item = _item()
+    request = build_content_ops_browser_action_request(item=item, goal_id=GOAL_ID, todo_id=TODO_ID)
+    provider = FakeComputerUseProvider(
+        {"screen_reachable": True}, session_reference="fake_session_facts_2"
+    )
+    receipt = provider.attempt(request)
+    assert receipt["stop_reason"] == "stopped_at_gate"
+    contradictory = dict(
+        receipt,
+        observed_facts=dict(receipt["observed_facts"], final_action_clicked=True),
+    )
+    check_receipt_shape(contradictory)
+
+    decision = reduce_content_ops_browser_receipt(
+        item=item, action_request=request, receipt=contradictory
+    )
+    assert decision["decision"] == "rejected_inconsistent_facts"
+    assert decision["proposed_event"] is None
+
+
 def _run_cli(args: list[str], *, cwd: Path) -> dict[str, Any]:
     result = subprocess.run(
         [sys.executable, "-m", "loopx.cli", "--format", "json", "content-ops", *args],
@@ -499,6 +788,8 @@ def test_cli_drives_the_full_draft_until_gate_round_trip(tmp_path: Path) -> None
             GOAL_ID,
             "--todo-id",
             TODO_ID,
+            "--occurred-at",
+            "2026-08-18T09:04:00+00:00",
         ],
         cwd=REPO_ROOT,
     )
@@ -509,6 +800,7 @@ def test_cli_drives_the_full_draft_until_gate_round_trip(tmp_path: Path) -> None
         "expected_state": "captured",
         "expected_revision": 1,
     }
+    assert request_packet["item"]["state"] == "captured", "draft path never writes"
 
     # Write the *full* item-browser-request packet (not just the inner
     # action_request) -- this is the preferred path, since it carries

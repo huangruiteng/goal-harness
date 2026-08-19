@@ -44,6 +44,7 @@ if str(REPO_ROOT) not in sys.path:
 from loopx.capabilities.content_ops.computer_use_provider import (  # noqa: E402
     ContentOpsCuaContractViolation,
     FakeComputerUseProvider,
+    build_content_ops_browser_action_request,
     build_content_ops_browser_action_request_packet,
 )
 from loopx.capabilities.content_ops.computer_use_reducer import (  # noqa: E402
@@ -99,7 +100,7 @@ def _approve(item: dict[str, Any], *, event_id: str, approval_ref: str) -> dict[
 def run_draft_until_gate_scenario() -> None:
     item = _fresh_item()
     request_packet = build_content_ops_browser_action_request_packet(
-        item=item, goal_id=GOAL_ID, todo_id=TODO_ID
+        item=item, goal_id=GOAL_ID, todo_id=TODO_ID, occurred_at="2026-08-18T09:04:00+00:00"
     )
     request = request_packet["action_request"]
     assert request["effect_class"] == "draft"
@@ -142,7 +143,7 @@ def run_draft_until_gate_scenario() -> None:
 def run_unknown_modal_scenario() -> None:
     item = _fresh_item()
     request_packet = build_content_ops_browser_action_request_packet(
-        item=item, goal_id=GOAL_ID, todo_id=TODO_ID
+        item=item, goal_id=GOAL_ID, todo_id=TODO_ID, occurred_at="2026-08-18T09:04:00+00:00"
     )
     request = request_packet["action_request"]
     provider = FakeComputerUseProvider(
@@ -179,20 +180,23 @@ def run_stale_gate_revision_is_rejected_scenario() -> None:
         },
     )["item"]
     item = _approve(item, event_id="event-approve-1", approval_ref="decision:showcase-1")
+    # Durably declares delivery intent (approved -> delivery_ready) before
+    # returning a request -- item moves on immediately, use the packet's item.
     stale_request_packet = build_content_ops_browser_action_request_packet(
-        item=item, goal_id=GOAL_ID, todo_id=TODO_ID
+        item=item, goal_id=GOAL_ID, todo_id=TODO_ID, occurred_at="2026-08-18T09:12:00+00:00"
     )
     stale_request = stale_request_packet["action_request"]
     assert stale_request["gate_binding"]["revision"] == 1
 
-    # Content never changes, but the approval is revoked and re-granted --
-    # only approval_sequence (not item.revision) can tell the two apart.
+    # Content never changes, but the approval is revoked (allowed from
+    # delivery_ready) and re-granted -- only approval_sequence (not
+    # item.revision) can tell the two apart.
     revoked = apply_content_ops_item_event(
-        item,
+        stale_request_packet["item"],
         {
             "event_id": "event-revoke",
             "action": "revoke_approval",
-            "expected_state": item["state"],
+            "expected_state": "delivery_ready",
             "expected_revision": item["revision"],
             "occurred_at": "2026-08-18T09:15:00+00:00",
             "payload": {"reason": "owner wants another look before publish"},
@@ -232,10 +236,16 @@ def run_approved_write_under_current_gate_scenario() -> None:
         },
     )["item"]
     item = _approve(item, event_id="event-approve-1", approval_ref="decision:showcase-3")
+    # The durable fence: delivery intent is declared (approved -> delivery_ready)
+    # right here, *before* the provider is ever invoked below -- not after a
+    # receipt comes back. The packet's `item` reflects that transition; a real
+    # caller MUST persist it before calling a provider with `action_request`.
     request_packet = build_content_ops_browser_action_request_packet(
-        item=item, goal_id=GOAL_ID, todo_id=TODO_ID
+        item=item, goal_id=GOAL_ID, todo_id=TODO_ID, occurred_at="2026-08-18T09:12:00+00:00"
     )
     request = request_packet["action_request"]
+    assert request_packet["item"]["state"] == "delivery_ready"
+
     provider = FakeComputerUseProvider(
         _load_ui_state("03_approved_write"), session_reference="showcase_session_write"
     )
@@ -243,7 +253,7 @@ def run_approved_write_under_current_gate_scenario() -> None:
     assert receipt["stop_reason"] == "completed"
 
     packet = apply_content_ops_browser_receipt(
-        item=item,
+        item=request_packet["item"],
         action_request=request,
         receipt=receipt,
         occurred_at="2026-08-18T09:20:00+00:00",
@@ -252,18 +262,22 @@ def run_approved_write_under_current_gate_scenario() -> None:
     assert packet["ok"] is True
     assert packet["decision"] == "confirmed_external_write_attempted"
     assert packet["item"]["state"] == "delivery_ready", (
-        "a completed write consumes the approval gate via set_delivery_intent; "
-        "the receipt schema has no public_url field, so recording the real "
-        "delivery stays with content-ops's existing readback tooling -- but "
-        "the item must not stay 'approved', or the same gate could issue and "
-        "attempt an identical external_write request a second time"
+        "unchanged -- there is nothing left to apply. The durable fence already "
+        "happened before the provider was invoked above, not here; recording "
+        "the real delivery stays with content-ops's existing readback tooling, "
+        "since the receipt schema has no public_url field to carry it"
     )
 
-    # Negative case: the gate is consumed. The same item can no longer
-    # produce a new external_write request at all.
+    # Negative case: restart after the provider already executed. Even
+    # without ever processing the receipt above, a fresh call using only the
+    # durably-persisted item must not be able to issue a second external-write
+    # request for the same approval.
     try:
         build_content_ops_browser_action_request_packet(
-            item=packet["item"], goal_id=GOAL_ID, todo_id=TODO_ID
+            item=request_packet["item"],
+            goal_id=GOAL_ID,
+            todo_id=TODO_ID,
+            occurred_at="2026-08-18T09:25:00+00:00",
         )
     except ContentOpsCuaContractViolation:
         pass
@@ -274,14 +288,78 @@ def run_approved_write_under_current_gate_scenario() -> None:
         )
 
 
+def _approved_delivery_ready_showcase_item(item_id: str) -> dict[str, Any]:
+    item = build_content_ops_item(
+        item_id=item_id,
+        item_kind="post",
+        channel="x",
+        content_digest=DIGEST,
+        content_ref=f"draft:{item_id}",
+        created_at="2026-08-18T09:00:00+00:00",
+    )
+    item = apply_content_ops_item_event(
+        item,
+        {
+            "event_id": "event-review",
+            "action": "submit_review",
+            "expected_state": "captured",
+            "expected_revision": 1,
+            "occurred_at": "2026-08-18T09:04:00+00:00",
+            "payload": {},
+        },
+    )["item"]
+    item = _approve(item, event_id="event-approve", approval_ref=f"decision:{item_id}")
+    packet = build_content_ops_browser_action_request_packet(
+        item=item, goal_id=GOAL_ID, todo_id=TODO_ID, occurred_at="2026-08-18T09:12:00+00:00"
+    )
+    return packet["item"]
+
+
+def run_cross_item_receipt_is_rejected_scenario() -> None:
+    """Two different items, both delivery_ready on their first approval (a
+    plausible, ordinary coincidence -- same approval_sequence). A request and
+    receipt built for one item must not be able to advance the other, even
+    though the gate revision numbers happen to line up."""
+
+    # Both items are already delivery_ready (the helper declares intent as
+    # part of reaching that state); use the pure, lower-level builder here to
+    # get item A's request without tripping the packet's own already-declared
+    # refusal (that refusal is exactly what the earlier scenario tests).
+    item_a = _approved_delivery_ready_showcase_item("cua-showcase-item-a")
+    item_b = _approved_delivery_ready_showcase_item("cua-showcase-item-b")
+    assert item_a["approval_sequence"] == item_b["approval_sequence"] == 1
+
+    request_for_a = build_content_ops_browser_action_request(
+        item=item_a, goal_id=GOAL_ID, todo_id=TODO_ID
+    )
+    provider = FakeComputerUseProvider(
+        _load_ui_state("03_approved_write"), session_reference="showcase_session_cross_item"
+    )
+    receipt_for_a = provider.attempt(request_for_a)
+    assert receipt_for_a["stop_reason"] == "completed"
+
+    packet = apply_content_ops_browser_receipt(
+        item=item_b,
+        action_request=request_for_a,
+        receipt=receipt_for_a,
+        occurred_at="2026-08-18T09:20:00+00:00",
+        expected_item_id=item_a["item_id"],
+    )
+    assert packet["ok"] is False
+    assert packet["decision"] == "rejected_item_mismatch"
+    assert packet["item"]["state"] == "delivery_ready", "item B must be completely untouched"
+
+
 def main() -> int:
     run_draft_until_gate_scenario()
     run_unknown_modal_scenario()
     run_stale_gate_revision_is_rejected_scenario()
     run_approved_write_under_current_gate_scenario()
+    run_cross_item_receipt_is_rejected_scenario()
     print(
         "content-ops-computer-use-showcase ok "
-        "scenarios=draft_until_gate,unknown_modal,stale_gate_rejected,approved_write"
+        "scenarios=draft_until_gate,unknown_modal,stale_gate_rejected,"
+        "approved_write,cross_item_rejected"
     )
     return 0
 

@@ -45,7 +45,48 @@ ReducerDecision = Literal[
     "confirmed_external_write_attempted",
     "handoff_blocked",
     "rejected_stale_gate",
+    "rejected_item_mismatch",
+    "rejected_inconsistent_facts",
 ]
+
+_OBSERVED_FACT_INVARIANTS: dict[str, tuple[tuple[str, bool], ...]] = {
+    # stop_reason -> required (observed_facts key, required value) pairs.
+    # Anything not listed for a key is unconstrained for that stop_reason.
+    "completed": (
+        ("screen_reached", True),
+        ("final_action_clicked", True),
+        ("unknown_modal", False),
+    ),
+    "stopped_at_gate": (
+        ("screen_reached", True),
+        ("final_action_clicked", False),
+    ),
+    "blocked_by_unknown_modal": (
+        ("unknown_modal", True),
+        ("final_action_clicked", False),
+    ),
+    "failed": (
+        ("screen_reached", False),
+    ),
+}
+
+
+def _check_observed_facts_consistent(
+    *, stop_reason: str, observed_facts: Mapping[str, Any]
+) -> str | None:
+    """A receipt's own observed_facts must not contradict its stop_reason --
+    e.g. stop_reason='completed' with final_action_clicked=false. Wire schema
+    validation (check_receipt_shape) only checks field types; this is the
+    domain-level judgment call the protocol leaves to content-ops's reducer.
+    Returns a violation reason, or None if consistent."""
+
+    for key, required in _OBSERVED_FACT_INVARIANTS.get(stop_reason, ()):
+        if observed_facts[key] is not required:
+            return (
+                f"stop_reason={stop_reason!r} is inconsistent with "
+                f"observed_facts.{key}={observed_facts[key]!r} (expected {required!r})"
+            )
+    return None
 
 
 def reduce_content_ops_browser_receipt(
@@ -53,12 +94,25 @@ def reduce_content_ops_browser_receipt(
     item: Mapping[str, Any],
     action_request: Mapping[str, Any],
     receipt: Mapping[str, Any],
+    expected_item_id: str | None = None,
 ) -> dict[str, Any]:
     """Turn one computer_use_receipt_v0 into a proposed content-ops transition.
 
     Returns a dict with ``decision``, ``reason``, and either
     ``proposed_event`` (to be applied via ``apply_content_ops_item_event``)
     or ``blocker`` (a human-facing report; no state change is proposed).
+
+    ``expected_item_id``, when supplied, must equal the current item's own
+    ``item_id`` -- this is the general-purpose defense against a
+    request/receipt built for a *different* item being fed into this item's
+    processing path (see ``apply_content_ops_browser_receipt`` for how it is
+    sourced from the item-browser-request packet's outer ``item_id``).
+    Separately, and unconditionally regardless of ``expected_item_id``, a
+    ``gate_binding`` (only present for external_write/credential_use) is
+    checked against a gate id *derived from this item* -- gate_binding.gate_id
+    already encodes item_id (see build_content_ops_browser_action_request),
+    so this closes the same hole even for a bare/hand-built request that
+    never went through the packet path at all.
     """
 
     check_action_request_shape(action_request)
@@ -71,8 +125,30 @@ def reduce_content_ops_browser_receipt(
     # hit a raw KeyError on a legacy item missing approval_sequence.
     item = require_content_ops_item(item)
 
+    if expected_item_id is not None and item["item_id"] != expected_item_id:
+        return {
+            "decision": "rejected_item_mismatch",
+            "reason": (
+                f"expected_item_id={expected_item_id!r} does not match this item's "
+                f"item_id={item['item_id']!r}; refusing to interpret a request/receipt "
+                "that was not built for this item"
+            ),
+            "proposed_event": None,
+        }
+
     gate_binding = action_request.get("gate_binding")
     if gate_binding is not None:
+        expected_gate_id = f"gate_{item['item_id']}_publish"
+        if gate_binding["gate_id"] != expected_gate_id:
+            return {
+                "decision": "rejected_item_mismatch",
+                "reason": (
+                    f"action_request gate_binding.gate_id={gate_binding['gate_id']!r} was "
+                    f"not derived from this item (expected {expected_gate_id!r}); refusing "
+                    "to let a gate/approval authorized for a different item advance this one"
+                ),
+                "proposed_event": None,
+            }
         current_approval_sequence = int(item["approval_sequence"])
         requested_revision = int(gate_binding["revision"])
         if requested_revision != current_approval_sequence:
@@ -88,6 +164,17 @@ def reduce_content_ops_browser_receipt(
             }
 
     stop_reason = receipt["stop_reason"]
+    inconsistency = _check_observed_facts_consistent(
+        stop_reason=stop_reason, observed_facts=receipt["observed_facts"]
+    )
+    if inconsistency is not None:
+        return {
+            "decision": "rejected_inconsistent_facts",
+            "reason": (
+                f"receipt is internally inconsistent and cannot be trusted: {inconsistency}"
+            ),
+            "proposed_event": None,
+        }
 
     if stop_reason == "blocked_by_unknown_modal":
         return {
@@ -136,30 +223,35 @@ def reduce_content_ops_browser_receipt(
                 "a 'completed' receipt for a request whose effect_class is not "
                 "external_write is out of contract for this reducer"
             )
-        approval = item.get("approval")
-        if not isinstance(approval, Mapping):
-            raise ValueError(
-                "a 'completed' external_write receipt requires an approved item"
-            )
+        if item["state"] != "delivery_ready":
+            # The gate revision matched (checked above), but the item is not
+            # currently delivery_ready -- it moved on through some other means
+            # since this request was issued (e.g. an existing-tooling
+            # record_delivery already ran). A stale replay of an old completed
+            # receipt, not a live one; treat it the same as a stale gate rather
+            # than acting on it.
+            return {
+                "decision": "rejected_stale_gate",
+                "reason": (
+                    f"item state is {item['state']!r}, not 'delivery_ready'; this "
+                    "completed receipt no longer answers the item's live attempt"
+                ),
+                "proposed_event": None,
+            }
         return {
             "decision": "confirmed_external_write_attempted",
             "reason": (
-                "provider reports the approved write completed; this consumes the "
-                "approval gate via set_delivery_intent (approved -> delivery_ready) "
-                "so the same gate cannot issue a second external_write request -- "
-                "recording a durable public_url/receipt_ref stays content-ops's "
-                "existing readback-verified delivery flow, since the receipt schema "
-                "has no field for it"
+                "provider reports the approved write completed. The durable fence "
+                "against a duplicate external effect already happened *before* this "
+                "receipt -- build_content_ops_browser_action_request_packet declared "
+                "delivery intent (approved -> delivery_ready) before ever returning a "
+                "request a provider could act on, and that transition cannot repeat "
+                "for the same approval. This receipt itself proposes no further "
+                "item-lifecycle transition: recording a durable public_url/receipt_ref "
+                "stays content-ops's existing readback-verified delivery flow, since "
+                "the receipt schema has no field for it"
             ),
-            "proposed_event": {
-                "action": "set_delivery_intent",
-                "expected_state": item["state"],
-                "expected_revision": item["revision"],
-                "payload": {
-                    "provider_id": receipt["provider_id"],
-                    "effect_kind": approval["effect_kind"],
-                },
-            },
+            "proposed_event": None,
         }
 
     raise ValueError(f"unsupported receipt.stop_reason {stop_reason!r}")
@@ -178,6 +270,11 @@ def _event_id_from_idempotency_key(idempotency_key: str) -> str:
     return f"cua_receipt_{digest}"
 
 
+_REJECTED_DECISIONS = frozenset(
+    {"rejected_stale_gate", "rejected_item_mismatch", "rejected_inconsistent_facts"}
+)
+
+
 def apply_content_ops_browser_receipt(
     *,
     item: Mapping[str, Any],
@@ -185,12 +282,22 @@ def apply_content_ops_browser_receipt(
     receipt: Mapping[str, Any],
     occurred_at: str,
     expected_transition: Mapping[str, Any] | None = None,
+    expected_item_id: str | None = None,
 ) -> dict[str, Any]:
     """CLI-facing wrapper: reduce a receipt and, if it proposes one, apply the
     transition through the existing, already-tested item-lifecycle event path.
 
-    A rejected-as-stale receipt or a handoff never touches item state; the
-    caller gets back the item exactly as it was.
+    A rejected receipt (stale gate, wrong item, or internally inconsistent
+    facts) or a handoff never touches item state; the caller gets back the
+    item exactly as it was.
+
+    ``expected_item_id`` should be the outer ``item_id`` from the
+    ``item-browser-request`` packet that produced ``action_request`` -- see
+    ``reduce_content_ops_browser_receipt`` for what it protects against. The
+    preferred (packet-based) CLI path always supplies it; only a caller using
+    a bare/hand-built ``action_request`` goes without this specific check
+    (the unconditional gate_id-derivation check inside the reducer still
+    applies for external_write/credential_use regardless).
 
     ``expected_transition`` should be the ``expected_transition`` sidecar from
     the ``item-browser-request`` packet that produced ``action_request`` --
@@ -219,7 +326,10 @@ def apply_content_ops_browser_receipt(
     # tolerated forever on every subsequent call.
     item = require_content_ops_item(item)
     decision = reduce_content_ops_browser_receipt(
-        item=item, action_request=action_request, receipt=receipt
+        item=item,
+        action_request=action_request,
+        receipt=receipt,
+        expected_item_id=expected_item_id,
     )
     base = {
         "schema_version": CONTENT_OPS_BROWSER_RECEIPT_PACKET_SCHEMA_VERSION,
@@ -229,7 +339,7 @@ def apply_content_ops_browser_receipt(
     if "blocker" in decision:
         base["blocker"] = decision["blocker"]
 
-    if decision["decision"] == "rejected_stale_gate":
+    if decision["decision"] in _REJECTED_DECISIONS:
         return {
             **base,
             "ok": False,
