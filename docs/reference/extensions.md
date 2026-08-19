@@ -245,10 +245,25 @@ integration_profile = "integration-profile.json"
 }
 ```
 
-A durable Goal binding enables a bounded operation for one exact active provider
+A durable Goal binding enables bounded operations for one exact active provider
 revision. It is Goal-scoped rather than Turn-scoped, so the same working Agent
 session may reuse an enabled read-only capability without creating a governed
-Turn for every observation:
+Turn for every observation. Preview the binding first, then persist it in the
+Goal record of the project registry:
+
+```bash
+loopx --registry .loopx/registry.json capability bind requirement-delivery \
+  --goal-id example-goal \
+  --operation observe
+
+loopx --registry .loopx/registry.json capability bind requirement-delivery \
+  --goal-id example-goal \
+  --operation observe \
+  --execute
+```
+
+LoopX resolves the enabled, doctor-ready provider while creating the binding.
+The persisted `goal.external_capability_bindings` entry has this typed shape:
 
 ```json
 {
@@ -264,17 +279,17 @@ Turn for every observation:
 }
 ```
 
-Preview or execute a read-only operation with the Goal binding projection:
+Preview or execute a read-only operation by resolving the durable Goal binding:
 
 ```bash
-loopx capability invoke requirement-delivery \
+loopx --registry .loopx/registry.json capability invoke requirement-delivery \
   --operation observe \
-  --goal-binding-json goal-binding.json \
+  --goal-id example-goal \
   --input-json provider-input.json
 
-loopx capability invoke requirement-delivery \
+loopx --registry .loopx/registry.json capability invoke requirement-delivery \
   --operation observe \
-  --goal-binding-json goal-binding.json \
+  --goal-id example-goal \
   --input-json provider-input.json \
   --execute
 ```
@@ -283,16 +298,22 @@ The input object contains `context_refs` plus a bounded domain `input` object.
 LoopX checks that the requested capability and operation are enabled for the
 Goal and that the provider id, active revision, and snapshotted profile digest
 still match. The binding digest plus the bounded input derives a deterministic
-invocation id. Managed runtime limits still apply.
+invocation id. Managed runtime limits still apply. `--goal-binding-json`
+remains available as a compatibility and debugging input, but normal execution
+should resolve the binding from `--goal-id` so the LoopX registry remains the
+task ground truth.
 
 The v0 route admits read-only operations only: provider results must not contain
 domain mutations, transition proposals, effect receipts, raw payloads,
 credential-like fields, or private-looking strings. It does not write LoopX
 state or spend quota. A future material operation must use a separate governed
 Turn adapter bound to the exact Todo and settlement contract; Goal enablement
-alone never grants write authority. The Goal binding is a local typed
-projection, not a security token or proof of a remote issuer; service
-authentication and authorization remain the provider's responsibility.
+alone never grants write authority. Creating or updating the binding is an
+explicit Goal configuration change: it uses preview/apply, but it does not
+create a Turn or spend Turn quota. Turn scope starts only when an invocation
+may produce a material external or LoopX-state effect. The Goal binding is a
+local typed projection, not a security token or proof of a remote issuer;
+service authentication and authorization remain the provider's responsibility.
 
 The generic runner is deliberately non-effectful and grants no operation
 effects. Both manifest `permissions` and runtime `required_permissions` must
