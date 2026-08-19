@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from ..authority import validate_public_safe_text
+from ..file_lock import exclusive_file_lock
+from ..history import load_registry
+from ..registry import atomic_write_json, find_registry_goal
 from .manifest import EXTERNAL_CAPABILITY_PROFILE_SCHEMA_VERSION
 from .runtime import (
     execute_extension_runtime_binding,
@@ -18,14 +21,15 @@ from .runtime import (
 EXTERNAL_CAPABILITY_REQUEST_SCHEMA_VERSION = (
     "loopx_external_domain_capability_request_v0"
 )
-EXTERNAL_CAPABILITY_RESULT_SCHEMA_VERSION = (
-    "loopx_external_domain_capability_result_v0"
-)
+EXTERNAL_CAPABILITY_RESULT_SCHEMA_VERSION = "loopx_external_domain_capability_result_v0"
 EXTERNAL_CAPABILITY_INVOCATION_SCHEMA_VERSION = (
     "loopx_external_domain_capability_invocation_v0"
 )
 GOAL_EXTERNAL_CAPABILITY_BINDING_SCHEMA_VERSION = (
     "loopx_goal_external_capability_binding_v0"
+)
+GOAL_EXTERNAL_CAPABILITY_BINDING_RECEIPT_SCHEMA_VERSION = (
+    "loopx_goal_external_capability_binding_receipt_v0"
 )
 _FORBIDDEN_RESULT_KEYS = frozenset(
     {
@@ -80,7 +84,9 @@ def _canonical_digest(value: object) -> str:
             separators=(",", ":"),
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
-        raise ValueError("external capability payload must be JSON serializable") from exc
+        raise ValueError(
+            "external capability payload must be JSON serializable"
+        ) from exc
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
@@ -91,7 +97,9 @@ def _operation_from_profile(
         raise ValueError("external capability integration profile is invalid")
     operations = profile.get("operations")
     if not isinstance(operations, list):
-        raise ValueError("external capability integration profile operations are invalid")
+        raise ValueError(
+            "external capability integration profile operations are invalid"
+        )
     matching = [
         dict(item)
         for item in operations
@@ -189,13 +197,7 @@ def _goal_binding(
     if binding.get("capability_id") != capability_id:
         raise ValueError("Goal capability binding capability_id does not match request")
     operations = binding.get("operations")
-    if not isinstance(operations, list) or not 1 <= len(operations) <= 32:
-        raise ValueError("Goal capability binding operations are invalid")
-    normalized_operations = [
-        _token(item, "Goal capability binding operation") for item in operations
-    ]
-    if len(normalized_operations) != len(set(normalized_operations)):
-        raise ValueError("Goal capability binding operations must be unique")
+    normalized_operations = _normalized_operations(operations)
     if operation not in normalized_operations:
         raise ValueError("operation is not enabled for this Goal")
     provider = _mapping(binding.get("provider"), "Goal capability binding provider")
@@ -203,7 +205,9 @@ def _goal_binding(
         "extension_id": _token(
             provider_binding.get("extension_id"), "active provider extension_id"
         ),
-        "revision": _token(provider_binding.get("revision"), "active provider revision"),
+        "revision": _token(
+            provider_binding.get("revision"), "active provider revision"
+        ),
         "profile_digest": _token(
             provider_binding.get("integration_profile_digest"),
             "active provider profile_digest",
@@ -211,7 +215,7 @@ def _goal_binding(
     }
     if provider != expected_provider:
         raise ValueError(
-            "Goal capability binding does not match the active provider revision"
+            "Goal capability binding does not match the active provider revision/profile"
         )
     normalized = {
         "schema_version": GOAL_EXTERNAL_CAPABILITY_BINDING_SCHEMA_VERSION,
@@ -221,6 +225,210 @@ def _goal_binding(
         "provider": expected_provider,
     }
     return {**normalized, "binding_digest": _canonical_digest(normalized)}
+
+
+def _normalized_operations(values: object) -> list[str]:
+    if not isinstance(values, list) or not 1 <= len(values) <= 32:
+        raise ValueError("Goal capability binding operations are invalid")
+    operations = [_token(item, "Goal capability binding operation") for item in values]
+    if len(operations) != len(set(operations)):
+        raise ValueError("Goal capability binding operations must be unique")
+    return operations
+
+
+def build_goal_external_capability_binding(
+    *,
+    state_file: str | Path,
+    goal_id: str,
+    capability_id: str,
+    operations: list[str],
+) -> dict[str, Any]:
+    """Pin one Goal capability to the exact ready provider revision and profile."""
+
+    normalized_goal_id = _token(goal_id, "Goal capability binding goal_id")
+    normalized_capability_id = _token(
+        capability_id, "Goal capability binding capability_id"
+    )
+    normalized_operations = _normalized_operations(operations)
+    provider_bindings = [
+        resolve_external_capability_binding(
+            state_file=state_file,
+            capability_id=normalized_capability_id,
+            operation=operation,
+        )
+        for operation in normalized_operations
+    ]
+    first = provider_bindings[0]
+    provider = {
+        "extension_id": _token(first.get("extension_id"), "provider extension_id"),
+        "revision": _token(first.get("revision"), "provider revision"),
+        "profile_digest": _token(
+            first.get("integration_profile_digest"), "provider profile_digest"
+        ),
+    }
+    for binding in provider_bindings[1:]:
+        current = {
+            "extension_id": _token(
+                binding.get("extension_id"), "provider extension_id"
+            ),
+            "revision": _token(binding.get("revision"), "provider revision"),
+            "profile_digest": _token(
+                binding.get("integration_profile_digest"),
+                "provider profile_digest",
+            ),
+        }
+        if current != provider:
+            raise ValueError(
+                "Goal capability operations do not resolve to one provider revision"
+            )
+    binding = {
+        "schema_version": GOAL_EXTERNAL_CAPABILITY_BINDING_SCHEMA_VERSION,
+        "goal_id": normalized_goal_id,
+        "capability_id": normalized_capability_id,
+        "operations": normalized_operations,
+        "provider": provider,
+    }
+    return {**binding, "binding_digest": _canonical_digest(binding)}
+
+
+def _goal_capability_bindings(goal: Mapping[str, Any]) -> list[dict[str, Any]]:
+    raw = goal.get("external_capability_bindings")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("Goal external_capability_bindings must be a list")
+    bindings: list[dict[str, Any]] = []
+    capability_ids: set[str] = set()
+    for index, value in enumerate(raw):
+        binding = _mapping(value, f"Goal external_capability_bindings[{index}]")
+        capability_id = _token(
+            binding.get("capability_id"),
+            f"Goal external_capability_bindings[{index}].capability_id",
+        )
+        if capability_id in capability_ids:
+            raise ValueError(
+                f"Goal has duplicate external capability binding `{capability_id}`"
+            )
+        capability_ids.add(capability_id)
+        bindings.append(binding)
+    return bindings
+
+
+def load_goal_external_capability_binding(
+    *,
+    registry_path: str | Path,
+    goal_id: str,
+    capability_id: str,
+) -> dict[str, Any]:
+    """Load one durable Goal-scoped external capability binding."""
+
+    path = Path(registry_path).expanduser()
+    if not path.is_file():
+        raise ValueError(f"LoopX registry does not exist: {path}")
+    goal = find_registry_goal(load_registry(path), _token(goal_id, "goal_id"))
+    if goal is None:
+        raise ValueError(f"LoopX registry does not contain Goal `{goal_id}`")
+    normalized_capability_id = _token(capability_id, "capability_id")
+    matching = [
+        binding
+        for binding in _goal_capability_bindings(goal)
+        if binding.get("capability_id") == normalized_capability_id
+    ]
+    if not matching:
+        raise ValueError(
+            f"Goal `{goal_id}` does not enable external capability "
+            f"`{normalized_capability_id}`"
+        )
+    return matching[0]
+
+
+def bind_external_capability_to_goal(
+    *,
+    registry_path: str | Path,
+    state_file: str | Path,
+    goal_id: str,
+    capability_id: str,
+    operations: list[str],
+    execute: bool = False,
+) -> dict[str, Any]:
+    """Preview or atomically persist one exact Goal-scoped provider binding."""
+
+    path = Path(registry_path).expanduser()
+    candidate_with_digest = build_goal_external_capability_binding(
+        state_file=state_file,
+        goal_id=goal_id,
+        capability_id=capability_id,
+        operations=operations,
+    )
+    binding_digest = str(candidate_with_digest.pop("binding_digest"))
+
+    def prepare(registry: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        goal = find_registry_goal(registry, str(candidate_with_digest["goal_id"]))
+        if goal is None:
+            raise ValueError(
+                "LoopX registry does not contain Goal "
+                f"`{candidate_with_digest['goal_id']}`"
+            )
+        existing = _goal_capability_bindings(goal)
+        matching = [
+            item
+            for item in existing
+            if item.get("capability_id") == candidate_with_digest["capability_id"]
+        ]
+        changed = matching != [candidate_with_digest]
+        merged = [
+            item
+            for item in existing
+            if item.get("capability_id") != candidate_with_digest["capability_id"]
+        ]
+        merged.append(deepcopy(candidate_with_digest))
+        merged.sort(key=lambda item: str(item.get("capability_id") or ""))
+        receipt: dict[str, Any] = {
+            "ok": True,
+            "schema_version": (GOAL_EXTERNAL_CAPABILITY_BINDING_RECEIPT_SCHEMA_VERSION),
+            "status": "ready" if not execute else "written",
+            "dry_run": not execute,
+            "executed": execute,
+            "changed": changed,
+            "written": False,
+            "registry": str(path),
+            "goal_id": candidate_with_digest["goal_id"],
+            "capability_id": candidate_with_digest["capability_id"],
+            "binding": deepcopy(candidate_with_digest),
+            "binding_digest": binding_digest,
+            "turn_required": False,
+            "quota_spent": False,
+        }
+        if execute and not changed:
+            receipt["status"] = "no_change"
+        return receipt, {**goal, "external_capability_bindings": merged}
+
+    if execute:
+        with exclusive_file_lock(path, operation="bind_external_capability_to_goal"):
+            if not path.is_file():
+                raise ValueError(f"LoopX registry does not exist: {path}")
+            registry = load_registry(path)
+            receipt, updated_goal = prepare(registry)
+            if not receipt["changed"]:
+                return receipt
+            goals = registry.get("goals")
+            if not isinstance(goals, list):
+                raise ValueError("LoopX registry goals must be a list")
+            registry["goals"] = [
+                updated_goal
+                if isinstance(item, Mapping)
+                and item.get("id") == updated_goal.get("id")
+                else item
+                for item in goals
+            ]
+            atomic_write_json(path, registry, preserve_mode=True)
+            receipt["written"] = True
+            return receipt
+
+    if not path.is_file():
+        raise ValueError(f"LoopX registry does not exist: {path}")
+    receipt, _updated_goal = prepare(load_registry(path))
+    return receipt
 
 
 def _provider_input(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -268,9 +476,13 @@ def validate_external_capability_result(
         raise ValueError(f"external capability result has unsupported fields {unknown}")
     expected_schema = str(operation.get("result_schema") or "")
     if result.get("schema_version") != expected_schema:
-        raise ValueError("external capability result schema_version does not match profile")
+        raise ValueError(
+            "external capability result schema_version does not match profile"
+        )
     if result.get("invocation_id") != invocation_id:
-        raise ValueError("external capability result invocation_id does not match request")
+        raise ValueError(
+            "external capability result invocation_id does not match request"
+        )
     if result.get("status") not in {"succeeded", "no_change"}:
         raise ValueError("external capability read-only result did not succeed")
     observations = result.get("observations")
@@ -284,9 +496,13 @@ def validate_external_capability_result(
         "transition_proposals",
     ):
         if result.get(field) != []:
-            raise ValueError(f"read-only external capability result must leave {field} empty")
+            raise ValueError(
+                f"read-only external capability result must leave {field} empty"
+            )
     if result.get("effect_receipt") is not None:
-        raise ValueError("read-only external capability result cannot contain an effect receipt")
+        raise ValueError(
+            "read-only external capability result cannot contain an effect receipt"
+        )
     _assert_public_safe_result(result)
     return result
 
@@ -296,7 +512,9 @@ def invoke_external_capability(
     state_file: str | Path,
     capability_id: str,
     operation: str,
-    goal_binding: Mapping[str, Any],
+    goal_binding: Mapping[str, Any] | None = None,
+    registry_path: str | Path | None = None,
+    goal_id: str | None = None,
     provider_input: Mapping[str, Any],
     execute: bool = False,
     environment: Mapping[str, str] | None = None,
@@ -313,6 +531,21 @@ def invoke_external_capability(
         raise ValueError(
             "material external capability invocation requires a governed Turn adapter"
         )
+    if goal_binding is None:
+        if registry_path is None or goal_id is None:
+            raise ValueError(
+                "external capability invocation requires goal_id and registry_path"
+            )
+        goal_binding = load_goal_external_capability_binding(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            capability_id=capability_id,
+        )
+    elif registry_path is not None or goal_id is not None:
+        raise ValueError(
+            "external capability invocation accepts either a durable Goal binding "
+            "or an explicit Goal binding projection, not both"
+        )
     goal = _goal_binding(
         goal_binding,
         capability_id=capability_id,
@@ -326,9 +559,9 @@ def invoke_external_capability(
         "operation": operation,
         "provider_input_digest": _canonical_digest(provided),
     }
-    invocation_id = "capability-" + _canonical_digest(invocation_seed).split(":", 1)[1][
-        :24
-    ]
+    invocation_id = (
+        "capability-" + _canonical_digest(invocation_seed).split(":", 1)[1][:24]
+    )
     request = {
         "schema_version": str(operation_profile.get("request_schema") or ""),
         "invocation_id": invocation_id,

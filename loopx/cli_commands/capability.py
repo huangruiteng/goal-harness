@@ -12,11 +12,16 @@ from ..capabilities.catalog import (
     render_capability_catalog_markdown,
     render_capability_detail_markdown,
 )
-from ..extensions.capability_admission import invoke_external_capability
+from ..extensions.capability_admission import (
+    bind_external_capability_to_goal,
+    invoke_external_capability,
+)
 from ..extensions.runtime import (
     MAX_EXTENSION_REQUEST_BYTES,
     default_extension_state_file,
 )
+from ..history import load_registry
+from ..paths import resolve_runtime_root
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -79,6 +84,26 @@ def _render_external_invocation(payload: dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _render_external_binding(payload: dict[str, object]) -> str:
+    lines = ["# LoopX Goal External Capability Binding", ""]
+    for key in (
+        "status",
+        "goal_id",
+        "capability_id",
+        "binding_digest",
+        "dry_run",
+        "executed",
+        "changed",
+        "written",
+        "turn_required",
+        "quota_spent",
+        "error",
+    ):
+        if key in payload:
+            lines.append(f"- {key}: `{payload.get(key)}`")
+    return "\n".join(lines) + "\n"
+
+
 def register_capability_commands(
     subparsers: argparse._SubParsersAction,
     add_subcommand_format: AddFormat,
@@ -107,6 +132,26 @@ def register_capability_commands(
         help="Capability id to inspect.",
     )
     _add_extension_manifest_argument(show_parser)
+    bind_parser = capability_sub.add_parser(
+        "bind",
+        help="Preview or persist one exact external capability binding for a Goal.",
+    )
+    add_subcommand_format(bind_parser)
+    bind_parser.add_argument("capability_id")
+    bind_parser.add_argument("--goal-id", required=True)
+    bind_parser.add_argument(
+        "--operation",
+        action="append",
+        required=True,
+        help="Enable one provider operation for the Goal. Repeat as needed.",
+    )
+    bind_parser.add_argument(
+        "--state-file",
+        dest="capability_state_file",
+        help="Override the local extension activation state file.",
+    )
+    bind_parser.add_argument("--execute", action="store_true")
+    bind_parser.set_defaults(capability_operation_parser=bind_parser)
     invoke_parser = capability_sub.add_parser(
         "invoke",
         help="Preview or run one external capability enabled for a Goal.",
@@ -114,10 +159,17 @@ def register_capability_commands(
     add_subcommand_format(invoke_parser)
     invoke_parser.add_argument("capability_id")
     invoke_parser.add_argument("--operation", required=True)
-    invoke_parser.add_argument(
+    goal_binding_group = invoke_parser.add_mutually_exclusive_group(required=True)
+    goal_binding_group.add_argument(
+        "--goal-id",
+        help="Resolve the capability binding from this Goal in the LoopX registry.",
+    )
+    goal_binding_group.add_argument(
         "--goal-binding-json",
-        required=True,
-        help="Path to one loopx_goal_external_capability_binding_v0 object.",
+        help=(
+            "Compatibility/debug path to one "
+            "loopx_goal_external_capability_binding_v0 object."
+        ),
     )
     invoke_parser.add_argument(
         "--input-json",
@@ -136,6 +188,7 @@ def register_capability_commands(
 def handle_capability_command(
     args: argparse.Namespace,
     *,
+    registry_path: Path,
     runtime_root_arg: str | None,
     output_format: FormatSelector,
     print_payload: PrintPayload,
@@ -143,11 +196,27 @@ def handle_capability_command(
     if args.command != "capability":
         return None
     manifest_paths = tuple(getattr(args, "extension_manifest", ()))
-    state_file = Path(
-        getattr(args, "capability_state_file", None)
-        or default_extension_state_file(runtime_root_arg)
-    ).expanduser()
     try:
+        explicit_state_file = getattr(args, "capability_state_file", None)
+        capability_runtime_root = runtime_root_arg
+        uses_durable_goal = args.capability_command == "bind" or bool(
+            getattr(args, "goal_id", None)
+        )
+        if (
+            explicit_state_file is None
+            and uses_durable_goal
+            and registry_path.is_file()
+        ):
+            capability_runtime_root = str(
+                resolve_runtime_root(
+                    load_registry(registry_path),
+                    runtime_root_arg,
+                    registry_path=registry_path,
+                )
+            )
+        state_file = Path(
+            explicit_state_file or default_extension_state_file(capability_runtime_root)
+        ).expanduser()
         if args.capability_command == "list":
             payload = build_capability_catalog_packet(
                 manifest_paths,
@@ -161,37 +230,58 @@ def handle_capability_command(
                 extension_state_file=state_file,
             )
             renderer = render_capability_detail_markdown
+        elif args.capability_command == "bind":
+            payload = bind_external_capability_to_goal(
+                registry_path=registry_path,
+                state_file=state_file,
+                goal_id=args.goal_id,
+                capability_id=args.capability_id,
+                operations=args.operation,
+                execute=args.execute,
+            )
+            renderer = _render_external_binding
         elif args.capability_command == "invoke":
             if args.goal_binding_json == "-" and args.input_json == "-":
                 raise ValueError(
                     "Goal binding and provider input cannot both read from stdin"
                 )
+            invocation_arguments: dict[str, object] = {}
+            if args.goal_binding_json:
+                invocation_arguments["goal_binding"] = _load_json_object(
+                    args.goal_binding_json,
+                    label="external capability Goal binding",
+                )
+            else:
+                invocation_arguments["registry_path"] = registry_path
+                invocation_arguments["goal_id"] = args.goal_id
             payload = invoke_external_capability(
                 state_file=state_file,
                 capability_id=args.capability_id,
                 operation=args.operation,
-                goal_binding=_load_json_object(
-                    args.goal_binding_json,
-                    label="external capability Goal binding",
-                ),
                 provider_input=_load_json_object(
                     args.input_json,
                     label="external capability provider input",
                 ),
                 execute=args.execute,
+                **invocation_arguments,
             )
             renderer = _render_external_invocation
         else:
-            raise ValueError("capability requires `list`, `show`, or `invoke`")
+            raise ValueError("capability requires `list`, `show`, `bind`, or `invoke`")
     except (RuntimeError, ValueError) as exc:
-        if args.capability_command == "invoke":
+        if args.capability_command in {"bind", "invoke"}:
             payload = {
                 "ok": False,
                 "schema_version": "loopx_external_domain_capability_error_v0",
                 "status": "invalid_request",
                 "error": str(exc),
             }
-            print_payload(payload, output_format(args), _render_external_invocation)
+            renderer = (
+                _render_external_binding
+                if args.capability_command == "bind"
+                else _render_external_invocation
+            )
+            print_payload(payload, output_format(args), renderer)
             return 2
         args.capability_operation_parser.error(str(exc))
     print_payload(payload, output_format(args), renderer)
