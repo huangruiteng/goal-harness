@@ -12,6 +12,7 @@ from .agent_registry import agent_profile_for_goal, registered_agent_ids_for_goa
 from .bootstrap import bootstrap_project
 from .chat import apply_todo_review_preview, build_todo_review_preview
 from .chat_action_store import ActionConflictError, ChatActionStore
+from .chat_goal_lifecycle_actions import ChatGoalLifecycleActionMixin
 from .chat_monitor_actions import ChatMonitorActionMixin
 from .chat_store import ChatSessionStore
 from .configure_goal import configure_goal
@@ -31,6 +32,7 @@ SUPPORTED_ACTION_KINDS = {
     "run.correct",
     "goal.create",
     "goal.update",
+    "goal.lifecycle",
     "agent.bind",
     "heartbeat.bind",
     "monitor.create",
@@ -136,7 +138,7 @@ def _monitor_text(parameters: Mapping[str, Any]) -> str | None:
     return None
 
 
-class ChatActionService(ChatMonitorActionMixin):
+class ChatActionService(ChatGoalLifecycleActionMixin, ChatMonitorActionMixin):
     """Validate previews and route applies through canonical LoopX services."""
 
     def __init__(
@@ -508,6 +510,8 @@ class ChatActionService(ChatMonitorActionMixin):
             if len(result) == 1:
                 raise ValueError("goal.update requires at least one change")
             return result
+        if action_kind == "goal.lifecycle":
+            return self._normalize_goal_lifecycle(parameters)
         if action_kind == "agent.bind":
             values = self._allowed_parameters(parameters, allowed={"goal_id", "agent_id"})
             goal_id = _opaque(values.get("goal_id"), field="goal_id")
@@ -1372,6 +1376,8 @@ class ChatActionService(ChatMonitorActionMixin):
             raise ValueError("typed Chat action proposal is malformed")
         if action_kind == "goal.create":
             return self._apply_goal_create(proposal_id, proposal, parameters)
+        if action_kind == "goal.lifecycle":
+            return self._apply_goal_lifecycle(proposal_id, proposal, parameters)
         if action_kind == "agent.bind":
             return self._apply_agent_bind(proposal_id, proposal, parameters)
         if action_kind == "heartbeat.bind":

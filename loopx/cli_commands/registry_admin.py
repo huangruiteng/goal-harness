@@ -10,6 +10,10 @@ from ..configure_goal import configure_goal, render_configure_goal_markdown
 from ..control_plane.goals.configure_goal_service import (
     configure_goal_with_global_sync,
 )
+from ..control_plane.goals.activation_service import (
+    render_goal_activation_markdown,
+    set_goal_activation_state,
+)
 from ..file_lock import exclusive_file_lock, lock_timeout_error_fields
 from ..global_registry import (
     render_global_goal_retirement_markdown,
@@ -52,6 +56,7 @@ PrintPayload = Callable[
 
 REGISTRY_ADMIN_COMMANDS = {
     "configure-goal",
+    "goal-lifecycle",
     "register-agent",
     "bind-agent-thread",
     "unbind-agent-thread",
@@ -369,6 +374,31 @@ def loop_activation_for_goal(
 def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> None:
     register_configure_goal_command(subparsers)
 
+    goal_lifecycle_parser = subparsers.add_parser(
+        "goal-lifecycle",
+        help="Preview or apply a reversible Goal stop/resume transition.",
+    )
+    goal_lifecycle_parser.add_argument(
+        "--goal-id",
+        required=True,
+        help="Goal id present in the active registry.",
+    )
+    goal_lifecycle_parser.add_argument(
+        "--operation",
+        choices=("stop", "resume"),
+        required=True,
+        help="Stop automatic advancement or restore eligibility.",
+    )
+    goal_lifecycle_parser.add_argument(
+        "--reason",
+        help="Bounded owner-visible transition reason.",
+    )
+    goal_lifecycle_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Write the source registry and verify the shared projection; preview is the default.",
+    )
+
     register_agent_parser = subparsers.add_parser(
         "register-agent",
         help="Register an automation agent through the existing global source_registry without reconnecting the goal.",
@@ -567,6 +597,31 @@ def handle_registry_admin_command(
 ) -> int | None:
     if args.command not in REGISTRY_ADMIN_COMMANDS:
         return None
+
+    if args.command == "goal-lifecycle":
+        try:
+            payload = set_goal_activation_state(
+                registry_path=registry_path,
+                goal_id=args.goal_id,
+                state="stopped" if args.operation == "stop" else "active",
+                reason=args.reason,
+                runtime_root_override=args.runtime_root,
+                execute=bool(args.execute),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "schema_version": "loopx_goal_activation_transition_v1",
+                "dry_run": not bool(args.execute),
+                "execute": bool(args.execute),
+                "goal_id": args.goal_id,
+                "changed": False,
+                "written": False,
+                "error": str(exc),
+                **lock_timeout_error_fields(exc),
+            }
+        print_payload(payload, args.format, render_goal_activation_markdown)
+        return 0 if payload.get("ok") else 1
 
     if args.command == "configure-goal":
         try:

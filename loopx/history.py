@@ -33,6 +33,7 @@ from .control_plane.runtime.run_index_rebuild import (
     collision_review_groups,
     validate_reviewed_collision_plan,
 )
+from .control_plane.goals.activation import goal_activation_state
 from .control_plane.runtime.time import now_local_iso, parse_timestamp
 from .doctor import PROMOTION_READINESS_CLASSIFICATIONS
 from .execution_profile import compact_execution_profile
@@ -259,6 +260,9 @@ def collect_history(
         quota = goal_quota_with_spend_ledger(meta, runs) if registry_member else None
         goal_record = {
             "id": current_goal_id,
+            "activation_state": goal_activation_state(meta).value
+            if registry_member
+            else "active",
             "display_name": meta.get("display_name") if registry_member else None,
             "domain": meta.get("domain"),
             "status": meta.get("status") if registry_member else "legacy-runtime",

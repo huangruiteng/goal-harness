@@ -21,6 +21,7 @@ CHAT_ACTION_PROPOSAL_SCHEMA_VERSION = "loopx_chat_action_proposal_v1"
 ACTION_KINDS = {
     "goal.create",
     "goal.update",
+    "goal.lifecycle",
     "todo.create",
     "todo.update",
     "agent.bind",

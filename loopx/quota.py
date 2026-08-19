@@ -92,6 +92,7 @@ from .control_plane.todos.projection import (
     todo_projection_sort_key as projection_todo_projection_sort_key,
     todo_summary_claim_scope_agent_id as projection_todo_summary_claim_scope_agent_id,
 )
+from .control_plane.goals.activation import goal_is_stopped
 
 
 _PUBLIC_COMPAT_REEXPORTS = {
@@ -387,7 +388,12 @@ def quota_status(
     spent_slots = int(payload["spent_slots"])
     allowed_slots = int(payload["allowed_slots"])
 
-    if compute <= 0:
+    if goal_is_stopped(goal):
+        state = "paused"
+        reason = "goal is stopped by owner; automatic agent turns are paused"
+        payload["blocked_action_scope"] = "automatic_agent_turns"
+        payload["goal_activation_state"] = "stopped"
+    elif compute <= 0:
         state = "paused"
         reason = "compute quota is 0; automatic agent turns are paused"
     elif severity == "high":

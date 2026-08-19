@@ -89,6 +89,7 @@ def build_run_history(
         goals.append(
             {
                 "id": goal.get("id"),
+                "activation_state": goal.get("activation_state") or "active",
                 "display_name": goal.get("display_name"),
                 "domain": goal.get("domain"),
                 "status": goal.get("status"),

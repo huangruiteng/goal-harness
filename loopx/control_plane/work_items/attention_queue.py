@@ -147,6 +147,8 @@ def build_attention_queue(
     for goal in history.get("goals") or []:
         if not isinstance(goal, dict):
             continue
+        if goal.get("activation_state") == "stopped":
+            continue
         active_state_fields: dict[str, Any] | None = None
         active_state_item: dict[str, Any] | None = None
         current_status_run = context.latest_run(goal)
@@ -165,6 +167,9 @@ def build_attention_queue(
             if not item:
                 item = active_state_item
         if item:
+            item["activation_state"] = str(
+                goal.get("activation_state") or "active"
+            )
             agent_lane_recommendation = context.compact_agent_lane_recommendation(
                 context.latest_agent_lane_run(goal)
             )
