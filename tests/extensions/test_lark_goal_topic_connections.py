@@ -542,10 +542,50 @@ def test_routes_bound_topic_messages_and_replies_in_thread(tmp_path: Path) -> No
     assert unmentioned_all_mode is not None
     assert unmentioned_all_mode["goal_id"] == "goal-alpha"
 
+    # Negative cases: mentioning another user or @all must NOT match in mentions mode
+    other_user_decision = decide_lark_topic_event(
+        target_payload=read_goal_channel_targets(target_path),
+        binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
+        event={
+            "chat_id": CHAT_ID,
+            "root_id": "om_topic_alpha",
+            "message_id": "om_other_user",
+            "content": "@Alice 请看一下这个文档",
+            "mentions": [{"name": "Alice", "id": "ou_alice_999"}],
+        },
+    )
+    assert other_user_decision == {"matched": False, "reason": "not_addressed", "route": None}
+
+    all_mention_decision = decide_lark_topic_event(
+        target_payload=read_goal_channel_targets(target_path),
+        binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
+        event={
+            "chat_id": CHAT_ID,
+            "root_id": "om_topic_alpha",
+            "message_id": "om_all_mention",
+            "content": "@_all 下午两点开会",
+            "mentions": [{"key": "@_all", "name": "所有人"}],
+        },
+    )
+    assert all_mention_decision == {"matched": False, "reason": "not_addressed", "route": None}
+
+    unrelated_mentions_decision = decide_lark_topic_event(
+        target_payload=read_goal_channel_targets(target_path),
+        binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
+        event={
+            "chat_id": CHAT_ID,
+            "root_id": "om_topic_alpha",
+            "message_id": "om_unrelated",
+            "content": "hello team",
+            "mentions": [{"name": "Bob", "id": "ou_bob_888"}],
+        },
+    )
+    assert unrelated_mentions_decision == {"matched": False, "reason": "not_addressed", "route": None}
+
     route = route_lark_topic_event(
         target_payload=read_goal_channel_targets(target_path),
         binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
-        event={"chat_id": CHAT_ID, "root_id": "om_topic_alpha", "message_id": "om_incoming", "mentioned": True},
+        event={"chat_id": CHAT_ID, "root_id": "om_topic_alpha", "message_id": "om_incoming", "addressed_to_bot": True},
     )
     assert route == {
         "app_ref": "mew",
@@ -580,7 +620,7 @@ def test_routes_bound_topic_messages_and_replies_in_thread(tmp_path: Path) -> No
             "root_id": "om_topic_alpha",
             "message_id": "om_provider_mention",
             "content": "@LoopX Mew 当前版本是什么？",
-            "mentions": [{"name": "LoopX Mew"}],
+            "mentions": [{"name": "LoopX Mew", "id": APP_ID}],
         },
     )
     assert provider_mention_route is not None

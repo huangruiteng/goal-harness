@@ -592,6 +592,65 @@ def list_lark_connections(
     return sorted(rows, key=lambda row: (str(row["app_label"]).casefold(), str(row["goal_title"]).casefold()))
 
 
+def _normalize_mention_name(name: str) -> str:
+    cleaned = str(name or "").strip()
+    if cleaned.startswith("@"):
+        cleaned = cleaned[1:].strip()
+    return " ".join(cleaned.split()).casefold()
+
+
+def is_event_addressed_to_bot(
+    event: Mapping[str, Any],
+    identity: Mapping[str, Any],
+) -> bool:
+    if event.get("reply_to_bot") is True and event.get("reply_context_verified") is True:
+        return True
+    if event.get("reply_to_bot") is True:
+        return True
+    if event.get("addressed_to_bot") is True:
+        return True
+    bot_app_id = str(identity.get("bot_app_id") or "").strip()
+    bot_display_name = str(identity.get("bot_display_name") or identity.get("bot_name") or "").strip()
+    sender_profile = str(identity.get("sender_profile") or "").strip()
+    if not (bot_app_id or bot_display_name or sender_profile):
+        return False
+
+    norm_bot_display_name = _normalize_mention_name(bot_display_name)
+    norm_sender_profile = _normalize_mention_name(sender_profile)
+
+    mentions = event.get("mentions")
+    if isinstance(mentions, list) and mentions:
+        for item in mentions:
+            if not isinstance(item, Mapping):
+                continue
+            raw_id = item.get("id")
+            candidate_ids: list[str] = []
+            if isinstance(raw_id, Mapping):
+                candidate_ids.extend([str(v) for v in raw_id.values() if v])
+            elif raw_id is not None:
+                candidate_ids.append(str(raw_id))
+            for key in ("user_id", "open_id", "union_id", "app_id", "bot_id"):
+                val = item.get(key)
+                if val:
+                    candidate_ids.append(str(val))
+            if bot_app_id and any(c == bot_app_id for c in candidate_ids):
+                return True
+            norm_item_name = _normalize_mention_name(str(item.get("name") or ""))
+            if norm_bot_display_name and norm_item_name == norm_bot_display_name:
+                return True
+            if norm_sender_profile and norm_item_name == norm_sender_profile:
+                return True
+
+    content = str(event.get("content") or "").strip()
+    if content:
+        if bot_display_name and f"@{bot_display_name}".casefold() in content.casefold():
+            return True
+        if sender_profile and f"@{sender_profile}".casefold() in content.casefold():
+            return True
+
+    return False
+
+
 def decide_lark_topic_event(
     *,
     target_payload: Mapping[str, Any],
@@ -637,26 +696,7 @@ def decide_lark_topic_event(
             return {"matched": False, "reason": "self_message", "route": None}
         incoming_mode = str(routing.get("incoming_mode") or "mentions").strip().lower()
         if incoming_mode != "all":
-            content_text = str(event.get("content") or "").strip()
-            bot_display_name = str(identity.get("bot_display_name") or identity.get("bot_name") or "").strip()
-            sender_profile = str(identity.get("sender_profile") or "").strip()
-            text_mentions_bot = bool(
-                (bot_display_name and f"@{bot_display_name}".casefold() in content_text.casefold())
-                or (sender_profile and f"@{sender_profile}".casefold() in content_text.casefold())
-                or content_text.startswith("@_user_")
-                or "@_user_" in content_text
-                or content_text.startswith("@_all")
-                or "@_all" in content_text
-            )
-            is_addressed = bool(
-                event.get("mentioned") is True
-                or event.get("addressed") is True
-                or event.get("reply_context_verified") is True
-                or event.get("reply_to_bot") is True
-                or (isinstance(event.get("mentions"), list) and len(event["mentions"]) > 0)
-                or text_mentions_bot
-            )
-            if not is_addressed:
+            if not is_event_addressed_to_bot(event, identity):
                 return {"matched": False, "reason": "not_addressed", "route": None}
         route = {
             "app_ref": str(identity.get("sender_profile") or "default"),

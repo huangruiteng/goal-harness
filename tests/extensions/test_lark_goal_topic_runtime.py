@@ -559,6 +559,13 @@ def test_profile_poll_routes_provider_event_through_existing_reply_path(tmp_path
         "thread_id": "omt_topic_alpha",
         "create_time": "2026-08-14T21:00:00Z",
         "content": "@_user_1 你现在 loopx 的版本是什么",
+        "mentions": [
+            {
+                "key": "@_user_1",
+                "id": "cli_public_fixture",
+                "name": "linkmacbot",
+            }
+        ],
     }
 
     def consume_runner(args: list[str]) -> dict[str, Any]:
@@ -740,3 +747,115 @@ def test_profile_poll_reports_ambiguous_topic_context_without_querying_message_h
     assert result["replied_count"] == 0
     assert result["event_statuses"] == ["topic_context_ambiguous"]
     assert not (tmp_path / "runtime").exists()
+
+
+def test_profile_poll_does_not_reply_or_invoke_agent_when_message_mentions_other_user_or_all(
+    tmp_path: Path,
+) -> None:
+    from loopx.extensions.lark.goal_topic_runtime import poll_lark_goal_topic_profile_once
+
+    target = {
+        "name": "mew-product",
+        "provider": "lark",
+        "enabled": True,
+        "channel": {"chat_id": "oc_public_fixture"},
+        "identity": {
+            "sender_profile": "mew",
+            "sender_identity": "bot",
+            "bot_app_id": "cli_public_fixture",
+            "bot_display_name": "linkmacbot",
+            "cli_bin": "fake-lark",
+        },
+    }
+    binding_payloads = {
+        "goal-alpha": {
+            "schema_version": "loopx_goal_channel_lark_binding_v0",
+            "bindings": {
+                "goal-alpha": {
+                    "goal_id": "goal-alpha",
+                    "provider": "lark",
+                    "enabled": True,
+                    "target_ref": "mew-product",
+                    "topic": {"root_message_id": "om_topic_alpha"},
+                    "routing": {"incoming_mode": "mentions", "reply_mode": "topic_reply"},
+                }
+            },
+        }
+    }
+
+    # Case A: Message mentions another user
+    other_user_event = {
+        "event_id": "evt_other_user",
+        "message_id": "om_other_user",
+        "chat_id": "oc_public_fixture",
+        "root_id": "om_topic_alpha",
+        "content": "@Alice 请看一下这个 PR",
+        "mentions": [{"name": "Alice", "id": "ou_alice_999"}],
+    }
+
+    answer_called = False
+
+    def answer_spy(_route: Any, _text: Any) -> str:
+        nonlocal answer_called
+        answer_called = True
+        return "must not reply"
+
+    result_other = poll_lark_goal_topic_profile_once(
+        profile="mew",
+        snapshot={
+            "target_payload": {
+                "schema_version": "loopx_goal_channel_provider_targets_v0",
+                "targets": {"mew-product": target},
+            },
+            "binding_payloads": binding_payloads,
+        },
+        runtime_root=tmp_path / "runtime-other",
+        answer=answer_spy,
+        consume_runner=lambda _args: {
+            "returncode": 0,
+            "stdout": json.dumps(other_user_event) + "\n",
+            "stderr": "",
+        },
+        provider_runner=lambda _args: subprocess.CompletedProcess([], 0, "", ""),
+        reply_runner=lambda _args: (_ for _ in ()).throw(AssertionError("must not reply")),
+    )
+
+    assert result_other["event_count"] == 1
+    assert result_other["replied_count"] == 0
+    assert result_other["event_statuses"] == ["ignored"]
+    assert not answer_called
+
+    # Case B: Message mentions @_all
+    all_event = {
+        "event_id": "evt_all",
+        "message_id": "om_all",
+        "chat_id": "oc_public_fixture",
+        "root_id": "om_topic_alpha",
+        "content": "@_all 大家同步一下进度",
+        "mentions": [{"key": "@_all", "name": "所有人"}],
+    }
+
+    result_all = poll_lark_goal_topic_profile_once(
+        profile="mew",
+        snapshot={
+            "target_payload": {
+                "schema_version": "loopx_goal_channel_provider_targets_v0",
+                "targets": {"mew-product": target},
+            },
+            "binding_payloads": binding_payloads,
+        },
+        runtime_root=tmp_path / "runtime-all",
+        answer=answer_spy,
+        consume_runner=lambda _args: {
+            "returncode": 0,
+            "stdout": json.dumps(all_event) + "\n",
+            "stderr": "",
+        },
+        provider_runner=lambda _args: subprocess.CompletedProcess([], 0, "", ""),
+        reply_runner=lambda _args: (_ for _ in ()).throw(AssertionError("must not reply")),
+    )
+
+    assert result_all["event_count"] == 1
+    assert result_all["replied_count"] == 0
+    assert result_all["event_statuses"] == ["ignored"]
+    assert not answer_called

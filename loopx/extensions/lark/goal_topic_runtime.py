@@ -42,8 +42,7 @@ _EVENT_PROJECTION = (
     "parent_id:(.parent_id // .reply_to // .message.parent_id // .message.reply_to "
     "// .event.message.parent_id // .event.message.reply_to),"
     "thread_id:(.thread_id // .message.thread_id // .event.message.thread_id),"
-    "mentioned:(if (.mentioned != null) then .mentioned elif ((.mentions // .message.mentions // .event.message.mentions) | type == \"array\") then (((.mentions // .message.mentions // .event.message.mentions) | length) > 0) else false end),"
-    "addressed:(if (.addressed != null) then .addressed elif (.mentioned != null) then .mentioned elif ((.mentions // .message.mentions // .event.message.mentions) | type == \"array\") then (((.mentions // .message.mentions // .event.message.mentions) | length) > 0) else false end)}"
+    "mentions:(.mentions // .message.mentions // .event.message.mentions // [])}"
 )
 
 
@@ -679,15 +678,9 @@ def process_lark_goal_topic_event(
         "content": str(event.get("content") or ""),
         "root_id": str(event.get("root_id") or ""),
         "parent_id": str(event.get("parent_id") or ""),
+        "mentions": event.get("mentions") if isinstance(event.get("mentions"), list) else [],
         "reply_context_verified": event.get("reply_context_verified") is True,
         "reply_to_bot": event.get("reply_to_bot") is True,
-        "mentioned": event.get("mentioned") is True,
-        "addressed": bool(
-            event.get("addressed") is True
-            or event.get("mentioned") is True
-            or event.get("reply_context_verified") is True
-            or event.get("reply_to_bot") is True
-        ),
     }
     ingest_lark_event_inbox(
         project=root,
