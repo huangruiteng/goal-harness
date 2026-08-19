@@ -121,6 +121,10 @@ class FakeRuntimeController:
         self.submissions.append(dict(kwargs))
         return ({"turn_id": "turn-correction-1", "status": "queued"}, True)
 
+    def submit_governed_turn(self, **kwargs: object) -> tuple[dict[str, object], bool]:
+        self.submissions.append({**dict(kwargs), "governed": True})
+        return ({"turn_id": "turn-governed-1", "status": "queued"}, True)
+
     def capabilities(self) -> list[dict[str, object]]:
         return [
             {
@@ -153,6 +157,9 @@ class FakeRuntimeController:
 class FailingRuntimeController(FakeRuntimeController):
     def submit_turn(self, **kwargs: object) -> tuple[dict[str, object], bool]:
         raise RuntimeError("temporary runtime failure")
+
+    def submit_governed_turn(self, **kwargs: object) -> tuple[dict[str, object], bool]:
+        raise RuntimeError("temporary governed runtime failure")
 
 
 def write_registry_fixture(root: Path) -> tuple[Path, Path]:
@@ -344,7 +351,9 @@ def assert_http_action_api(root: Path) -> None:
         assert todo_resources["session_id"], todo_resources
         assert todo_resources["turn_id"], todo_resources
         assert applied["turn"]["session_id"] == todo_resources["session_id"], applied
-        assert runtime_controller.opened_sessions[-1]["channel_id"] == f"task.{todo_resources['todo_id']}"
+        assert runtime_controller.opened_sessions[-1]["channel_id"] == "goal.goal-one"
+        assert runtime_controller.submissions[-1]["governed"] is True
+        assert runtime_controller.submissions[-1]["todo_id"] == todo_resources["todo_id"]
         assert state_path.read_text(encoding="utf-8").count("Verify the typed action API") == 1
         assert "claimed_by=codex" in state_path.read_text(encoding="utf-8")
         code, repeated = request_json(
@@ -364,8 +373,10 @@ def assert_http_action_api(root: Path) -> None:
         )
         assert code == 202, correction_applied
         assert correction_applied["proposal"]["status"] == "applied", correction_applied
-        assert correction_applied["turn"]["turn_id"] == "turn-correction-1", correction_applied
+        assert correction_applied["turn"]["turn_id"] == "turn-governed-1", correction_applied
         assert runtime_controller.submissions[1]["session_id"] == session["session_id"]
+        assert runtime_controller.submissions[1]["governed"] is True
+        assert runtime_controller.submissions[1]["todo_id"] == todo_resources["todo_id"]
 
         goal_proposal = previews["goal.create"]
         code, goal_applied = request_json(
@@ -788,7 +799,10 @@ def assert_http_action_api(root: Path) -> None:
             body={},
         )
         assert code == 202, run_applied
-        assert run_applied["proposal"]["receipt"]["outcome"] == "monitor_turn_created", run_applied
+        assert (
+            run_applied["proposal"]["receipt"]["outcome"]
+            == "governed_monitor_turn_created"
+        ), run_applied
         assert runtime_controller.submissions[-1]["session_id"] == session["session_id"]
 
         code, fresh_run_preview = request_json(
@@ -817,8 +831,10 @@ def assert_http_action_api(root: Path) -> None:
         assert code == 202, fresh_run_applied
         fresh_resources = fresh_run_applied["proposal"]["receipt"]["resource_ids"]
         assert fresh_resources["session_id"], fresh_run_applied
-        assert runtime_controller.opened_sessions[-1]["channel_id"] == f"task.{monitor_todo_id}"
+        assert runtime_controller.opened_sessions[-1]["channel_id"] == "goal.goal-one"
         assert runtime_controller.submissions[-1]["session_id"] == fresh_resources["session_id"]
+        assert runtime_controller.submissions[-1]["governed"] is True
+        assert runtime_controller.submissions[-1]["todo_id"] == monitor_todo_id
 
         code, stop_preview = request_json(
             f"{base_url}/api/actions/preview",
@@ -938,7 +954,7 @@ def assert_http_action_api(root: Path) -> None:
 
         persisted_payload = action_store.path.read_text(encoding="utf-8")
         assert str(root) not in persisted_payload, persisted_payload
-        assert str(project := registry_path.parent.parent) not in persisted_payload, persisted_payload
+        assert str(registry_path.parent.parent) not in persisted_payload, persisted_payload
 
         cancellable_code, cancellable = request_json(
             f"{base_url}/api/actions/preview",

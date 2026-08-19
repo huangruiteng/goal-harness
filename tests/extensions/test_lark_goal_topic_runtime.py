@@ -226,9 +226,10 @@ def test_bound_topic_reuses_one_goal_chat_session(tmp_path: Path) -> None:
     assert first == "当前运行的是 LoopX 开发版。"
     assert second == first
     assert runtime.open_calls[0]["mode"] == "resume_latest"
-    assert runtime.open_calls[0]["channel_id"].startswith("lark.")
+    assert runtime.open_calls[0]["channel_id"] == "goal.goal-alpha"
     assert runtime.open_calls[0]["channel_id"] == runtime.open_calls[1]["channel_id"]
     assert runtime.submit_calls[0]["client_turn_id"].startswith("lark.")
+    assert "working Agent" in runtime.submit_calls[0]["message"]
     assert "只生成预览" in runtime.submit_calls[0]["message"]
 
 

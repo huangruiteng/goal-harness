@@ -26,6 +26,28 @@ def test_chat_command_accepts_explicit_lark_cli_binary() -> None:
     assert args.lark_cli_bin == "custom-lark-cli"
 
 
+def test_chat_command_passes_governed_turn_capabilities_to_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(support_control, "serve_chat", lambda **kwargs: calls.append(kwargs))
+
+    assert (
+        main(
+            [
+                "chat",
+                "--available-capability",
+                "network",
+                "--available-capability",
+                "browser",
+                "--no-open",
+            ]
+        )
+        == 0
+    )
+    assert calls[0]["available_capabilities"] == ["network", "browser"]
+
+
 def test_chat_command_passes_explicit_lark_cli_binary_to_server(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
