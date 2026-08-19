@@ -54,6 +54,13 @@ class GitSshService(str, Enum):
     UPLOAD_ARCHIVE = "git-upload-archive"
 
 
+class ReferenceTransactionPhase(str, Enum):
+    PREPARING = "preparing"
+    PREPARED = "prepared"
+    COMMITTED = "committed"
+    ABORTED = "aborted"
+
+
 BASE_HOOK_NAMES = ("pre-commit", "pre-push")
 REFERENCE_GUARD_HOOK_NAME = "reference-transaction"
 SSH_TRANSPORT_EVENT = "ssh-transport"
@@ -799,19 +806,25 @@ def _reference_transaction_introduces_commit(
     hook_args: Sequence[str],
     hook_stdin: bytes,
 ) -> bool:
-    if len(hook_args) != 1 or hook_args[0] not in {
-        "prepared",
-        "committed",
-        "aborted",
-    }:
+    if len(hook_args) != 1:
         raise RepositoryChangeWindowError(
-            "reference-transaction requires exactly one prepared, committed, or aborted phase"
+            "reference-transaction requires exactly one phase"
         )
-    if hook_args[0] != "prepared":
+    try:
+        phase = ReferenceTransactionPhase(hook_args[0])
+    except ValueError as exc:
+        supported = ", ".join(item.value for item in ReferenceTransactionPhase)
+        raise RepositoryChangeWindowError(
+            f"unsupported reference-transaction phase `{hook_args[0]}`; use one of: {supported}"
+        ) from exc
+    if phase not in {
+        ReferenceTransactionPhase.PREPARING,
+        ReferenceTransactionPhase.PREPARED,
+    }:
         return False
     if not hook_stdin.strip():
         raise RepositoryChangeWindowError(
-            "reference-transaction prepared phase requires at least one ref update"
+            f"reference-transaction {phase.value} phase requires at least one ref update"
         )
     try:
         lines = hook_stdin.decode("ascii").splitlines()

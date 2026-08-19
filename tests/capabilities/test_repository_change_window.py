@@ -320,6 +320,17 @@ def test_reference_guard_uses_fake_clock_and_shared_linked_worktree_state(
     assert blocked["status"] == "blocked_by_policy"
     assert blocked["pending_change"]["changed"] is True
 
+    preparing = run_git_hook_provider(
+        repo_path=linked,
+        runtime_root=runtime_root,
+        event="reference-transaction",
+        hook_args=("preparing",),
+        hook_stdin=f"{old_oid} {new_oid} refs/heads/feature/guard\n".encode(),
+        now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+    )
+    assert preparing["status"] == "blocked_by_policy"
+    assert preparing["guarded_change"] is True
+
     for staged_ref in (
         "refs/tags/staged-candidate",
         "refs/notes/staged-candidate",
