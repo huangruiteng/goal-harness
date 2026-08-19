@@ -7,7 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from ..authority import validate_public_safe_text
+from ..control_plane.runtime.public_safety import validate_public_safe_value
 from ..file_lock import exclusive_file_lock
 from ..history import load_registry
 from ..registry import atomic_write_json, find_registry_goal
@@ -30,24 +30,6 @@ GOAL_EXTERNAL_CAPABILITY_BINDING_SCHEMA_VERSION = (
 )
 GOAL_EXTERNAL_CAPABILITY_BINDING_RECEIPT_SCHEMA_VERSION = (
     "loopx_goal_external_capability_binding_receipt_v0"
-)
-_FORBIDDEN_RESULT_KEYS = frozenset(
-    {
-        "access_token",
-        "authorization",
-        "credential",
-        "credentials",
-        "cookie",
-        "password",
-        "private_key",
-        "raw_document",
-        "raw_log",
-        "raw_message",
-        "request_body",
-        "response_body",
-        "secret",
-        "token",
-    }
 )
 _RESULT_FIELDS = {
     "schema_version",
@@ -177,6 +159,7 @@ def _goal_binding(
     capability_id: str,
     operation: str,
     provider_binding: Mapping[str, Any],
+    expected_goal_id: str | None = None,
 ) -> dict[str, Any]:
     binding = _mapping(value, "Goal capability binding")
     expected_fields = {
@@ -194,6 +177,8 @@ def _goal_binding(
             f"{GOAL_EXTERNAL_CAPABILITY_BINDING_SCHEMA_VERSION}"
         )
     goal_id = _token(binding.get("goal_id"), "Goal capability binding goal_id")
+    if expected_goal_id is not None and goal_id != expected_goal_id:
+        raise ValueError("Goal capability binding goal_id does not match request")
     if binding.get("capability_id") != capability_id:
         raise ValueError("Goal capability binding capability_id does not match request")
     operations = binding.get("operations")
@@ -325,9 +310,13 @@ def load_goal_external_capability_binding(
     path = Path(registry_path).expanduser()
     if not path.is_file():
         raise ValueError(f"LoopX registry does not exist: {path}")
-    goal = find_registry_goal(load_registry(path), _token(goal_id, "goal_id"))
+    requested_goal_id = _token(goal_id, "goal_id")
+    goal = find_registry_goal(load_registry(path), requested_goal_id)
     if goal is None:
-        raise ValueError(f"LoopX registry does not contain Goal `{goal_id}`")
+        raise ValueError(f"LoopX registry does not contain Goal `{requested_goal_id}`")
+    containing_goal_id = _token(goal.get("id"), "registry Goal id")
+    if containing_goal_id != requested_goal_id:
+        raise ValueError("registry Goal id does not match requested goal_id")
     normalized_capability_id = _token(capability_id, "capability_id")
     matching = [
         binding
@@ -336,10 +325,19 @@ def load_goal_external_capability_binding(
     ]
     if not matching:
         raise ValueError(
-            f"Goal `{goal_id}` does not enable external capability "
+            f"Goal `{requested_goal_id}` does not enable external capability "
             f"`{normalized_capability_id}`"
         )
-    return matching[0]
+    selected = matching[0]
+    binding_goal_id = _token(
+        selected.get("goal_id"),
+        "Goal external capability binding goal_id",
+    )
+    if binding_goal_id != containing_goal_id:
+        raise ValueError(
+            "Goal external capability binding goal_id does not match containing Goal"
+        )
+    return selected
 
 
 def bind_external_capability_to_goal(
@@ -446,24 +444,6 @@ def _provider_input(value: Mapping[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _assert_public_safe_result(value: object, *, path: str = "provider_result") -> None:
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            normalized_key = str(key).casefold()
-            if normalized_key in _FORBIDDEN_RESULT_KEYS or normalized_key.startswith(
-                "raw_"
-            ):
-                raise ValueError(f"{path} contains forbidden field `{key}`")
-            _assert_public_safe_result(item, path=f"{path}.{key}")
-        return
-    if isinstance(value, list):
-        for index, item in enumerate(value):
-            _assert_public_safe_result(item, path=f"{path}[{index}]")
-        return
-    if isinstance(value, str):
-        validate_public_safe_text(path, value)
-
-
 def validate_external_capability_result(
     value: Mapping[str, Any],
     *,
@@ -503,7 +483,7 @@ def validate_external_capability_result(
         raise ValueError(
             "read-only external capability result cannot contain an effect receipt"
         )
-    _assert_public_safe_result(result)
+    validate_public_safe_value(result, path="provider_result")
     return result
 
 
@@ -541,16 +521,20 @@ def invoke_external_capability(
             goal_id=goal_id,
             capability_id=capability_id,
         )
+        expected_goal_id = _token(goal_id, "goal_id")
     elif registry_path is not None or goal_id is not None:
         raise ValueError(
             "external capability invocation accepts either a durable Goal binding "
             "or an explicit Goal binding projection, not both"
         )
+    else:
+        expected_goal_id = None
     goal = _goal_binding(
         goal_binding,
         capability_id=capability_id,
         operation=operation,
         provider_binding=binding,
+        expected_goal_id=expected_goal_id,
     )
     provided = _provider_input(provider_input)
     invocation_seed = {

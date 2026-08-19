@@ -147,6 +147,20 @@ def _provider_input() -> dict[str, object]:
     }
 
 
+def _external_result(observations: list[object]) -> dict[str, object]:
+    return {
+        "schema_version": "loopx_external_domain_capability_result_v0",
+        "invocation_id": "capability-fixture",
+        "status": "succeeded",
+        "observations": observations,
+        "domain_state_mutations": [],
+        "domain_transition_receipts": [],
+        "transition_proposals": [],
+        "effect_receipt": None,
+        "follow_up": {"kind": "none"},
+    }
+
+
 def _installed_extension(tmp_path: Path) -> Path:
     provider = _provider(tmp_path / "provider")
     _profile(tmp_path / "profile.json")
@@ -355,6 +369,54 @@ def test_durable_goal_binding_fails_closed_after_provider_revision_drift(
         )
 
 
+@pytest.mark.parametrize(
+    ("requested_goal_id", "binding_goal_id"),
+    [
+        ("fixture-goal", "different-goal"),
+        ("different-goal", "fixture-goal"),
+    ],
+)
+def test_durable_goal_binding_rejects_cross_goal_lineage(
+    tmp_path: Path,
+    requested_goal_id: str,
+    binding_goal_id: str,
+) -> None:
+    state_file = _installed_extension(tmp_path)
+    registry_path = _registry(tmp_path / "registry.json")
+    bind_external_capability_to_goal(
+        registry_path=registry_path,
+        state_file=state_file,
+        goal_id="fixture-goal",
+        capability_id="fixture-requirement-delivery",
+        operations=["observe"],
+        execute=True,
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    binding = registry["goals"][0]["external_capability_bindings"][0]
+    if requested_goal_id == "fixture-goal":
+        binding["goal_id"] = binding_goal_id
+    else:
+        registry["goals"].append(
+            {
+                "id": requested_goal_id,
+                "title": "Different Goal",
+                "repo": str(tmp_path),
+                "external_capability_bindings": [binding],
+            }
+        )
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not match containing Goal"):
+        invoke_external_capability(
+            state_file=state_file,
+            registry_path=registry_path,
+            goal_id=requested_goal_id,
+            capability_id="fixture-requirement-delivery",
+            operation="observe",
+            provider_input=_provider_input(),
+        )
+
+
 def test_external_capability_rejects_operation_outside_goal_binding(
     tmp_path: Path,
 ) -> None:
@@ -422,26 +484,71 @@ def test_external_capability_rejects_stale_goal_profile_binding(
         )
 
 
-def test_read_only_result_rejects_secret_fields() -> None:
-    with pytest.raises(ValueError, match="forbidden field"):
+@pytest.mark.parametrize(
+    ("observation", "match"),
+    [
+        ({"access_token": "synthetic-secret-value"}, "credential-bearing field"),
+        (
+            {"nested": [{"apiKey": "synthetic-secret-value"}]},
+            "credential-bearing field",
+        ),
+        (
+            {"nested": [{"providerToken": "synthetic-secret-value"}]},
+            "credential-bearing field",
+        ),
+        (
+            {"nested": {"value": "sk-" + "live-synthetic-abcdefghijklmnop"}},
+            "credential-like value",
+        ),
+        (
+            {"nested": {"sk-" + "live-synthetic-abcdefghijklmnop": "value"}},
+            "unsafe field name",
+        ),
+        (
+            {"nested": [{"path": "/" + "home/example/private.txt"}]},
+            "absolute local path",
+        ),
+        (
+            {"nested": {"path": "C:" + "\\Users\\example\\private.txt"}},
+            "absolute local path",
+        ),
+        ({"responseBody": {"status": "ok"}}, "unbounded payload field"),
+    ],
+)
+def test_read_only_result_rejects_nested_private_material(
+    observation: dict[str, object],
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
         validate_external_capability_result(
-            {
-                "schema_version": "loopx_external_domain_capability_result_v0",
-                "invocation_id": "capability-fixture",
-                "status": "succeeded",
-                "observations": [{"access_token": "synthetic-secret-value"}],
-                "domain_state_mutations": [],
-                "domain_transition_receipts": [],
-                "transition_proposals": [],
-                "effect_receipt": None,
-                "follow_up": {"kind": "none"},
-            },
+            _external_result([observation]),
             invocation_id="capability-fixture",
             operation={
                 "effect_class": "read_only",
                 "result_schema": "loopx_external_domain_capability_result_v0",
             },
         )
+
+
+def test_read_only_result_accepts_bounded_noncredential_metadata() -> None:
+    result = validate_external_capability_result(
+        _external_result(
+            [
+                {
+                    "token_count": 12,
+                    "path_hint": "docs/reference/extensions.md",
+                    "nested": [{"status": "ready"}],
+                }
+            ]
+        ),
+        invocation_id="capability-fixture",
+        operation={
+            "effect_class": "read_only",
+            "result_schema": "loopx_external_domain_capability_result_v0",
+        },
+    )
+
+    assert result["observations"][0]["token_count"] == 12
 
 
 def test_capability_invoke_cli_uses_managed_runtime(
