@@ -10,7 +10,7 @@ if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ || -z "$output_json" 
   exit 2
 fi
 if [[ -z "${GH_TOKEN:-}" ]]; then
-  echo "::error title=Missing star-history credential::Set STAR_HISTORY_READ_TOKEN to a fine-grained token limited to this public repository with read-only Metadata access." >&2
+  echo "::error title=Missing star-history credential::Set STAR_HISTORY_READ_TOKEN to a classic PAT from an admin/collaborator account with the public_repo scope." >&2
   exit 1
 fi
 
