@@ -8,12 +8,14 @@ import pytest
 
 from loopx.cli import main
 from loopx.extensions.capability_admission import (
+    bind_external_capability_to_goal,
     invoke_external_capability,
+    load_goal_external_capability_binding,
     resolve_external_capability_binding,
     validate_external_capability_result,
 )
 from loopx.extensions.manifest import load_extension_manifest
-from loopx.extensions.runtime import install_extension
+from loopx.extensions.runtime import default_extension_state_file, install_extension
 
 
 def _provider(path: Path) -> Path:
@@ -63,9 +65,7 @@ def _profile(path: Path) -> Path:
                         "request_schema": (
                             "loopx_external_domain_capability_request_v0"
                         ),
-                        "result_schema": (
-                            "loopx_external_domain_capability_result_v0"
-                        ),
+                        "result_schema": ("loopx_external_domain_capability_result_v0"),
                     }
                 ],
             },
@@ -156,6 +156,26 @@ def _installed_extension(tmp_path: Path) -> Path:
     return state_file
 
 
+def _registry(path: Path, *, runtime_root: Path | None = None) -> Path:
+    payload: dict[str, object] = {
+        "schema_version": "loopx_registry_v1",
+        "goals": [
+            {
+                "id": "fixture-goal",
+                "title": "Fixture Goal",
+                "repo": str(path.parent),
+            }
+        ],
+    }
+    if runtime_root is not None:
+        payload["common_runtime_root"] = str(runtime_root)
+    path.write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_manifest_snapshots_external_capability_profile_and_digest(
     tmp_path: Path,
 ) -> None:
@@ -228,6 +248,113 @@ def test_read_only_external_capability_is_bound_to_goal_not_turn(
     }
 
 
+def test_goal_binding_preview_execute_and_idempotent_readback(tmp_path: Path) -> None:
+    state_file = _installed_extension(tmp_path)
+    registry_path = _registry(tmp_path / "registry.json")
+    original = registry_path.read_text(encoding="utf-8")
+
+    preview = bind_external_capability_to_goal(
+        registry_path=registry_path,
+        state_file=state_file,
+        goal_id="fixture-goal",
+        capability_id="fixture-requirement-delivery",
+        operations=["observe"],
+    )
+
+    assert preview["status"] == "ready"
+    assert preview["changed"] is True
+    assert preview["written"] is False
+    assert preview["turn_required"] is False
+    assert preview["quota_spent"] is False
+    assert registry_path.read_text(encoding="utf-8") == original
+
+    written = bind_external_capability_to_goal(
+        registry_path=registry_path,
+        state_file=state_file,
+        goal_id="fixture-goal",
+        capability_id="fixture-requirement-delivery",
+        operations=["observe"],
+        execute=True,
+    )
+    repeated = bind_external_capability_to_goal(
+        registry_path=registry_path,
+        state_file=state_file,
+        goal_id="fixture-goal",
+        capability_id="fixture-requirement-delivery",
+        operations=["observe"],
+        execute=True,
+    )
+    stored = load_goal_external_capability_binding(
+        registry_path=registry_path,
+        goal_id="fixture-goal",
+        capability_id="fixture-requirement-delivery",
+    )
+
+    assert written["status"] == "written"
+    assert written["written"] is True
+    assert repeated["status"] == "no_change"
+    assert repeated["changed"] is False
+    assert repeated["written"] is False
+    assert stored == written["binding"]
+
+
+def test_external_capability_resolves_durable_goal_binding(tmp_path: Path) -> None:
+    state_file = _installed_extension(tmp_path)
+    registry_path = _registry(tmp_path / "registry.json")
+    bind_external_capability_to_goal(
+        registry_path=registry_path,
+        state_file=state_file,
+        goal_id="fixture-goal",
+        capability_id="fixture-requirement-delivery",
+        operations=["observe"],
+        execute=True,
+    )
+
+    executed = invoke_external_capability(
+        state_file=state_file,
+        registry_path=registry_path,
+        goal_id="fixture-goal",
+        capability_id="fixture-requirement-delivery",
+        operation="observe",
+        provider_input=_provider_input(),
+        execute=True,
+    )
+
+    assert executed["status"] == "succeeded"
+    assert executed["goal_binding"]["goal_id"] == "fixture-goal"
+    assert executed["goal_binding"]["turn_required"] is False
+
+
+def test_durable_goal_binding_fails_closed_after_provider_revision_drift(
+    tmp_path: Path,
+) -> None:
+    state_file = _installed_extension(tmp_path)
+    registry_path = _registry(tmp_path / "registry.json")
+    bind_external_capability_to_goal(
+        registry_path=registry_path,
+        state_file=state_file,
+        goal_id="fixture-goal",
+        capability_id="fixture-requirement-delivery",
+        operations=["observe"],
+        execute=True,
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["external_capability_bindings"][0]["provider"]["revision"] = (
+        "sha256:stale-provider-revision"
+    )
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="active provider revision"):
+        invoke_external_capability(
+            state_file=state_file,
+            registry_path=registry_path,
+            goal_id="fixture-goal",
+            capability_id="fixture-requirement-delivery",
+            operation="observe",
+            provider_input=_provider_input(),
+        )
+
+
 def test_external_capability_rejects_operation_outside_goal_binding(
     tmp_path: Path,
 ) -> None:
@@ -276,6 +403,25 @@ def test_external_capability_rejects_stale_goal_provider_binding(
         )
 
 
+def test_external_capability_rejects_stale_goal_profile_binding(
+    tmp_path: Path,
+) -> None:
+    state_file = _installed_extension(tmp_path)
+    goal_binding = _goal_binding(state_file)
+    provider = goal_binding["provider"]
+    assert isinstance(provider, dict)
+    provider["profile_digest"] = "sha256:stale-integration-profile"
+
+    with pytest.raises(ValueError, match="active provider revision/profile"):
+        invoke_external_capability(
+            state_file=state_file,
+            capability_id="fixture-requirement-delivery",
+            operation="observe",
+            goal_binding=goal_binding,
+            provider_input=_provider_input(),
+        )
+
+
 def test_read_only_result_rejects_secret_fields() -> None:
     with pytest.raises(ValueError, match="forbidden field"):
         validate_external_capability_result(
@@ -303,17 +449,40 @@ def test_capability_invoke_cli_uses_managed_runtime(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     state_file = _installed_extension(tmp_path)
-    goal_binding = tmp_path / "goal-binding.json"
+    registry_path = _registry(tmp_path / "registry.json")
     provider_input = tmp_path / "provider-input.json"
-    goal_binding.write_text(
-        json.dumps(_goal_binding(state_file)),
-        encoding="utf-8",
-    )
     provider_input.write_text(json.dumps(_provider_input()), encoding="utf-8")
 
     assert (
         main(
             [
+                "--registry",
+                str(registry_path),
+                "--format",
+                "json",
+                "capability",
+                "bind",
+                "fixture-requirement-delivery",
+                "--goal-id",
+                "fixture-goal",
+                "--operation",
+                "observe",
+                "--state-file",
+                str(state_file),
+                "--execute",
+            ]
+        )
+        == 0
+    )
+    binding_receipt = json.loads(capsys.readouterr().out)
+    assert binding_receipt["status"] == "written"
+    assert binding_receipt["turn_required"] is False
+
+    assert (
+        main(
+            [
+                "--registry",
+                str(registry_path),
                 "--format",
                 "json",
                 "capability",
@@ -321,8 +490,8 @@ def test_capability_invoke_cli_uses_managed_runtime(
                 "fixture-requirement-delivery",
                 "--operation",
                 "observe",
-                "--goal-binding-json",
-                str(goal_binding),
+                "--goal-id",
+                "fixture-goal",
                 "--input-json",
                 str(provider_input),
                 "--state-file",
@@ -334,6 +503,45 @@ def test_capability_invoke_cli_uses_managed_runtime(
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "succeeded"
-    assert payload["provider_result"]["observations"][0]["requirement_ref"] == (
-        "REQ-1"
+    assert payload["provider_result"]["observations"][0]["requirement_ref"] == ("REQ-1")
+
+
+def test_capability_bind_cli_resolves_registry_runtime_root(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    provider = _provider(tmp_path / "provider")
+    _profile(tmp_path / "profile.json")
+    manifest = _manifest(tmp_path / "extension.toml", provider=provider)
+    install_extension(
+        manifest,
+        state_file=default_extension_state_file(runtime_root),
+        execute=True,
     )
+    registry_path = _registry(
+        tmp_path / "registry.json",
+        runtime_root=runtime_root,
+    )
+
+    assert (
+        main(
+            [
+                "--registry",
+                str(registry_path),
+                "--format",
+                "json",
+                "capability",
+                "bind",
+                "fixture-requirement-delivery",
+                "--goal-id",
+                "fixture-goal",
+                "--operation",
+                "observe",
+                "--execute",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "written"
