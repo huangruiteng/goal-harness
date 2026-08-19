@@ -69,6 +69,23 @@ async function installApi(page) {
   };
   await page.route(`http://127.0.0.1:${port}/status.json`, async (route) => {
     const fixture = require(resolve(repoRoot, "examples/status.example.json"));
+    const directoryFixtures = [
+      { id: "product-release", display_name: "Product Release", activation_state: "active" },
+      { id: "research-monitor", display_name: "Research Monitor", activation_state: "active" },
+      { id: "legacy-benchmark", display_name: "Legacy Benchmark", activation_state: "stopped" },
+      { id: "archived-notes", display_name: "Archived Notes", activation_state: "stopped" },
+    ];
+    for (const directoryGoal of directoryFixtures) {
+      if (fixture.run_history.goals.some((goal) => goal.id === directoryGoal.id)) continue;
+      fixture.run_history.goals.push({
+        ...directoryGoal,
+        status: "active-read-only", registry_member: true,
+        legacy_runtime_goal: false, adapter_kind: "generic_project_goal_v0", adapter_status: "connected",
+        lifecycle_phase: "registered", lifecycle_flags: ["registered"],
+        quota: { compute: 1, window_hours: 24, slot_minutes: 1, allowed_slots: 1440, spent_slots: 0, state: directoryGoal.activation_state === "stopped" ? "paused" : "waiting" },
+        index_exists: false, raw_index_records: 0, unique_runs: 0, latest_runs: [],
+      });
+    }
     if (!fixture.run_history.goals.some((goal) => goal.id === "stale-browser-goal")) {
       fixture.run_history.goals.push({
         id: "stale-browser-goal", status: "monitoring", registry_member: false,
@@ -182,7 +199,7 @@ async function installApi(page) {
         ok: true, schema_version: "loopx_chat_capabilities_v1", agent_backend: "multi_adapter",
         sandbox: "read-only", approval_policy: "never", todo_write: "preview_locked",
         goal_id: null, streaming: true, resume: true, interrupt: true, typed_actions: true,
-        action_kinds: ["goal.create", "agent.bind", "heartbeat.bind", "monitor.create", "run.correct"],
+        action_kinds: ["goal.create", "goal.lifecycle", "agent.bind", "heartbeat.bind", "monitor.create", "run.correct"],
         adapters: [
           { agent_id: "codex", display_name: "Codex", adapter_kind: "codex_app_server", available: true, streaming: true, resume: true, interrupt: true },
           { agent_id: "claude-code", display_name: "Claude Code", adapter_kind: "claude_code_cli", available: true, streaming: true, resume: true, interrupt: true },
@@ -420,7 +437,7 @@ async function main() {
     if (await page.locator(".personal-home-lane").count() !== 4) throw new Error("Manager home did not render four active lanes");
     if (body.includes("接下来")) throw new Error("Manager home still exposes the ambiguous 接下来 label");
     if (body.includes("stale-browser-goal")) throw new Error("An unregistered historical Goal remained interactive");
-    if (!(await page.locator(".personal-home-history").isVisible())) throw new Error("Completed Goals are not available through the collapsed history section");
+    if (!(await page.locator(".personal-home-history").first().isVisible())) throw new Error("Completed Goals are not available through the collapsed history section");
     const needsYouCount = await page.getByTestId("personal-home-lane-needs_you").locator(".personal-home-goal-card").count();
     const greeting = await page.locator(".personal-manager-greeting").innerText();
     if (!greeting.includes(`你有 ${needsYouCount} 项需要处理`)) {
@@ -430,7 +447,29 @@ async function main() {
     if (await page.locator(".personal-digest-stats button").count()) throw new Error("Away digest still behaves like hidden channel navigation");
     if (body.includes("Agent 设置")) throw new Error("Sidebar still exposes the read-only Agent settings dead end");
     if (await page.locator(".personal-global-rail").count()) throw new Error("Old icon rail is visible");
-    pass(1, "Single Goal sidebar is visible and the old icon rail is absent.");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 3) throw new Error("Active Goal directory did not exclude stopped Goals");
+    const stoppedDirectory = page.locator(".personal-stopped-goals");
+    if (!(await stoppedDirectory.isVisible()) || await stoppedDirectory.getAttribute("open") !== null) throw new Error("Stopped Goals are not available in a collapsed directory section");
+    const writesBeforeLifecyclePreview = api.durableWriteCount;
+    await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
+    await page.getByText("确认执行", { exact: true }).waitFor({ state: "visible" });
+    const stopPreview = api.actionPreviews.findLast((preview) => preview.action_kind === "goal.lifecycle" && preview.normalized_parameters.operation === "stop");
+    if (!stopPreview || stopPreview.normalized_parameters.goal_id !== "product-release") throw new Error("Goal stop did not create the expected typed preview");
+    if (api.durableWriteCount !== writesBeforeLifecyclePreview) throw new Error("Goal stop preview wrote state before owner confirmation");
+    await page.getByRole("button", { name: "关闭", exact: true }).click();
+    await stoppedDirectory.locator("summary").click();
+    await page.getByRole("button", { name: "恢复 Legacy Benchmark", exact: true }).click();
+    await page.getByText("确认执行", { exact: true }).waitFor({ state: "visible" });
+    const resumePreview = api.actionPreviews.findLast((preview) => preview.action_kind === "goal.lifecycle" && preview.normalized_parameters.operation === "resume");
+    if (!resumePreview || resumePreview.normalized_parameters.goal_id !== "legacy-benchmark") throw new Error("Goal resume did not create the expected typed preview");
+    if (api.durableWriteCount !== writesBeforeLifecyclePreview) throw new Error("Goal resume preview wrote state before owner confirmation");
+    await page.getByRole("button", { name: "关闭", exact: true }).click();
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const stoppedChevronTransition = await stoppedDirectory.locator("summary svg").evaluate((element) => getComputedStyle(element).transitionDuration);
+    if (stoppedChevronTransition !== "0s") throw new Error(`Stopped Goals disclosure ignores reduced motion: ${stoppedChevronTransition}`);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.screenshot({ path: resolve(outputDir, "goal-lifecycle-directory.png"), fullPage: false, animations: "disabled" });
+    pass(1, "Active Goals stay concise; reversible stop/resume uses typed previews and a collapsed Stopped Goals section.");
     if (await page.locator(".personal-timeline-row").filter({ hasText: /纠偏/u }).count()) throw new Error("Browse rows expose repeated correction actions");
     pass(2, "Browse rows are full-row click targets and Session rows state that they open execution progress and results.");
     await page.screenshot({ path: resolve(outputDir, "desktop-first-screen.png"), fullPage: false, animations: "disabled" });
@@ -934,6 +973,9 @@ async function main() {
     if (mobileSidebarProbe.display === "none" || mobileSidebarProbe.width < 100) {
       throw new Error(`Mobile sidebar did not become visible: ${JSON.stringify(mobileSidebarProbe)}`);
     }
+    const mobileStoppedDirectory = mobile.locator(".personal-stopped-goals");
+    if (await mobileStoppedDirectory.getAttribute("open") === null) await mobileStoppedDirectory.locator("summary").click();
+    await mobile.screenshot({ path: resolve(outputDir, "mobile-goal-directory.png"), fullPage: false, animations: "disabled" });
     await mobile.keyboard.press("Escape");
     if (await mobileNavigationTrigger.getAttribute("aria-expanded") !== "false") {
       throw new Error("Mobile navigation did not close on Escape");

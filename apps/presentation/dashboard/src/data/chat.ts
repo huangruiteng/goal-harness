@@ -223,6 +223,7 @@ export class ChatApiError extends Error {
 export const typedActionKindSchema = z.enum([
   "goal.create",
   "goal.update",
+  "goal.lifecycle",
   "todo.create",
   "todo.update",
   "agent.bind",

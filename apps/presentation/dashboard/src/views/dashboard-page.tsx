@@ -188,6 +188,7 @@ function buildGoalDirectoryRows(goals: RunGoal[], queueItems: QueueItem[]): Goal
     }
     rows.push({
       goal: {
+        activation_state: item.activation_state,
         id: item.goal_id,
         status: item.status,
         display_name: item.goal_id,
@@ -325,7 +326,7 @@ function buildAgentManagementRows(
   });
 }
 
-type PersonalGoalState = "需修复" | "等你" | "等待条件" | "推进中" | "已完成" | "安静运行";
+type PersonalGoalState = "需修复" | "等你" | "等待条件" | "推进中" | "已完成" | "安静运行" | "已停止";
 
 type PersonalRunEvidence = {
   generatedAt: string;
@@ -338,6 +339,7 @@ type PersonalRunEvidence = {
 };
 
 type PersonalGoalItem = {
+  activationState: "active" | "stopped";
   agentId: string;
   agentSentence: string;
   agentTodos: PersonalAgentTodoItem[];
@@ -475,6 +477,7 @@ const personalGoalStateVariant: Record<PersonalGoalState, BadgeVariant> = {
   "等待条件": "info",
   "推进中": "success",
   "安静运行": "neutral",
+  "已停止": "neutral",
   "已完成": "neutral",
 };
 
@@ -765,6 +768,9 @@ function personalPendingOperatorGateText(row: GoalDirectoryRow) {
 }
 
 function personalGoalState(payload: StatusPayload, row: GoalDirectoryRow): PersonalGoalState {
+  if (row.goal.activation_state === "stopped") {
+    return "已停止";
+  }
   const userTodos = getShareTodos(row, "user");
   const agentTodos = getShareTodos(row, "agent");
   const hasOpenUserTodo = Boolean(firstOpenTodo(userTodos));
@@ -788,6 +794,9 @@ function personalGoalState(payload: StatusPayload, row: GoalDirectoryRow): Perso
 }
 
 function personalAgentSentence(payload: StatusPayload, row: GoalDirectoryRow, state: PersonalGoalState) {
+  if (state === "已停止") {
+    return "已由你停止；历史、Todo 和证据仍保留";
+  }
   if (state === "需修复") {
     return personalProjectionSentence(personalRepairText(payload, row), "LoopX 状态需要刷新");
   }
@@ -840,7 +849,7 @@ function answerPersonalManagerQuestion(
 ): PersonalManagerAnswer {
   if (personalManagerMatches(question, ["Agent", "agent", "推进", "在做"])) {
     const activeGoals = model.goals.filter((goal) =>
-      !["安静运行", "已完成"].includes(goal.state)
+      !["安静运行", "已完成", "已停止"].includes(goal.state)
     );
     const shownGoals = (activeGoals.length > 0 ? activeGoals : model.goals).slice(0, 3);
     if (shownGoals.length === 0) {
@@ -925,9 +934,15 @@ function answerPersonalManagerQuestion(
 
 function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]): PersonalHomeModel {
   const rowById = new Map(rows.map((row) => [row.goal.id, row]));
+  const stoppedGoalIds = new Set(
+    payload.run_history.goals
+      .filter((goal) => goal.activation_state === "stopped")
+      .map((goal) => goal.id),
+  );
   const usageById = shareUsageById(payload.usage_summary);
   const agentRows = buildAgentManagementRows(rows, payload.todo_index, payload.agent_management_projection);
   const projectedUserTodos = payload.attention_queue.items.flatMap((item, sourceOrder) => {
+    if (stoppedGoalIds.has(item.goal_id)) return [];
     const blocking = ["user_or_controller", "controller"].includes(item.waiting_on);
     return (personalTodosForQueueItem(item, "user")?.items ?? [])
       .filter((todo) => !todo.done)
@@ -945,7 +960,7 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
   });
   const projectedGoalIds = new Set(projectedUserTodos.map((todo) => todo.goalId));
   const pendingOperatorGates = rows.flatMap((row, rowOrder) => {
-    if (projectedGoalIds.has(row.goal.id) || !personalGoalHasPendingOperatorGate(row)) return [];
+    if (stoppedGoalIds.has(row.goal.id) || projectedGoalIds.has(row.goal.id) || !personalGoalHasPendingOperatorGate(row)) return [];
     return [{
       actionKind: "gate.resolve",
       blocking: true,
@@ -992,6 +1007,7 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
     ].map((value) => personalProjectionSentence(value))
       .find((value) => value !== "" && value !== "暂无") ?? "等待 LoopX 更新下一步";
     return [{
+      activationState: goal.activation_state,
       agentId: agentRow?.agentId ?? "codex",
       agentSentence: personalAgentSentence(payload, row, state),
       agentTodos: goalAgentTodos,

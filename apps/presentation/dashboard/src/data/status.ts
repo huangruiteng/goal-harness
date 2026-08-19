@@ -330,6 +330,7 @@ export const projectAssetSchema = z.object({
 
 export const queueItemSchema = z.object({
   goal_id: z.string(),
+  activation_state: z.enum(["active", "stopped"]).optional().default("active"),
   status: z.string(),
   waiting_on: z.string(),
   severity: z.string(),
@@ -473,6 +474,7 @@ export const runRecordSchema = z.object({
 
 export const runGoalSchema = z.object({
   id: z.string(),
+  activation_state: z.enum(["active", "stopped"]).optional().default("active"),
   display_name: z.string().optional().nullable(),
   domain: z.string().optional().nullable(),
   status: z.string().optional().nullable(),

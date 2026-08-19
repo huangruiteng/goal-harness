@@ -66,6 +66,30 @@ graph TD
    - `[汇总所有 Goal 进展 (立即发送)]`：带有蓝色高亮标识，点击后**立即发送**并在右下角弹出托盘展示全局总结；
    - `[创建新 Goal (草稿)]`：快速填入目标模板草稿。
 
+### 3.1 停止暂时不活跃的 Goal
+
+当 Goal 较多时，主列表只展示仍处于 active 状态的 Goal。点击 Goal 右侧的暂停按钮后，LoopX 会先展示 Typed Action 预览；只有你明确确认，Goal 才会进入 **「已停止」** 折叠区。
+
+- 停止会暂停该 Goal 的自动 Agent Turn，并从「需要你」等活跃聚合中移除；
+- Goal 的 Todo、历史、证据和配置全部保留，不会被标记成「已完成」，也不会删除；
+- 展开「已停止」，点击恢复按钮并确认，即可重新获得调度资格；恢复后仍需通过 quota、Gate 和 Todo 约束。
+
+CLI 提供同一套可预览、可验证的生命周期操作：
+
+```bash
+# 零写入预览
+loopx goal-lifecycle --goal-id <goal-id> --operation stop
+
+# 确认执行，再读取 quota 验证自动推进已暂停
+loopx goal-lifecycle --goal-id <goal-id> --operation stop --execute
+loopx quota status --goal-id <goal-id>
+
+# 恢复；不会绕过其他运行门禁
+loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
+```
+
+执行时，LoopX 会写入权威 source registry、同步全局 registry，并验证两端 readback；任一端未验证成功时不会宣称操作完成。
+
 ---
 
 ## 🎯 4. Goal 深度工作区

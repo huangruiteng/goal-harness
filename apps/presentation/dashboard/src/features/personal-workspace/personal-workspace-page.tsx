@@ -98,9 +98,11 @@ function ManagerHomeBoard({
 }) {
   const active = Object.fromEntries(activeHomeLanes.map((lane) => [lane.key, [] as WorkspaceGoal[]])) as Record<(typeof activeHomeLanes)[number]["key"], WorkspaceGoal[]>;
   const history: WorkspaceGoal[] = [];
+  const stopped: WorkspaceGoal[] = [];
   goals.forEach((goal) => {
     const lane = workspaceHomeLaneForGoal(goal);
     if (lane === "history") history.push(goal);
+    else if (lane === "stopped") stopped.push(goal);
     else active[lane].push(goal);
   });
   const goalCard = (goal: WorkspaceGoal) => (
@@ -144,6 +146,12 @@ function ManagerHomeBoard({
         <summary><span>历史</span><b>{history.length}</b><small>已完成的 Goal</small></summary>
         <div>{history.length ? history.map(goalCard) : <span className="personal-home-empty">还没有已完成的 Goal</span>}</div>
       </details>
+      {stopped.length ? (
+        <details className="personal-home-history is-stopped">
+          <summary><span>已停止</span><b>{stopped.length}</b><small>保留状态，可随时恢复</small></summary>
+          <div>{stopped.map(goalCard)}</div>
+        </details>
+      ) : null}
     </section>
   );
 }
@@ -376,6 +384,8 @@ function proposalFields(parameters: Record<string, unknown>) {
     completion_criteria: "完成标准",
     execution_boundary: "执行边界",
     goal_id: "Goal ID",
+    operation: "操作",
+    reason: "原因",
     initial_todos: "首个任务",
     objective: "目标",
     permission: "权限",
@@ -404,22 +414,35 @@ function proposalFields(parameters: Record<string, unknown>) {
 }
 
 function workspaceProposal(proposal: TypedActionProposal): WorkspaceActionPreview {
+  const lifecycleOperation = proposal.action_kind === "goal.lifecycle"
+    && (proposal.normalized_parameters.operation === "stop" || proposal.normalized_parameters.operation === "resume")
+    ? proposal.normalized_parameters.operation
+    : undefined;
   return {
     actionKind: proposal.action_kind,
     fields: proposalFields(proposal.normalized_parameters),
     goalId: typeof proposal.normalized_parameters.goal_id === "string" ? proposal.normalized_parameters.goal_id : undefined,
     impact: proposal.action_kind === "goal.create"
       ? "确认后会创建 Goal 和首个 Todo，并让选定 Agent 开始首轮推进。"
+      : proposal.action_kind === "goal.lifecycle" && lifecycleOperation === "stop"
+        ? "确认后会停止自动推进，并将 Goal 移入折叠的「已停止」列表；历史、Todo 和证据都会保留，可随时恢复。"
+        : proposal.action_kind === "goal.lifecycle"
+          ? "确认后会恢复 Goal 的自动调度资格并移回 Active Goals；实际执行仍受 quota、Gate 和 Todo 约束。"
       : proposal.permission_classification === "protected"
       ? "该操作需要通过受保护的 LoopX 写入服务完成。"
       : "确认后会调用规范 LoopX 服务写入状态。",
     previewId: proposal.proposal_id,
+    lifecycleOperation,
     gate: proposal.gate ? {
       kind: String(proposal.gate.kind ?? "protected_action"),
       nextAction: typeof proposal.gate.next_action === "string" ? proposal.gate.next_action : undefined,
       summary: String(proposal.gate.summary ?? "需要宿主确认"),
     } : undefined,
     primaryLabel: proposal.action_kind === "goal.create" ? "创建 Goal 并开始首轮"
+      : proposal.action_kind === "goal.lifecycle" && lifecycleOperation === "stop"
+        ? "停止 Goal"
+        : proposal.action_kind === "goal.lifecycle"
+          ? "恢复 Goal"
       : proposal.action_kind === "todo.create" && proposal.normalized_parameters.start_execution === true
         ? "创建任务并开始执行"
         : "确认并应用",
@@ -902,6 +925,20 @@ export function PersonalWorkspacePage({
     window.requestAnimationFrame(() => composerRef.current?.focus());
   }
 
+  async function requestGoalLifecycle(goal: WorkspaceGoal, operation: "stop" | "resume") {
+    await createPreview({
+      actionKind: "goal.lifecycle",
+      context: { kind: "goal_directory", goal_id: goal.goalId },
+      idempotencyKey: `workspace-goal-${operation}-${goal.goalId}-${Date.now().toString(36)}`,
+      normalizedParameters: {
+        goal_id: goal.goalId,
+        operation,
+        reason: operation === "stop" ? "Stopped from the owner workspace" : "Resumed from the owner workspace",
+      },
+      summary: operation === "stop" ? `停止 Goal：${goal.title}` : `恢复 Goal：${goal.title}`,
+    });
+  }
+
   function prepareScheduleDraft(kind: "heartbeat" | "monitor", goalId: string | null) {
     if (!goalId) {
       setComposer(kind === "heartbeat"
@@ -986,6 +1023,10 @@ export function PersonalWorkspacePage({
           setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
           setSelection({ item: applied, kind: "proposal" });
           setActionFeedback(`已完成：${proposal.title}`);
+          if (proposal.actionKind === "goal.lifecycle") {
+            await callbacks.onRefresh?.();
+            if (proposal.lifecycleOperation === "stop") selectGoal(null);
+          }
           return;
         }
         const result = await applyTypedAction(proposal.previewId);
@@ -995,7 +1036,12 @@ export function PersonalWorkspacePage({
         setActionFeedback(`已完成：${applied.title}`);
         // Keep the success receipt visible. Refresh and navigation happen when
         // the user chooses the explicit "进入 Goal" action in the drawer.
-        if (applied.actionKind === "todo.create") callbacks.onRefresh?.();
+        if (applied.actionKind === "todo.create" || applied.actionKind === "goal.lifecycle") {
+          await callbacks.onRefresh?.();
+        }
+        if (applied.actionKind === "goal.lifecycle" && applied.lifecycleOperation === "stop") {
+          selectGoal(null);
+        }
       } catch (error) {
         if (error instanceof ChatApiError && error.payload.error_code === "protected_action") {
           const rawGate = error.payload.gate;
@@ -1572,6 +1618,7 @@ export function PersonalWorkspacePage({
           attentionCount={managerNeedsYouCount}
           goals={workspaceGoals}
           onRequestGoalCreate={requestGoalCreate}
+          onRequestGoalLifecycle={(goal, operation) => void requestGoalLifecycle(goal, operation)}
           onOpenNotifications={() => setSelection({ kind: "notifications" })}
           onSelectGoal={selectGoal}
           ownerLabel={ownerLabel}

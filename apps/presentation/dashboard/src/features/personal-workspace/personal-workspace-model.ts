@@ -4,14 +4,16 @@ export type WorkspaceGoalState =
   | "等待条件"
   | "推进中"
   | "安静运行"
-  | "已完成";
+  | "已完成"
+  | "已停止";
 
 export type WorkspaceHomeLane =
   | "needs_you"
   | "running"
   | "observing"
   | "scheduled"
-  | "history";
+  | "history"
+  | "stopped";
 
 export type WorkspaceAgentTodo = {
   claimedBy?: string | null;
@@ -49,6 +51,7 @@ export type WorkspaceRepositoryContext = {
 };
 
 export type WorkspaceGoal = {
+  activationState: "active" | "stopped";
   agentId: string;
   agentLabel?: string;
   agentSentence: string;
@@ -151,6 +154,7 @@ export type WorkspaceActionPreview = {
   actionKind:
     | "goal.create"
     | "goal.update"
+    | "goal.lifecycle"
     | "todo.create"
     | "todo.update"
     | "agent.bind"
@@ -162,6 +166,7 @@ export type WorkspaceActionPreview = {
   agentLabel?: string;
   fields: Array<{ label: string; value: string }>;
   goalId?: string;
+  lifecycleOperation?: "stop" | "resume";
   impact: string;
   gate?: {
     kind: string;
@@ -353,6 +358,7 @@ export function workspaceSessionStatusLabel(status?: string): string {
  * The home keeps four active lanes visible and collapses terminal work into history.
  */
 export function workspaceHomeLaneForGoal(goal: WorkspaceGoal): WorkspaceHomeLane {
+  if (goal.activationState === "stopped" || goal.state === "已停止") return "stopped";
   if (goal.state === "已完成") return "history";
   if (goal.needsYou || goal.state === "等你") return "needs_you";
   if (goal.state === "推进中" || goal.state === "需修复") return "running";
