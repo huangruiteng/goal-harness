@@ -562,18 +562,22 @@ def answer_lark_goal_topic(
     """Run one addressed Topic message through the durable Goal Chat session."""
 
     goal_id = str(route.get("goal_id") or "")
+    channel_id = "lark." + _opaque_digest(
+        route.get("app_ref"),
+        route.get("target_ref"),
+        route.get("topic_root_message_id"),
+    )
     session, _resumed = runtime_controller.open_session(
         goal_id=goal_id,
         agent_id="codex",
         work_dir=Path(work_dir).expanduser().resolve(),
         objective=str(objective or goal_id),
         mode="resume_latest",
-        channel_id=f"goal.{goal_id}",
+        channel_id=channel_id,
         agent_goal_id=goal_id,
     )
     message = (
-        "这是来自已绑定 Lark Goal Topic 的用户消息。你就是这个 Goal 的 working Agent，"
-        "请在当前长程会话中直接回答；"
+        "这是来自已绑定 Lark Goal Topic 的用户消息。请直接回答当前问题；"
         "任何 Goal、Todo 或其他持久状态修改只生成预览，等待用户在 LoopX 明确确认后应用。\n\n"
         f"用户消息：{str(text or '').strip()}"
     )

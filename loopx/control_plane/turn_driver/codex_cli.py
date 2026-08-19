@@ -127,35 +127,6 @@ def codex_cli_session_binding(
     }
 
 
-def bind_codex_cli_session(
-    runtime_root: Path,
-    turn_envelope: Mapping[str, Any],
-    *,
-    session_id: str,
-) -> dict[str, str]:
-    """Bind one existing opaque Codex thread to the current governed Todo.
-
-    The binding is owner-local transport state.  It does not grant Goal or Todo
-    authority: callers must build the binding from a fresh TurnEnvelope, and the
-    Turn driver rechecks the full goal/agent/todo lineage before host execution.
-    """
-
-    request = {"turn_envelope": dict(turn_envelope)}
-    lineage = _lineage(request)
-    normalized_session_id = _valid_session_id(session_id)
-    if not normalized_session_id:
-        raise ValueError("Codex CLI resume session id is invalid")
-    _store_codex_cli_session(
-        runtime_root,
-        lineage=lineage,
-        session_id=normalized_session_id,
-    )
-    return {
-        "schema_version": "loopx_turn_session_binding_v0",
-        **lineage,
-    }
-
-
 def _store_codex_cli_session(
     runtime_root: Path,
     *,

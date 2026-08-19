@@ -14,11 +14,6 @@ from .chat import apply_todo_review_preview, build_todo_review_preview
 from .chat_action_store import ActionConflictError, ChatActionStore
 from .chat_monitor_actions import ChatMonitorActionMixin
 from .chat_store import ChatSessionStore
-from .chat_turn_admission import (
-    governed_execution_gate,
-    governed_session_lineage,
-    submit_governed_goal_turn,
-)
 from .configure_goal import configure_goal
 from .control_plane.runtime.time import now_utc, parse_timestamp, utc_isoformat
 from .control_plane.scheduler.monitor_todo import monitor_next_due_at
@@ -970,23 +965,28 @@ class ChatActionService(ChatMonitorActionMixin):
                 )[:600],
                 "quota_state": str(guard.get("state") or "waiting"),
             }
-        if agent_id and self.runtime_controller is not None and first_turn_gate is None and todo_ids:
-            session, first_turn, created = submit_governed_goal_turn(
-                self.runtime_controller,
+        if agent_id and self.runtime_controller is not None and first_turn_gate is None:
+            session, _resumed = self.runtime_controller.open_session(
                 goal_id=goal_id,
-                endpoint_id=agent_id,
-                governed_agent_id=agent_id,
-                todo_id=todo_ids[0],
+                agent_id=agent_id,
                 work_dir=project,
                 objective=objective,
+                mode="resume_latest",
+                channel_id=f"goal.{goal_id}",
+                agent_goal_id=goal_id,
+            )
+            session_id = _opaque(session.get("session_id"), field="session_id")
+            first_turn, created = self.runtime_controller.submit_turn(
+                session_id=session_id,
                 client_turn_id=f"goal-start-{proposal_id}",
                 message=(
                     f"开始推进 Goal {goal_id}。先核对目标边界和现有 Todo，"
                     f"首个 Todo：{'；'.join(str(item) for item in (parameters.get('initial_todos') or [])[:3]) or '按目标边界建立首个可验证进展'}。"
                     "然后直接推进并报告可验证结果；遇到权限边界时停止并提出明确 Gate。"
                 ),
+                work_dir=project,
+                objective=objective,
             )
-            session_id = _opaque(session.get("session_id"), field="session_id")
             turn_result = {
                 "turn_id": _opaque(first_turn.get("turn_id"), field="turn_id"),
                 "status": str(first_turn.get("status") or "queued"),
@@ -1000,12 +1000,6 @@ class ChatActionService(ChatMonitorActionMixin):
                     "session_id": session_id,
                     "turn_id": turn_result["turn_id"],
                 },
-            )
-        elif agent_id and first_turn_gate is None and not todo_ids:
-            first_turn_gate = governed_execution_gate("todo_required")
-            self.store.save_checkpoint(
-                proposal_id, step="first_turn_gated",
-                receipt={"outcome": "first_turn_gated", "gate": first_turn_gate},
             )
         elif first_turn_gate is not None:
             self.store.save_checkpoint(
@@ -1483,18 +1477,23 @@ class ChatActionService(ChatMonitorActionMixin):
                     if not project.is_dir():
                         raise ValueError("the Goal project root is unavailable")
                     self._agent_eligibility(execution_agent_id, project=project)
-                    session, turn, created = submit_governed_goal_turn(
-                        self.runtime_controller,
+                    session, _resumed = self.runtime_controller.open_session(
                         goal_id=str(parameters["goal_id"]),
-                        endpoint_id=execution_agent_id,
-                        governed_agent_id=str(parameters["agent_id"]),
-                        todo_id=todo_id,
+                        agent_id=execution_agent_id,
                         work_dir=project,
                         objective=str(parameters["text"]),
-                        client_turn_id=f"task-start-{proposal_id}",
-                        message=str(parameters["text"]),
+                        mode="resume_latest",
+                        channel_id=f"task.{todo_id}",
+                        agent_goal_id=str(parameters["goal_id"]),
                     )
                     session_id = _opaque(session.get("session_id"), field="session_id")
+                    turn, created = self.runtime_controller.submit_turn(
+                        session_id=session_id,
+                        client_turn_id=f"task-start-{proposal_id}",
+                        message=str(parameters["text"]),
+                        work_dir=project,
+                        objective=str(parameters["text"]),
+                    )
                     turn_id = _opaque(turn.get("turn_id"), field="turn_id")
                     self.store.save_checkpoint(
                         proposal_id,
@@ -1504,7 +1503,7 @@ class ChatActionService(ChatMonitorActionMixin):
                 receipt["resource_ids"].update(
                     {"session_id": session_id, "turn_id": turn_id}
                 )
-                receipt["outcome"] = "governed_task_execution_started"
+                receipt["outcome"] = "task_execution_started"
                 turn_result = {
                     "session_id": session_id,
                     "turn_id": turn_id,
@@ -1535,18 +1534,12 @@ class ChatActionService(ChatMonitorActionMixin):
             if not project.is_dir():
                 raise ValueError("the Goal project root is unavailable")
             client_turn_id = str(parameters.get("client_turn_id") or f"action-{proposal_id}")
-            lineage = governed_session_lineage(self.store, session_id=str(parameters["session_id"]), goal_id=str(parameters["goal_id"]))
-            if lineage is None:
-                raise ProtectedActionGate(
-                    "run.correct", gate=governed_execution_gate("governed_turn_required")
-                )
-            turn, created = self.runtime_controller.submit_governed_turn(
+            turn, created = self.runtime_controller.submit_turn(
                 session_id=str(parameters["session_id"]),
                 client_turn_id=client_turn_id,
                 message=str(parameters["message"]),
-                todo_id=lineage["todo_id"],
-                governed_agent_id=lineage["agent_id"],
                 work_dir=project,
+                objective=str(goal.get("domain") or parameters["goal_id"]),
             )
             turn_id = _opaque(turn.get("turn_id"), field="turn_id")
             receipt = {
@@ -1583,5 +1576,5 @@ class ChatActionService(ChatMonitorActionMixin):
             "session_id": str(resource_ids["session_id"]) if resource_ids.get("session_id") else None,
             "turn_id": str(resource_ids["turn_id"]),
             "status": "accepted",
-            "created": receipt.get("outcome") in {"turn_created", "task_execution_started", "governed_task_execution_started"},
+            "created": receipt.get("outcome") in {"turn_created", "task_execution_started"},
         }

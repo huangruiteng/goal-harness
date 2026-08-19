@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from ..contract import check_contract, render_contract_markdown
-from ..control_plane.goals.collaboration_status import build_collaboration_status
 from ..control_plane.runtime.status_projection_cache import (
     load_status_projection_cache,
     resolve_status_projection_cache_runtime_root,
@@ -24,17 +23,11 @@ from ..control_plane.todos.todo_index import (
 )
 from ..diagnose import collect_diagnosis, render_diagnosis_markdown
 from ..handoff_budget import build_handoff_interface_budget
-from ..presentation.renderers.collaboration_status import (
-    render_collaboration_status_markdown,
-)
 from ..presentation.renderers.status_markdown import render_status_markdown
 from ..quota import build_quota_should_run
 from ..review_packet import build_review_packet, render_review_packet_markdown
 from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
-from .status_registration import (  # noqa: F401 - re-exported by cli_commands.
-    default_public_scan_root,
-    register_status_commands,
-)
+from .status_registration import default_public_scan_root, register_status_commands
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -177,18 +170,6 @@ def handle_status_command(
     output_format: FormatSelector,
     print_payload: PrintPayload,
 ) -> int:
-    if args.collaboration and not str(args.goal_id or "").strip():
-        payload = build_collaboration_status(
-            {"ok": False, "attention_queue": {"items": []}},
-            goal_id="",
-            max_age_seconds=args.collaboration_max_age_seconds,
-        )
-        print_payload(
-            payload,
-            output_format(args),
-            render_collaboration_status_markdown,
-        )
-        return 1
     try:
         scan_roots = _scan_roots(args)
         display_limit = max(0, args.limit)
@@ -251,57 +232,31 @@ def handle_status_command(
                 agent_id=args.agent_id,
             )
             compact_agent_lane_todo_index_for_status_display(payload)
-        if args.collaboration:
-            cache = payload.get("projection_cache")
-            cache = cache if isinstance(cache, dict) else {}
-            snapshot_generated_at = (
-                str(cache.get("generated_at"))
-                if cache.get("hit") is True and cache.get("generated_at")
-                else None
-            )
-            payload = build_collaboration_status(
-                payload,
-                goal_id=str(args.goal_id),
-                snapshot_generated_at=snapshot_generated_at,
-                max_age_seconds=args.collaboration_max_age_seconds,
-            )
     except Exception as exc:
-        if args.collaboration:
-            payload = build_collaboration_status(
-                {"ok": False, "attention_queue": {"items": []}},
-                goal_id=str(args.goal_id or ""),
-                max_age_seconds=args.collaboration_max_age_seconds,
-            )
-        else:
-            payload = {
-                "ok": False,
-                "registry": str(registry_path),
-                "runtime_root": runtime_root_arg,
-                "error": str(exc),
-                "attention_queue": {
-                    "available": False,
-                    "item_count": 1,
-                    "needs_user_or_controller": 0,
-                    "needs_codex": 1,
-                    "watching_external_evidence": 0,
-                    "items": [
-                        {
-                            "goal_id": "loopx-status",
-                            "status": "status_collection_failed",
-                            "waiting_on": "codex",
-                            "severity": "high",
-                            "recommended_action": str(exc),
-                            "source": "status",
-                        }
-                    ],
-                },
-            }
-    renderer = (
-        render_collaboration_status_markdown
-        if args.collaboration
-        else render_status_markdown
-    )
-    print_payload(payload, output_format(args), renderer)
+        payload = {
+            "ok": False,
+            "registry": str(registry_path),
+            "runtime_root": runtime_root_arg,
+            "error": str(exc),
+            "attention_queue": {
+                "available": False,
+                "item_count": 1,
+                "needs_user_or_controller": 0,
+                "needs_codex": 1,
+                "watching_external_evidence": 0,
+                "items": [
+                    {
+                        "goal_id": "loopx-status",
+                        "status": "status_collection_failed",
+                        "waiting_on": "codex",
+                        "severity": "high",
+                        "recommended_action": str(exc),
+                        "source": "status",
+                    }
+                ],
+            },
+        }
+    print_payload(payload, output_format(args), render_status_markdown)
     return 0 if payload.get("ok") else 1
 
 

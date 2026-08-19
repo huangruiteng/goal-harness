@@ -238,48 +238,6 @@ loopx serve-status --port 8765 --enable-reward-write-api
 The write flag is loopback-only. Without it, the dashboard can validate a
 reward draft but cannot append feedback.
 
-## Working-Agent Goal Chat
-
-`loopx chat` keeps one canonical Codex conversation per Goal and resumes that
-same upstream thread across ordinary replies and governed execution:
-
-```bash
-loopx chat \
-  --goal-id <goal-id> \
-  --global-registry \
-  --available-capability network
-```
-
-Ordinary Goal and bound Goal Topic messages remain read-only Chat turns. They
-do not spend a governed Turn quota slot. A user-confirmed typed action that
-starts or corrects a Todo enters `loopx turn run-once` with a fresh exact-Todo
-guard, releases the app-server transport, resumes the same Codex thread through
-the Codex CLI, validates workspace progress independently, writes the bounded
-result back, and settles quota once. The next read-only message resumes that
-same thread again.
-
-`--available-capability` is repeatable. It declares what the current host can
-provide to the fresh Turn guard; it does not grant credentials or bypass Todo,
-repository, validation, writeback, or quota policy. Governed execution fails
-closed unless the Goal session is a resumable Codex session. Other Agent
-endpoints remain available for read-only Chat until they implement an
-equivalent governed resume adapter.
-
-For an authorized peer channel or bot response, render a bounded, read-only
-Goal snapshot directly from LoopX state:
-
-```bash
-loopx status \
-  --goal-id <goal-id> \
-  --collaboration \
-  --collaboration-max-age-seconds 300
-```
-
-The `loopx_collaboration_status_v0` projection preserves exact open Todo counts
-and bounded owner/repository context while omitting credential-like material,
-provider payloads, and local paths. It fails closed on stale snapshots,
-conflicting counts, or a writable truth contract.
-
 ## Load Static Status
 
 Use a local static export:

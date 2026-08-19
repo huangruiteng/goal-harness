@@ -32,19 +32,6 @@ class ChatRuntimeAdapter(Protocol):
     def healthcheck(self) -> bool: ...
 
 
-class GovernedTurnRunner(Protocol):
-    def __call__(
-        self,
-        *,
-        goal_id: str,
-        agent_id: str,
-        todo_id: str,
-        upstream_thread_id: str,
-        work_dir: Path,
-        turn_instance_id: str,
-    ) -> dict[str, Any]: ...
-
-
 @dataclass
 class CodexAppServerAdapter:
     session: CodexChatAgentSession
@@ -213,7 +200,6 @@ class ChatRuntimeController:
         idle_timeout_sec: float = 180.0,
         hard_timeout_sec: float = 900.0,
         endpoint_registry: AgentEndpointRegistry | None = None,
-        governed_turn_runner: GovernedTurnRunner | None = None,
     ) -> None:
         self.store = store
         self.codex_bin = codex_bin
@@ -222,7 +208,6 @@ class ChatRuntimeController:
         self.idle_timeout_sec = idle_timeout_sec
         self.hard_timeout_sec = hard_timeout_sec
         self.endpoint_registry = endpoint_registry or AgentEndpointRegistry(store.root)
-        self.governed_turn_runner = governed_turn_runner
         self.adapters: dict[str, ChatRuntimeAdapter] = {}
         self.cancelled_turns: set[tuple[str, str]] = set()
         self.turn_event_buffers: dict[tuple[str, str], _TurnEventBuffer] = {}
@@ -539,168 +524,6 @@ class ChatRuntimeController:
             self.turn_done_events[(session_id, str(turn["turn_id"]))] = threading.Event()
         worker.start()
         return turn, True
-
-    def submit_governed_turn(
-        self,
-        *,
-        session_id: str,
-        client_turn_id: str,
-        message: str,
-        todo_id: str,
-        governed_agent_id: str,
-        work_dir: Path,
-    ) -> tuple[dict[str, Any], bool]:
-        """Queue one material Turn against the canonical long-lived Chat session."""
-
-        if self.governed_turn_runner is None:
-            raise ValueError("governed LoopX Turn admission is unavailable")
-        if not todo_id.strip() or not governed_agent_id.strip():
-            raise ValueError("governed Chat execution requires exact Todo and Agent identity")
-        session = self.store.load_session(session_id)
-        if session is None:
-            raise KeyError("chat session was not found")
-        goal_id = str(session.get("goal_id") or "")
-        if str(session.get("channel_id") or "") != f"goal.{goal_id}":
-            raise ValueError("material Chat execution requires the canonical Goal session")
-        if session.get("agent_id") != "codex" or session.get("upstream_mode") != "chat":
-            raise ValueError(
-                "governed Chat execution requires a resumable Codex Goal session"
-            )
-        turn, created = self.store.create_turn(
-            session_id,
-            client_turn_id=client_turn_id,
-            message=message,
-        )
-        if not created:
-            return turn, False
-        worker = threading.Thread(
-            target=self._run_governed_turn,
-            kwargs={
-                "session_id": session_id,
-                "turn_id": str(turn["turn_id"]),
-                "todo_id": todo_id,
-                "governed_agent_id": governed_agent_id,
-                "work_dir": work_dir,
-            },
-            daemon=True,
-        )
-        with self.lock:
-            self.turn_done_events[(session_id, str(turn["turn_id"]))] = threading.Event()
-        worker.start()
-        return turn, True
-
-    def _detach_adapter(self, session_id: str) -> None:
-        """Release app-server transport while retaining its resumable thread id."""
-
-        with self.lock:
-            adapter = self.adapters.pop(session_id, None)
-        if adapter is not None:
-            adapter.close_session()
-
-    def _run_governed_turn(
-        self,
-        *,
-        session_id: str,
-        turn_id: str,
-        todo_id: str,
-        governed_agent_id: str,
-        work_dir: Path,
-    ) -> None:
-        started = utc_now()
-        self.store.update_turn(session_id, turn_id, status="starting", started_at=started)
-        self.store.append_event(
-            session_id,
-            turn_id,
-            kind="governance.admission_started",
-            payload={"todo_id": todo_id},
-        )
-        try:
-            session = self.store.load_session(session_id)
-            if session is None:
-                raise KeyError("chat session was not found")
-            runner = self.governed_turn_runner
-            if runner is None:
-                raise ValueError("governed LoopX Turn admission is unavailable")
-            self._detach_adapter(session_id)
-            self.store.update_turn(session_id, turn_id, status="running")
-            payload = runner(
-                goal_id=str(session["goal_id"]),
-                agent_id=governed_agent_id,
-                todo_id=todo_id,
-                upstream_thread_id=str(session["upstream_thread_id"]),
-                work_dir=work_dir,
-                turn_instance_id=f"chat-{turn_id}",
-            )
-            summary = str(payload.get("summary") or "本次 LoopX Turn 已完成受治理执行。")
-            next_action = str(payload.get("next_action") or "").strip()
-            message = summary + (f"\n\n下一步：{next_action}" if next_action else "")
-            governance = {
-                "schema_version": "loopx_chat_turn_governance_v0",
-                "mode": "governed",
-                "todo_id": todo_id,
-                "agent_id": governed_agent_id,
-                "turn_key": payload.get("resume_turn_key"),
-                "journal_ref": payload.get("journal_ref"),
-                "status": payload.get("status"),
-                "result_kind": payload.get("result_kind"),
-                "validation": payload.get("validation"),
-                "effects": payload.get("effects"),
-                "quota_slot_spend_count": payload.get("quota_slot_spend_count"),
-            }
-            response = {
-                "schema_version": "loopx_chat_agent_response_v1",
-                "message": message,
-                "proposals": [],
-                "gate": None,
-                "governance": governance,
-            }
-            self.store.append_message(
-                session_id,
-                role="agent",
-                text=message,
-                turn_id=turn_id,
-            )
-            completed = utc_now()
-            self.store.update_turn(
-                session_id,
-                turn_id,
-                status="completed",
-                response=response,
-                completed_at=completed,
-                last_activity_at=completed,
-            )
-            self.store.append_event(
-                session_id,
-                turn_id,
-                kind="governance.settled",
-                payload={"governance": governance},
-            )
-            self.store.append_event(
-                session_id,
-                turn_id,
-                kind="turn.completed",
-                payload={"response": response},
-            )
-            self.store.update_session(
-                session_id,
-                status="ready",
-                active_turn_id=None,
-                last_activity_at=completed,
-                last_error_code=None,
-            )
-        except Exception as exc:  # noqa: BLE001 - governed runner is a typed boundary.
-            self._fail_turn(
-                session_id,
-                turn_id,
-                "governed_turn_failed",
-                str(exc),
-                status="failed",
-            )
-        finally:
-            with self.lock:
-                done_event = self.turn_done_events.pop((session_id, turn_id), None)
-            if done_event is not None:
-                done_event.set()
 
     def _run_turn(
         self,

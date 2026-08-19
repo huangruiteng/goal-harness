@@ -10,7 +10,6 @@ import pytest
 
 from loopx.control_plane.turn_driver.codex_cli import (
     CODEX_CLI_SESSION_SCHEMA_VERSION,
-    bind_codex_cli_session,
     codex_cli_result_schema,
     codex_cli_session_binding,
     load_codex_cli_session,
@@ -125,31 +124,6 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
         "vision_unchanged_reason": 240,
         "summary": 400,
     }
-
-
-def test_existing_chat_thread_can_be_bound_to_fresh_todo_lineage(
-    tmp_path: Path,
-) -> None:
-    request = _request()
-    envelope = request["turn_envelope"]
-    assert isinstance(envelope, dict)
-
-    binding = bind_codex_cli_session(
-        tmp_path,
-        envelope,
-        session_id="thread-long-lived",
-    )
-
-    assert binding == {
-        "schema_version": "loopx_turn_session_binding_v0",
-        "goal_id": "fixture-goal",
-        "agent_id": "codex-fixture",
-        "todo_id": "todo_fixture0001",
-    }
-    stored = codex_cli_session_binding(tmp_path, envelope)
-    assert stored == binding
-    session_file = next(tmp_path.glob("goals/*/turn-sessions/*.json"))
-    assert stat.S_IMODE(session_file.stat().st_mode) == 0o600
 
 
 def test_codex_cli_host_starts_then_resumes_opaque_session(
