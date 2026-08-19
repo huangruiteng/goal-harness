@@ -642,6 +642,128 @@ def assert_http_action_api(root: Path) -> None:
         assert "cadence=2h" in lifecycle_state, lifecycle_state
         assert "status=open" in lifecycle_state, lifecycle_state
 
+        # Exclusive typed stop-condition transitions:
+        # 1. prose -> ISO timestamp
+        code, edit_ts_preview = request_json(
+            f"{base_url}/api/actions/preview",
+            method="POST",
+            body={
+                "action_kind": "monitor.update",
+                "summary": "Switch stop condition to timestamp",
+                "normalized_parameters": {
+                    "goal_id": "goal-one",
+                    "todo_id": monitor_todo_id,
+                    "agent_id": "codex",
+                    "operation": "edit",
+                    "stop_condition": "2026-08-25T12:00:00Z",
+                },
+                "context": {"kind": "goal", "goal_id": "goal-one"},
+                "idempotency_key": "http-monitor-edit-ts",
+            },
+        )
+        assert code == 201, edit_ts_preview
+        code, edit_ts_applied = request_json(
+            f"{base_url}/api/actions/{edit_ts_preview['proposal']['proposal_id']}/apply",
+            method="POST",
+            body={},
+        )
+        assert code == 200, edit_ts_applied
+        state_after_ts = state_path.read_text(encoding="utf-8")
+        assert "expires_at=2026-08-25T12:00:00Z" in state_after_ts, state_after_ts
+        assert "resume_when=" not in state_after_ts, state_after_ts
+        assert "watch_only=" not in state_after_ts, state_after_ts
+
+        # 2. ISO timestamp -> watch_only
+        code, edit_watch_preview = request_json(
+            f"{base_url}/api/actions/preview",
+            method="POST",
+            body={
+                "action_kind": "monitor.update",
+                "summary": "Switch stop condition to watch only",
+                "normalized_parameters": {
+                    "goal_id": "goal-one",
+                    "todo_id": monitor_todo_id,
+                    "agent_id": "codex",
+                    "operation": "edit",
+                    "stop_condition": "watch_only",
+                },
+                "context": {"kind": "goal", "goal_id": "goal-one"},
+                "idempotency_key": "http-monitor-edit-watch",
+            },
+        )
+        assert code == 201, edit_watch_preview
+        code, edit_watch_applied = request_json(
+            f"{base_url}/api/actions/{edit_watch_preview['proposal']['proposal_id']}/apply",
+            method="POST",
+            body={},
+        )
+        assert code == 200, edit_watch_applied
+        state_after_watch = state_path.read_text(encoding="utf-8")
+        assert "watch_only=true" in state_after_watch, state_after_watch
+        assert "expires_at=" not in state_after_watch, state_after_watch
+        assert "resume_when=" not in state_after_watch, state_after_watch
+
+        # 3. watch_only -> prose (pr_merged:example/loopx#3560)
+        code, edit_prose_preview = request_json(
+            f"{base_url}/api/actions/preview",
+            method="POST",
+            body={
+                "action_kind": "monitor.update",
+                "summary": "Switch stop condition to prose pr_merged",
+                "normalized_parameters": {
+                    "goal_id": "goal-one",
+                    "todo_id": monitor_todo_id,
+                    "agent_id": "codex",
+                    "operation": "edit",
+                    "stop_condition": "pr_merged:example/loopx#3560",
+                },
+                "context": {"kind": "goal", "goal_id": "goal-one"},
+                "idempotency_key": "http-monitor-edit-prose",
+            },
+        )
+        assert code == 201, edit_prose_preview
+        code, edit_prose_applied = request_json(
+            f"{base_url}/api/actions/{edit_prose_preview['proposal']['proposal_id']}/apply",
+            method="POST",
+            body={},
+        )
+        assert code == 200, edit_prose_applied
+        state_after_prose = state_path.read_text(encoding="utf-8")
+        assert "resume_when=pr_merged:example%2Floopx%233560" in state_after_prose, state_after_prose
+        assert "expires_at=" not in state_after_prose, state_after_prose
+        assert "watch_only=" not in state_after_prose, state_after_prose
+
+        # 4. Cadence-only edit preserves existing resume_when without adding competing fields
+        code, edit_cadence_preview = request_json(
+            f"{base_url}/api/actions/preview",
+            method="POST",
+            body={
+                "action_kind": "monitor.update",
+                "summary": "Edit cadence only",
+                "normalized_parameters": {
+                    "goal_id": "goal-one",
+                    "todo_id": monitor_todo_id,
+                    "agent_id": "codex",
+                    "operation": "edit",
+                    "cadence": "45m",
+                },
+                "context": {"kind": "goal", "goal_id": "goal-one"},
+                "idempotency_key": "http-monitor-edit-cadence",
+            },
+        )
+        assert code == 201, edit_cadence_preview
+        code, edit_cadence_applied = request_json(
+            f"{base_url}/api/actions/{edit_cadence_preview['proposal']['proposal_id']}/apply",
+            method="POST",
+            body={},
+        )
+        assert code == 200, edit_cadence_applied
+        state_after_cadence = state_path.read_text(encoding="utf-8")
+        assert "resume_when=pr_merged:example%2Floopx%233560" in state_after_cadence, state_after_cadence
+        assert "cadence=45m" in state_after_cadence, state_after_cadence
+        assert "expires_at=" not in state_after_cadence, state_after_cadence
+        assert "watch_only=" not in state_after_cadence, state_after_cadence
+
         code, run_preview = request_json(
             f"{base_url}/api/actions/preview",
             method="POST",

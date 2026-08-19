@@ -15,7 +15,7 @@ from .chat_action_store import ActionConflictError, ChatActionStore
 from .chat_monitor_actions import ChatMonitorActionMixin
 from .chat_store import ChatSessionStore
 from .configure_goal import configure_goal
-from .control_plane.runtime.time import now_utc
+from .control_plane.runtime.time import now_utc, parse_timestamp, utc_isoformat
 from .control_plane.scheduler.monitor_todo import monitor_next_due_at
 from .history import load_registry
 from .host_loop_activation import build_host_loop_activation_packet
@@ -115,6 +115,12 @@ def _monitor_metadata(parameters: Mapping[str, Any]) -> dict[str, str]:
         )
         if next_due_at:
             metadata["next_due_at"] = next_due_at
+    stop_condition = str(parameters.get("stop_condition") or "").strip()
+    if stop_condition:
+        if parse_timestamp(stop_condition) is not None:
+            metadata["expires_at"] = stop_condition
+        elif stop_condition.lower() in {"watch_only", "watch-only", "watch", "continuous", "never"}:
+            metadata["watch_only"] = "true"
     return metadata
 
 
@@ -579,10 +585,12 @@ class ChatActionService(ChatMonitorActionMixin):
                 "target_key": _opaque(values.get("target_key"), field="target_key"),
                 "cadence": _normalize_cadence(values.get("cadence")),
                 "timezone": _text(values.get("timezone"), field="timezone", limit=80),
-                "stop_condition": _text(
-                    values.get("stop_condition"), field="stop_condition", limit=160
-                ).lower(),
             }
+            stop_cond_raw = values.get("stop_condition")
+            if stop_cond_raw:
+                raw_text = _text(stop_cond_raw, field="stop_condition", limit=160)
+                parsed_ts = parse_timestamp(raw_text)
+                result["stop_condition"] = utc_isoformat(parsed_ts) if parsed_ts is not None else raw_text.lower()
             if values.get("notification_rule"):
                 result["notification_rule"] = _text(
                     values["notification_rule"], field="notification_rule", limit=400
@@ -626,9 +634,9 @@ class ChatActionService(ChatMonitorActionMixin):
             if values.get("cadence"):
                 result["cadence"] = _normalize_cadence(values["cadence"])
             if values.get("stop_condition"):
-                result["stop_condition"] = _text(
-                    values["stop_condition"], field="stop_condition", limit=160
-                ).lower()
+                raw_stop = _text(values["stop_condition"], field="stop_condition", limit=160)
+                parsed_ts = parse_timestamp(raw_stop)
+                result["stop_condition"] = utc_isoformat(parsed_ts) if parsed_ts is not None else raw_stop.lower()
             if values.get("session_id"):
                 result["session_id"] = _opaque(values["session_id"], field="session_id")
             if operation == "edit" and len(result) == 4:
@@ -1135,6 +1143,17 @@ class ChatActionService(ChatMonitorActionMixin):
         agent_id = str(parameters["agent_id"])
         if agent_id not in registered_agent_ids_for_goal(self._goal(goal_id)):
             raise ValueError("monitor Agent must be registered for the Goal")
+        stop_condition = str(parameters.get("stop_condition") or "").strip()
+        resume_when = None
+        if (
+            stop_condition
+            and parse_timestamp(stop_condition) is None
+            and stop_condition.lower() not in {"watch_only", "watch-only", "watch", "continuous", "never"}
+        ):
+            resume_when = stop_condition
+        metadata = _monitor_metadata(parameters)
+        if not (metadata.get("expires_at") or resume_when or metadata.get("watch_only")):
+            metadata["watch_only"] = "true"
         result = add_goal_todo(
             registry_path=self.registry_path,
             goal_id=goal_id,
@@ -1144,7 +1163,8 @@ class ChatActionService(ChatMonitorActionMixin):
             action_kind="observe",
             claimed_by=agent_id,
             agent_id=agent_id,
-            monitor_metadata=_monitor_metadata(parameters),
+            resume_when=resume_when,
+            monitor_metadata=metadata,
             dry_run=False,
         )
         todo_id = _opaque(result.get("todo_id"), field="todo_id")

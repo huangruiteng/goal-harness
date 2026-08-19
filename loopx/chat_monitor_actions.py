@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .control_plane.runtime.time import parse_timestamp
 from .todos import complete_goal_todo, update_goal_todo
 
 
@@ -145,10 +146,59 @@ class ChatMonitorActionMixin:
                 kwargs.update(status="open")
                 outcome = "monitor_resumed"
             else:
-                kwargs.update(
-                    text=_monitor_text(parameters),
-                    monitor_metadata=_monitor_metadata(parameters),
-                )
+                stop_condition_raw = parameters.get("stop_condition")
+                base_metadata = _monitor_metadata(parameters)
+                if stop_condition_raw is not None:
+                    stop_condition = str(stop_condition_raw).strip()
+                    if parse_timestamp(stop_condition) is not None:
+                        kwargs.update(
+                            text=_monitor_text(parameters),
+                            resume_when=None,
+                            clear_resume_when=True,
+                            monitor_metadata={
+                                **base_metadata,
+                                "expires_at": stop_condition,
+                                "watch_only": None,
+                            },
+                        )
+                    elif stop_condition.lower() in {"watch_only", "watch-only", "watch", "continuous", "never"}:
+                        kwargs.update(
+                            text=_monitor_text(parameters),
+                            resume_when=None,
+                            clear_resume_when=True,
+                            monitor_metadata={
+                                **base_metadata,
+                                "expires_at": None,
+                                "watch_only": "true",
+                            },
+                        )
+                    elif stop_condition:
+                        kwargs.update(
+                            text=_monitor_text(parameters),
+                            resume_when=stop_condition,
+                            clear_resume_when=False,
+                            monitor_metadata={
+                                **base_metadata,
+                                "expires_at": None,
+                                "watch_only": None,
+                            },
+                        )
+                    else:
+                        kwargs.update(
+                            text=_monitor_text(parameters),
+                            resume_when=None,
+                            clear_resume_when=True,
+                            monitor_metadata={
+                                **base_metadata,
+                                "expires_at": None,
+                                "watch_only": "true",
+                            },
+                        )
+                else:
+                    kwargs.update(
+                        text=_monitor_text(parameters),
+                        monitor_metadata=base_metadata,
+                    )
                 outcome = "monitor_updated"
             result = update_goal_todo(**kwargs)
         todo_id = _opaque(result.get("todo_id"), field="todo_id")

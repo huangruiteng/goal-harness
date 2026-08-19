@@ -179,7 +179,15 @@ def main() -> None:
 
             apps = request(base, "/api/chat/lark/apps")
             assert apps["apps"] == [
-                {"app_ref": "mew", "label": "LoopX Mew", "brand": "feishu", "active": True, "ready": True}
+                {
+                    "app_ref": "mew",
+                    "label": "LoopX Mew",
+                    "brand": "feishu",
+                    "active": True,
+                    "ready": True,
+                    "reply_ready": True,
+                    "health_error_code": None,
+                }
             ], apps
 
             setup = request(

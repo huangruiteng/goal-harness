@@ -599,15 +599,19 @@ def _normalize_mention_name(name: str) -> str:
     return " ".join(cleaned.split()).casefold()
 
 
+def _match_content_mention(content: str, name: str) -> bool:
+    if not content or not name:
+        return False
+    escaped = re.escape(name.lstrip("@"))
+    pattern = rf"(?:^|\s|[,，!！?？;；:：])@{escaped}(?:\b|[\s,，!！?？;；:：]|$)"
+    return bool(re.search(pattern, content, re.IGNORECASE))
+
+
 def is_event_addressed_to_bot(
     event: Mapping[str, Any],
     identity: Mapping[str, Any],
 ) -> bool:
     if event.get("reply_to_bot") is True and event.get("reply_context_verified") is True:
-        return True
-    if event.get("reply_to_bot") is True:
-        return True
-    if event.get("addressed_to_bot") is True:
         return True
     bot_app_id = str(identity.get("bot_app_id") or "").strip()
     bot_display_name = str(identity.get("bot_display_name") or identity.get("bot_name") or "").strip()
@@ -618,34 +622,36 @@ def is_event_addressed_to_bot(
     norm_bot_display_name = _normalize_mention_name(bot_display_name)
     norm_sender_profile = _normalize_mention_name(sender_profile)
 
-    mentions = event.get("mentions")
-    if isinstance(mentions, list) and mentions:
-        for item in mentions:
-            if not isinstance(item, Mapping):
-                continue
-            raw_id = item.get("id")
-            candidate_ids: list[str] = []
-            if isinstance(raw_id, Mapping):
-                candidate_ids.extend([str(v) for v in raw_id.values() if v])
-            elif raw_id is not None:
-                candidate_ids.append(str(raw_id))
-            for key in ("user_id", "open_id", "union_id", "app_id", "bot_id"):
-                val = item.get(key)
-                if val:
-                    candidate_ids.append(str(val))
-            if bot_app_id and any(c == bot_app_id for c in candidate_ids):
-                return True
-            norm_item_name = _normalize_mention_name(str(item.get("name") or ""))
-            if norm_bot_display_name and norm_item_name == norm_bot_display_name:
-                return True
-            if norm_sender_profile and norm_item_name == norm_sender_profile:
-                return True
+    if "mentions" in event:
+        mentions = event.get("mentions")
+        if isinstance(mentions, list):
+            for item in mentions:
+                if not isinstance(item, Mapping):
+                    continue
+                raw_id = item.get("id")
+                candidate_ids: list[str] = []
+                if isinstance(raw_id, Mapping):
+                    candidate_ids.extend([str(v) for v in raw_id.values() if v])
+                elif raw_id is not None:
+                    candidate_ids.append(str(raw_id))
+                for key in ("user_id", "open_id", "union_id", "app_id", "bot_id"):
+                    val = item.get(key)
+                    if val:
+                        candidate_ids.append(str(val))
+                if bot_app_id and any(c == bot_app_id for c in candidate_ids):
+                    return True
+                norm_item_name = _normalize_mention_name(str(item.get("name") or ""))
+                if norm_bot_display_name and norm_item_name == norm_bot_display_name:
+                    return True
+                if norm_sender_profile and norm_item_name == norm_sender_profile:
+                    return True
+            return False
 
     content = str(event.get("content") or "").strip()
     if content:
-        if bot_display_name and f"@{bot_display_name}".casefold() in content.casefold():
+        if bot_display_name and _match_content_mention(content, bot_display_name):
             return True
-        if sender_profile and f"@{sender_profile}".casefold() in content.casefold():
+        if sender_profile and _match_content_mention(content, sender_profile):
             return True
 
     return False

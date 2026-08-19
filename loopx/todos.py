@@ -1508,14 +1508,13 @@ def update_goal_todo(
             task_class=target_task_class,
         )
         effective_monitor_metadata = {
-            key: existing_block.get(key)
-            for key in (
-                "expires_at",
-                "watch_only",
-            )
-            if existing_block.get(key) is not None
+            k: v
+            for k, v in {
+                **{key: existing_block.get(key) for key in ("expires_at", "watch_only") if existing_block.get(key) is not None},
+                **normalized_monitor_metadata,
+            }.items()
+            if v is not None
         }
-        effective_monitor_metadata.update(normalized_monitor_metadata)
         if enforce_monitor_boundedness:
             todo_monitor_metadata.require_continuous_monitor_boundedness(
                 task_class=target_task_class,

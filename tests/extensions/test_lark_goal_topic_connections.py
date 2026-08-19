@@ -585,7 +585,13 @@ def test_routes_bound_topic_messages_and_replies_in_thread(tmp_path: Path) -> No
     route = route_lark_topic_event(
         target_payload=read_goal_channel_targets(target_path),
         binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
-        event={"chat_id": CHAT_ID, "root_id": "om_topic_alpha", "message_id": "om_incoming", "addressed_to_bot": True},
+        event={
+            "chat_id": CHAT_ID,
+            "root_id": "om_topic_alpha",
+            "message_id": "om_incoming",
+            "content": "@LoopX Mew hello",
+            "mentions": [{"name": "LoopX Mew", "id": "ou_mew_bot"}],
+        },
     )
     assert route == {
         "app_ref": "mew",
@@ -711,6 +717,51 @@ def test_topic_route_decision_reports_safe_reason_codes(tmp_path: Path) -> None:
                 "mentioned": True,
             },
             "self_message",
+        ),
+        (
+            {
+                "chat_id": CHAT_ID,
+                "root_id": "om_topic_alpha",
+                "message_id": "om_incoming_other_mention",
+                "content": "@Alice please review @LoopX Mew draft",
+                "mentions": [
+                    {
+                        "key": "@_user_1",
+                        "id": {"open_id": "ou_alice"},
+                        "name": "Alice",
+                    }
+                ],
+            },
+            "not_addressed",
+        ),
+        (
+            {
+                "chat_id": CHAT_ID,
+                "root_id": "om_topic_alpha",
+                "message_id": "om_incoming_prefix_collision",
+                "content": "@LoopXMewExtra bot",
+            },
+            "not_addressed",
+        ),
+        (
+            {
+                "chat_id": CHAT_ID,
+                "root_id": "om_topic_alpha",
+                "message_id": "om_bare_reply_to_bot_unverified",
+                "content": "arbitrary reply without verified context",
+                "reply_to_bot": True,
+            },
+            "not_addressed",
+        ),
+        (
+            {
+                "chat_id": CHAT_ID,
+                "root_id": "om_topic_alpha",
+                "message_id": "om_bare_addressed_to_bot",
+                "content": "arbitrary message with addressed_to_bot boolean",
+                "addressed_to_bot": True,
+            },
+            "not_addressed",
         ),
     ]
     for event, reason in cases:

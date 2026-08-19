@@ -70,7 +70,7 @@ graph TD
 
 ## 🎯 4. Goal 深度工作区
 
-在侧边栏点击具体的 Goal（例如 `LoopX friday tech radar`），进入该 Goal 的独立工作台。
+在侧边栏点击具体的 Goal（例如 `Apollo Spacecraft Telemetry Pipeline`），进入该 Goal 的独立工作台。
 
 ### 4.1 Tasks 任务看板视图
 ![Goal Tasks 4 列看板](../assets/personal-workspace/guide_goal_tasks_board.png)
