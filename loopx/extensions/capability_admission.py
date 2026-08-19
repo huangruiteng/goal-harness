@@ -18,10 +18,6 @@ from .runtime import (
     resolve_extension_runtime_binding,
 )
 
-EXTERNAL_CAPABILITY_REQUEST_SCHEMA_VERSION = (
-    "loopx_external_domain_capability_request_v0"
-)
-EXTERNAL_CAPABILITY_RESULT_SCHEMA_VERSION = "loopx_external_domain_capability_result_v0"
 EXTERNAL_CAPABILITY_INVOCATION_SCHEMA_VERSION = (
     "loopx_external_domain_capability_invocation_v0"
 )

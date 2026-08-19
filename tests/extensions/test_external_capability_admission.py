@@ -223,6 +223,21 @@ def test_manifest_rejects_profile_path_escape(tmp_path: Path) -> None:
         load_extension_manifest(manifest)
 
 
+def test_manifest_rejects_unimplemented_external_write_profile(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    profile = _profile(tmp_path / "profile.json")
+    profile.write_text(
+        profile.read_text(encoding="utf-8").replace("read_only", "external_write"),
+        encoding="utf-8",
+    )
+    manifest = _manifest(tmp_path / "extension.toml", provider=provider)
+
+    with pytest.raises(ValueError, match="must be `read_only` in the v0 profile"):
+        load_extension_manifest(manifest)
+
+
 def test_read_only_external_capability_is_bound_to_goal_not_turn(
     tmp_path: Path,
 ) -> None:
