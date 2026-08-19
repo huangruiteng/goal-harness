@@ -18,7 +18,9 @@ class RepositoryContext:
     root: Path
     common_dir: Path
     repository_id: str
-    branch: str
+    checkout_kind: str
+    checkout_id: str
+    branch: str | None
     head_oid: str
 
 
@@ -61,6 +63,11 @@ def repository_common_dir(repo: Path) -> Path:
     return (raw if raw.is_absolute() else repo / raw).resolve()
 
 
+def repository_git_dir(repo: Path) -> Path:
+    raw = Path(git_text(repo, "rev-parse", "--git-dir"))
+    return (raw if raw.is_absolute() else repo / raw).resolve()
+
+
 def _credential_free_remote(value: str) -> str | None:
     remote = str(value or "").strip()
     if not remote:
@@ -93,18 +100,87 @@ def repository_identity(repo: Path, common_dir: Path) -> str:
 def resolve_repository_context(repo_path: str | Path) -> RepositoryContext:
     root = repository_root(repo_path)
     common_dir = repository_common_dir(root)
-    branch = git_text(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
-    if not branch:
-        raise RepositoryChangeWindowError(
-            "repository change tracking requires an attached local branch"
-        )
+    branch = (
+        git_text(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
+        or None
+    )
+    checkout_kind = "branch" if branch else "detached"
+    checkout_id = branch or (
+        "worktree_"
+        + hashlib.sha256(str(repository_git_dir(root)).encode("utf-8")).hexdigest()[:20]
+    )
     head_oid = git_text(root, "rev-parse", "--verify", "HEAD^{commit}")
     return RepositoryContext(
         root=root,
         common_dir=common_dir,
         repository_id=repository_identity(root, common_dir),
+        checkout_kind=checkout_kind,
+        checkout_id=checkout_id,
         branch=branch,
         head_oid=head_oid,
+    )
+
+
+def repository_worktree_roots(context: RepositoryContext) -> tuple[Path, ...]:
+    output = git(
+        context.root,
+        "worktree",
+        "list",
+        "--porcelain",
+        "-z",
+    ).stdout
+    roots: list[Path] = []
+    for record in output.split(b"\0\0"):
+        if not record:
+            continue
+        worktree_field = next(
+            (field for field in record.split(b"\0") if field.startswith(b"worktree ")),
+            None,
+        )
+        if worktree_field is None:
+            raise RepositoryChangeWindowError(
+                "git worktree inventory omitted a worktree locator"
+            )
+        root = Path(os.fsdecode(worktree_field.removeprefix(b"worktree "))).resolve()
+        if root not in roots:
+            roots.append(root)
+    if context.root not in roots:
+        raise RepositoryChangeWindowError(
+            "current checkout is absent from the Git worktree inventory"
+        )
+    return tuple(roots)
+
+
+def repository_changed_paths(context: RepositoryContext) -> tuple[str, ...]:
+    names: set[str] = set()
+    for args in (
+        ("diff", "--cached", "--name-only", "-z", "--no-ext-diff"),
+        ("diff", "--name-only", "-z", "--no-ext-diff"),
+        ("ls-files", "--others", "--exclude-standard", "-z"),
+    ):
+        for raw_name in git(context.root, *args).stdout.split(b"\0"):
+            if not raw_name:
+                continue
+            name = os.fsdecode(raw_name)
+            path = Path(name)
+            if path.is_absolute() or ".." in path.parts:
+                raise RepositoryChangeWindowError(
+                    "Git reported a path outside the repository worktree"
+                )
+            names.add(name)
+    return tuple(sorted(names, key=os.fsencode))
+
+
+def repository_has_changes(repo_path: str | Path) -> bool:
+    root = Path(repo_path).expanduser().resolve()
+    return bool(
+        git(
+            root,
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ).stdout
     )
 
 

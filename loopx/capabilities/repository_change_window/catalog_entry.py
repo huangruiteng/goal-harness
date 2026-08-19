@@ -24,7 +24,7 @@ REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY: dict[str, Any] = {
     "entry_command": "loopx change-window status --repo-path <repo> --format json",
     "commands": [
         {
-            "command": "loopx change-window install --repo-path <repo> [policy options] [--execute] --format json",
+            "command": "loopx change-window install --repo-path <repo> [policy options] [--enforcement-level hook_only|reference_guard] [--execute] --format json",
             "purpose": "Preview or install the bundled Git-hook provider for one repository.",
             "write_boundary": "repository-local Git config and private Git common-directory provider state only",
         },
@@ -49,6 +49,11 @@ REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY: dict[str, Any] = {
             "write_boundary": "shared runtime pending-change event ledger and machine-private locator sidecar",
         },
         {
+            "command": "loopx change-window reconcile --repo-path <repo> [--all-linked-worktrees] [--execute] --format json",
+            "purpose": "Repair the current dirty checkout, or explicitly sweep all linked and detached worktrees, during a blocked window.",
+            "write_boundary": "shared runtime pending-change event ledger and machine-private locator path inventory",
+        },
+        {
             "command": "loopx change-window list [--state open|resolved|all] --format json",
             "purpose": "Read the cross-project pending-change projection after restart or handoff.",
             "write_boundary": "read-only",
@@ -66,7 +71,7 @@ REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "loopx/capabilities/repository_change_window/README.md",
         },
         {
-            "schema_version": "repository_change_window_git_hook_state_v0",
+            "schema_version": "repository_change_window_git_hook_state_v2",
             "module": "loopx.capabilities.repository_change_window.git_hook",
             "doc": "loopx/capabilities/repository_change_window/README.md",
         },
@@ -80,7 +85,7 @@ REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY: dict[str, Any] = {
         {
             "provider_id": "git-hook",
             "origin": "builtin",
-            "protocol": "repository_change_window_git_hook_state_v0",
+            "protocol": "repository_change_window_git_hook_state_v2",
             "status": "available_default_off",
         }
     ],
@@ -92,8 +97,8 @@ REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY: dict[str, Any] = {
         "The capability is disabled until an explicit executed install for a repository.",
         "The hook provider uses a trusted invocation clock; fake clocks exist only as an injected test seam.",
         "Pending-change events store references, digests, counts, and typed lifecycle data, never code bodies, diff bodies, credentials, or local absolute paths.",
-        "A private locator sidecar may retain a local worktree path for verification, but that path is never copied into the shared projection or command result.",
-        "Local Git hooks do not grant repository authority and can be bypassed by Git client mechanisms; server-side policy remains separate.",
+        "A private locator sidecar may retain a local worktree path and repository-relative changed-path inventory for recovery, but those values are never copied into the shared projection or command result.",
+        "The opt-in reference_guard blocks newly created commit ref updates that --no-verify cannot skip and guards the repository SSH command route; HTTPS, alternate Git configuration, another machine, and hosting APIs remain outside local authority.",
     ],
     "next_real_step": (
         "Install the provider in one non-production repository, trigger one blocked change with a fake-clock test, and verify the pending record from a linked worktree."
