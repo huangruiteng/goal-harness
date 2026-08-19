@@ -444,6 +444,16 @@ vision-derived duty accepts only its declared vision outcomes. Historical
 repair ACKs are not accepted by the semantic replan reducer; they remain inert
 history rather than a compatibility closure path.
 
+The compact `autonomous_replan_ack` projection preserves the aggregate
+`fresh_vision_path_outcome` in `semantic_delta` and, when that outcome is
+present in the validated `outcomes` list, adds the same run's
+`agent_vision.path_delta.outcome` as top-level `path_disposition`. Only
+`continue`, `no_change`, and `replan` are projected. The field is additive and
+observational: it does not alter settlement, and it is omitted for non-vision,
+legacy, or invalid path packets. Consumers should inspect `outcomes` rather
+than only `satisfying_outcomes`, because one accepted ACK may combine a vision
+path observation with a different obligation-satisfying outcome.
+
 ### Bad Case: ACK Hidden By Scheduler Accounting
 
 Observed failure: a monitor-only lane correctly projected
