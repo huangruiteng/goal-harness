@@ -344,6 +344,19 @@ def test_bare_sensitive_filename_does_not_match_unrelated_path_basename() -> Non
         ("cmd", "/usr/bin/env", True),
         ("cmd", "/usr/bin/printenv API_KEY", True),
         ("cmd", "cat /proc/self/environ", True),
+        (
+            "cmd",
+            (
+                "tool --apply-patch <<'PATCH'\n"
+                "*** Begin Patch\n"
+                "+\tenv := moduleTestEnv(t)\n"
+                "*** End Patch\n"
+                "PATCH\n"
+            ),
+            False,
+        ),
+        ("cmd", "cat <<EOF\nenv\nEOF", False),
+        ("cmd", "cat <<-EOF\n\tenv\n\tEOF\nenv", True),
         ("cmd", "grep -R 'os.getenv(\"API_KEY\")' src", False),
         ("cmd", "rg 'os.environ.copy\\(\\)' src", False),
         ("cmd", "grep -R 'printenv API_KEY' src", False),

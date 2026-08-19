@@ -492,6 +492,7 @@ class _QuotaDecisionRoute:
     state: str
     quota: dict[str, Any]
     replan_decision_allowed: bool
+    receipt_bound_replan_decision: bool
     heartbeat_recommendation: dict[str, Any]
     external_evidence_observation: dict[str, Any] | None
     external_evidence_observation_recent: dict[str, Any] | None
@@ -549,6 +550,12 @@ def _resolve_quota_should_run_route(
     state = run_decision.state
     quota = run_decision.quota
     replan_decision_allowed = run_decision.replan_decision_allowed
+    receipt_bound_replan_decision = bool(
+        replan_decision_allowed
+        and isinstance(prepared.replan_obligation, Mapping)
+        and prepared.replan_obligation.get("selection_binding")
+        == "heartbeat_receipt"
+    )
     heartbeat_recommendation = build_heartbeat_recommendation(
         {**item, "quota": quota},
         goal_id=prepared.safe_goal_id,
@@ -692,6 +699,11 @@ def _resolve_quota_should_run_route(
                 )
             ),
         )
+    if receipt_bound_replan_decision:
+        # The replan obligation is the immutable settlement authority for this
+        # decision. A newly runnable Todo remains visible in summaries, but it
+        # cannot become the selected settlement target in the same packet.
+        agent_lane_next_action = None
     agent_scope_frontier = None
     agent_lane_frontier_hint = None
     if not replan_decision_allowed:
@@ -821,6 +833,7 @@ def _resolve_quota_should_run_route(
         state=state,
         quota=quota,
         replan_decision_allowed=replan_decision_allowed,
+        receipt_bound_replan_decision=receipt_bound_replan_decision,
         heartbeat_recommendation=heartbeat_recommendation,
         external_evidence_observation=external_evidence_observation,
         external_evidence_observation_recent=external_evidence_observation_recent,
@@ -984,13 +997,19 @@ def _build_quota_should_run_payload(
         payload,
         agent_lane_next_action=route.agent_lane_next_action,
     )
-    selected_todo_projection = _selected_todo_projection(
-        agent_lane_next_action=route.agent_lane_next_action,
-        work_lane_contract=route.payload_work_lane_contract,
-        agent_scope_frontier=route.agent_scope_frontier,
+    selected_todo_projection = (
+        None
+        if route.receipt_bound_replan_decision
+        else _selected_todo_projection(
+            agent_lane_next_action=route.agent_lane_next_action,
+            work_lane_contract=route.payload_work_lane_contract,
+            agent_scope_frontier=route.agent_scope_frontier,
+        )
     )
     if selected_todo_projection:
         payload["selected_todo"] = selected_todo_projection
+    elif route.receipt_bound_replan_decision:
+        payload["selected_todo"] = None
     _attach_truthy_fields(
         payload,
         agent_lane_frontier_hint=route.agent_lane_frontier_hint,

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
+from loopx.control_plane.agents.agent_scope_frontier import AgentScopeFrontierAction
 from loopx.control_plane.scheduler import scheduler_hint as scheduler_hint_module
 from loopx.control_plane.scheduler.ack import build_codex_app_scheduler_ack_event
 from loopx.control_plane.scheduler.execution_context import (
@@ -21,6 +24,7 @@ HOST_7 = "FREQ=MINUTELY;INTERVAL=7"
 APP_CONTEXT = scheduler_execution_context_for_runtime_profile(
     "codex_app_heartbeat"
 )
+AGENT_SCOPE_ACTIONS = [action.value for action in AgentScopeFrontierAction]
 
 
 def _monitor_decision(
@@ -28,13 +32,14 @@ def _monitor_decision(
     now: datetime,
     minutes_until_due: int,
     cadence: str = "3m",
+    recommended_action: str = "Wait for material monitor evidence.",
 ) -> dict:
     return {
         "goal_id": GOAL_ID,
         "agent_identity": {"agent_id": AGENT_ID},
         "should_run": False,
         "effective_action": "monitor_quiet_skip",
-        "recommended_action": "Wait for material monitor evidence.",
+        "recommended_action": recommended_action,
         "heartbeat_recommendation": {
             "recommended_mode": "monitor_quiet_until_material_transition",
             "notify": "DONT_NOTIFY",
@@ -65,6 +70,54 @@ def _monitor_decision(
                 }
             ],
             "monitor_open_items": [],
+        },
+    }
+
+
+def _agent_wait_decision() -> dict:
+    return {
+        "goal_id": GOAL_ID,
+        "agent_identity": {"agent_id": AGENT_ID},
+        "should_run": False,
+        "effective_action": AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value,
+        "recommended_action": "Wait for reassignment.",
+        "heartbeat_recommendation": {
+            "recommended_mode": AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value,
+            "notify": "DONT_NOTIFY",
+        },
+        "interaction_contract": {
+            "schema_version": "loopx_interaction_contract_v0",
+            "mode": AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value,
+            "user_channel": {"action_required": False, "notify": "DONT_NOTIFY"},
+            "agent_channel": {
+                "must_attempt": False,
+                "delivery_allowed": False,
+                "quiet_noop_allowed": True,
+            },
+        },
+    }
+
+
+def _active_decision() -> dict:
+    return {
+        "goal_id": GOAL_ID,
+        "agent_identity": {"agent_id": AGENT_ID},
+        "should_run": True,
+        "effective_action": "normal_run",
+        "recommended_action": "Run bounded delivery work.",
+        "heartbeat_recommendation": {
+            "recommended_mode": "run_first_read_only_map",
+            "notify": "DONT_NOTIFY",
+        },
+        "interaction_contract": {
+            "schema_version": "loopx_interaction_contract_v0",
+            "mode": "bounded_delivery",
+            "user_channel": {"action_required": False, "notify": "DONT_NOTIFY"},
+            "agent_channel": {
+                "must_attempt": True,
+                "delivery_allowed": True,
+                "quiet_noop_allowed": False,
+            },
         },
     }
 
@@ -111,6 +164,7 @@ def _hint(
     monkeypatch.setattr(scheduler_hint_module, "now_utc", lambda: now)
     return build_scheduler_hint(
         decision,
+        agent_scope_frontier_actions=AGENT_SCOPE_ACTIONS,
         codex_app_scheduler_state=scheduler_state,
         codex_app_current_rrule=host_rrule,
         scheduler_execution_context=APP_CONTEXT,
@@ -125,6 +179,107 @@ def _ack_state(hint: dict, *, applied_rrule: str, generated_at: datetime) -> dic
         generated_at=generated_at.isoformat(),
     )
     return event["scheduler_ack_event"]["scheduler_state"]
+
+
+CADENCE_POLICY_CASES = [
+    {
+        "id": "agent_wait_advances_after_acknowledged_interval",
+        "decision": "agent_wait",
+        "progression": [10, 20, 30, 60],
+        "initial_rrule": "FREQ=MINUTELY;INTERVAL=10",
+        "elapsed_minutes": 10,
+        "expected_rrule": "FREQ=MINUTELY;INTERVAL=20",
+        "expected_index": 1,
+    },
+    {
+        "id": "monitor_wait_advances_after_acknowledged_interval",
+        "decision": "monitor_wait",
+        "progression": [15, 30, 60],
+        "initial_rrule": HOST_15,
+        "elapsed_minutes": 15,
+        "expected_rrule": HOST_30,
+        "expected_index": 1,
+    },
+    {
+        "id": "active_work_holds_initial_interval",
+        "decision": "active_work",
+        "progression": [3, 6, 10],
+        "initial_rrule": HOST_3,
+        "elapsed_minutes": 3,
+        "expected_rrule": None,
+        "expected_index": 0,
+    },
+]
+
+
+@pytest.mark.parametrize(
+    "case",
+    CADENCE_POLICY_CASES,
+    ids=[case["id"] for case in CADENCE_POLICY_CASES],
+)
+def test_scheduler_hint_cadence_policy_decision_table(monkeypatch, case: dict) -> None:
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    if case["decision"] == "agent_wait":
+        decision = _agent_wait_decision()
+    elif case["decision"] == "monitor_wait":
+        decision = _monitor_decision(now=now, minutes_until_due=119)
+    else:
+        decision = _active_decision()
+
+    initial = _hint(monkeypatch, decision, now=now)
+    initial_app = initial["codex_app"]
+    assert initial_app["example_progression_minutes"] == case["progression"]
+    assert initial_app["recommended_rrule"] == case["initial_rrule"]
+
+    scheduler_state = _ack_state(
+        initial,
+        applied_rrule=case["initial_rrule"],
+        generated_at=now,
+    )
+    after_interval = _hint(
+        monkeypatch,
+        decision,
+        now=now + timedelta(minutes=case["elapsed_minutes"]),
+        scheduler_state=scheduler_state,
+        host_rrule=case["initial_rrule"],
+    )
+    after_app = after_interval["codex_app"]
+    assert after_app["stateful_backoff"]["progression_index"] == case[
+        "expected_index"
+    ]
+    if case["expected_rrule"] is None:
+        assert after_app["stateful_backoff"]["apply_needed"] is False
+        assert "recommended_rrule" not in after_app
+    else:
+        assert after_app["recommended_rrule"] == case["expected_rrule"]
+
+
+def test_monitor_identity_ignores_recommended_action_text_mutation(monkeypatch) -> None:
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    original = _monitor_decision(
+        now=now,
+        minutes_until_due=119,
+        recommended_action="Monitor the post-merge run.",
+    )
+    first = _hint(monkeypatch, original, now=now)
+    scheduler_state = _ack_state(first, applied_rrule=HOST_15, generated_at=now)
+
+    mutated = _monitor_decision(
+        now=now,
+        minutes_until_due=119,
+        recommended_action="Controller wording changed; the target did not.",
+    )
+    second = _hint(
+        monkeypatch,
+        mutated,
+        now=now + timedelta(minutes=15),
+        scheduler_state=scheduler_state,
+        host_rrule=HOST_15,
+    )
+
+    assert second["codex_app"]["stateful_backoff"]["state_status"] == "same_identity"
+    assert second["codex_app"]["recommended_rrule"] == HOST_30
+    assert "recommended_action" not in second["unchanged_identity_keys"]
 
 
 def test_monitor_ack_settles_before_progression_and_avoids_3_6_3_flip(

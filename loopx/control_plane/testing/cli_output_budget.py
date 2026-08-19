@@ -272,7 +272,10 @@ CLI_OUTPUT_BUDGET_SPECS: tuple[CliOutputBudgetSpec, ...] = (
         owner="todo control plane",
         consumer_action="select and inspect current work items",
         qualification_policy="baseline_and_growth",
-        cold_path="role/status filters and direct todo-id lifecycle commands",
+        cold_path=(
+            "role/status filters, full per-role sections without --limit, and "
+            "direct todo-id lifecycle commands"
+        ),
         semantic_json_keys=("todos", "agent_todos", "filter_semantics"),
         markdown_anchor="# LoopX Todo List",
         max_chars={
@@ -517,6 +520,21 @@ CLI_OUTPUT_MODE_VARIANT_SPECS: tuple[CliOutputModeVariantSpec, ...] = (
         markdown_anchor="# Heartbeat Automation Prompt",
         max_chars={"json": 19_000, "markdown": 18_000},
         max_lines={"json": 58, "markdown": 280},
+    ),
+    CliOutputModeVariantSpec(
+        variant_id="todo_list_limited",
+        parent_surface_id="todo_list",
+        command="todo list --limit 3",
+        output_formats=("json", "markdown"),
+        semantic_json_keys=(
+            "todos",
+            "agent_todos",
+            "explicit_limit",
+            "todo_list_projection",
+        ),
+        markdown_anchor="# LoopX Todo List",
+        max_chars={"json": 40_000, "markdown": 1_200},
+        max_lines={"json": 1_100, "markdown": 24},
     ),
 )
 

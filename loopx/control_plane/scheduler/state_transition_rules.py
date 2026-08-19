@@ -63,13 +63,16 @@ def decide_scheduler_cadence_transition(
         applied_index = int(scheduler_state.get("progression_index"))
     except (TypeError, ValueError):
         applied_index = -1
+    if not 0 <= applied_index < len(progression_minutes):
+        applied_index = -1
     applied_target_rrule = (
         rrule_for_minutes(progression_minutes[applied_index])
         if 0 <= applied_index < len(progression_minutes)
         else ""
     )
     current_cadence_acknowledged = (
-        normalize_scheduler_rrule(scheduler_state.get("last_applied_rrule"))
+        bool(applied_target_rrule)
+        and normalize_scheduler_rrule(scheduler_state.get("last_applied_rrule"))
         == applied_target_rrule
     )
 

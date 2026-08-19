@@ -30,6 +30,7 @@ from ..quota.goal_boundary import (
     effective_available_capabilities as _effective_available_capabilities,
     goal_boundary as _goal_boundary,
 )
+from ..quota.error_codes import HeartbeatReceiptIdentityConflictError
 from ..quota.policy_constants import (
     MONITOR_DUE_ITEM_LIMIT,
 )
@@ -63,6 +64,7 @@ from ..todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,
     normalize_todo_claimed_by,
+    normalize_todo_replan_obligation_id,
     normalize_todo_status,
 )
 from ..todos.projection import (
@@ -139,6 +141,29 @@ class _QuotaDecisionPreparation:
     codex_app_current_rrule: Any
     codex_app_automation_id: Any
     resolved_scheduler_context: SchedulerExecutionContextResolution
+
+
+def _preserve_receipt_bound_replan_obligation(
+    replan_obligation: Mapping[str, Any] | None,
+    receipt_bound_replan_obligation_id: str | None,
+) -> dict[str, Any] | None:
+    preserved_replan_id = normalize_todo_replan_obligation_id(
+        receipt_bound_replan_obligation_id
+    )
+    if not preserved_replan_id:
+        return dict(replan_obligation) if replan_obligation is not None else None
+    current_replan_id = normalize_todo_replan_obligation_id(
+        (replan_obligation or {}).get("obligation_id")
+    )
+    if current_replan_id != preserved_replan_id:
+        raise HeartbeatReceiptIdentityConflictError(
+            "heartbeat receipt settlement identity conflicts with the "
+            "current autonomous replan obligation"
+        )
+    preserved_replan_obligation = dict(replan_obligation or {})
+    preserved_replan_obligation["selection_binding"] = "heartbeat_receipt"
+    return preserved_replan_obligation
+
 
 def _same_todo_identity(left: dict[str, Any], right: dict[str, Any]) -> bool:
     left_id = str(left.get("todo_id") or "").strip()
@@ -369,6 +394,7 @@ def _prepare_quota_should_run_item(
     item: dict[str, Any],
     health_items: list[Any],
     receipt_bound_todo_id: str | None,
+    receipt_bound_replan_obligation_id: str | None,
 ) -> _QuotaDecisionPreparation:
     quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
     state = str(quota.get("state") or "unknown")
@@ -636,7 +662,10 @@ def _prepare_quota_should_run_item(
         goal_status=str(registry_goal.get("status") or ""),
         agent_profile=_quota_agent_profile(agent_identity),
     )
-    replan_obligation = goal_frontier_context.get("replan_obligation")
+    replan_obligation = _preserve_receipt_bound_replan_obligation(
+        goal_frontier_context.get("replan_obligation"),
+        receipt_bound_replan_obligation_id
+    )
     replan_scope = goal_frontier_context.get("replan_scope") or {}
     goal_frontier_projection = (
         goal_frontier_context.get("goal_frontier_projection")

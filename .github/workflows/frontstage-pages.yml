@@ -140,9 +140,10 @@ jobs:
       - name: Fetch complete GitHub stargazer history
         if: github.event_name != 'pull_request'
         env:
-          # List-stargazers rejects the GitHub Actions installation token even
-          # with Metadata: read. Keep this existing fine-grained token limited
-          # to this public repository and read-only metadata.
+          # Since July 2026, GitHub limits stargazer listing to repository
+          # admins/collaborators and rejects fine-grained PATs even with
+          # Metadata: read. Use a classic PAT from an admin/collaborator
+          # account with only the public_repo scope.
           GH_TOKEN: ${{ secrets.STAR_HISTORY_READ_TOKEN }}
         run: |
           scripts/fetch-github-stargazers.sh \

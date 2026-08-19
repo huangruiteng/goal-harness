@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -15,7 +16,10 @@ from ...registry import atomic_write_json
 from .repository import (
     RepositoryChangeWindowError,
     git_text,
+    repository_changed_paths,
     repository_change_fingerprint,
+    repository_has_changes,
+    repository_worktree_roots,
     resolve_repository_context,
 )
 
@@ -23,6 +27,8 @@ from .repository import (
 EVENT_SCHEMA_VERSION = "repository_pending_change_event_v0"
 LIST_SCHEMA_VERSION = "repository_pending_change_list_v0"
 VERIFY_SCHEMA_VERSION = "repository_pending_change_verify_v0"
+RECONCILE_SCHEMA_VERSION = "repository_pending_change_reconcile_v0"
+RECONCILE_DETAIL_LIMIT = 20
 LEDGER_RELATIVE_PATH = Path("repository-change-window") / "pending-change-events.jsonl"
 LOCATOR_RELATIVE_PATH = (
     Path("repository-change-window") / "pending-change-locators.json"
@@ -232,6 +238,10 @@ def _write_locator(
     change_id: str,
     repository_id: str,
     repo_path: Path,
+    checkout_kind: str,
+    checkout_id: str,
+    head_oid: str,
+    changed_paths: Sequence[str],
     recorded_at: str,
 ) -> None:
     path = _locator_path(runtime_root)
@@ -242,6 +252,10 @@ def _write_locator(
     changes[change_id] = {
         "repository_id": repository_id,
         "worktree_path": str(repo_path),
+        "checkout_kind": checkout_kind,
+        "checkout_id": checkout_id,
+        "head_oid": head_oid,
+        "changed_paths": list(changed_paths),
         "updated_at": recorded_at,
     }
     atomic_write_json(path, {**payload, "changes": changes})
@@ -262,9 +276,15 @@ def _remove_locator(runtime_root: Path, *, change_id: str) -> None:
 def _derived_change_id(
     *,
     repository_id: str,
-    branch: str,
+    checkout_kind: str,
+    checkout_id: str,
 ) -> str:
-    identity = "\0".join((repository_id, branch)).encode("utf-8")
+    identity_parts = (
+        (repository_id, checkout_id)
+        if checkout_kind == "branch"
+        else (repository_id, checkout_kind, checkout_id)
+    )
+    identity = "\0".join(identity_parts).encode("utf-8")
     return f"change_{hashlib.sha256(identity).hexdigest()[:20]}"
 
 
@@ -280,6 +300,7 @@ def _merged_string_list(current: object, additions: Sequence[str]) -> list[str]:
 def _comparable_record(record: Mapping[str, Any]) -> dict[str, Any]:
     comparable = dict(record)
     comparable.pop("updated_at", None)
+    comparable.pop("source", None)
     decision = comparable.get("gate_decision")
     if isinstance(decision, Mapping):
         comparable["gate_decision"] = {
@@ -323,13 +344,15 @@ def record_pending_change(
     assert normalized_source is not None
     stable_id = str(change_id or "").strip() or _derived_change_id(
         repository_id=context.repository_id,
-        branch=context.branch,
+        checkout_kind=context.checkout_kind,
+        checkout_id=context.checkout_id,
     )
     if not _CHANGE_ID_RE.fullmatch(stable_id):
         raise RepositoryChangeWindowError(
             "change_id must match change_<lowercase-letters-digits-underscore-hyphen>"
         )
     recorded_at = _now_iso(now)
+    changed_paths = repository_changed_paths(context)
     fingerprint = repository_change_fingerprint(context)
     bounded_decision = {
         key: decision.get(key)
@@ -355,10 +378,12 @@ def record_pending_change(
             )
         current = current or {}
         record = {
-            "schema_version": "repository_pending_change_v0",
+            "schema_version": "repository_pending_change_v1",
             "change_id": stable_id,
             "state": "open",
             "repository_id": context.repository_id,
+            "checkout_kind": context.checkout_kind,
+            "checkout_id": context.checkout_id,
             "branch": context.branch,
             "head_oid": context.head_oid,
             "goal_id": normalized_goal or current.get("goal_id"),
@@ -374,6 +399,8 @@ def record_pending_change(
             "source": normalized_source,
             "gate_decision": bounded_decision,
             "fingerprint": fingerprint,
+            "changed_path_count": len(changed_paths),
+            "private_path_inventory": "machine_private_locator",
             "updated_at": recorded_at,
             "contains_code": False,
             "contains_diff_body": False,
@@ -399,6 +426,10 @@ def record_pending_change(
                 change_id=stable_id,
                 repository_id=context.repository_id,
                 repo_path=context.root,
+                checkout_kind=context.checkout_kind,
+                checkout_id=context.checkout_id,
+                head_oid=context.head_oid,
+                changed_paths=changed_paths,
                 recorded_at=recorded_at,
             )
     return {
@@ -411,6 +442,134 @@ def record_pending_change(
         "storage_ref": LEDGER_RELATIVE_PATH.as_posix(),
         "locator_status": "registered" if execute else "planned",
         "record": record,
+    }
+
+
+def reconcile_pending_changes(
+    *,
+    runtime_root: Path,
+    repo_path: str | Path,
+    decision: Mapping[str, Any],
+    include_linked_worktrees: bool = False,
+    execute: bool = False,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    seed_context = resolve_repository_context(repo_path)
+    if decision.get("allowed") is not False:
+        return {
+            "ok": True,
+            "schema_version": RECONCILE_SCHEMA_VERSION,
+            "status": "window_open_noop",
+            "dry_run": not execute,
+            "repository_id": seed_context.repository_id,
+            "scope": "linked_worktrees" if include_linked_worktrees else "current",
+            "scanned_worktree_count": 0,
+            "dirty_worktree_count": 0,
+            "changed_count": 0,
+            "duplicate_count": 0,
+            "error_count": 0,
+            "changes": [],
+            "contains_local_path": False,
+        }
+
+    rows: list[dict[str, Any]] = []
+    scanned_count = 0
+    clean_count = 0
+    error_count = 0
+    changed_count = 0
+    duplicate_count = 0
+    worktree_roots = (
+        repository_worktree_roots(seed_context)
+        if include_linked_worktrees
+        else (seed_context.root,)
+    )
+
+    def probe(worktree_root: Path) -> tuple[Path, str]:
+        if not worktree_root.is_dir():
+            return worktree_root, "missing"
+        try:
+            return (
+                worktree_root,
+                "dirty" if repository_has_changes(worktree_root) else "clean",
+            )
+        except (OSError, TypeError, ValueError):
+            return worktree_root, "unreadable"
+
+    worker_count = min(8, max(1, len(worktree_roots)))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        probe_results = list(executor.map(probe, worktree_roots))
+
+    for worktree_root, probe_status in probe_results:
+        if probe_status in {"missing", "unreadable"}:
+            error_count += 1
+            continue
+        scanned_count += 1
+        if probe_status == "clean":
+            clean_count += 1
+            continue
+        try:
+            context = resolve_repository_context(worktree_root)
+            if (
+                context.common_dir != seed_context.common_dir
+                or context.repository_id != seed_context.repository_id
+            ):
+                error_count += 1
+                continue
+            changed_paths = repository_changed_paths(context)
+            if not changed_paths:
+                clean_count += 1
+                continue
+            result = record_pending_change(
+                runtime_root=runtime_root,
+                repo_path=context.root,
+                decision=decision,
+                source="reconcile_cli",
+                execute=execute,
+                now=now,
+            )
+        except (OSError, TypeError, ValueError):
+            error_count += 1
+            continue
+        record = result["record"]
+        if result["changed"]:
+            changed_count += 1
+        if result["duplicate"]:
+            duplicate_count += 1
+        rows.append(
+            {
+                "change_id": record["change_id"],
+                "repository_id": record["repository_id"],
+                "checkout_kind": record["checkout_kind"],
+                "checkout_id": record["checkout_id"],
+                "head_oid": record["head_oid"],
+                "changed_path_count": record["changed_path_count"],
+                "transition": result["transition"],
+                "changed": result["changed"],
+                "duplicate": result["duplicate"],
+            }
+        )
+    rows.sort(key=lambda item: (str(item["checkout_kind"]), str(item["checkout_id"])))
+    visible_rows = rows[:RECONCILE_DETAIL_LIMIT]
+    return {
+        "ok": error_count == 0,
+        "schema_version": RECONCILE_SCHEMA_VERSION,
+        "status": "reconciled" if execute else "reconcile_preview",
+        "dry_run": not execute,
+        "repository_id": seed_context.repository_id,
+        "scope": "linked_worktrees" if include_linked_worktrees else "current",
+        "probe_worker_count": worker_count,
+        "scanned_worktree_count": scanned_count,
+        "clean_worktree_count": clean_count,
+        "dirty_worktree_count": len(rows),
+        "changed_count": changed_count,
+        "duplicate_count": duplicate_count,
+        "error_count": error_count,
+        "changes": visible_rows,
+        "change_detail_limit": RECONCILE_DETAIL_LIMIT,
+        "omitted_change_count": len(rows) - len(visible_rows),
+        "storage_ref": LEDGER_RELATIVE_PATH.as_posix(),
+        "private_locator_inventory": LOCATOR_RELATIVE_PATH.as_posix(),
+        "contains_local_path": False,
     }
 
 
@@ -562,19 +721,16 @@ def verify_pending_change(
         }
     )
     branch = str(current.get("branch") or "")
-    branch_head = git_text(
-        context.root,
-        "rev-parse",
-        "--verify",
-        f"refs/heads/{branch}^{{commit}}",
-        check=False,
+    checkout_kind = str(current.get("checkout_kind") or "branch")
+    checkout_id = str(current.get("checkout_id") or branch)
+    checkout_matches = (
+        context.checkout_kind == checkout_kind and context.checkout_id == checkout_id
     )
-    branch_exists = bool(branch_head)
     checks.append(
         {
-            "check": "branch",
-            "ok": branch_exists,
-            "status": "present" if branch_exists else "missing",
+            "check": "checkout_identity",
+            "ok": checkout_matches,
+            "status": "match" if checkout_matches else "mismatch",
         }
     )
     recorded_head = str(current.get("head_oid") or "")
@@ -594,20 +750,52 @@ def verify_pending_change(
             "status": "present" if head_exists else "missing",
         }
     )
-    head_status = "missing"
-    if branch_exists and head_exists:
-        head_status = (
-            "unchanged" if branch_head == recorded_head else "advanced_or_rewritten"
+    checkout_head_ok = False
+    if checkout_kind == "branch":
+        branch_head = git_text(
+            context.root,
+            "rev-parse",
+            "--verify",
+            f"refs/heads/{branch}^{{commit}}",
+            check=False,
         )
-    checks.append(
-        {
-            "check": "branch_head",
-            "ok": head_status == "unchanged",
-            "status": head_status,
-        }
-    )
+        branch_exists = bool(branch_head)
+        checks.append(
+            {
+                "check": "branch",
+                "ok": branch_exists,
+                "status": "present" if branch_exists else "missing",
+            }
+        )
+        head_status = "missing"
+        if branch_exists and head_exists:
+            head_status = (
+                "unchanged" if branch_head == recorded_head else "advanced_or_rewritten"
+            )
+        checkout_head_ok = head_status == "unchanged"
+        checks.append(
+            {
+                "check": "branch_head",
+                "ok": checkout_head_ok,
+                "status": head_status,
+            }
+        )
+    else:
+        head_status = (
+            "unchanged"
+            if checkout_matches and context.head_oid == recorded_head
+            else "advanced_or_rewritten"
+        )
+        checkout_head_ok = head_exists and head_status == "unchanged"
+        checks.append(
+            {
+                "check": "detached_head",
+                "ok": checkout_head_ok,
+                "status": head_status,
+            }
+        )
     fingerprint_status = "not_current_checkout"
-    if context.branch == branch:
+    if checkout_matches:
         current_fingerprint = repository_change_fingerprint(context)
         recorded_fingerprint = current.get("fingerprint")
         fingerprint_status = (
@@ -623,12 +811,37 @@ def verify_pending_change(
             "status": fingerprint_status,
         }
     )
+    recorded_paths = locator.get("changed_paths")
+    path_inventory_ok = True
+    if isinstance(recorded_paths, list) and all(
+        isinstance(item, str) for item in recorded_paths
+    ):
+        current_paths = repository_changed_paths(context)
+        path_inventory_ok = tuple(recorded_paths) == current_paths
+        checks.append(
+            {
+                "check": "private_changed_path_inventory",
+                "ok": path_inventory_ok,
+                "status": "unchanged" if path_inventory_ok else "changed",
+                "recorded_count": len(recorded_paths),
+                "current_count": len(current_paths),
+            }
+        )
+    else:
+        checks.append(
+            {
+                "check": "private_changed_path_inventory",
+                "ok": True,
+                "status": "legacy_absent",
+            }
+        )
     ok = (
         repository_matches
-        and branch_exists
+        and checkout_matches
         and head_exists
-        and head_status == "unchanged"
+        and checkout_head_ok
         and fingerprint_status == "unchanged"
+        and path_inventory_ok
     )
     return {
         "ok": ok,

@@ -50,7 +50,7 @@ def reconcile_existing_heartbeat_receipt(
             if isinstance(existing_details_value, Mapping)
             else {}
         )
-        existing_todo_id = str(existing_details.get("todo_id") or "").strip()
+        existing_todo_id = normalize_todo_id(existing_details.get("todo_id"))
         existing_replan_obligation_id = normalize_todo_replan_obligation_id(
             existing_details.get("replan_obligation_id")
         )
@@ -89,7 +89,10 @@ def reconcile_existing_heartbeat_receipt(
             ):
                 raise HeartbeatReceiptIdentityConflictError(
                     "heartbeat receipt settlement identity conflicts with the "
-                    "current settlement binding"
+                    "current settlement binding: receipt="
+                    f"{existing_todo_id or existing_replan_obligation_id}, "
+                    "current="
+                    f"{rollout_todo_id or rollout_replan_obligation_id}"
                 )
         else:
             rollout_details = quota_rollout_details(

@@ -71,7 +71,7 @@ TODO_OPTION_FIELDS = (
     ("--self-merged", "self_merged"),
     ("--agent-id", "agent_id"),
     ("--from", "suggestion_sources"),
-    ("--limit", "suggestion_limit"),
+    ("--limit", "todo_limit"),
     ("--trigger", "suggestion_trigger"),
     ("--state-file", "state_file"),
     ("--execute", "execute"),
@@ -275,9 +275,10 @@ def _validate_todo_option_subset(args: argparse.Namespace, allowed_fields: Itera
 def validate_todo_list_options(args: argparse.Namespace) -> None:
     _validate_todo_option_subset(
         args,
-        {"role", "todo_id", "status", "agent_id", "state_file"},
+        {"role", "todo_id", "status", "agent_id", "todo_limit", "state_file"},
         "todo list only accepts --goal-id, optional --role, --status, --todo-id, "
-        "--agent-id, --project, --state-file, --dry-run, and --format; unsupported: ",
+        "--agent-id, --limit, --project, --state-file, --dry-run, and --format; "
+        "unsupported: ",
     )
 
 
@@ -412,7 +413,7 @@ def validate_todo_archive_completed_options(args: argparse.Namespace) -> None:
 def validate_todo_suggest_options(args: argparse.Namespace) -> None:
     _validate_todo_option_subset(
         args,
-        {"agent_id", "suggestion_sources", "suggestion_limit", "suggestion_trigger"},
+        {"agent_id", "suggestion_sources", "todo_limit", "suggestion_trigger"},
         "todo suggest only accepts --goal-id, optional --project, --agent-id, "
         "--from, --limit, --trigger, --dry-run, and --format; unsupported: ",
     )
@@ -524,14 +525,15 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
         )
     if (
         args.todo_command not in {"suggest", "capture-followups"}
-        and (
-            args.suggestion_sources
-            or args.suggestion_limit is not None
-            or args.suggestion_trigger
-        )
+        and (args.suggestion_sources or args.suggestion_trigger)
+    ):
+        raise ValueError("--from and --trigger are supported only by todo suggest")
+    if (
+        args.todo_command not in {"suggest", "list", "capture-followups"}
+        and args.todo_limit is not None
     ):
         raise ValueError(
-            "--from, --limit, and --trigger are supported only by todo suggest"
+            "--limit is supported only by todo suggest and todo list"
         )
 
 

@@ -238,8 +238,8 @@ def test_todo_list_validation_preserves_exact_unsupported_diagnostic() -> None:
 
     assert str(exc_info.value) == (
         "todo list only accepts --goal-id, optional --role, --status, --todo-id, "
-        "--agent-id, --project, --state-file, --dry-run, and --format; unsupported: "
-        "--note, --evidence"
+        "--agent-id, --limit, --project, --state-file, --dry-run, and --format; "
+        "unsupported: --note, --evidence"
     )
 
 
@@ -258,6 +258,8 @@ def test_todo_list_validation_accepts_read_filters() -> None:
             "todo_example",
             "--agent-id",
             "codex-example",
+            "--limit",
+            "3",
             "--project",
             ".",
             "--state-file",

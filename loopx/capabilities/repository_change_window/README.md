@@ -26,6 +26,33 @@ loopx change-window status --repo-path . --format json
 loopx change-window verify --repo-path . --format json
 ```
 
+Installation defaults to the backward-compatible `hook_only` enforcement
+level. It manages `pre-commit` and `pre-push`; Git's `--no-verify` option can
+skip those client hooks. Repositories that want a stronger local guard must
+opt in explicitly:
+
+```bash
+loopx change-window install \
+  --repo-path . \
+  --enforcement-level reference_guard \
+  --execute \
+  --format json
+
+loopx change-window verify --repo-path . --format json
+```
+
+`reference_guard` additionally manages Git's `reference-transaction` hook and
+the repository-local `core.sshCommand` route. In a blocked window it rejects a
+`HEAD` or local-branch update that introduces a new commit, including
+`git commit --no-verify`. The `pre-push` hook covers ordinary pushes, while the
+SSH route also rejects an SSH push that uses `--no-verify`. Checkout,
+linked-worktree creation, branch deletion, SSH fetches, and local branch
+creation at a commit already reachable from another local branch or the current
+`HEAD` stays available. Tags, notes, and custom refs do not make a new commit
+eligible for a local-branch update during the blocked window.
+Unknown SSH service commands fail closed. `status` and `verify` report the
+typed enforcement level, exact managed hook set, and SSH-route health.
+
 Customize one typed v0 window with repeatable weekdays and IANA timezone data:
 
 ```bash
@@ -46,10 +73,12 @@ interpreted as an implicit full-day lock.
 
 The provider writes only repository-local Git configuration and private state
 under the repository's Git common directory. Linked worktrees therefore share
-one installation and policy. The managed `pre-commit` and `pre-push` wrappers
-evaluate the policy and then call the hook route that was effective before
-installation. A modified wrapper, changed hook route, invalid policy, or
-missing state fails verification closed.
+one installation and policy. Managed hooks evaluate the policy and then call
+the same hook from the route that was effective before installation, including
+stdin and hook arguments. The SSH guard delegates to the previously effective
+`core.sshCommand`, or to `ssh` when none was configured. A modified managed
+command, changed hook or SSH route, invalid policy, or missing state fails
+verification closed.
 
 The execution clock is not a caller argument. Live hooks use the invocation
 clock; tests inject an aware fake clock through the Python contract so an
@@ -58,18 +87,22 @@ artifact timestamp cannot move a commit or push into an allowed window.
 ## Pending-change ledger
 
 When a hook blocks a commit or push, it automatically records or refreshes a
-stable branch-scoped pending change. The shared runtime event contains:
+stable checkout-scoped pending change. Attached branches retain their existing
+identity; detached worktrees receive a path-free, machine-local checkout id so
+work prepared during a change window can be recovered without creating a
+branch. The shared runtime event contains:
 
 - a stable `change_id` and credential-free repository identity;
-- branch and exact head OID;
+- typed `branch` or `detached` checkout identity and exact head OID;
 - counts and content digests for staged, unstaged, and untracked state;
 - the typed gate decision and next eligible time; and
 - lifecycle source and update time.
 
 It does **not** contain code, a patch, a diff body, credential material, file
 names, or a local absolute path. A separate mode-`0600` machine-private locator
-lets `verify` find the producing worktree; list/readback packets never expose
-that path.
+retains the producing worktree plus its repository-relative changed-path
+inventory; list, reconciliation, and verification packets expose only counts
+and never expose those paths.
 
 Add goal, Todo, PR, write-scope, and validation lineage explicitly when it is
 available:
@@ -88,11 +121,39 @@ loopx change-window list --state open --format json
 loopx change-window verify --change-id change_example123 --format json
 ```
 
-`record` is idempotent for the same identity and fingerprint. A changed head
-or worktree fingerprint appends a `refreshed` event rather than overwriting
-history. `verify` distinguishes missing locator/worktree, repository mismatch,
-missing branch, missing recorded head, branch movement, and worktree-fingerprint
-drift.
+A hook can only observe an attempted Git operation. Work prepared during a
+blocked window may therefore remain dirty without reaching `pre-commit`,
+`reference-transaction`, or `pre-push`. Reconcile the current checkout during
+normal writeback, or explicitly sweep every linked and detached worktree in
+the same Git common directory before a wider handoff:
+
+```bash
+loopx change-window reconcile --repo-path . --format json
+loopx change-window reconcile --repo-path . --execute --format json
+loopx change-window reconcile \
+  --repo-path . \
+  --all-linked-worktrees \
+  --execute \
+  --format json
+```
+
+Reconciliation is a no-op while the policy allows repository changes and
+requires an installed provider. The bounded default inspects only
+`--repo-path`; `--all-linked-worktrees` is the explicit repository-wide
+recovery sweep. Both ignore clean worktrees, record dirty checkouts
+idempotently, and return only path-free checkout ids and counts. Run the
+bounded form after preparing gated work and the wider sweep before a handoff,
+shutdown, or gate-open delivery pass. Wide-sweep output keeps aggregate counts
+authoritative and caps per-checkout detail so a large historical worktree set
+does not flood the control packet.
+
+`record` is idempotent for the same identity and fingerprint. A changed head,
+changed-path inventory, or worktree fingerprint appends a `refreshed` event
+rather than overwriting history. `verify` distinguishes missing
+locator/worktree, repository or checkout mismatch, missing recorded head,
+branch or detached-HEAD movement, private changed-path inventory drift, and
+worktree-fingerprint drift. Verification reports only inventory counts, never
+the private path values.
 
 Close the lifecycle only with a typed outcome and compact public-safe evidence:
 
@@ -119,15 +180,20 @@ loopx change-window uninstall --repo-path . --format json
 loopx change-window uninstall --repo-path . --execute --format json
 ```
 
-Uninstall restores the exact repository-local `core.hooksPath` value that
-preceded installation, or removes the local override when none existed. It
-refuses to overwrite drifted provider state. Pending-change history is not
-deleted by uninstall; resolve it through the ledger lifecycle instead.
+Uninstall restores the exact repository-local `core.hooksPath` and
+`core.sshCommand` values that preceded installation, or removes either local
+override when none existed. It refuses to overwrite drifted provider state.
+Pending-change history is not deleted by uninstall; resolve it through the
+ledger lifecycle instead.
 
 ## Authority and enforcement boundary
 
-This is local workflow enforcement, not branch protection. Git client options
-such as `--no-verify`, another machine, or a server-side write can bypass local
-hooks. Use remote branch protection or server-side hooks for a security
-boundary. The capability does not push, merge, create a PR, modify protected
-branches, or treat schedule admission as permission for any of those effects.
+This is local workflow enforcement, not branch protection. `hook_only` can be
+bypassed with `--no-verify`; `reference_guard` closes that commit path and the
+repository's SSH transport path. HTTPS pushes that both skip `pre-push` and
+avoid SSH, replacing `core.hooksPath` or `core.sshCommand`, using an alternate
+Git configuration or binary, directly editing ref files, writing from another
+machine, or calling a hosting API remain outside its authority. Use OS policy
+plus remote branch protection or server-side controls for a security boundary.
+The capability does not push, merge, create a PR, modify protected branches,
+or treat schedule admission as permission for any of those effects.

@@ -4,11 +4,14 @@ import argparse
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 
 from ...paths import DEFAULT_RUNTIME_ROOT, resolve_runtime_root
 from ...registry import read_json
 from .git_hook import (
+    EnforcementLevel,
     git_hook_provider_status,
+    hook_runtime_contract,
     install_git_hook_provider,
     run_git_hook_provider,
     uninstall_git_hook_provider,
@@ -16,6 +19,7 @@ from .git_hook import (
 )
 from .ledger import (
     list_pending_changes,
+    reconcile_pending_changes,
     record_pending_change,
     resolve_pending_change,
     verify_pending_change,
@@ -74,6 +78,15 @@ def register_repository_change_window_commands(
     install.add_argument("--blocked-start", default="10:00")
     install.add_argument("--blocked-end", default="21:00")
     install.add_argument(
+        "--enforcement-level",
+        choices=tuple(item.value for item in EnforcementLevel),
+        default=EnforcementLevel.HOOK_ONLY.value,
+        help=(
+            "Local enforcement strength. `reference_guard` also protects new commit "
+            "ref updates that `git commit --no-verify` cannot skip."
+        ),
+    )
+    install.add_argument(
         "--replace",
         action="store_true",
         help="Replace an installed policy only after provider drift and policy are reviewed.",
@@ -118,6 +131,25 @@ def register_repository_change_window_commands(
     record.add_argument("--supersedes")
     _execute_argument(record, action="pending-change ledger write")
 
+    reconcile = commands.add_parser(
+        "reconcile",
+        help=(
+            "Inventory dirty linked worktrees during a blocked window and repair "
+            "missing global pending-change records."
+        ),
+    )
+    add_subcommand_format(reconcile)
+    _repo_argument(reconcile)
+    reconcile.add_argument(
+        "--all-linked-worktrees",
+        action="store_true",
+        help=(
+            "Scan every linked worktree in the repository. The default reconciles "
+            "only --repo-path so routine writeback stays bounded."
+        ),
+    )
+    _execute_argument(reconcile, action="linked-worktree pending-change reconciliation")
+
     list_parser = commands.add_parser(
         "list",
         help="List unresolved or terminal pending changes from the shared runtime ledger.",
@@ -149,8 +181,23 @@ def register_repository_change_window_commands(
     )
     add_subcommand_format(hook)
     _repo_argument(hook)
-    hook.add_argument("--event", choices=("pre-commit", "pre-push"), required=True)
+    hook.add_argument(
+        "--event",
+        choices=(
+            "pre-commit",
+            "pre-push",
+            "reference-transaction",
+            "ssh-transport",
+        ),
+        required=True,
+    )
     hook.add_argument("hook_args", nargs=argparse.REMAINDER)
+
+    hook_runtime = commands.add_parser(
+        "hook-runtime",
+        help="Report the typed runtime contract used by managed Git hooks.",
+    )
+    add_subcommand_format(hook_runtime)
 
 
 def _runtime_root(registry_path: Path, runtime_root_arg: str | None) -> Path:
@@ -204,7 +251,8 @@ def render_repository_change_window_markdown(payload: dict[str, object]) -> str:
             if isinstance(item, dict):
                 lines.append(
                     f"- `{item.get('change_id')}` {item.get('repository_id')} "
-                    f"`{item.get('branch')}` state=`{item.get('state')}`"
+                    f"`{item.get('branch') or item.get('checkout_id')}` "
+                    f"state=`{item.get('state')}`"
                 )
     return "\n".join(lines).rstrip() + "\n"
 
@@ -232,6 +280,7 @@ def handle_repository_change_window_command(
                     blocked_start=args.blocked_start,
                     blocked_end=args.blocked_end,
                 ),
+                enforcement_level=args.enforcement_level,
                 replace=bool(args.replace),
                 execute=bool(args.execute),
             )
@@ -277,6 +326,20 @@ def handle_repository_change_window_command(
                 supersedes=args.supersedes,
                 execute=bool(args.execute),
             )
+        elif command == "reconcile":
+            provider = git_hook_provider_status(repo_path=args.repo_path)
+            decision = provider.get("decision")
+            if not provider.get("installed") or not isinstance(decision, dict):
+                raise RepositoryChangeWindowError(
+                    "pending-change reconciliation requires an installed repository provider"
+                )
+            payload = reconcile_pending_changes(
+                runtime_root=runtime_root,
+                repo_path=args.repo_path,
+                decision=decision,
+                include_linked_worktrees=bool(args.all_linked_worktrees),
+                execute=bool(args.execute),
+            )
         elif command == "list":
             payload = list_pending_changes(
                 runtime_root=runtime_root,
@@ -292,6 +355,8 @@ def handle_repository_change_window_command(
                 superseded_by=args.superseded_by,
                 execute=bool(args.execute),
             )
+        elif command == "hook-runtime":
+            payload = hook_runtime_contract()
         elif command == "hook":
             hook_args = list(args.hook_args)
             if hook_args[:1] == ["--"]:
@@ -301,6 +366,7 @@ def handle_repository_change_window_command(
                 runtime_root=runtime_root,
                 event=args.event,
                 hook_args=hook_args,
+                hook_stdin=sys.stdin.buffer.read(),
             )
         else:
             raise RepositoryChangeWindowError(

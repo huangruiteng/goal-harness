@@ -116,6 +116,17 @@ CADENCE_CASES = [
             False,
         ),
     },
+    {
+        "id": "out_of_range_failed_index_recovers_at_initial",
+        "state": _scheduler_state(progression_index=99, last_applied_rrule=""),
+        "has_failures": True,
+        "expected": (
+            0,
+            "same_identity",
+            SchedulerCadenceTransition.RETRY_UNACKNOWLEDGED_FAILURE,
+            False,
+        ),
+    },
 ]
 
 

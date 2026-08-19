@@ -2,17 +2,21 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import subprocess
 
 import pytest
 
 from loopx.capabilities.repository_change_window import (
+    EnforcementLevel,
     build_policy,
     evaluate_policy,
     git_hook_provider_status,
+    hook_runtime_contract,
     install_git_hook_provider,
     list_pending_changes,
+    reconcile_pending_changes,
     record_pending_change,
     resolve_pending_change,
     run_git_hook_provider,
@@ -53,8 +57,19 @@ def _repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(repo, "config", "user.email", "loopx@example.invalid")
     _git(repo, "remote", "add", "origin", "git@github.com:example/change-window.git")
     (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
-    _git(repo, "add", "tracked.txt")
-    _git(repo, "commit", "-m", "base")
+    blob_oid = _git(repo, "hash-object", "-w", "tracked.txt")
+    tree = subprocess.run(
+        ["git", "-C", str(repo), "mktree"],
+        input=f"100644 blob {blob_oid}\ttracked.txt\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    commit_oid = _git(repo, "commit-tree", tree, "-m", "base")
+    refs_dir = repo / ".git" / "refs" / "heads"
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    (refs_dir / "main").write_text(f"{commit_oid}\n", encoding="ascii")
+    _git(repo, "reset", "--mixed", "HEAD")
     return repo
 
 
@@ -65,6 +80,40 @@ def _weekday_policy():
         blocked_start="10:00",
         blocked_end="21:00",
     )
+
+
+def _rewrite_provider_as_legacy(
+    repo: Path,
+    *,
+    schema_version: str,
+    enforcement_level: str | None,
+    managed_hook_names: list[str],
+    preserved_ssh_command: Path,
+) -> None:
+    common_dir = Path(_git(repo, "rev-parse", "--git-common-dir"))
+    if not common_dir.is_absolute():
+        common_dir = (repo / common_dir).resolve()
+    provider_dir = common_dir / "loopx" / "repository-change-window"
+    state_path = provider_dir / "provider.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["schema_version"] = schema_version
+    if enforcement_level is None:
+        state.pop("enforcement_level", None)
+    else:
+        state["enforcement_level"] = enforcement_level
+    for field in (
+        "previous_ssh_local_override",
+        "previous_ssh_local_value",
+        "previous_ssh_command",
+        "ssh_command_digest",
+    ):
+        state.pop(field, None)
+    state["hook_digests"] = {
+        name: state["hook_digests"][name] for name in managed_hook_names
+    }
+    state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    (provider_dir / "ssh-command").unlink(missing_ok=True)
+    _git(repo, "config", "--local", "core.sshCommand", str(preserved_ssh_command))
 
 
 def test_policy_uses_typed_timezone_boundaries_and_internal_fake_clock() -> None:
@@ -165,6 +214,8 @@ def test_install_is_default_off_preserves_prior_hook_and_is_linked_worktree_shar
         execute=True,
     )
     assert installed["enabled"] is True
+    assert installed["enforcement_level"] == "hook_only"
+    assert installed["managed_hook_names"] == ["pre-commit", "pre-push"]
     assert installed["contains_personal_path"] is False
     assert str(tmp_path) not in json.dumps(installed, sort_keys=True)
 
@@ -209,6 +260,321 @@ def test_install_is_default_off_preserves_prior_hook_and_is_linked_worktree_shar
         prior_hooks
     )
     assert prior_hook.is_file()
+
+
+def test_reference_guard_uses_fake_clock_and_shared_linked_worktree_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repository(tmp_path, monkeypatch)
+    linked = tmp_path / "linked-guard"
+    _git(repo, "worktree", "add", "-b", "feature/guard", str(linked))
+    runtime_root = tmp_path / "runtime"
+    prior_ssh = tmp_path / "prior-ssh"
+    prior_ssh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    prior_ssh.chmod(0o755)
+    _git(repo, "config", "--local", "core.sshCommand", str(prior_ssh))
+
+    installed = install_git_hook_provider(
+        repo_path=repo,
+        policy=_weekday_policy(),
+        enforcement_level=EnforcementLevel.REFERENCE_GUARD,
+        execute=True,
+    )
+    assert installed["managed_hook_names"] == [
+        "pre-commit",
+        "pre-push",
+        "reference-transaction",
+    ]
+    assert installed["guards_ssh_transport"] is True
+    managed_ssh = Path(_git(repo, "config", "--local", "--get", "core.sshCommand"))
+    assert managed_ssh.name == "ssh-command"
+    assert managed_ssh.is_file()
+    assert str(tmp_path) not in json.dumps(installed, sort_keys=True)
+    linked_status = git_hook_provider_status(
+        repo_path=linked,
+        now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+    )
+    assert linked_status["enforcement_level"] == "reference_guard"
+    assert linked_status["decision"]["allowed"] is False
+
+    old_oid = _git(linked, "rev-parse", "HEAD")
+    tree_oid = _git(linked, "rev-parse", "HEAD^{tree}")
+    new_oid = _git(
+        linked,
+        "commit-tree",
+        tree_oid,
+        "-p",
+        old_oid,
+        "-m",
+        "unreferenced candidate",
+    )
+    blocked = run_git_hook_provider(
+        repo_path=linked,
+        runtime_root=runtime_root,
+        event="reference-transaction",
+        hook_args=("prepared",),
+        hook_stdin=f"{old_oid} {new_oid} refs/heads/feature/guard\n".encode(),
+        now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+    )
+    assert blocked["status"] == "blocked_by_policy"
+    assert blocked["pending_change"]["changed"] is True
+
+    preparing = run_git_hook_provider(
+        repo_path=linked,
+        runtime_root=runtime_root,
+        event="reference-transaction",
+        hook_args=("preparing",),
+        hook_stdin=f"{old_oid} {new_oid} refs/heads/feature/guard\n".encode(),
+        now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+    )
+    assert preparing["status"] == "blocked_by_policy"
+    assert preparing["guarded_change"] is True
+
+    for staged_ref in (
+        "refs/tags/staged-candidate",
+        "refs/notes/staged-candidate",
+        "refs/loopx/staged-candidate",
+    ):
+        _git(linked, "update-ref", staged_ref, new_oid)
+        staged = run_git_hook_provider(
+            repo_path=linked,
+            runtime_root=runtime_root,
+            event="reference-transaction",
+            hook_args=("prepared",),
+            hook_stdin=f"{old_oid} {new_oid} refs/heads/feature/guard\n".encode(),
+            now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+        )
+        assert staged["status"] == "blocked_by_policy"
+        assert staged["guarded_change"] is True
+
+    blocked_ssh = run_git_hook_provider(
+        repo_path=linked,
+        runtime_root=runtime_root,
+        event="ssh-transport",
+        hook_args=("git@github.com", "git-receive-pack 'example/repo.git'"),
+        now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+    )
+    assert blocked_ssh["status"] == "blocked_by_policy"
+
+    allowed_ssh = run_git_hook_provider(
+        repo_path=linked,
+        runtime_root=runtime_root,
+        event="ssh-transport",
+        hook_args=("git@github.com", "git-upload-pack 'example/repo.git'"),
+        now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+    )
+    assert allowed_ssh["status"] == "allowed"
+    assert allowed_ssh["guarded_change"] is False
+    assert allowed_ssh["previous_hook_invoked"] is False
+    with pytest.raises(ValueError, match="unsupported Git SSH service"):
+        run_git_hook_provider(
+            repo_path=linked,
+            runtime_root=runtime_root,
+            event="ssh-transport",
+            hook_args=("git@github.com", "custom-service 'example/repo.git'"),
+            now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+        )
+
+    existing_ref_move = run_git_hook_provider(
+        repo_path=linked,
+        runtime_root=runtime_root,
+        event="reference-transaction",
+        hook_args=("prepared",),
+        hook_stdin=f"{old_oid} {old_oid} HEAD\n".encode(),
+        now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+    )
+    assert existing_ref_move["status"] == "allowed"
+    assert existing_ref_move["guarded_change"] is False
+    with pytest.raises(ValueError, match="requires exactly one"):
+        run_git_hook_provider(
+            repo_path=linked,
+            runtime_root=runtime_root,
+            event="reference-transaction",
+            hook_args=(),
+            hook_stdin=f"{old_oid} {new_oid} refs/heads/feature/guard\n".encode(),
+            now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+        )
+
+    replaced = install_git_hook_provider(
+        repo_path=linked,
+        policy=_weekday_policy(),
+        enforcement_level=EnforcementLevel.HOOK_ONLY,
+        replace=True,
+        execute=True,
+    )
+    assert replaced["enforcement_level"] == "hook_only"
+    assert _git(linked, "config", "--local", "--get", "core.sshCommand") == str(
+        prior_ssh
+    )
+    assert managed_ssh.exists() is False
+    reference_hook = Path(
+        _git(linked, "rev-parse", "--git-path", "hooks/reference-transaction")
+    )
+    assert reference_hook.exists() is False
+    reference_hook.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    drifted_status = git_hook_provider_status(repo_path=linked)
+    assert drifted_status["status"] == "drifted"
+    assert any(
+        item["check"] == "hook:reference-transaction:absent"
+        and item["status"] == "unexpected_managed_hook"
+        for item in drifted_status["checks"]
+    )
+
+
+def test_provider_detects_incompatible_hook_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repository(tmp_path, monkeypatch)
+    install_git_hook_provider(
+        repo_path=repo,
+        policy=_weekday_policy(),
+        enforcement_level=EnforcementLevel.REFERENCE_GUARD,
+        execute=True,
+    )
+
+    stale_bin = tmp_path / "stale-bin"
+    stale_bin.mkdir()
+    stale_loopx = stale_bin / "loopx"
+    stale_loopx.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' '{\"ok\":true,\"schema_version\":"
+        "\"repository_change_window_hook_runtime_v1\","
+        "\"supported_events\":[\"pre-commit\",\"pre-push\"]}'\n",
+        encoding="utf-8",
+    )
+    stale_loopx.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{stale_bin}:{os.environ.get('PATH', '')}")
+
+    status = git_hook_provider_status(repo_path=repo)
+    assert status["ok"] is False
+    assert status["status"] == "drifted"
+    assert any(
+        item["check"] == "hook_runtime_contract"
+        and item["status"] == "incompatible"
+        for item in status["checks"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("legacy_schema", "legacy_enforcement", "managed_hook_names"),
+    [
+        ("repository_change_window_git_hook_state_v0", None, ["pre-commit", "pre-push"]),
+        (
+            "repository_change_window_git_hook_state_v1",
+            "reference_guard",
+            ["pre-commit", "pre-push", "reference-transaction"],
+        ),
+    ],
+)
+def test_pristine_legacy_provider_can_be_inspected_and_uninstalled_without_ssh_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    legacy_schema: str,
+    legacy_enforcement: str | None,
+    managed_hook_names: list[str],
+) -> None:
+    repo = _repository(tmp_path, monkeypatch)
+    prior_ssh = tmp_path / "prior-ssh"
+    prior_ssh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    prior_ssh.chmod(0o755)
+    _git(repo, "config", "--local", "core.sshCommand", str(prior_ssh))
+    install_git_hook_provider(
+        repo_path=repo,
+        policy=_weekday_policy(),
+        enforcement_level=(
+            EnforcementLevel.REFERENCE_GUARD
+            if legacy_enforcement == "reference_guard"
+            else EnforcementLevel.HOOK_ONLY
+        ),
+        execute=True,
+    )
+    _rewrite_provider_as_legacy(
+        repo,
+        schema_version=legacy_schema,
+        enforcement_level=legacy_enforcement,
+        managed_hook_names=managed_hook_names,
+        preserved_ssh_command=prior_ssh,
+    )
+
+    status = git_hook_provider_status(repo_path=repo)
+    assert status["ok"] is False
+    assert status["status"] == "drifted"
+    assert any(
+        item["check"] == "provider_schema"
+        and item["status"] == "migration_required"
+        for item in status["checks"]
+    )
+    assert all(
+        item["ok"]
+        for item in status["checks"]
+        if item["check"] not in {"provider_schema", "hook_runtime_contract"}
+    )
+
+    preview = uninstall_git_hook_provider(repo_path=repo)
+    assert preview["status"] == "preview"
+    assert preview["installed_state_schema_version"] == legacy_schema
+    assert preview["restores_previous_ssh_route"] is False
+    removed = uninstall_git_hook_provider(repo_path=repo, execute=True)
+    assert removed["status"] == "uninstalled"
+    assert _git(repo, "config", "--local", "--get", "core.sshCommand") == str(
+        prior_ssh
+    )
+
+
+def test_reference_guard_v1_migration_preserves_original_ssh_route(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repository(tmp_path, monkeypatch)
+    prior_ssh = tmp_path / "prior-ssh"
+    prior_ssh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    prior_ssh.chmod(0o755)
+    _git(repo, "config", "--local", "core.sshCommand", str(prior_ssh))
+    install_git_hook_provider(
+        repo_path=repo,
+        policy=_weekday_policy(),
+        enforcement_level=EnforcementLevel.REFERENCE_GUARD,
+        execute=True,
+    )
+    _rewrite_provider_as_legacy(
+        repo,
+        schema_version="repository_change_window_git_hook_state_v1",
+        enforcement_level="reference_guard",
+        managed_hook_names=["pre-commit", "pre-push", "reference-transaction"],
+        preserved_ssh_command=prior_ssh,
+    )
+
+    replaced = install_git_hook_provider(
+        repo_path=repo,
+        policy=_weekday_policy(),
+        enforcement_level=EnforcementLevel.REFERENCE_GUARD,
+        replace=True,
+        execute=True,
+    )
+    assert replaced["status"] == "installed"
+    assert git_hook_provider_status(repo_path=repo)["status"] == "ready"
+    managed_ssh = _git(repo, "config", "--local", "--get", "core.sshCommand")
+    assert managed_ssh != str(prior_ssh)
+
+    uninstall_git_hook_provider(repo_path=repo, execute=True)
+    assert _git(repo, "config", "--local", "--get", "core.sshCommand") == str(
+        prior_ssh
+    )
+
+
+def test_hook_runtime_contract_is_typed_and_complete() -> None:
+    assert hook_runtime_contract() == {
+        "ok": True,
+        "schema_version": "repository_change_window_hook_runtime_v1",
+        "supported_events": [
+            "pre-commit",
+            "pre-push",
+            "reference-transaction",
+            "ssh-transport",
+        ],
+    }
 
 
 def test_pending_change_ledger_is_restart_safe_idempotent_and_path_free(
@@ -275,6 +641,7 @@ def test_pending_change_ledger_is_restart_safe_idempotent_and_path_free(
     assert automatic_refresh["record"]["goal_id"] == "example-goal"
     assert automatic_refresh["record"]["todo_id"] == "todo_example123"
     assert automatic_refresh["record"]["write_scopes"] == ["loopx/**", "tests/**"]
+    assert automatic_refresh["duplicate"] is True
 
     restarted_read = list_pending_changes(runtime_root=runtime_root)
     assert restarted_read["count"] == 1
@@ -295,6 +662,11 @@ def test_pending_change_ledger_is_restart_safe_idempotent_and_path_free(
     assert drifted["status"] == "drifted"
     assert any(
         item["check"] == "worktree_fingerprint" and item["status"] == "changed"
+        for item in drifted["checks"]
+    )
+    assert any(
+        item["check"] == "private_changed_path_inventory"
+        and item["status"] == "changed"
         for item in drifted["checks"]
     )
     refreshed = record_pending_change(
@@ -367,6 +739,153 @@ def test_pending_change_ledger_is_restart_safe_idempotent_and_path_free(
     )
 
 
+def test_pending_change_ledger_tracks_detached_worktree_without_public_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repository(tmp_path, monkeypatch)
+    detached = tmp_path / "detached-pending"
+    _git(repo, "worktree", "add", "--detach", str(detached), "HEAD")
+    runtime_root = tmp_path / "runtime"
+
+    recorded = record_pending_change(
+        runtime_root=runtime_root,
+        repo_path=detached,
+        decision={"allowed": False, "reason": "test_gate"},
+        source="manual_cli",
+        goal_id="example-goal",
+        todo_id="todo_detached123",
+        execute=True,
+    )
+    record = recorded["record"]
+    assert record["checkout_kind"] == "detached"
+    assert str(record["checkout_id"]).startswith("worktree_")
+    assert record["branch"] is None
+    assert str(tmp_path) not in json.dumps(record, sort_keys=True)
+    assert (
+        verify_pending_change(
+            runtime_root=runtime_root,
+            change_id=record["change_id"],
+        )["status"]
+        == "verified"
+    )
+
+    (detached / "tracked.txt").write_text("detached draft\n", encoding="utf-8")
+    drifted = verify_pending_change(
+        runtime_root=runtime_root,
+        change_id=record["change_id"],
+    )
+    assert drifted["status"] == "drifted"
+    assert any(
+        item["check"] == "worktree_fingerprint" and item["status"] == "changed"
+        for item in drifted["checks"]
+    )
+
+
+def test_reconcile_repairs_dirty_linked_worktrees_and_keeps_paths_private(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repository(tmp_path, monkeypatch)
+    linked = tmp_path / "linked-dirty"
+    detached = tmp_path / "detached-dirty"
+    _git(repo, "worktree", "add", "-b", "feature/reconcile", str(linked))
+    _git(repo, "worktree", "add", "--detach", str(detached), "HEAD")
+    (linked / "tracked.txt").write_text("linked draft\n", encoding="utf-8")
+    (detached / "detached-note.txt").write_text("detached draft\n", encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    decision = evaluate_policy(
+        _weekday_policy(),
+        now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+    )
+
+    bounded = reconcile_pending_changes(
+        runtime_root=runtime_root,
+        repo_path=repo,
+        decision=decision,
+    )
+    assert bounded["scope"] == "current"
+    assert bounded["scanned_worktree_count"] == 1
+    assert bounded["dirty_worktree_count"] == 0
+
+    preview = reconcile_pending_changes(
+        runtime_root=runtime_root,
+        repo_path=repo,
+        decision=decision,
+        include_linked_worktrees=True,
+    )
+    assert preview["status"] == "reconcile_preview"
+    assert preview["scanned_worktree_count"] == 3
+    assert preview["clean_worktree_count"] == 1
+    assert preview["dirty_worktree_count"] == 2
+    assert list_pending_changes(runtime_root=runtime_root)["count"] == 0
+
+    executed = reconcile_pending_changes(
+        runtime_root=runtime_root,
+        repo_path=repo,
+        decision=decision,
+        include_linked_worktrees=True,
+        execute=True,
+        now=datetime(2026, 8, 18, 4, 0, tzinfo=timezone.utc),
+    )
+    assert executed["ok"] is True
+    assert executed["changed_count"] == 2
+    assert executed["error_count"] == 0
+    projection = list_pending_changes(runtime_root=runtime_root)
+    assert projection["count"] == 2
+    serialized_public = json.dumps(
+        {"reconcile": executed, "projection": projection}, sort_keys=True
+    )
+    assert str(tmp_path) not in serialized_public
+    assert "tracked.txt" not in serialized_public
+    assert "detached-note.txt" not in serialized_public
+    assert all(item["changed_path_count"] == 1 for item in projection["changes"])
+
+    locators = json.loads(
+        (
+            runtime_root / "repository-change-window" / "pending-change-locators.json"
+        ).read_text(encoding="utf-8")
+    )["changes"]
+    private_paths = {
+        path for locator in locators.values() for path in locator["changed_paths"]
+    }
+    assert private_paths == {"tracked.txt", "detached-note.txt"}
+    assert {locator["worktree_path"] for locator in locators.values()} == {
+        str(linked),
+        str(detached),
+    }
+    verified = verify_pending_change(
+        runtime_root=runtime_root,
+        change_id=projection["changes"][0]["change_id"],
+    )
+    assert any(
+        item["check"] == "private_changed_path_inventory"
+        and item["status"] == "unchanged"
+        for item in verified["checks"]
+    )
+
+    repeated = reconcile_pending_changes(
+        runtime_root=runtime_root,
+        repo_path=detached,
+        decision=decision,
+        include_linked_worktrees=True,
+        execute=True,
+        now=datetime(2026, 8, 18, 4, 1, tzinfo=timezone.utc),
+    )
+    assert repeated["changed_count"] == 0
+    assert repeated["duplicate_count"] == 2
+    assert list_pending_changes(runtime_root=runtime_root)["count"] == 2
+
+    allowed = reconcile_pending_changes(
+        runtime_root=runtime_root,
+        repo_path=repo,
+        decision={"allowed": True, "reason": "outside_blocked_window"},
+        execute=True,
+    )
+    assert allowed["status"] == "window_open_noop"
+    assert allowed["scanned_worktree_count"] == 0
+
+
 def test_verify_detects_missing_branch_and_worktree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -427,7 +946,12 @@ def test_verify_detects_branch_movement(
     )
     (repo / "tracked.txt").write_text("advanced\n", encoding="utf-8")
     _git(repo, "add", "tracked.txt")
-    _git(repo, "commit", "-m", "advance")
+    previous = _git(repo, "rev-parse", "HEAD")
+    tree = _git(repo, "write-tree")
+    advanced = _git(repo, "commit-tree", tree, "-p", previous, "-m", "advance")
+    (repo / ".git" / "refs" / "heads" / "main").write_text(
+        f"{advanced}\n", encoding="ascii"
+    )
 
     result = verify_pending_change(
         runtime_root=runtime_root,

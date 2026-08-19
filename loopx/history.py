@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,7 @@ from .control_plane.runtime.run_index_rebuild import (
     collision_review_groups,
     validate_reviewed_collision_plan,
 )
-from .control_plane.runtime.time import now_local_iso
+from .control_plane.runtime.time import now_local_iso, parse_timestamp
 from .doctor import PROMOTION_READINESS_CLASSIFICATIONS
 from .execution_profile import compact_execution_profile
 from .explore_graph import compact_explore_graph_policy
@@ -63,6 +64,24 @@ REGISTRY_ATTENTION_FIELDS = (
 
 def now_local() -> str:
     return now_local_iso()
+
+
+_MIN_TIMESTAMP = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _chronology_key(value: Any) -> tuple[int, datetime, str]:
+    """Return a UTC-aware ordering key while keeping legacy rows deterministic."""
+
+    raw = str(value or "")
+    try:
+        parsed = parse_timestamp(value)
+    except OverflowError:
+        # UTC conversion can overflow at datetime's representable boundaries.
+        parsed = None
+    if parsed is None:
+        # Malformed or missing legacy rows must never outrank valid timestamps.
+        return (0, _MIN_TIMESTAMP, raw)
+    return (1, parsed, raw)
 
 
 def unique_run_paths(runs_dir: Path, generated_at: str) -> tuple[Path, Path]:
@@ -223,7 +242,10 @@ def collect_history(
             run
             for _, run in sorted(
                 enumerate(runs),
-                key=lambda item: (str(item[1].get("generated_at") or ""), item[0]),
+                key=lambda item: (
+                    *_chronology_key(item[1].get("generated_at")),
+                    item[0],
+                ),
                 reverse=True,
             )
         ]
@@ -271,7 +293,9 @@ def collect_history(
                     goal_record[field] = meta.get(field)
         goals.append(goal_record)
 
-    all_runs.sort(key=lambda item: str(item.get("generated_at") or ""), reverse=True)
+    all_runs.sort(
+        key=lambda item: _chronology_key(item.get("generated_at")), reverse=True
+    )
     return {
         "ok": True,
         "registry": str(registry_path),

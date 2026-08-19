@@ -84,6 +84,17 @@ def heartbeat_receipt_settlement_todo_id(
     return identity[1]
 
 
+def heartbeat_receipt_settlement_replan_obligation_id(
+    event: Mapping[str, object],
+) -> str | None:
+    """Return the autonomous replan bound to a committed heartbeat receipt."""
+
+    identity = _receipt_settlement_identity(event)
+    if identity is None or identity[0] is not SettlementBindingKind.AUTONOMOUS_REPLAN:
+        return None
+    return identity[1]
+
+
 def _effective_heartbeat_receipt(
     events: list[dict[str, object]],
 ) -> dict[str, object] | None:

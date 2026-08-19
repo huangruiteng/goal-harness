@@ -238,6 +238,7 @@ def _command_strings(function_name: str, raw_arguments: object) -> tuple[str, ..
 
 
 def _shell_segments(command: str) -> tuple[tuple[str, ...], ...]:
+    command = _without_shell_heredoc_bodies(command)
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|\n")
         lexer.whitespace = " \t\r"
@@ -258,6 +259,67 @@ def _shell_segments(command: str) -> tuple[tuple[str, ...], ...]:
     if current:
         segments.append(tuple(current))
     return tuple(segments)
+
+
+def _heredoc_delimiters(command_line: str) -> tuple[tuple[str, bool], ...]:
+    """Return quoted-normalized heredoc delimiters declared by one shell line."""
+
+    try:
+        lexer = shlex.shlex(command_line, posix=True, punctuation_chars=";&|\n<>")
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return ()
+
+    delimiters: list[tuple[str, bool]] = []
+    index = 0
+    while index < len(tokens):
+        if tokens[index] != "<<":
+            index += 1
+            continue
+        index += 1
+        strip_tabs = index < len(tokens) and tokens[index] == "-"
+        if strip_tabs:
+            index += 1
+        if index >= len(tokens):
+            break
+        delimiter = tokens[index]
+        if not strip_tabs and delimiter.startswith("-") and len(delimiter) > 1:
+            # ``shlex`` returns ``-EOF`` for the ordinary ``<<-EOF`` spelling.
+            strip_tabs = True
+            delimiter = delimiter[1:]
+        if delimiter and all(character not in ";&|\n<>" for character in delimiter):
+            delimiters.append((delimiter, strip_tabs))
+        index += 1
+    return tuple(delimiters)
+
+
+def _without_shell_heredoc_bodies(command: str) -> str:
+    """Exclude stdin payloads from shell-command classification.
+
+    Patch and file-generation tools commonly receive source text through a
+    heredoc.  That payload is data, not a sequence of shell commands, so a
+    source line such as ``env := value`` must not be classified as an executed
+    ``env`` credential probe.  Command lines before and after the payload stay
+    visible to the classifier.
+    """
+
+    visible_lines: list[str] = []
+    pending: list[tuple[str, bool]] = []
+    for raw_line in command.splitlines(keepends=True):
+        if pending:
+            delimiter, strip_tabs = pending[0]
+            candidate = raw_line.rstrip("\r\n")
+            if strip_tabs:
+                candidate = candidate.lstrip("\t")
+            if candidate == delimiter:
+                pending.pop(0)
+            continue
+        visible_lines.append(raw_line)
+        pending.extend(_heredoc_delimiters(raw_line))
+    return "".join(visible_lines)
 
 
 def _shell_executable(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:

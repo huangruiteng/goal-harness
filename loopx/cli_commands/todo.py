@@ -546,9 +546,15 @@ def register_todo_command(
     )
     todo_parser.add_argument(
         "--limit",
-        dest="suggestion_limit",
+        dest="todo_limit",
         type=int,
-        help="For todo suggest, maximum candidate count. Values above 5 are clamped to 5.",
+        help=(
+            "For todo suggest, maximum candidate count; values above 5 are "
+            "clamped to 5. For todo list, explicit per-section cold-path cap: "
+            "keep the top N todos of each role section after filtering; must "
+            "be an integer >= 1, and the payload discloses the truncation via "
+            "explicit_limit."
+        ),
     )
     todo_parser.add_argument(
         "--trigger",
@@ -601,6 +607,7 @@ def handle_todo_command(
                 status=args.status,
                 todo_id=args.todo_id,
                 agent_id=args.agent_id,
+                limit=args.todo_limit,
                 **_todo_path_args(args),
                 runtime_root_arg=runtime_root_arg,
             )
@@ -852,7 +859,7 @@ def handle_todo_command(
                 project=Path(args.project).expanduser() if args.project else None,
                 agent_id=args.agent_id,
                 sources=args.suggestion_sources,
-                limit=args.suggestion_limit,
+                limit=args.todo_limit,
                 trigger=args.suggestion_trigger,
             )
             payload["dry_run"] = True
