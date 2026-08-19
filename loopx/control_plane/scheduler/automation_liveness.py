@@ -36,6 +36,20 @@ def build_automation_liveness(payload: dict[str, Any]) -> dict[str, Any]:
             "stuck for two more eligible turns"
         ),
     }
+    if recommended_mode == "goal_stopped":
+        return {
+            **base,
+            "keep_active": False,
+            "pause_allowed": True,
+            "pause_policy": (
+                "pause or delete the recurring automation now; only an explicit "
+                "Goal lifecycle resume should recreate or resume it"
+            ),
+            "automation_action": "stop_goal_stopped",
+            "reason": "Goal lifecycle is stopped by owner",
+            "next_trigger": "explicit Goal lifecycle resume",
+            "spend_policy": "no quota spend for stopped-Goal automation shutdown",
+        }
     if recommended_mode == "quota_paused":
         return {
             **base,

@@ -44,31 +44,12 @@ class ChatGoalLifecycleActionMixin:
             else GoalActivationState.ACTIVE
         )
         current_state = goal_activation_state(self._goal(goal_id))
-        if current_state is target_state and current_fingerprint != proposal.get(
-            "expected_state_fingerprint"
-        ):
-            receipt = {
-                "receipt_id": _digest(
-                    {
-                        "proposal_id": proposal_id,
-                        "goal_id": goal_id,
-                        "operation": operation,
-                    }
-                )[:32],
-                "outcome": f"goal_already_{target_state.value}",
-                "projection_verified": True,
-                "resource_ids": {
-                    "goal_id": goal_id,
-                    "activation_state": target_state.value,
-                },
-            }
-            stored = self.store.apply(
-                proposal_id,
-                current_state_fingerprint=str(proposal["expected_state_fingerprint"]),
-                receipt=receipt,
-            )
-            return {"proposal": stored, "turn": None}
-        if current_fingerprint != proposal.get("expected_state_fingerprint"):
+        expected_fingerprint = str(proposal.get("expected_state_fingerprint") or "")
+        idempotent_reapply = (
+            current_state is target_state
+            and current_fingerprint != expected_fingerprint
+        )
+        if current_fingerprint != expected_fingerprint and not idempotent_reapply:
             stale = self.store.apply(
                 proposal_id,
                 current_state_fingerprint=current_fingerprint,
@@ -109,7 +90,9 @@ class ChatGoalLifecycleActionMixin:
         }
         stored = self.store.apply(
             proposal_id,
-            current_state_fingerprint=current_fingerprint,
+            current_state_fingerprint=(
+                expected_fingerprint if idempotent_reapply else current_fingerprint
+            ),
             receipt=receipt,
         )
         return {"proposal": stored, "turn": None}

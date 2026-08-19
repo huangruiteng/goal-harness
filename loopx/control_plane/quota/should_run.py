@@ -18,7 +18,11 @@ from ..quota.goal_boundary import (
 from ..quota.decision_summary import (
     quota_plan_items as _quota_plan_items,
 )
-from ..quota.states import quota_item_is_paused as _quota_item_is_paused
+from ..quota.states import (
+    AutomaticTurnPauseCause,
+    automatic_turn_pause_cause,
+    quota_item_is_paused as _quota_item_is_paused,
+)
 from ..scheduler.automation_liveness import build_automation_liveness
 from ..scheduler.execution_context import (
     SchedulerExecutionContextResolution,
@@ -40,6 +44,7 @@ from .should_run_prepare import _prepare_quota_should_run_item
 
 
 QUOTA_PAUSED_MODE = "quota_paused"
+GOAL_STOPPED_MODE = "goal_stopped"
 
 
 def build_quota_paused_should_run_payload(
@@ -55,28 +60,41 @@ def build_quota_paused_should_run_payload(
     codex_app_automation_id: Any = None,
     resolved_scheduler_context: SchedulerExecutionContextResolution,
 ) -> dict[str, Any]:
-    """Project one canonical paused contract with no contradicting lane authority.
+    """Project one canonical hard-pause contract with no lane contradiction.
 
-    The whole Goal is hard-paused, so every automatic authority field resolves to
-    the same terminal decision: `should_run=false`, all delivery/repair
-    permissions false, `DONT_NOTIFY`, no quota spend, and a scheduler cadence that
-    is never `run_now`. No capability_gate, workspace_guard, replan, monitor, or
-    inbox candidate is constructed here.
+    Whether the owner stopped the Goal lifecycle or set its compute quota to zero,
+    every automatic authority field resolves to `should_run=false`, all
+    delivery/repair permissions false, `DONT_NOTIFY`, no quota spend, and a
+    scheduler cadence that is never `run_now`. The typed pause cause preserves the
+    distinct resume authority for the host scheduler.
     """
 
     quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
     quota = {**quota, "state": "paused"}
+    pause_cause = automatic_turn_pause_cause(
+        {"quota": quota}
+    ) or AutomaticTurnPauseCause.COMPUTE_QUOTA_ZERO
+    goal_stopped = pause_cause is AutomaticTurnPauseCause.GOAL_STOPPED
+    recommended_mode = GOAL_STOPPED_MODE if goal_stopped else QUOTA_PAUSED_MODE
     reason = str(
         quota.get("reason")
-        or "compute quota is 0; the whole Goal is hard-paused and automatic agent turns stop"
+        or (
+            "goal is stopped by owner; automatic agent turns are paused"
+            if goal_stopped
+            else "compute quota is 0; automatic agent turns are paused"
+        )
     )
     agent_identity = build_quota_agent_identity(item, agent_id=requested_agent_id)
     heartbeat_recommendation = {
         "source": "quota.should-run",
-        "recommended_mode": QUOTA_PAUSED_MODE,
+        "recommended_mode": recommended_mode,
         "notify": "DONT_NOTIFY",
         "reason": reason,
-        "spend_policy": "do not append quota spend while the Goal is paused",
+        "spend_policy": (
+            "do not append quota spend while the Goal lifecycle is stopped"
+            if goal_stopped
+            else "do not append quota spend while compute quota is paused"
+        ),
     }
     execution_obligation = _execution_obligation(
         should_run=False,
@@ -99,6 +117,7 @@ def build_quota_paused_should_run_payload(
         "actionable_by_codex": False,
         "reason": reason,
         "quota": quota,
+        "pause_cause": pause_cause.value,
         "state": "paused",
         "safe_bypass_allowed": False,
         "waiting_on": item.get("waiting_on"),

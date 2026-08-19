@@ -168,7 +168,15 @@ It provides a unified, coherent experience for managing long-running agent Goals
   beside a Goal to preview and confirm a reversible stop; stopped Goals retain their
   Todos, history, and evidence in a collapsed **Stopped Goals** section and can be
   restored from the same section. Stopping a Goal pauses automatic Agent turns; it
-  does not mark the Goal complete or delete state. The equivalent CLI flow is:
+  does not mark the Goal complete or delete state. A stopped Goal leaves active
+  attention and projects zero effective quota, allowing the scheduler to stop host
+  automation such as a Codex App heartbeat while retaining the configured quota.
+  Goal stop and `quota.compute=0` share this shutdown path but keep distinct resume
+  authority: only Goal lifecycle resume may reactivate a stopped Goal, while an
+  explicit positive quota update resumes a quota pause. Stop does not force-kill an
+  in-flight tool call; the next `quota should-run` packet tells the host to pause or
+  delete the recurring heartbeat before another automatic turn. The equivalent CLI
+  flow is:
 
   ```bash
   loopx goal-lifecycle --goal-id <goal-id> --operation stop

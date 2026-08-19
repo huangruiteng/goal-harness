@@ -152,7 +152,8 @@ def set_goal_activation_state(
     if not execute:
         return payload
 
-    if changed and not _same_path(source_registry, target_registry):
+    registries_are_distinct = not _same_path(source_registry, target_registry)
+    if registries_are_distinct:
         writability = probe_registry_write_path(target_registry, create_parent=True)
         payload["global_registry_writability"] = writability
         if not writability.get("ok"):
@@ -195,7 +196,7 @@ def set_goal_activation_state(
             payload["written"] = True
 
     sync_payload: dict[str, Any] | None = None
-    if changed and not _same_path(source_registry, target_registry):
+    if registries_are_distinct:
         sync_payload = sync_project_registry_to_global(
             registry_path=source_registry,
             runtime_root_override=sync_runtime_root,
@@ -205,23 +206,26 @@ def set_goal_activation_state(
         payload["global_sync"] = sync_payload
 
     readback = (
-        _readback(
+        {
+            "schema_version": GOAL_ACTIVATION_READBACK_SCHEMA_VERSION,
+            "status": "not_run",
+            "verified": False,
+        }
+        if sync_payload is not None and not sync_payload.get("ok")
+        else _readback(
             source_registry=source_registry,
             target_registry=target_registry,
             goal_id=normalized_goal_id,
             expected_state=target_state,
         )
-        if sync_payload is None or sync_payload.get("ok")
-        else {
-            "schema_version": GOAL_ACTIVATION_READBACK_SCHEMA_VERSION,
-            "status": "not_run",
-            "verified": False,
-        }
     )
     payload["readback"] = readback
     sync_ok = sync_payload is None or bool(sync_payload.get("ok"))
     payload["ok"] = bool(sync_ok and readback.get("verified"))
     payload["partial_write"] = bool(payload["written"] and not payload["ok"])
+    payload["projection_reconciled"] = bool(
+        not changed and registries_are_distinct and readback.get("verified")
+    )
     if not payload["ok"]:
         payload["error"] = "goal activation shared registry readback did not verify"
         payload["recommended_action"] = (

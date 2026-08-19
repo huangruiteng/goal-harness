@@ -1003,19 +1003,34 @@ def build_scheduler_hint(
         }
 
     heartbeat_recommendation = _dict_or_empty(payload.get("heartbeat_recommendation"))
-    if heartbeat_recommendation.get("recommended_mode") == "quota_paused":
+    pause_mode = str(heartbeat_recommendation.get("recommended_mode") or "")
+    if pause_mode in {"goal_stopped", "quota_paused"}:
+        goal_stopped = pause_mode == "goal_stopped"
+        cadence_class = "goal_stopped" if goal_stopped else "quota_paused"
+        resume_trigger = (
+            "explicit Goal lifecycle resume"
+            if goal_stopped
+            else "explicit quota resume with quota.compute > 0"
+        )
         return apply_scheduler_execution_context(
             {
                 "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
                 "source": "quota.should-run",
                 "action": "stop_until_explicit_resume",
-                "cadence_class": "quota_paused",
-                "reason_code": "quota_paused",
+                "cadence_class": cadence_class,
+                "reason_code": cadence_class,
                 "reason": (
-                    "Goal-level compute quota is paused; recurring host automation "
+                    "Goal lifecycle is stopped by owner; recurring host automation "
+                    "must stop until the Goal is explicitly resumed"
+                    if goal_stopped
+                    else "Goal-level compute quota is paused; recurring host automation "
                     "must stop until quota.compute is explicitly raised above 0"
                 ),
-                "spend_policy": "no quota spend for paused automation shutdown",
+                "spend_policy": (
+                    "no quota spend for stopped-Goal automation shutdown"
+                    if goal_stopped
+                    else "no quota spend for paused automation shutdown"
+                ),
                 "codex_app": {
                     "apply": "pause_or_delete_current_heartbeat_if_possible",
                     "host_tool": "automation_update",
@@ -1024,7 +1039,7 @@ def build_scheduler_hint(
                     "attempt_limit": 1,
                     "verify_host_result": True,
                     "ack_required": False,
-                    "resume_trigger": "explicit quota resume with quota.compute > 0",
+                    "resume_trigger": resume_trigger,
                     "no_spend_for_host_action": True,
                 },
                 "unchanged_poll": {
@@ -1033,11 +1048,15 @@ def build_scheduler_hint(
                     CODEX_APP_SSH_GOAL_RUNTIME_KEY: "complete_host_goal",
                     "claude_code_loop": "stop",
                     "final_quota_replan_check_enabled": False,
-                    "spend_policy": "no quota spend while the Goal is paused",
+                    "spend_policy": (
+                        "no quota spend while the Goal lifecycle is stopped"
+                        if goal_stopped
+                        else "no quota spend while compute quota is paused"
+                    ),
                 },
                 "unchanged_identity_keys": list(
                     _scheduler_identity_keys(
-                        cadence_class="quota_paused",
+                        cadence_class=cadence_class,
                         execution_context=execution_context,
                     )
                 ),

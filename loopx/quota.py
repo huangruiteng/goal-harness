@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .control_plane import compact_control_plane_policy
+from .control_plane.goals.activation import goal_is_stopped
 from .execution_profile import (
     execution_profile_outcome_floor,
     outcome_floor_threshold,
@@ -59,7 +60,7 @@ from .control_plane.quota.slot_accounting import (
 from .control_plane.quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
 )
-from .control_plane.quota.states import QUOTA_STATE_ORDER
+from .control_plane.quota.states import AutomaticTurnPauseCause, QUOTA_STATE_ORDER
 from .control_plane.quota.policy_constants import (
     DEFAULT_COMPUTE_QUOTA,
     DEFAULT_SLOT_MINUTES,
@@ -92,9 +93,6 @@ from .control_plane.todos.projection import (
     todo_projection_sort_key as projection_todo_projection_sort_key,
     todo_summary_claim_scope_agent_id as projection_todo_summary_claim_scope_agent_id,
 )
-from .control_plane.goals.activation import goal_is_stopped
-
-
 _PUBLIC_COMPAT_REEXPORTS = {
     "AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS": "loopx.control_plane.quota.policy_constants",
     "MONITOR_DUE_ITEM_LIMIT": "loopx.control_plane.quota.policy_constants",
@@ -391,11 +389,20 @@ def quota_status(
     if goal_is_stopped(goal):
         state = "paused"
         reason = "goal is stopped by owner; automatic agent turns are paused"
+        # Stopping is an owner lifecycle decision, not a destructive quota edit.
+        # Project zero *effective* allocation while retaining the configured
+        # values so an explicit Goal resume restores the prior quota policy.
+        payload["configured_compute"] = compute
+        payload["configured_allowed_slots"] = allowed_slots
+        payload["compute"] = 0.0
+        payload["allowed_slots"] = 0
         payload["blocked_action_scope"] = "automatic_agent_turns"
         payload["goal_activation_state"] = "stopped"
+        payload["pause_cause"] = AutomaticTurnPauseCause.GOAL_STOPPED.value
     elif compute <= 0:
         state = "paused"
         reason = "compute quota is 0; automatic agent turns are paused"
+        payload["pause_cause"] = AutomaticTurnPauseCause.COMPUTE_QUOTA_ZERO.value
     elif severity == "high":
         state = "blocked_health"
         reason = "health or contract blocker must clear before compute is spent"
@@ -562,7 +569,19 @@ def _quota_plan_goal_quota(
         if isinstance(attention.get("quota"), dict)
         else goal.get("quota")
     )
-    if project_asset_quota:
+    if goal_is_stopped(goal):
+        # Stopped Goals intentionally have no attention-queue row. Re-derive
+        # the hard pause from run-history state before any legacy quota fallback
+        # can treat the Goal as waiting or eligible.
+        quota = quota_status(
+            goal,
+            waiting_on=waiting_on,
+            severity=str(attention.get("severity") or ""),
+            lifecycle_phase=lifecycle_phase,
+            lifecycle_flags=lifecycle_flags,
+            status=status,
+        )
+    elif project_asset_quota:
         raw_quota_base = raw_quota if isinstance(raw_quota, dict) else {}
         quota = {**raw_quota_base, **project_asset_quota}
     elif isinstance(raw_quota, dict):
