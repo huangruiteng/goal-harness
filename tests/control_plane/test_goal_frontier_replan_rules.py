@@ -18,6 +18,9 @@ from loopx.control_plane.goals.goal_frontier.replan_rules import (
 )
 from loopx.control_plane.todos.addition import require_replan_successor_scope
 from loopx.control_plane.todos.summary_item import compact_todo_summary_item
+from loopx.control_plane.work_items.interaction_contract import (
+    interaction_next_cli_actions,
+)
 
 
 @pytest.mark.parametrize(
@@ -165,6 +168,104 @@ def _advancement(todo_id: str, claimed_by: str) -> dict[str, object]:
         "task_class": "advancement_task",
         "claimed_by": claimed_by,
     }
+
+
+def test_todo_succession_gap_prefers_exact_lifecycle_settlement() -> None:
+    completed_items = [
+        {
+            "todo_id": "todo_111111111111",
+            "text": "Implement the bounded feature.",
+            "status": "done",
+            "task_class": "advancement_task",
+            "claimed_by": "current-agent",
+            "completion_turn_key": "turn-implement",
+        },
+        {
+            "todo_id": "todo_222222222222",
+            "text": "Validate the bounded feature.",
+            "status": "done",
+            "task_class": "advancement_task",
+            "claimed_by": "current-agent",
+            "completion_turn_key": "turn-validate",
+        },
+    ]
+    obligation = derive_goal_frontier_replan_obligation_from_summaries(
+        user_todo_summary={"open_count": 0},
+        agent_todo_summary={
+            "open_count": 0,
+            "current_agent_claimed_advancement_count": 0,
+            "todo_succession_warning": {
+                "reason_code": "completed_advancement_without_successor",
+                "count": len(completed_items),
+                "items": completed_items,
+            },
+        },
+        work_lane_contract=None,
+        agent_id="current-agent",
+        existing_replan_obligation=None,
+        acceptance_gaps=[],
+    )
+
+    assert obligation is not None
+    assert obligation["resolution_mode"] == "todo_lifecycle_settlement"
+    assert obligation["guidance_actions"][0] == "record_no_followup"
+    assert obligation["todo_actions"][0] == {
+        "action": "settle",
+        "role": "agent",
+        "priority": "P0",
+        "todo_ids": ["todo_111111111111", "todo_222222222222"],
+        "text": (
+            "settle the exact completed Todos through no-follow-up or link each "
+            "to a real runnable successor"
+        ),
+    }
+    assert "todo_111111111111, todo_222222222222" in obligation[
+        "recommended_action"
+    ]
+    assert "host-projected coverage ledger" not in obligation["recommended_action"]
+    assert obligation["replan_novelty_policy"]["writeback"] == (
+        "todo_lifecycle_or_typed_successor"
+    )
+    assert [trigger["completion_turn_key"] for trigger in obligation["triggers"]] == [
+        "turn-implement",
+        "turn-validate",
+    ]
+
+
+def test_todo_succession_gap_cli_actions_do_not_require_semantic_refresh() -> None:
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": "goal-example",
+            "agent_identity": {"agent_id": "current-agent"},
+            "autonomous_replan_obligation": {
+                "resolution_mode": "todo_lifecycle_settlement",
+                "triggers": [
+                    {
+                        "kind": "completed_advancement_without_successor",
+                        "todo_id": "todo_111111111111",
+                        "completion_turn_key": "turn-implement",
+                    },
+                    {
+                        "kind": "completed_advancement_without_successor",
+                        "todo_id": "todo_222222222222",
+                    },
+                ],
+            },
+        },
+        mode="autonomous_replan",
+        available_capabilities=["shell"],
+    )
+
+    assert "--todo-id todo_111111111111" in actions[0]
+    assert "--turn-instance-id turn-implement" in actions[0]
+    assert "--todo-id todo_222222222222" in actions[1]
+    assert "--turn-instance-id" not in actions[1]
+    assert all("refresh-state" not in action for action in actions)
+    assert all("spend-slot" not in action for action in actions)
+    assert actions[-1] == (
+        "loopx --format json quota should-run --goal-id goal-example "
+        "--agent-id current-agent --available-capability shell"
+    )
 
 
 @pytest.mark.parametrize("other_agent_count", [1, 2, 8])
