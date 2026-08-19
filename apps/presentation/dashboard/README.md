@@ -141,6 +141,11 @@ LoopX services are already running separately. Vite proxies the default
 `/status.json` request to port `8766`, so an SSH user only needs to forward port
 `5173` for the normal development page.
 
+Both the root dashboard and the packaged `/chat/` route expose the same
+installable PWA manifest and icons. The default `loopx dashboard` command opens
+`/chat/`; its manifest therefore scopes the installed app to `/chat/`. This is
+an installable standalone surface, not an offline-cache service worker.
+
 The live `/status.json` route keeps repository-wide public-boundary scanning
 out of the first-screen request. Its contract projection reports that scan as
 deferred; run `loopx check` before publishing or pushing public surfaces to
