@@ -47,7 +47,9 @@ the repository-local `core.sshCommand` route. In a blocked window it rejects a
 `git commit --no-verify`. The `pre-push` hook covers ordinary pushes, while the
 SSH route also rejects an SSH push that uses `--no-verify`. Checkout,
 linked-worktree creation, branch deletion, SSH fetches, and local branch
-creation at a commit already reachable from another ref stay available.
+creation at a commit already reachable from another local branch or the current
+`HEAD` stays available. Tags, notes, and custom refs do not make a new commit
+eligible for a local-branch update during the blocked window.
 Unknown SSH service commands fail closed. `status` and `verify` report the
 typed enforcement level, exact managed hook set, and SSH-route health.
 

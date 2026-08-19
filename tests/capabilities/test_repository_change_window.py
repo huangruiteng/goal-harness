@@ -82,6 +82,40 @@ def _weekday_policy():
     )
 
 
+def _rewrite_provider_as_legacy(
+    repo: Path,
+    *,
+    schema_version: str,
+    enforcement_level: str | None,
+    managed_hook_names: list[str],
+    preserved_ssh_command: Path,
+) -> None:
+    common_dir = Path(_git(repo, "rev-parse", "--git-common-dir"))
+    if not common_dir.is_absolute():
+        common_dir = (repo / common_dir).resolve()
+    provider_dir = common_dir / "loopx" / "repository-change-window"
+    state_path = provider_dir / "provider.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["schema_version"] = schema_version
+    if enforcement_level is None:
+        state.pop("enforcement_level", None)
+    else:
+        state["enforcement_level"] = enforcement_level
+    for field in (
+        "previous_ssh_local_override",
+        "previous_ssh_local_value",
+        "previous_ssh_command",
+        "ssh_command_digest",
+    ):
+        state.pop(field, None)
+    state["hook_digests"] = {
+        name: state["hook_digests"][name] for name in managed_hook_names
+    }
+    state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    (provider_dir / "ssh-command").unlink(missing_ok=True)
+    _git(repo, "config", "--local", "core.sshCommand", str(preserved_ssh_command))
+
+
 def test_policy_uses_typed_timezone_boundaries_and_internal_fake_clock() -> None:
     policy = _weekday_policy()
 
@@ -286,6 +320,23 @@ def test_reference_guard_uses_fake_clock_and_shared_linked_worktree_state(
     assert blocked["status"] == "blocked_by_policy"
     assert blocked["pending_change"]["changed"] is True
 
+    for staged_ref in (
+        "refs/tags/staged-candidate",
+        "refs/notes/staged-candidate",
+        "refs/loopx/staged-candidate",
+    ):
+        _git(linked, "update-ref", staged_ref, new_oid)
+        staged = run_git_hook_provider(
+            repo_path=linked,
+            runtime_root=runtime_root,
+            event="reference-transaction",
+            hook_args=("prepared",),
+            hook_stdin=f"{old_oid} {new_oid} refs/heads/feature/guard\n".encode(),
+            now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+        )
+        assert staged["status"] == "blocked_by_policy"
+        assert staged["guarded_change"] is True
+
     blocked_ssh = run_git_hook_provider(
         repo_path=linked,
         runtime_root=runtime_root,
@@ -395,6 +446,72 @@ def test_provider_detects_incompatible_hook_runtime(
     )
 
 
+@pytest.mark.parametrize(
+    ("legacy_schema", "legacy_enforcement", "managed_hook_names"),
+    [
+        ("repository_change_window_git_hook_state_v0", None, ["pre-commit", "pre-push"]),
+        (
+            "repository_change_window_git_hook_state_v1",
+            "reference_guard",
+            ["pre-commit", "pre-push", "reference-transaction"],
+        ),
+    ],
+)
+def test_pristine_legacy_provider_can_be_inspected_and_uninstalled_without_ssh_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    legacy_schema: str,
+    legacy_enforcement: str | None,
+    managed_hook_names: list[str],
+) -> None:
+    repo = _repository(tmp_path, monkeypatch)
+    prior_ssh = tmp_path / "prior-ssh"
+    prior_ssh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    prior_ssh.chmod(0o755)
+    _git(repo, "config", "--local", "core.sshCommand", str(prior_ssh))
+    install_git_hook_provider(
+        repo_path=repo,
+        policy=_weekday_policy(),
+        enforcement_level=(
+            EnforcementLevel.REFERENCE_GUARD
+            if legacy_enforcement == "reference_guard"
+            else EnforcementLevel.HOOK_ONLY
+        ),
+        execute=True,
+    )
+    _rewrite_provider_as_legacy(
+        repo,
+        schema_version=legacy_schema,
+        enforcement_level=legacy_enforcement,
+        managed_hook_names=managed_hook_names,
+        preserved_ssh_command=prior_ssh,
+    )
+
+    status = git_hook_provider_status(repo_path=repo)
+    assert status["ok"] is False
+    assert status["status"] == "drifted"
+    assert any(
+        item["check"] == "provider_schema"
+        and item["status"] == "migration_required"
+        for item in status["checks"]
+    )
+    assert all(
+        item["ok"]
+        for item in status["checks"]
+        if item["check"] not in {"provider_schema", "hook_runtime_contract"}
+    )
+
+    preview = uninstall_git_hook_provider(repo_path=repo)
+    assert preview["status"] == "preview"
+    assert preview["installed_state_schema_version"] == legacy_schema
+    assert preview["restores_previous_ssh_route"] is False
+    removed = uninstall_git_hook_provider(repo_path=repo, execute=True)
+    assert removed["status"] == "uninstalled"
+    assert _git(repo, "config", "--local", "--get", "core.sshCommand") == str(
+        prior_ssh
+    )
+
+
 def test_reference_guard_v1_migration_preserves_original_ssh_route(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -410,13 +527,13 @@ def test_reference_guard_v1_migration_preserves_original_ssh_route(
         enforcement_level=EnforcementLevel.REFERENCE_GUARD,
         execute=True,
     )
-    common_dir = Path(_git(repo, "rev-parse", "--git-common-dir"))
-    if not common_dir.is_absolute():
-        common_dir = (repo / common_dir).resolve()
-    state_path = common_dir / "loopx" / "repository-change-window" / "provider.json"
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    state["schema_version"] = "repository_change_window_git_hook_state_v1"
-    state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    _rewrite_provider_as_legacy(
+        repo,
+        schema_version="repository_change_window_git_hook_state_v1",
+        enforcement_level="reference_guard",
+        managed_hook_names=["pre-commit", "pre-push", "reference-transaction"],
+        preserved_ssh_command=prior_ssh,
+    )
 
     replaced = install_git_hook_provider(
         repo_path=repo,
@@ -426,6 +543,10 @@ def test_reference_guard_v1_migration_preserves_original_ssh_route(
         execute=True,
     )
     assert replaced["status"] == "installed"
+    assert git_hook_provider_status(repo_path=repo)["status"] == "ready"
+    managed_ssh = _git(repo, "config", "--local", "--get", "core.sshCommand")
+    assert managed_ssh != str(prior_ssh)
+
     uninstall_git_hook_provider(repo_path=repo, execute=True)
     assert _git(repo, "config", "--local", "--get", "core.sshCommand") == str(
         prior_ssh

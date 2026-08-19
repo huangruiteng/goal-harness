@@ -137,6 +137,18 @@ def _state_enforcement_level(state: Mapping[str, Any]) -> EnforcementLevel:
     )
 
 
+def _state_manages_ssh_transport(state: Mapping[str, Any]) -> bool:
+    """Return whether this state schema owns the repository SSH route.
+
+    State v0 only managed pre-commit/pre-push. State v1 added the typed hook
+    enforcement level, including reference-transaction, but still did not own
+    core.sshCommand. State v2 is the first schema that persists enough
+    information to restore the SSH route safely.
+    """
+
+    return state.get("schema_version") == PROVIDER_STATE_SCHEMA_VERSION
+
+
 def _provider_dir(common_dir: Path) -> Path:
     return common_dir / PROVIDER_RELATIVE_DIR
 
@@ -382,7 +394,28 @@ def _provider_checks(
     configured_ssh = git_text(
         repo, "config", "--local", "--get", "core.sshCommand", check=False
     )
-    if enforcement is EnforcementLevel.REFERENCE_GUARD:
+    if not _state_manages_ssh_transport(state):
+        command_absent = not ssh_command.exists() and not ssh_command.is_symlink()
+        route_unowned = configured_ssh != str(ssh_command)
+        checks.extend(
+            [
+                {
+                    "check": "legacy_ssh-command:absent",
+                    "ok": command_absent,
+                    "status": (
+                        "not_managed" if command_absent else "unexpected_managed_command"
+                    ),
+                },
+                {
+                    "check": "legacy_local_core_ssh_command:unowned",
+                    "ok": route_unowned,
+                    "status": (
+                        "not_managed" if route_unowned else "ambiguous_managed_route"
+                    ),
+                },
+            ]
+        )
+    elif enforcement is EnforcementLevel.REFERENCE_GUARD:
         expected_ssh_digest = state.get("ssh_command_digest")
         actual_ssh_digest = (
             hashlib.sha256(ssh_command.read_bytes()).hexdigest()
@@ -699,7 +732,8 @@ def uninstall_git_hook_provider(
         state=state,
         include_runtime=False,
     )
-    if not all(bool(item["ok"]) for item in checks):
+    asset_checks = [item for item in checks if item["check"] != "provider_schema"]
+    if not all(bool(item["ok"]) for item in asset_checks):
         raise RepositoryChangeWindowError(
             "provider drift detected; uninstall will not overwrite modified hook state"
         )
@@ -724,7 +758,8 @@ def uninstall_git_hook_provider(
                 raise RepositoryChangeWindowError(
                     "failed to remove the managed local core.hooksPath override"
                 )
-        _restore_local_ssh_command(context.root, state)
+        if _state_manages_ssh_transport(state):
+            _restore_local_ssh_command(context.root, state)
         shutil.rmtree(_provider_dir(context.common_dir))
     return {
         "ok": True,
@@ -735,8 +770,27 @@ def uninstall_git_hook_provider(
         "repository_id": context.repository_id,
         "provider_id": "git-hook",
         "restores_previous_hook_route": True,
+        "restores_previous_ssh_route": _state_manages_ssh_transport(state),
+        "installed_state_schema_version": state.get("schema_version"),
         "contains_personal_path": False,
     }
+
+
+def _commit_reachable_from_existing_branch_or_head(repo: Path, oid: str) -> bool:
+    containing_branches = git_text(
+        repo,
+        "for-each-ref",
+        f"--contains={oid}",
+        "--format=%(refname)",
+        "refs/heads",
+        check=False,
+    )
+    if containing_branches:
+        return True
+    return bool(
+        git(repo, "merge-base", "--is-ancestor", oid, "HEAD", check=False).returncode
+        == 0
+    )
 
 
 def _reference_transaction_introduces_commit(
@@ -778,15 +832,7 @@ def _reference_transaction_introduces_commit(
             continue
         if git_text(repo, "cat-file", "-t", new_oid, check=False) != "commit":
             continue
-        containing_refs = git_text(
-            repo,
-            "for-each-ref",
-            f"--contains={new_oid}",
-            "--format=%(refname)",
-            "refs",
-            check=False,
-        )
-        if not containing_refs:
+        if not _commit_reachable_from_existing_branch_or_head(repo, new_oid):
             return True
     return False
 
