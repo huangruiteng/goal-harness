@@ -37,6 +37,32 @@ to hand off across turns, tools, and agents.
 - **Getting started** - install, connect a project, and run your first governed loop. [Guide](docs/guides/getting-started.md)
 - **Docs** - the full reference and operations site. [LoopX Docs](https://huangruiteng.github.io/loopx/docs/)
 
+## Meet the Personal Agent Workspace
+
+Turn scattered agent sessions into one local-first workspace for Goals,
+attention, conversations, tasks, files, schedules, and recovery.
+
+<a href="docs/assets/personal-workspace/loopx-dashboard-launch.mp4">
+  <img src="docs/assets/personal-workspace/loopx-dashboard-tour.webp" alt="Animated tour of the LoopX personal Agent workspace, from one-command launch to Manager overview, Goal task board, protected action preview, and Goal details" width="960">
+</a>
+
+The workspace gives you one place to:
+
+- see what needs you, what is running, what is being watched, and what is
+  scheduled or stopped;
+- continue across Codex, Claude Code, direct-model, and other registered Agent
+  sessions without losing Goal state or evidence;
+- review protected changes through typed preview, explicit confirmation, and
+  receipts while LoopX state—not the browser—remains authoritative.
+
+```bash
+loopx dashboard
+```
+
+[Watch the full 32-second walkthrough](docs/assets/personal-workspace/loopx-dashboard-launch.mp4)
+· [Read the workspace guide](docs/guides/personal-workspace-user-guide.md)
+· [Try the five-minute tour](docs/guides/personal-workspace-trial-guide.md)
+
 <a id="how-it-works"></a>
 
 ## Why LoopX

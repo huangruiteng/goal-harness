@@ -33,6 +33,31 @@ LoopX 是开放且 Provider-neutral 的轻量 state kernel，也是 local-first
 - **快速开始** - 安装、连接项目并运行第一个受治理的 Loop。[指南](docs/guides/getting-started.md)
 - **文档站** - 完整参考与运维文档。[LoopX Docs](https://huangruiteng.github.io/loopx/docs/)
 
+## 认识个人 Agent 工作区
+
+把分散的 Agent 会话收进同一个 local-first 工作区，统一管理 Goal、待关注事项、
+对话、任务、文件、定时计划与恢复状态。
+
+<a href="docs/assets/personal-workspace/loopx-dashboard-launch.mp4">
+  <img src="docs/assets/personal-workspace/loopx-dashboard-tour.webp" alt="LoopX 个人 Agent 工作区动画导览：从一键启动，到管家总览、Goal 任务看板、受保护操作预览和 Goal 详情" width="960">
+</a>
+
+你可以在一个页面中：
+
+- 看清哪些事项正在等你、执行中、观察中、已安排或已停止；
+- 在 Codex、Claude Code、direct-model 等已注册 Agent 会话之间延续工作，
+  不丢失 Goal 状态与证据；
+- 通过 typed preview、显式确认与 receipt 审阅受保护变更；浏览器只负责投影，
+  LoopX state 始终是权威事实源。
+
+```bash
+loopx dashboard
+```
+
+[观看 32 秒完整演示](docs/assets/personal-workspace/loopx-dashboard-launch.mp4)
+· [阅读工作区指南](docs/guides/personal-workspace-user-guide.md)
+· [开始五分钟体验](docs/guides/personal-workspace-trial-guide.md)
+
 ## 为什么需要 LoopX
 
 一个 agent 可以在单次会话里完成任务。长程工作更难：目标会变化，用户决策会出现，
