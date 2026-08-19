@@ -109,15 +109,15 @@ def register_capability_commands(
     _add_extension_manifest_argument(show_parser)
     invoke_parser = capability_sub.add_parser(
         "invoke",
-        help="Preview or run one external capability inside an admitted Turn.",
+        help="Preview or run one external capability enabled for a Goal.",
     )
     add_subcommand_format(invoke_parser)
     invoke_parser.add_argument("capability_id")
     invoke_parser.add_argument("--operation", required=True)
     invoke_parser.add_argument(
-        "--turn-plan-json",
+        "--goal-binding-json",
         required=True,
-        help="Path to one loopx_turn_plan_v0 JSON object.",
+        help="Path to one loopx_goal_external_capability_binding_v0 object.",
     )
     invoke_parser.add_argument(
         "--input-json",
@@ -162,17 +162,17 @@ def handle_capability_command(
             )
             renderer = render_capability_detail_markdown
         elif args.capability_command == "invoke":
-            if args.turn_plan_json == "-" and args.input_json == "-":
+            if args.goal_binding_json == "-" and args.input_json == "-":
                 raise ValueError(
-                    "turn plan and provider input cannot both read from stdin"
+                    "Goal binding and provider input cannot both read from stdin"
                 )
             payload = invoke_external_capability(
                 state_file=state_file,
                 capability_id=args.capability_id,
                 operation=args.operation,
-                turn_plan=_load_json_object(
-                    args.turn_plan_json,
-                    label="external capability turn plan",
+                goal_binding=_load_json_object(
+                    args.goal_binding_json,
+                    label="external capability Goal binding",
                 ),
                 provider_input=_load_json_object(
                     args.input_json,

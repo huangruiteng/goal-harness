@@ -2,18 +2,14 @@ from __future__ import annotations
 
 import json
 import sys
-from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
 from loopx.cli import main
-from loopx.control_plane.quota.turn_envelope import (
-    turn_envelope_action_signature_document,
-)
-from loopx.control_plane.turn_driver import build_loopx_turn_plan
 from loopx.extensions.capability_admission import (
     invoke_external_capability,
+    resolve_external_capability_binding,
     validate_external_capability_result,
 )
 from loopx.extensions.manifest import load_extension_manifest
@@ -70,11 +66,6 @@ def _profile(path: Path) -> Path:
                         "result_schema": (
                             "loopx_external_domain_capability_result_v0"
                         ),
-                        "todo_contract": {
-                            "action_kinds": ["fixture_requirement_observe"],
-                            "target_key_prefixes": ["fixture:requirement:"],
-                            "capability_binding_refs": ["fixture-binding-1"],
-                        },
                     }
                 ],
             },
@@ -119,59 +110,28 @@ integration_profile = "profile.json"
     return path
 
 
-def _turn_plan(
+def _goal_binding(
+    state_file: Path,
     *,
-    action_kind: str = "fixture_requirement_observe",
-    capability_binding_ref: str = "fixture-binding-1",
+    operations: list[str] | None = None,
+    revision: str | None = None,
 ) -> dict[str, object]:
-    envelope = {
-        "ok": True,
-        "schema_version": "loopx_turn_envelope_v0",
-        "goal_id": "fixture-goal",
-        "agent_id": "codex-fixture",
-        "should_run": True,
-        "effective_action": "normal_run",
-        "action": {
-            "must_attempt": True,
-            "delivery_allowed": True,
-            "quiet_noop_allowed": False,
-            "selected_todo": {
-                "todo_id": "todo_fixture0001",
-                "action_kind": action_kind,
-                "target_key": "fixture:requirement:REQ-1",
-                "capability_binding_ref": capability_binding_ref,
-                "text": "Observe one synthetic requirement.",
-            },
-        },
-        "user": {
-            "action_required": False,
-            "open_count": 0,
-            "notify": "DONT_NOTIFY",
-        },
-        "writeback": {"spend_after_validation": True},
-        "scheduler": {"action": "run_now"},
-        "compaction": {"within_budget": True},
-    }
-    signature_document = turn_envelope_action_signature_document(envelope)
-    signature_hash = "sha256:" + sha256(
-        json.dumps(
-            signature_document,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
-    envelope["action_signature"] = {
-        "matches": True,
-        "source_hash": signature_hash,
-        "envelope_hash": signature_hash,
-    }
-    return build_loopx_turn_plan(
-        envelope,
-        host="codex-cli",
-        execution_mode="isolated-headless",
-        turn_instance_id="fixture-turn-1",
+    active = resolve_external_capability_binding(
+        state_file=state_file,
+        capability_id="fixture-requirement-delivery",
+        operation="observe",
     )
+    return {
+        "schema_version": "loopx_goal_external_capability_binding_v0",
+        "goal_id": "fixture-goal",
+        "capability_id": "fixture-requirement-delivery",
+        "operations": operations or ["observe"],
+        "provider": {
+            "extension_id": active["extension_id"],
+            "revision": revision or active["revision"],
+            "profile_digest": active["integration_profile_digest"],
+        },
+    }
 
 
 def _provider_input() -> dict[str, object]:
@@ -229,24 +189,24 @@ def test_manifest_rejects_profile_path_escape(tmp_path: Path) -> None:
         load_extension_manifest(manifest)
 
 
-def test_read_only_external_capability_is_bound_to_one_turn_and_todo(
+def test_read_only_external_capability_is_bound_to_goal_not_turn(
     tmp_path: Path,
 ) -> None:
     state_file = _installed_extension(tmp_path)
-    plan = _turn_plan()
+    goal_binding = _goal_binding(state_file)
 
     preview = invoke_external_capability(
         state_file=state_file,
         capability_id="fixture-requirement-delivery",
         operation="observe",
-        turn_plan=plan,
+        goal_binding=goal_binding,
         provider_input=_provider_input(),
     )
     executed = invoke_external_capability(
         state_file=state_file,
         capability_id="fixture-requirement-delivery",
         operation="observe",
-        turn_plan=plan,
+        goal_binding=goal_binding,
         provider_input=_provider_input(),
         execute=True,
     )
@@ -261,54 +221,57 @@ def test_read_only_external_capability_is_bound_to_one_turn_and_todo(
         "loopx_state_written": False,
         "quota_spent": False,
     }
-    assert executed["turn"] == {
+    assert executed["goal_binding"] == {
         "goal_id": "fixture-goal",
-        "agent_id": "codex-fixture",
-        "todo_id": "todo_fixture0001",
-        "turn_key": plan["transaction"]["turn_key"],
-        "turn_instance_id": "fixture-turn-1",
+        "binding_digest": preview["goal_binding"]["binding_digest"],
+        "turn_required": False,
     }
 
 
-def test_external_capability_rejects_todo_outside_profile(tmp_path: Path) -> None:
+def test_external_capability_rejects_operation_outside_goal_binding(
+    tmp_path: Path,
+) -> None:
     state_file = _installed_extension(tmp_path)
-    plan = _turn_plan(action_kind="unrelated_action")
 
-    with pytest.raises(ValueError, match="action_kind is outside"):
+    with pytest.raises(ValueError, match="not enabled for this Goal"):
         invoke_external_capability(
             state_file=state_file,
             capability_id="fixture-requirement-delivery",
             operation="observe",
-            turn_plan=plan,
+            goal_binding=_goal_binding(state_file, operations=["different"]),
             provider_input=_provider_input(),
         )
 
 
-def test_external_capability_rejects_wrong_capability_binding(tmp_path: Path) -> None:
+def test_external_capability_rejects_wrong_goal_capability(tmp_path: Path) -> None:
     state_file = _installed_extension(tmp_path)
-    plan = _turn_plan(capability_binding_ref="different-binding")
+    goal_binding = _goal_binding(state_file)
+    goal_binding["capability_id"] = "different-capability"
 
-    with pytest.raises(ValueError, match="capability_binding_ref is outside"):
+    with pytest.raises(ValueError, match="capability_id does not match"):
         invoke_external_capability(
             state_file=state_file,
             capability_id="fixture-requirement-delivery",
             operation="observe",
-            turn_plan=plan,
+            goal_binding=goal_binding,
             provider_input=_provider_input(),
         )
 
 
-def test_external_capability_rejects_tampered_turn_key(tmp_path: Path) -> None:
+def test_external_capability_rejects_stale_goal_provider_binding(
+    tmp_path: Path,
+) -> None:
     state_file = _installed_extension(tmp_path)
-    plan = _turn_plan()
-    plan["transaction"]["turn_key"] = "sha256:" + "f" * 64
 
-    with pytest.raises(ValueError, match="turn_key does not match"):
+    with pytest.raises(ValueError, match="active provider revision"):
         invoke_external_capability(
             state_file=state_file,
             capability_id="fixture-requirement-delivery",
             operation="observe",
-            turn_plan=plan,
+            goal_binding=_goal_binding(
+                state_file,
+                revision="sha256:stale-provider-revision",
+            ),
             provider_input=_provider_input(),
         )
 
@@ -340,9 +303,12 @@ def test_capability_invoke_cli_uses_managed_runtime(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     state_file = _installed_extension(tmp_path)
-    turn_plan = tmp_path / "turn-plan.json"
+    goal_binding = tmp_path / "goal-binding.json"
     provider_input = tmp_path / "provider-input.json"
-    turn_plan.write_text(json.dumps(_turn_plan()), encoding="utf-8")
+    goal_binding.write_text(
+        json.dumps(_goal_binding(state_file)),
+        encoding="utf-8",
+    )
     provider_input.write_text(json.dumps(_provider_input()), encoding="utf-8")
 
     assert (
@@ -355,8 +321,8 @@ def test_capability_invoke_cli_uses_managed_runtime(
                 "fixture-requirement-delivery",
                 "--operation",
                 "observe",
-                "--turn-plan-json",
-                str(turn_plan),
+                "--goal-binding-json",
+                str(goal_binding),
                 "--input-json",
                 str(provider_input),
                 "--state-file",

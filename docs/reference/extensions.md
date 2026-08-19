@@ -206,7 +206,7 @@ standalone extensions.
 Direct provider binaries are implementation and debugging surfaces; they are
 not the supported management API.
 
-### Turn-bound external capability providers
+### Goal-bound external capability providers
 
 An extension that owns a new domain capability may attach one relative JSON
 `integration_profile` to its `[[provides]]` record. LoopX reads, validates, and
@@ -239,43 +239,59 @@ integration_profile = "integration-profile.json"
       "effect_class": "read_only",
       "required_permission": "requirement.read",
       "request_schema": "loopx_external_domain_capability_request_v0",
-      "result_schema": "loopx_external_domain_capability_result_v0",
-      "todo_contract": {
-        "action_kinds": ["requirement_observe"],
-        "target_key_prefixes": ["requirement:"],
-        "capability_binding_refs": ["requirement-provider-v1"]
-      }
+      "result_schema": "loopx_external_domain_capability_result_v0"
     }
   ]
 }
 ```
 
-Preview or execute the provider only as a child of an already planned Turn:
+A durable Goal binding enables a bounded operation for one exact active provider
+revision. It is Goal-scoped rather than Turn-scoped, so the same working Agent
+session may reuse an enabled read-only capability without creating a governed
+Turn for every observation:
+
+```json
+{
+  "schema_version": "loopx_goal_external_capability_binding_v0",
+  "goal_id": "example-goal",
+  "capability_id": "requirement-delivery",
+  "operations": ["observe"],
+  "provider": {
+    "extension_id": "example-requirement-provider",
+    "revision": "sha256:active-revision",
+    "profile_digest": "sha256:integration-profile"
+  }
+}
+```
+
+Preview or execute a read-only operation with the Goal binding projection:
 
 ```bash
 loopx capability invoke requirement-delivery \
   --operation observe \
-  --turn-plan-json turn-plan.json \
+  --goal-binding-json goal-binding.json \
   --input-json provider-input.json
 
 loopx capability invoke requirement-delivery \
   --operation observe \
-  --turn-plan-json turn-plan.json \
+  --goal-binding-json goal-binding.json \
   --input-json provider-input.json \
   --execute
 ```
 
 The input object contains `context_refs` plus a bounded domain `input` object.
-LoopX independently recomputes the Turn action hash and transaction key, checks
-the exact Goal, Agent, Todo, action kind, target key, and capability binding,
-and derives a deterministic child invocation id. Managed runtime limits still
-apply. The v0 route admits read-only operations only: provider results must not
-contain domain mutations, transition proposals, effect receipts, raw payloads,
-credential-like fields, or private-looking strings.
+LoopX checks that the requested capability and operation are enabled for the
+Goal and that the provider id, active revision, and snapshotted profile digest
+still match. The binding digest plus the bounded input derives a deterministic
+invocation id. Managed runtime limits still apply.
 
-This child invocation does not itself write LoopX state or spend quota. The
-owning Turn remains the transaction and settlement authority. The Turn plan is
-a local typed binding, not a security token or proof of a remote issuer; service
+The v0 route admits read-only operations only: provider results must not contain
+domain mutations, transition proposals, effect receipts, raw payloads,
+credential-like fields, or private-looking strings. It does not write LoopX
+state or spend quota. A future material operation must use a separate governed
+Turn adapter bound to the exact Todo and settlement contract; Goal enablement
+alone never grants write authority. The Goal binding is a local typed
+projection, not a security token or proof of a remote issuer; service
 authentication and authorization remain the provider's responsibility.
 
 The generic runner is deliberately non-effectful and grants no operation

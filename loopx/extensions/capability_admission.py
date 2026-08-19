@@ -2,16 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from ..authority import validate_public_safe_text
-from ..control_plane.quota.turn_envelope import turn_envelope_action_signature_document
-from ..control_plane.turn_driver import build_loopx_turn_transaction_plan
-from ..control_plane.turn_driver.driver import selected_turn_todo
 from .manifest import EXTERNAL_CAPABILITY_PROFILE_SCHEMA_VERSION
 from .runtime import (
     execute_extension_runtime_binding,
@@ -28,8 +24,9 @@ EXTERNAL_CAPABILITY_RESULT_SCHEMA_VERSION = (
 EXTERNAL_CAPABILITY_INVOCATION_SCHEMA_VERSION = (
     "loopx_external_domain_capability_invocation_v0"
 )
-_TURN_PLAN_SCHEMA_VERSION = "loopx_turn_plan_v0"
-_TURN_KEY_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+GOAL_EXTERNAL_CAPABILITY_BINDING_SCHEMA_VERSION = (
+    "loopx_goal_external_capability_binding_v0"
+)
 _FORBIDDEN_RESULT_KEYS = frozenset(
     {
         "access_token",
@@ -166,124 +163,64 @@ def resolve_external_capability_binding(
     }
 
 
-def _turn_binding(turn_plan: Mapping[str, Any]) -> dict[str, Any]:
-    if turn_plan.get("schema_version") != _TURN_PLAN_SCHEMA_VERSION:
-        raise ValueError(f"turn plan must use {_TURN_PLAN_SCHEMA_VERSION}")
-    if turn_plan.get("ok") is not True:
-        raise ValueError("turn plan is not executable")
-    route = _mapping(turn_plan.get("route"), "turn plan route")
-    if route.get("would_invoke_host") is not True:
-        raise ValueError("turn plan route is not host executable")
-    transaction = _mapping(turn_plan.get("transaction"), "turn plan transaction")
-    if transaction.get("status") != "planned":
-        raise ValueError("turn plan transaction is not planned")
-    turn_key = _token(transaction.get("turn_key"), "turn plan turn_key")
-    if not _TURN_KEY_RE.fullmatch(turn_key):
-        raise ValueError("turn plan turn_key is invalid")
-    turn_instance_id = _token(
-        transaction.get("turn_instance_id"), "turn plan turn_instance_id"
-    )
-    settlement = _mapping(
-        transaction.get("settlement_plan"), "turn plan settlement_plan"
-    )
-    identity = _mapping(settlement.get("identity"), "turn plan settlement identity")
-    envelope = _mapping(turn_plan.get("turn_envelope"), "turn plan envelope")
-    signature = _mapping(envelope.get("action_signature"), "turn action signature")
-    action_signature = _token(
-        signature.get("source_hash"), "turn action signature source_hash"
-    )
-    expected_signature = _canonical_digest(
-        turn_envelope_action_signature_document(envelope)
-    )
-    if (
-        signature.get("matches") is not True
-        or signature.get("envelope_hash") != action_signature
-        or action_signature != expected_signature
-    ):
-        raise ValueError("turn action signature is stale")
-    todo = selected_turn_todo(envelope)
-    required_todo_fields = (
-        "todo_id",
-        "action_kind",
-        "target_key",
-        "capability_binding_ref",
-    )
-    for field in required_todo_fields:
-        _token(todo.get(field), f"selected Todo {field}")
-    goal_id = _token(envelope.get("goal_id"), "turn goal_id")
-    agent_id = _token(envelope.get("agent_id"), "turn agent_id")
-    expected_identity = {
-        "goal_id": goal_id,
-        "agent_id": agent_id,
-        "todo_id": str(todo["todo_id"]),
-        "turn_instance_id": turn_instance_id,
+def _goal_binding(
+    value: Mapping[str, Any],
+    *,
+    capability_id: str,
+    operation: str,
+    provider_binding: Mapping[str, Any],
+) -> dict[str, Any]:
+    binding = _mapping(value, "Goal capability binding")
+    expected_fields = {
+        "schema_version",
+        "goal_id",
+        "capability_id",
+        "operations",
+        "provider",
     }
-    actual_identity = {
-        key: str(identity.get(key) or "") for key in expected_identity
-    }
-    if actual_identity != expected_identity:
-        raise ValueError("turn settlement identity does not match the selected Todo")
-    host = _mapping(turn_plan.get("host"), "turn plan host")
-    session = _mapping(turn_plan.get("session"), "turn plan session")
-    signature_document = turn_envelope_action_signature_document(envelope)
-    signed_action = _mapping(signature_document.get("action"), "turn signed action")
-    signature_document["action"] = {
-        **signed_action,
-        "selected_todo": dict(todo),
-    }
-    lineage = {
-        "goal_id": goal_id,
-        "agent_id": agent_id,
-        "todo_id": str(todo["todo_id"]),
-        "action_hash": _canonical_digest(signature_document),
-    }
-    expected_transaction = build_loopx_turn_transaction_plan(
-        planned=True,
-        lineage=lineage,
-        host=_token(host.get("kind"), "turn plan host kind"),
-        execution_mode=_token(
-            host.get("execution_mode"), "turn plan host execution_mode"
-        ),
-        scheduler_owner=_token(
-            host.get("scheduler_owner"), "turn plan host scheduler_owner"
-        ),
-        session_action=_token(session.get("action"), "turn plan session action"),
-        turn_instance_id=turn_instance_id,
-    )
-    if expected_transaction.get("turn_key") != turn_key:
-        raise ValueError("turn plan turn_key does not match its signed lineage")
-    return {
-        "turn_key": turn_key,
-        "turn_instance_id": turn_instance_id,
-        "action_signature": action_signature,
-        "goal_id": goal_id,
-        "agent_id": agent_id,
-        "todo": todo,
-    }
-
-
-def _validate_todo_contract(
-    operation: Mapping[str, Any], todo: Mapping[str, Any]
-) -> None:
-    contract = operation.get("todo_contract")
-    if not isinstance(contract, Mapping):
-        return
-    action_kind = str(todo.get("action_kind") or "")
-    action_kinds = contract.get("action_kinds")
-    if not isinstance(action_kinds, list) or action_kind not in action_kinds:
-        raise ValueError("selected Todo action_kind is outside the capability profile")
-    target_key = str(todo.get("target_key") or "")
-    prefixes = contract.get("target_key_prefixes")
-    if not isinstance(prefixes, list) or not any(
-        target_key.startswith(str(prefix)) for prefix in prefixes
-    ):
-        raise ValueError("selected Todo target_key is outside the capability profile")
-    binding_ref = str(todo.get("capability_binding_ref") or "")
-    binding_refs = contract.get("capability_binding_refs")
-    if not isinstance(binding_refs, list) or binding_ref not in binding_refs:
+    if set(binding) != expected_fields:
+        raise ValueError("Goal capability binding fields are invalid")
+    if binding.get("schema_version") != GOAL_EXTERNAL_CAPABILITY_BINDING_SCHEMA_VERSION:
         raise ValueError(
-            "selected Todo capability_binding_ref is outside the capability profile"
+            "Goal capability binding must use "
+            f"{GOAL_EXTERNAL_CAPABILITY_BINDING_SCHEMA_VERSION}"
         )
+    goal_id = _token(binding.get("goal_id"), "Goal capability binding goal_id")
+    if binding.get("capability_id") != capability_id:
+        raise ValueError("Goal capability binding capability_id does not match request")
+    operations = binding.get("operations")
+    if not isinstance(operations, list) or not 1 <= len(operations) <= 32:
+        raise ValueError("Goal capability binding operations are invalid")
+    normalized_operations = [
+        _token(item, "Goal capability binding operation") for item in operations
+    ]
+    if len(normalized_operations) != len(set(normalized_operations)):
+        raise ValueError("Goal capability binding operations must be unique")
+    if operation not in normalized_operations:
+        raise ValueError("operation is not enabled for this Goal")
+    provider = _mapping(binding.get("provider"), "Goal capability binding provider")
+    expected_provider = {
+        "extension_id": _token(
+            provider_binding.get("extension_id"), "active provider extension_id"
+        ),
+        "revision": _token(provider_binding.get("revision"), "active provider revision"),
+        "profile_digest": _token(
+            provider_binding.get("integration_profile_digest"),
+            "active provider profile_digest",
+        ),
+    }
+    if provider != expected_provider:
+        raise ValueError(
+            "Goal capability binding does not match the active provider revision"
+        )
+    normalized = {
+        "schema_version": GOAL_EXTERNAL_CAPABILITY_BINDING_SCHEMA_VERSION,
+        "goal_id": goal_id,
+        "capability_id": capability_id,
+        "operations": normalized_operations,
+        "provider": expected_provider,
+    }
+    return {**normalized, "binding_digest": _canonical_digest(normalized)}
 
 
 def _provider_input(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -359,12 +296,12 @@ def invoke_external_capability(
     state_file: str | Path,
     capability_id: str,
     operation: str,
-    turn_plan: Mapping[str, Any],
+    goal_binding: Mapping[str, Any],
     provider_input: Mapping[str, Any],
     execute: bool = False,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Preview or run one read-only provider as a child of an admitted Turn."""
+    """Preview or run one read-only provider enabled for a durable Goal."""
 
     binding = resolve_external_capability_binding(
         state_file=state_file,
@@ -373,13 +310,18 @@ def invoke_external_capability(
     )
     operation_profile = _mapping(binding.get("operation"), "operation profile")
     if operation_profile.get("effect_class") != "read_only":
-        raise ValueError("external-write capability admission is not implemented")
-    turn = _turn_binding(turn_plan)
-    todo = _mapping(turn.get("todo"), "selected Todo")
-    _validate_todo_contract(operation_profile, todo)
+        raise ValueError(
+            "material external capability invocation requires a governed Turn adapter"
+        )
+    goal = _goal_binding(
+        goal_binding,
+        capability_id=capability_id,
+        operation=operation,
+        provider_binding=binding,
+    )
     provided = _provider_input(provider_input)
     invocation_seed = {
-        "turn_key": turn["turn_key"],
+        "goal_binding_digest": goal["binding_digest"],
         "capability_id": capability_id,
         "operation": operation,
         "provider_input_digest": _canonical_digest(provided),
@@ -390,19 +332,11 @@ def invoke_external_capability(
     request = {
         "schema_version": str(operation_profile.get("request_schema") or ""),
         "invocation_id": invocation_id,
-        "turn": {
-            "turn_key": turn["turn_key"],
-            "turn_instance_id": turn["turn_instance_id"],
-            "action_signature": turn["action_signature"],
-        },
         "capability_id": capability_id,
         "operation": operation,
-        "goal": {"goal_id": turn["goal_id"]},
-        "todo": {
-            "todo_id": todo["todo_id"],
-            "action_kind": todo["action_kind"],
-            "target_key": todo["target_key"],
-            "capability_binding_ref": todo["capability_binding_ref"],
+        "goal": {
+            "goal_id": goal["goal_id"],
+            "capability_binding_digest": goal["binding_digest"],
         },
         "provider": {
             "extension_id": binding["extension_id"],
@@ -426,12 +360,10 @@ def invoke_external_capability(
             "revision": binding["revision"],
             "profile_digest": binding["integration_profile_digest"],
         },
-        "turn": {
-            "goal_id": turn["goal_id"],
-            "agent_id": turn["agent_id"],
-            "todo_id": todo["todo_id"],
-            "turn_key": turn["turn_key"],
-            "turn_instance_id": turn["turn_instance_id"],
+        "goal_binding": {
+            "goal_id": goal["goal_id"],
+            "binding_digest": goal["binding_digest"],
+            "turn_required": False,
         },
         "invocation_id": invocation_id,
         "request_digest": _canonical_digest(request),
