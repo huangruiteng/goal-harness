@@ -4,6 +4,10 @@
 /CONTRIBUTOR_TASKS.md @huangruiteng
 /docs/project/technical-directions*.md @huangruiteng
 
+# Frontend source and bundled web assets.
+/apps/presentation/dashboard/** @huangruiteng @maxliu
+/loopx/web/chat/** @huangruiteng @maxliu
+
 # Lark integration review routing.
 /loopx/extensions/lark/** @huangruiteng @steven-kid
 /loopx/cli_commands/lark_*.py @huangruiteng @steven-kid
