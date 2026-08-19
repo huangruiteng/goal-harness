@@ -112,6 +112,20 @@ def register_status_commands(
         default=120,
         help="Freshness window for --use-projection-cache. Defaults to 120 seconds.",
     )
+    status_parser.add_argument(
+        "--collaboration",
+        action="store_true",
+        help=(
+            "Render one Goal as loopx_collaboration_status_v0 for an authorized "
+            "peer channel. Requires --goal-id."
+        ),
+    )
+    status_parser.add_argument(
+        "--collaboration-max-age-seconds",
+        type=int,
+        default=300,
+        help="Fail closed when a collaboration snapshot is older than this window.",
+    )
 
     diagnose_parser = subparsers.add_parser(
         "diagnose",
