@@ -65,19 +65,20 @@ class ChatMonitorActionMixin:
                         or f"Run monitor {parameters['todo_id']}"
                     ),
                     mode="resume_latest",
-                    channel_id=f"task.{parameters['todo_id']}",
+                    channel_id=f"goal.{goal_id}",
                     agent_goal_id=goal_id,
                 )
                 session_id = _opaque(session.get("session_id"), field="session_id")
-            turn, created = self.runtime_controller.submit_turn(
+            turn, created = self.runtime_controller.submit_governed_turn(
                 session_id=session_id,
                 client_turn_id=f"action-{proposal_id}",
                 message=(
                     f"Run continuous monitor Todo {parameters['todo_id']} now and "
                     "write back only verified material change."
                 ),
+                todo_id=str(parameters["todo_id"]),
+                governed_agent_id=str(parameters["agent_id"]),
                 work_dir=project,
-                objective=str(goal.get("domain") or goal_id),
             )
             turn_id = _opaque(turn.get("turn_id"), field="turn_id")
             receipt = {
@@ -85,9 +86,9 @@ class ChatMonitorActionMixin:
                     {"proposal_id": proposal_id, "turn_id": turn_id}
                 )[:32],
                 "outcome": (
-                    "monitor_turn_created"
+                    "governed_monitor_turn_created"
                     if created
-                    else "monitor_turn_already_exists"
+                    else "governed_monitor_turn_already_exists"
                 ),
                 "projection_verified": True,
                 "resource_ids": {

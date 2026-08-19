@@ -491,6 +491,15 @@ def register_support_control_commands(
         help="Absolute maximum seconds for one Agent turn.",
     )
     chat_parser.add_argument(
+        "--available-capability",
+        action="append",
+        default=[],
+        help=(
+            "Capability available to governed material Turns. Repeat for multiple "
+            "capabilities; ordinary read-only Chat replies do not consume this list."
+        ),
+    )
+    chat_parser.add_argument(
         "--assets-dir",
         help="Optional LoopX Chat web bundle directory. Defaults to packaged assets.",
     )
@@ -556,6 +565,12 @@ def register_support_control_commands(
             "Optional explicit lark-cli executable. When omitted, LoopX uses its bounded "
             "runtime discovery order."
         ),
+    )
+    dashboard_parser.add_argument(
+        "--available-capability",
+        action="append",
+        default=[],
+        help="Capability available to governed material Turns. Repeatable.",
     )
     dashboard_parser.add_argument(
         "--assets-dir",
@@ -1024,6 +1039,9 @@ def handle_support_control_command(
                 codex_bin=getattr(args, "codex_bin", "codex"),
                 claude_bin=getattr(args, "claude_bin", "claude"),
                 lark_cli_bin=getattr(args, "lark_cli_bin", None),
+                available_capabilities=list(
+                    getattr(args, "available_capability", []) or []
+                ),
                 assets_dir=Path(args.assets_dir).expanduser().resolve() if getattr(args, "assets_dir", None) else None,
                 verbose=getattr(args, "verbose", False),
                 open_browser=not getattr(args, "no_open", False),
@@ -1055,6 +1073,7 @@ def handle_support_control_command(
                 codex_bin=args.codex_bin,
                 claude_bin=args.claude_bin,
                 lark_cli_bin=args.lark_cli_bin,
+                available_capabilities=list(args.available_capability or []),
                 startup_timeout_sec=max(0.1, float(args.startup_timeout_seconds)),
                 idle_timeout_sec=max(0.1, float(args.idle_timeout_seconds)),
                 hard_timeout_sec=max(0.1, float(args.hard_timeout_seconds)),

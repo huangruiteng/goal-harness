@@ -2,6 +2,7 @@
 
 from .codex_cli import (
     CODEX_CLI_SESSION_SCHEMA_VERSION,
+    bind_codex_cli_session,
     codex_cli_result_schema,
     codex_cli_session_binding,
     codex_cli_session_id_from_jsonl,
@@ -62,6 +63,7 @@ __all__ = [
     "LoopXTurnResultKind",
     "LoopXTurnRoute",
     "ValidatedTurnReceipt",
+    "bind_codex_cli_session",
     "build_loopx_turn_command_validator",
     "build_loopx_turn_host_request",
     "build_loopx_turn_plan",

@@ -26,6 +26,7 @@ from ..control_plane.turn_driver import (
     LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
     LOOPX_TURN_JOURNAL_INSPECTION_SCHEMA_VERSION,
     LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+    bind_codex_cli_session,
     build_loopx_turn_command_validator,
     build_loopx_turn_plan,
     codex_cli_session_binding,
@@ -160,6 +161,13 @@ def register_turn_commands(
     )
     run_once.add_argument("--codex-model")
     run_once.add_argument(
+        "--codex-resume-session-id",
+        help=(
+            "Owner-local opaque Codex thread to resume for the freshly selected "
+            "Todo. Requires --host codex-cli and --execute."
+        ),
+    )
+    run_once.add_argument(
         "--codex-sandbox",
         choices=["read-only", "workspace-write"],
         default="read-only",
@@ -228,6 +236,12 @@ def _add_turn_decision_arguments(
             "Caller-stable public-safe identity for one logical Turn. Reusing the "
             "same id replays idempotently; use a new id for a new Turn with the "
             "same semantic action."
+        ),
+    )
+    parser.add_argument(
+        "--expected-todo-id",
+        help=(
+            "Fail closed unless the fresh quota decision selects this exact Todo."
         ),
     )
     parser.add_argument(
@@ -431,8 +445,36 @@ def handle_turn_command(
             decision,
             scheduler_execution_context=scheduler_context,
         )
+        selected_todo = selected_turn_todo(turn_envelope)
+        if args.expected_todo_id and selected_todo.get("todo_id") != args.expected_todo_id:
+            raise ValueError(
+                "fresh LoopX Turn admission selected a different Todo than expected"
+            )
+        codex_resume_session_id = getattr(args, "codex_resume_session_id", None)
+        if codex_resume_session_id:
+            if args.turn_command != "run-once" or args.host != "codex-cli":
+                raise ValueError(
+                    "--codex-resume-session-id requires turn run-once --host codex-cli"
+                )
+            if not args.execute:
+                raise ValueError("--codex-resume-session-id requires --execute")
+            if supplied_resume_fields:
+                raise ValueError(
+                    "--codex-resume-session-id cannot be combined with host session identity flags"
+                )
+            if args.resume_turn_key:
+                raise ValueError(
+                    "--codex-resume-session-id cannot be combined with --resume-turn-key"
+                )
+            session_binding = bind_codex_cli_session(
+                runtime_root,
+                turn_envelope,
+                session_id=codex_resume_session_id,
+            )
         if args.turn_command == "run-once" and args.host == "codex-cli" and not supplied_resume_fields:
-            session_binding = codex_cli_session_binding(runtime_root, turn_envelope)
+            session_binding = session_binding or codex_cli_session_binding(
+                runtime_root, turn_envelope
+            )
         payload = build_loopx_turn_plan(
             turn_envelope,
             host=args.host,

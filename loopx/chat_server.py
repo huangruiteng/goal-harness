@@ -23,6 +23,7 @@ from .chat_actions import ChatActionService, ProtectedActionGate
 from .chat_action_store import ACTION_KINDS, ActionConflictError, ChatActionStore
 from .chat_runtime import ChatRuntimeController, TERMINAL_TURN_STATES
 from .chat_store import ChatSessionStore
+from .chat_turn_admission import LoopXChatTurnAdmission
 from .chat_lark_api import (
     LarkChatRequestMixin,
     build_goal_repository_contexts as build_goal_repository_contexts,
@@ -1373,6 +1374,7 @@ def serve_chat(
     startup_timeout_sec: float = 30.0,
     idle_timeout_sec: float = 180.0,
     hard_timeout_sec: float = 900.0,
+    available_capabilities: list[str] | None = None,
     assets_dir: Path | None = None,
     open_browser: bool = False,
     verbose: bool = False,
@@ -1418,6 +1420,13 @@ def serve_chat(
     )
     server.chat_store = ChatSessionStore(runtime_root)
     server.action_store = ChatActionStore(runtime_root / "chat" / "actions")
+    governed_turn_runner = LoopXChatTurnAdmission(
+        registry_path=resolved_registry_path,
+        runtime_root_override=resolved_runtime_root_override,
+        codex_bin=codex_bin,
+        timeout_seconds=hard_timeout_sec,
+        available_capabilities=available_capabilities or (),
+    )
     server.runtime_controller = ChatRuntimeController(
         store=server.chat_store,
         codex_bin=codex_bin,
@@ -1425,13 +1434,14 @@ def serve_chat(
         startup_timeout_sec=startup_timeout_sec,
         idle_timeout_sec=idle_timeout_sec,
         hard_timeout_sec=hard_timeout_sec,
+        governed_turn_runner=governed_turn_runner,
     )
     server.action_service = ChatActionService(
         store=server.action_store,
-        registry_path=registry_path,
+        registry_path=resolved_registry_path,
         chat_store=server.chat_store,
         runtime_controller=server.runtime_controller,
-        workspace_roots=scan_roots,
+        workspace_roots=resolved_scan_roots,
     )
     server.lark_goal_topic_runtime = LarkGoalTopicRuntimeService(
         snapshot_provider=lambda: build_lark_goal_topic_runtime_snapshot(

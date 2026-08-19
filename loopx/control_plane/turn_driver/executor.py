@@ -822,6 +822,7 @@ def _execution_payload(
     turn_key = str(transaction.get("turn_key") or "")
     planned_host = plan.get("host") if isinstance(plan.get("host"), dict) else {}
     writeback = _mapping(journal.get("writeback"))
+    host_result = _mapping(journal.get("host_result"))
     todo_completion = _mapping(writeback.get("completion"))
     quota_spent = effects.get("quota_spent") is True or "quota_spend" in list(
         journal.get("completed_phases") or []
@@ -843,6 +844,7 @@ def _execution_payload(
         "execution_mode": planned_host.get("execution_mode"),
         "host": journal.get("host"),
         "result_kind": journal.get("result_kind"),
+        **({key: host_result.get(key) for key in ("summary", "recommended_action", "next_action")} if host_result else {}),
         "validation": journal.get("task_validation"),
         "receipt": journal.get("receipt"),
         "scheduler": journal.get("scheduler"),
