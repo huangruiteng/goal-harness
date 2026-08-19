@@ -26,6 +26,23 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     "commands": [
         {
             "command": (
+                "loopx benchmark source-revision-fence "
+                "--source-checkout <clean-source> "
+                "--expected-revision <pin> "
+                "--observed-reference-revision <observed-head> "
+                "--require-admitted --format json"
+            ),
+            "purpose": (
+                "Fail closed before a new run when the installed source no "
+                "longer matches the caller-observed reference head."
+            ),
+            "write_boundary": (
+                "local Git readback only; caller owns reference observation, "
+                "fetch, installation, and launch"
+            ),
+        },
+        {
+            "command": (
                 "loopx benchmark experiment-board-show --goal-id <goal-id> "
                 "--format json"
             ),
@@ -90,6 +107,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         ),
         "required_sequence": [
             "read_experiment_board_before_launch_or_case_selection",
+            "qualify_source_revision_before_each_new_run_admission",
             "upsert_preregistered_or_running_row_when_a_run_starts",
             "upsert_terminal_score_countability_effort_and_insight_status",
             "read_matched_comparisons_before_selecting_the_next_arm",
@@ -182,6 +200,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     },
     "implemented_protocols": [
         {
+            "schema_version": "benchmark_source_revision_fence_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.source_revision_fence",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
             "schema_version": "benchmark_experiment_board_row_v0",
             "module": "loopx.capabilities.benchmark_toolkit.experiment_board",
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
@@ -220,12 +243,14 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     "smokes": [
         (
             "python -m pytest tests/capabilities/test_benchmark_toolkit.py "
-            "tests/capabilities/test_benchmark_experiment_board.py -q"
+            "tests/capabilities/test_benchmark_experiment_board.py "
+            "tests/capabilities/test_benchmark_source_revision_fence.py -q"
         )
     ],
     "docs": ["loopx/capabilities/benchmark_toolkit/README.md"],
     "boundaries": [
         "The toolkit never grants runner, Docker, model, upload, submission, or publication authority; each effect remains separately gated.",
+        "Source revision qualification is read-only and caller-observed: it does not fetch, install, update a checkout, or rewrite an already admitted run.",
         "Raw trajectories are private local inputs to integrity qualification and are never copied into receipts, ledgers, docs, or PR artifacts.",
         "A clean trajectory scan is not isolation proof: runner-owned permission and verifier-order attestations are mandatory and fail closed when absent.",
         "Concurrent Docker runs must bind runtime evidence to one exact job-owned container; image-only discovery is not sufficient.",

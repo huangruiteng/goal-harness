@@ -5,6 +5,35 @@ artifact, integrity, and reusable agent-runtime boundaries around benchmark
 experiments. It does not own benchmark-family runners, result ledgers, or scoring
 adapters.
 
+## Source revision admission
+
+A long-running campaign can keep launching from an old installed checkout after
+the tracked branch advances. Pinning the source once at controller startup does
+not prevent that drift. Immediately before each new benchmark admission, obtain
+the current reference head through the runner's provider or network boundary,
+then compare it with the clean local checkout and intended pin:
+
+```bash
+loopx benchmark source-revision-fence \
+  --source-checkout /path/to/pinned-source \
+  --expected-revision "$PINNED_REVISION" \
+  --observed-reference-revision "$OBSERVED_REFERENCE_REVISION" \
+  --require-admitted \
+  --format json
+```
+
+The command succeeds only when all three identities match and the source root has
+no tracked or untracked changes. Its compact receipt records equality, cleanliness,
+and a stable reason code without recording the checkout path or any revision value.
+Invalid input is also reduced to a path-free fail-closed receipt.
+
+The fence is an admission boundary, not a live-run mutation mechanism. A run that
+already passed the fence keeps its immutable revision even if the reference moves
+later; the new head blocks only subsequent admissions until the runner installs and
+pins an updated source. The caller owns the freshness and authority of the observed
+reference value. This capability performs no fetch, provider API call, checkout,
+install, process launch, score write, or submission.
+
 ## Native Codex Goal runtime
 
 Benchmark adapters that use the Codex app-server Goal API should import
