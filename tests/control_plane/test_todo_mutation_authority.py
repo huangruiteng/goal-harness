@@ -1311,6 +1311,28 @@ def test_task_domain_survives_markdown_event_projection() -> None:
     assert projection["agent_todos"]["items"][0]["task_domain"] == "validation"
 
 
+def test_updated_at_survives_todo_add_projection() -> None:
+    added = make_state_event(
+        event_id="evt-updated-at-add",
+        goal_id=GOAL_ID,
+        event_type=TODO_ADDED,
+        refs={"todo_id": "todo_updated_at001"},
+        payload={
+            "role": "agent",
+            "title": "Validate one adaptive lane.",
+            "updated_at": "2026-07-18T00:00:00+00:00",
+        },
+        recorded_at="2026-07-18T00:00:00+00:00",
+    )
+
+    projection = build_state_projection([added])
+
+    assert (
+        projection["agent_todos"]["items"][0]["updated_at"]
+        == "2026-07-18T00:00:00+00:00"
+    )
+
+
 def test_task_domain_event_update_is_normalized_and_invalid_values_fail() -> None:
     added = make_state_event(
         event_id="evt-domain-add",

@@ -661,6 +661,7 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
         "planner_order": payload.get("planner_order"),
         "append_sequence": event.get("append_sequence"),
         "last_event_id": event.get("event_id"),
+        "updated_at": compact_text(payload.get("updated_at")),
     }
     if task_class:
         todo["task_class"] = task_class
