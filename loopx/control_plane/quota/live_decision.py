@@ -90,6 +90,7 @@ def build_live_quota_should_run_decision(
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     bounded_research_frontier_projector: BoundedResearchFrontierProjector | None = None,
     receipt_bound_todo_id: str | None = None,
+    receipt_bound_replan_obligation_id: str | None = None,
 ) -> dict[str, Any]:
     """Build one live CLI decision while keeping host observation injectable."""
 
@@ -134,6 +135,7 @@ def build_live_quota_should_run_decision(
         scheduler_execution_context=resolved_context,
         operator_inbox_urgency_projector=operator_inbox_urgency_projector,
         receipt_bound_todo_id=receipt_bound_todo_id,
+        receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
     )
     bind_scheduler_followup_cli_routes(
         payload,

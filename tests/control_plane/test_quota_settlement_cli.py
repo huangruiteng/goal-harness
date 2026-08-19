@@ -795,6 +795,72 @@ def test_runtime_capability_reentry_preserves_receipt_bound_todo_and_rejects_exp
     assert _heartbeat_receipt_count(runtime, TURN_ID) == 1
 
 
+def test_runtime_capability_reentry_preserves_receipt_bound_autonomous_replan(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_autonomous_replan_fixture(project, runtime, registry_path)
+    _configure_runtime_capability_reentry_fixture(project)
+    turn_instance_id = "turn-autonomous-replan-capability-reentry"
+    guard_args = (
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--scan-path",
+        str(project),
+    )
+
+    first_rc, first = _run_cli(registry_path, runtime, *guard_args)
+    replay_rc, replay = _run_cli(
+        registry_path,
+        runtime,
+        *guard_args,
+        "--available-capability",
+        "network",
+    )
+
+    assert first_rc == 0, first
+    assert first["decision"] == "autonomous_replan_required", first
+    obligation_id = first["replan_action_packet"]["obligation_id"]
+    assert first["heartbeat_receipt"]["settlement_identity"][
+        "replan_obligation_id"
+    ] == obligation_id
+    assert replay_rc == 0, replay
+    assert replay["decision"] == "autonomous_replan_required", replay
+    assert replay["selected_todo"] is None
+    assert replay["autonomous_replan_obligation"]["selection_binding"] == (
+        "heartbeat_receipt"
+    )
+    assert replay["replan_action_packet"]["obligation_id"] == obligation_id
+    assert replay["heartbeat_receipt"]["status"] == "replayed"
+    assert replay["heartbeat_receipt"]["settlement_identity"][
+        "replan_obligation_id"
+    ] == obligation_id
+    assert replay["interaction_contract"]["cli_channel"]["settlement_plan"][
+        "identity"
+    ]["replan_obligation_id"] == obligation_id
+    assert _heartbeat_receipt_count(runtime, turn_instance_id) == 1
+
+    conflict_rc, conflict = _run_cli(
+        registry_path,
+        runtime,
+        *guard_args,
+        "--available-capability",
+        "network",
+        "--todo-id",
+        REENTRY_TODO_ID,
+    )
+
+    assert conflict_rc == 1, conflict
+    assert conflict["error_code"] == "heartbeat_receipt_identity_conflict"
+    assert _heartbeat_receipt_count(runtime, turn_instance_id) == 1
+
 def test_peer_refresh_rejects_implicit_canonical_workspace_before_writeback(
     tmp_path: Path,
 ) -> None:

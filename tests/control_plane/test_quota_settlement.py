@@ -16,6 +16,7 @@ from loopx.control_plane.effect_program import (
 )
 from loopx.control_plane.quota import effect_program as quota_effect_program
 from loopx.control_plane.quota.heartbeat_receipt import (
+    heartbeat_receipt_settlement_replan_obligation_id,
     heartbeat_receipt_settlement_todo_id,
 )
 from loopx.control_plane.quota.settlement import (
@@ -73,14 +74,16 @@ def test_settlement_identity_rejects_dual_binding_before_projection() -> None:
 
 
 def test_replan_bound_heartbeat_receipt_is_not_projected_as_a_todo() -> None:
+    obligation_id = "replan-0000000000000001"
     event = {
         "goal_id": GOAL_ID,
         "agent_id": AGENT_ID,
         "run_id": TURN_ID,
-        "details": {"replan_obligation_id": "replan-0000000000000001"},
+        "details": {"replan_obligation_id": obligation_id},
     }
 
     assert heartbeat_receipt_settlement_todo_id(event) is None
+    assert heartbeat_receipt_settlement_replan_obligation_id(event) == obligation_id
 
 
 def test_selected_todo_suppresses_stale_replan_packet_binding() -> None:

@@ -23,6 +23,7 @@ from ..control_plane.quota.error_codes import (
 from ..control_plane.quota.heartbeat_receipt import (
     fail_heartbeat_receipt,
     find_heartbeat_receipt,
+    heartbeat_receipt_settlement_replan_obligation_id,
     heartbeat_receipt_settlement_todo_id,
     heartbeat_receipt_view,
 )
@@ -126,6 +127,15 @@ class _QuotaCommandContext:
     operator_inbox_urgency_projector: Callable[..., dict[str, object]]
     detail_sections: frozenset[str]
     heartbeat_turn_id: str | None
+
+
+def _heartbeat_receipt_settlement_bindings(
+    event: Mapping[str, object],
+) -> tuple[str | None, str | None]:
+    return (
+        heartbeat_receipt_settlement_todo_id(event),
+        heartbeat_receipt_settlement_replan_obligation_id(event),
+    )
 
 
 def _scheduler_execution_context_from_args(
@@ -553,7 +563,7 @@ def handle_quota_command(
         scheduler_context = context.scheduler_context
         operator_inbox_urgency_projector = context.operator_inbox_urgency_projector
         if args.quota_command == "should-run":
-            receipt_bound_todo_id = None
+            receipt_bound_todo_id, receipt_bound_replan_obligation_id = None, None
             if heartbeat_turn_id:
                 heartbeat_receipt_existing = find_heartbeat_receipt(
                     runtime_root,
@@ -562,7 +572,10 @@ def handle_quota_command(
                     turn_instance_id=heartbeat_turn_id,
                 )
                 if heartbeat_receipt_existing:
-                    receipt_bound_todo_id = heartbeat_receipt_settlement_todo_id(
+                    (
+                        receipt_bound_todo_id,
+                        receipt_bound_replan_obligation_id,
+                    ) = _heartbeat_receipt_settlement_bindings(
                         heartbeat_receipt_existing
                     )
             payload = build_live_quota_should_run_decision(
@@ -581,6 +594,9 @@ def handle_quota_command(
                     project_live_explore_composition_frontier
                 ),
                 receipt_bound_todo_id=receipt_bound_todo_id,
+                receipt_bound_replan_obligation_id=(
+                    receipt_bound_replan_obligation_id
+                ),
             )
             if heartbeat_turn_id:
                 if heartbeat_receipt_existing:
@@ -652,6 +668,9 @@ def handle_quota_command(
                                 project_live_explore_composition_frontier
                             ),
                             receipt_bound_todo_id=receipt_bound_todo_id,
+                            receipt_bound_replan_obligation_id=(
+                                receipt_bound_replan_obligation_id
+                            ),
                         )
                         cache_metadata = None
                         heartbeat_stall_observation = (
