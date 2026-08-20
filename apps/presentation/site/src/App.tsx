@@ -111,6 +111,27 @@ const content = {
       ["Durable state", "The next session resumes from governed state, not memory."],
       ["Reviewable evidence", "Every transition leaves a result another person can verify."],
     ],
+    overview: {
+      eyebrow: "What LoopX is",
+      title: "Execution happens in the runtime. Continuity lives in LoopX.",
+      body: "LoopX is the stateful control plane between a long-running goal, the people who own it, and agents that perform bounded work. It does not replace an agent harness; it gives every turn durable context, explicit authority, and a safe next action.",
+      layers: [
+        ["Human authority", "Owns intent, sensitive decisions, permission gates, and final judgment."],
+        ["LoopX control plane", "Owns Goals, typed Todos, Claims, Gates, Evidence, Quota, recovery, and handoff."],
+        ["Agent harnesses", "Codex, Claude Code, OpenCode, TraeX, Pi, and custom runners execute bounded work and return readback."],
+      ],
+      stateTitle: "The durable state of a long-running loop",
+      state: [
+        ["Goal & scope", "What success means and what this run may touch."],
+        ["Gate & authority", "Which decision belongs to a person and why work is waiting."],
+        ["Todo & claim", "Who owns the next bounded unit of work."],
+        ["Evidence & history", "What changed, how it was validated, and what remains uncertain."],
+        ["Quota & scheduler", "When another turn is useful—and when automation should stop."],
+        ["Recovery & handoff", "How another session, host, or agent resumes without reconstructing chat."],
+      ],
+      boundaryTitle: "A clear ownership boundary",
+      boundary: "The harness executes tools and providers perform operations. LoopX preserves control truth and proposes governed transitions. Installing or connecting LoopX does not silently grant write access, approval authority, credentials, or permission to bypass a user gate.",
+    },
     sectionEyebrow: "One governed lifecycle",
     sectionTitle: "Long-running work stays legible.",
     sectionBody: "The runtime executes. LoopX preserves the control state that lets the work continue safely across sessions, hosts, and providers.",
@@ -131,6 +152,29 @@ const content = {
         ["03", "Gate aware", "A blocked P0 stays visible while independent P1 and P2 lanes continue safely."],
         ["04", "Outcome driven", "Every run writes validation, ownership, review, and handoff evidence into the next loop."],
       ],
+    },
+    outcomes: {
+      eyebrow: "Outcome capabilities",
+      title: "Choose a path by the result you need.",
+      body: "Capabilities are provider-neutral contracts built on the same control plane. Each one turns bounded observations into a verifiable outcome without creating a second source of Goal, Todo, or scheduling truth.",
+      groups: [
+        {
+          title: "Engineering delivery",
+          body: "Move repository work from public signal to a focused, reviewable result.",
+          items: ["Issue Fix", "Change Quality", "PR Review Queue", "Integration Branch"],
+        },
+        {
+          title: "Research & decisions",
+          body: "Preserve questions, experiments, evidence, and decisions across many turns.",
+          items: ["Explore", "Auto Research", "Decision Context", "Reward Memory"],
+        },
+        {
+          title: "Operations & knowledge",
+          body: "Project work into human-readable surfaces without moving state authority into the display.",
+          items: ["Personal Workspace", "Periodic Report", "Content Operations", "Material Lifecycle"],
+        },
+      ],
+      inspect: "Inspect the installed capability catalog",
     },
     learn: {
       eyebrow: "Developer book",
@@ -212,6 +256,27 @@ const content = {
       ["持久状态", "下一轮从受治理状态恢复，而不是依赖聊天记忆。"],
       ["可审查证据", "每次状态变化都留下可供他人验证的结果。"],
     ],
+    overview: {
+      eyebrow: "LoopX 是什么",
+      title: "Runtime 负责执行，LoopX 负责让长期工作连续。",
+      body: "LoopX 是连接长期目标、目标负责人和执行 Agent 的有状态控制面。它不替代 Agent harness，而是为每一轮执行提供持久上下文、显式权限边界与清晰的下一步安全动作。",
+      layers: [
+        ["人类决策权", "负责目标意图、敏感判断、权限 Gate 与最终决策。"],
+        ["LoopX 控制面", "负责 Goal、类型化 Todo、Claim、Gate、Evidence、Quota、恢复与交接。"],
+        ["Agent Harness", "Codex、Claude Code、OpenCode、TraeX、Pi 与自定义 Runner 执行有边界的工作并返回 readback。"],
+      ],
+      stateTitle: "一个长程闭环需要持久保存的状态",
+      state: [
+        ["Goal 与 Scope", "成功意味着什么，以及本轮允许触碰哪些范围。"],
+        ["Gate 与 Authority", "哪项判断属于人，以及为什么工作正在等待。"],
+        ["Todo 与 Claim", "下一个有界工作单元由谁负责。"],
+        ["Evidence 与 History", "发生了什么、如何验证，以及仍有哪些不确定性。"],
+        ["Quota 与 Scheduler", "何时值得继续下一轮，以及自动化何时应该停止。"],
+        ["Recovery 与 Handoff", "新的会话、Host 或 Agent 如何在不重建聊天记录的情况下继续。"],
+      ],
+      boundaryTitle: "清晰的责任边界",
+      boundary: "Harness 负责工具执行，Provider 负责具体操作；LoopX 保存控制面事实并提出受治理的状态迁移。安装或连接 LoopX 不会自动获得写权限、审批权、凭证，也不会获得绕过用户 Gate 的权限。",
+    },
     sectionEyebrow: "一个受治理的生命周期",
     sectionTitle: "让长程工作始终清晰可读。",
     sectionBody: "Runtime 负责执行；LoopX 保存跨会话、Host 与 Provider 安全推进所需的控制状态。",
@@ -232,6 +297,29 @@ const content = {
         ["03", "Gate-aware", "P0 等待决策时保持可见，独立的 P1、P2 线路可以安全继续。"],
         ["04", "结果驱动", "每轮运行都把验证、归属、审查和交接证据写入下一轮闭环。"],
       ],
+    },
+    outcomes: {
+      eyebrow: "结果型 Capability",
+      title: "按你需要的结果选择能力路径。",
+      body: "Capability 是建立在同一控制面之上的 Provider-neutral 结果契约。每项能力都把有边界的观察转成可验证结果，但不会另建一套 Goal、Todo 或调度事实源。",
+      groups: [
+        {
+          title: "工程交付",
+          body: "把公开信号转化为聚焦、可验证、可审查的仓库结果。",
+          items: ["Issue Fix", "Change Quality", "PR Review Queue", "Integration Branch"],
+        },
+        {
+          title: "研究与决策",
+          body: "在多轮执行中持续保存问题、实验、证据与决策。",
+          items: ["Explore", "Auto Research", "Decision Context", "Reward Memory"],
+        },
+        {
+          title: "运营与知识",
+          body: "把项目状态投影成人类可读界面，同时不把状态权威转移到展示层。",
+          items: ["Personal Workspace", "Periodic Report", "Content Operations", "Material Lifecycle"],
+        },
+      ],
+      inspect: "查看当前安装版本的 Capability 目录",
     },
     learn: {
       eyebrow: "开发者手册",
@@ -912,8 +1000,78 @@ export function App() {
           })}
         </section>
 
+        <Reveal>
+          <section className="overview-section" id="product" aria-labelledby="overview-title">
+            <div className="section-heading">
+              <p className="eyebrow">
+                <span />
+                {copy.overview.eyebrow}
+              </p>
+              <h2 id="overview-title">{copy.overview.title}</h2>
+              <p>{copy.overview.body}</p>
+            </div>
+
+            <div className="architecture-grid">
+              <div className="architecture-stack" aria-label={copy.overview.title}>
+                {copy.overview.layers.map(([title, body], index) => {
+                  const Icon = [UserRoundCheck, ShieldCheck, TerminalSquare][index];
+                  return (
+                    <article key={title}>
+                      <span className="architecture-icon">
+                        <Icon size={18} strokeWidth={1.8} />
+                      </span>
+                      <div>
+                        <small>0{index + 1}</small>
+                        <h3>{title}</h3>
+                        <p>{body}</p>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
+              <aside className="ownership-boundary">
+                <span>
+                  <GitBranch size={17} strokeWidth={1.8} />
+                  CONTROL / EXECUTION
+                </span>
+                <h3>{copy.overview.boundaryTitle}</h3>
+                <p>{copy.overview.boundary}</p>
+                <div className="boundary-flow" aria-hidden="true">
+                  <span>Goal</span>
+                  <ChevronRight size={14} />
+                  <span>LoopX state</span>
+                  <ChevronRight size={14} />
+                  <span>Bounded turn</span>
+                  <ChevronRight size={14} />
+                  <span>Readback</span>
+                </div>
+              </aside>
+            </div>
+
+            <div className="state-map">
+              <div className="state-map-heading">
+                <span>STATE KERNEL</span>
+                <h3>{copy.overview.stateTitle}</h3>
+              </div>
+              <div className="state-grid">
+                {copy.overview.state.map(([title, body], index) => {
+                  const Icon = [Target, ShieldCheck, UserRoundCheck, FileCheck2, RotateCcw, GitBranch][index];
+                  return (
+                    <article key={title}>
+                      <Icon size={17} strokeWidth={1.8} />
+                      <h4>{title}</h4>
+                      <p>{body}</p>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        </Reveal>
+
         <Reveal className="workflow-section-wrap">
-        <section className="workflow-section" id="product">
+        <section className="workflow-section" id="workflow">
           <div className="section-heading">
             <p className="eyebrow">
               <span />
@@ -922,7 +1080,7 @@ export function App() {
             <h2>{copy.sectionTitle}</h2>
             <p>{copy.sectionBody}</p>
           </div>
-          <div className="workflow-grid" id="workflow">
+          <div className="workflow-grid">
             {copy.steps.map(([number, title, body]) => (
               <article key={number}>
                 <span>{number}</span>
@@ -1000,6 +1158,48 @@ export function App() {
                 </article>
               ))}
             </div>
+          </section>
+        </Reveal>
+
+        <Reveal>
+          <section className="outcome-section" aria-labelledby="outcome-title">
+            <div className="section-heading">
+              <p className="eyebrow">
+                <span />
+                {copy.outcomes.eyebrow}
+              </p>
+              <h2 id="outcome-title">{copy.outcomes.title}</h2>
+              <p>{copy.outcomes.body}</p>
+            </div>
+            <div className="outcome-grid">
+              {copy.outcomes.groups.map((group, index) => {
+                const Icon = [Code2, Target, FileCheck2][index];
+                return (
+                  <article key={group.title}>
+                    <div className="outcome-title-row">
+                      <span>
+                        <Icon size={18} strokeWidth={1.8} />
+                      </span>
+                      <small>0{index + 1}</small>
+                    </div>
+                    <h3>{group.title}</h3>
+                    <p>{group.body}</p>
+                    <ul>
+                      {group.items.map((item) => (
+                        <li key={item}>
+                          <Check size={13} strokeWidth={2} />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                );
+              })}
+            </div>
+            <a className="catalog-link" href={`${basePath}docs/capabilities/`}>
+              {copy.outcomes.inspect}
+              <ArrowRight size={15} />
+            </a>
           </section>
         </Reveal>
 
