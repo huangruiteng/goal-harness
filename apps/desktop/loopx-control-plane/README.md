@@ -34,6 +34,22 @@ The WebView can navigate only inside its own loopback asset origin. Dashboard
 requests to the status and Chat services remain restricted to loopback CORS and
 the existing preview/apply authority boundary.
 
+## Coexistence With `loopx dashboard`
+
+The desktop shell and `loopx dashboard` share the same loopback services on
+`8766` and `8767`, and both entry points reuse an already-running matching
+LoopX service:
+
+- Start `loopx dashboard` first, then open the desktop shell: the shell keeps
+  using the running status and Chat services and only opens the native window.
+- Start the desktop shell first, then run `loopx dashboard`: the command
+  detects the matching LoopX Chat service, prints its URL, and opens the
+  browser/PWA route without starting a second server.
+
+Either order works. Closing the desktop window stops only the service process
+groups it started; a Chat service started by `loopx dashboard` keeps running
+until that command is stopped.
+
 ## Prerequisites
 
 - LoopX installed and available as `loopx`; set `LOOPX_BIN` to override it.

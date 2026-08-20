@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+import http.client
+import json
 import os
 from pathlib import Path
 import subprocess
+from urllib.parse import quote
+import webbrowser
+
+
+CHAT_CAPABILITIES_PATH = "/api/chat/capabilities"
+DASHBOARD_CHAT_PATH = "/chat/"
+EXPECTED_CHAT_SCHEMA_VERSION = "loopx_chat_capabilities_v1"
+CHAT_PROBE_TIMEOUT_SECONDS = 0.75
+MAX_PROBE_RESPONSE_BYTES = 1024 * 1024
 
 
 def dashboard_release_root() -> Path:
@@ -14,6 +25,51 @@ def dashboard_release_root() -> Path:
 
 def default_packaged_assets_dir() -> Path:
     return Path(__file__).resolve().parent / "web" / "chat"
+
+
+def _probe_existing_chat(host: str, port: int) -> str:
+    """Return whether the target port already serves LoopX Chat.
+
+    The result is one of ``matching`` (a LoopX Chat v1 service is running),
+    ``foreign`` (some other process owns the port), or ``unavailable`` (the
+    port is free). Only the exact top-level capability fingerprint is
+    accepted so a mismatched frontend/backend pair is never silently reused.
+    """
+    try:
+        connection = http.client.HTTPConnection(
+            host,
+            port,
+            timeout=CHAT_PROBE_TIMEOUT_SECONDS,
+        )
+        try:
+            connection.request(
+                "GET",
+                CHAT_CAPABILITIES_PATH,
+                headers={"Connection": "close"},
+            )
+            response = connection.getresponse()
+            payload = response.read(MAX_PROBE_RESPONSE_BYTES)
+            status = response.status
+        finally:
+            connection.close()
+    except ConnectionRefusedError:
+        return "unavailable"
+    except (OSError, http.client.HTTPException):
+        return "foreign"
+    if status != 200:
+        return "foreign"
+    try:
+        capabilities = json.loads(payload)
+    except (UnicodeDecodeError, ValueError):
+        return "foreign"
+    if not isinstance(capabilities, dict):
+        return "foreign"
+    if (
+        capabilities.get("ok") is not True
+        or capabilities.get("schema_version") != EXPECTED_CHAT_SCHEMA_VERSION
+    ):
+        return "foreign"
+    return "matching"
 
 
 def launch_dashboard(
@@ -37,6 +93,21 @@ def launch_dashboard(
     dev_launcher = release_root / "scripts" / "dashboard-dev.sh"
     if (prefer_dev or os.environ.get("LOOPX_DASHBOARD_DEV") == "1") and dev_launcher.is_file():
         return subprocess.call(["bash", str(dev_launcher)], cwd=release_root)
+
+    existing_chat = _probe_existing_chat(host, port)
+    if existing_chat == "matching":
+        url = f"http://{host}:{port}{DASHBOARD_CHAT_PATH}"
+        if goal_id:
+            url = f"{url}?goalId={quote(goal_id, safe='')}"
+        print(f"Reusing existing LoopX Chat service at {url}", flush=True)
+        if open_browser:
+            webbrowser.open(url)
+        return 0
+    if existing_chat == "foreign":
+        raise RuntimeError(
+            f"port {port} is already used by a service that is not LoopX Chat; "
+            "stop that service or start LoopX on another port with --port."
+        )
 
     from .chat_server import serve_chat
 

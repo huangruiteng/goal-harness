@@ -71,7 +71,10 @@ npm run dev
 
 [Read the desktop shell guide](apps/desktop/loopx-control-plane/README.md).
 Closing the window stops only the service processes that the shell started;
-existing LoopX services and durable Goal state remain intact.
+existing LoopX services and durable Goal state remain intact. Both entry
+points share the same loopback services and can be started in either order:
+`loopx dashboard` reuses an already-running LoopX Chat service instead of
+starting a second one.
 
 [Watch the full 32-second walkthrough](docs/assets/personal-workspace/loopx-dashboard-launch.mp4)
 · [Read the workspace guide](docs/guides/personal-workspace-user-guide.md)

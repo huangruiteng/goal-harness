@@ -1,14 +1,42 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
 from loopx.cli import build_parser, main
 from loopx.cli_commands import support_control
+
+
+class _CapabilitiesHandler(BaseHTTPRequestHandler):
+    capabilities: dict[str, object] = {
+        "ok": True,
+        "schema_version": "loopx_chat_capabilities_v1",
+    }
+
+    def do_GET(self) -> None:
+        body = json.dumps(self.capabilities).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: object) -> None:
+        pass
+
+
+def _serve_capabilities(handler_cls: type[_CapabilitiesHandler] = _CapabilitiesHandler):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
 
 
 def test_dashboard_command_is_registered() -> None:
@@ -75,6 +103,10 @@ def test_launch_dashboard_in_installed_mode_serves_packaged_chat(
 
     # Point release root to an empty directory without scripts/dashboard-dev.sh (simulating installed wheel site-packages)
     monkeypatch.setenv("LOOPX_RELEASE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "loopx.dashboard_launcher._probe_existing_chat",
+        lambda _host, _port: "unavailable",
+    )
 
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(
@@ -88,6 +120,75 @@ def test_launch_dashboard_in_installed_mode_serves_packaged_chat(
     assert len(calls) == 1
     assert calls[0]["open_browser"] is False
     assert (Path(str(calls[0]["assets_dir"])) / "index.html").is_file()
+
+
+def test_probe_existing_chat_accepts_exact_loopx_fingerprint() -> None:
+    from loopx.dashboard_launcher import _probe_existing_chat
+
+    server, thread = _serve_capabilities()
+    try:
+        assert _probe_existing_chat("127.0.0.1", server.server_address[1]) == "matching"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_probe_existing_chat_rejects_unknown_capability_schema() -> None:
+    from loopx.dashboard_launcher import _probe_existing_chat
+
+    class _UnknownCapabilitiesHandler(_CapabilitiesHandler):
+        capabilities = {"ok": True, "schema_version": "loopx_chat_capabilities_v0"}
+
+    server, thread = _serve_capabilities(_UnknownCapabilitiesHandler)
+    try:
+        assert _probe_existing_chat("127.0.0.1", server.server_address[1]) == "foreign"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_launch_dashboard_reuses_existing_matching_chat_service(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from loopx.dashboard_launcher import launch_dashboard
+
+    monkeypatch.setenv("LOOPX_RELEASE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "loopx.dashboard_launcher._probe_existing_chat",
+        lambda _host, _port: "matching",
+    )
+    opened: list[str] = []
+    monkeypatch.setattr("loopx.dashboard_launcher.webbrowser.open", opened.append)
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "loopx.chat_server.serve_chat",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    result = launch_dashboard(open_browser=True, goal_id="demo-goal")
+
+    assert result == 0
+    assert calls == []
+    assert opened == ["http://127.0.0.1:8767/chat/?goalId=demo-goal"]
+
+
+def test_launch_dashboard_rejects_foreign_chat_service(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from loopx.dashboard_launcher import launch_dashboard
+
+    monkeypatch.setenv("LOOPX_RELEASE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "loopx.dashboard_launcher._probe_existing_chat",
+        lambda _host, _port: "foreign",
+    )
+
+    with pytest.raises(RuntimeError, match="not LoopX Chat"):
+        launch_dashboard(open_browser=False)
 
 
 def test_serve_status_still_returns_success_when_server_stops_cleanly(
