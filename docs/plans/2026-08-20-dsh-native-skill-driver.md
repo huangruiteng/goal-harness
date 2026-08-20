@@ -13,8 +13,9 @@ Give a visible DeepSeek Harness (DSH) Session a small, native LoopX surface:
 
 - `/loopx-init` installs or repairs the LoopX CLI and DSH-facing LoopX Skills;
 - the `loopx` Skill teaches the model to use the authoritative LoopX CLI;
-- one same-session Driver continues quota-approved work through the exact live
-  DSH Agent.
+- one globally loaded but passive Driver becomes eligible only after the exact
+  Session successfully invokes the `loopx` Skill, then continues quota-approved
+  work through the exact live DSH Agent.
 
 LoopX remains the durable Goal, Agent, Todo, quota, and scheduler authority.
 DSH remains the model, tool, inbox, and same-session execution authority.
@@ -26,7 +27,8 @@ DSH remains the model, tool, inbox, and same-session execution authority.
 - Provider: optional `dsh-loopx-plugin` package under `packages/`.
 - Delivery: extension package, not a new built-in LoopX capability.
 - The package owns only a DSH command and Driver. It does not introduce a
-  provider-neutral Service, model tools, a coordinator API, or durable state.
+  provider-neutral Service, model tools, a coordinator API, or plugin-owned
+  durable state.
 - Existing `loopx/dsh_goal_mode` remains the separate external/headless
   `deepseek-harness` Turn adapter.
 
@@ -91,7 +93,8 @@ command error.
 The initialization followups use the stable
 `dsh-loopx-plugin/init-command` plugin source, distinct from
 `dsh-loopx-plugin/driver`. They are ordinary competing plugin input, not Driver
-reservations, and do not change Driver admission authority or command barriers.
+reservations, do not activate the Driver, and do not change Driver admission
+authority or command barriers.
 
 This command cannot install the plugin that defines it. `install.sh` remains
 the plugin bootstrap and tells the user to run `/loopx-init` after profile
@@ -142,9 +145,35 @@ Driver never creates or changes identity bindings.
 ## Same-Session Driver
 
 The Driver is modeled on DSH's native goal-round lifecycle but consumes LoopX
-quota instead of `ctx.goals`.
+quota instead of `ctx.goals`. Its service is loaded with the plugin so it can
+observe typed Session events, but loading, Agent creation, Session start, and
+idle status are passive. Before activation the Driver may only fold bounded
+in-memory Session history and clean up local work; it performs no LoopX CLI,
+binding, quota, scheduler, or heartbeat call, creates no timer, and queues no
+followup.
 
-At an exact live Agent idle checkpoint it:
+Activation belongs to one exact current Session and accepts only:
+
+- a `user/message` source with exact `kind: skill-invocation`, exact
+  `name: loopx`, and exact `form: instructions`; or
+- a `tool/call` named exactly `skill` whose arguments parse as a non-array JSON
+  object with exact `name: loopx`, followed by a successful `tool/result`
+  paired by the same call id.
+
+A call request alone is not sufficient. Failed, malformed, unmatched, or
+superseded model calls fail closed, as do ordinary prose, skill catalogs, shell
+text, `/loopx-init` lifecycle events, plugin-authored init or heartbeat input,
+installed files, CLI presence, registries, Goals, and existing bindings.
+
+Observation and Session start rebuild this eligibility projection only by
+folding the exact Session's existing typed event history. A replacement or
+cleared Session does not inherit activation from the prior Session. The plugin
+stores no durable activation record and performs no migration binding scan. An
+older or compacted Session without recognizable invocation evidence remains
+inactive until the installed `loopx` Skill is invoked once in that Session.
+
+Activation is intent, not authority. After activation, at an exact live Agent
+idle checkpoint the Driver:
 
 1. yields to ordinary human or plugin input;
 2. resolves the current Session binding from LoopX;
@@ -162,8 +191,12 @@ Plugin reload, Agent replacement, Session start/fork, cancellation, and command
 execution invalidate unadmitted work. The Driver stores no durable lifecycle
 state and exposes no public coordinator.
 
-Durable binding plus fresh LoopX quota is the continuation authority. There is
-no separate process-local arm/suppression protocol.
+The process-local activation projection only admits an evaluation for one
+Session. It does not create a binding, select a Goal or Agent, spend quota, or
+grant tool authority. Durable exact binding plus fresh LoopX quota remains the
+continuation authority; the existing scheduler/heartbeat, reservation,
+serialization, human-priority, cancellation, and pre-step revalidation
+contracts remain unchanged after activation.
 
 ## Retry Ownership
 
@@ -200,8 +233,8 @@ installed.
 - model-facing `loopx_*` tools;
 - plugin Service abstraction;
 - coordinator registry or public/private coordinator protocol;
-- sidecar state, lifecycle restoration, activation epochs, and failure
-  suppression counters;
+- sidecar state, plugin-owned durable activation state, activation epochs, and
+  failure suppression counters;
 - custom operation receipts and planning checkpoints;
 - `switchConfirmation` and plugin-owned Goal switching;
 - raw CLI or registry mutation performed on behalf of model prose.
@@ -225,9 +258,16 @@ Focused validation must cover:
   `$ARGUMENTS` dependence;
 - external `deepseek-harness`/`dsh` compatibility;
 - zero/one/ambiguous Session binding resolution;
-- idle admission, human-input priority, exact reservation checks, Agent or
-  Session replacement, command collision, cancellation, wait scheduling, and
-  the one-Driver-followup maximum per automatic admission;
+- plugin load, Agent creation, Session start, ordinary events, and repeated idle
+  transitions remaining at zero runner calls and zero timers before activation;
+- exact user and successful paired model `loopx` Skill activation, recovery
+  from typed current-Session history, cross-Agent isolation, replacement-
+  Session recomputation, and fail-closed negative invocation shapes;
+- legacy or compacted Sessions without recognizable evidence remaining
+  inactive until `loopx` is invoked once in each intended Session;
+- post-activation idle admission, human-input priority, exact reservation
+  checks, Agent or Session replacement, command collision, cancellation, wait
+  scheduling, and the one-Driver-followup maximum per automatic admission;
 - finite CLI retry with stable quota idempotency and no retry for unsafe
   outcomes;
 - built tarball installation and real DSH profile readback containing only the
@@ -243,8 +283,10 @@ Focused validation must cover:
   all-unchanged outcomes.
 - a task handled through the `loopx` Skill uses authoritative CLI calls, not a
   plugin `/loopx` command, semantic routing, or model tools.
-- A bound visible DSH Session continues only fresh quota-approved work through
-  its exact live Agent.
+- an inactive Session performs no LoopX call or timer work; only a successfully
+  invoked `loopx` Skill activates that exact Session.
+- An activated, bound visible DSH Session continues only fresh quota-approved
+  work through its exact live Agent, with binding and quota authority unchanged.
 - Existing external DSH Turn mode remains compatible.
 - No rejected Service/tools/coordinator/sidecar design survives in production
   code or public guidance.
