@@ -600,7 +600,7 @@ def test_rebinding_to_another_chat_drops_prior_session(
     assert binding["receipts"] == {}
 
 
-def test_status_reads_four_state_and_updates_local_receipt(
+def test_status_reads_typed_lifecycle_and_updates_local_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -698,6 +698,92 @@ def test_status_transport_failure_does_not_regress_terminal_receipt(
 
     assert observed["status"] == "unknown"
     assert binding["receipts"][dispatch_key]["state"] == "completed"
+
+
+@pytest.mark.parametrize(
+    ("local_state", "provider_state"),
+    [
+        ("completed", "running"),
+        ("failed", "unknown"),
+        ("not_found", None),
+    ],
+)
+def test_status_ignores_provider_regression_after_local_terminal_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    local_state: str,
+    provider_state: str | None,
+) -> None:
+    registry, registry_path = _registry(tmp_path)
+    binding_path = tmp_path / ".loopx" / "goal-channel-runtime.json"
+    monkeypatch.setenv("BOTMUX_TEST_TOKEN", "secret-public-fixture")
+    setup_botmux_runtime(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        endpoint="http://127.0.0.1:7891",
+        bot_id=BOT_ID,
+        chat_id=CHAT_ID,
+        token_env="BOTMUX_TEST_TOKEN",
+        execute=True,
+        requester=_requester([], tmp_path),
+    )
+    trigger_botmux_runtime(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        execute=True,
+        requester=_requester([], tmp_path),
+    )
+
+    def terminal(**kwargs: Any) -> dict[str, Any]:
+        return {"ok": True, "state": local_state}
+
+    status_botmux_runtime(
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        execute=True,
+        requester=terminal,
+    )
+
+    def stale(**kwargs: Any) -> dict[str, Any]:
+        return {"ok": True, "state": provider_state}
+
+    observed = status_botmux_runtime(
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        execute=True,
+        requester=stale,
+    )
+    binding = botmux_binding_for_goal(
+        read_botmux_runtime_binding(binding_path),
+        GOAL_ID,
+    )
+    assert binding is not None
+    dispatch_key = binding["session"]["active_dispatch_key"]
+
+    assert observed["ok"] is True
+    assert observed["status"] == local_state
+    assert "blocker" not in observed
+    assert observed["details"] == {
+        "dispatch_state": local_state,
+        "output_available": False,
+        "local_receipt_updated": True,
+        "provider_observation": provider_state or "unknown",
+        "provider_observation_ignored": True,
+    }
+    assert binding["receipts"][dispatch_key]["state"] == local_state
+    assert (
+        binding["receipts"][dispatch_key]["provider_observation"]
+        == (provider_state or "unknown")
+    )
+    assert (
+        binding["receipts"][dispatch_key]["provider_observation_ignored"]
+        is True
+    )
+    _assert_public_packet(observed)
 
 
 def test_status_maps_confirmed_unknown_session_to_not_found(

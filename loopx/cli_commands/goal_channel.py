@@ -228,7 +228,7 @@ def register_goal_channel_commands(
 
     runtime_status = runtime_sub.add_parser(
         "status",
-        help="Read the four-state result of the current botmux runtime turn.",
+        help="Read the typed lifecycle result of the current botmux runtime turn.",
     )
     add_subcommand_format(runtime_status)
     _add_runtime_common_args(runtime_status)

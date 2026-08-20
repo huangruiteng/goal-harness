@@ -66,6 +66,15 @@ class BotmuxDispatchState(str, Enum):
     REJECTED = "rejected"
 
 
+_TERMINAL_DISPATCH_STATES = frozenset(
+    {
+        BotmuxDispatchState.COMPLETED,
+        BotmuxDispatchState.FAILED,
+        BotmuxDispatchState.NOT_FOUND,
+    }
+)
+
+
 _DISPATCH_TRANSITIONS: dict[
     BotmuxDispatchState | None,
     frozenset[BotmuxDispatchState],
@@ -1266,19 +1275,43 @@ def _status_botmux_runtime(
             blocker="botmux_unreachable",
             public_summary="the botmux runtime status is temporarily unknown",
         )
-    state = _dispatch_state(result.get("state"))
-    if state not in {
+    provider_state = _dispatch_state(result.get("state"))
+    if provider_state not in {
         BotmuxDispatchState.RUNNING,
         BotmuxDispatchState.COMPLETED,
         BotmuxDispatchState.FAILED,
         BotmuxDispatchState.NOT_FOUND,
     }:
-        state = BotmuxDispatchState.UNKNOWN
+        provider_state = BotmuxDispatchState.UNKNOWN
+    latest_payload = read_botmux_runtime_binding(binding_path)
+    latest_binding = botmux_binding_for_goal(latest_payload, goal_id) or binding
+    latest_receipts = latest_binding.get("receipts")
+    latest_receipts = (
+        latest_receipts if isinstance(latest_receipts, Mapping) else {}
+    )
+    latest_receipt = latest_receipts.get(dispatch_key)
+    local_state = (
+        _dispatch_state(latest_receipt.get("state"))
+        if isinstance(latest_receipt, Mapping)
+        else None
+    )
+    provider_observation_ignored = (
+        local_state in _TERMINAL_DISPATCH_STATES
+        and provider_state != local_state
+    )
+    state = local_state if provider_observation_ignored else provider_state
     output = result.get("output")
     output_available = bool(
         isinstance(output, Mapping) and str(output.get("content") or "").strip()
     )
+    local_receipt_updated = execute
     if execute:
+        updates = None
+        if provider_observation_ignored:
+            updates = {
+                "provider_observation": provider_state.value,
+                "provider_observation_ignored": True,
+            }
         _persist_dispatch_receipt(
             binding_path=binding_path,
             goal_id=goal_id,
@@ -1286,6 +1319,19 @@ def _status_botmux_runtime(
             dispatch_key=dispatch_key,
             state=state,
             timestamp_field="status_checked_at",
+            updates=updates,
+        )
+    details: dict[str, Any] = {
+        "dispatch_state": state.value,
+        "output_available": output_available,
+        "local_receipt_updated": local_receipt_updated,
+    }
+    if provider_observation_ignored:
+        details.update(
+            {
+                "provider_observation": provider_state.value,
+                "provider_observation_ignored": True,
+            }
         )
     return _operation_packet(
         ok=state != BotmuxDispatchState.UNKNOWN,
@@ -1302,11 +1348,7 @@ def _status_botmux_runtime(
         readback_verified=state == BotmuxDispatchState.COMPLETED,
         idempotency_key=dispatch_key,
         receipt_id=_receipt_id(dispatch_key),
-        details={
-            "dispatch_state": state.value,
-            "output_available": output_available,
-            "local_receipt_updated": execute,
-        },
+        details=details,
     )
 
 

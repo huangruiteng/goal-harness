@@ -101,7 +101,7 @@ loopx goal-channel runtime trigger \
   --execute
 ```
 
-Read botmux's four-state result:
+Read botmux's typed lifecycle result:
 
 ```bash
 loopx goal-channel runtime status --goal-id <goal-id>
