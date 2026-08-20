@@ -10,6 +10,7 @@ import shlex
 import tempfile
 from typing import Any, Iterator, Mapping
 
+from .file_lock import exclusive_file_lock
 from .skill_install_readback import (
     ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
     PACKAGED_HOST_SKILL_IDS,
@@ -35,6 +36,9 @@ MANAGED_ENTRY_PREVIEW_STATUSES = {*MANAGED_ENTRY_STATUSES, "would_create"}
 _PACKAGED_SKILL_SENTINEL = PurePosixPath(
     "share/loopx/skills/loopx-project/SKILL.md"
 )
+# `exclusive_file_lock` appends `.lock`, so the sibling it guards keeps the
+# lock file at the path installs have always used.
+_INSTALL_LOCK_STEM = ".loopx-workflow-skills"
 
 
 def _valid_source_root(path: Path) -> bool:
@@ -100,16 +104,12 @@ def default_workflow_skills_dir(env: Mapping[str, str] | None = None) -> Path:
 
 @contextmanager
 def _exclusive_install_lock(skills_dir: Path) -> Iterator[None]:
-    import fcntl
-
     skills_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = skills_dir / ".loopx-workflow-skills.lock"
-    with lock_path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    with exclusive_file_lock(
+        skills_dir / _INSTALL_LOCK_STEM,
+        operation="workflow_skill_install",
+    ):
+        yield
 
 
 def _install_one_skill(source: Path, target: Path) -> str:

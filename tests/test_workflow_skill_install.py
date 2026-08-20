@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 from pathlib import Path
+from typing import Any, Iterator
 
+import pytest
+
+from loopx import file_lock
+from loopx import workflow_skill_install as install_module
 from loopx.skill_install_readback import (
     ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
     PACKAGED_HOST_SKILL_IDS,
@@ -82,6 +88,67 @@ def test_uninstall_preserves_locally_modified_skill(tmp_path: Path) -> None:
     assert removed["result"]["preserved_modified"] == ["loopx-project"]
     assert modified.is_file()
     assert (skills_dir / SKILL_INSTALL_READBACK_FILENAME).is_file()
+
+
+class _ByteRangeLockBackend:
+    """Stand-in for ``msvcrt`` so the Windows lock branch runs on any host."""
+
+    LK_NBLCK = 1
+    LK_UNLCK = 0
+
+    def __init__(self) -> None:
+        self.modes: list[int] = []
+
+    def locking(self, file_descriptor: int, mode: int, length: int) -> None:
+        self.modes.append(mode)
+
+
+def test_install_takes_the_windows_lock_branch_without_fcntl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _ByteRangeLockBackend()
+    monkeypatch.setattr(file_lock, "fcntl", None)
+    monkeypatch.setattr(file_lock, "msvcrt", backend)
+    skills_dir = tmp_path / "skills"
+
+    installed = workflow_skill_install(skills_dir=skills_dir, execute=True)
+
+    assert installed["ok"] is True
+    assert installed["after"]["ready"] is True
+    assert backend.modes == [backend.LK_NBLCK, backend.LK_UNLCK]
+
+
+def test_install_serializes_on_the_shared_workflow_skill_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills_dir = tmp_path / "skills"
+    held: list[Path] = []
+    locked: list[Path] = []
+    real_readback = install_module.write_skill_install_readback
+
+    @contextmanager
+    def recording_lock(path: Path, **kwargs: Any) -> Iterator[Path]:
+        locked.append(path)
+        held.append(path)
+        try:
+            yield path
+        finally:
+            held.pop()
+
+    def recording_readback(**kwargs: Any) -> Any:
+        assert held, "the install readback was written outside the lock"
+        return real_readback(**kwargs)
+
+    monkeypatch.setattr(install_module, "exclusive_file_lock", recording_lock)
+    monkeypatch.setattr(install_module, "write_skill_install_readback", recording_readback)
+
+    installed = workflow_skill_install(skills_dir=skills_dir, execute=True)
+
+    assert installed["ok"] is True
+    assert locked == [skills_dir / ".loopx-workflow-skills"]
+    assert held == []
 
 
 def test_inspect_does_not_create_target(tmp_path: Path) -> None:
