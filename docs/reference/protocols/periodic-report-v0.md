@@ -38,6 +38,34 @@ records whether generation is allowed, the normalized profile digest, and the
 portable/enhanced/durable extension mode. It performs no source read, schedule
 mutation, provider lookup, rendering, archive write, or message delivery.
 
+### Audience policy and announcement plan
+
+A custom profile may include `periodic_report_audience_policy_v0`. The policy
+contains symbolic recipients, an eligible visibility set (primary by default),
+and no provider identity. Each recipient must own one or more normalized domain
+tokens or declare one or more `periodic_report_audience_routing_rule_v0`
+objects. A rule may select `source_ids`, `section_ids`, `content_kinds`,
+`tags_any`, or `domains_any`; every selector declared by that rule must match
+one normalized item. An item may carry `domains` in addition to its existing
+tags and content kind.
+
+`periodic_report_announcement_plan_v0` is a deterministic, provider-neutral
+projection over the exact normalized document and audience policy. It records
+the selected symbolic recipient ids, matching item references, typed match
+reasons, and policy/document digests. An owned-domain intersection or explicit
+routing-rule match is required. Supporting items are ignored unless the policy
+explicitly makes that visibility eligible. An unrelated recipient is omitted,
+and title or summary text never infers relevance.
+
+The Lark delivery adapter accepts the document and policy together. Preview
+returns the plan with no identity resolution or external effect. Execute asks
+an injected Lark identity adapter to render only the selected symbolic ids,
+prepends those `<at>` elements, then uses the existing send and exact-readback
+contract. A selected recipient without an identity renderer, a mismatched
+artifact/document digest, or mention markup authored into report content,
+title, or footer fails closed before send. This keeps relevance in the core
+contract and provider identity on the extension side.
+
 `periodic_report_project_progress_projection_v0` is the built-in,
 domain-neutral source input. It groups typed project facts into progress,
 capability evolution, risks, next actions, and supporting evidence, with no

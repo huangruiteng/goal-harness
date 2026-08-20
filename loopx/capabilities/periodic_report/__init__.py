@@ -13,6 +13,10 @@ from .archive import (
     build_periodic_report_archive_bundle,
     verify_periodic_report_archive_receipts,
 )
+from .audience import (
+    build_periodic_report_announcement_plan,
+    normalize_periodic_report_audience_policy,
+)
 from .bindings import (
     build_periodic_report_delivery_receipt,
     build_periodic_report_extension_readiness,
@@ -51,6 +55,7 @@ __all__ = [
     "PROJECT_PROGRESS_PROJECTION_SCHEMA",
     "WEEKLY_PROGRESS_PRESET_ID",
     "build_periodic_report_activation",
+    "build_periodic_report_announcement_plan",
     "build_periodic_report_document",
     "build_periodic_report_delivery_receipt",
     "build_periodic_report_editorial",
@@ -63,6 +68,7 @@ __all__ = [
     "build_periodic_report_source_result",
     "build_periodic_report_trigger_decision",
     "normalize_periodic_report_profile",
+    "normalize_periodic_report_audience_policy",
     "normalize_periodic_report_sink_bindings",
     "normalize_periodic_report_trigger_policy",
     "project_progress_periodic_report_source_adapter",

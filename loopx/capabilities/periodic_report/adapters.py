@@ -162,6 +162,14 @@ def _normalize_item(raw: object, *, label: str) -> dict[str, Any]:
     )
     if tags:
         normalized["tags"] = tags
+    domains = sorted(
+        {
+            _token(value, f"{label}.domains[]")
+            for value in _sequence(item.get("domains", []), f"{label}.domains")
+        }
+    )
+    if domains:
+        normalized["domains"] = domains
     raw_tag_labels = _mapping(item.get("tag_labels", {}), f"{label}.tag_labels")
     tag_labels: dict[str, str] = {}
     for raw_tag, raw_label in raw_tag_labels.items():

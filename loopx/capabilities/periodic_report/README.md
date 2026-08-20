@@ -93,6 +93,31 @@ cadence, collect repository and discussion signals, render a team card, archive
 the artifact, and deliver it to a configured channel. None of those choices
 becomes an invariant of the shared core or the in-session preset.
 
+## Audience relevance and Lark announcements
+
+A custom profile may declare a `periodic_report_audience_policy_v0`. Recipients
+use stable symbolic ids and must declare at least one owned domain or typed
+routing rule. Report items may carry normalized `domains`; routing rules may
+also select explicit source ids, section ids, content kinds, tags, or domains.
+Every declared selector in one rule must match the same normalized item.
+
+`build_periodic_report_announcement_plan` compiles those facts into a
+provider-neutral `periodic_report_announcement_plan_v0`. A recipient is
+mentioned only when at least one eligible report item intersects an owned
+domain or matches an explicit rule. Primary items are eligible by default;
+supporting evidence is excluded unless the profile opts it in. The default for
+an unrelated recipient is omission. Titles, summaries, authored mention text,
+provider identities, and external lookups never participate in selection.
+
+The Lark delivery adapter may consume the exact normalized document and policy
+alongside the rendered artifact. Preview returns the announcement plan without
+resolving an identity or sending a message. On execute, the extension resolves
+only the selected symbolic ids through an injected provider adapter and places
+those verified `<at>` elements before the report. A match without a renderer,
+a mismatched document/artifact digest, or provider mention markup embedded in
+the artifact, title, or footer fails before send. The core therefore owns
+relevance while the Lark extension owns provider identity and wire rendering.
+
 This is a built-in capability, not an extension: callers need the trigger,
 idempotency, retry, and receipt contract even when no provider is installed.
 Optional or independently versioned collectors, renderers, archive stores, and

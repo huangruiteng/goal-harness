@@ -12,6 +12,10 @@ from ....capabilities.periodic_report.adapters import (
     ARTIFACT_SCHEMA,
     SINK_RESULT_SCHEMA,
     PeriodicReportSinkAdapter,
+    _normalize_artifact_result,
+)
+from ....capabilities.periodic_report.audience import (
+    build_periodic_report_announcement_plan,
 )
 from ....capabilities.periodic_report.core import _reject_raw_keys
 from .message_card import build_lark_markdown_reply_card
@@ -19,6 +23,7 @@ from .message_card import build_lark_markdown_reply_card
 
 LarkSendEffect = Callable[[Mapping[str, Any], str], Mapping[str, Any]]
 LarkReadbackEffect = Callable[[str], Mapping[str, Any]]
+LarkRecipientMentionRenderer = Callable[[str], str]
 MiaodaPublishEffect = Callable[
     [Mapping[str, Any], str, str], Mapping[str, Any]
 ]
@@ -28,6 +33,11 @@ MIAODA_HTML_MAX_BYTES = 10 * 1024 * 1024
 MIAODA_ARCHIVE_MAX_BYTES = 20 * 1024 * 1024
 MIAODA_UNCOMPRESSED_MAX_BYTES = 200 * 1024 * 1024
 _MIAODA_APP_ID_RE = re.compile(r"^app_[a-z0-9]+$")
+_LARK_MENTION_MARKUP_RE = re.compile(r"<\s*at\b", re.IGNORECASE)
+_LARK_RENDERED_MENTION_RE = re.compile(
+    r"^<at\b[^>]*>[^<>]*</at>$",
+    re.IGNORECASE,
+)
 
 
 def _required_text(value: object, label: str) -> str:
@@ -50,6 +60,35 @@ def _miaoda_app_id(value: object) -> str:
     if not _MIAODA_APP_ID_RE.fullmatch(app_id):
         raise ValueError("app_id must be a Miaoda HTML app id beginning with app_")
     return app_id
+
+
+def _reject_lark_mention_markup(value: object, label: str) -> None:
+    if _LARK_MENTION_MARKUP_RE.search(str(value or "")):
+        raise ValueError(
+            f"{label} must not contain Lark mention markup; use audience_policy"
+        )
+
+
+def _render_lark_mentions(
+    recipient_ids: list[str],
+    render_recipient_mention: LarkRecipientMentionRenderer | None,
+) -> str:
+    if not recipient_ids:
+        return ""
+    if render_recipient_mention is None:
+        raise ValueError("matched audience recipients require render_recipient_mention")
+    mentions: list[str] = []
+    for recipient_id in recipient_ids:
+        mention = _required_text(
+            render_recipient_mention(recipient_id),
+            f"mention for recipient {recipient_id}",
+        )
+        if not _LARK_RENDERED_MENTION_RE.fullmatch(mention):
+            raise ValueError(
+                "render_recipient_mention must return one Lark <at> element"
+            )
+        mentions.append(mention)
+    return " ".join(mentions)
 
 
 def _https_url(value: object, label: str) -> str:
@@ -104,6 +143,7 @@ def periodic_report_lark_sink_adapter(
     *,
     send: LarkSendEffect,
     readback: LarkReadbackEffect,
+    render_recipient_mention: LarkRecipientMentionRenderer | None = None,
     sink_id: str = "lark_delivery",
 ) -> PeriodicReportSinkAdapter:
     """Build a Lark delivery sink with injected write and readback effects."""
@@ -114,9 +154,31 @@ def periodic_report_lark_sink_adapter(
     ) -> dict[str, Any]:
         if artifact.get("schema_version") != ARTIFACT_SCHEMA:
             raise ValueError(f"artifact must use {ARTIFACT_SCHEMA}")
+        has_document = context.get("document") is not None
+        has_audience_policy = context.get("audience_policy") is not None
+        if has_document != has_audience_policy:
+            raise ValueError("document and audience_policy must be provided together")
+        announcement_plan: dict[str, Any] | None = None
+        if has_document:
+            document = dict(context["document"])
+            _normalize_artifact_result(artifact, expected_document=document)
+            announcement_plan = build_periodic_report_announcement_plan(
+                document=document,
+                audience_policy=dict(context["audience_policy"]),
+            )
         idempotency_key = _required_text(
             context.get("idempotency_key"), "idempotency_key"
         )
+        title = _card_text(context.get("title"), "title", default="Periodic report")
+        footer = _card_text(
+            context.get("footer"),
+            "footer",
+            default="LoopX periodic_report_v0",
+        )
+        _reject_raw_keys({"title": title, "footer": footer}, "lark_context")
+        _reject_lark_mention_markup(artifact.get("content"), "artifact.content")
+        _reject_lark_mention_markup(title, "title")
+        _reject_lark_mention_markup(footer, "footer")
         base: dict[str, Any] = {
             "schema_version": SINK_RESULT_SCHEMA,
             "sink_id": adapter.sink_id,
@@ -126,6 +188,8 @@ def periodic_report_lark_sink_adapter(
             "schedule_policy_applied": False,
             "business_evidence_judged": False,
         }
+        if announcement_plan is not None:
+            base["announcement_plan"] = announcement_plan
         if context.get("execute") is not True:
             return {
                 **base,
@@ -134,15 +198,20 @@ def periodic_report_lark_sink_adapter(
                 "readback_verified": False,
                 "external_writes_performed": False,
             }
-        title = _card_text(context.get("title"), "title", default="Periodic report")
-        footer = _card_text(
-            context.get("footer"),
-            "footer",
-            default="LoopX periodic_report_v0",
+        recipient_ids = (
+            list(announcement_plan["mentioned_recipient_ids"])
+            if announcement_plan is not None
+            else []
         )
-        _reject_raw_keys({"title": title, "footer": footer}, "lark_context")
+        mentions = _render_lark_mentions(
+            recipient_ids,
+            render_recipient_mention,
+        )
+        markdown = str(artifact.get("content") or "")
+        if mentions:
+            markdown = f"{mentions}\n\n{markdown}"
         card = build_lark_markdown_reply_card(
-            artifact.get("content"),
+            markdown,
             title=title,
             footer=footer,
         )

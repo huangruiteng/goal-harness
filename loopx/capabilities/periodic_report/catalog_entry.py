@@ -67,6 +67,16 @@ PERIODIC_REPORT_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "docs/reference/protocols/periodic-report-v0.md",
         },
         {
+            "schema_version": "periodic_report_audience_policy_v0",
+            "module": "loopx.capabilities.periodic_report.audience",
+            "doc": "docs/reference/protocols/periodic-report-v0.md",
+        },
+        {
+            "schema_version": "periodic_report_announcement_plan_v0",
+            "module": "loopx.capabilities.periodic_report.audience",
+            "doc": "docs/reference/protocols/periodic-report-v0.md",
+        },
+        {
             "schema_version": "periodic_report_project_progress_projection_v0",
             "module": "loopx.capabilities.periodic_report.project_progress",
             "doc": "docs/reference/protocols/periodic-report-v0.md",
@@ -144,6 +154,7 @@ PERIODIC_REPORT_CATALOG_ENTRY: dict[str, Any] = {
         "Custom, unattended, or externally delivered reports remain disabled until a project profile and host/runtime authority explicitly enable those separate paths.",
         "The core owns material trigger classification, coalescing, cooldown/deduplication, period/profile binding, deterministic identity, receipts, run state, and retry projection.",
         "Profiles own schedule calculation, enabled trigger kinds, minimum interval, timezone, sections, audience, and project policy.",
+        "Audience mentions are selected only from normalized item domains or explicit typed routing rules; title and summary text never infer a recipient, and unrelated recipients are omitted by default.",
         "Adapters own domain source collection; renderers and sinks own all provider effects and verified readback.",
         "An explicit hosted-delivery intent is satisfied only by its typed sink result and exact provider readback; a local HTML artifact remains usable but cannot satisfy that intent.",
         "The document builder compiles hero summaries only from typed primary outcomes, risks, and next actions; renderers reject authored or stale summaries.",

@@ -86,6 +86,17 @@ entry_command = "loopx explore feishu-sync --goal-id <goal-id>"
 next_real_step = "Install or upgrade and explicitly enable the bundled provider before configuring a Lark Explore sink."
 
 [[provides]]
+id = "lark-periodic-report-announcement"
+kind = "delivery_sink"
+title = "Audience-aware periodic report announcement"
+status = "active-preview"
+visibility = "public"
+real_world_anchor = "a periodic report delivered to a configured Lark chat with only relevant recipients mentioned"
+user_value = "Deliver one report while mentioning only symbolic recipients selected by normalized domains or explicit typed routing rules."
+entry_command = "loopx periodic-report inspect-profile --profile-json <profile.json>"
+next_real_step = "Configure a profile-owned audience policy, preview the announcement plan, then execute through an explicitly enabled Lark sink."
+
+[[provides]]
 id = "lark-miaoda-html-report"
 kind = "delivery_sink"
 title = "Miaoda HTML report publication"

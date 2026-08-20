@@ -4,6 +4,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .audience import normalize_periodic_report_audience_policy
 from .bindings import (
     _boolean,
     _mapping,
@@ -36,6 +37,7 @@ _PROFILE_FIELDS = {
     "source_bindings",
     "renderer_bindings",
     "sink_bindings",
+    "audience_policy",
 }
 
 
@@ -191,6 +193,10 @@ def normalize_periodic_report_profile(raw: Mapping[str, Any]) -> dict[str, Any]:
     schedule = _normalize_schedule(profile.get("schedule"))
     if schedule is not None:
         normalized["schedule"] = schedule
+    if profile.get("audience_policy") is not None:
+        normalized["audience_policy"] = normalize_periodic_report_audience_policy(
+            _mapping(profile["audience_policy"], "profile.audience_policy")
+        )
     return normalized
 
 
