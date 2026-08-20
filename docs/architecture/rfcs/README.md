@@ -71,17 +71,21 @@ promote a proposal beyond that status.
 
 ## Draft Integration Proposals
 
-- [Attached App Session Frontend v0](attached-app-session-frontend-v0.md):
-  attach the LoopX frontend to an already-running Codex App session, preserve
-  its automation-prompt/visible-host execution driver, and defer managed CLI
-  Turn launch to a separate future mode.
+- [LoopX Desktop Execution Frontends v0](desktop-execution-frontends-v0.md):
+  support both attachment to an externally owned Codex App session and a
+  LoopX-managed Pi or DeepSeek Harness runtime driven by bounded Turns, with a
+  provider-neutral contract and Ark Agent Plan as the default product profile;
+  converge Web and Agent-scoped Lark Bot connections on the same ordered
+  working session, and route group messages or document comments through a
+  provider-neutral external Connector contract.
 - [Agent IM, LoopX, and OpenViking collaboration v0](agent-im-openviking-collaboration-v0.md):
   separate runtime delivery, durable control state, and scoped context while
   preserving direct agent-to-LoopX interaction.
 - [Goal Channel collaboration v0](goal-channel-collaboration-v0.md)
-  ([中文版](goal-channel-collaboration-v0.zh-CN.md)): bind one external
-  collaboration channel to one LoopX goal while preserving LoopX as the source
-  of truth.
+  ([中文版](goal-channel-collaboration-v0.zh-CN.md)): bind external
+  collaboration surfaces to one LoopX goal while preserving LoopX as the
+  source of truth; interactive chat is refined by the Desktop Execution
+  Frontends RFC to route through an explicit Agent working session.
 - [Per-Goal Usage, Token, and Cost Surfacing v0](goal-usage-token-cost-v0.md):
   capture per-goal token, cost, and duration in core `usage_summary` and surface
   it in the existing dashboard behind a provider-neutral capture layer.
