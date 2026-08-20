@@ -43,8 +43,15 @@ interface Reservation extends Binding {
   phase: ReservationPhase
 }
 
+interface ActivationProjection {
+  readonly session: Agent['session']
+  readonly pendingModelCalls: Set<string>
+  activated: boolean
+}
+
 interface DriverState {
   readonly agent: Agent
+  activation: ActivationProjection
   requested: boolean
   stopping: boolean
   competing: boolean
@@ -119,6 +126,92 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined
+}
+
+function eventCallId(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+function exactUserActivation(event: SessionEvent): boolean {
+  if (event.type !== 'user/message') return false
+  const data = record(event.data)
+  const source = record(data?.source)
+  return source?.kind === 'skill-invocation'
+    && source.name === 'loopx'
+    && source.form === 'instructions'
+}
+
+function exactModelActivationCall(event: SessionEvent): string | undefined {
+  if (event.type !== 'tool/call') return undefined
+  const data = record(event.data)
+  const callId = eventCallId(data?.callId)
+  if (callId === undefined || data?.name !== 'skill'
+    || typeof data.arguments !== 'string') return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(data.arguments)
+  } catch {
+    return undefined
+  }
+  return record(parsed)?.name === 'loopx' ? callId : undefined
+}
+
+function foldActivationEvent(
+  projection: ActivationProjection,
+  event: SessionEvent,
+): void {
+  if (projection.activated) return
+  if (exactUserActivation(event)) {
+    projection.activated = true
+    projection.pendingModelCalls.clear()
+    return
+  }
+  if (event.type === 'tool/call') {
+    const data = record(event.data)
+    const callId = eventCallId(data?.callId)
+    if (callId === undefined) return
+    projection.pendingModelCalls.delete(callId)
+    if (exactModelActivationCall(event) !== undefined) {
+      projection.pendingModelCalls.add(callId)
+    }
+    return
+  }
+  if (event.type !== 'tool/result') return
+  const data = record(event.data)
+  const message = record(data?.message)
+  const source = record(message?.source)
+  const callId = eventCallId(source?.callId)
+  if (callId === undefined) return
+  const matched = projection.pendingModelCalls.delete(callId)
+  const content = message?.content
+  const block = Array.isArray(content) && content.length === 1
+    ? record(content[0])
+    : undefined
+  const successful = source?.kind === 'tool'
+    && message?.role === 'user'
+    && block?.type === 'tool-result'
+    && block.toolCallId === callId
+    && (block.isError === undefined || block.isError === false)
+    && data?.error === undefined
+  if (matched && successful) {
+    projection.activated = true
+    projection.pendingModelCalls.clear()
+  }
+}
+
+function foldSessionActivation(session: Agent['session']): ActivationProjection {
+  const projection: ActivationProjection = {
+    session,
+    pendingModelCalls: new Set(),
+    activated: false,
+  }
+  try {
+    for (const event of session.events) foldActivationEvent(projection, event)
+  } catch {
+    projection.pendingModelCalls.clear()
+    projection.activated = false
+  }
+  return projection
 }
 
 function exactBinding(
@@ -228,7 +321,7 @@ function renderThrown(value: unknown): string {
   return value instanceof Error ? value.message : String(value)
 }
 
-/** Exact-session driver with no local activation, binding mirror, or failure counter. */
+/** Exact-session driver with typed activation and no binding mirror or failure counter. */
 export class LoopXContinuationDriver {
   private readonly states = new Map<Agent, DriverState>()
   private readonly isLiveAgent: (agent: Agent) => boolean
@@ -253,8 +346,9 @@ export class LoopXContinuationDriver {
   }
 
   observeAgent(agent: Agent): void {
-    this.stateFor(agent)
-    if (agent.status === 'idle') this.requestEvaluation(this.stateFor(agent))
+    const state = this.stateFor(agent)
+    state.activation = foldSessionActivation(agent.session)
+    if (agent.status === 'idle') this.requestEvaluation(state)
   }
 
   onAgentDisposed(agent: Agent): void {
@@ -273,6 +367,7 @@ export class LoopXContinuationDriver {
     state.schedulerToken = ''
     state.unchangedPolls = 0
     state.commands.clear()
+    state.activation = foldSessionActivation(agent.session)
     this.requestEvaluation(state)
   }
 
@@ -317,8 +412,15 @@ export class LoopXContinuationDriver {
   }
 
   onSessionEvent(agent: Agent, event: SessionEvent): void {
-    const state = this.states.get(agent)
-    if (state === undefined) return
+    const existing = this.states.get(agent)
+    if (existing === undefined) return
+    const state = this.stateFor(agent)
+    const wasActivated = state.activation.activated
+    foldActivationEvent(state.activation, event)
+    if (!wasActivated && state.activation.activated
+      && agent.status === 'idle' && !state.pauseAfterTurnError) {
+      this.requestEvaluation(state)
+    }
     if (event.type === 'command/run') {
       state.commands.add(String(event.data.commandId))
       state.competing = true
@@ -426,9 +528,22 @@ export class LoopXContinuationDriver {
 
   private stateFor(agent: Agent): DriverState {
     const existing = this.states.get(agent)
-    if (existing !== undefined) return existing
+    if (existing !== undefined) {
+      if (existing.activation.session !== agent.session) {
+        this.cancelPending(existing)
+        this.retireReservation(existing)
+        existing.competing = agent.inbox.hasPending
+        existing.pauseAfterTurnError = false
+        existing.schedulerToken = ''
+        existing.unchangedPolls = 0
+        existing.commands.clear()
+        existing.activation = foldSessionActivation(agent.session)
+      }
+      return existing
+    }
     const state: DriverState = {
       agent,
+      activation: foldSessionActivation(agent.session),
       requested: false,
       stopping: false,
       competing: agent.inbox.hasPending,
@@ -444,6 +559,8 @@ export class LoopXContinuationDriver {
   private ready(state: DriverState): boolean {
     return !this.disposed
       && !state.stopping
+      && state.activation.session === state.agent.session
+      && state.activation.activated
       && !state.pauseAfterTurnError
       && !state.competing
       && state.commands.size === 0
@@ -458,7 +575,9 @@ export class LoopXContinuationDriver {
   }
 
   private requestEvaluation(state: DriverState): void {
-    if (state.stopping || this.disposed) return
+    if (state.stopping || this.disposed
+      || state.activation.session !== state.agent.session
+      || !state.activation.activated) return
     state.requested = true
     if (state.run !== undefined) return
     let run: Promise<void>
@@ -614,6 +733,8 @@ export class LoopXContinuationDriver {
     signal: AbortSignal,
   ): Promise<boolean> {
     if (signal.aborted || !this.isLiveAgent(state.agent)
+      || state.activation.session !== state.agent.session
+      || !state.activation.activated
       || state.agent.session !== reservation.session
       || state.stopping || state.pauseAfterTurnError
       || state.competing || state.reservation !== reservation) return false
@@ -742,7 +863,9 @@ export class LoopXContinuationDriver {
   }
 
   private schedule(state: DriverState, delayMs: number): void {
-    if (state.stopping || this.disposed) return
+    if (state.stopping || this.disposed
+      || state.activation.session !== state.agent.session
+      || !state.activation.activated) return
     if (state.timer !== undefined) this.clock.clearTimeout(state.timer)
     const handle = this.clock.setTimeout(() => {
       if (state.timer !== handle) return

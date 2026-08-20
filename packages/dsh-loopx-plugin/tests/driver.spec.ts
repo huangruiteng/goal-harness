@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
 import type { FileRunner } from '../src/cli.ts'
 import {
   LoopXContinuationDriver,
@@ -15,9 +15,11 @@ const sessionId = 'session-fixture'
 interface FakeAgent {
   readonly agent: Agent
   readonly cancelCalls: number
+  readonly maintenanceCalls: number
   readonly nextTurn: UserMessage[]
   readonly nextStep: UserMessage[]
-  replaceSession(headerId?: string): void
+  appendEvent(event: SessionEvent): void
+  replaceSession(headerId?: string, events?: SessionEvent[]): void
   setStatus(status: 'idle' | 'running'): void
 }
 
@@ -30,11 +32,12 @@ function userMessage(text: string): UserMessage {
   }
 }
 
-function fakeAgent(): FakeAgent {
+function fakeAgent(id = sessionId): FakeAgent {
   const nextTurn: UserMessage[] = []
   const nextStep: UserMessage[] = []
   let status: 'idle' | 'running' = 'idle'
   let cancelCalls = 0
+  let maintenanceCalls = 0
   const inbox = {
     nextTurn,
     nextStep,
@@ -52,11 +55,22 @@ function fakeAgent(): FakeAgent {
       return false
     },
   }
-  let session = {
-    id: sessionId,
+  let session: {
+    id: string
+    header: {
+      version: number
+      id: string
+      createdAt: number
+      cwd: string
+      seedLength: number
+    }
+    events: SessionEvent[]
+    surface: { nodes: never[] }
+  } = {
+    id,
     header: {
       version: 0,
-      id: sessionId,
+      id,
       createdAt: 1,
       cwd: '/fixture/project',
       seedLength: 0,
@@ -65,7 +79,7 @@ function fakeAgent(): FakeAgent {
     surface: { nodes: [] },
   }
   const agent = {
-    id: sessionId,
+    id,
     options: {},
     get session() { return session },
     inbox,
@@ -73,9 +87,10 @@ function fakeAgent(): FakeAgent {
     get status() { return status },
     cancel() { cancelCalls += 1 },
     whenIdle: async () => {},
-    runMaintenance: async <T>(task: (signal: AbortSignal) => Promise<T>) => (
-      task(new AbortController().signal)
-    ),
+    runMaintenance: async <T>(task: (signal: AbortSignal) => Promise<T>) => {
+      maintenanceCalls += 1
+      return task(new AbortController().signal)
+    },
     send(message: UserMessage, target: 'next-turn' | 'next-step') {
       (target === 'next-step' ? nextStep : nextTurn).push(message)
     },
@@ -86,16 +101,102 @@ function fakeAgent(): FakeAgent {
   return {
     agent,
     get cancelCalls() { return cancelCalls },
+    get maintenanceCalls() { return maintenanceCalls },
     nextTurn,
     nextStep,
-    replaceSession(headerId) {
+    appendEvent(event) { session.events.push(event) },
+    replaceSession(headerId, events = [...session.events]) {
       session = {
         ...session,
-        header: { ...session.header, ...(headerId === undefined ? {} : { id: headerId }) },
+        events,
+        header: {
+          ...session.header,
+          ...(headerId === undefined ? {} : { id: headerId }),
+        },
       }
     },
     setStatus(value) { status = value },
   }
+}
+
+function sessionEvent(
+  type: string,
+  data: unknown,
+): SessionEvent {
+  return { type, data } as unknown as SessionEvent
+}
+
+function userSkillInvocationEvent(
+  name = 'loopx',
+  form = 'instructions',
+): SessionEvent {
+  return sessionEvent('user/message', {
+    id: randomUUID(),
+    role: 'user',
+    content: [{ type: 'text', text: `Loaded ${name}.` }],
+    source: { kind: 'skill-invocation', name, form },
+  })
+}
+
+function modelSkillCallEvent(
+  callId: string,
+  rawArguments: string,
+  name = 'skill',
+): SessionEvent {
+  return sessionEvent('tool/call', {
+    turn: 0,
+    step: 0,
+    callId,
+    name,
+    arguments: rawArguments,
+  })
+}
+
+function modelSkillResultEvent(
+  callId: string,
+  options: {
+    readonly blockCallId?: string
+    readonly eventError?: { name: string; code: string }
+    readonly extraBlock?: boolean
+    readonly isError?: boolean
+  } = {},
+): SessionEvent {
+  const resultBlock = {
+    type: 'tool-result',
+    toolCallId: options.blockCallId ?? callId,
+    content: [],
+    isError: options.isError ?? false,
+  }
+  return sessionEvent('tool/result', {
+    turn: 0,
+    step: 0,
+    message: {
+      id: randomUUID(),
+      role: 'user',
+      content: options.extraBlock
+        ? [resultBlock, { type: 'text', text: 'unexpected extra block' }]
+        : [resultBlock],
+      source: { kind: 'tool', callId },
+    },
+    ...(options.eventError === undefined ? {} : { error: options.eventError }),
+  })
+}
+
+function observeActivated(
+  driver: LoopXContinuationDriver,
+  host: FakeAgent,
+): void {
+  host.appendEvent(userSkillInvocationEvent())
+  driver.observeAgent(host.agent)
+}
+
+function publishEvent(
+  driver: LoopXContinuationDriver,
+  host: FakeAgent,
+  event: SessionEvent,
+): void {
+  host.appendEvent(event)
+  driver.onSessionEvent(host.agent, event)
 }
 
 interface RunnerFixture {
@@ -113,6 +214,7 @@ function runnerFixture(options: {
   readonly unchangedPollLimit?: number
   readonly quotaAgentId?: string
   readonly typedQuotaFailure?: boolean
+  readonly bindingStatus?: 'bound' | 'missing'
 } = {}): RunnerFixture {
   const calls: string[][] = []
   const quotaCalls: string[][] = []
@@ -127,13 +229,29 @@ function runnerFixture(options: {
         return { exitCode: 0, stdout: 'loopx 0.5.0\n', stderr: '' }
       }
       if (args.includes('resolve-agent-thread')) {
+        const threadIdIndex = args.indexOf('--thread-id')
+        const threadId = args[threadIdIndex + 1]
+        if (options.bindingStatus === 'missing') {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              ok: true,
+              schema_version: 'loopx_thread_agent_binding_resolution_v0',
+              host_surface: 'deepseek-harness-native',
+              thread_id: threadId,
+              status: 'unbound',
+              matches: [],
+            }),
+            stderr: '',
+          }
+        }
         return {
           exitCode: 0,
           stdout: JSON.stringify({
             ok: true,
             schema_version: 'loopx_thread_agent_binding_resolution_v0',
             host_surface: 'deepseek-harness-native',
-            thread_id: sessionId,
+            thread_id: threadId,
             status: 'bound',
             goal_id: goalId,
             agent_id: agentId,
@@ -224,6 +342,271 @@ function makeDriver(fixture: RunnerFixture): LoopXContinuationDriver {
 }
 
 describe('same-session LoopX driver', () => {
+  it('keeps a newly observed inactive Agent at zero LoopX I/O and zero timers', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    const timers: unknown[] = []
+    let detachedCalls = 0
+    const driver = new LoopXContinuationDriver({
+      runner: fixture.runner,
+      isLiveAgent: () => true,
+      runDetached: operation => {
+        detachedCalls += 1
+        return operation()
+      },
+      clock: {
+        setTimeout(_callback, delay) {
+          const timer = { delay }
+          timers.push(timer)
+          return timer
+        },
+        clearTimeout() {},
+      },
+    })
+
+    driver.observeAgent(host.agent)
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(fixture.calls).toHaveLength(0)
+    expect(host.maintenanceCalls).toBe(0)
+    expect(detachedCalls).toBe(0)
+    expect(timers).toHaveLength(0)
+    await driver.dispose()
+  })
+
+  it('keeps every ordinary inactive lifecycle transition at zero LoopX I/O', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    const timers: unknown[] = []
+    const driver = new LoopXContinuationDriver({
+      runner: fixture.runner,
+      isLiveAgent: () => true,
+      clock: {
+        setTimeout(_callback, delay) {
+          const timer = { delay }
+          timers.push(timer)
+          return timer
+        },
+        clearTimeout() {},
+      },
+    })
+
+    driver.observeAgent(host.agent)
+    driver.onSessionStart(host.agent)
+    const human = userMessage('ordinary work mentioning loopx only as prose')
+    driver.onInboxInserted(host.agent, human)
+    driver.onInboxClaimed(host.agent, human)
+    publishEvent(driver, host, sessionEvent('user/message', human))
+    publishEvent(driver, host, sessionEvent('turn/end', {
+      turn: 0,
+      reason: { kind: 'completed' },
+    }))
+    driver.onAgentStatus(host.agent, 'idle')
+    driver.onAgentStatus(host.agent, 'idle')
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(fixture.calls).toHaveLength(0)
+    expect(host.maintenanceCalls).toBe(0)
+    expect(timers).toHaveLength(0)
+    await driver.dispose()
+  })
+
+  it('activates only the exact Session with a user-explicit loopx invocation', async () => {
+    const fixture = runnerFixture()
+    const first = fakeAgent()
+    const second = fakeAgent('another-session')
+    const driver = makeDriver(fixture)
+
+    driver.observeAgent(first.agent)
+    driver.observeAgent(second.agent)
+    expect(fixture.calls).toHaveLength(0)
+
+    publishEvent(driver, first, userSkillInvocationEvent())
+    await waitFor(() => first.nextTurn.length === 1)
+    const activatedCalls = fixture.calls.length
+
+    driver.onSessionStart(second.agent)
+    driver.onAgentStatus(second.agent, 'idle')
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(second.nextTurn).toHaveLength(0)
+    expect(fixture.calls).toHaveLength(activatedCalls)
+
+    publishEvent(driver, second, userSkillInvocationEvent())
+    await waitFor(() => second.nextTurn.length === 1)
+
+    const resolvedThreadIds = fixture.calls
+      .filter(call => call.includes('resolve-agent-thread'))
+      .map(call => call[call.indexOf('--thread-id') + 1])
+    expect(resolvedThreadIds).toEqual([sessionId, 'another-session'])
+    expect(first.nextTurn).toHaveLength(1)
+    expect(second.nextTurn).toHaveLength(1)
+    expect(fixture.heartbeatCalls).toBe(2)
+    await driver.dispose()
+  })
+
+  it('activates after a successful paired model skill call for loopx', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+
+    driver.observeAgent(host.agent)
+    publishEvent(driver, host, modelSkillCallEvent('call-loopx', '{"name":"loopx"}'))
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+    expect(fixture.calls).toHaveLength(0)
+
+    publishEvent(driver, host, modelSkillResultEvent('call-loopx'))
+    await waitFor(() => host.nextTurn.length === 1)
+
+    expect(fixture.heartbeatCalls).toBe(1)
+    await driver.dispose()
+  })
+
+  it('ignores malformed, failed, unrelated, prose-only, and plugin-authored signals', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+    driver.observeAgent(host.agent)
+
+    const nonSignals = [
+      userSkillInvocationEvent('another-skill'),
+      userSkillInvocationEvent('loopx', 'catalog'),
+      sessionEvent('user/message', userMessage('please run loopx')),
+      sessionEvent('user/message', {
+        ...userMessage('LoopX initialization finished.'),
+        source: { kind: 'plugin', plugin: 'dsh-loopx-plugin/init-command' },
+      }),
+      sessionEvent('user/message', {
+        ...userMessage('Continue through LoopX.'),
+        source: { kind: 'plugin', plugin: 'dsh-loopx-plugin/driver' },
+      }),
+      modelSkillCallEvent('malformed', '{not-json'),
+      modelSkillResultEvent('malformed'),
+      modelSkillCallEvent('json-null', 'null'),
+      modelSkillResultEvent('json-null'),
+      modelSkillCallEvent('json-array', '[{"name":"loopx"}]'),
+      modelSkillResultEvent('json-array'),
+      modelSkillCallEvent('json-string', '"loopx"'),
+      modelSkillResultEvent('json-string'),
+      modelSkillCallEvent('other-skill', '{"name":"another-skill"}'),
+      modelSkillResultEvent('other-skill'),
+      modelSkillCallEvent('missing-result', '{"name":"loopx"}'),
+      modelSkillCallEvent('errored', '{"name":"loopx"}'),
+      modelSkillResultEvent('errored', {
+        eventError: { name: 'SkillError', code: 'UNAVAILABLE' },
+      }),
+      modelSkillCallEvent('block-error', '{"name":"loopx"}'),
+      modelSkillResultEvent('block-error', { isError: true }),
+      modelSkillCallEvent('mismatched-block', '{"name":"loopx"}'),
+      modelSkillResultEvent('mismatched-block', { blockCallId: 'different-call' }),
+      modelSkillCallEvent('extra-block', '{"name":"loopx"}'),
+      modelSkillResultEvent('extra-block', { extraBlock: true }),
+      modelSkillCallEvent('wrong-source', '{"name":"loopx"}'),
+      sessionEvent('tool/result', {
+        turn: 0,
+        step: 0,
+        message: {
+          id: randomUUID(),
+          role: 'user',
+          content: [{
+            type: 'tool-result',
+            toolCallId: 'wrong-source',
+            content: [],
+            isError: false,
+          }],
+          source: {
+            kind: 'plugin',
+            plugin: 'not-a-tool',
+            callId: 'wrong-source',
+          },
+        },
+      }),
+      modelSkillCallEvent('duplicate-result', '{"name":"loopx"}'),
+      modelSkillResultEvent('duplicate-result', {
+        eventError: { name: 'SkillError', code: 'FAILED' },
+      }),
+      modelSkillResultEvent('duplicate-result'),
+      modelSkillResultEvent('unmatched'),
+      modelSkillCallEvent('shell-loopx', '{"name":"loopx"}', 'shell'),
+      modelSkillResultEvent('shell-loopx'),
+      modelSkillCallEvent('superseded', '{"name":"loopx"}'),
+      modelSkillCallEvent('superseded', '{"name":"another-skill"}'),
+      modelSkillResultEvent('superseded'),
+    ]
+    for (const event of nonSignals) publishEvent(driver, host, event)
+    driver.onSessionStart(host.agent)
+    driver.onAgentStatus(host.agent, 'idle')
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(fixture.calls).toHaveLength(0)
+    expect(host.maintenanceCalls).toBe(0)
+    expect(host.nextTurn).toHaveLength(0)
+    await driver.dispose()
+  })
+
+  it('restores activation from exact paired Session history in a fresh Driver', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    host.appendEvent(modelSkillCallEvent('historical-call', '{"name":"loopx"}'))
+    host.appendEvent(modelSkillResultEvent('historical-call'))
+
+    const driver = makeDriver(fixture)
+    expect(fixture.calls).toHaveLength(0)
+    driver.observeAgent(host.agent)
+    await waitFor(() => host.nextTurn.length === 1)
+
+    expect(fixture.calls.some(call => call.includes('resolve-agent-thread'))).toBe(true)
+    await driver.dispose()
+  })
+
+  it('leaves legacy or compacted history without invocation evidence inactive', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    host.appendEvent(sessionEvent('user/message', userMessage('legacy continuation')))
+    host.appendEvent(sessionEvent('user/message', {
+      ...userMessage('compacted summary mentioning loopx'),
+      source: { kind: 'plugin', plugin: 'dsh-compaction-basic' },
+    }))
+    const driver = makeDriver(fixture)
+
+    driver.observeAgent(host.agent)
+    driver.onAgentStatus(host.agent, 'idle')
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(fixture.calls).toHaveLength(0)
+    expect(host.nextTurn).toHaveLength(0)
+    await driver.dispose()
+  })
+
+  it('stops an activated Session with a missing binding before quota, heartbeat, or timers', async () => {
+    const fixture = runnerFixture({ bindingStatus: 'missing' })
+    const host = fakeAgent()
+    const timers: unknown[] = []
+    const driver = new LoopXContinuationDriver({
+      runner: fixture.runner,
+      isLiveAgent: () => true,
+      retryDelaysMs: [0, 0],
+      clock: {
+        setTimeout(_callback, delay) {
+          const timer = { delay }
+          timers.push(timer)
+          return timer
+        },
+        clearTimeout() {},
+      },
+    })
+
+    observeActivated(driver, host)
+    await waitFor(() => fixture.calls.some(call => call.includes('resolve-agent-thread')))
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(fixture.quotaCalls).toHaveLength(0)
+    expect(fixture.heartbeatCalls).toBe(0)
+    expect(timers).toHaveLength(0)
+    expect(host.nextTurn).toHaveLength(0)
+    await driver.dispose()
+  })
+
   it('contains a synchronous detached-runner failure without retrying', async () => {
     const fixture = runnerFixture()
     const host = fakeAgent()
@@ -235,6 +618,7 @@ describe('same-session LoopX driver', () => {
       warn: message => warnings.push(message),
     })
 
+    host.appendEvent(userSkillInvocationEvent())
     expect(() => driver.observeAgent(host.agent)).not.toThrow()
     expect(warnings).toHaveLength(1)
     expect(fixture.calls).toHaveLength(0)
@@ -246,7 +630,7 @@ describe('same-session LoopX driver', () => {
     const host = fakeAgent()
     const driver = makeDriver(fixture)
 
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => host.nextTurn.length === 1)
     driver.onAgentError(host.agent)
     driver.onAgentStatus(host.agent, 'idle')
@@ -262,7 +646,7 @@ describe('same-session LoopX driver', () => {
     host.setStatus('running')
     const driver = makeDriver(fixture)
 
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     driver.onSessionEvent(host.agent, {
       type: 'turn/end',
       data: { reason: { kind: 'max-tokens' } },
@@ -282,7 +666,7 @@ describe('same-session LoopX driver', () => {
     host.replaceSession('different-session-header')
     const driver = makeDriver(fixture)
 
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await new Promise<void>(resolve => setTimeout(resolve, 0))
 
     expect(fixture.calls).toHaveLength(0)
@@ -295,7 +679,7 @@ describe('same-session LoopX driver', () => {
     const host = fakeAgent()
     const driver = makeDriver(fixture)
 
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => host.nextTurn.length === 1)
     const queued = host.nextTurn[0] as UserMessage
     expect(queued.content).toEqual([
@@ -326,7 +710,7 @@ describe('same-session LoopX driver', () => {
     const fixture = runnerFixture()
     const host = fakeAgent()
     const driver = makeDriver(fixture)
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => host.nextTurn.length === 1)
 
     const human = userMessage('human priority')
@@ -341,7 +725,7 @@ describe('same-session LoopX driver', () => {
     const fixture = runnerFixture()
     const host = fakeAgent()
     const driver = makeDriver(fixture)
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => host.nextTurn.length === 1)
     const queued = host.nextTurn.shift() as UserMessage
     host.setStatus('running')
@@ -356,7 +740,7 @@ describe('same-session LoopX driver', () => {
     const fixture = runnerFixture({ quotaExitFailures: 2 })
     const host = fakeAgent()
     const driver = makeDriver(fixture)
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => host.nextTurn.length === 1)
 
     expect(fixture.quotaCalls).toHaveLength(3)
@@ -386,7 +770,7 @@ describe('same-session LoopX driver', () => {
       },
     })
 
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => fixture.quotaCalls.length === 3 && warnings.length === 1)
 
     expect(host.nextTurn).toHaveLength(0)
@@ -415,7 +799,7 @@ describe('same-session LoopX driver', () => {
       },
     })
 
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => warnings.length === 1)
 
     expect(fixture.quotaCalls).toHaveLength(1)
@@ -446,7 +830,7 @@ describe('same-session LoopX driver', () => {
       retryDelaysMs: [0, 0],
       clock,
     })
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => timers.length === 1)
 
     expect(timers[0]?.delay).toBe(7 * 60_000)
@@ -477,7 +861,7 @@ describe('same-session LoopX driver', () => {
       },
     })
 
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => timers.length === 1)
     timers[0]?.callback()
     await waitFor(() => fixture.quotaCalls.length === 2)
@@ -504,7 +888,7 @@ describe('same-session LoopX driver', () => {
       },
     })
 
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => fixture.quotaCalls.length === 1)
     await new Promise<void>(resolve => setTimeout(resolve, 0))
 
@@ -534,7 +918,7 @@ describe('same-session LoopX driver', () => {
       },
     })
 
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => warnings.length === 1)
 
     expect(host.nextTurn).toHaveLength(0)
@@ -546,7 +930,7 @@ describe('same-session LoopX driver', () => {
     const fixture = runnerFixture()
     const host = fakeAgent()
     const driver = makeDriver(fixture)
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => host.nextTurn.length === 1)
     const queued = host.nextTurn.shift() as UserMessage
     host.setStatus('running')
@@ -571,7 +955,7 @@ describe('same-session LoopX driver', () => {
     const fixture = runnerFixture()
     const host = fakeAgent()
     const driver = makeDriver(fixture)
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => host.nextTurn.length === 1)
     const queued = host.nextTurn.shift() as UserMessage
     host.setStatus('running')
@@ -595,7 +979,7 @@ describe('same-session LoopX driver', () => {
     const fixture = runnerFixture()
     const host = fakeAgent()
     const driver = makeDriver(fixture)
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => host.nextTurn.length === 1)
 
     driver.onSessionEvent(host.agent, {
@@ -643,7 +1027,7 @@ describe('same-session LoopX driver', () => {
         clearTimeout() {},
       },
     })
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => resolveStarted)
     live = false
     releaseResolve?.()
@@ -677,7 +1061,7 @@ describe('same-session LoopX driver', () => {
       retryDelaysMs: [0, 0],
     })
 
-    driver.observeAgent(host.agent)
+    observeActivated(driver, host)
     await waitFor(() => resolveStarted)
     host.replaceSession()
     releaseResolve?.()
@@ -685,6 +1069,48 @@ describe('same-session LoopX driver', () => {
 
     expect(host.nextTurn).toHaveLength(0)
     expect(controlled.quotaCalls).toHaveLength(0)
+    await driver.dispose()
+  })
+
+  it('recomputes activation from replacement history instead of carrying it over', async () => {
+    const fixture = runnerFixture({ shouldRun: false, waitMinutes: 3 })
+    const host = fakeAgent()
+    const timers: Array<{
+      callback: () => void
+      cleared: boolean
+      delay: number
+    }> = []
+    const driver = new LoopXContinuationDriver({
+      runner: fixture.runner,
+      isLiveAgent: () => true,
+      retryDelaysMs: [0, 0],
+      clock: {
+        setTimeout(callback, delay) {
+          const timer = { callback, cleared: false, delay }
+          timers.push(timer)
+          return timer
+        },
+        clearTimeout(handle) {
+          (handle as { cleared: boolean }).cleared = true
+        },
+      },
+    })
+
+    observeActivated(driver, host)
+    await waitFor(() => timers.length === 1)
+    const callsBeforeReplacement = fixture.calls.length
+    const maintenanceBeforeReplacement = host.maintenanceCalls
+
+    host.replaceSession(undefined, [])
+    driver.onSessionStart(host.agent)
+    driver.onAgentStatus(host.agent, 'idle')
+    timers[0]?.callback()
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(timers[0]?.cleared).toBe(true)
+    expect(timers).toHaveLength(1)
+    expect(fixture.calls).toHaveLength(callsBeforeReplacement)
+    expect(host.maintenanceCalls).toBe(maintenanceBeforeReplacement)
     await driver.dispose()
   })
 })
