@@ -639,12 +639,14 @@ loopx todo complete \
   --evidence "<public-safe evidence>"
 ```
 
-The version check is optional; the idempotency key is required while the lease
-is active. A missing or mismatched key fails before Todo or successor state is
-written, including when two host processes intentionally share one `agent_id`.
-`todo supersede` moves the same todo to done and crosses the same fence with
-the same two options; a leased todo cannot be retired keylessly through either
-verb.
+The key and version are both required while the lease is active. A missing or
+mismatched pair fails before Todo or successor state is written, including
+when two host processes intentionally share one `agent_id`. `todo supersede`
+moves the same todo to done and crosses the same fence with the same two
+options; a leased todo cannot be retired with a partial fence through either
+verb. Release retains an inactive terminal record, and the next acquisition
+must use a new execution key and receives a greater version and
+authority-owned `lease_epoch`.
 
 ## Parsed Schema
 

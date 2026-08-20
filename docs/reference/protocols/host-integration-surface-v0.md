@@ -293,15 +293,18 @@ quota, capability, write-scope, or workspace guards:
 
 ```bash
 loopx task-lease acquire --goal-id <goal-id> --todo-id <todo_id> --owner <agent-id> --idempotency-key <turn-key> --write-scope <scope>
-loopx todo complete --goal-id <goal-id> --todo-id <todo_id> --claimed-by <agent-id> --task-lease-idempotency-key <turn-key> --evidence "<public-safe evidence>"
+loopx todo complete --goal-id <goal-id> --todo-id <todo_id> --claimed-by <agent-id> --task-lease-idempotency-key <turn-key> --task-lease-expected-version <lease-version> --evidence "<public-safe evidence>"
 ```
 
-The acquire key is an execution-instance fence. A lifecycle writer cannot rely
-on `agent_id` alone because multiple host processes may share one registered
-peer identity. While an effective lease exists, `todo complete` and
-`todo supersede` hold the lease lock through canonical state writeback and
-reject a missing, stale, or mismatched key before creating successors. Hosts
-may also pass `--task-lease-expected-version` for an explicit version CAS.
+The acquire key and returned version form the execution-instance fence. A
+lifecycle writer cannot rely on `agent_id` alone because multiple host
+processes may share one registered peer identity. While an effective lease
+exists, `todo complete` and `todo supersede` require both fields, hold the lease
+lock through canonical state writeback, and reject a missing, stale, or
+mismatched fence before creating successors. Renew, transfer, and release also
+require `--expected-version`. Release retains an inactive terminal record so a
+later acquire advances the per-todo version and `lease_epoch` instead of
+recreating version 1.
 
 If the host adapter is unavailable, the user or automation can run those
 commands and preserve the same state transitions. If a host offers an operation

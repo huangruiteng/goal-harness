@@ -249,6 +249,11 @@ Lease 丢失应 fail closed。一个 worker 不应该在 lease 过期后继续�
 - status 中的 `soft_claim` 展示不能反向解释成 hard lease；
 - handoff 不要求先创建 lease，lease 也不证明 handoff 已完成。
 
+一旦启用 hard lease，执行凭据是 acquire 返回的
+`(idempotency_key, version)` 完整二元组；续租、转移、释放与 terminal
+writeback 都必须提交当前 version。Release 会保留 inactive terminal record，
+使下一代 acquire 的 `version` 与 `lease_epoch` 单调前进，而不是回到 1。
+
 实现边界可以直接由调用图证明：`acquire_task_lease()` 的产品调用点位于
 `loopx/cli_commands/task_lease.py`，而不是 todo claim 或 quota pipeline。
 生命周期与幂等合同由 `tests/control_plane/test_task_lease.py` 和

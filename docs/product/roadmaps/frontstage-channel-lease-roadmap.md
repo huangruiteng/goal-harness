@@ -221,6 +221,7 @@ review action over an independent handoff, optionally excluding the author.
   "idempotency_key": "loopx-meta:todo_123:20260615T1230Z",
   "write_scopes": ["docs/product/roadmaps/frontstage-channel-lease-roadmap.md"],
   "version": 1,
+  "lease_epoch": 1,
   "acquired_at": "2026-06-15T12:00:00Z",
   "updated_at": "2026-06-15T12:00:00Z",
   "expires_at": "2026-06-15T12:30:00Z",
@@ -232,12 +233,22 @@ The current implementation is local and file-backed, with per-goal locking,
 renewal, transfer, release, registered-owner validation, and stale-owner
 invalidation. A concrete same-agent/multi-process completion race established
 the first lifecycle adoption case: while a lease is effective, `todo complete`
-must present the acquire idempotency key and holds the lease lock through Todo
-and successor writeback. The key fences execution instances that share one
-registered `agent_id`; an optional expected version adds an explicit CAS. A
-completed Todo is terminal-idempotent, so a stale replay cannot append a second
-successor after the canonical completion commits. A later server can own the
-same schema and coordination surface.
+must present the acquire idempotency key and current version, and holds the
+lease lock through Todo and successor writeback. The pair fences execution
+instances that share one registered `agent_id`; renew, transfer, release, and
+terminal writeback all require the current version. `lease_epoch` is the
+authority-owned generation: acquire and transfer advance it, while ordinary
+renewal only advances `version`.
+
+Release and committed terminal writeback retain an inactive `status=released`
+record at the same per-todo path. This single-record tombstone preserves the
+last version and epoch, so re-acquire cannot reset to version 1. Reusing the
+just-retired execution key is rejected; a new execution key receives the next
+version and epoch. Active-lease projections ignore the tombstone, while exact
+release retries return its original terminal result. A completed Todo remains
+terminal-idempotent, so a stale replay cannot append a second successor after
+the canonical completion commits. A later server can own the same schema and
+coordination surface.
 Conflicts should be detected by `(goal_id, todo_id)` plus overlapping
 write-scope checks: another agent may claim a different todo in the same goal,
 but a second pending claim on the same todo must fail closed, renew, or

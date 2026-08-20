@@ -287,7 +287,10 @@ The server path should land in layers:
    append paths should fail closed on stale revision or overlapping write scope.
 2. **Lease adoption**: the optional local `task_lease_v0` CLI already provides
    owner, TTL, write scope, idempotency, conflict, transfer, and release
-   semantics. Keep `claimed_by` as the default soft route and adopt hard leases
+   semantics. Released generations remain as inactive per-todo tombstones, so
+   a later acquire advances both the CAS version and authority-owned
+   `lease_epoch`; terminal writeback uses the returned key/version pair. Keep
+   `claimed_by` as the default soft route and adopt hard leases
    only for hosts with a demonstrated concurrent-write problem.
    The pending/lease key should be per todo: `(goal_id, todo_id)` is the
    contention unit, not the whole goal or project. Different todos under the
