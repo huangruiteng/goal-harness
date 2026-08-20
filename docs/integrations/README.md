@@ -11,6 +11,7 @@ and external systems while preserving one control-plane authority.
 - [Codex peer task orchestration](codex-subagent-orchestration.md)
 - [Complex project read-only adapter](complex-project-readonly-adapter.md)
 - [Lark Kanban control-plane adapter](lark-kanban-control-plane-adapter.md)
+- [Botmux Goal Channel runtime](botmux-goal-channel-runtime.md)
 - [Extensions and capabilities](../reference/extensions.md)
 - [Host integration surface v0](../reference/protocols/host-integration-surface-v0.md)
 

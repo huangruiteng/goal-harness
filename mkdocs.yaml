@@ -125,6 +125,7 @@ nav:
       - integrations/README.md
       - Worker Bridge: integrations/worker-bridge-install-contract.md
       - Lark Kanban: integrations/lark-kanban-control-plane-adapter.md
+      - Botmux Goal Channel Runtime: integrations/botmux-goal-channel-runtime.md
       - Lark Provider: integrations/lark-provider/README.md
       - Runtime Connector Catalog: integrations/runtime-connector-catalog.md
   - Reference:

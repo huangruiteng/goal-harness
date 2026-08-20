@@ -89,9 +89,14 @@ loopx goal-channel configure --goal-id <goal-id> --auto-notify-human-gates
 loopx goal-channel doctor --goal-id <goal-id>
 loopx goal-channel sync --goal-id <goal-id>
 loopx goal-channel notify-gate --goal-id <goal-id>
+loopx goal-channel runtime setup --goal-id <goal-id> --bot-id <bot-id> --chat-id <chat-id>
 ```
 
 `goal-channel` is the durable control-plane object and the user-facing CLI.
+The optional [botmux runtime integration](../../integrations/botmux-goal-channel-runtime.md)
+delegates IM delivery and persistent agent sessions to botmux without changing
+Goal Channel or LoopX state authority. Delivery does not imply a state
+transition; the configured agent runtime must still invoke LoopX explicitly.
 
 ## Ownership Model
 
