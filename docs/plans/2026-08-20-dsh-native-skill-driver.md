@@ -41,29 +41,57 @@ The new integration must not repurpose the existing `dsh` alias.
 
 ## `/loopx-init` Contract
 
-`/loopx-init` is a global DSH UI command. It is available after the plugin has
-been installed and never sends its result to the model.
+`/loopx-init` is a global DSH UI command available after the plugin has been
+installed. Its settled native `CommandResult` remains the authoritative result
+rendered by the command UI. The plugin also queues bounded, model-visible status
+prompts through the exact receiving Agent, but neither their delivery nor the
+model replies participate in installation or reload decisions.
 
-The command accepts no free-form input. An exact invocation performs this
-bounded sequence:
+The command accepts no free-form input. Invalid input returns the usage error
+before any followup or CLI probe. An exact invocation performs this bounded
+sequence:
 
-1. Probe a usable `loopx` executable and the DSH-native workflow-skill
+1. Queue one plugin-authored start followup that welcomes the user and says the
+   CLI and DSH workflow skills are being checked or installed.
+2. Probe a usable `loopx` executable and the DSH-native workflow-skill
    installation capability.
-2. If the CLI is missing or incompatible, run the documented installer once:
+3. If the CLI is missing or incompatible, run the documented installer once:
    `python3 -m pip install --upgrade loopx`.
-3. Resolve the resulting executable again; fail if it is still unavailable.
-4. Run `loopx workflow-skills --install --skills-dir ~/.agents/skills
+4. Resolve the resulting executable again; fail if it is still unavailable.
+5. Run `loopx workflow-skills --install --skills-dir ~/.agents/skills
    --host-surface deepseek-harness-native`.
-5. Run the read-only workflow-skill inspection and require a healthy managed
+6. Validate every actual packaged-skill and entry-skill mutation status and
+   derive the typed `skillsChanged` result; missing or unknown status fails
+   closed at the `install_skills` boundary.
+7. Run the read-only workflow-skill inspection and require a healthy managed
    readback.
-6. Return a bounded UI result naming completed, skipped, or failed steps and
-   the installed LoopX version. Do not expose raw subprocess output or local
-   absolute paths.
+8. Construct the bounded authoritative UI result. Unless the operation was
+   cancelled, queue one completion followup from the same typed success or
+   failure facts, then return the native result. Neither surface exposes raw
+   subprocess output or local absolute paths.
+
+A valid, uncancelled execution therefore normally adds two model calls: one
+start turn and one result turn, including when initialization fails. A cancelled
+execution leaves only the already queued start turn, and invalid input adds no
+model call. Both followups instruct the model not to call tools, run commands,
+reinstall, or expand diagnostics. Queue failures are logged safely, never
+retried, and cannot alter the native result or cause a second install mutation.
+
+DSH restart guidance is based only on the actual skill mutation statuses.
+`skillsChanged` is true when any packaged skill is `created` or `updated`, or
+when the entry skill is `created`, `updated`, or
+`upgraded_legacy_managed`; these outcomes require one DSH restart to reload the
+skills. A CLI-only change and an all-`unchanged` skill result require no restart.
 
 A healthy compatible LoopX CLI is preserved rather than upgraded. Subprocesses
 use fixed argv without a shell, honor the command AbortSignal, and are never
 blindly retried. A failed package installation is returned as an actionable
 command error.
+
+The initialization followups use the stable
+`dsh-loopx-plugin/init-command` plugin source, distinct from
+`dsh-loopx-plugin/driver`. They are ordinary competing plugin input, not Driver
+reservations, and do not change Driver admission authority or command barriers.
 
 This command cannot install the plugin that defines it. `install.sh` remains
 the plugin bootstrap and tells the user to run `/loopx-init` after profile
@@ -123,7 +151,8 @@ At an exact live Agent idle checkpoint it:
 3. calls `quota should-run` with the resolved Goal/Agent and one stable attempt
    identity;
 4. stops, schedules the typed next wakeup, or obtains the exact thin task body;
-5. queues at most one plugin-authored `Agent.followup()` in the same Session;
+5. queues at most one Driver-authored `Agent.followup()` for that automatic
+   admission in the same Session;
 6. revalidates the exact Agent, Session, reservation, competing input, and
    binding before the queued message enters a model step.
 
@@ -182,14 +211,23 @@ installed.
 Focused validation must cover:
 
 - `/loopx-init` healthy-skip, missing-CLI install, incompatible-CLI repair,
-  cancellation, package failure, Skill failure, and readback failure;
+  package failure, Skill failure, and readback failure, with one install
+  mutation at most;
+- invalid init arguments producing no followup or probe; start/result ordering;
+  two followups for uncancelled success or failure; only the start followup for
+  cancellation; and followup queue failure preserving the native result;
+- actual `created`, `updated`, `unchanged`, and `upgraded_legacy_managed` skill
+  status projection, CLI-only changes requiring no restart, and incomplete or
+  unknown status failing closed;
+- init followup source isolation from the Driver reservation source, bounded
+  safe messages, and no raw subprocess output or local absolute paths;
 - DSH-native generated Skill text, exact host/session flags, and absence of
   `$ARGUMENTS` dependence;
 - external `deepseek-harness`/`dsh` compatibility;
 - zero/one/ambiguous Session binding resolution;
 - idle admission, human-input priority, exact reservation checks, Agent or
   Session replacement, command collision, cancellation, wait scheduling, and
-  one-followup maximum;
+  the one-Driver-followup maximum per automatic admission;
 - finite CLI retry with stable quota idempotency and no retry for unsafe
   outcomes;
 - built tarball installation and real DSH profile readback containing only the
@@ -197,8 +235,12 @@ Focused validation must cover:
 
 ## Definition Of Done
 
-- A user installs the plugin, runs `/loopx-init`, and receives verified LoopX
+- A user installs the plugin, runs `/loopx-init`, sees bounded start and result
+  feedback, and receives an authoritative native result for the verified LoopX
   CLI plus DSH-native Skills.
+- the result requests a DSH restart only after an actual skill create, update,
+  or managed legacy-entry upgrade, and explicitly requires none for CLI-only or
+  all-unchanged outcomes.
 - a task handled through the `loopx` Skill uses authoritative CLI calls, not a
   plugin `/loopx` command, semantic routing, or model tools.
 - A bound visible DSH Session continues only fresh quota-approved work through

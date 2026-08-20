@@ -29,11 +29,28 @@ Then open DSH and run:
 /loopx-init
 ```
 
-The command has no arguments. It first probes the current LoopX installation.
-When the CLI is missing or lacks the DSH-native skill contract, it runs exactly
-one `python3 -m pip install --upgrade loopx`, then installs and reads back the
-skills. It never invokes a model, constructs a shell command, edits a registry,
-or retries the install mutation.
+The command has no arguments. Extra input returns a usage error before any
+model work or CLI probe. A valid invocation queues a bounded start followup on
+the exact receiving Agent, then probes the current LoopX installation. When the
+CLI is missing or lacks the DSH-native skill contract, it runs exactly one
+`python3 -m pip install --upgrade loopx`, then installs and reads back the
+skills. It never constructs a shell command, edits a registry, or retries the
+install mutation.
+
+Unless the command is cancelled, it queues a second bounded followup for the
+typed success or failure result. These are ordinary Agent turns, so a valid,
+uncancelled invocation normally adds two model calls; cancellation leaves only
+the already queued start turn, while invalid input adds none. The prompts do
+not authorize tools, commands, or another installation. Followup delivery is
+best effort and is not retried. The native `CommandResult` rendered by the
+command UI remains authoritative: a followup failure or model reply cannot
+change the installation result or repeat its mutation.
+
+On success, restart DSH only when the actual install payload reports a packaged
+skill as `created` or `updated`, or the entry skill as `created`, `updated`, or
+`upgraded_legacy_managed`. A CLI-only installation or upgrade and an
+all-`unchanged` skill result do not require a restart. Missing or unknown skill
+status fails initialization instead of being guessed as unchanged.
 
 After initialization, invoke the `loopx` skill with the task text. The skill
 uses the exact DSH-managed `$DSH_SESSION_ID`, passes
@@ -58,6 +75,9 @@ The Driver resolves the current project registry with
 session, and rechecks binding plus quota before and after downstream pre-step
 listeners. A human message removes an unclaimed automatic reservation; a
 mixed batch rejects the automatic message and restores the human work.
+The Driver queues at most one Driver-owned followup per automatic admission.
+Initialization messages use the distinct `dsh-loopx-plugin/init-command`
+source and never satisfy a Driver reservation.
 
 ## Uninstall
 
