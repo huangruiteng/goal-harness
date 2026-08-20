@@ -86,6 +86,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
                         "status": "active",
                         "objective": "Alpha delivery",
                         "adapter": {"kind": "generic_project_goal_v0"},
+                        "coordination": {"registered_agents": ["agent-alpha"]},
                     },
                     {
                         "id": "goal-beta",
@@ -95,6 +96,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
                         "status": "active",
                         "objective": "Beta delivery",
                         "adapter": {"kind": "generic_project_goal_v0"},
+                        "coordination": {"registered_agents": ["agent-alpha"]},
                     },
                 ],
             }
@@ -224,6 +226,7 @@ def main() -> None:
                     "chat_name": "Product group",
                     "goal_id": goal_id,
                     "incoming_mode": "mentions",
+                    "agent_id": "agent-alpha",
                 }
                 preview = request(base, "/api/chat/lark/connections", method="POST", body={**body, "execute": False})
                 assert preview["status"] == "preview_ready", preview
@@ -233,6 +236,8 @@ def main() -> None:
             connections = request(base, "/api/chat/lark/connections")
             assert len(connections["connections"]) == 2, connections
             assert {row["goal_id"] for row in connections["connections"]} == {"goal-alpha", "goal-beta"}
+            assert {row["agent_id"] for row in connections["connections"]} == {"agent-alpha"}
+            assert {row["ingress_mode"] for row in connections["connections"]} == {"async_inbox"}
             assert "oc_" not in json.dumps(connections) and "om_" not in json.dumps(connections)
 
             target_path = runtime / "goal-channel-targets.json"

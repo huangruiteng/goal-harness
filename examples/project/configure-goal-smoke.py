@@ -189,6 +189,7 @@ def main() -> int:
         assert dry["after"]["lark_event_inbox"] == {
             "enabled": True,
             "config_pointer_registered": True,
+            "agent_scoped_count": 0,
         }, dry
         assert dry["after"]["lark_kanban_heartbeat_sync"] == {
             "enabled": True,
