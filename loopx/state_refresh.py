@@ -114,12 +114,17 @@ def _delivery_workspace_supplement_required(
     refresh-state call may therefore arrive after the durable-writeback receipt
     exists, while the monitor run itself has no delivery workspace snapshot.
     Keep ordinary replays idempotent, but let an explicit workspace path append
-    one causal refresh record when the original Todo required repository work.
+    one causal refresh record unless the original Todo explicitly declared a
+    non-delivery settlement. This also repairs legacy monitor Todos whose
+    workspace requirement was left unknown.
     """
 
     if delivery_workspace_path is None:
         return False
-    if str((delivery_workspace_causality or {}).get("requirement") or "") != "required":
+    if (
+        str((delivery_workspace_causality or {}).get("requirement") or "")
+        == "not_required"
+    ):
         return False
     return delivery_workspace_repository(
         prior_writeback.get("delivery_workspace")

@@ -502,11 +502,15 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
     assert _spend_run_count(runtime) == 1
 
 
-def test_material_monitor_writeback_can_add_required_workspace_before_spend(
+def _assert_material_monitor_writeback_can_add_workspace_before_spend(
     tmp_path: Path,
+    *,
+    repository_write: bool,
+    expected_requirement: str,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
-    _configure_repository_write_todo(project)
+    if repository_write:
+        _configure_repository_write_todo(project)
     _initialize_git_checkout(project)
     binding = (
         "--agent-id",
@@ -533,9 +537,10 @@ def test_material_monitor_writeback_can_add_required_workspace_before_spend(
         str(project),
     )
     assert guard_rc == 0, guard
-    assert guard["heartbeat_receipt"]["delivery_workspace_causality"][
-        "requirement"
-    ] == "required"
+    assert (
+        guard["heartbeat_receipt"]["delivery_workspace_causality"]["requirement"]
+        == expected_requirement
+    )
 
     runs_dir = runtime / "goals" / GOAL_ID / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -638,6 +643,26 @@ def test_material_monitor_writeback_can_add_required_workspace_before_spend(
     assert spend_rc == 0, spend
     assert spend["delivery_workspace_validated"] is True
     assert spend["settlement_result"]["ok"] is True
+
+
+def test_material_monitor_writeback_can_add_required_workspace_before_spend(
+    tmp_path: Path,
+) -> None:
+    _assert_material_monitor_writeback_can_add_workspace_before_spend(
+        tmp_path,
+        repository_write=True,
+        expected_requirement="required",
+    )
+
+
+def test_material_monitor_writeback_can_add_unknown_workspace_before_spend(
+    tmp_path: Path,
+) -> None:
+    _assert_material_monitor_writeback_can_add_workspace_before_spend(
+        tmp_path,
+        repository_write=False,
+        expected_requirement="unknown",
+    )
 
 
 def test_same_turn_identityless_guard_upgrades_and_settles_full_chain(
