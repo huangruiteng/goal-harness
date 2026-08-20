@@ -31,6 +31,13 @@ the pull-based commands documented by the returned
 tests, expected solutions, evaluator answers, credentials, or private project
 material, and it does not authorize score or leaderboard claims.
 
+The same `worker-bridge` surface also carries the provider-neutral
+[`attached Agent session broker`](attached-agent-session-broker.md). That
+broker binds an already-running host session and lets that exact host claim and
+complete queued Web or Connector messages. It never starts a replacement
+runtime. Host session ids, message bodies, and response files remain
+owner-local.
+
 The retired benchmark result/writeback layer is preserved for source
 archaeology under
 [`deprecate/benchmark-legacy/`](https://github.com/huangruiteng/loopx/blob/main/deprecate/benchmark-legacy/README.md).

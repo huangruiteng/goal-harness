@@ -566,6 +566,24 @@ Ark Agent Plan 有自己的受支持模型、凭据和用量边界。适配器�
 
 这是围绕已在运行的工作采用 Desktop 的短路径。
 
+第一阶段的可执行 broker 契约沉淀在 Chat session/store 与通用
+`worker-bridge attached-session-*` 命令中，而不是 Lark provider 内部：
+
+- `agent_id` 始终表示 Goal 内已登记的 LoopX Agent；
+- `executor_endpoint_id` 单独表示 `codex`、`claude-code` 或其他执行端；
+- attach 只有在 `(host_surface, host_session_id)` 已精确绑定该 Agent 时才成立；
+- attached session 的 Web 与 Lark 消息进入同一有界 FIFO，并保留
+  `origin=web|lark`；
+- 原宿主通过稳定 claim/completion id 领取消息并回写，重复调用不会重复生成
+  Agent 回复；以及
+- 任何 attached session 路径都不得调用 managed runtime 的启动/恢复函数。
+
+该阶段已经能支撑 `session_queue` 与回复 readback。`live_steering` 仍要求宿主提供
+对正在运行 Turn 的 push transport；在此之前 capability 明确为 false，入口失败
+关闭，不能用新启动的 app-server 或静默改投另一个模式冒充完成。Desktop 下一步
+需要把 bind/list/claim 状态投影成首屏 attach 管理交互，并由 Codex App 等宿主
+自动完成 claim/complete，而不是要求人手工运行 CLI。
+
 ### 切片 C：托管参考垂直
 
 1. 一个 provider-neutral 的托管运行时与托管 provider 接口；

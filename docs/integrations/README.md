@@ -9,6 +9,7 @@ and external systems while preserving one control-plane authority.
 - [Session runtime control-plane adapter](session-runtime-control-plane-adapter.md)
 - [LoopX Control Plane desktop shell](../../apps/desktop/loopx-control-plane/README.md)
 - [Worker bridge install contract](worker-bridge-install-contract.md)
+- [Attached Agent session broker](attached-agent-session-broker.md)
 - [Codex peer task orchestration](codex-subagent-orchestration.md)
 - [Complex project read-only adapter](complex-project-readonly-adapter.md)
 - [Lark Kanban control-plane adapter](lark-kanban-control-plane-adapter.md)
