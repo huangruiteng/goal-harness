@@ -17,14 +17,15 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage"],
+    "targets": ["app", "dmg", "msi", "nsis", "deb", "appimage"],
     "category": "DeveloperTool",
     "shortDescription": "Local LoopX control plane",
     "longDescription": "A thin desktop shell for the local LoopX personal Agent workspace.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/128x128@2x.png"
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
     ]
   }
 }

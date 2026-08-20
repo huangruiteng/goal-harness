@@ -1,0 +1,171 @@
+name: Desktop Release Artifacts
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/desktop-release-artifacts.yml"
+      - "apps/desktop/loopx-control-plane/**"
+      - "apps/presentation/dashboard/**"
+      - "examples/desktop-icon-alpha-smoke.py"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing GitHub Release tag to attach desktop artifacts to"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-artifacts-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'huangruiteng/loopx'
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS desktop
+            runner: macos-15
+            bundles: dmg app
+            artifact-name: loopx-control-plane-macos
+            artifact-path: dist/desktop/*
+          - name: Windows desktop
+            runner: windows-latest
+            bundles: msi nsis
+            artifact-name: loopx-control-plane-windows
+            artifact-path: dist/desktop/*
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.sha }}
+
+      - name: Resolve release identity
+        id: identity
+        shell: bash
+        env:
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          release_tag="${EVENT_RELEASE_TAG:-${INPUT_RELEASE_TAG:-}}"
+          if [[ -z "${release_tag}" ]]; then
+            release_tag="$(git describe --tags --exact-match 2>/dev/null || echo "preview-${GITHUB_SHA::12}")"
+          fi
+          echo "release-tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            apps/desktop/loopx-control-plane/package-lock.json
+            apps/presentation/dashboard/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/loopx-control-plane/src-tauri -> target
+          key: desktop-${{ matrix.runner }}
+
+      - name: Install desktop dependencies
+        working-directory: apps/desktop/loopx-control-plane
+        run: npm ci
+
+      - name: Validate desktop icon background
+        run: python examples/desktop-icon-alpha-smoke.py
+
+      - name: Build desktop bundles
+        working-directory: apps/desktop/loopx-control-plane
+        run: npm run build -- --bundles ${{ matrix.bundles }} --no-sign
+
+      - name: Collect macOS desktop bundles
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/desktop
+          cp apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/dmg/*.dmg dist/desktop/
+          ditto -c -k --keepParent \
+            "apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/macos/LoopX Control Plane.app" \
+            "dist/desktop/LoopX Control Plane.app.zip"
+
+      - name: Collect Windows desktop bundles
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/desktop | Out-Null
+          Copy-Item apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/msi/*.msi dist/desktop/
+          Copy-Item apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/nsis/*.exe dist/desktop/
+
+      - name: Attest desktop artifacts
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ matrix.artifact-path }}
+
+      - name: Upload desktop artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact-name }}-${{ steps.identity.outputs.release-tag }}
+          path: ${{ matrix.artifact-path }}
+          if-no-files-found: error
+          retention-days: 30
+
+  upload-release:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: loopx-control-plane-*
+          path: dist/desktop
+          merge-multiple: true
+
+      - name: Resolve release identity
+        id: identity
+        env:
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          release_tag="${EVENT_RELEASE_TAG:-${INPUT_RELEASE_TAG:-}}"
+          if [[ -z "${release_tag}" ]]; then
+            echo "::error title=Missing release tag::release uploads require a release event or workflow_dispatch tag"
+            exit 1
+          fi
+          echo "release-tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload desktop artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+        run: |
+          set -euo pipefail
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+          gh release upload "${RELEASE_TAG}" \
+            dist/desktop/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber

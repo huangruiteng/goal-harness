@@ -4,9 +4,16 @@ This directory contains the experimental Tauri shell for the LoopX personal
 Agent workspace. It reuses the existing React dashboard and LoopX HTTP
 services; it does not introduce another Goal, Todo, Gate, or Chat state owner.
 
-This is currently a source-built preview. It is not installed by the LoopX
-Python package, and LoopX releases do not yet promise prebuilt desktop
-installers. Use `loopx dashboard` for the supported browser/PWA launch path.
+This is currently a preview desktop shell. It is not installed by the LoopX
+Python package; use `loopx dashboard` for the supported browser/PWA launch
+path. Published LoopX releases attach desktop preview artifacts when the
+desktop release workflow succeeds:
+
+- macOS: `.dmg` plus a zipped `.app` bundle;
+- Windows: `.msi` plus an NSIS `.exe` installer.
+
+The desktop shell still depends on a local `loopx` command at runtime. Install
+or update the LoopX CLI first, then open the desktop app.
 
 ## Runtime Model
 
@@ -57,10 +64,10 @@ cd ..
 npm run build
 ```
 
-`npm run build` produces the configured Linux `.deb` and AppImage bundles under
-`src-tauri/target/release/bundle/`. Other platforms can run the development
-shell after satisfying Tauri's platform prerequisites, but prebuilt installers
-are not yet a LoopX release contract.
+`npm run build` produces the configured platform bundles under
+`src-tauri/target/release/bundle/`. The release workflow builds macOS `.dmg`
+and `.app.zip` artifacts on macOS, Windows `.msi` and `.exe` artifacts on
+Windows, and uploads them to the GitHub Release that triggered the workflow.
 
 ## Disable Or Remove
 
