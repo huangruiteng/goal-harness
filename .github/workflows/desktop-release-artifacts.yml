@@ -40,12 +40,12 @@ jobs:
           - name: macOS desktop
             runner: macos-15
             bundles: dmg app
-            artifact-name: loopx-control-plane-macos
+            artifact-name: loopx-macos
             artifact-path: dist/desktop/*
           - name: Windows desktop
             runner: windows-latest
             bundles: msi nsis
-            artifact-name: loopx-control-plane-windows
+            artifact-name: loopx-windows
             artifact-path: dist/desktop/*
     steps:
       - name: Check out release source
@@ -104,8 +104,8 @@ jobs:
           mkdir -p dist/desktop
           cp apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/dmg/*.dmg dist/desktop/
           ditto -c -k --keepParent \
-            "apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/macos/LoopX Control Plane.app" \
-            "dist/desktop/LoopX Control Plane.app.zip"
+            "apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/macos/LoopX.app" \
+            "dist/desktop/LoopX.app.zip"
 
       - name: Collect Windows desktop bundles
         if: runner.os == 'Windows'
@@ -140,7 +140,7 @@ jobs:
       - name: Download desktop artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: loopx-control-plane-*
+          pattern: loopx-*
           path: dist/desktop
           merge-multiple: true
 

@@ -52,7 +52,7 @@ pub fn run() {
             )?;
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(origin))
-                .title("LoopX Control Plane")
+                .title("LoopX")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(960.0, 640.0)
                 .on_navigation(move |url| url.origin() == navigation_origin.origin())
