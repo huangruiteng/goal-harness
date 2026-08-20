@@ -119,6 +119,62 @@ async function exerciseInstalled(installed) {
   })
   assert.equal(typeof driverModule.LoopXContinuationDriver, 'function')
   assert.equal(driverModule.inject.join(','), 'agents')
+
+  const runnerCalls = []
+  const timerCalls = []
+  const followupMessages = []
+  let maintenanceCalls = 0
+  const session = {
+    id: 'inactive-session',
+    header: { id: 'inactive-session', cwd: installed },
+    events: [],
+  }
+  const inactiveAgent = {
+    id: 'inactive-session',
+    status: 'idle',
+    session,
+    inbox: { hasPending: false },
+    followup(message) {
+      followupMessages.push(message)
+    },
+    async runMaintenance(operation) {
+      maintenanceCalls += 1
+      return operation(new AbortController().signal)
+    },
+  }
+  const driver = new driverModule.LoopXContinuationDriver({
+    isLiveAgent: candidate => candidate === inactiveAgent,
+    runner: async (...args) => {
+      runnerCalls.push(args)
+      throw new Error('inactive Driver must not run LoopX')
+    },
+    clock: {
+      setTimeout(callback, delayMs) {
+        timerCalls.push({ callback, delayMs })
+        return timerCalls.length
+      },
+      clearTimeout() {},
+    },
+  })
+  driver.observeAgent(inactiveAgent)
+  driver.onSessionStart(inactiveAgent)
+  driver.onAgentStatus(inactiveAgent, 'idle')
+  driver.onAgentStatus(inactiveAgent, 'idle')
+  driver.onSessionEvent(inactiveAgent, {
+    type: 'user/message',
+    data: {
+      id: 'ordinary-message',
+      role: 'user',
+      content: [{ type: 'text', text: 'ordinary input' }],
+      source: { kind: 'user' },
+    },
+  })
+  await Promise.resolve()
+  assert.equal(runnerCalls.length, 0, 'inactive Driver made a LoopX runner call')
+  assert.equal(timerCalls.length, 0, 'inactive Driver created a timer')
+  assert.equal(maintenanceCalls, 0, 'inactive Driver entered Agent maintenance')
+  assert.equal(followupMessages.length, 0, 'inactive Driver queued a followup')
+  await driver.dispose()
 }
 
 async function main() {
