@@ -1,18 +1,140 @@
 import { describe, expect, it } from 'vitest'
+import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {
+  CommandDefinition,
+  CommandInvocation,
+  CommandResult,
+} from '@deepseek-ai/dsh-commands'
+import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { LoopXCliError } from '../src/cli.ts'
 import type { FileRunner } from '../src/cli.ts'
-import { initializeLoopX } from '../src/init-command.ts'
+import { apply, initializeLoopX } from '../src/init-command.ts'
+import type { LoopXInitOptions } from '../src/init-command.ts'
 
 const hostSurface = 'deepseek-harness-native'
+const initSource = 'dsh-loopx-plugin/init-command'
+const packagedSkillIds = [
+  'loopx-project',
+  'loopx-pr-program',
+  'loopx-pr-review',
+  'loopx-doc-registry',
+  'loopx-self-repair',
+] as const
 
-function workflowPayload(operation: 'inspect' | 'install', installRequired = false): string {
+type PackagedSkillStatus = 'created' | 'updated' | 'unchanged'
+type EntrySkillStatus = PackagedSkillStatus | 'upgraded_legacy_managed'
+
+function installState(
+  packagedStatus: PackagedSkillStatus = 'unchanged',
+  entryStatus: EntrySkillStatus = 'unchanged',
+): Record<string, unknown> {
+  return {
+    installed: Object.fromEntries(packagedSkillIds.map(skillId => [skillId, packagedStatus])),
+    entry: { status: entryStatus },
+  }
+}
+
+function workflowPayload(
+  operation: 'inspect' | 'install',
+  installRequired = false,
+  actualInstallState: Record<string, unknown> = installState(),
+): string {
   return JSON.stringify({
     ok: true,
     schema_version: 'loopx_workflow_skill_install_v0',
     operation,
     host_surface: hostSurface,
-    ...(operation === 'inspect' ? { install_required: installRequired } : {}),
+    ...(operation === 'inspect'
+      ? { install_required: installRequired }
+      : actualInstallState),
   })
+}
+
+function messageText(message: UserMessage): string {
+  return message.content
+    .filter(block => block.type === 'text')
+    .map(block => block.text)
+    .join('')
+}
+
+interface CommandHarness {
+  readonly messages: UserMessage[]
+  readonly warnings: string[]
+  execute(rawInput?: string, signal?: AbortSignal): Promise<CommandResult>
+}
+
+function commandHarness(
+  options: LoopXInitOptions,
+  onFollowup?: ((message: UserMessage, attempt: number) => void) | undefined,
+): CommandHarness {
+  const messages: UserMessage[] = []
+  const warnings: string[] = []
+  let definition: CommandDefinition | undefined
+  const ctx = {
+    commands: {
+      register(candidate: CommandDefinition) {
+        definition = candidate
+        return () => {}
+      },
+    },
+    logger: { warn(message: string) { warnings.push(message) } },
+  } as unknown as Context
+  apply(ctx, options)
+  if (definition === undefined) throw new Error('loopx-init command was not registered')
+  const handler = definition.handler
+  const agent = {
+    followup(message: UserMessage) {
+      messages.push(message)
+      onFollowup?.(message, messages.length)
+    },
+  } as unknown as Agent
+  return {
+    messages,
+    warnings,
+    execute(rawInput = '', signal = new AbortController().signal) {
+      return Promise.resolve(handler({ rawInput, signal, agent } as CommandInvocation))
+    },
+  }
+}
+
+function successfulRunner(options: {
+  readonly initiallyInstalled?: boolean | undefined
+  readonly packagedStatus?: PackagedSkillStatus | undefined
+  readonly entryStatus?: EntrySkillStatus | undefined
+  readonly events?: string[] | undefined
+} = {}): { readonly runner: FileRunner, readonly calls: string[][] } {
+  const calls: string[][] = []
+  let cliAvailable = options.initiallyInstalled ?? true
+  let inspectCalls = 0
+  const runner: FileRunner = async (_file, args) => {
+    calls.push([...args])
+    if (args.slice(0, 4).join(' ') === '-m pip install --upgrade') {
+      options.events?.push('install-cli')
+      cliAvailable = true
+      return { exitCode: 0, stdout: 'installed', stderr: '' }
+    }
+    if (args.at(-1) === '--version') {
+      options.events?.push('probe')
+      if (!cliAvailable) throw new LoopXCliError('missing', 'missing', false)
+      return { exitCode: 0, stdout: 'loopx 0.5.0\n', stderr: '' }
+    }
+    if (args.includes('--install')) {
+      options.events?.push('install-skills')
+      return {
+        exitCode: 0,
+        stdout: workflowPayload('install', false, installState(
+          options.packagedStatus,
+          options.entryStatus,
+        )),
+        stderr: '',
+      }
+    }
+    inspectCalls += 1
+    options.events?.push(inspectCalls === 1 ? 'inspect-before' : 'readback')
+    return { exitCode: 0, stdout: workflowPayload('inspect', false), stderr: '' }
+  }
+  return { runner, calls }
 }
 
 describe('/loopx-init implementation', () => {
@@ -47,6 +169,7 @@ describe('/loopx-init implementation', () => {
       cliVersion: 'loopx 0.5.0',
       cliInstalled: false,
       skillsInstalled: true,
+      skillsChanged: false,
       hostSurface,
     })
     expect(calls.some(args => args.slice(0, 5).join(' ') === (
@@ -109,6 +232,7 @@ describe('/loopx-init implementation', () => {
     const result = await initializeLoopX({ runner, skillsDir: '/fixture/skills' })
 
     expect(result.cliInstalled).toBe(true)
+    expect(result.skillsChanged).toBe(false)
     expect(pipCalls).toBe(1)
   })
 
@@ -145,6 +269,66 @@ describe('/loopx-init implementation', () => {
     const result = await initializeLoopX({ runner, skillsDir: '/fixture/skills' })
     expect(result.cliInstalled).toBe(true)
     expect(pipCalls).toBe(1)
+  })
+
+  it.each([
+    ['created packaged skill', 'created', 'unchanged'],
+    ['updated packaged skill', 'updated', 'unchanged'],
+    ['upgraded legacy entry skill', 'unchanged', 'upgraded_legacy_managed'],
+  ] as const)('reports skills changed for a %s', async (
+    _caseName,
+    packagedStatus,
+    entryStatus,
+  ) => {
+    const { runner } = successfulRunner({ packagedStatus, entryStatus })
+
+    const result = await initializeLoopX({ runner, skillsDir: '/fixture/skills' })
+
+    expect(result.skillsChanged).toBe(true)
+  })
+
+  it.each([
+    ['missing packaged status', {
+      installed: Object.fromEntries(packagedSkillIds.slice(1).map(skillId => (
+        [skillId, 'unchanged']
+      ))),
+      entry: { status: 'unchanged' },
+    }],
+    ['missing entry status', {
+      ...installState(),
+      entry: {},
+    }],
+    ['unknown packaged status', {
+      ...installState(),
+      installed: {
+        ...(installState().installed as Record<string, unknown>),
+        'loopx-project': 'replaced',
+      },
+    }],
+    ['unknown entry status', {
+      ...installState(),
+      entry: { status: 'replaced' },
+    }],
+  ])('fails closed for %s in the actual install payload', async (
+    _caseName,
+    actualInstallState,
+  ) => {
+    const runner: FileRunner = async (_file, args) => {
+      if (args.at(-1) === '--version') {
+        return { exitCode: 0, stdout: 'loopx 0.5.0\n', stderr: '' }
+      }
+      if (args.includes('--install')) {
+        return {
+          exitCode: 0,
+          stdout: workflowPayload('install', false, actualInstallState),
+          stderr: '',
+        }
+      }
+      return { exitCode: 0, stdout: workflowPayload('inspect', false), stderr: '' }
+    }
+
+    await expect(initializeLoopX({ runner, skillsDir: '/fixture/skills' }))
+      .rejects.toMatchObject({ stage: 'install_skills', causeKind: 'typed_failure' })
   })
 
   it('never retries a failed skill installation mutation', async () => {
@@ -231,5 +415,208 @@ describe('/loopx-init implementation', () => {
     await expect(initializeLoopX({ runner, skillsDir: '/fixture/skills' }))
       .rejects.toMatchObject({ kind: 'aborted' })
     expect(installCalls).toBe(1)
+  })
+})
+
+describe('/loopx-init followups', () => {
+  it('rejects arguments before sending a followup or probing LoopX', async () => {
+    let runnerCalls = 0
+    const harness = commandHarness({
+      runner: async () => {
+        runnerCalls += 1
+        throw new Error('runner must not be called')
+      },
+      skillsDir: '/fixture/skills',
+    })
+
+    const result = await harness.execute(' extra')
+
+    expect(result).toEqual({ kind: 'error', text: 'Usage: /loopx-init' })
+    expect(harness.messages).toHaveLength(0)
+    expect(runnerCalls).toBe(0)
+  })
+
+  it('queues bounded start and completion messages around the single mutation and readback', async () => {
+    const events: string[] = []
+    const { runner, calls } = successfulRunner({ events })
+    const harness = commandHarness(
+      { runner, skillsDir: '/fixture/skills' },
+      (_message, attempt) => { events.push(`followup-${attempt}`) },
+    )
+
+    const result = await harness.execute()
+
+    expect(result.kind).toBe('success')
+    expect(events).toEqual([
+      'followup-1',
+      'probe',
+      'inspect-before',
+      'install-skills',
+      'readback',
+      'followup-2',
+    ])
+    expect(calls.filter(args => args.includes('--install'))).toHaveLength(1)
+    expect(harness.messages).toHaveLength(2)
+    for (const message of harness.messages) {
+      expect(message.source).toEqual({ kind: 'plugin', plugin: initSource })
+      expect(message.source).not.toEqual({
+        kind: 'plugin',
+        plugin: 'dsh-loopx-plugin/driver',
+      })
+      expect(messageText(message).length).toBeLessThanOrEqual(800)
+      expect(messageText(message)).toContain('Do not call tools')
+    }
+    expect(messageText(harness.messages[0] as UserMessage)).toContain(
+      'initialization has started',
+    )
+    expect(messageText(harness.messages[1] as UserMessage)).toContain(
+      'no DSH restart is required',
+    )
+  })
+
+  it.each([
+    ['created packaged skill', 'created', 'unchanged'],
+    ['updated packaged skill', 'updated', 'unchanged'],
+    ['upgraded legacy entry skill', 'unchanged', 'upgraded_legacy_managed'],
+  ] as const)('requires a DSH restart after a %s', async (
+    _caseName,
+    packagedStatus,
+    entryStatus,
+  ) => {
+    const { runner } = successfulRunner({ packagedStatus, entryStatus })
+    const harness = commandHarness({ runner, skillsDir: '/fixture/skills' })
+
+    const result = await harness.execute()
+
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('Restart DSH once')
+    expect(harness.messages).toHaveLength(2)
+    expect(messageText(harness.messages[1] as UserMessage)).toContain(
+      'restart DSH once',
+    )
+  })
+
+  it.each([
+    ['compatible CLI', true, 0],
+    ['newly installed CLI', false, 1],
+  ] as const)('does not request a restart for unchanged skills with a %s', async (
+    _caseName,
+    initiallyInstalled,
+    expectedPipCalls,
+  ) => {
+    const { runner, calls } = successfulRunner({ initiallyInstalled })
+    const harness = commandHarness({ runner, skillsDir: '/fixture/skills' })
+
+    const result = await harness.execute()
+
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('No DSH restart is required')
+    expect(messageText(harness.messages[1] as UserMessage)).toContain(
+      'no DSH restart is required',
+    )
+    expect(calls.filter(args => (
+      args.slice(0, 4).join(' ') === '-m pip install --upgrade'
+    ))).toHaveLength(expectedPipCalls)
+    expect(calls.filter(args => args.includes('--install'))).toHaveLength(1)
+  })
+
+  it('sends a safe failure followup without leaking subprocess diagnostics', async () => {
+    const privateStderr = '/fixture/private/runner-stderr'
+    let installCalls = 0
+    const runner: FileRunner = async (_file, args) => {
+      if (args.at(-1) === '--version') {
+        return { exitCode: 0, stdout: 'loopx 0.5.0\n', stderr: '' }
+      }
+      if (args.includes('--install')) {
+        installCalls += 1
+        return {
+          exitCode: 1,
+          stdout: JSON.stringify({
+            ok: false,
+            schema_version: 'loopx_workflow_skill_install_v0',
+            operation: 'install',
+            host_surface: hostSurface,
+          }),
+          stderr: privateStderr,
+        }
+      }
+      return { exitCode: 0, stdout: workflowPayload('inspect', true), stderr: '' }
+    }
+    const harness = commandHarness({ runner, skillsDir: '/fixture/skills' })
+
+    const result = await harness.execute()
+
+    expect(result.kind).toBe('error')
+    expect(result.text).toContain('stage=install_skills; kind=typed_failure')
+    expect(result.text).not.toContain(privateStderr)
+    expect(installCalls).toBe(1)
+    expect(harness.messages).toHaveLength(2)
+    const completion = messageText(harness.messages[1] as UserMessage)
+    expect(completion).toContain('safe failure stage is install_skills')
+    expect(completion).toContain('cause kind is typed_failure')
+    expect(completion).not.toContain(privateStderr)
+    expect(completion).not.toContain('restart DSH once')
+    expect(completion.length).toBeLessThanOrEqual(800)
+  })
+
+  it('leaves only the start followup when initialization is cancelled', async () => {
+    let installCalls = 0
+    const runner: FileRunner = async (_file, args) => {
+      if (args.at(-1) === '--version') {
+        return { exitCode: 0, stdout: 'loopx 0.5.0\n', stderr: '' }
+      }
+      if (args.includes('--install')) {
+        installCalls += 1
+        throw new LoopXCliError('aborted', 'cancelled with private context', false)
+      }
+      return { exitCode: 0, stdout: workflowPayload('inspect', false), stderr: '' }
+    }
+    const harness = commandHarness({ runner, skillsDir: '/fixture/skills' })
+
+    const result = await harness.execute()
+
+    expect(result).toEqual({
+      kind: 'error',
+      text: 'LOOPX_INIT_CANCELLED: initialization was cancelled.',
+    })
+    expect(installCalls).toBe(1)
+    expect(harness.messages).toHaveLength(1)
+    expect(messageText(harness.messages[0] as UserMessage)).toContain(
+      'initialization has started',
+    )
+  })
+
+  it.each([
+    ['start', 1],
+    ['completion', 2],
+  ] as const)('keeps the result and one mutation when the %s followup throws', async (
+    _phase,
+    throwingAttempt,
+  ) => {
+    const { runner, calls } = successfulRunner({ packagedStatus: 'created' })
+    const harness = commandHarness(
+      { runner, skillsDir: '/fixture/skills' },
+      (_message, attempt) => {
+        if (attempt === throwingAttempt) throw new Error('private followup failure')
+      },
+    )
+
+    const result = await harness.execute()
+
+    expect(result).toEqual({
+      kind: 'success',
+      text: [
+        'LoopX ready (loopx 0.5.0).',
+        'CLI already compatible.',
+        'DSH LoopX skills installed or updated and verified.',
+        'Restart DSH once to reload the changed skills, then use the `loopx` skill with your task.',
+      ].join(' '),
+    })
+    expect(calls.filter(args => args.includes('--install'))).toHaveLength(1)
+    expect(harness.messages).toHaveLength(2)
+    expect(harness.warnings).toEqual([
+      `dsh-loopx-init-command: could not queue ${throwingAttempt === 1 ? 'start' : 'complete'} followup`,
+    ])
+    expect(harness.warnings.join(' ')).not.toContain('private followup failure')
   })
 })
