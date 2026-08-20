@@ -662,6 +662,7 @@ def main(argv: list[str] | None = None) -> int:
 
     periodic_report_result = handle_periodic_report_command(
         args,
+        runtime_root_arg=args.runtime_root,
         output_format=output_format,
         print_payload=print_payload,
     )

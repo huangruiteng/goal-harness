@@ -49,6 +49,11 @@ PERIODIC_REPORT_CATALOG_ENTRY: dict[str, Any] = {
             "purpose": "Invoke the optional OpenViking archive extension after profile, runtime-capability, manifest permission, revision, and doctor checks.",
             "write_boundary": "writes report.md and then manifest.json only when --execute is explicit; exact Resource readback is required for sent",
         },
+        {
+            "command": "loopx periodic-report publish-miaoda --request-json <request.json> --execute --format json",
+            "purpose": "Publish one typed hosted-report intent through the enabled LoopX Lark extension and require exact Miaoda app, URL, and published-state readback.",
+            "write_boundary": "preview is provider-free and leaves the intent pending; --execute publishes only the selected HTML artifact to the request-selected existing app and never changes app access policy",
+        },
     ],
     "implemented_protocols": [
         {
@@ -106,6 +111,21 @@ PERIODIC_REPORT_CATALOG_ENTRY: dict[str, Any] = {
             "module": "loopx.capabilities.periodic_report.bindings",
             "doc": "docs/reference/protocols/periodic-report-v0.md",
         },
+        {
+            "schema_version": "periodic_report_miaoda_delivery_request_v0",
+            "module": "loopx.extensions.lark.miaoda_report",
+            "doc": "docs/reference/protocols/periodic-report-v0.md",
+        },
+        {
+            "schema_version": "periodic_report_delivery_intent_v0",
+            "module": "loopx.extensions.lark.miaoda_report",
+            "doc": "docs/reference/protocols/periodic-report-v0.md",
+        },
+        {
+            "schema_version": "periodic_report_miaoda_delivery_result_v0",
+            "module": "loopx.extensions.lark.miaoda_report",
+            "doc": "docs/reference/protocols/periodic-report-v0.md",
+        },
     ],
     "smokes": [
         "python3 examples/periodic-report-smoke.py",
@@ -125,6 +145,7 @@ PERIODIC_REPORT_CATALOG_ENTRY: dict[str, Any] = {
         "The core owns material trigger classification, coalescing, cooldown/deduplication, period/profile binding, deterministic identity, receipts, run state, and retry projection.",
         "Profiles own schedule calculation, enabled trigger kinds, minimum interval, timezone, sections, audience, and project policy.",
         "Adapters own domain source collection; renderers and sinks own all provider effects and verified readback.",
+        "An explicit hosted-delivery intent is satisfied only by its typed sink result and exact provider readback; a local HTML artifact remains usable but cannot satisfy that intent.",
         "The document builder compiles hero summaries only from typed primary outcomes, risks, and next actions; renderers reject authored or stale summaries.",
         "Markdown and HTML render from one normalized document; runtime and delivery-receipt items must be supporting, HTML collapses them, and Markdown preserves them in a labeled appendix.",
         "Raw content, messages, logs, transcripts, credentials, secrets, and private paths are rejected.",
@@ -132,7 +153,7 @@ PERIODIC_REPORT_CATALOG_ENTRY: dict[str, Any] = {
     ],
     "next_real_step": (
         "Exercise the built-in weekly profile in a normal project session, then "
-        "prove one separately configured scheduled delivery without widening its "
-        "authority into the portable path."
+        "prove one profile-bound Miaoda publication and one separately configured "
+        "scheduled delivery without widening either authority into the portable path."
     ),
 }

@@ -179,7 +179,7 @@ def periodic_report_miaoda_html_sink_adapter(
     readback: MiaodaReadbackEffect,
     sink_id: str = "miaoda_html_delivery",
 ) -> PeriodicReportSinkAdapter:
-    """Publish a rendered HTML report to a profile-owned Miaoda app."""
+    """Publish a rendered HTML report to a request-selected existing Miaoda app."""
 
     def deliver(
         artifact: Mapping[str, Any],
