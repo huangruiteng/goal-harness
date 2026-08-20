@@ -574,6 +574,8 @@ Ark Agent Plan 有自己的受支持模型、凭据和用量边界。适配器�
 - attach 只有在 `(host_surface, host_session_id)` 已精确绑定该 Agent 时才成立；
 - attached session 的 Web 与 Lark 消息进入同一有界 FIFO，并保留
   `origin=web|lark`；
+- 已有宿主可以保持一个最长 30 分钟的 claim 等待，并在队列出现消息时立即
+  获得旧项优先、幂等 claim；超时只返回空结果，不启动或恢复任何运行时；
 - 原宿主通过稳定 claim/completion id 领取消息并回写，重复调用不会重复生成
   Agent 回复；以及
 - 任何 attached session 路径都不得调用 managed runtime 的启动/恢复函数。

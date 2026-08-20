@@ -34,8 +34,15 @@ loopx worker-bridge attached-session-claim \
   --host-surface <host-surface> \
   --host-session-id <opaque-host-session-id> \
   --claim-id <stable-claim-id> \
+  --wait-seconds 30 \
   --format json
 ```
+
+`--wait-seconds` turns claim into a bounded host subscription. An existing host
+bridge can keep one claim request open and wake as soon as the oldest queued
+message is available, instead of polling the command in a tight loop. The wait
+is capped at 30 minutes and never starts or resumes an Agent runtime. A timeout
+returns `claimed=false`; the host chooses whether to subscribe again.
 
 Write the Agent response to an owner-local JSON file containing at least a
 `message` field, then complete the exact claim:
@@ -51,10 +58,11 @@ loopx worker-bridge attached-session-complete \
   --response-json <owner-local-response.json>
 ```
 
-`session_queue` and reply readback are enabled in this stage. `live_steering`
-is explicitly reported as unavailable until the host exposes a push transport
-for the already-running Turn. LoopX fails closed instead of starting a managed
-runtime or silently degrading one event into another ingress mode.
+`session_queue`, bounded claim wait, and reply readback are enabled in this
+stage. `live_steering` is explicitly reported as unavailable until the host
+exposes a push transport for the already-running Turn. LoopX fails closed
+instead of starting a managed runtime or silently degrading one event into
+another ingress mode.
 
 Opaque host identifiers, message bodies, and response files stay in the local
 runtime store. Public Session projections contain only the LoopX Session id,
