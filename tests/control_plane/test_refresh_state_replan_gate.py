@@ -162,6 +162,86 @@ def test_writeback_allowed_when_replan_not_due() -> None:
     _call_gate(runs=_durable_runs(5))
 
 
+def _typed_repeat_runs() -> list[dict]:
+    """Two consecutive identical blocked observations (external-wait stall).
+
+    Mirrors the real external-wait pattern: the agent records the same typed
+    ``blocked`` observation twice, which creates a ``typed_progress_repeat``
+    replan obligation whose progress_baseline is the repeated observation.
+    Newest-first order, like run history.
+    """
+
+    observation = {
+        "schema_version": "typed_progress_observation_v0",
+        "result_class": "blocked",
+        "blocker_id": "blocker-external-review",
+        "evidence_ids": ["evidence-external-review"],
+    }
+    return [
+        {
+            "classification": "state_refreshed",
+            "generated_at": f"2026-08-13T12:0{index}:00+08:00",
+            "agent_id": AGENT_ID,
+            "progress_observation": dict(observation),
+        }
+        for index in (1, 0)
+    ]
+
+
+def test_repair_delta_claim_alone_cannot_close_typed_repeat_obligation() -> None:
+    runs = _typed_repeat_runs()
+    # The recovery row must not tell agents that a repair-delta/blocker claim
+    # alone closes a typed_progress_repeat obligation: the write gate rejects
+    # any writeback whose progress observation does not carry a NEW typed
+    # semantic delta relative to the obligation baseline.
+    with pytest.raises(ValueError) as exc:
+        enforce_open_replan_writeback(
+            newest_first_runs=runs,
+            state_text=STATE_TEXT,
+            agent_id=AGENT_ID,
+            goal_id=GOAL_ID,
+        )
+    message = str(exc.value)
+    assert "autonomous replan obligation" in message
+    assert "typed semantic delta" in message
+    # Repeating the same baseline observation cannot close the replan either.
+    with pytest.raises(ValueError, match="typed semantic delta"):
+        enforce_open_replan_writeback(
+            newest_first_runs=runs,
+            state_text=STATE_TEXT,
+            agent_id=AGENT_ID,
+            goal_id=GOAL_ID,
+            progress_observation={
+                "schema_version": "typed_progress_observation_v0",
+                "result_class": "blocked",
+                "blocker_id": "blocker-external-review",
+                "evidence_ids": ["evidence-external-review"],
+            },
+        )
+
+
+def test_atomic_new_blocker_delta_closes_typed_repeat_obligation() -> None:
+    runs = _typed_repeat_runs()
+    # One atomic writeback carries BOTH the repair-delta/blocker claim and a
+    # NEW typed blocker relative to the obligation baseline; the semantic gate
+    # accepts it in the same refresh (no separate later fingerprint step).
+    semantic_delta = enforce_open_replan_writeback(
+        newest_first_runs=runs,
+        state_text=STATE_TEXT,
+        agent_id=AGENT_ID,
+        goal_id=GOAL_ID,
+        progress_observation={
+            "schema_version": "typed_progress_observation_v0",
+            "result_class": "blocked",
+            "blocker_id": "blocker-new-external-review",
+            "evidence_ids": ["evidence-new-external-review"],
+        },
+    )
+    assert semantic_delta is not None
+    assert semantic_delta["accepted"] is True
+    assert semantic_delta["satisfying_outcomes"] == ["new_concrete_blocker"]
+
+
 def test_refresh_state_run_rejects_maintenance_writeback(tmp_path: Path) -> None:
     project = tmp_path / "project"
     state = (
