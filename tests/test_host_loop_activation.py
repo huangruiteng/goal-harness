@@ -283,6 +283,37 @@ def test_deepseek_harness_is_an_exact_host_type_with_external_loop_activation() 
     assert "scripts/dsh_turn_host_adapter.py" in packet["entry_command_hint"], packet
 
 
+def test_deepseek_harness_native_is_distinct_same_session_host() -> None:
+    assert normalize_agent_type("dsh-native") == "deepseek-harness-native"
+    assert normalize_agent_type("DeepSeek Harness Native") == "deepseek-harness-native"
+    assert agent_type_for_host_surface("deepseek-harness-native") == (
+        "deepseek-harness-native"
+    )
+    assert scheduler_command_binding_for_agent_type("deepseek-harness-native") == {
+        "runtime_profile": "generic_cli"
+    }
+
+    packet = build_host_loop_activation_packet(
+        agent_type="deepseek-harness-native",
+        goal_id="fixture-goal",
+        agent_id="dsh-native-fixture",
+        registered_agents=["dsh-native-fixture"],
+    )
+    assert packet["host_surface"] == "deepseek_harness_native_same_session"
+    assert packet["activation_method"] == "same_session_plugin_driver"
+    assert packet["host_mutation"]["host_loop_primitive"] == "exact live Agent.followup"
+    assert "/loopx-init" in packet["entry_command_hint"]
+    assert "loopx.dsh_goal_mode" not in packet["entry_command_hint"]
+
+    from loopx.agent_onboarding import _skill_delivery_contract
+
+    skill_delivery = _skill_delivery_contract("deepseek-harness-native")
+    assert skill_delivery["owner"] == "dsh_loopx_plugin"
+    assert skill_delivery["preferred_delivery"] == "dsh_loopx_init_command"
+    assert skill_delivery["install_command"] == "/loopx-init"
+    assert skill_delivery["entry_host_surface"] == "deepseek-harness-native"
+
+
 @pytest.mark.parametrize(
     "runtime_profile",
     ("ark_managed_agent_goal", "codex_app_ssh_goal"),

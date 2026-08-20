@@ -8,10 +8,15 @@ from typing import Any
 from .control_plane.todos.contract import normalize_todo_claimed_by
 from .file_lock import exclusive_file_lock
 from .history import load_registry
-from .registry import atomic_write_json, find_registry_goal
+from .registry import atomic_write_json, find_registry_goal, registry_goals
 
 THREAD_ID_MAX_LENGTH = 128
 THREAD_BINDING_SCHEMA_VERSION = "loopx_thread_agent_binding_v0"
+THREAD_BINDING_RESOLUTION_SCHEMA_VERSION = "loopx_thread_agent_binding_resolution_v0"
+
+
+class ThreadBindingRequestError(ValueError):
+    """The caller supplied an invalid host-thread identity."""
 
 
 def normalize_thread_id(value: Any) -> str | None:
@@ -105,6 +110,83 @@ def resolve_thread_agent_binding(
         base["status"] = "conflict"
         base["reason"] = "one thread is bound to multiple agent lanes"
     return base
+
+
+def resolve_registry_thread_agent_binding(
+    *,
+    registry_path: Path,
+    host_surface: str,
+    thread_id: str,
+) -> dict[str, Any]:
+    """Resolve one exact host thread across every Goal in a project registry."""
+
+    try:
+        normalized_thread_id = normalize_thread_id(thread_id)
+        if normalized_thread_id is None:
+            raise ValueError("thread_id is required")
+        normalized_surface = _normalized_host_surface(host_surface)
+    except ValueError as exc:
+        raise ThreadBindingRequestError("thread binding request is invalid") from exc
+    payload = load_registry(registry_path)
+    matches: list[dict[str, str]] = []
+    for goal in registry_goals(payload):
+        raw_goal_id = goal.get("id")
+        if (
+            not isinstance(raw_goal_id, str)
+            or not raw_goal_id
+            or raw_goal_id.strip() != raw_goal_id
+        ):
+            continue
+        goal_id = raw_goal_id
+        binding = resolve_thread_agent_binding(
+            goal,
+            host_surface=normalized_surface,
+            thread_id=normalized_thread_id,
+        )
+        if binding["status"] == "conflict":
+            for item in binding["matches"]:
+                matches.append({"goal_id": goal_id, "agent_id": item["agent_id"]})
+        elif binding["status"] == "bound":
+            matches.append({"goal_id": goal_id, "agent_id": binding["agent_id"]})
+
+    unique_matches = sorted(
+        {(
+            item["goal_id"],
+            item["agent_id"],
+        ) for item in matches}
+    )
+    compact_matches = [
+        {"goal_id": goal_id, "agent_id": agent_id}
+        for goal_id, agent_id in unique_matches
+    ]
+    result: dict[str, Any] = {
+        "ok": True,
+        "schema_version": THREAD_BINDING_RESOLUTION_SCHEMA_VERSION,
+        "host_surface": normalized_surface,
+        "thread_id": normalized_thread_id,
+        "status": "missing",
+        "goal_id": None,
+        "agent_id": None,
+        "matches": compact_matches,
+    }
+    if len(compact_matches) == 1:
+        result.update(
+            {
+                "status": "bound",
+                "goal_id": compact_matches[0]["goal_id"],
+                "agent_id": compact_matches[0]["agent_id"],
+            }
+        )
+    elif len(compact_matches) > 1:
+        result.update(
+            {
+                "ok": False,
+                "status": "ambiguous",
+                "error_kind": "thread_agent_binding_ambiguous",
+                "error": "host thread is bound to more than one Goal or Agent",
+            }
+        )
+    return result
 
 
 def _merge_thread_binding_entries(

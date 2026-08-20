@@ -109,7 +109,12 @@ class TestAgentTypeCatalog:
         assert normalize_agent_type("traex") == "traex-cli"
 
     def test_host_managed_skill_types(self):
-        host = {"ark-managed-agent", "traex-cli", "other-agent"}
+        host = {
+            "ark-managed-agent",
+            "deepseek-harness-native",
+            "traex-cli",
+            "other-agent",
+        }
         for at in SUPPORTED_AGENT_TYPES:
             canonical = normalize_agent_type(at)
             assert agent_type_uses_host_managed_skills(canonical) == (

@@ -835,6 +835,35 @@ def test_start_goal_binds_selected_lane_before_todo_writeback(
     }
 
 
+def test_dsh_native_start_goal_binds_the_exact_same_session_lane(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        thread_id="dsh-session-fixture",
+        cli_bin="loopx",
+        host_surface="deepseek-harness-native",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+
+    assert payload["thread_id"] == "dsh-session-fixture"
+    assert payload["thread_agent_binding"]["status"] == "missing"
+    command_pack = payload["command_pack"]
+    bind_command = command_pack["commands"]["goal_start_bind_thread"]
+    assert "--host-surface deepseek-harness-native" in bind_command
+    assert "--thread-id dsh-session-fixture" in bind_command
+    activation = command_pack["host_loop_activation"]
+    assert activation["activation_method"] == "same_session_plugin_driver"
+    assert activation["host_mutation"]["host_loop_primitive"] == (
+        "exact live Agent.followup"
+    )
+
+
 def test_start_goal_with_unbound_thread_requires_existing_lane_selection(
     tmp_path: Path,
 ) -> None:
@@ -1287,6 +1316,7 @@ def test_cli_without_host_returns_read_only_host_selection_gate(
         "gemini-cli",
         "cursor-agent",
         "deepseek-harness",
+        "deepseek-harness-native",
         "ark-managed-agent",
         "shell",
         "other-agent",

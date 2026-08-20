@@ -378,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
             "doctor",
             "first-run-report",
             "new-project-prompt",
+            "resolve-agent-thread",
             "start-goal",
             "slash-commands",
             "workflow-skills",

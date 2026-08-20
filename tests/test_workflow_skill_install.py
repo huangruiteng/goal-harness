@@ -160,3 +160,30 @@ def test_inspect_does_not_create_target(tmp_path: Path) -> None:
     assert inspected["operation"] == "inspect"
     assert inspected["install_required"] is True
     assert not skills_dir.exists()
+
+
+def test_install_and_inspect_dsh_native_entry(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "skills"
+
+    installed = workflow_skill_install(
+        skills_dir=skills_dir,
+        execute=True,
+        host_surface="deepseek-harness-native",
+    )
+
+    assert installed["ok"] is True
+    assert installed["host_surface"] == "deepseek-harness-native"
+    entry = (skills_dir / "loopx" / "SKILL.md").read_text(encoding="utf-8")
+    assert "--host-surface deepseek-harness-native" in entry
+    assert '--thread-id "$DSH_SESSION_ID"' in entry
+
+    inspected = workflow_skill_install(
+        skills_dir=skills_dir,
+        host_surface="deepseek-harness-native",
+    )
+    assert inspected["install_required"] is False
+    assert inspected["entry"]["status"] == "unchanged"
+
+    generic = workflow_skill_install(skills_dir=skills_dir)
+    assert generic["install_required"] is True
+    assert generic["entry"]["status"] == "updated"

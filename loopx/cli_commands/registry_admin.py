@@ -32,7 +32,10 @@ from ..state_migration import (
     render_state_migration_markdown,
 )
 from ..thread_agent_binding import (
+    THREAD_BINDING_RESOLUTION_SCHEMA_VERSION,
+    ThreadBindingRequestError,
     bind_thread_agent_in_registry,
+    resolve_registry_thread_agent_binding,
     resolve_thread_agent_binding,
     unbind_thread_agent_in_registry,
 )
@@ -55,6 +58,7 @@ REGISTRY_ADMIN_COMMANDS = {
     "configure-goal",
     "goal-lifecycle",
     "register-agent",
+    "resolve-agent-thread",
     "bind-agent-thread",
     "unbind-agent-thread",
     "archive-runtime",
@@ -63,6 +67,26 @@ REGISTRY_ADMIN_COMMANDS = {
     "sync-global",
     "migrate-state",
 } | REGISTRY_AUTHORITY_COMMANDS
+
+
+def _render_thread_binding_resolution_markdown(payload: dict[str, object]) -> str:
+    lines = [
+        "# LoopX Host Thread Binding",
+        "",
+        f"- ok: `{payload.get('ok')}`",
+        f"- status: `{payload.get('status')}`",
+        f"- host_surface: `{payload.get('host_surface')}`",
+        f"- thread_id: `{payload.get('thread_id')}`",
+    ]
+    if payload.get("goal_id"):
+        lines.append(f"- goal_id: `{payload.get('goal_id')}`")
+    if payload.get("agent_id"):
+        lines.append(f"- agent_id: `{payload.get('agent_id')}`")
+    if payload.get("error_kind"):
+        lines.append(f"- error_kind: `{payload.get('error_kind')}`")
+    if payload.get("error"):
+        lines.extend(["", str(payload["error"])])
+    return "\n".join(lines)
 
 
 def explicit_global_registry(runtime_root_arg: str | None) -> Path:
@@ -398,6 +422,17 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Write the source registry and sync it globally. Without this flag, preview only.",
     )
 
+    resolve_thread_parser = subparsers.add_parser(
+        "resolve-agent-thread",
+        help="Resolve one exact host thread across the current project registry.",
+    )
+    resolve_thread_parser.add_argument(
+        "--thread-id", required=True, help="Stable opaque host thread id."
+    )
+    resolve_thread_parser.add_argument(
+        "--host-surface", required=True, help="Exact host surface token."
+    )
+
     bind_thread_parser = subparsers.add_parser(
         "bind-agent-thread",
         help="Bind a stable host thread to one already registered LoopX agent.",
@@ -713,6 +748,38 @@ def handle_registry_admin_command(
                 **lock_timeout_error_fields(exc),
             }
         print_payload(payload, args.format, render_register_agent_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "resolve-agent-thread":
+        try:
+            payload = resolve_registry_thread_agent_binding(
+                registry_path=registry_path,
+                host_surface=args.host_surface,
+                thread_id=args.thread_id,
+            )
+        except Exception as exc:
+            invalid_request = isinstance(exc, ThreadBindingRequestError)
+            payload = {
+                "ok": False,
+                "schema_version": THREAD_BINDING_RESOLUTION_SCHEMA_VERSION,
+                "host_surface": None if invalid_request else args.host_surface,
+                "thread_id": None if invalid_request else args.thread_id,
+                "status": "unavailable",
+                "goal_id": None,
+                "agent_id": None,
+                "matches": [],
+                "error_kind": (
+                    "thread_agent_binding_invalid_request"
+                    if invalid_request
+                    else "thread_agent_binding_resolution_failed"
+                ),
+                "error": (
+                    "thread binding request is invalid"
+                    if invalid_request
+                    else "thread binding authority could not be read"
+                ),
+            }
+        print_payload(payload, args.format, _render_thread_binding_resolution_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command in {"bind-agent-thread", "unbind-agent-thread"}:

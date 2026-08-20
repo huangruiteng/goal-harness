@@ -157,19 +157,26 @@ def _skill_delivery_contract(
         *active_project_skills,
     ]
     ark_managed_agent = agent_type == "ark-managed-agent"
+    dsh_native = agent_type == "deepseek-harness-native"
     filesystem_readback = (
         inspect_skill_install_readback(
             skills_dir=host_skills_dir,
             required_skill_ids=REQUIRED_HOST_SKILL_IDS,
             source_root=Path(__file__).resolve().parents[1],
         )
-        if ark_managed_agent
+        if ark_managed_agent or dsh_native
         else None
     )
     return {
         "schema_version": HOST_SKILL_DELIVERY_SCHEMA_VERSION,
         "mode": "host_managed",
-        "owner": "loopx_install_script" if ark_managed_agent else "custom_agent_host",
+        "owner": (
+            "loopx_install_script"
+            if ark_managed_agent
+            else "dsh_loopx_plugin"
+            if dsh_native
+            else "custom_agent_host"
+        ),
         "status": (
             str(filesystem_readback["status"])
             if filesystem_readback
@@ -182,6 +189,7 @@ def _skill_delivery_contract(
         "active_project_skill_ids": active_project_skills,
         "delivery_options": [
             *(["fixed_install_script"] if ark_managed_agent else []),
+            *(["dsh_loopx_init_command"] if dsh_native else []),
             "host_skill_manifest",
             "prompt_injection",
         ],
@@ -206,7 +214,18 @@ def _skill_delivery_contract(
                 "filesystem_readback": filesystem_readback,
             }
             if ark_managed_agent
-            else {}
+            else (
+                {
+                    "preferred_delivery": "dsh_loopx_init_command",
+                    "onboarding_role": "read_only_verifier",
+                    "onboarding_required_for_install": False,
+                    "install_command": "/loopx-init",
+                    "entry_host_surface": "deepseek-harness-native",
+                    "target_layout": "~/.agents/skills",
+                }
+                if dsh_native
+                else {}
+            )
         ),
         "source_repository": "https://github.com/huangruiteng/loopx",
         "source_directories": [
@@ -258,6 +277,7 @@ def _bootstrap_pack_command(
         "gemini-cli": "gemini-cli",
         "cursor-agent": "cursor-agent",
         "deepseek-harness": "deepseek-harness",
+        "deepseek-harness-native": "deepseek-harness-native",
         "ark-managed-agent": "ark-managed-agent",
         "manual": "shell",
         "other-agent": "other-agent",
@@ -318,6 +338,12 @@ def _start_instruction(agent_type: str) -> str:
             "(`python -m loopx.dsh_goal_mode`; the legacy "
             "`scripts/dsh_turn_host_adapter.py` launcher still works) as the "
             "generic-cli host adapter; every tick starts from `quota should-run`."
+        )
+    if agent_type == "deepseek-harness-native":
+        return (
+            "Install the DSH LoopX plugin, run `/loopx-init`, then invoke the `loopx` "
+            "skill with the task text. The plugin driver continues the exact live "
+            "DSH session only after `quota should-run` admits another step."
         )
     if agent_type == "ark-managed-agent":
         return (

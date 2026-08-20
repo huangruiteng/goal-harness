@@ -20,6 +20,7 @@ IDENTITY_SELECTION_SCHEMA_VERSION = "loopx_host_loop_identity_selection_v0"
 HOST_MANAGED_SKILL_AGENT_TYPES = frozenset(
     {
         "ark-managed-agent",
+        "deepseek-harness-native",
         "traex-cli",
         "other-agent",
     }
@@ -45,6 +46,7 @@ def scheduler_command_binding_for_agent_type(
         "gemini-cli": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
         "cursor-agent": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
         "deepseek-harness": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
+        "deepseek-harness-native": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
     }.get(canonical)
     if runtime_profile is not None:
         return {"runtime_profile": runtime_profile.value}
@@ -70,6 +72,7 @@ SUPPORTED_AGENT_TYPES = [
     "gemini-cli",
     "cursor-agent",
     "deepseek-harness",
+    "deepseek-harness-native",
     "manual",
     "other-agent",
 ]
@@ -244,6 +247,19 @@ AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
             "dsh",
         ],
     },
+    "deepseek-harness-native": {
+        "display_name": "DeepSeek Harness (native session)",
+        "host_loop": "DeepSeek Harness same-session loop driven by the LoopX plugin",
+        "entry": "the LoopX skill plus the DSH `/loopx-init` command and same-session driver",
+        "accepted_inputs": [
+            "deepseek-harness-native",
+            "deepseek_harness_native",
+            "deepseek harness native",
+            "dsh-native",
+            "dsh_native",
+            "dsh native",
+        ],
+    },
     "manual": {
         "display_name": "Manual shell / external scheduler",
         "host_loop": "external scheduler or manual quota/status loop",
@@ -321,6 +337,8 @@ HOST_SURFACE_TO_AGENT_TYPE = {
     "cursor": "cursor-agent",
     "deepseek-harness": "deepseek-harness",
     "dsh": "deepseek-harness",
+    "deepseek-harness-native": "deepseek-harness-native",
+    "dsh-native": "deepseek-harness-native",
     "shell": "manual",
     "http": "other-agent",
     "worker-bridge": "other-agent",
@@ -452,6 +470,7 @@ def _heartbeat_commands(
         "gemini-cli": "Gemini CLI agent loop gated by LoopX",
         "cursor-agent": "Cursor Agent CLI loop gated by LoopX",
         "deepseek-harness": "DeepSeek Harness automation loop gated by LoopX",
+        "deepseek-harness-native": "DeepSeek Harness same-session plugin loop gated by LoopX",
         "manual": "External scheduler or manual shell LoopX poll",
         "other-agent": "Custom agent host loop gated by LoopX",
     }
@@ -1137,6 +1156,37 @@ def _deepseek_harness_activation(commands: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def _deepseek_harness_native_activation(commands: dict[str, str]) -> dict[str, Any]:
+    return {
+        "host_surface": "deepseek_harness_native_same_session",
+        "entry_command_hint": (
+            "install the DSH LoopX plugin, run /loopx-init, then invoke the loopx skill"
+        ),
+        "activation_method": "same_session_plugin_driver",
+        "activation_input_command": commands["heartbeat_prompt_json"],
+        "host_mutation": {
+            "owner": "DSH LoopX plugin",
+            "host_loop_primitive": "exact live Agent.followup",
+            "cli_can_mutate_directly": False,
+            "missing_host_tool_gate": (
+                "The DSH LoopX plugin or its same-session driver is unavailable; install "
+                "the plugin and run `/loopx-init` before claiming an autonomous loop."
+            ),
+        },
+        "activation_steps": [
+            "Install the DSH LoopX plugin and run `/loopx-init`.",
+            "Invoke the installed `loopx` skill with the original task text.",
+            "Bind the exact DSH session while starting or attaching the Goal.",
+            "Let the plugin driver call `quota should-run` before each same-session follow-up.",
+        ],
+        "success_criteria": [
+            "The exact live DSH Agent and session id match the durable LoopX binding.",
+            "Each automatic follow-up has a fresh positive quota decision.",
+            "Human input cancels any reserved automatic follow-up before delivery.",
+        ],
+    }
+
+
 def _manual_activation(commands: dict[str, str]) -> dict[str, Any]:
     return {
         "host_surface": "external_scheduler_or_manual_shell",
@@ -1229,6 +1279,8 @@ def build_host_loop_activation_packet(
         surface = _cursor_agent_activation(commands, cli_bin)
     elif canonical == "deepseek-harness":
         surface = _deepseek_harness_activation(commands)
+    elif canonical == "deepseek-harness-native":
+        surface = _deepseek_harness_native_activation(commands)
     else:
         surface = _manual_activation(commands)
         if canonical == "other-agent":

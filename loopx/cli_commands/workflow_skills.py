@@ -47,6 +47,11 @@ def register_workflow_skills_command(
         help="LoopX executable name embedded in the generated $loopx entry skill.",
     )
     parser.add_argument(
+        "--host-surface",
+        choices=["ark-managed-agent", "deepseek-harness-native"],
+        help="Generate the managed $loopx entry for one exact host surface.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Inspect the requested operation without writing files.",
@@ -66,6 +71,7 @@ def handle_workflow_skills_command(
         execute=bool((args.install or args.uninstall) and not args.dry_run),
         uninstall=bool(args.uninstall),
         cli_bin=args.cli_bin,
+        host_surface=args.host_surface,
     )
     print_payload(
         payload,

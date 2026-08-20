@@ -162,6 +162,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "purpose": "Persist one stable host thread binding to an already registered LoopX agent.",
             },
             {
+                "command": "loopx resolve-agent-thread",
+                "purpose": "Read one exact host thread binding across the current project without mutating authority.",
+            },
+            {
                 "command": "loopx unbind-agent-thread",
                 "purpose": "Remove one exact host thread binding without unregistering its agent or peer sessions.",
             },
