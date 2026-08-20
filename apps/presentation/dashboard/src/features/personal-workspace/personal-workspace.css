@@ -565,6 +565,8 @@
 .personal-inline-agent-select { display: grid; grid-column: 1 / -1; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--pw-line); border-radius: 10px; color: var(--pw-muted); font-size: 11px; }
 .personal-inline-agent-select select { min-width: 0; min-height: 36px; padding: 0 8px; border: 1px solid var(--pw-line-strong); border-radius: 8px; background: #fff; color: #333; }
 .personal-inline-agent-select .personal-secondary-action { width: auto; min-height: 36px; padding: 0 12px; margin: 0; }
+.personal-inline-resume-when input { min-width: 0; min-height: 36px; padding: 0 8px; border: 1px solid var(--pw-line-strong); border-radius: 8px; background: #fff; color: #333; }
+.personal-inline-resume-when small { grid-column: 2 / -1; color: var(--pw-faint); }
 .personal-primary-action, .personal-secondary-action, .personal-danger-action { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 42px; margin-top: 12px; border-radius: 11px; cursor: pointer; font-weight: 650; font-size: 13.5px; }
 .personal-primary-action { border: 1px solid var(--pw-blue); background: var(--pw-blue); color: #fff; box-shadow: 0 2px 6px rgb(47 102 233 / 28%); }
 .personal-primary-action:hover { background: var(--pw-blue-ink); }
@@ -872,6 +874,7 @@
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-compact-menu > div button:hover { background: #fff8d6; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-inline-agent-select { border: 2px solid #141414; border-radius: 4px; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-inline-agent-select select { border: 2px solid #141414; border-radius: 4px; color: #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-inline-resume-when input { border: 2px solid #141414; border-radius: 4px; color: #141414; }
 
 /* ===== 晨间摘要 + Agent 全景 + 会话提示 + 优先级徽章 ===== */
 .personal-digest-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; padding: 13px 16px; border: 1px solid var(--pw-line); border-radius: 14px; background: linear-gradient(135deg, #fff, #fbf7ee); }

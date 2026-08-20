@@ -41,6 +41,14 @@ function executionIntent(message: string) {
     && /(帮我|请|给我|直接|现在|开始|bytedcli|codebase|git|rebase|push|提交|推送)/iu.test(message);
 }
 
+export function todoResumeWhenFromMessage(rawMessage: string) {
+  const message = normalizedMessage(rawMessage).toLowerCase();
+  const match = message.match(
+    /(?:^|[\s，,；;：（(:]|到|至)(?<condition>todo_done:todo_[a-z0-9_-]{3,64}|pr_merged:(?:(?:[a-z0-9_.-]{1,80})\/(?:[a-z0-9_.-]{1,100}))?#[1-9][0-9]{0,8}|capacity_available:[a-z][a-z0-9_:-]{0,63})(?=$|[\s，,。；;）)])/iu,
+  );
+  return match?.groups?.condition ?? null;
+}
+
 export function routeWorkspaceInput(rawMessage: string, context: WorkspaceRouterContext): WorkspaceRouterResult {
   const message = normalizedMessage(rawMessage);
   const candidates: Array<{ actionKind: WorkspaceRouterActionKind; confidence: number; normalizedParameters: Record<string, unknown> }> = [];
@@ -87,10 +95,25 @@ export function routeWorkspaceInput(rawMessage: string, context: WorkspaceRouter
           : agent && !negates(message, /交给|分配给|改派/u) && /交给|分配给|改派/u.test(message) ? "reassign"
             : null;
     if (operation) {
+      const resumeWhen = operation === "defer" ? todoResumeWhenFromMessage(message) : null;
+      if (operation === "defer" && !resumeWhen) {
+        return {
+          actionKind: "todo.update",
+          confidence: 0.97,
+          missingFields: ["resume_when"],
+          normalizedParameters: { goal_id: context.goalId, operation, todo_id: todo.todoId },
+          route: "clarify",
+        };
+      }
       candidates.push({
         actionKind: "todo.update",
         confidence: 0.97,
-        normalizedParameters: { goal_id: context.goalId, operation, todo_id: todo.todoId },
+        normalizedParameters: {
+          goal_id: context.goalId,
+          operation,
+          ...(resumeWhen ? { resume_when: resumeWhen } : {}),
+          todo_id: todo.todoId,
+        },
       });
     }
   }

@@ -878,12 +878,69 @@ def assert_http_action_api(root: Path) -> None:
         assert todo_updated["proposal"]["receipt"]["outcome"] == "todo_updated", todo_updated
         assert "Verify typed action lifecycle and receipts" in state_path.read_text(encoding="utf-8")
 
+        todo_state_before_defer = state_path.read_text(encoding="utf-8")
+        code, unsupported_defer = request_json(
+            f"{base_url}/api/actions/preview",
+            method="POST",
+            body={
+                "action_kind": "todo.update",
+                "summary": "Defer without an evaluable condition",
+                "normalized_parameters": {
+                    "goal_id": "goal-one",
+                    "todo_id": current_todo_id,
+                    "operation": "defer",
+                    "resume_when": "owner_resume",
+                },
+                "context": {"kind": "goal", "goal_id": "goal-one"},
+                "idempotency_key": "http-todo-defer-unsupported",
+            },
+        )
+        assert code == 400, unsupported_defer
+        assert unsupported_defer["error_code"] == "invalid_action_preview", unsupported_defer
+        assert "supported condition" in unsupported_defer["error"], unsupported_defer
+        assert not any(
+            proposal.get("idempotency_key") == "http-todo-defer-unsupported"
+            for proposal in service.store.list()
+        ), service.store.list()
+        assert state_path.read_text(encoding="utf-8") == todo_state_before_defer
+
+        code, valid_defer_preview = request_json(
+            f"{base_url}/api/actions/preview",
+            method="POST",
+            body={
+                "action_kind": "todo.update",
+                "summary": "Defer until another Todo is done",
+                "normalized_parameters": {
+                    "goal_id": "goal-one",
+                    "todo_id": current_todo_id,
+                    "operation": "defer",
+                    "agent_id": "codex",
+                    "resume_when": f"todo_done:{current_todo_id}",
+                },
+                "context": {"kind": "goal", "goal_id": "goal-one"},
+                "idempotency_key": "http-todo-defer-supported",
+            },
+        )
+        assert code == 201, valid_defer_preview
+        assert valid_defer_preview["proposal"]["validation_evidence"] == [
+            "Canonical LoopX Todo dry-run validated the requested transition."
+        ], valid_defer_preview
+        assert state_path.read_text(encoding="utf-8") == todo_state_before_defer
+        code, valid_defer_applied = request_json(
+            f"{base_url}/api/actions/{valid_defer_preview['proposal']['proposal_id']}/apply",
+            method="POST",
+            body={},
+        )
+        assert code == 200, valid_defer_applied
+        assert valid_defer_applied["proposal"]["receipt"]["outcome"] == "todo_updated", valid_defer_applied
+        assert f"resume_when=todo_done:{current_todo_id}" in state_path.read_text(encoding="utf-8")
+
         for index, parameters in enumerate(
             (
                 {"operation": "reassign", "agent_id": "codex"},
-                {"operation": "block", "note": "Waiting for owner evidence"},
-                {"operation": "defer", "resume_when": f"todo_done:{current_todo_id}"},
-                {"operation": "successor", "successor_todo_ids": [current_todo_id]},
+                {"operation": "block", "note": "Waiting for owner evidence", "agent_id": "codex"},
+                {"operation": "defer", "resume_when": f"todo_done:{current_todo_id}", "agent_id": "codex"},
+                {"operation": "successor", "successor_todo_ids": [current_todo_id], "agent_id": "codex"},
             )
         ):
             code, transition_preview = request_json(

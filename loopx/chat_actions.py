@@ -15,14 +15,16 @@ from .chat_action_store import ActionConflictError, ChatActionStore
 from .chat_goal_lifecycle_actions import ChatGoalLifecycleActionMixin
 from .chat_monitor_actions import ChatMonitorActionMixin
 from .chat_store import ChatSessionStore
+from .chat_todo_actions import ChatTodoActionMixin
 from .configure_goal import configure_goal
 from .control_plane.runtime.time import now_utc, parse_timestamp, utc_isoformat
 from .control_plane.scheduler.monitor_todo import monitor_next_due_at
+from .control_plane.todos.contract import require_supported_todo_resume_when
 from .history import load_registry
 from .host_loop_activation import build_host_loop_activation_packet
 from .quota import build_quota_should_run
 from .registry import registry_goals
-from .todos import add_goal_todo, complete_goal_todo, update_goal_todo
+from .todos import add_goal_todo, update_goal_todo
 
 
 CHAT_ACTION_RESPONSE_SCHEMA_VERSION = "loopx_chat_action_response_v1"
@@ -138,7 +140,9 @@ def _monitor_text(parameters: Mapping[str, Any]) -> str | None:
     return None
 
 
-class ChatActionService(ChatGoalLifecycleActionMixin, ChatMonitorActionMixin):
+class ChatActionService(
+    ChatGoalLifecycleActionMixin, ChatMonitorActionMixin, ChatTodoActionMixin
+):
     """Validate previews and route applies through canonical LoopX services."""
 
     def __init__(
@@ -381,9 +385,9 @@ class ChatActionService(ChatGoalLifecycleActionMixin, ChatMonitorActionMixin):
             elif values.get("agent_id"):
                 result["agent_id"] = _opaque(values["agent_id"], field="agent_id")
             if values.get("resume_when"):
-                result["resume_when"] = _text(
-                    values["resume_when"], field="resume_when", limit=240
-                ).lower()
+                result["resume_when"] = require_supported_todo_resume_when(
+                    _text(values["resume_when"], field="resume_when", limit=240)
+                )
             if values.get("successor_todo_ids") is not None:
                 if not isinstance(values["successor_todo_ids"], list):
                     raise ValueError("successor_todo_ids must be a list")
@@ -1183,65 +1187,6 @@ class ChatActionService(ChatGoalLifecycleActionMixin, ChatMonitorActionMixin):
         )
         return {"proposal": stored, "turn": None}
 
-    def _apply_todo_update(
-        self, proposal_id: str, proposal: dict[str, Any], parameters: dict[str, Any]
-    ) -> dict[str, Any]:
-        goal_id = str(parameters["goal_id"])
-        current_fingerprint = self._goal_state_fingerprint(goal_id)
-        if current_fingerprint != proposal.get("expected_state_fingerprint"):
-            stale = self.store.apply(
-                proposal_id, current_state_fingerprint=current_fingerprint, receipt={}
-            )
-            return {"proposal": stale, "turn": None}
-        operation = str(parameters.get("operation") or "edit")
-        if operation == "complete":
-            result = complete_goal_todo(
-                registry_path=self.registry_path,
-                goal_id=goal_id,
-                todo_id=str(parameters["todo_id"]),
-                note=parameters.get("note"),
-                no_followup=bool(parameters.get("no_followup", True)),
-                successor_todo_ids=parameters.get("successor_todo_ids"),
-                agent_id=parameters.get("agent_id"),
-                authority_reason="owner-confirmed typed Chat action",
-                dry_run=False,
-            )
-        else:
-            status = parameters.get("status")
-            if operation == "block":
-                status = "blocked"
-            elif operation == "defer":
-                status = "deferred"
-            result = update_goal_todo(
-                registry_path=self.registry_path,
-                goal_id=goal_id,
-                todo_id=str(parameters["todo_id"]),
-                text=parameters.get("text"),
-                status=status,
-                note=parameters.get("note"),
-                claimed_by=parameters.get("agent_id") if operation == "reassign" else None,
-                resume_when=parameters.get("resume_when"),
-                successor_todo_ids=parameters.get("successor_todo_ids"),
-                agent_id=parameters.get("agent_id"),
-                authority_reason="owner-confirmed typed Chat action",
-                dry_run=False,
-            )
-        todo_id = _opaque(result.get("todo_id"), field="todo_id")
-        receipt = {
-            "receipt_id": _digest({"proposal_id": proposal_id, "todo_id": todo_id})[:32],
-            "outcome": (
-                "todo_completed"
-                if operation == "complete"
-                else "todo_updated" if result.get("changed") else "todo_unchanged"
-            ),
-            "projection_verified": True,
-            "resource_ids": {"goal_id": goal_id, "todo_id": todo_id},
-        }
-        stored = self.store.apply(
-            proposal_id, current_state_fingerprint=current_fingerprint, receipt=receipt
-        )
-        return {"proposal": stored, "turn": None}
-
     def preview(self, request: Mapping[str, Any]) -> dict[str, Any]:
         unknown = set(request) - {
             "action_kind",
@@ -1287,6 +1232,12 @@ class ChatActionService(ChatGoalLifecycleActionMixin, ChatMonitorActionMixin):
             evidence = ["The recoverable Goal and Agent Chat Session is available."]
             permission = "scoped_correction"
         elif action_kind in {"todo.update", "monitor.update"}:
+            if action_kind == "todo.update":
+                canonical_preview = self._run_todo_update(normalized, dry_run=True)
+                if canonical_preview.get("ok") is not True:
+                    raise ValueError(
+                        str(canonical_preview.get("error") or "Todo transition failed canonical dry-run validation")
+                    )
             goal_fingerprint = self._goal_state_fingerprint(normalized["goal_id"])
             if action_kind == "monitor.update" and normalized.get("operation") == "run_now":
                 session_id = normalized.get("session_id")
@@ -1304,7 +1255,11 @@ class ChatActionService(ChatGoalLifecycleActionMixin, ChatMonitorActionMixin):
                 )
             else:
                 fingerprint = goal_fingerprint
-            evidence = ["Canonical LoopX Todo state validated the requested transition."]
+            evidence = [
+                "Canonical LoopX Todo dry-run validated the requested transition."
+                if action_kind == "todo.update"
+                else "Canonical LoopX Todo state validated the requested transition."
+            ]
             permission = "durable_write"
         else:
             fingerprint = self._registry_fingerprint()

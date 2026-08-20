@@ -33,6 +33,7 @@ import type {
 } from "./personal-workspace-model";
 import type { LarkGoalConnection } from "../../data/chat";
 import { attentionAgeLabel, formatCostUsd, formatDurationMs, formatTokenCount, hasGoalUsage, workspaceSessionStatusLabel } from "./personal-workspace-model";
+import { todoResumeWhenFromMessage } from "./personal-workspace-router";
 
 const focusableSelector = [
   "a[href]",
@@ -47,7 +48,6 @@ type TodoOperation = "block" | "complete" | "defer" | "successor_create";
 
 const todoTransitions = [
   { label: "标记阻塞", operation: "block" },
-  { label: "暂缓", operation: "defer" },
   { label: "创建后续 Todo", operation: "successor_create" },
 ] as const satisfies readonly { label: string; operation: TodoOperation }[];
 
@@ -73,6 +73,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   const [repositoryCopyState, setRepositoryCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [runDrawerTab, setRunDrawerTab] = useState<"record" | "details">("record");
   const [todoAgentId, setTodoAgentId] = useState(agents.find((agent) => agent.available)?.agentId ?? "codex");
+  const [todoResumeWhen, setTodoResumeWhen] = useState("");
   const closeRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const selectionIdentity = selection.kind === "run" ? `run:${selection.item.runId}`
@@ -87,6 +88,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     setRepositoryCopyState("idle");
     setDiagnosticsOpen(false);
     setRunDrawerTab("record");
+    setTodoResumeWhen("");
   }, [selectionIdentity]);
 
   useEffect(() => {
@@ -145,6 +147,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     || Boolean(selection.item.latestActivity)
     || Boolean(selection.item.outputs?.length)
   );
+  const normalizedTodoResumeWhen = todoResumeWhenFromMessage(todoResumeWhen);
 
   async function sendCorrection() {
     if (selection.kind !== "run" || !correction.trim()) return;
@@ -152,7 +155,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     setCorrection("");
   }
 
-  async function previewTodoTransition(todo: WorkspaceTodo, operation: TodoOperation, label: string) {
+  async function previewTodoTransition(todo: WorkspaceTodo, operation: TodoOperation, label: string, resumeWhen?: string) {
     if (operation === "successor_create") {
       await callbacks.onPreviewAction?.({
         actionKind: "todo.create",
@@ -168,10 +171,11 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
       context: { goal_id: todo.goalId, kind: "todo", todo_id: todo.todoId },
       idempotencyKey: `workspace-todo-${todo.todoId}-${operation}-${Date.now().toString(36)}`,
       normalizedParameters: {
+        agent_id: todo.claimedBy ?? todoAgentId,
         goal_id: todo.goalId,
         operation,
         ...(operation === "block" ? { note: "Owner 标记为阻塞，等待补充上下文。" } : {}),
-        ...(operation === "defer" ? { resume_when: "owner_resume" } : {}),
+        ...(operation === "defer" && resumeWhen ? { resume_when: resumeWhen } : {}),
         todo_id: todo.todoId,
       },
       summary: `${label}：${todo.text}`,
@@ -266,6 +270,24 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                   normalizedParameters: { agent_id: todoAgentId, goal_id: selection.item.goalId, operation: "reassign", todo_id: selection.item.todoId },
                   summary: `重新分配：${selection.item.text}`,
                 })} type="button">检查变更</button>
+              </label>
+              <label className="personal-inline-agent-select personal-inline-resume-when">暂缓至
+                <input
+                  aria-label="Todo 暂缓恢复条件"
+                  aria-invalid={Boolean(todoResumeWhen.trim()) && !normalizedTodoResumeWhen}
+                  onChange={(event) => setTodoResumeWhen(event.target.value)}
+                  placeholder="例如 pr_merged:owner/repo#123"
+                  value={todoResumeWhen}
+                />
+                <button
+                  className="personal-secondary-action"
+                  disabled={!normalizedTodoResumeWhen}
+                  onClick={() => void previewTodoTransition(selection.item, "defer", "暂缓", normalizedTodoResumeWhen ?? undefined)}
+                  type="button"
+                >检查暂缓</button>
+                <small>{todoResumeWhen.trim() && !normalizedTodoResumeWhen
+                  ? "条件格式不受支持；请使用下列三种可判定条件"
+                  : "支持 todo_done、pr_merged、capacity_available 条件"}</small>
               </label>
               <details className="personal-compact-menu">
                 <summary><MoreHorizontal size={17} />更多操作</summary>

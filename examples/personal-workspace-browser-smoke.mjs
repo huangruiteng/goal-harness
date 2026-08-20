@@ -893,9 +893,17 @@ async function main() {
     await page.getByText("确认执行").waitFor({ state: "visible" });
     if (!api.actionPreviews.some((preview) => preview.action_kind === "todo.update" && preview.normalized_parameters.operation === "reassign")) throw new Error("Todo reassign did not create a typed preview");
     await page.getByRole("button", { name: "关闭", exact: true }).click();
+    await taskRow.click();
+    await page.getByLabel("Todo 暂缓恢复条件").fill("pr_merged:huangruiteng/loopx#3399");
+    await page.screenshot({ path: resolve(outputDir, "todo-defer-resume-condition.png"), fullPage: false, animations: "disabled" });
+    await page.getByRole("button", { name: "检查暂缓", exact: true }).click();
+    await page.getByText("确认执行").waitFor({ state: "visible" });
+    const explicitDefer = api.actionPreviews.findLast((preview) => preview.action_kind === "todo.update" && preview.normalized_parameters.operation === "defer");
+    if (explicitDefer?.normalized_parameters.resume_when !== "pr_merged:huangruiteng/loopx#3399") throw new Error(`Todo defer did not preserve its supported resume condition: ${JSON.stringify(explicitDefer)}`);
+    if (JSON.stringify(api.actionPreviews).includes("owner_resume")) throw new Error("Personal Workspace emitted the unsupported owner_resume sentinel");
+    await page.getByRole("button", { name: "关闭", exact: true }).click();
     for (const [label, actionKind, operation] of [
       ["标记阻塞", "todo.update", "block"],
-      ["暂缓", "todo.update", "defer"],
       ["标记完成", "todo.update", "complete"],
       ["创建后续 Todo", "todo.create", null],
     ]) {

@@ -1211,7 +1211,9 @@ export function PersonalWorkspacePage({
       });
       if (intentRoute.route === "clarify") {
         setComposer(message);
-        setActionFeedback("这句话包含多个可能修改状态的操作。请一次描述一项操作，我会逐项展示确认预览。");
+        setActionFeedback(intentRoute.missingFields.includes("resume_when")
+          ? "暂缓 Todo 需要可自动判断的恢复条件。请补充 todo_done:<todo_id>、pr_merged:[owner/repo]#<number> 或 capacity_available:<capability>。"
+          : "这句话包含多个可能修改状态的操作。请一次描述一项操作，我会逐项展示确认预览。");
         return;
       }
       if (intentRoute.actionKind === "goal.create") {
@@ -1309,9 +1311,12 @@ export function PersonalWorkspacePage({
           context: { kind: "todo", goal_id: selectedGoalId, todo_id: matchedTodo.todoId, natural_language: message },
           idempotencyKey: `workspace-todo-update-${matchedTodo.todoId}-${todoOperation}-${Date.now().toString(36)}`,
           normalizedParameters: {
+            agent_id: selectedAgentId,
             ...(todoOperation === "reassign" && requestedAgent ? { endpoint_id: requestedAgent.agentId } : {}),
             ...(todoOperation === "block" ? { note: message } : {}),
-            ...(todoOperation === "defer" ? { resume_when: "owner_resume" } : {}),
+            ...(todoOperation === "defer" && typeof intentRoute.normalizedParameters.resume_when === "string"
+              ? { resume_when: intentRoute.normalizedParameters.resume_when }
+              : {}),
             goal_id: selectedGoalId,
             operation: todoOperation,
             todo_id: matchedTodo.todoId,

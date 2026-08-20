@@ -23,9 +23,12 @@ for (const field of ["dependencies", "nextTransition", "ownerLabel", "todoId", "
   assert.match(model, new RegExp(`${field}\\??:`), `Todo exposes ${field}`);
 }
 assert.match(drawer, /actionKind: "todo\.update"/, "Todo mutations use typed previews");
-for (const operation of ["reassign", "block", "defer"]) {
+for (const operation of ["reassign", "block"]) {
   assert.match(drawer, new RegExp(`operation:\\s*"${operation}"`), `Todo supports ${operation}`);
 }
+assert.match(drawer, /previewTodoTransition\(selection\.item, "defer"/, "Todo defer collects a resume condition before preview");
+assert.match(drawer, /resume_when:\s*resumeWhen/, "Todo defer sends its explicit resume condition");
+assert.doesNotMatch(drawer + page, /owner_resume/, "Personal Workspace never emits the unsupported owner_resume sentinel");
 assert.match(drawer, /previewTodoTransition\(selection\.item, "complete"/, "Todo complete is the primary drawer action");
 assert.match(drawer, /actionKind: "todo\.create"/, "Todo successor uses the canonical create action");
 
