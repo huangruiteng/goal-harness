@@ -1,0 +1,7 @@
+# Host integration only. LoopX owns Goal, Todo, quota, and thread-binding authority.
+- insert:
+    - id: loopx-init-command
+      name: dsh-loopx-plugin/init-command
+
+    - id: loopx-driver
+      name: dsh-loopx-plugin/driver
