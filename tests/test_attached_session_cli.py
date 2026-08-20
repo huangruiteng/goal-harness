@@ -94,6 +94,8 @@ def test_attached_session_cli_bind_claim_and_complete(
                 "opaque-host-session",
                 "--claim-id",
                 "claim-1",
+                "--wait-seconds",
+                "1",
             ]
         )
         == 0

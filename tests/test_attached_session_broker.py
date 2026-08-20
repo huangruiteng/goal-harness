@@ -82,6 +82,7 @@ def test_bind_requires_exact_registered_thread_and_is_idempotent(tmp_path: Path)
     assert session["attached_capabilities"] == {
         "live_steering": False,
         "session_queue": True,
+        "claim_wait": True,
         "reply_readback": True,
     }
 
@@ -150,6 +151,51 @@ def test_concurrent_bind_and_completion_are_duplicate_safe(tmp_path: Path) -> No
     assert sorted(packet["created"] for packet in completions) == [False, True]
     agent_messages = [item for item in store.messages(session_id) if item["role"] == "agent"]
     assert len(agent_messages) == 1
+
+
+def test_attached_host_can_wait_for_queue_wakeup(tmp_path: Path) -> None:
+    store = ChatSessionStore(tmp_path)
+    session_id = str(_bind(store)["session"]["session_id"])
+
+    def queue_message() -> None:
+        time.sleep(0.02)
+        store.create_queued_turn(
+            session_id,
+            client_turn_id="wake-host",
+            message="wake the attached host",
+            origin="lark",
+        )
+
+    producer = threading.Thread(target=queue_message)
+    producer.start()
+    claimed = claim_attached_agent_turn(
+        store=store,
+        session_id=session_id,
+        host_surface=HOST_SURFACE,
+        host_session_id=HOST_SESSION_ID,
+        claim_id="wake-claim",
+        wait_seconds=1,
+    )
+    producer.join(timeout=1)
+
+    assert claimed["claimed"] is True
+    assert claimed["waited"] is True
+    assert claimed["turn"]["message"] == "wake the attached host"
+
+
+def test_attached_host_claim_wait_is_bounded(tmp_path: Path) -> None:
+    store = ChatSessionStore(tmp_path)
+    session_id = str(_bind(store)["session"]["session_id"])
+
+    with pytest.raises(ValueError, match="between 0 and 1800"):
+        claim_attached_agent_turn(
+            store=store,
+            session_id=session_id,
+            host_surface=HOST_SURFACE,
+            host_session_id=HOST_SESSION_ID,
+            claim_id="unbounded-claim",
+            wait_seconds=1_801,
+        )
 
 
 def test_loopback_attach_api_binds_without_exposing_host_session(tmp_path: Path) -> None:
