@@ -355,6 +355,40 @@ def test_standard_codex_app_actions_use_typed_settlement_before_turn_driver() ->
         assert '--turn-instance-id "${LOOPX_TURN:?}"' in command
 
 
+@pytest.mark.parametrize(
+    "profile",
+    (
+        SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL,
+        SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
+        SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
+    ),
+)
+def test_native_goal_actions_preserve_visible_goal_spend_attribution(
+    profile: SchedulerRuntimeProfile,
+) -> None:
+    todo_id = "todo_visible_goal"
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": GOAL_ID,
+            "agent_identity": {"agent_id": AGENT_ID},
+            "selected_todo": {"todo_id": todo_id},
+        },
+        mode="bounded_delivery",
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            profile
+        ),
+    )
+
+    assert len(actions) == 2
+    assert actions[0].startswith("loopx refresh-state")
+    assert actions[1] == (
+        f"loopx quota spend-slot --goal-id {GOAL_ID} --slots 1 "
+        f"--source visible-goal --execute --agent-id {AGENT_ID}"
+    )
+    assert all("--todo-id" not in command for command in actions)
+    assert all("--turn-instance-id" not in command for command in actions)
+
+
 def test_codex_app_external_observation_settles_only_substantive_writeback() -> None:
     todo_id = "todo_external_observation"
     actions = interaction_next_cli_actions(
