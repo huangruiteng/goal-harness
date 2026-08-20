@@ -13,7 +13,7 @@ evidence, or recovery authority.
 | `lark-kanban-projection` | Render public-safe LoopX todo and control-plane projections into Lark Base | [`presentation/kanban.py`](presentation/kanban.py) |
 | `lark-goal-channel` | Bind one verified Lark group and projection surface to one LoopX goal | [`goal_channel.py`](goal_channel.py), [`goal_channel_setup.py`](goal_channel_setup.py) |
 | `lark-explore-projection` | Project canonical Explore results into Lark tables, cards, and whiteboards | [`presentation/explore_results.py`](presentation/explore_results.py) |
-| `lark-miaoda-html-report` | Publish an already-rendered periodic report to a profile-owned Miaoda app | [`presentation/periodic_report.py`](presentation/periodic_report.py) |
+| `lark-miaoda-html-report` | Publish an already-rendered periodic report to an operator-selected existing Miaoda app | [`presentation/periodic_report.py`](presentation/periodic_report.py) |
 
 The [event inbox guide](docs/lark-event-inbox.md) documents the complete
 collector, processing, reply, reaction, and acknowledgement lifecycle. The
@@ -37,6 +37,13 @@ Kernel state:
 loopx extension disable loopx-lark --execute --format json
 loopx extension rollback loopx-lark --execute --format json
 ```
+
+For Miaoda, `loopx periodic-report publish-miaoda --request-json <path>` first
+previews a typed hosted-delivery intent. Add `--execute` only after checking the
+profile-bound sink, request-selected app, and artifact. The command delegates
+authentication and the external publish/readback calls to `lark-cli`; LoopX
+stores no credentials and does not treat local HTML generation as hosted
+delivery.
 
 Installation controls discoverability and provider lifecycle only. Every
 private chat, app, group, Base, document, or Miaoda target remains in ignored

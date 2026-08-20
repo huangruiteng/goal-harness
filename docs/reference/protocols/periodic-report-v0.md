@@ -234,10 +234,31 @@ own idempotency and readback receipt; it is not renderer authority.
 The bundled Lark extension includes an opt-in `miaoda_html` delivery sink for
 `html_artifact_v0`. It validates the single HTML, compressed archive, and
 uncompressed payload limits before any external effect. A successful receipt
-requires exact readback of the profile-owned app id, published URL, and
+requires exact readback of the request-selected app id, published URL, and
 published state, and also records the observed access scope and login
 requirement. The project or host still owns app selection, authentication,
 audience policy, and the execute decision.
+
+`loopx periodic-report publish-miaoda` is the concrete CLI for that sink. Its
+`periodic_report_miaoda_delivery_request_v0` must carry a complete normalized
+profile, the exact `periodic_report_generation_bundle_v0`, and a
+`periodic_report_delivery_intent_v0` with `kind=hosted`,
+`sink_kind=miaoda_html`, a profile-bound sink id, an operator-selected existing
+app id, and a stable idempotency key. The selected profile binding must use
+`report.miaoda_html.publish@v0`, `loopx-lark`, and
+`periodic_report_sink_v0`; an omitted, disabled, or differently typed sink is
+rejected before provider execution.
+
+Without `--execute`, the command performs no provider call and returns
+`periodic_report_miaoda_delivery_result_v0` with
+`status=pending_execution`, `intent_satisfied=false`, and a pending delivery
+receipt. With `--execute`, it uses authenticated `lark-cli` publication and
+requires exact readback of the same app id, online URL, and published state.
+Only that verified result sets `intent_satisfied=true`. The generation bundle
+remains usable in either case, but local HTML never satisfies the hosted
+delivery intent. The command does not accept credentials, create apps, select
+an audience, mutate access scope, send chat notifications, or apply schedule
+policy.
 
 The normalized document's optional `editorial` input is split by ownership.
 The project profile owns bounded `kicker`, `period_label`, `language`, and zero
