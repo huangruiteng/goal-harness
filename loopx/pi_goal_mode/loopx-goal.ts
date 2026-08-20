@@ -156,14 +156,18 @@ export default function (pi: ExtensionAPI) {
       }
       // Start a guided goal for the exact Pi host; the returned packet
       // includes ordered todos and the heartbeat task_body the agent needs.
+      // Deliver the packet straight to the agent as a user message (the same
+      // followUp/triggerTurn pattern the quota loop uses for heartbeat
+      // injection) instead of prefilling the editor: no popup box, no manual
+      // Enter step before the agent follows the ordered transaction.
       try {
         const stdout = await runLoopxCli(
           ["start-goal", "--guided", "--project", ".", "--goal-text", trimmed, "--host-surface", "pi"],
           ctx.cwd,
         );
-        ctx.ui.setEditorText(stdout);
+        pi.sendUserMessage(stdout, { deliverAs: "followUp", triggerTurn: true });
         ctx.ui.notify(
-          "LoopX start-goal packet ready in the editor; review and send it, then the agent calls loopx_goal_activate.",
+          "LoopX start-goal packet delivered to the agent; it will follow the ordered transaction.",
           "info",
         );
       } catch (error) {

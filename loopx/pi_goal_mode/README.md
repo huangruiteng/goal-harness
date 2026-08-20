@@ -9,7 +9,9 @@ into a LoopX-governed visible goal loop.
 - **`/loopx`** — with no arguments, runs `loopx bootstrap-command-pack --project .`
   and shows the packet as a widget plus a transcript entry. With a goal text
   argument, runs `loopx start-goal --guided --project . --goal-text "<text>"
-  --host-surface pi` and places the returned packet in the editor for review.
+  --host-surface pi` and delivers the returned packet directly to the agent as
+  a follow-up user message (`sendUserMessage` with `triggerTurn`), so the
+  guided transaction starts without a popup box or a manual Enter step.
   `/loopx resume` re-arms auto-continuation after a user-driven pause or an
   aborted run.
 - **`loopx_goal_activate`** — agent-callable tool. Binds the current session to

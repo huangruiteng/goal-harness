@@ -39,6 +39,18 @@ def test_pi_extension_registers_command_tool_and_events() -> None:
     assert "sendUserMessage" in text
 
 
+def test_pi_guided_start_goal_delivers_packet_without_editor_box() -> None:
+    text = extension_source()
+    # /loopx <goal text> must hand the guided start-goal packet straight to the
+    # agent (same followUp/triggerTurn pattern as heartbeat injection) instead
+    # of prefilling the editor: no popup box, no manual Enter step before the
+    # agent follows the ordered transaction.
+    assert 'pi.sendUserMessage(stdout, { deliverAs: "followUp", triggerTurn: true })' in text
+    # The editor-prefill flow must not remain anywhere in the extension: it is
+    # the mechanism that pops a box and forces the user to press Enter.
+    assert "setEditorText" not in text
+
+
 def test_pi_extension_disposes_the_loop_on_session_shutdown() -> None:
     adapter = extension_source()
     runtime = runtime_source()
