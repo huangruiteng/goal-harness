@@ -39,8 +39,10 @@ to hand off across turns, tools, and agents.
 
 ## Meet the Personal Agent Workspace
 
-Turn scattered agent sessions into one local-first workspace for Goals,
-attention, conversations, tasks, files, schedules, and recovery.
+Keep long-horizon goals in one local-first workspace. Goals, attention,
+conversations, tasks, files, schedules, and recovery stay durable across days,
+restarts, and harnesses, so work that began last week resumes exactly where
+the last bounded turn stopped instead of living in chat memory.
 
 <a href="docs/assets/personal-workspace/loopx-dashboard-launch.mp4">
   <img src="docs/assets/personal-workspace/loopx-dashboard-tour.webp" alt="Animated tour of the LoopX personal Agent workspace, from one-command launch to Manager overview, Goal task board, protected action preview, and Goal details" width="960">

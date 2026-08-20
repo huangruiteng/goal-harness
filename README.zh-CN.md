@@ -35,8 +35,9 @@ LoopX 是开放且 Provider-neutral 的轻量 state kernel，也是 local-first
 
 ## 认识个人 Agent 工作区
 
-把分散的 Agent 会话收进同一个 local-first 工作区，统一管理 Goal、待关注事项、
-对话、任务、文件、定时计划与恢复状态。
+把长程目标收进同一个 local-first 工作区。Goal、待关注事项、对话、任务、
+文件、定时计划与恢复状态跨天数、跨重启、跨 harness 保持持久，上周开始的工作
+会从上一次有界 Turn 停止的地方精确恢复，而不是活在聊天记忆里。
 
 <a href="docs/assets/personal-workspace/loopx-dashboard-launch.mp4">
   <img src="docs/assets/personal-workspace/loopx-dashboard-tour.webp" alt="LoopX 个人 Agent 工作区动画导览：从一键启动，到管家总览、Goal 任务看板、受保护操作预览和 Goal 详情" width="960">
