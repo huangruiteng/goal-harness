@@ -86,11 +86,37 @@ async function exerciseInstalled(installed) {
   assert.deepEqual([...commands.keys()], ['loopx-init'])
   const command = commands.get('loopx-init')
   assert.equal(command.recordInput, false)
+  const followups = []
+  const agent = { followup: message => followups.push(message) }
   const usage = await command.handler({
+    agent,
     rawInput: ' unexpected',
     signal: new AbortController().signal,
   })
   assert.deepEqual(usage, { kind: 'error', text: 'Usage: /loopx-init' })
+  assert.equal(followups.length, 0)
+
+  const cancelledSignal = new AbortController()
+  cancelledSignal.abort()
+  const cancelled = await command.handler({
+    agent,
+    rawInput: '',
+    signal: cancelledSignal.signal,
+  })
+  assert.deepEqual(cancelled, {
+    kind: 'error',
+    text: 'LOOPX_INIT_CANCELLED: initialization was cancelled.',
+  })
+  assert.equal(followups.length, 1)
+  assert.equal(followups[0].role, 'user')
+  assert.deepEqual(followups[0].source, {
+    kind: 'plugin',
+    plugin: 'dsh-loopx-plugin/init-command',
+  })
+  assert.notDeepEqual(followups[0].source, {
+    kind: 'plugin',
+    plugin: 'dsh-loopx-plugin/driver',
+  })
   assert.equal(typeof driverModule.LoopXContinuationDriver, 'function')
   assert.equal(driverModule.inject.join(','), 'agents')
 }
