@@ -193,7 +193,8 @@ class ChatSessionStore:
         capabilities = {
             str(key): bool(value)
             for key, value in (attached_capabilities or {}).items()
-            if str(key) in {"live_steering", "session_queue", "reply_readback"}
+            if str(key)
+            in {"live_steering", "session_queue", "claim_wait", "reply_readback"}
         }
         normalized_goal_id = _opaque_id(goal_id, field="goal_id")
         normalized_agent_id = _opaque_id(agent_id, field="agent_id")

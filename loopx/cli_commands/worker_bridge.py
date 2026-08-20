@@ -343,6 +343,15 @@ def register_worker_bridge_commands(
     attached_claim_parser.add_argument("--host-surface", required=True)
     attached_claim_parser.add_argument("--host-session-id", required=True)
     attached_claim_parser.add_argument("--claim-id", required=True)
+    attached_claim_parser.add_argument(
+        "--wait-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "Wait up to this many seconds for one queued message before returning. "
+            "The bounded host subscription is capped at 1800 seconds."
+        ),
+    )
 
     attached_complete_parser = worker_bridge_sub.add_parser(
         "attached-session-complete",
@@ -436,6 +445,7 @@ def handle_worker_bridge_command(
                     host_surface=args.host_surface,
                     host_session_id=args.host_session_id,
                     claim_id=args.claim_id,
+                    wait_seconds=args.wait_seconds,
                 )
             else:
                 if args.response_json == "-":

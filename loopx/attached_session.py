@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import math
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -16,6 +18,8 @@ from .thread_agent_binding import resolve_thread_agent_binding
 ATTACHED_SESSION_BROKER_SCHEMA_VERSION = "loopx_attached_agent_session_broker_v0"
 ATTACHED_SESSION_ADAPTER_KIND = "attached_host_session"
 ATTACHED_SESSION_UPSTREAM_MODE = "host_broker"
+MAX_ATTACHED_SESSION_CLAIM_WAIT_SECONDS = 1_800.0
+ATTACHED_SESSION_CLAIM_POLL_INTERVAL_SECONDS = 0.1
 
 
 def _binding_lock_path(
@@ -155,6 +159,7 @@ def bind_attached_agent_session(
             attached_capabilities={
                 "live_steering": False,
                 "session_queue": True,
+                "claim_wait": True,
                 "reply_readback": True,
             },
         )
@@ -196,8 +201,9 @@ def claim_attached_agent_turn(
     host_surface: str,
     host_session_id: str,
     claim_id: str,
+    wait_seconds: float = 0.0,
 ) -> dict[str, Any]:
-    """Claim the oldest queued Web/connector message for the exact host session."""
+    """Claim or bounded-wait for the oldest queued message for the exact host."""
 
     _require_attached_host(
         store=store,
@@ -205,12 +211,32 @@ def claim_attached_agent_turn(
         host_surface=host_surface,
         host_session_id=host_session_id,
     )
-    turn = store.claim_next_queued_turn(session_id, host_claim_id=claim_id)
+    normalized_wait = float(wait_seconds)
+    if (
+        not math.isfinite(normalized_wait)
+        or normalized_wait < 0
+        or normalized_wait > MAX_ATTACHED_SESSION_CLAIM_WAIT_SECONDS
+    ):
+        raise ValueError(
+            "wait_seconds must be between 0 and "
+            f"{int(MAX_ATTACHED_SESSION_CLAIM_WAIT_SECONDS)}"
+        )
+    deadline = time.monotonic() + normalized_wait
+    turn = None
+    while turn is None:
+        turn = store.claim_next_queued_turn(session_id, host_claim_id=claim_id)
+        if turn is not None or normalized_wait == 0:
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(ATTACHED_SESSION_CLAIM_POLL_INTERVAL_SECONDS, remaining))
     return {
         "ok": True,
         "schema_version": ATTACHED_SESSION_BROKER_SCHEMA_VERSION,
         "action": "claim",
         "claimed": turn is not None,
+        "waited": normalized_wait > 0,
         "turn": (
             {
                 "session_id": session_id,
