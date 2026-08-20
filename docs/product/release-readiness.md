@@ -455,6 +455,11 @@ path, and canary route rather than as a user-facing release baseline.
   browser/PWA workspace, adds a source-built native desktop shell over the same
   local authority, makes Goal stop/resume and repository change windows
   operator-visible, and admits goal-bound external capability providers.
+- `v0.5.1` on 2026-08-21: operator workflow and collaboration hardening at the
+  matching `v0.5.1` tag. LoopX adds downloadable macOS and Windows desktop
+  previews, first-class DeepSeek Harness packaging, botmux Goal Channel turns,
+  three Agent-scoped Lark ingress modes, and fixes Goal lifecycle, Todo defer,
+  quota settlement, replan closeout, and event-sourced freshness paths.
 
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.

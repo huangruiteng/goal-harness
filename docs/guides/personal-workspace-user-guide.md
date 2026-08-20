@@ -145,7 +145,29 @@ loopx goal-lifecycle --goal-id <goal-id> --operation resume --execute
 - **代码仓只读绑定**：明确展示当前绑定的 GitHub / 本地仓库、生效分支及只读隔离属性；
 - **Lark / 飞书话题连接**：
   - 展示当前绑定的飞书群组与 Topic 话题；
-  - **触发规则（Trigger）**：明确标注为 **`Someone mentions the Agent`**（仅在群聊话题内显式 @ 该机器人时触发，避免群聊闲聊打扰）。
+  - **Capture scope**：可选择只接收明确 @ / 回复 App 的消息，或接收该 Goal Topic
+    的全部消息；这只改变捕获范围，不扩大 Agent 权限；
+  - **Agent ingress**：为 Goal 当前已注册的目标 Agent 选择一种明确的收信方式：
+    - **Steering (`live_steering`)**：投递到该 Agent 当前精确的活跃 Turn；没有匹配的
+      活跃 Turn、Session 已过期或运行时不支持原生 steering 时安全拒绝；
+    - **Queuing (`session_queue`)**：写入同一精确 Agent Session 的有界 FIFO，当前
+      Turn 完成后按顺序处理，并支持重启恢复；
+    - **Async inbox (`async_inbox`)**：写入该 Agent 的本地私有收件箱，等待后续显式
+      `lark-inbox drain`；投递本身不会创建内联 Session，也不会提前回复或 ACK；
+  - **Reply mode**：回复仍限定在来源 Topic 内，避免跨群或跨 Goal 投递。
+
+在「通知设置 → Lark / 飞书 → Connections」中选择 Goal、Target Agent、群聊、
+Capture scope 与 Agent ingress，保存后可在同一页读回当前模式、Session 绑定状态、
+监听状态和最近事件结果。Steering 与 Queuing 要求该 Goal / Agent 已有工作 Session；
+Async inbox 不要求活跃 Turn，适合后台 Agent 稍后处理。发送一条新的 @ 消息验证所选
+模式；若选择 Async inbox，可用以下命令读回待处理事件：
+
+```bash
+loopx lark-inbox drain --goal-id <goal-id> --agent-id <agent-id>
+```
+
+要停用该 Goal 的话题入站，在 Connections 中选择 **Disconnect**。断开只移除这个
+Goal 的 Topic 路由，不删除 Goal、Agent Session、历史 Todo 或其他 Goal 的连接。
 
 ---
 
