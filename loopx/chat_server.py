@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .attached_session_api import AttachedSessionRequestMixin
 from .chat import (
     TodoReviewPreviewConflict,
     apply_todo_review_preview,
@@ -75,6 +76,7 @@ DEFAULT_CHAT_STATUS_PATH = "/status.json"
 CHAT_CAPABILITIES_PATH = "/api/chat/capabilities"
 CHAT_ENDPOINTS_PATH = "/api/chat/endpoints"
 CHAT_SESSIONS_PATH = "/api/chat/sessions"
+CHAT_ATTACH_SESSION_PATH = f"{CHAT_SESSIONS_PATH}/attach"
 CHAT_PROJECTION_MESSAGES_PATH = "/api/chat/projection-messages"
 MANAGER_AGENT_GOAL_ID = "loopx-manager"
 MANAGER_AGENT_OBJECTIVE = (
@@ -424,7 +426,11 @@ class ChatHTTPServer(ThreadingHTTPServer):
         super().server_close()
 
 
-class ChatRequestHandler(LarkChatRequestMixin, BaseHTTPRequestHandler):
+class ChatRequestHandler(
+    AttachedSessionRequestMixin,
+    LarkChatRequestMixin,
+    BaseHTTPRequestHandler,
+):
     server: ChatHTTPServer
 
     def _send_json(self, payload: dict[str, Any], *, status: int = 200) -> None:
@@ -1288,6 +1294,7 @@ class ChatRequestHandler(LarkChatRequestMixin, BaseHTTPRequestHandler):
                     "resume": True,
                     "interrupt": True,
                     "typed_actions": True,
+                    "attached_session_broker": True,
                     "action_kinds": sorted(ACTION_KINDS),
                     "adapters": self.server.runtime_controller.capabilities(),
                     "lark_cli": self.server.lark_cli_resolution.public_snapshot(),
@@ -1340,6 +1347,7 @@ class ChatRequestHandler(LarkChatRequestMixin, BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         post_dispatch = {
             CHAT_SESSIONS_PATH: self._create_session,
+            CHAT_ATTACH_SESSION_PATH: self._attach_session,
             CHAT_PROJECTION_MESSAGES_PATH: self._record_projection_exchange,
             CHAT_ACTION_PREVIEW_PATH: self._action_preview,
             CHAT_TODO_DRY_RUN_PATH: lambda: self._todo(apply=False),

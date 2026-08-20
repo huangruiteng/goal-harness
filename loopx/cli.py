@@ -444,6 +444,7 @@ def main(argv: list[str] | None = None) -> int:
         args,
         print_payload=print_payload,
         output_format=output_format,
+        registry_path=registry_path,
     )
     if worker_bridge_result is not None:
         return worker_bridge_result

@@ -13,7 +13,7 @@ from typing import Any, Callable, Protocol
 from .chat_acp import ACPStdioAdapter
 from .chat_agent import CodexChatAgentError, CodexChatAgentSession, CodexChatTimeoutError
 from .chat_endpoints import AgentEndpointRegistry
-from .chat_store import ChatSessionStore, utc_now
+from .chat_store import CHAT_SESSION_MODE_ATTACHED, ChatSessionStore, utc_now
 from .chat_providers import ClaudeCodeAdapter, direct_model_from_environment
 
 
@@ -378,6 +378,7 @@ class ChatRuntimeController:
             persisted = self.store.create_session(
                 goal_id=goal_id,
                 agent_id=agent_id,
+                executor_endpoint_id=agent_id,
                 adapter_kind=str(capability["adapter_kind"]),
                 upstream_thread_id=adapter.upstream_thread_id,
                 upstream_mode="chat" if agent_id == "codex" else "default",
@@ -395,6 +396,11 @@ class ChatRuntimeController:
         objective: str,
     ) -> ChatRuntimeAdapter:
         session_id = str(session["session_id"])
+        if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
+            raise CodexChatAgentError(
+                "The attached host Session must be served by its existing host bridge.",
+                error_code="attached_session_requires_host_bridge",
+            )
         with self.lock:
             current = self.adapters.get(session_id)
             if current is not None and current.healthcheck():
@@ -507,6 +513,15 @@ class ChatRuntimeController:
         session = self.store.load_session(session_id)
         if session is None:
             raise KeyError("chat session was not found")
+        if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
+            if attachments:
+                raise ValueError("attached host session queue does not yet accept attachments")
+            return self.store.create_queued_turn(
+                session_id,
+                client_turn_id=client_turn_id,
+                message=message,
+                origin="web",
+            )
         adapter = self._ensure_adapter(session, work_dir=work_dir, objective=objective)
         turn, created = self.store.create_turn(
             session_id,
@@ -550,6 +565,18 @@ class ChatRuntimeController:
             mode="live_steering",
             message=message,
         )
+        if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
+            capabilities = session.get("attached_capabilities")
+            capabilities = capabilities if isinstance(capabilities, dict) else {}
+            if capabilities.get("live_steering") is not True:
+                if created:
+                    self.store.update_ingress_receipt(
+                        session_id,
+                        client_ingress_id,
+                        status="failed",
+                        error_code="attached_session_live_steering_unavailable",
+                    )
+                raise RuntimeError("attached_session_live_steering_unavailable")
         if not created:
             if receipt.get("status") == "delivered":
                 delivered_turn_id = str(receipt.get("active_turn_id") or "")
@@ -635,6 +662,7 @@ class ChatRuntimeController:
         message: str,
         work_dir: Path,
         objective: str,
+        origin: str = "external",
     ) -> tuple[dict[str, Any], bool]:
         """Persist a bounded same-Session Turn and dispatch it in FIFO order."""
 
@@ -645,12 +673,14 @@ class ChatRuntimeController:
             session_id,
             client_turn_id=client_turn_id,
             message=message,
+            origin=origin,
         )
-        self.resume_session_queue(
-            session_id=session_id,
-            work_dir=work_dir,
-            objective=objective,
-        )
+        if session.get("session_mode") != CHAT_SESSION_MODE_ATTACHED:
+            self.resume_session_queue(
+                session_id=session_id,
+                work_dir=work_dir,
+                objective=objective,
+            )
         return turn, created
 
     def resume_session_queue(
@@ -661,6 +691,9 @@ class ChatRuntimeController:
         objective: str,
     ) -> None:
         if self.closed.is_set():
+            return
+        session = self.store.load_session(session_id)
+        if session is None or session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
             return
         with self.lock:
             if session_id in self.session_queue_workers:
@@ -959,6 +992,16 @@ class ChatRuntimeController:
         session = self.store.load_session(session_id)
         if session is None or session.get("status") == "closed":
             raise KeyError("chat session was not found")
+        if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
+            if session.get("active_turn_id"):
+                return session
+            restored = self.store.update_session(
+                session_id,
+                status="ready",
+                active_turn_id=None,
+                last_error_code=None,
+            )
+            return restored
         self.store.update_session(
             session_id,
             status="stale",

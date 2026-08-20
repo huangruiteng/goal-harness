@@ -6,6 +6,15 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from ..attached_session import (
+    bind_attached_agent_session,
+    claim_attached_agent_turn,
+    complete_attached_agent_turn,
+    render_attached_session_broker_markdown,
+)
+from ..chat_store import CHAT_SESSION_MODE_ATTACHED, ChatSessionStore
+from ..history import load_registry
+from ..paths import resolve_runtime_root
 from ..worker_bridge import (
     DEFAULT_ACTIVE_USER_CODEX_BIN,
     DEFAULT_ACTIVE_USER_SIMULATOR_CONTEXT_DIR,
@@ -44,6 +53,10 @@ WORKER_BRIDGE_COMMANDS = {
     "active-user-observe",
     "active-user-simulator-output",
     "contract",
+    "attached-session-bind",
+    "attached-session-claim",
+    "attached-session-complete",
+    "attached-session-list",
 }
 
 
@@ -300,12 +313,61 @@ def register_worker_bridge_commands(
         help="Compact classification label for optional counter/checkpoint writeback.",
     )
 
+    attached_bind_parser = worker_bridge_sub.add_parser(
+        "attached-session-bind",
+        help="Bind an already-running host session to one registered LoopX Agent.",
+    )
+    add_subcommand_format(attached_bind_parser)
+    attached_bind_parser.add_argument("--goal-id", required=True)
+    attached_bind_parser.add_argument("--agent-id", required=True)
+    attached_bind_parser.add_argument("--host-surface", required=True)
+    attached_bind_parser.add_argument("--host-session-id", required=True)
+    attached_bind_parser.add_argument("--executor-endpoint-id", required=True)
+    attached_bind_parser.add_argument("--channel-id")
+    attached_bind_parser.add_argument("--execute", action="store_true")
+
+    attached_list_parser = worker_bridge_sub.add_parser(
+        "attached-session-list",
+        help="List content-free attached Session descriptors.",
+    )
+    add_subcommand_format(attached_list_parser)
+    attached_list_parser.add_argument("--goal-id")
+    attached_list_parser.add_argument("--agent-id")
+
+    attached_claim_parser = worker_bridge_sub.add_parser(
+        "attached-session-claim",
+        help="Claim the oldest queued Web or Connector message for an attached host.",
+    )
+    add_subcommand_format(attached_claim_parser)
+    attached_claim_parser.add_argument("--session-id", required=True)
+    attached_claim_parser.add_argument("--host-surface", required=True)
+    attached_claim_parser.add_argument("--host-session-id", required=True)
+    attached_claim_parser.add_argument("--claim-id", required=True)
+
+    attached_complete_parser = worker_bridge_sub.add_parser(
+        "attached-session-complete",
+        help="Write back one duplicate-safe attached-host response.",
+    )
+    add_subcommand_format(attached_complete_parser)
+    attached_complete_parser.add_argument("--session-id", required=True)
+    attached_complete_parser.add_argument("--turn-id", required=True)
+    attached_complete_parser.add_argument("--host-surface", required=True)
+    attached_complete_parser.add_argument("--host-session-id", required=True)
+    attached_complete_parser.add_argument("--claim-id", required=True)
+    attached_complete_parser.add_argument("--completion-id", required=True)
+    attached_complete_parser.add_argument(
+        "--response-json",
+        required=True,
+        help="Owner-local response JSON path, or '-' for stdin.",
+    )
+
 
 def handle_worker_bridge_command(
     args: argparse.Namespace,
     *,
     print_payload: PrintPayload,
     output_format: OutputFormat,
+    registry_path: Path | None = None,
 ) -> int | None:
     if args.command != "worker-bridge":
         return None
@@ -319,7 +381,7 @@ def handle_worker_bridge_command(
                 "`active-user-contract`, "
                 "`active-user-codex-simulator-contract`, "
                 "`active-user-intervention`, `active-user-simulator-output`, "
-                "or `active-user-observe`."
+                "`active-user-observe`, or one of the `attached-session-*` commands."
             ),
         }
         print_payload(
@@ -329,8 +391,72 @@ def handle_worker_bridge_command(
         )
         return 1
 
+    renderer = render_worker_bridge_install_contract_markdown
     try:
-        if args.worker_bridge_command == "contract":
+        if args.worker_bridge_command.startswith("attached-session-"):
+            effective_registry_path = registry_path or Path(args.registry)
+            registry = load_registry(effective_registry_path)
+            runtime_root = resolve_runtime_root(
+                registry,
+                args.runtime_root,
+                registry_path=effective_registry_path,
+            )
+            store = ChatSessionStore(runtime_root)
+            renderer = render_attached_session_broker_markdown
+            if args.worker_bridge_command == "attached-session-bind":
+                payload = bind_attached_agent_session(
+                    store=store,
+                    registry=registry,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    host_surface=args.host_surface,
+                    host_session_id=args.host_session_id,
+                    executor_endpoint_id=args.executor_endpoint_id,
+                    channel_id=args.channel_id,
+                    execute=bool(args.execute),
+                )
+            elif args.worker_bridge_command == "attached-session-list":
+                payload = {
+                    "ok": True,
+                    "schema_version": "loopx_attached_agent_session_broker_v0",
+                    "action": "list",
+                    "sessions": [
+                        session
+                        for session in store.list_sessions(
+                            goal_id=args.goal_id,
+                            agent_id=args.agent_id,
+                        )
+                        if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED
+                    ],
+                }
+            elif args.worker_bridge_command == "attached-session-claim":
+                payload = claim_attached_agent_turn(
+                    store=store,
+                    session_id=args.session_id,
+                    host_surface=args.host_surface,
+                    host_session_id=args.host_session_id,
+                    claim_id=args.claim_id,
+                )
+            else:
+                if args.response_json == "-":
+                    response = json.loads(sys.stdin.read())
+                else:
+                    response = json.loads(
+                        Path(args.response_json).expanduser().read_text(encoding="utf-8")
+                    )
+                if not isinstance(response, dict):
+                    raise ValueError("response JSON must be an object")
+                payload = complete_attached_agent_turn(
+                    store=store,
+                    session_id=args.session_id,
+                    turn_id=args.turn_id,
+                    host_surface=args.host_surface,
+                    host_session_id=args.host_session_id,
+                    claim_id=args.claim_id,
+                    completion_id=args.completion_id,
+                    response=response,
+                )
+        elif args.worker_bridge_command == "contract":
             payload = build_worker_bridge_install_contract(
                 project_root=args.project_root,
                 runtime_root=args.worker_bridge_runtime_root,
@@ -429,6 +555,6 @@ def handle_worker_bridge_command(
     print_payload(
         payload,
         output_format(args),
-        render_worker_bridge_install_contract_markdown,
+        renderer,
     )
     return 0 if payload.get("ok") else 1

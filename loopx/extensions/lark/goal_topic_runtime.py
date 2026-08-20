@@ -652,6 +652,7 @@ def answer_lark_goal_topic(
                 message=message,
                 work_dir=resolved_work_dir,
                 objective=str(objective or goal_id),
+                origin="lark",
             )
     else:
         # Compatibility path for bindings created before the three ingress modes.
