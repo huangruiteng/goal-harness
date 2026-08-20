@@ -12,6 +12,7 @@ from loopx.cli import build_parser
 from loopx.control_plane.goals.botmux_runtime import (
     BOTMUX_RUNTIME_BINDING_SCHEMA_VERSION,
     BotmuxApiError,
+    BotmuxTransportError,
     botmux_binding_for_goal,
     disable_botmux_runtime,
     doctor_botmux_runtime,
@@ -251,6 +252,7 @@ def test_doctor_accepts_runtime_agnostic_bot(
                     {
                         "larkAppId": BOT_ID,
                         "cliId": "codex",
+                        "online": True,
                         "defaultWorkingDir": str(tmp_path),
                     }
                 ]
@@ -279,6 +281,47 @@ def test_doctor_accepts_runtime_agnostic_bot(
     assert result["ok"] is True
     assert result["status"] == "ready"
     _assert_public_packet(result)
+
+
+def test_setup_rejects_explicitly_offline_bot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, registry_path = _registry(tmp_path)
+    binding_path = tmp_path / ".loopx" / "goal-channel-runtime.json"
+    monkeypatch.setenv("BOTMUX_TEST_TOKEN", "secret-public-fixture")
+
+    def offline(**kwargs: Any) -> dict[str, Any]:
+        if kwargs["path"] == "/__health":
+            return {"ok": True}
+        if kwargs["path"] == "/api/bots":
+            return {
+                "bots": [
+                    {
+                        "larkAppId": BOT_ID,
+                        "online": False,
+                        "defaultWorkingDir": str(tmp_path),
+                    }
+                ]
+            }
+        raise AssertionError("offline bot must stop readiness before chat probing")
+
+    result = setup_botmux_runtime(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        endpoint="http://127.0.0.1:7891",
+        bot_id=BOT_ID,
+        chat_id=CHAT_ID,
+        token_env="BOTMUX_TEST_TOKEN",
+        execute=True,
+        requester=offline,
+    )
+
+    assert result["ok"] is False
+    assert result["blocker"] == "botmux_configuration_invalid"
+    assert not binding_path.exists()
 
 
 def test_disable_is_goal_scoped_and_previewable(
@@ -603,6 +646,60 @@ def test_status_reads_four_state_and_updates_local_receipt(
     _assert_public_packet(result)
 
 
+def test_status_transport_failure_does_not_regress_terminal_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, registry_path = _registry(tmp_path)
+    binding_path = tmp_path / ".loopx" / "goal-channel-runtime.json"
+    monkeypatch.setenv("BOTMUX_TEST_TOKEN", "secret-public-fixture")
+    setup_botmux_runtime(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        endpoint="http://127.0.0.1:7891",
+        bot_id=BOT_ID,
+        chat_id=CHAT_ID,
+        token_env="BOTMUX_TEST_TOKEN",
+        execute=True,
+        requester=_requester([], tmp_path),
+    )
+    trigger_botmux_runtime(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        execute=True,
+        requester=_requester([], tmp_path),
+    )
+    status_botmux_runtime(
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        execute=True,
+        requester=_requester([], tmp_path),
+    )
+
+    def unavailable(**kwargs: Any) -> dict[str, Any]:
+        raise BotmuxTransportError("fixture status failure")
+
+    observed = status_botmux_runtime(
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        execute=True,
+        requester=unavailable,
+    )
+    binding = botmux_binding_for_goal(
+        read_botmux_runtime_binding(binding_path),
+        GOAL_ID,
+    )
+    assert binding is not None
+    dispatch_key = binding["session"]["active_dispatch_key"]
+
+    assert observed["status"] == "unknown"
+    assert binding["receipts"][dispatch_key]["state"] == "completed"
+
+
 def test_status_maps_confirmed_unknown_session_to_not_found(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -693,6 +790,140 @@ def test_terminal_failure_requires_new_turn_key_before_redispatch(
 
     assert duplicate["status"] == "already_dispatched"
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_reason"),
+    [
+        ("transport", "transport_failure"),
+        ("invalid_receipt", "invalid_provider_receipt"),
+    ],
+)
+def test_unknown_dispatch_is_persisted_and_status_never_reports_idle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+    expected_reason: str,
+) -> None:
+    registry, registry_path = _registry(tmp_path)
+    binding_path = tmp_path / ".loopx" / "goal-channel-runtime.json"
+    monkeypatch.setenv("BOTMUX_TEST_TOKEN", "secret-public-fixture")
+    setup_botmux_runtime(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        endpoint="http://127.0.0.1:7891",
+        bot_id=BOT_ID,
+        chat_id=CHAT_ID,
+        token_env="BOTMUX_TEST_TOKEN",
+        execute=True,
+        requester=_requester([], tmp_path),
+    )
+    provider_calls = 0
+
+    def uncertain_provider(**kwargs: Any) -> dict[str, Any]:
+        nonlocal provider_calls
+        provider_calls += 1
+        if failure_kind == "transport":
+            raise BotmuxTransportError("fixture transport failure")
+        return {"ok": True, "action": "queued"}
+
+    dispatched = trigger_botmux_runtime(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        execute=True,
+        requester=uncertain_provider,
+    )
+    binding = botmux_binding_for_goal(
+        read_botmux_runtime_binding(binding_path),
+        GOAL_ID,
+    )
+    assert binding is not None
+    active_key = str(binding["session"]["active_dispatch_key"])
+    receipt = binding["receipts"][active_key]
+
+    assert dispatched["status"] == "dispatch_unknown"
+    assert receipt["state"] == "unknown"
+    assert receipt["unknown_reason"] == expected_reason
+    assert "attempted_at" in receipt
+
+    status = status_botmux_runtime(
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+    )
+    assert status["ok"] is False
+    assert status["status"] == "unknown"
+    assert status["blocker"] == "botmux_dispatch_outcome_unknown"
+    assert status["details"]["dispatch_state"] == "unknown"
+
+    duplicate = trigger_botmux_runtime(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        execute=True,
+        requester=uncertain_provider,
+    )
+    assert duplicate["status"] == "already_dispatched"
+    assert duplicate["details"]["dispatch_state"] == "unknown"
+    assert provider_calls == 1
+
+
+def test_status_promotes_unresolved_attempt_to_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, registry_path = _registry(tmp_path)
+    binding_path = tmp_path / ".loopx" / "goal-channel-runtime.json"
+    monkeypatch.setenv("BOTMUX_TEST_TOKEN", "secret-public-fixture")
+    setup_botmux_runtime(
+        registry=registry,
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        endpoint="http://127.0.0.1:7891",
+        bot_id=BOT_ID,
+        chat_id=CHAT_ID,
+        token_env="BOTMUX_TEST_TOKEN",
+        execute=True,
+        requester=_requester([], tmp_path),
+    )
+    payload = read_botmux_runtime_binding(binding_path)
+    binding = botmux_binding_for_goal(payload, GOAL_ID)
+    assert binding is not None
+    dispatch_key = "sha256:" + ("a" * 64)
+    binding["receipts"] = {
+        dispatch_key: {
+            "state": "attempting",
+            "attempted_at": "2026-01-01T00:00:00+00:00",
+            "session_reused": False,
+        }
+    }
+    binding["session"] = {"active_dispatch_key": dispatch_key}
+    payload["bindings"][GOAL_ID] = binding
+    binding_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    status = status_botmux_runtime(
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        execute=True,
+    )
+    persisted = botmux_binding_for_goal(
+        read_botmux_runtime_binding(binding_path),
+        GOAL_ID,
+    )
+
+    assert status["status"] == "unknown"
+    assert status["details"]["local_receipt_updated"] is True
+    assert persisted is not None
+    assert persisted["receipts"][dispatch_key]["state"] == "unknown"
+    assert (
+        persisted["receipts"][dispatch_key]["unknown_reason"]
+        == "unresolved_attempt"
+    )
 
 
 def test_concurrent_trigger_dispatches_provider_once(

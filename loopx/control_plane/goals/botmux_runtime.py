@@ -8,6 +8,7 @@ import re
 import tempfile
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -52,6 +53,69 @@ class BotmuxApiError(RuntimeError):
 
 class BotmuxTransportError(RuntimeError):
     pass
+
+
+class BotmuxDispatchState(str, Enum):
+    ATTEMPTING = "attempting"
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    NOT_FOUND = "not_found"
+    UNKNOWN = "unknown"
+    REJECTED = "rejected"
+
+
+_DISPATCH_TRANSITIONS: dict[
+    BotmuxDispatchState | None,
+    frozenset[BotmuxDispatchState],
+] = {
+    None: frozenset({BotmuxDispatchState.ATTEMPTING}),
+    BotmuxDispatchState.ATTEMPTING: frozenset(
+        {
+            BotmuxDispatchState.QUEUED,
+            BotmuxDispatchState.UNKNOWN,
+            BotmuxDispatchState.REJECTED,
+        }
+    ),
+    BotmuxDispatchState.QUEUED: frozenset(
+        {
+            BotmuxDispatchState.QUEUED,
+            BotmuxDispatchState.RUNNING,
+            BotmuxDispatchState.COMPLETED,
+            BotmuxDispatchState.FAILED,
+            BotmuxDispatchState.NOT_FOUND,
+            BotmuxDispatchState.UNKNOWN,
+        }
+    ),
+    BotmuxDispatchState.RUNNING: frozenset(
+        {
+            BotmuxDispatchState.RUNNING,
+            BotmuxDispatchState.COMPLETED,
+            BotmuxDispatchState.FAILED,
+            BotmuxDispatchState.NOT_FOUND,
+            BotmuxDispatchState.UNKNOWN,
+        }
+    ),
+    BotmuxDispatchState.UNKNOWN: frozenset(
+        {
+            BotmuxDispatchState.UNKNOWN,
+            BotmuxDispatchState.RUNNING,
+            BotmuxDispatchState.COMPLETED,
+            BotmuxDispatchState.FAILED,
+            BotmuxDispatchState.NOT_FOUND,
+        }
+    ),
+    BotmuxDispatchState.COMPLETED: frozenset({BotmuxDispatchState.COMPLETED}),
+    BotmuxDispatchState.FAILED: frozenset({BotmuxDispatchState.FAILED}),
+    BotmuxDispatchState.NOT_FOUND: frozenset({BotmuxDispatchState.NOT_FOUND}),
+    BotmuxDispatchState.REJECTED: frozenset(
+        {
+            BotmuxDispatchState.REJECTED,
+            BotmuxDispatchState.ATTEMPTING,
+        }
+    ),
+}
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
@@ -142,6 +206,110 @@ def _save_binding(
             "schema_version": BOTMUX_RUNTIME_BINDING_SCHEMA_VERSION,
             "bindings": mutable,
         },
+    )
+
+
+def _dispatch_state(value: object) -> BotmuxDispatchState | None:
+    try:
+        return BotmuxDispatchState(str(value or ""))
+    except ValueError:
+        return None
+
+
+def _transition_dispatch_receipt(
+    receipt: Mapping[str, Any] | None,
+    *,
+    state: BotmuxDispatchState,
+    timestamp_field: str,
+    updates: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    current = _dispatch_state(receipt.get("state")) if isinstance(receipt, Mapping) else None
+    allowed = _DISPATCH_TRANSITIONS.get(current, frozenset())
+    if state not in allowed:
+        raise ValueError(
+            f"invalid botmux dispatch transition: "
+            f"{current.value if current else 'none'}->{state.value}"
+        )
+    transitioned = dict(receipt or {})
+    transitioned["state"] = state.value
+    transitioned[timestamp_field] = _now_iso()
+    if updates:
+        transitioned.update(dict(updates))
+    return transitioned
+
+
+def _persist_dispatch_receipt(
+    *,
+    binding_path: Path,
+    goal_id: str,
+    binding: dict[str, Any],
+    dispatch_key: str,
+    state: BotmuxDispatchState,
+    timestamp_field: str,
+    updates: Mapping[str, Any] | None = None,
+    session: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = read_botmux_runtime_binding(binding_path)
+    current_binding = botmux_binding_for_goal(payload, goal_id)
+    if current_binding is None:
+        raise ValueError("botmux runtime binding disappeared during dispatch")
+    receipts = dict(current_binding.get("receipts") or {})
+    receipt = _transition_dispatch_receipt(
+        receipts.get(dispatch_key)
+        if isinstance(receipts.get(dispatch_key), Mapping)
+        else None,
+        state=state,
+        timestamp_field=timestamp_field,
+        updates=updates,
+    )
+    receipts[dispatch_key] = receipt
+    current_binding["receipts"] = receipts
+    if session is not None:
+        current_binding["session"] = dict(session)
+    binding.clear()
+    binding.update(current_binding)
+    _save_binding(
+        binding_path=binding_path,
+        payload=payload,
+        goal_id=goal_id,
+        binding=current_binding,
+    )
+    return receipt
+
+
+def _active_dispatch_receipt(
+    binding: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]] | None:
+    receipts = binding.get("receipts")
+    receipts = receipts if isinstance(receipts, Mapping) else {}
+    session = binding.get("session")
+    session = session if isinstance(session, Mapping) else {}
+    active_key = str(session.get("active_dispatch_key") or "").strip()
+    active = receipts.get(active_key) if active_key else None
+    if active_key and isinstance(active, Mapping):
+        return active_key, dict(active)
+
+    candidates = [
+        (str(key), dict(value))
+        for key, value in receipts.items()
+        if isinstance(value, Mapping)
+        and _dispatch_state(value.get("state"))
+        in {
+            BotmuxDispatchState.ATTEMPTING,
+            BotmuxDispatchState.UNKNOWN,
+            BotmuxDispatchState.REJECTED,
+        }
+    ]
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda item: str(
+            item[1].get("unknown_at")
+            or item[1].get("rejected_at")
+            or item[1].get("attempted_at")
+            or ""
+        ),
     )
 
 
@@ -355,6 +523,8 @@ def _probe_botmux(
     )
     if selected is None:
         raise ValueError("configured botmux bot is not online")
+    if selected.get("online") is not True:
+        raise ValueError("configured botmux bot is offline")
     groups_payload = requester(
         endpoint=endpoint,
         path="/api/groups",
@@ -743,16 +913,20 @@ def _trigger_botmux_runtime(
     )
     receipts = dict(binding.get("receipts") or {})
     prior = receipts.get(dispatch_key)
-    if isinstance(prior, Mapping) and str(prior.get("state") or "") in {
-        "attempting",
-        "queued",
-        "running",
-        "completed",
-        "failed",
-        "not_found",
-        "unknown",
+    prior_state = (
+        _dispatch_state(prior.get("state"))
+        if isinstance(prior, Mapping)
+        else None
+    )
+    if prior_state in {
+        BotmuxDispatchState.ATTEMPTING,
+        BotmuxDispatchState.QUEUED,
+        BotmuxDispatchState.RUNNING,
+        BotmuxDispatchState.COMPLETED,
+        BotmuxDispatchState.FAILED,
+        BotmuxDispatchState.NOT_FOUND,
+        BotmuxDispatchState.UNKNOWN,
     }:
-        state = str(prior.get("state") or "")
         return _operation_packet(
             ok=True,
             goal_id=goal_id,
@@ -762,7 +936,10 @@ def _trigger_botmux_runtime(
             public_summary="the same botmux runtime turn was already dispatched",
             idempotency_key=dispatch_key,
             receipt_id=_receipt_id(dispatch_key),
-            details={"dispatch_state": state, "session_reused": True},
+            details={
+                "dispatch_state": prior_state.value,
+                "session_reused": True,
+            },
         )
     session = dict(binding.get("session") or {})
     existing_session_id = str(session.get("session_id") or "").strip()
@@ -797,17 +974,23 @@ def _trigger_botmux_runtime(
             str(binding.get("chat_id") or ""),
             "chat id",
         )
-    receipts[dispatch_key] = {
-        "state": "attempting",
-        "attempted_at": _now_iso(),
-        "session_reused": bool(existing_session_id),
-    }
-    binding["receipts"] = receipts
-    _save_binding(
+    _persist_dispatch_receipt(
         binding_path=binding_path,
-        payload=payload,
         goal_id=goal_id,
         binding=binding,
+        dispatch_key=dispatch_key,
+        state=BotmuxDispatchState.ATTEMPTING,
+        timestamp_field="attempted_at",
+        updates={"session_reused": bool(existing_session_id)},
+        session={
+            **(
+                {"session_id": existing_session_id}
+                if existing_session_id
+                else {}
+            ),
+            "active_dispatch_key": dispatch_key,
+            "updated_at": _now_iso(),
+        },
     )
     try:
         response = requester(
@@ -828,6 +1011,15 @@ def _trigger_botmux_runtime(
             },
         )
     except BotmuxTransportError:
+        _persist_dispatch_receipt(
+            binding_path=binding_path,
+            goal_id=goal_id,
+            binding=binding,
+            dispatch_key=dispatch_key,
+            state=BotmuxDispatchState.UNKNOWN,
+            timestamp_field="unknown_at",
+            updates={"unknown_reason": "transport_failure"},
+        )
         return _operation_packet(
             ok=False,
             goal_id=goal_id,
@@ -843,18 +1035,14 @@ def _trigger_botmux_runtime(
             receipt_id=_receipt_id(dispatch_key),
         )
     except BotmuxApiError as exc:
-        receipts[dispatch_key] = {
-            **dict(receipts[dispatch_key]),
-            "state": "rejected",
-            "rejected_at": _now_iso(),
-            "http_status": exc.status,
-        }
-        binding["receipts"] = receipts
-        _save_binding(
+        _persist_dispatch_receipt(
             binding_path=binding_path,
-            payload=read_botmux_runtime_binding(binding_path),
             goal_id=goal_id,
             binding=binding,
+            dispatch_key=dispatch_key,
+            state=BotmuxDispatchState.REJECTED,
+            timestamp_field="rejected_at",
+            updates={"http_status": exc.status},
         )
         return _operation_packet(
             ok=False,
@@ -877,6 +1065,15 @@ def _trigger_botmux_runtime(
         response_target.get("sessionId") or async_payload.get("sessionId") or ""
     ).strip()
     if response.get("ok") is not True or not session_id:
+        _persist_dispatch_receipt(
+            binding_path=binding_path,
+            goal_id=goal_id,
+            binding=binding,
+            dispatch_key=dispatch_key,
+            state=BotmuxDispatchState.UNKNOWN,
+            timestamp_field="unknown_at",
+            updates={"unknown_reason": "invalid_provider_receipt"},
+        )
         return _operation_packet(
             ok=False,
             goal_id=goal_id,
@@ -888,24 +1085,22 @@ def _trigger_botmux_runtime(
             idempotency_key=dispatch_key,
             receipt_id=_receipt_id(dispatch_key),
         )
-    receipts[dispatch_key] = {
-        **dict(receipts[dispatch_key]),
-        "state": "queued",
-        "queued_at": _now_iso(),
-        "session_id": session_id,
-        "trigger_id": str(response.get("triggerId") or ""),
-    }
-    binding["receipts"] = receipts
-    binding["session"] = {
-        "session_id": session_id,
-        "active_dispatch_key": dispatch_key,
-        "updated_at": _now_iso(),
-    }
-    _save_binding(
+    _persist_dispatch_receipt(
         binding_path=binding_path,
-        payload=read_botmux_runtime_binding(binding_path),
         goal_id=goal_id,
         binding=binding,
+        dispatch_key=dispatch_key,
+        state=BotmuxDispatchState.QUEUED,
+        timestamp_field="queued_at",
+        updates={
+            "session_id": session_id,
+            "trigger_id": str(response.get("triggerId") or ""),
+        },
+        session={
+            "session_id": session_id,
+            "active_dispatch_key": dispatch_key,
+            "updated_at": _now_iso(),
+        },
     )
     return _operation_packet(
         ok=True,
@@ -944,6 +1139,55 @@ def _status_botmux_runtime(
     session_id = str(session.get("session_id") or "").strip()
     dispatch_key = str(session.get("active_dispatch_key") or "").strip()
     if not session_id or not dispatch_key:
+        active = _active_dispatch_receipt(binding)
+        if active is not None:
+            active_key, receipt = active
+            receipt_state = _dispatch_state(receipt.get("state"))
+            if receipt_state == BotmuxDispatchState.ATTEMPTING:
+                receipt_state = BotmuxDispatchState.UNKNOWN
+                if execute:
+                    _persist_dispatch_receipt(
+                        binding_path=binding_path,
+                        goal_id=goal_id,
+                        binding=binding,
+                        dispatch_key=active_key,
+                        state=BotmuxDispatchState.UNKNOWN,
+                        timestamp_field="unknown_at",
+                        updates={"unknown_reason": "unresolved_attempt"},
+                    )
+            if receipt_state in {
+                BotmuxDispatchState.UNKNOWN,
+                BotmuxDispatchState.REJECTED,
+            }:
+                public_state = receipt_state.value
+                return _operation_packet(
+                    ok=False,
+                    goal_id=goal_id,
+                    operation="runtime_status",
+                    execute=execute,
+                    status=public_state,
+                    blocker=(
+                        "botmux_dispatch_outcome_unknown"
+                        if receipt_state == BotmuxDispatchState.UNKNOWN
+                        else "botmux_api_rejected"
+                    ),
+                    public_summary=(
+                        "the botmux runtime dispatch outcome is unknown"
+                        if receipt_state == BotmuxDispatchState.UNKNOWN
+                        else "the botmux runtime dispatch was rejected"
+                    ),
+                    idempotency_key=active_key,
+                    receipt_id=_receipt_id(active_key),
+                    details={
+                        "dispatch_state": public_state,
+                        "output_available": False,
+                        "local_receipt_updated": bool(
+                            execute
+                            and _dispatch_state(receipt.get("state"))
+                            == BotmuxDispatchState.ATTEMPTING
+                        ),
+                    },
+                )
         return _operation_packet(
             ok=True,
             goal_id=goal_id,
@@ -990,6 +1234,29 @@ def _status_botmux_runtime(
                 public_summary="botmux rejected the runtime status read",
             )
     except BotmuxTransportError:
+        if execute:
+            receipts = binding.get("receipts")
+            receipts = receipts if isinstance(receipts, Mapping) else {}
+            receipt = receipts.get(dispatch_key)
+            current_state = (
+                _dispatch_state(receipt.get("state"))
+                if isinstance(receipt, Mapping)
+                else None
+            )
+            if current_state in {
+                BotmuxDispatchState.QUEUED,
+                BotmuxDispatchState.RUNNING,
+                BotmuxDispatchState.UNKNOWN,
+            }:
+                _persist_dispatch_receipt(
+                    binding_path=binding_path,
+                    goal_id=goal_id,
+                    binding=binding,
+                    dispatch_key=dispatch_key,
+                    state=BotmuxDispatchState.UNKNOWN,
+                    timestamp_field="unknown_at",
+                    updates={"unknown_reason": "status_transport_failure"},
+                )
         return _operation_packet(
             ok=False,
             goal_id=goal_id,
@@ -999,39 +1266,44 @@ def _status_botmux_runtime(
             blocker="botmux_unreachable",
             public_summary="the botmux runtime status is temporarily unknown",
         )
-    state = str(result.get("state") or "unknown")
-    if state not in {"running", "completed", "failed", "not_found"}:
-        state = "unknown"
+    state = _dispatch_state(result.get("state"))
+    if state not in {
+        BotmuxDispatchState.RUNNING,
+        BotmuxDispatchState.COMPLETED,
+        BotmuxDispatchState.FAILED,
+        BotmuxDispatchState.NOT_FOUND,
+    }:
+        state = BotmuxDispatchState.UNKNOWN
     output = result.get("output")
     output_available = bool(
         isinstance(output, Mapping) and str(output.get("content") or "").strip()
     )
     if execute:
-        receipts = dict(binding.get("receipts") or {})
-        receipt = dict(receipts.get(dispatch_key) or {})
-        receipt["state"] = state
-        receipt["status_checked_at"] = _now_iso()
-        receipts[dispatch_key] = receipt
-        binding["receipts"] = receipts
-        _save_binding(
+        _persist_dispatch_receipt(
             binding_path=binding_path,
-            payload=payload,
             goal_id=goal_id,
             binding=binding,
+            dispatch_key=dispatch_key,
+            state=state,
+            timestamp_field="status_checked_at",
         )
     return _operation_packet(
-        ok=state != "unknown",
+        ok=state != BotmuxDispatchState.UNKNOWN,
         goal_id=goal_id,
         operation="runtime_status",
         execute=execute,
-        status=state,
-        blocker="botmux_status_unknown" if state == "unknown" else None,
-        public_summary=f"the botmux runtime turn is {state}",
-        readback_verified=state == "completed",
+        status=state.value,
+        blocker=(
+            "botmux_status_unknown"
+            if state == BotmuxDispatchState.UNKNOWN
+            else None
+        ),
+        public_summary=f"the botmux runtime turn is {state.value}",
+        readback_verified=state == BotmuxDispatchState.COMPLETED,
         idempotency_key=dispatch_key,
         receipt_id=_receipt_id(dispatch_key),
         details={
-            "dispatch_state": state,
+            "dispatch_state": state.value,
             "output_available": output_available,
             "local_receipt_updated": execute,
         },
