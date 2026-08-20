@@ -71,13 +71,14 @@ promote a proposal beyond that status.
 
 ## Draft Integration Proposals
 
-- [LoopX Desktop Execution Frontends v0](desktop-execution-frontends-v0.md):
-  support both attachment to an externally owned Codex App session and a
-  LoopX-managed Pi or DeepSeek Harness runtime driven by bounded Turns, with a
-  provider-neutral contract and Ark Agent Plan as the default product profile;
-  converge Web and Agent-scoped Lark Bot connections on the same ordered
-  working session, and route group messages or document comments through a
-  provider-neutral external Connector contract.
+- [LoopX Desktop Execution Frontends v0](desktop-execution-frontends-v0.md)
+  ([中文版](desktop-execution-frontends-v0.zh-CN.md)): support both
+  attachment to an externally owned Codex App session and a LoopX-managed Pi or
+  DeepSeek Harness runtime driven by bounded Turns, with a provider-neutral
+  contract and Ark Agent Plan as the default product profile; converge Web and
+  Agent-scoped Lark Bot connections on the same ordered working session, and
+  route group messages or document comments through a provider-neutral external
+  Connector contract.
 - [Agent IM, LoopX, and OpenViking collaboration v0](agent-im-openviking-collaboration-v0.md):
   separate runtime delivery, durable control state, and scoped context while
   preserving direct agent-to-LoopX interaction.
