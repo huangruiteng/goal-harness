@@ -259,6 +259,7 @@ def _build_leases_projection(
         return None
 
     from .control_plane.work_items.task_lease import (
+        lease_epoch,
         lease_is_active,
         read_lease,
         task_lease_dir,
@@ -288,6 +289,7 @@ def _build_leases_projection(
                 "owner": lease.get("owner"),
                 "expires_at": lease.get("expires_at"),
                 "version": lease.get("version"),
+                "lease_epoch": lease_epoch(lease),
                 "write_scopes": lease.get("write_scopes") or [],
                 "acquire_ttl_seconds": lease.get("acquire_ttl_seconds"),
             }

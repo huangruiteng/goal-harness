@@ -274,6 +274,7 @@ def _hard_lease_entries(
 
     from ..work_items.task_lease import (
         TaskLeaseError,
+        lease_epoch,
         lease_is_active,
         read_lease,
         task_lease_dir,
@@ -322,6 +323,7 @@ def _hard_lease_entries(
         version = lease.get("version")
         if isinstance(version, int):
             entry["lease_version"] = version
+        entry["lease_epoch"] = lease_epoch(lease)
         expires_at = _text(lease.get("expires_at"), limit=80)
         if expires_at:
             entry["expires_at"] = expires_at

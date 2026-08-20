@@ -55,10 +55,16 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
                         "status": "active",
                         "repo": str(project),
                         "state_file": f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md",
-                        "adapter": {"kind": "generic_project_goal_v0", "status": "connected"},
+                        "adapter": {
+                            "kind": "generic_project_goal_v0",
+                            "status": "connected",
+                        },
                         "authority_sources": [],
                         "coordination": {
-                            "registered_agents": ["codex-main-control", "codex-side-bypass"],
+                            "registered_agents": [
+                                "codex-main-control",
+                                "codex-side-bypass",
+                            ],
                             "agent_model": "peer_v1",
                         },
                     }
@@ -87,7 +93,11 @@ def set_claimed_by(state_file: Path, *, todo_id: str, owner: str | None) -> None
     raise AssertionError(f"todo metadata not found: {todo_id}")
 
 
-def cli(registry_path: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def command(
+    registry_path: Path,
+    *args: str,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
@@ -97,7 +107,6 @@ def cli(registry_path: Path, *args: str, check: bool = True) -> subprocess.Compl
             str(registry_path),
             "--format",
             "json",
-            "task-lease",
             *args,
         ],
         cwd=REPO_ROOT,
@@ -105,6 +114,12 @@ def cli(registry_path: Path, *args: str, check: bool = True) -> subprocess.Compl
         text=True,
         capture_output=True,
     )
+
+
+def cli(
+    registry_path: Path, *args: str, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    return command(registry_path, "task-lease", *args, check=check)
 
 
 def payload(result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
@@ -141,6 +156,7 @@ def main() -> int:
         assert first["ok"] is True and first["acquired"] is True, first
         assert first["lease"]["schema_version"] == "task_lease_v0", first
         assert first["lease"]["version"] == 1, first
+        assert first["lease"]["lease_epoch"] == 1, first
         assert first["lease"]["acquire_ttl_seconds"] == 120, first
 
         idempotent = payload(
@@ -203,7 +219,9 @@ def main() -> int:
         )
         assert conflict.returncode == 1, conflict.stdout
         conflict_payload = payload(conflict)
-        assert conflict_payload["error_code"] == "write_scope_conflict", conflict_payload
+        assert conflict_payload["error_code"] == "write_scope_conflict", (
+            conflict_payload
+        )
         assert conflict_payload["conflicts"][0]["todo_id"] == TODO_A, conflict_payload
 
         renewed = payload(
@@ -223,6 +241,7 @@ def main() -> int:
             )
         )
         assert renewed["ok"] is True and renewed["lease"]["version"] == 2, renewed
+        assert renewed["lease"]["lease_epoch"] == 1, renewed
 
         claim_blocked_transfer = cli(
             registry_path,
@@ -270,6 +289,7 @@ def main() -> int:
         )
         assert transferred["lease"]["owner"] == "codex-side-bypass", transferred
         assert transferred["lease"]["version"] == 3, transferred
+        assert transferred["lease"]["lease_epoch"] == 2, transferred
 
         released = payload(
             cli(
@@ -289,8 +309,120 @@ def main() -> int:
         )
         assert released["released"] is True, released
         assert released["lease"]["status"] == "released", released
-        assert released["lease"]["released_at"] == released["lease"]["updated_at"], released
-        assert payload(cli(registry_path, "inspect", "--goal-id", GOAL_ID, "--todo-id", TODO_A))["active"] is False
+        assert released["lease"]["lease_epoch"] == 2, released
+        assert released["lease"]["released_at"] == released["lease"]["updated_at"], (
+            released
+        )
+        inspected = payload(
+            cli(registry_path, "inspect", "--goal-id", GOAL_ID, "--todo-id", TODO_A)
+        )
+        assert inspected["active"] is False, inspected
+        assert inspected["lease"]["status"] == "released", inspected
+
+        release_replay = payload(
+            cli(
+                registry_path,
+                "release",
+                "--goal-id",
+                GOAL_ID,
+                "--todo-id",
+                TODO_A,
+                "--owner",
+                "codex-side-bypass",
+                "--idempotency-key",
+                "side-transfer",
+                "--expected-version",
+                "3",
+            )
+        )
+        assert release_replay["released"] is True, release_replay
+        assert release_replay["idempotent"] is True, release_replay
+
+        reused_key = cli(
+            registry_path,
+            "acquire",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            TODO_A,
+            "--owner",
+            "codex-side-bypass",
+            "--idempotency-key",
+            "side-transfer",
+            "--ttl-seconds",
+            "120",
+            "--write-scope",
+            "loopx/**",
+            check=False,
+        )
+        assert reused_key.returncode == 1, reused_key.stdout
+        assert payload(reused_key)["error_code"] == "idempotency_key_reuse"
+
+        next_generation = payload(
+            cli(
+                registry_path,
+                "acquire",
+                "--goal-id",
+                GOAL_ID,
+                "--todo-id",
+                TODO_A,
+                "--owner",
+                "codex-side-bypass",
+                "--idempotency-key",
+                "side-next-generation",
+                "--ttl-seconds",
+                "120",
+                "--write-scope",
+                "loopx/**",
+            )
+        )
+        assert next_generation["lease"]["version"] == 4, next_generation
+        assert next_generation["lease"]["lease_epoch"] == 3, next_generation
+
+        stale_completion = command(
+            registry_path,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            TODO_A,
+            "--agent-id",
+            "codex-side-bypass",
+            "--task-lease-idempotency-key",
+            "side-transfer",
+            "--task-lease-expected-version",
+            "3",
+            "--evidence",
+            "stale execution must not commit",
+            "--no-follow-up",
+            check=False,
+        )
+        assert stale_completion.returncode == 1, stale_completion.stdout
+        assert payload(stale_completion)["error_code"] == "lease_cas_mismatch"
+
+        completed = payload(
+            command(
+                registry_path,
+                "todo",
+                "complete",
+                "--goal-id",
+                GOAL_ID,
+                "--todo-id",
+                TODO_A,
+                "--agent-id",
+                "codex-side-bypass",
+                "--task-lease-idempotency-key",
+                "side-next-generation",
+                "--task-lease-expected-version",
+                "4",
+                "--evidence",
+                "current execution committed",
+                "--no-follow-up",
+            )
+        )
+        assert completed["ok"] is True, completed
+        assert completed["task_lease_fence"]["lease_epoch"] == 3, completed
 
     print("task-lease-runtime-smoke ok")
     return 0

@@ -154,9 +154,7 @@ def _agent_todo(state: Path, todo_id: str) -> dict[str, Any]:
 def _user_todo(state: Path, todo_id: str) -> dict[str, Any]:
     todos = parse_active_state_todos(state.read_text(encoding="utf-8"))
     return next(
-        item
-        for item in todos["user_todos"]["items"]
-        if item["todo_id"] == todo_id
+        item for item in todos["user_todos"]["items"] if item["todo_id"] == todo_id
     )
 
 
@@ -385,6 +383,7 @@ def test_legacy_pin_foreign_claim_makes_lease_renew_fail_typed(
             todo_id=todo["todo_id"],
             owner=AGENT_A,
             idempotency_key="turn-lease-1",
+            expected_version=1,
         )
 
     assert error.value.code == "owner_conflicts_with_claim"
@@ -531,6 +530,7 @@ def test_soft_claim_allows_release_and_inspect_of_legacy_leftover(
         todo_id=todo["todo_id"],
         owner=AGENT_A,
         idempotency_key="turn-lease-1",
+        expected_version=1,
         registry_path=registry,
     )
     assert released["ok"] is True
@@ -786,7 +786,7 @@ def test_hard_lease_holder_can_handoff_claim_and_peer_can_finish(
         expected_version=acquired_by_a["lease"]["version"],
     )
     assert released_by_a["released"] is True
-    assert not lease_file.exists()
+    assert json.loads(lease_file.read_text(encoding="utf-8"))["status"] == "released"
 
     acquired_by_b = _acquire(
         registry,
@@ -809,7 +809,7 @@ def test_hard_lease_holder_can_handoff_claim_and_peer_can_finish(
     assert completed_by_b["task_lease_fence"]["execution_instance_verified"] is True
     assert completed_by_b["task_lease_fence"]["released"] is True
     assert _agent_todo(state, todo["todo_id"])["status"] == "done"
-    assert not lease_file.exists()
+    assert json.loads(lease_file.read_text(encoding="utf-8"))["status"] == "released"
 
 
 def test_hard_lease_blocks_todo_add_reassigning_a_leased_todo(tmp_path: Path) -> None:
@@ -853,7 +853,9 @@ def test_hard_lease_allows_todo_add_creating_a_claimed_todo(tmp_path: Path) -> N
     assert _agent_todo(state, created["todo_id"])["claimed_by"] == AGENT_A
 
 
-def test_hard_lease_allows_todo_add_repeating_the_existing_claim(tmp_path: Path) -> None:
+def test_hard_lease_allows_todo_add_repeating_the_existing_claim(
+    tmp_path: Path,
+) -> None:
     registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
     todo = _add_todo(registry, claimed_by=AGENT_A)
     _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
@@ -1009,6 +1011,7 @@ def test_hard_lease_completion_successor_assignment_stays_allowed(
         todo_id=todo["todo_id"],
         agent_id=AGENT_A,
         task_lease_idempotency_key="turn-lease-1",
+        task_lease_expected_version=1,
         evidence="done with verified lease key",
         next_agent_todo="Follow-up slice for the peer lane.",
         next_claimed_by=AGENT_B,
@@ -1049,6 +1052,7 @@ def test_hard_lease_completion_with_verified_key_succeeds(tmp_path: Path) -> Non
         todo_id=todo["todo_id"],
         agent_id=AGENT_A,
         task_lease_idempotency_key="turn-lease-1",
+        task_lease_expected_version=1,
         evidence="done with verified lease key",
     )
 
@@ -1127,18 +1131,19 @@ def test_hard_lease_exact_user_gate_completion_uses_fence_and_releases_lease(
         "active": True,
         "owner": AGENT_A,
         "version": 1,
+        "lease_epoch": 1,
         "execution_instance_verified": True,
         "released": True,
     }
-    assert not lease_file.exists()
+    assert json.loads(lease_file.read_text(encoding="utf-8"))["status"] == "released"
     assert _user_todo(state, gate["todo_id"])["status"] == "done"
     target_after = _agent_todo(state, target["todo_id"])
     assert target_after["status"] == "open"
     assert not target_after.get("required_decision_scopes")
     assert result["decision_scope_resolution"]["state"] == "resolved"
-    assert result["decision_scope_resolution"][
-        "remaining_required_decision_scopes"
-    ] == []
+    assert (
+        result["decision_scope_resolution"]["remaining_required_decision_scopes"] == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -1222,7 +1227,7 @@ def test_hard_lease_user_gate_completion_auto_acquires_key(tmp_path: Path) -> No
     assert result["task_lease_fence"]["required"] is True
     assert result["task_lease_fence"]["execution_instance_verified"] is True
     assert result["task_lease_fence"]["released"] is True
-    assert not lease_file.exists()
+    assert json.loads(lease_file.read_text(encoding="utf-8"))["status"] == "released"
     assert _user_todo(state, gate["todo_id"])["status"] == "done"
     target_after = _agent_todo(state, target["todo_id"])
     assert target_after["status"] == "open"
@@ -1281,6 +1286,7 @@ def test_hard_lease_local_terminal_replay_keeps_response_shape_after_release(
         todo_id=todo["todo_id"],
         agent_id=AGENT_A,
         task_lease_idempotency_key=lease_key,
+        task_lease_expected_version=1,
         completion_turn_key=turn_key,
         evidence="complete under the held hard lease",
         no_followup=True,
@@ -1292,7 +1298,8 @@ def test_hard_lease_local_terminal_replay_keeps_response_shape_after_release(
     )
     assert completed["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
     assert completed["task_lease_fence"]["released"] is True
-    assert not lease_file.exists()
+    terminal_lease = lease_file.read_text(encoding="utf-8")
+    assert json.loads(terminal_lease)["status"] == "released"
     completed_state = state.read_text(encoding="utf-8")
 
     def unexpected_lease_effect(*_args: Any, **_kwargs: Any) -> None:
@@ -1312,6 +1319,7 @@ def test_hard_lease_local_terminal_replay_keeps_response_shape_after_release(
         todo_id=todo["todo_id"],
         agent_id=AGENT_A,
         task_lease_idempotency_key=lease_key,
+        task_lease_expected_version=1,
         completion_turn_key=turn_key,
         evidence="retry the same completion after lease release",
         no_followup=True,
@@ -1322,7 +1330,9 @@ def test_hard_lease_local_terminal_replay_keeps_response_shape_after_release(
     assert replayed["changed"] is False
     assert replayed["idempotent_replay"] is True
     assert state.read_text(encoding="utf-8") == completed_state
-    assert not lease_file.exists()
+    assert lease_file.read_text(encoding="utf-8") == terminal_lease
+
+
 def test_hard_lease_self_disarm_state_becomes_loud_typed_error(
     tmp_path: Path,
 ) -> None:
@@ -1522,6 +1532,7 @@ def test_holder_gate_normalizes_lease_owner_case_variants(tmp_path: Path) -> Non
             write_scopes=[],
             acquire_ttl_seconds=600,
             version=1,
+            lease_epoch=1,
             acquired_at=task_lease.isoformat(now),
             updated_at=task_lease.isoformat(now),
             expires_at=task_lease.isoformat(now + timedelta(seconds=600)),
@@ -1632,6 +1643,7 @@ def test_hard_lease_supersede_with_verified_key_succeeds_and_releases_lease(
         reason="superseded with the verified key",
         next_agent_todo="Continue the superseding work.",
         task_lease_idempotency_key="turn-lease-1",
+        task_lease_expected_version=1,
     )
 
     assert result["ok"] is True
@@ -1640,7 +1652,7 @@ def test_hard_lease_supersede_with_verified_key_succeeds_and_releases_lease(
     assert result["task_lease_fence"]["execution_instance_verified"] is True
     assert result["task_lease_fence"]["released"] is True
     assert _agent_todo(state, todo["todo_id"])["done"] is True
-    assert not lease_file.exists()
+    assert json.loads(lease_file.read_text(encoding="utf-8"))["status"] == "released"
     assert result["next_todos"][0]["added"] is True
 
 
@@ -1660,6 +1672,7 @@ def test_hard_lease_supersede_dry_run_keeps_lease_and_state(tmp_path: Path) -> N
         agent_id=AGENT_A,
         reason="preview only",
         task_lease_idempotency_key="turn-lease-1",
+        task_lease_expected_version=1,
         dry_run=True,
     )
 
@@ -1740,7 +1753,9 @@ def test_legacy_pin_supersede_ignores_missing_lease_but_fences_effective_lease(
 # ---------------------------------------------------------------------------
 
 
-def _force_bootstrap(registry: Path, state: Path, tmp_path: Path, **overrides: Any) -> dict[str, Any]:
+def _force_bootstrap(
+    registry: Path, state: Path, tmp_path: Path, **overrides: Any
+) -> dict[str, Any]:
     from loopx.bootstrap import bootstrap_project
 
     options: dict[str, Any] = dict(
@@ -1771,7 +1786,9 @@ def _force_bootstrap(registry: Path, state: Path, tmp_path: Path, **overrides: A
     return bootstrap_project(**options)
 
 
-def test_force_bootstrap_replace_preserves_declared_handoff_mode(tmp_path: Path) -> None:
+def test_force_bootstrap_replace_preserves_declared_handoff_mode(
+    tmp_path: Path,
+) -> None:
     """Appendix B rule 5: a mode change needs quiescence; a forced state rebuild
     is not a mode change and must not silently fall back to legacy."""
 
@@ -1799,7 +1816,9 @@ def test_force_bootstrap_replace_keeps_legacy_default_absent(tmp_path: Path) -> 
     assert goal_handoff_mode(state.read_text(encoding="utf-8")) == HANDOFF_MODE_LEGACY
 
 
-def test_force_bootstrap_dry_run_reports_preserved_mode_without_writing(tmp_path: Path) -> None:
+def test_force_bootstrap_dry_run_reports_preserved_mode_without_writing(
+    tmp_path: Path,
+) -> None:
     registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_SOFT_CLAIM)
     before = state.read_bytes()
 

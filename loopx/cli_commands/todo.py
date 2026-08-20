@@ -396,8 +396,9 @@ def register_todo_command(
         "--task-lease-expected-version",
         type=int,
         help=(
-            "For todo complete and todo supersede, optionally CAS the active hard "
-            "task lease version. Requires --task-lease-idempotency-key."
+            "For todo complete and todo supersede, supply the active hard task "
+            "lease version. Required with --task-lease-idempotency-key when the "
+            "lease is effective."
         ),
     )
     todo_parser.add_argument(

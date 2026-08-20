@@ -56,6 +56,7 @@ def _write_active_lease(
         write_scopes=["src/"],
         acquire_ttl_seconds=ttl_seconds,
         version=version,
+        lease_epoch=1,
         acquired_at=isoformat(at),
         updated_at=isoformat(at),
         expires_at=isoformat(at + timedelta(seconds=ttl_seconds)),
@@ -72,7 +73,9 @@ def _active_leases(projection: dict[str, Any]) -> list[dict[str, Any]]:
     return leases
 
 
-def _entries_with_status(projection: dict[str, Any], status: str) -> list[dict[str, Any]]:
+def _entries_with_status(
+    projection: dict[str, Any], status: str
+) -> list[dict[str, Any]]:
     return [item for item in _active_leases(projection) if item.get("status") == status]
 
 
@@ -95,6 +98,7 @@ def test_divergent_hard_lease_is_surfaced_with_conflict_reason(tmp_path: Path) -
             "status": "hard_lease",
             "owner_agent": "agent-a",
             "lease_version": 3,
+            "lease_epoch": 1,
             "expires_at": lease["expires_at"],
             "reason": "owner_conflicts_with_claim",
             "claimed_by": "agent-b",
@@ -117,6 +121,7 @@ def test_matching_hard_lease_is_surfaced_without_conflict(tmp_path: Path) -> Non
             "status": "hard_lease",
             "owner_agent": "agent-a",
             "lease_version": 3,
+            "lease_epoch": 1,
             "expires_at": lease["expires_at"],
         }
     ]
@@ -155,6 +160,7 @@ def test_expired_lease_is_not_surfaced(tmp_path: Path) -> None:
         write_scopes=[],
         acquire_ttl_seconds=60,
         version=1,
+        lease_epoch=1,
         acquired_at=isoformat(at - timedelta(seconds=120)),
         updated_at=isoformat(at - timedelta(seconds=120)),
         expires_at=isoformat(at - timedelta(seconds=60)),
@@ -340,9 +346,7 @@ def test_status_attention_queue_surfaces_hard_lease_end_to_end(
 
     queue = payload["attention_queue"]
     items = [
-        item
-        for item in queue.get("items") or []
-        if item.get("goal_id") == GOAL_ID
+        item for item in queue.get("items") or [] if item.get("goal_id") == GOAL_ID
     ]
     assert items, "expected an attention item for the fixture goal"
     projection = items[0].get("goal_channel_projection")
@@ -356,6 +360,7 @@ def test_status_attention_queue_surfaces_hard_lease_end_to_end(
             "status": "hard_lease",
             "owner_agent": "agent-a",
             "lease_version": 3,
+            "lease_epoch": 1,
             "expires_at": lease["expires_at"],
             "reason": "owner_conflicts_with_claim",
             "claimed_by": "agent-b",

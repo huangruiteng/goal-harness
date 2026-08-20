@@ -45,6 +45,8 @@ def render_task_lease_markdown(payload: dict[str, object]) -> str:
                 f"- todo_id: `{lease.get('todo_id')}`",
                 f"- owner: `{lease.get('owner')}`",
                 f"- version: `{lease.get('version')}`",
+                f"- lease_epoch: `{lease.get('lease_epoch')}`",
+                f"- status: `{lease.get('status')}`",
                 f"- expires_at: `{lease.get('expires_at')}`",
                 f"- write_scopes: `{', '.join(lease.get('write_scopes') or [])}`",
             ]
@@ -100,7 +102,10 @@ def register_task_lease_command(
     parser.add_argument(
         "--expected-version",
         type=int,
-        help="Optional CAS version that must match the current lease version.",
+        help=(
+            "CAS version that must match the current lease. Required for "
+            "renew, transfer, and release; optional for acquire."
+        ),
     )
 
 

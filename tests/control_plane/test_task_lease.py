@@ -117,6 +117,18 @@ def test_expected_version_is_compare_and_swap_guard() -> None:
     assert error.value.payload == {"expected_version": 2, "actual_version": 3}
 
 
+def test_lease_epoch_migrates_legacy_records_and_rejects_corruption() -> None:
+    assert task_lease.lease_epoch(None) == 0
+    assert (
+        task_lease.lease_epoch({"schema_version": "task_lease_v0", "version": 7}) == 1
+    )
+
+    for raw_epoch in (0, -1, "not-an-epoch"):
+        with pytest.raises(TaskLeaseError) as error:
+            task_lease.lease_epoch({"lease_epoch": raw_epoch})
+        assert error.value.code == "corrupt_lease"
+
+
 def test_task_lease_lifecycle_preserves_idempotency_and_versions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -151,6 +163,7 @@ def test_task_lease_lifecycle_preserves_idempotency_and_versions(
     acquired = acquire_task_lease(**arguments)
     assert acquired["acquired"] is True
     assert acquired["lease"]["version"] == 1
+    assert acquired["lease"]["lease_epoch"] == 1
     assert acquired["lease"]["expires_at"] == (
         now + timedelta(seconds=120)
     ).isoformat().replace("+00:00", "Z")
@@ -158,10 +171,35 @@ def test_task_lease_lifecycle_preserves_idempotency_and_versions(
     repeated = acquire_task_lease(**arguments)
     assert repeated["idempotent"] is True
     assert repeated["lease"]["version"] == 1
+    assert repeated["lease"]["lease_epoch"] == 1
 
     with pytest.raises(TaskLeaseError) as reuse_error:
         acquire_task_lease(**{**arguments, "ttl_seconds": 600})
     assert reuse_error.value.code == "idempotency_key_reuse"
+
+    with pytest.raises(TaskLeaseError) as renew_without_version:
+        renew_task_lease(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id="goal-a",
+            todo_id="todo_leasea",
+            owner="agent-a",
+            idempotency_key="turn-1",
+        )
+    assert renew_without_version.value.code == "version_required"
+
+    with pytest.raises(TaskLeaseError) as transfer_without_version:
+        transfer_task_lease(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id="goal-a",
+            todo_id="todo_leasea",
+            owner="agent-a",
+            idempotency_key="turn-1",
+            new_owner="agent-b",
+            new_idempotency_key="turn-2",
+        )
+    assert transfer_without_version.value.code == "version_required"
 
     renewed = renew_task_lease(
         registry_path=registry_path,
@@ -173,6 +211,7 @@ def test_task_lease_lifecycle_preserves_idempotency_and_versions(
         expected_version=1,
     )
     assert renewed["lease"]["version"] == 2
+    assert renewed["lease"]["lease_epoch"] == 1
 
     transferred = transfer_task_lease(
         registry_path=registry_path,
@@ -187,6 +226,7 @@ def test_task_lease_lifecycle_preserves_idempotency_and_versions(
     )
     assert transferred["lease"]["owner"] == "agent-b"
     assert transferred["lease"]["version"] == 3
+    assert transferred["lease"]["lease_epoch"] == 2
 
     released = release_task_lease(
         runtime_root=runtime_root,
@@ -201,4 +241,49 @@ def test_task_lease_lifecycle_preserves_idempotency_and_versions(
     assert released["lease"]["released_at"] == now.isoformat().replace("+00:00", "Z")
     assert released["lease"]["updated_at"] == released["lease"]["released_at"]
     assert task_lease.lease_is_active(released["lease"], at=now) is False
-    assert not Path(str(released["lease_path"])).exists()
+    lease_path = Path(str(released["lease_path"]))
+    assert lease_path.exists()
+    assert task_lease.read_lease(lease_path) == released["lease"]
+
+    replayed_release = release_task_lease(
+        runtime_root=runtime_root,
+        goal_id="goal-a",
+        todo_id="todo_leasea",
+        owner="agent-b",
+        idempotency_key="turn-2",
+        expected_version=3,
+    )
+    assert replayed_release["released"] is True
+    assert replayed_release["idempotent"] is True
+    assert replayed_release["lease"] == released["lease"]
+
+    with pytest.raises(TaskLeaseError) as retired_key:
+        acquire_task_lease(
+            **{
+                **arguments,
+                "owner": "agent-b",
+                "idempotency_key": "turn-2",
+            }
+        )
+    assert retired_key.value.code == "idempotency_key_reuse"
+
+    reacquired = acquire_task_lease(
+        **{
+            **arguments,
+            "owner": "agent-b",
+            "idempotency_key": "turn-3",
+        }
+    )
+    assert reacquired["acquired"] is True
+    assert reacquired["lease"]["version"] == 4
+    assert reacquired["lease"]["lease_epoch"] == 3
+
+    with pytest.raises(TaskLeaseError) as missing_version:
+        release_task_lease(
+            runtime_root=runtime_root,
+            goal_id="goal-a",
+            todo_id="todo_leasea",
+            owner="agent-b",
+            idempotency_key="turn-3",
+        )
+    assert missing_version.value.code == "version_required"

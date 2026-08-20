@@ -514,6 +514,8 @@ def test_todo_supersede_cli_requires_key_in_hard_lease_and_accepts_it(
         "keyed supersede",
         "--task-lease-idempotency-key",
         "turn-lease-1",
+        "--task-lease-expected-version",
+        "1",
     )
     assert exit_code == 0
     assert payload["ok"] is True

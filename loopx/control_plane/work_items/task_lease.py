@@ -240,6 +240,7 @@ def hold_handoff_lease_holder_gate(
                     "actor_agent_id": actor,
                     "lease_owner": owner,
                     "lease_version": lease.get("version"),
+                    "lease_epoch": lease_epoch(lease),
                     "expires_at": lease.get("expires_at"),
                 },
             )
@@ -249,6 +250,7 @@ def hold_handoff_lease_holder_gate(
             "active": True,
             "owner": owner,
             "version": lease.get("version"),
+            "lease_epoch": lease_epoch(lease),
         }
 
 
@@ -393,6 +395,7 @@ def hold_task_lease_mutation_fence(
                 write_scopes=[],
                 acquire_ttl_seconds=DEFAULT_TASK_LEASE_TTL_SECONDS,
                 version=int((lease or {}).get("version") or 0) + 1,
+                lease_epoch=lease_epoch(lease) + 1,
                 acquired_at=updated_at,
                 updated_at=updated_at,
                 expires_at=expires_at,
@@ -418,6 +421,7 @@ def hold_task_lease_mutation_fence(
                             "handoff_mode": handoff_mode,
                             "lease_owner": lease.get("owner"),
                             "lease_version": lease.get("version"),
+                            "lease_epoch": lease_epoch(lease),
                             "constraint": constraint,
                             "lease_path": str(lease_path),
                         },
@@ -464,6 +468,7 @@ def hold_task_lease_mutation_fence(
                     "todo_id": normalized_todo_id,
                     "lease_owner": lease.get("owner"),
                     "lease_version": lease.get("version"),
+                    "lease_epoch": lease_epoch(lease),
                     "lease_path": str(lease_path),
                 },
             )
@@ -480,9 +485,15 @@ def hold_task_lease_mutation_fence(
                     "todo_id": normalized_todo_id,
                     "lease_owner": lease.get("owner"),
                     "lease_version": lease.get("version"),
+                    "lease_epoch": lease_epoch(lease),
                     "actor_agent_id": normalized_actor,
                     "lease_path": str(lease_path),
                 },
+            )
+        if not auto_acquired:
+            expected_version = require_expected_version(
+                expected_version,
+                action="lifecycle writeback",
             )
         assert_expected_version(lease, expected_version)
         fence_payload = {
@@ -491,12 +502,17 @@ def hold_task_lease_mutation_fence(
             "active": True,
             "owner": normalized_actor,
             "version": lease.get("version"),
+            "lease_epoch": lease_epoch(lease),
             "execution_instance_verified": True,
         }
         if auto_acquired:
             fence_payload["auto_acquired"] = True
         fence = _VerifiedTaskLeaseFence(fence_payload)
-        fence.release_hook = lambda: remove_lease(lease_path)
+        verified_lease = dict(lease)
+        fence.release_hook = lambda: persist_released_lease(
+            lease_path,
+            verified_lease,
+        )
         yield fence
 
 
@@ -555,16 +571,17 @@ def release_verified_task_lease_fence(
     Must run while the hold_task_lease_mutation_fence context is still open so
     the per-goal lease lock it acquired is still held; the lease therefore
     cannot have been renewed, transferred, or re-acquired since the fence
-    verified the owner and idempotency key. The release reuses the CLI release
-    semantics (the lease file is removed; no new lifecycle state).
+    verified the owner, idempotency key, and version. The release reuses the
+    CLI release semantics and persists the terminal record that fences the
+    next lease generation.
 
     The private release hook rides on the fence object's attribute, not inside
     the payload mapping, and is disarmed here on every call. Only a committed,
     key-verified fence releases the lease; non-verified fences carry no hook
     and are never touched. A release failure never unwinds the committed
     lifecycle write: it is surfaced additively as fence["released"] = False
-    and the lease file is left for an explicit `loopx task-lease release` or
-    TTL expiry.
+    and the active record is left for an explicit `loopx task-lease release`
+    or TTL expiry.
     """
 
     hook = getattr(fence, "release_hook", None)
@@ -758,11 +775,53 @@ def write_lease(path: Path, payload: dict[str, Any]) -> None:
     temp_path.replace(path)
 
 
-def remove_lease(path: Path) -> None:
+def lease_epoch(lease: dict[str, Any] | None) -> int:
+    """Return the authority-owned generation for one todo's lease lineage.
+
+    Records written before ``lease_epoch`` shipped describe the one active
+    generation visible at migration time, so they migrate as epoch 1. Missing
+    records are the pre-history state at epoch 0.
+    """
+
+    if not lease:
+        return 0
+    raw_epoch = lease.get("lease_epoch")
+    if raw_epoch is None:
+        return 1
     try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
+        epoch = int(raw_epoch)
+    except (TypeError, ValueError) as exc:
+        raise TaskLeaseError(
+            "lease epoch must be a positive integer",
+            code="corrupt_lease",
+            payload={"lease_epoch": raw_epoch},
+        ) from exc
+    if epoch <= 0:
+        raise TaskLeaseError(
+            "lease epoch must be a positive integer",
+            code="corrupt_lease",
+            payload={"lease_epoch": raw_epoch},
+        )
+    return epoch
+
+
+def released_lease_payload(
+    lease: dict[str, Any],
+    *,
+    at: datetime,
+) -> dict[str, Any]:
+    released = dict(lease)
+    released["lease_epoch"] = lease_epoch(lease)
+    released["status"] = "released"
+    released["released_at"] = isoformat(at)
+    released["updated_at"] = isoformat(at)
+    return released
+
+
+def persist_released_lease(path: Path, lease: dict[str, Any]) -> None:
+    """Atomically retain the terminal record that fences the next generation."""
+
+    write_lease(path, released_lease_payload(lease, at=now_utc()))
 
 
 def lease_expires_at(lease: dict[str, Any] | None) -> datetime | None:
@@ -885,6 +944,8 @@ def active_conflicts(
                     "todo_id": lease.get("todo_id"),
                     "owner": lease.get("owner"),
                     "expires_at": lease.get("expires_at"),
+                    "version": lease.get("version"),
+                    "lease_epoch": lease_epoch(lease),
                     "write_scopes": lease.get("write_scopes") or [],
                     "lease_path": str(path),
                 }
@@ -904,6 +965,16 @@ def assert_expected_version(lease: dict[str, Any] | None, expected_version: int 
         )
 
 
+def require_expected_version(expected_version: int | None, *, action: str) -> int:
+    if expected_version is None:
+        raise TaskLeaseError(
+            f"task lease {action} requires the current lease version",
+            code="version_required",
+            payload={"action": action},
+        )
+    return int(expected_version)
+
+
 def build_lease(
     *,
     goal_id: str,
@@ -913,6 +984,7 @@ def build_lease(
     write_scopes: list[str],
     acquire_ttl_seconds: int,
     version: int,
+    lease_epoch: int,
     acquired_at: str,
     updated_at: str,
     expires_at: str,
@@ -926,6 +998,7 @@ def build_lease(
         "write_scopes": write_scopes,
         "acquire_ttl_seconds": acquire_ttl_seconds,
         "version": version,
+        "lease_epoch": lease_epoch,
         "acquired_at": acquired_at,
         "updated_at": updated_at,
         "expires_at": expires_at,
@@ -1021,6 +1094,13 @@ def acquire_task_lease(
                 code="todo_lease_conflict",
                 payload={"lease": existing, "lease_path": str(lease_path)},
             )
+        if existing and existing.get("idempotency_key") == idempotency_key:
+            raise TaskLeaseError(
+                "idempotency key belongs to an expired or released lease generation; "
+                "a new execution must use a new key",
+                code="idempotency_key_reuse",
+                payload={"lease": existing, "lease_path": str(lease_path)},
+            )
         conflicts = active_conflicts(
             registry_path=registry_path,
             runtime_root=runtime_root,
@@ -1045,6 +1125,7 @@ def acquire_task_lease(
             write_scopes=normalized_write_scopes,
             acquire_ttl_seconds=ttl,
             version=int((existing or {}).get("version") or 0) + 1,
+            lease_epoch=lease_epoch(existing) + 1,
             acquired_at=updated_at,
             updated_at=updated_at,
             expires_at=expires_at,
@@ -1093,6 +1174,7 @@ def renew_task_lease(
             todo_id=todo_id,
             action="renew",
         )
+        expected_version = require_expected_version(expected_version, action="renew")
         require_task_lease_owner_allowed(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -1107,6 +1189,7 @@ def renew_task_lease(
             raise TaskLeaseError("lease owner or idempotency key mismatch", code="lease_cas_mismatch")
         lease = dict(lease)
         lease["version"] = int(lease.get("version") or 0) + 1
+        lease["lease_epoch"] = lease_epoch(lease)
         lease["updated_at"] = isoformat(at)
         lease["expires_at"] = isoformat(at + timedelta(seconds=ttl))
         write_lease(lease_path, lease)
@@ -1155,6 +1238,7 @@ def transfer_task_lease(
             todo_id=todo_id,
             action="transfer",
         )
+        expected_version = require_expected_version(expected_version, action="transfer")
         require_registered_task_lease_owner(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -1173,10 +1257,17 @@ def transfer_task_lease(
             raise TaskLeaseError("lease is missing or expired", code="lease_not_active")
         if lease.get("owner") != owner or lease.get("idempotency_key") != idempotency_key:
             raise TaskLeaseError("lease owner or idempotency key mismatch", code="lease_cas_mismatch")
+        if new_idempotency_key == idempotency_key:
+            raise TaskLeaseError(
+                "lease transfer must mint a new execution idempotency key",
+                code="idempotency_key_reuse",
+                payload={"lease": lease, "lease_path": str(lease_path)},
+            )
         lease = dict(lease)
         lease["owner"] = new_owner
         lease["idempotency_key"] = new_idempotency_key
         lease["version"] = int(lease.get("version") or 0) + 1
+        lease["lease_epoch"] = lease_epoch(lease) + 1
         lease["updated_at"] = isoformat(at)
         lease["expires_at"] = isoformat(at + timedelta(seconds=ttl))
         write_lease(lease_path, lease)
@@ -1205,6 +1296,7 @@ def release_task_lease(
     todo_id = normalize_lease_todo_id(todo_id)
     owner = normalize_owner(owner)
     idempotency_key = normalize_idempotency_key(idempotency_key)
+    expected_version = require_expected_version(expected_version, action="release")
     # Release stays allowed in every handoff mode (cleanup of legacy
     # leftovers); the mode is reported additively when resolvable.
     handoff_mode = _optional_handoff_mode(registry_path, goal_id)
@@ -1229,20 +1321,27 @@ def release_task_lease(
                 "lease_path": str(lease_path),
                 **handoff_extra,
             }
-        if lease_is_active(lease, at=at) and (
-            lease.get("owner") != owner or lease.get("idempotency_key") != idempotency_key
-        ):
+        if lease.get("owner") != owner or lease.get("idempotency_key") != idempotency_key:
             raise TaskLeaseError("lease owner or idempotency key mismatch", code="lease_cas_mismatch")
-        remove_lease(lease_path)
-        released_lease = dict(lease)
-        released_lease["status"] = "released"
-        released_lease["released_at"] = isoformat(at)
-        released_lease["updated_at"] = isoformat(at)
+        if lease.get("status") == "released":
+            return {
+                "ok": True,
+                "schema_version": TASK_LEASE_SCHEMA_VERSION,
+                "action": "release",
+                "released": True,
+                "idempotent": True,
+                "lease": lease,
+                "lease_path": str(lease_path),
+                **handoff_extra,
+            }
+        released_lease = released_lease_payload(lease, at=at)
+        write_lease(lease_path, released_lease)
         return {
             "ok": True,
             "schema_version": TASK_LEASE_SCHEMA_VERSION,
             "action": "release",
             "released": True,
+            "idempotent": False,
             "lease": released_lease,
             "lease_path": str(lease_path),
             **handoff_extra,

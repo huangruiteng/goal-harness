@@ -93,7 +93,7 @@ def _write_fixture(
                         "adapter": {"kind": "harness_self_improvement"},
                         "coordination": coordination,
                     }
-                ]
+                ],
             }
         ),
         encoding="utf-8",
@@ -108,9 +108,7 @@ def _lease_path(tmp_path: Path, todo_id: str) -> Path:
 def _agent_todo(state: Path, todo_id: str) -> dict:
     todos = parse_active_state_todos(state.read_text(encoding="utf-8"))
     return next(
-        item
-        for item in todos["agent_todos"]["items"]
-        if item["todo_id"] == todo_id
+        item for item in todos["agent_todos"]["items"] if item["todo_id"] == todo_id
     )
 
 
@@ -353,9 +351,7 @@ def test_capability_binding_follows_generated_agent_successor(tmp_path: Path) ->
     )
 
     successor = _agent_todo(state, result["next_todos"][0]["todo_id"])
-    assert successor["capability_binding_ref"] == (
-        "issue-fix:feasibility-a1b2c3d4"
-    )
+    assert successor["capability_binding_ref"] == ("issue-fix:feasibility-a1b2c3d4")
 
 
 def test_active_task_lease_fences_same_agent_completion_instance(
@@ -415,10 +411,16 @@ def test_active_task_lease_fences_same_agent_completion_instance(
         "active": True,
         "owner": AUTHOR_AGENT,
         "version": 1,
+        "lease_epoch": 1,
         "execution_instance_verified": True,
         "released": True,
     }
-    assert not _lease_path(tmp_path, todo["todo_id"]).exists()
+    assert (
+        json.loads(_lease_path(tmp_path, todo["todo_id"]).read_text(encoding="utf-8"))[
+            "status"
+        ]
+        == "released"
+    )
 
     replayed = complete_goal_todo(
         registry_path=registry,
@@ -438,6 +440,121 @@ def test_active_task_lease_fences_same_agent_completion_instance(
     ]
     assert todo_titles.count("Create the canonical successor.") == 1
     assert "Create a duplicate stale successor." not in todo_titles
+
+
+def test_released_lease_generation_rejects_stale_completion_fences(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    todo = _add_agent_todo(registry)
+    runtime_root = tmp_path / "runtime"
+    first = acquire_task_lease(
+        registry_path=registry,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        owner=AUTHOR_AGENT,
+        idempotency_key="execution-one",
+        ttl_seconds=600,
+    )
+    assert first["lease"]["version"] == 1
+    assert first["lease"]["lease_epoch"] == 1
+
+    released = release_task_lease(
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        owner=AUTHOR_AGENT,
+        idempotency_key="execution-one",
+        expected_version=1,
+        registry_path=registry,
+    )
+    assert released["lease"]["status"] == "released"
+    assert _lease_path(tmp_path, todo["todo_id"]).exists()
+
+    with pytest.raises(TaskLeaseError) as reused_execution:
+        acquire_task_lease(
+            registry_path=registry,
+            runtime_root=runtime_root,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            owner=AUTHOR_AGENT,
+            idempotency_key="execution-one",
+            ttl_seconds=600,
+        )
+    assert reused_execution.value.code == "idempotency_key_reuse"
+
+    second = acquire_task_lease(
+        registry_path=registry,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        owner=AUTHOR_AGENT,
+        idempotency_key="execution-two",
+        ttl_seconds=600,
+    )
+    assert second["lease"]["version"] == 2
+    assert second["lease"]["lease_epoch"] == 2
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(TaskLeaseError) as old_key:
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            claimed_by=AUTHOR_AGENT,
+            task_lease_idempotency_key="execution-one",
+            task_lease_expected_version=1,
+            evidence="stale first execution",
+            no_followup=True,
+        )
+    assert old_key.value.code == "lease_cas_mismatch"
+    assert state.read_text(encoding="utf-8") == before
+
+    with pytest.raises(TaskLeaseError) as old_version:
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            claimed_by=AUTHOR_AGENT,
+            task_lease_idempotency_key="execution-two",
+            task_lease_expected_version=1,
+            evidence="stale version from the first generation",
+            no_followup=True,
+        )
+    assert old_version.value.code == "version_mismatch"
+    assert state.read_text(encoding="utf-8") == before
+
+    with pytest.raises(TaskLeaseError) as missing_version:
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            claimed_by=AUTHOR_AGENT,
+            task_lease_idempotency_key="execution-two",
+            evidence="incomplete fence",
+            no_followup=True,
+        )
+    assert missing_version.value.code == "version_required"
+    assert state.read_text(encoding="utf-8") == before
+
+    completed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        claimed_by=AUTHOR_AGENT,
+        task_lease_idempotency_key="execution-two",
+        task_lease_expected_version=2,
+        evidence="current generation completed",
+        no_followup=True,
+    )
+    assert completed["task_lease_fence"]["lease_epoch"] == 2
+    tombstone = json.loads(
+        _lease_path(tmp_path, todo["todo_id"]).read_text(encoding="utf-8")
+    )
+    assert tombstone["status"] == "released"
+    assert tombstone["version"] == 2
+    assert tombstone["lease_epoch"] == 2
 
 
 def test_completion_turn_key_rejects_cross_turn_replay(tmp_path: Path) -> None:
@@ -647,10 +764,14 @@ def test_event_projected_completion_reports_task_lease_fence(
         "active": True,
         "owner": AUTHOR_AGENT,
         "version": 1,
+        "lease_epoch": 1,
         "execution_instance_verified": True,
         "released": True,
     }
-    assert not _lease_path(tmp_path, todo_id).exists()
+    assert (
+        json.loads(_lease_path(tmp_path, todo_id).read_text(encoding="utf-8"))["status"]
+        == "released"
+    )
 
 
 def test_unfenced_completion_leaves_no_lease_artifacts(tmp_path: Path) -> None:
@@ -742,6 +863,7 @@ def test_dry_run_completion_does_not_release_lease(tmp_path: Path) -> None:
         todo_id=todo["todo_id"],
         claimed_by=AUTHOR_AGENT,
         task_lease_idempotency_key=lease_key,
+        task_lease_expected_version=1,
         evidence="dry run must not touch the lease",
         no_followup=True,
         dry_run=True,
@@ -772,16 +894,21 @@ def test_release_failure_after_commit_keeps_completion_ok(
         ttl_seconds=600,
     )
 
-    def _fail_remove(path: Path) -> None:
-        raise OSError("simulated unlink failure")
+    def _fail_release(_path: Path, _lease: dict) -> None:
+        raise OSError("simulated terminal write failure")
 
-    monkeypatch.setattr(task_lease_module, "remove_lease", _fail_remove)
+    monkeypatch.setattr(
+        task_lease_module,
+        "persist_released_lease",
+        _fail_release,
+    )
     completed = complete_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
         todo_id=todo["todo_id"],
         claimed_by=AUTHOR_AGENT,
         task_lease_idempotency_key=lease_key,
+        task_lease_expected_version=1,
         evidence="completion must survive a failed lease release",
         no_followup=True,
     )
@@ -799,14 +926,9 @@ def test_reopened_todo_completes_unfenced_after_lease_release(
 ) -> None:
     """Pin the accepted reopen-window divergence of release-on-completion.
 
-    Before leases were released on completion, the leftover lease file
-    resurrected as the execution-instance fence if a done todo was manually
-    reopened inside the lease TTL, so a second completion without the key
-    was rejected with lease_fence_required. With the lease released at the
-    first committed completion, the reopened todo completes unfenced. This
-    matches the end state of the disciplined baseline flow (complete followed
-    by an explicit `loopx task-lease release`); no production path reopens
-    done todos.
+    The terminal tombstone retains the generation but is not time-active, so a
+    manually reopened todo completes unfenced. The tombstone exists only to
+    prevent a later acquire from reusing the old execution generation.
     """
 
     registry, _state = _write_fixture(tmp_path, multi_agent=False)
@@ -828,11 +950,17 @@ def test_reopened_todo_completes_unfenced_after_lease_release(
         todo_id=todo["todo_id"],
         claimed_by=AUTHOR_AGENT,
         task_lease_idempotency_key=lease_key,
+        task_lease_expected_version=1,
         evidence="first completion releases the verified lease",
         no_followup=True,
     )
     assert completed["task_lease_fence"]["released"] is True
-    assert not _lease_path(tmp_path, todo["todo_id"]).exists()
+    assert (
+        json.loads(_lease_path(tmp_path, todo["todo_id"]).read_text(encoding="utf-8"))[
+            "status"
+        ]
+        == "released"
+    )
 
     reopened = update_goal_todo(
         registry_path=registry,
@@ -860,13 +988,8 @@ def test_reopened_todo_completes_unfenced_after_lease_release(
     }
 
 
-def test_cli_release_after_auto_release_reports_missing(tmp_path: Path) -> None:
-    """A post-completion `loopx task-lease release` now sees no lease file.
-
-    Baseline removed the then-stale lease and reported released=True; after
-    release-on-completion the same call reports released=False, missing=True
-    with ok=True (the pre-existing double-release shape).
-    """
+def test_release_after_auto_release_replays_terminal_tombstone(tmp_path: Path) -> None:
+    """A post-completion release returns the retained terminal result."""
 
     registry, _state = _write_fixture(tmp_path, multi_agent=False)
     todo = _add_agent_todo(registry)
@@ -886,6 +1009,7 @@ def test_cli_release_after_auto_release_reports_missing(tmp_path: Path) -> None:
         todo_id=todo["todo_id"],
         claimed_by=AUTHOR_AGENT,
         task_lease_idempotency_key=lease_key,
+        task_lease_expected_version=1,
         evidence="completion already released the lease",
         no_followup=True,
     )
@@ -896,11 +1020,13 @@ def test_cli_release_after_auto_release_reports_missing(tmp_path: Path) -> None:
         todo_id=todo["todo_id"],
         owner=AUTHOR_AGENT,
         idempotency_key=lease_key,
+        expected_version=1,
     )
 
     assert released["ok"] is True
-    assert released["released"] is False
-    assert released["missing"] is True
+    assert released["released"] is True
+    assert released["idempotent"] is True
+    assert released["lease"]["status"] == "released"
 
 
 def test_exception_after_verified_fence_leaves_lease_intact(
@@ -929,6 +1055,7 @@ def test_exception_after_verified_fence_leaves_lease_intact(
             todo_id=todo["todo_id"],
             claimed_by=AUTHOR_AGENT,
             task_lease_idempotency_key=lease_key,
+            task_lease_expected_version=1,
             successor_todo_ids=["!!not-a-todo-id!!"],
             evidence="fails after the fence verified",
             no_followup=True,
@@ -979,6 +1106,7 @@ def test_event_projected_dry_run_completion_does_not_release_lease(
         todo_id=todo_id,
         claimed_by=AUTHOR_AGENT,
         task_lease_idempotency_key=lease_key,
+        task_lease_expected_version=1,
         evidence="event-projected dry run must not touch the lease",
         no_followup=True,
         dry_run=True,
@@ -1135,9 +1263,7 @@ def test_event_projected_completion_appends_same_turn_terminal_upgrade(
     projected_todo = projected["agent_todos"]["items"][0]
     assert projected_todo["no_followup"] == "true"
     assert projected_todo["completion_continuation"] == "no_followup"
-    assert projected_todo["completion_recovery"] == (
-        "same_turn_terminal_closeout"
-    )
+    assert projected_todo["completion_recovery"] == ("same_turn_terminal_closeout")
     assert projected_todo["completed_at"] == "2026-07-18T00:01:00+00:00"
     assert sum(event["event_type"] == TODO_COMPLETED for event in upgraded_events) == 2
 
@@ -1245,9 +1371,7 @@ def test_capability_binding_follows_event_projected_successor(tmp_path: Path) ->
         for item in replayed["agent_todos"]["items"]
         if item["todo_id"] == successor_id
     )
-    assert successor["capability_binding_ref"] == (
-        "issue-fix:feasibility-a1b2c3d4"
-    )
+    assert successor["capability_binding_ref"] == ("issue-fix:feasibility-a1b2c3d4")
 
     event_count = len(AppendOnlyStateEventStore(event_log).load())
     completed_parent = next(
