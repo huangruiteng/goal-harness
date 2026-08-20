@@ -4,21 +4,12 @@ import argparse
 import json
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from ...extensions.lark import LARK_EXTENSION_ID, LARK_MIAODA_HTML_PERMISSION
-from ...extensions.lark.cli_resolution import (
-    LarkCliUnavailableError,
-    build_lark_command_runner,
-    resolve_lark_cli,
-)
-from ...extensions.lark.miaoda_report import deliver_periodic_report_to_miaoda
 from ...extensions.runtime import (
-    default_extension_state_file,
     execute_extension_runtime_binding,
-    resolve_extension_activation,
 )
 from .core import build_periodic_report_run
 from .extension_envelope import build_openviking_archive_execution_envelope
@@ -35,6 +26,11 @@ PrintPayload = Callable[
 ]
 FormatSelector = Callable[..., str]
 AddFormat = Callable[[argparse.ArgumentParser], None]
+ProviderCommandRegistrar = Callable[
+    [argparse._SubParsersAction, AddFormat],
+    None,
+]
+ProviderCommandHandler = Callable[..., int | None]
 
 
 def _load_json_object(path_text: str) -> dict[str, Any]:
@@ -50,6 +46,8 @@ def _load_json_object(path_text: str) -> dict[str, Any]:
 def register_periodic_report_commands(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     add_subcommand_format: AddFormat,
+    *,
+    provider_command_registrars: Sequence[ProviderCommandRegistrar] = (),
 ) -> None:
     parser = subparsers.add_parser(
         "periodic-report",
@@ -121,28 +119,8 @@ def register_periodic_report_commands(
         help="Environment variable containing the API key; never pass the key itself.",
     )
     archive.add_argument("--execute", action="store_true")
-    miaoda = commands.add_parser(
-        "publish-miaoda",
-        help=(
-            "Preview or execute one typed hosted Miaoda delivery intent with "
-            "exact app and URL readback."
-        ),
-    )
-    add_subcommand_format(miaoda)
-    miaoda.add_argument(
-        "--request-json",
-        required=True,
-        help="Path to periodic_report_miaoda_delivery_request_v0 JSON.",
-    )
-    miaoda.add_argument(
-        "--lark-cli-bin",
-        help="Optional explicit lark-cli executable; credentials remain in lark-cli.",
-    )
-    miaoda.add_argument(
-        "--lark-profile",
-        help="Optional lark-cli auth profile name; never an inline credential.",
-    )
-    miaoda.add_argument("--execute", action="store_true")
+    for register_provider_commands in provider_command_registrars:
+        register_provider_commands(commands, add_subcommand_format)
 
 
 def _archive_openviking(
@@ -290,39 +268,21 @@ def handle_periodic_report_command(
     runtime_root_arg: str | None,
     output_format: FormatSelector,
     print_payload: PrintPayload,
+    provider_command_handlers: Sequence[ProviderCommandHandler] = (),
 ) -> int | None:
     if args.command != "periodic-report":
         return None
+    for handle_provider_command in provider_command_handlers:
+        result = handle_provider_command(
+            args,
+            runtime_root_arg=runtime_root_arg,
+            output_format=output_format,
+            print_payload=print_payload,
+        )
+        if result is not None:
+            return result
     try:
-        if args.periodic_report_command == "publish-miaoda":
-            extension_activation = resolve_extension_activation(
-                LARK_EXTENSION_ID,
-                state_file=default_extension_state_file(runtime_root_arg),
-                required_permissions=(LARK_MIAODA_HTML_PERMISSION,),
-            )
-            cli_bin = args.lark_cli_bin or "lark-cli"
-            runner = None
-            if args.execute:
-                resolution = resolve_lark_cli(explicit=args.lark_cli_bin)
-                if not resolution.available or not resolution.command:
-                    raise LarkCliUnavailableError(
-                        resolution.error_code or "lark_cli_not_installed"
-                    )
-                cli_bin = resolution.command
-                runner = build_lark_command_runner(resolution)
-            call_args: dict[str, Any] = {
-                "extension_activation": extension_activation,
-                "execute": bool(args.execute),
-                "cli_bin": cli_bin,
-                "lark_profile": args.lark_profile,
-            }
-            if runner is not None:
-                call_args["runner"] = runner
-            payload = deliver_periodic_report_to_miaoda(
-                _load_json_object(args.request_json),
-                **call_args,
-            )
-        elif args.periodic_report_command == "archive-openviking":
+        if args.periodic_report_command == "archive-openviking":
             payload = _archive_openviking(
                 _load_json_object(args.request_json),
                 args,

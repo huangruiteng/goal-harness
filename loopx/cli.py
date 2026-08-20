@@ -153,6 +153,10 @@ from .capabilities.project_skill_delivery.cli import (
     handle_project_skill_command,
     register_project_skill_commands,
 )
+from .extensions.lark.periodic_report_cli import (
+    handle_lark_periodic_report_command,
+    register_lark_periodic_report_commands,
+)
 from .help_surface import (
     build_command_reference_payload,
     render_command_reference_markdown,
@@ -265,7 +269,11 @@ def build_parser() -> LoopXArgumentParser:
 
     register_review_batch_commands(sub, add_subcommand_format)
 
-    register_periodic_report_commands(sub, add_subcommand_format)
+    register_periodic_report_commands(
+        sub,
+        add_subcommand_format,
+        provider_command_registrars=(register_lark_periodic_report_commands,),
+    )
 
     register_semantic_preference_commands(sub, add_subcommand_format)
 
@@ -665,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_root_arg=args.runtime_root,
         output_format=output_format,
         print_payload=print_payload,
+        provider_command_handlers=(handle_lark_periodic_report_command,),
     )
     if periodic_report_result is not None:
         return periodic_report_result
