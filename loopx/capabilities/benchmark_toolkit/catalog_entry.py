@@ -133,17 +133,45 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     },
     "post_run_case_analysis": {
         "benchmark_start_hint": (
-            "When starting a benchmark, add one continuous_monitor todo that runs "
-            "the post-run analyst brief on every material scored-case transition."
+            "When starting a benchmark, add one continuous_monitor todo that "
+            "refreshes aggregate score coverage and runs the post-run analyst brief "
+            "on every material scored-case transition, with bounded periodic reviews "
+            "while the campaign is active."
         ),
         "monitor_todo_template": {
             "task_class": "continuous_monitor",
             "action_kind": "benchmark_case_insight_monitor",
             "trigger": "material_scored_case_transition",
+            "active_campaign_review": "bounded_periodic",
             "text": (
-                "On each material scored-case transition, read the complete private "
-                "evaluation evidence, write one benchmark_case_insight_v0, and report "
-                "only new reusable insight."
+                "On each material scored-case transition and bounded active-campaign "
+                "review, refresh the public-safe aggregate score and coverage summary, "
+                "report material changes to the user, and after solver termination "
+                "read the complete private evaluation evidence and write one "
+                "benchmark_case_insight_v0."
+            ),
+        },
+        "aggregate_reporting": {
+            "source": "experiment_board_public_safe_projection",
+            "report_on": [
+                "new_countable_terminal",
+                "countability_or_pairing_change",
+                "aggregate_score_or_direction_change",
+                "new_reusable_case_insight",
+                "systematic_runner_or_treatment_fidelity_issue",
+            ],
+            "report_fields": [
+                "countable_baseline_cases",
+                "countable_treatment_cases",
+                "matched_pair_count",
+                "aggregate_primary_metric_by_arm",
+                "binary_outcome_by_arm_when_available",
+                "improved_flat_regressed_pair_counts",
+                "new_case_insights_and_next_probe",
+            ],
+            "unchanged_policy": (
+                "Do not send a repetitive user update when no score, coverage, "
+                "direction, insight, or material runner state changed."
             ),
         },
         "hint": (

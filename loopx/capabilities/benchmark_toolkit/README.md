@@ -408,10 +408,22 @@ the solving agent's evidence boundary.
 
 ## Post-run case insight monitor
 
-Benchmark startup should create one `continuous_monitor` todo. Whenever a case
-reaches a new material scored state, that monitor runs a post-run analyst brief and
-writes one private `benchmark_case_insight_v0` artifact. This monitor is part of the
-benchmark lifecycle, not an optional cleanup pass.
+Benchmark startup should create one `continuous_monitor` todo that owns both the
+campaign score update and the post-run case analysis. Whenever a case reaches a new
+material scored state, the monitor first reads the public-safe experiment-board
+projection and refreshes the countable baseline, treatment, and matched-pair totals.
+It then reports material aggregate changes to the user and, after the solver is
+terminal, runs a post-run analyst brief and writes one private
+`benchmark_case_insight_v0` artifact. A bounded periodic review while a campaign is
+active prevents a long run from silently accumulating results. This monitor is part
+of the benchmark lifecycle, not an optional cleanup pass.
+
+A material user update should include the current countable arm and pair coverage,
+aggregate primary metric by arm, binary outcomes when the benchmark exposes them,
+improved/flat/regressed pair counts, and the new causal insight or next probe. Derive
+these score fields from the experiment board or benchmark-owned scoring projection,
+not from raw private evidence. Do not send a repetitive update when no score,
+coverage, direction, insight, or material runner state changed.
 
 Use this analyst hint:
 

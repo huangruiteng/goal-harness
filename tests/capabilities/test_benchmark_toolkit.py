@@ -120,12 +120,34 @@ def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:
         "task_class": "continuous_monitor",
         "action_kind": "benchmark_case_insight_monitor",
         "trigger": "material_scored_case_transition",
+        "active_campaign_review": "bounded_periodic",
         "text": (
-            "On each material scored-case transition, read the complete private "
-            "evaluation evidence, write one benchmark_case_insight_v0, and report "
-            "only new reusable insight."
+            "On each material scored-case transition and bounded active-campaign "
+            "review, refresh the public-safe aggregate score and coverage summary, "
+            "report material changes to the user, and after solver termination "
+            "read the complete private evaluation evidence and write one "
+            "benchmark_case_insight_v0."
         ),
     }
+    reporting = analysis["aggregate_reporting"]
+    assert reporting["source"] == "experiment_board_public_safe_projection"
+    assert reporting["report_on"] == [
+        "new_countable_terminal",
+        "countability_or_pairing_change",
+        "aggregate_score_or_direction_change",
+        "new_reusable_case_insight",
+        "systematic_runner_or_treatment_fidelity_issue",
+    ]
+    assert reporting["report_fields"] == [
+        "countable_baseline_cases",
+        "countable_treatment_cases",
+        "matched_pair_count",
+        "aggregate_primary_metric_by_arm",
+        "binary_outcome_by_arm_when_available",
+        "improved_flat_regressed_pair_counts",
+        "new_case_insights_and_next_probe",
+    ]
+    assert "Do not send a repetitive" in reporting["unchanged_policy"]
     hint = analysis["hint"]
     for evidence_name in (
         "real trajectory",
