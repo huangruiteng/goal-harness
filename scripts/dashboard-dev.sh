@@ -100,6 +100,20 @@ python_version_ok() {
   "$1" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' 2>/dev/null
 }
 
+select_python_candidate() {
+  local requested="$1"
+  local resolved=""
+  if [ -x "${requested}" ]; then
+    resolved="${requested}"
+  elif ! resolved="$(command -v "${requested}" 2>/dev/null)"; then
+    return 1
+  fi
+  if ! python_version_ok "${resolved}"; then
+    return 1
+  fi
+  PYTHON_BIN="${resolved}"
+}
+
 select_python_runtime() {
   local candidate=""
   local configured_python=""
@@ -113,10 +127,8 @@ select_python_runtime() {
   fi
 
   if [ -n "${configured_python}" ]; then
-    if { [ -x "${configured_python}" ] || command -v "${configured_python}" >/dev/null 2>&1; } \
-      && python_version_ok "${configured_python}"; then
-      echo "Using LoopX Python: ${configured_python}"
-      PYTHON_BIN="${configured_python}"
+    if select_python_candidate "${configured_python}"; then
+      echo "Using LoopX Python: ${PYTHON_BIN}"
       return 0
     fi
     if [ "${authoritative}" -eq 1 ]; then
@@ -127,9 +139,7 @@ select_python_runtime() {
   fi
 
   for candidate in python3.13 python3.12 python3.11 python3; do
-    if command -v "${candidate}" >/dev/null 2>&1 \
-      && python_version_ok "$(command -v "${candidate}")"; then
-      PYTHON_BIN="$(command -v "${candidate}")"
+    if select_python_candidate "${candidate}"; then
       return 0
     fi
   done
@@ -144,9 +154,8 @@ select_python_runtime() {
     /usr/local/bin/python3.13 \
     /usr/local/bin/python3.12 \
     /usr/local/bin/python3.11; do
-    if [ -x "${candidate}" ] && python_version_ok "${candidate}"; then
-      echo "Using Python from ${candidate}"
-      PYTHON_BIN="${candidate}"
+    if select_python_candidate "${candidate}"; then
+      echo "Using Python from ${PYTHON_BIN}"
       return 0
     fi
   done

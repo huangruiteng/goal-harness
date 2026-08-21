@@ -430,6 +430,43 @@ def test_dashboard_launcher_uses_installer_recorded_python(
     assert "recorded:-m loopx.cli chat" in commands
 
 
+def test_dashboard_launcher_ignores_stale_recorded_python(
+    tmp_path: Path,
+) -> None:
+    release_root, dashboard_script, fake_bin = _prepare_dashboard_runtime_fixture(
+        tmp_path
+    )
+    discovered_python = fake_bin / "python3.13"
+
+    command_log = tmp_path / "commands.log"
+    _write_logging_python_stub(discovered_python, label="discovered")
+    (release_root / ".loopx-python").write_text(
+        f"{tmp_path / 'missing-python'}\n",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        ["bash", str(dashboard_script)],
+        cwd=release_root,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "LOOPX_COMMAND_LOG": str(command_log),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Ignoring non-functional Python recorded in .loopx-python" in (
+        completed.stderr
+    )
+    commands = command_log.read_text(encoding="utf-8")
+    assert "discovered:-m loopx.cli serve-status" in commands
+    assert "discovered:-m loopx.cli chat" in commands
+
+
 def test_dashboard_launcher_discovers_agent_bins_outside_restricted_path(
     tmp_path: Path,
 ) -> None:
