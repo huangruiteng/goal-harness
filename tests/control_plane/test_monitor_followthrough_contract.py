@@ -407,6 +407,112 @@ def test_turn_scoped_monitor_poll_preserves_receipt_todo_after_capability_reentr
     assert admitted["todo_id"] in conflict["reason"]
 
 
+def test_same_turn_should_run_settles_polled_monitor_before_successor_reselection(
+    tmp_path: Path,
+) -> None:
+    registry, runtime, _state = _write_fixture(tmp_path)
+    admitted = _add_monitor(
+        registry,
+        text="[P1] Poll the admitted public release target.",
+        target_key="public-release:receipt-settlement",
+        next_due_at="2000-01-01T00:00:00+00:00",
+    )
+    turn_id = "2026-08-21T09:48:02.405Z"
+    guard_args = (
+        "quota",
+        "should-run",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--runtime-profile",
+        "generic_cli",
+        "--turn-instance-id",
+        turn_id,
+        "--available-capability",
+        "network",
+        "--available-capability",
+        "external_evidence_poll",
+    )
+
+    guard = run_json_cli(
+        *guard_args,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert guard["selected_todo"]["todo_id"] == admitted["todo_id"]
+
+    poll = run_json_cli(
+        "quota",
+        "monitor-poll",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--runtime-profile",
+        "generic_cli",
+        "--turn-instance-id",
+        turn_id,
+        "--available-capability",
+        "network",
+        "--available-capability",
+        "external_evidence_poll",
+        "--todo-id",
+        admitted["todo_id"],
+        "--target-key",
+        "public-release:receipt-settlement",
+        "--result-hash",
+        "merged-receipt-settlement",
+        "--material-change",
+        "--next-agent-todo",
+        "Validate the exact merged release head.",
+        "--next-action-kind",
+        "validate_release_head",
+        "--next-task-repository",
+        "git:github.com/huangruiteng/loopx",
+        "--next-required-capability",
+        "network",
+        "--next-continuation-policy",
+        "same_agent_non_delivery",
+        "--next-target-key",
+        "release-head:receipt-settlement",
+        "--next-claimed-by",
+        AGENT_ID,
+        "--execute",
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    successor_id = poll["successor_todo_ids"][0]
+    assert poll["after"]["selected_todo"]["todo_id"] == admitted["todo_id"]
+
+    replay = run_json_cli(
+        *guard_args,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert replay["selected_todo"]["todo_id"] == admitted["todo_id"]
+    assert replay["selected_todo"]["selection_binding"] == "heartbeat_receipt"
+    assert replay["agent_lane_next_action"]["receipt_bound_monitor_due"] is False
+    assert replay["work_lane_contract"]["obligation"] == (
+        "settle_receipt_bound_monitor"
+    )
+    assert replay["work_lane_contract"]["selected_todo_id"] == admitted["todo_id"]
+    assert replay["work_lane_contract"]["deferred_work_lane"]["lane"] == (
+        "advancement_task"
+    )
+    assert "do not poll again" in replay["work_lane_contract"]["action"]
+    assert replay["heartbeat_receipt"]["status"] == "replayed"
+
+    next_turn_args = list(guard_args)
+    next_turn_args[next_turn_args.index(turn_id)] = "2026-08-21T09:51:02.405Z"
+    next_turn = run_json_cli(
+        *next_turn_args,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert next_turn["selected_todo"]["todo_id"] == successor_id
+
+
 def test_turn_scoped_monitor_poll_requires_committed_receipt(tmp_path: Path) -> None:
     registry, runtime, _state = _write_fixture(tmp_path)
     monitor = _add_monitor(
