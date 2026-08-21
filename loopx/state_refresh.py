@@ -72,7 +72,10 @@ from .control_plane.goals.vision_checkpoint import (
 from .control_plane.goals.goal_frontier import latest_agent_vision_from_runs
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
-from .state_projection import state_projection_gap_warning
+from .state_projection import (
+    active_state_next_action_entries,
+    state_projection_gap_warning,
+)
 from .control_plane.todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,
@@ -479,7 +482,7 @@ def build_state_refresh_record(
     settlement_identity: SettlementIdentity | None = None,
 ) -> dict[str, Any]:
     frontmatter = parse_frontmatter(state_text)
-    next_action = extract_section_lines(state_text, "Next Action")
+    next_action = active_state_next_action_entries(state_text, limit=8)
     recent_feedback = extract_section_lines(state_text, "Recent User Feedback", limit=5)
     progress = extract_section_lines(state_text, "Progress Ledger", limit=5)
     digest = hashlib.sha256(state_text.encode("utf-8")).hexdigest()[:16]

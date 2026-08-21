@@ -27,7 +27,6 @@ from .control_plane.todos.contract import (
     build_todo_id,
     format_todo_metadata_line,
     metadata_line_for_todo_block,
-    merge_todo_id_lists,
     normalize_required_capabilities,
     normalize_required_write_scopes,
     normalize_explore_result_node_refs,
@@ -86,8 +85,10 @@ from .control_plane.todos.event_writeback import (
 from .control_plane.todos.line_update import (
     apply_todo_update_to_lines,
     link_generated_successor_todo_ids,
+    link_superseding_todo_id,
     upsert_todo_metadata,
 )
+from .control_plane.todos.next_action_runtime import settle_completed_todo_next_action
 from .control_plane.todos.list_projection import (
     AGENT_LANE_OVERLAY_FULL_DETAIL_COLD_PATH,
     EXPLICIT_LIMIT_OVERLAY_FULL_DETAIL_COLD_PATH,
@@ -1974,11 +1975,18 @@ def complete_goal_todo(
             role=role,
             successor_todo_ids=generated_successor_todo_ids,
         )
+        next_action_changed = update_result.get("role") == "agent" and (
+            settle_completed_todo_next_action(
+                lines,
+                completed_todo_id=str(update_result.get("todo_id") or todo_id),
+            )
+        )
         next_changed = any(item.get("added") or item.get("metadata_updated") for item in next_results)
         changed = bool(
             update_result["changed"]
             or next_changed
             or successor_metadata_updated
+            or next_action_changed
             or (unblock_resume or {}).get("changed")
             or (decision_scope_resolution or {}).get("changed")
         )
@@ -2181,37 +2189,28 @@ def supersede_goal_todo(
                     updated_at=updated_at,
                 )
             )
-        superseded_by = next((item.get("todo_id") for item in next_results if item.get("todo_id")), None)
         generated_successor_todo_ids = [
             todo_id
             for todo_id in normalize_todo_id_list([item.get("todo_id") for item in next_results])
         ]
-        if superseded_by:
-            block_match = find_todo_block(lines, todo_id=str(update_result["todo_id"]), role=role)
-            if block_match:
-                _resolved_role, _section, _start, _end, block = block_match
-                update_result["metadata_updated"] = upsert_todo_metadata(
-                    lines,
-                    block,
-                    metadata_line_for_todo_block(
-                        block,
-                        {
-                            "superseded_by": superseded_by,
-                            "successor_todo_ids": merge_todo_id_lists(
-                                update_result.get("successor_todo_ids"),
-                                generated_successor_todo_ids,
-                            ),
-                        },
-                    ),
-                ) or update_result["metadata_updated"]
-                update_result["superseded_by"] = superseded_by
-                update_result["successor_todo_ids"] = merge_todo_id_lists(
-                    update_result.get("successor_todo_ids"),
-                    generated_successor_todo_ids,
-                )
-                update_result["changed"] = True
+        link_superseding_todo_id(
+            lines,
+            update_result=update_result,
+            role=role,
+            successor_todo_ids=generated_successor_todo_ids,
+        )
+        next_action_changed = current_role == "agent" and (
+            settle_completed_todo_next_action(
+                lines,
+                completed_todo_id=str(update_result.get("todo_id") or todo_id),
+            )
+        )
         next_changed = any(item.get("added") or item.get("metadata_updated") for item in next_results)
-        changed = bool(update_result["changed"] or next_changed)
+        changed = bool(
+            update_result["changed"]
+            or next_changed
+            or next_action_changed
+        )
         new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
         if changed:
             new_text = replace_updated_at(new_text, updated_at)

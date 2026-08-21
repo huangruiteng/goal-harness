@@ -394,6 +394,8 @@ def _section_entries(lines: list[str]) -> list[str]:
     entries: list[str] = []
     current: list[str] = []
     for line in lines:
+        if line.strip().startswith("<!--"):
+            continue
         bullet = BULLET_PATTERN.match(line)
         if bullet:
             if current:

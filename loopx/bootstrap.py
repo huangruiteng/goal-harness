@@ -7,14 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from .control_plane.runtime.time import now_local_iso
-from .control_plane.todos.handoff_mode import (
-    HANDOFF_MODE_LEGACY,
-    goal_handoff_mode,
-)
 from .control_plane.todos.active_state_editing import (
     TODO_SECTION_HEADINGS,
     insertion_anchor,
     section_bounds,
+)
+from .control_plane.todos.next_action_runtime import bind_next_action_to_todo
+from .control_plane.todos.handoff_mode import (
+    HANDOFF_MODE_LEGACY,
+    goal_handoff_mode,
 )
 from .execution_profile import (
     build_execution_profile,
@@ -376,7 +377,7 @@ def apply_onboarding_todos_to_state(
             else None
         )
         if action:
-            add_todo_to_lines(
+            added = add_todo_to_lines(
                 lines,
                 role="agent",
                 text=action["text"],
@@ -384,6 +385,7 @@ def apply_onboarding_todos_to_state(
                 action_kind=action["action_kind"],
                 updated_at=updated_at,
             )
+            bind_next_action_to_todo(lines, todo_id=str(added["todo_id"]))
         return "\n".join(lines) + "\n"
     lines = text.splitlines()
     if accept_onboarding_agent_todos:

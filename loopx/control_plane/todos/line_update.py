@@ -112,6 +112,49 @@ def link_generated_successor_todo_ids(
     return metadata_updated
 
 
+def link_superseding_todo_id(
+    lines: list[str],
+    *,
+    update_result: dict[str, Any],
+    role: str | None,
+    successor_todo_ids: list[str],
+) -> bool:
+    """Persist supersede lineage after generated successors are materialized."""
+
+    if not successor_todo_ids:
+        return False
+    block_match = find_todo_block(
+        lines,
+        todo_id=str(update_result.get("todo_id") or ""),
+        role=role,
+    )
+    if not block_match:
+        return False
+    _resolved_role, _section, _start, _end, block = block_match
+    merged_successor_ids = merge_todo_id_lists(
+        update_result.get("successor_todo_ids"),
+        successor_todo_ids,
+    )
+    metadata_updated = upsert_todo_metadata(
+        lines,
+        block,
+        metadata_line_for_todo_block(
+            block,
+            {
+                "superseded_by": successor_todo_ids[0],
+                "successor_todo_ids": merged_successor_ids,
+            },
+        ),
+    )
+    update_result["metadata_updated"] = bool(
+        update_result.get("metadata_updated") or metadata_updated
+    )
+    update_result["superseded_by"] = successor_todo_ids[0]
+    update_result["successor_todo_ids"] = merged_successor_ids
+    update_result["changed"] = True
+    return metadata_updated
+
+
 def apply_todo_update_to_lines(
     lines: list[str],
     *,

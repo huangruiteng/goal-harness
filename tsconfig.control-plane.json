@@ -16,9 +16,11 @@
     "loopx/control_plane/effect_runtime_handlers.ts",
     "loopx/control_plane/effect_runtime_io.ts",
     "loopx/control_plane/effect_runtime_server.ts",
+    "loopx/control_plane/todos/next_action.ts",
     "loopx/control_plane/turn_driver/turn_journal.ts",
     "loopx/control_plane/turn_driver/turn_journal_effects.ts",
     "tests/control_plane_ts/effect_program.test.ts",
+    "tests/control_plane_ts/todo_next_action.test.ts",
     "tests/control_plane_ts/turn_journal.test.ts",
     "tests/control_plane_ts/turn_journal_effects.test.ts"
   ]
