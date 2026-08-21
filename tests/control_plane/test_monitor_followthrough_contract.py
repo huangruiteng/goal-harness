@@ -17,6 +17,9 @@ from loopx.control_plane.testing.canary_harness import (
     write_fixture_registry,
 )
 from loopx.control_plane.todos.contract import resolve_next_user_task_class
+from loopx.control_plane.work_items.work_lane import (
+    preserve_heartbeat_receipt_bound_work_lane,
+)
 from loopx.quota import build_quota_should_run, record_quota_monitor_poll
 from loopx.status import collect_status
 from loopx.todos import add_goal_todo, list_goal_todos, update_goal_todo
@@ -332,6 +335,23 @@ def test_turn_scoped_monitor_poll_preserves_receipt_todo_after_capability_reentr
     assert guard["heartbeat_receipt"]["settlement_identity"]["todo_id"] == admitted[
         "todo_id"
     ]
+    guard_replay = run_json_cli(
+        "quota",
+        "should-run",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--runtime-profile",
+        "generic_cli",
+        "--turn-instance-id",
+        turn_id,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert guard_replay["agent_lane_next_action"][
+        "receipt_bound_monitor_phase"
+    ] == "poll_due"
 
     command = (
         "quota",
@@ -492,7 +512,9 @@ def test_same_turn_should_run_settles_polled_monitor_before_successor_reselectio
     )
     assert replay["selected_todo"]["todo_id"] == admitted["todo_id"]
     assert replay["selected_todo"]["selection_binding"] == "heartbeat_receipt"
-    assert replay["agent_lane_next_action"]["receipt_bound_monitor_due"] is False
+    assert replay["agent_lane_next_action"]["receipt_bound_monitor_phase"] == (
+        "settlement_pending"
+    )
     assert replay["work_lane_contract"]["obligation"] == (
         "settle_receipt_bound_monitor"
     )
@@ -511,6 +533,25 @@ def test_same_turn_should_run_settles_polled_monitor_before_successor_reselectio
         runtime_root=runtime,
     )
     assert next_turn["selected_todo"]["todo_id"] == successor_id
+
+
+def test_receipt_bound_monitor_replay_requires_an_explicit_phase() -> None:
+    with pytest.raises(
+        ValueError,
+        match="receipt-bound monitor selection requires an explicit monitor phase",
+    ):
+        preserve_heartbeat_receipt_bound_work_lane(
+            {
+                "schema_version": "work_lane_contract_v1",
+                "lane": "continuous_monitor",
+                "must_attempt_work": True,
+            },
+            selected_todo={
+                "todo_id": "todo_monitor_without_phase",
+                "task_class": "continuous_monitor",
+                "selection_binding": "heartbeat_receipt",
+            },
+        )
 
 
 def test_turn_scoped_monitor_poll_requires_committed_receipt(tmp_path: Path) -> None:

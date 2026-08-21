@@ -13,6 +13,7 @@ from ..todos.projection import todo_item_is_due_monitor
 from ..todos.summary_item import compact_todo_summary_item
 from ..work_items.primary_action import protocol_action_text
 from ..work_items.work_lane import (
+    ReceiptBoundMonitorPhase,
     work_lane_contract_is_due_monitor_attempt,
     work_lane_contract_is_lark_inbox_reply_due,
 )
@@ -88,7 +89,11 @@ def build_receipt_bound_monitor_next_action(
                 "confidence": "selected",
                 "preserves_goal_next_action": True,
                 "selection_binding": "heartbeat_receipt",
-                "receipt_bound_monitor_due": monitor_due,
+                "receipt_bound_monitor_phase": (
+                    ReceiptBoundMonitorPhase.POLL_DUE
+                    if monitor_due
+                    else ReceiptBoundMonitorPhase.SETTLEMENT_PENDING
+                ).value,
             }
         )
         if not agent_scope_item_claimed_by(item):

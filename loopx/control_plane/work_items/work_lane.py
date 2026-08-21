@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 
 from ..todos.contract import TODO_TASK_CLASS_MONITOR, normalize_todo_id
@@ -21,6 +22,15 @@ WORK_LANE_EXTERNAL_EVIDENCE_OBSERVATION_OBLIGATION = (
 )
 WORK_LANE_LARK_INBOX_REPLY_DUE_OBLIGATION = "drain_lark_inbox_reply_due"
 WORK_LANE_TODO_MONITOR_DUE_KIND = "todo_monitor_due"
+
+
+class ReceiptBoundMonitorPhase(StrEnum):
+    """Same-turn phase of a monitor selected by a heartbeat receipt."""
+
+    POLL_DUE = "poll_due"
+    SETTLEMENT_PENDING = "settlement_pending"
+
+
 WORK_LANE_TODO_ITEM_FIELDS = (
     "index",
     "text",
@@ -131,8 +141,15 @@ def preserve_heartbeat_receipt_bound_work_lane(
     if not todo_id or selected_todo.get("selection_binding") != "heartbeat_receipt":
         return contract
     if selected_todo.get("task_class") == TODO_TASK_CLASS_MONITOR:
-        monitor_due = selected_todo.get("receipt_bound_monitor_due") is not False
-        if not monitor_due:
+        try:
+            monitor_phase = ReceiptBoundMonitorPhase(
+                selected_todo.get("receipt_bound_monitor_phase")
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "receipt-bound monitor selection requires an explicit monitor phase"
+            ) from exc
+        if monitor_phase is ReceiptBoundMonitorPhase.SETTLEMENT_PENDING:
             return {
                 **contract,
                 "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
