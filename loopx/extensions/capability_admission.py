@@ -498,8 +498,8 @@ def prepare_external_capability_invocation(
 
     Read-only callers omit ``authority`` and retain the original deterministic
     invocation identity. Material adapters pass the typed settlement identity;
-    this keeps otherwise identical operations in separate governed Turns from
-    collapsing onto one provider idempotency key.
+    its effect id exclusively owns the invocation identity so one governed Turn
+    cannot dispatch multiple distinct external writes under one quota receipt.
     """
 
     binding = resolve_external_capability_binding(
@@ -539,14 +539,21 @@ def prepare_external_capability_invocation(
         if authority is not None
         else None
     )
-    invocation_seed = {
-        "goal_binding_digest": goal["binding_digest"],
-        "capability_id": capability_id,
-        "operation": operation,
-        "provider_input_digest": _canonical_digest(provided),
-    }
-    if normalized_authority is not None:
-        invocation_seed["authority_digest"] = _canonical_digest(normalized_authority)
+    invocation_seed = (
+        {
+            "settlement_effect_id": _token(
+                normalized_authority.get("effect_id"),
+                "external capability authority effect_id",
+            )
+        }
+        if normalized_authority is not None
+        else {
+            "goal_binding_digest": goal["binding_digest"],
+            "capability_id": capability_id,
+            "operation": operation,
+            "provider_input_digest": _canonical_digest(provided),
+        }
+    )
     invocation_id = (
         "capability-" + _canonical_digest(invocation_seed).split(":", 1)[1][:24]
     )

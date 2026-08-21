@@ -320,6 +320,65 @@ def test_material_start_rejects_an_unrelated_selected_todo_action(
     assert not (tmp_path / "provider-calls.txt").exists()
 
 
+def test_material_start_requires_a_runnable_admission(tmp_path: Path) -> None:
+    arguments = _start_arguments(tmp_path)
+    arguments["admission"] = {
+        **arguments["admission"],
+        "should_run": False,
+    }
+
+    with pytest.raises(ValueError, match="requires should_run=true"):
+        start_governed_external_capability(**arguments, execute=True)
+
+    assert not (tmp_path / "provider-calls.txt").exists()
+
+
+def test_material_start_recovers_an_existing_journal_without_new_run_authority(
+    tmp_path: Path,
+) -> None:
+    arguments = _start_arguments(tmp_path)
+    started = start_governed_external_capability(**arguments, execute=True)
+    arguments["admission"] = {
+        **arguments["admission"],
+        "should_run": False,
+    }
+    arguments["admission"].pop("selected_todo")
+
+    replay = start_governed_external_capability(**arguments, execute=True)
+
+    assert replay["invocation_id"] == started["invocation_id"]
+    assert (tmp_path / "provider-calls.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == ["start"]
+
+
+def test_material_turn_rejects_a_second_distinct_invocation(tmp_path: Path) -> None:
+    arguments = _start_arguments(tmp_path)
+    first = start_governed_external_capability(**arguments, execute=True)
+    second_arguments = {
+        **arguments,
+        "provider_input": {
+            "context_refs": [
+                {
+                    "kind": "synthetic-requirement",
+                    "ref": "REQ-2",
+                    "digest": "sha256:synthetic-context-2",
+                }
+            ],
+            "input": {"requirement_key": "REQ-2"},
+        },
+    }
+    second_preview = start_governed_external_capability(**second_arguments)
+
+    assert second_preview["invocation_id"] == first["invocation_id"]
+    assert second_preview["request_digest"] != first["request_digest"]
+    with pytest.raises(ValueError, match="replay does not match"):
+        start_governed_external_capability(**second_arguments, execute=True)
+    assert (tmp_path / "provider-calls.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == ["start"]
+
+
 def test_material_settlement_fails_closed_without_effect_receipt_writeback(
     tmp_path: Path,
 ) -> None:
@@ -353,6 +412,26 @@ def test_material_settlement_fails_closed_without_effect_receipt_writeback(
     assert failed["ok"] is False
     assert failed["status"] == "settlement_failed"
     assert calls == ["writeback"]
+
+
+def test_material_reconcile_rejects_tampered_journal_request(tmp_path: Path) -> None:
+    arguments = _start_arguments(tmp_path)
+    started = start_governed_external_capability(**arguments, execute=True)
+    journal_path = Path(arguments["run_dir"]) / f"{started['invocation_id']}.json"
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal["request"]["input"]["requirement_key"] = "tampered"
+    journal_path.write_text(
+        json.dumps(journal, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="request digest is invalid"):
+        reconcile_governed_external_capability(
+            run_dir=arguments["run_dir"],
+            invocation_id=str(started["invocation_id"]),
+            writeback=lambda _context: {},
+            spend=lambda _context: {},
+        )
 
 
 def test_material_reconcile_resumes_at_spend_without_repeating_writeback(

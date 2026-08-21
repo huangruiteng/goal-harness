@@ -15,7 +15,7 @@ const authority = {
   effect_class: "external_write",
 } as const;
 
-function result(status: "running" | "succeeded") {
+function result(status: "running" | "succeeded" | "no_change") {
   return {
     schema_version: authority.result_schema,
     invocation_id: authority.invocation_id,
@@ -31,7 +31,7 @@ function result(status: "running" | "succeeded") {
             schema_version: "loopx_external_effect_receipt_v0",
             invocation_id: authority.invocation_id,
             idempotency_key: authority.effect_id,
-            status: "committed",
+            status: status === "no_change" ? "no_change" : "committed",
             external_ref: "synthetic-run-1",
             evidence_digest: "sha256:synthetic-evidence",
           },
@@ -120,6 +120,32 @@ test("terminal effect receipts bind the exact settlement effect", () => {
   assert.throws(
     () => validateGovernedCapabilityResult({ ...authority, value: invalid }),
     /idempotency_key is invalid/,
+  );
+});
+
+test("terminal result and effect receipt cannot contradict each other", () => {
+  const falseCommit = result("no_change");
+  assert.ok(falseCommit.effect_receipt);
+  falseCommit.effect_receipt.status = "committed";
+  assert.throws(
+    () => validateGovernedCapabilityResult({ ...authority, value: falseCommit }),
+    /requires a no-change effect receipt/,
+  );
+
+  const falseNoChange = result("succeeded");
+  assert.ok(falseNoChange.effect_receipt);
+  falseNoChange.effect_receipt.status = "no_change";
+  assert.throws(
+    () => validateGovernedCapabilityResult({ ...authority, value: falseNoChange }),
+    /requires a committed effect receipt/,
+  );
+
+  const mutatedNoChange = result("no_change");
+  mutatedNoChange.domain_state_mutations.push({ kind: "contradictory-write" });
+  assert.throws(
+    () =>
+      validateGovernedCapabilityResult({ ...authority, value: mutatedNoChange }),
+    /must leave domain_state_mutations empty/,
   );
 });
 

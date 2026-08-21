@@ -68,7 +68,12 @@ def _mapping(value: object, label: str) -> dict[str, Any]:
 
 
 def _journal_path(run_dir: str | Path, invocation_id: str) -> Path:
-    if not invocation_id.startswith("capability-") or not invocation_id[11:].isalnum():
+    suffix = invocation_id.removeprefix("capability-")
+    if (
+        not invocation_id.startswith("capability-")
+        or len(suffix) != 24
+        or any(character not in "0123456789abcdef" for character in suffix)
+    ):
         raise ValueError("governed capability invocation_id is invalid")
     return Path(run_dir).expanduser() / f"{invocation_id}.json"
 
@@ -87,6 +92,8 @@ def _read_journal(path: Path) -> dict[str, Any]:
         or value.get("schema_version") != GOVERNED_CAPABILITY_RUN_SCHEMA_VERSION
     ):
         raise ValueError("governed capability invocation journal is invalid")
+    if os.name != "nt" and path.stat().st_mode & 0o077:
+        raise ValueError("governed capability invocation journal must use mode 0600")
     return value
 
 
@@ -116,8 +123,11 @@ def _require_admission(
     admission: Mapping[str, Any],
     *,
     expected_identity: Mapping[str, Any],
-    todo_contract: Mapping[str, Any],
+    require_should_run: bool,
+    todo_contract: Mapping[str, Any] | None,
 ) -> None:
+    if require_should_run and admission.get("should_run") is not True:
+        raise ValueError("governed capability admission requires should_run=true")
     guard = classify_host_guard_snapshot(
         json.dumps(dict(admission), ensure_ascii=False, sort_keys=True)
     )
@@ -134,14 +144,15 @@ def _require_admission(
         raise ValueError(
             "quota guard settlement identity does not match the invocation"
         )
-    effect_runtime_result(
-        "governed_capability.validate_admission",
-        {
-            "admission": dict(admission),
-            "todo_id": expected["todo_id"],
-            "todo_contract": dict(todo_contract),
-        },
-    )
+    if todo_contract is not None:
+        effect_runtime_result(
+            "governed_capability.validate_admission",
+            {
+                "admission": dict(admission),
+                "todo_id": expected["todo_id"],
+                "todo_contract": dict(todo_contract),
+            },
+        )
 
 
 def _validated_governed_capability_result(
@@ -187,6 +198,122 @@ def validate_governed_capability_result(
         operation=operation,
     )
     return result
+
+
+def _validate_journal(
+    journal: Mapping[str, Any],
+    *,
+    invocation_id: str,
+) -> None:
+    if journal.get("invocation_id") != invocation_id:
+        raise ValueError("governed capability journal invocation identity is invalid")
+    transaction_plan = _mapping(journal.get("transaction_plan"), "transaction plan")
+    identity = _settlement_identity(transaction_plan)
+    expected_top_level = {
+        key: identity.get(key)
+        for key in ("goal_id", "agent_id", "todo_id", "turn_instance_id", "effect_id")
+    }
+    if any(journal.get(key) != value for key, value in expected_top_level.items()):
+        raise ValueError("governed capability journal settlement identity is invalid")
+
+    request = _mapping(journal.get("request"), "provider request")
+    if request.get("invocation_id") != invocation_id:
+        raise ValueError("governed capability journal request identity is invalid")
+    if request.get("authority") != identity:
+        raise ValueError("governed capability journal request authority is invalid")
+    lifecycle = _mapping(request.get("lifecycle"), "provider request lifecycle")
+    if set(lifecycle) != {"phase", "idempotency_key"} or not (
+        lifecycle.get("phase") == "start"
+        and lifecycle.get("idempotency_key") == identity.get("effect_id")
+    ):
+        raise ValueError("governed capability journal start lifecycle is invalid")
+    validate_public_safe_value(request, path="provider_request")
+    if journal.get("request_digest") != _canonical_digest(request):
+        raise ValueError("governed capability journal request digest is invalid")
+
+    operation_profile = _mapping(journal.get("operation_profile"), "operation profile")
+    if operation_profile.get("effect_class") != "external_write":
+        raise ValueError("governed capability journal effect class is invalid")
+    _mapping(journal.get("provider_binding"), "provider binding")
+    status = str(journal.get("status") or "")
+    provider_result = journal.get("provider_result")
+    if provider_result is None:
+        if status != "starting":
+            raise ValueError("governed capability journal provider state is invalid")
+        return
+    result = _mapping(provider_result, "external capability result")
+    validated, provider_status = _validated_governed_capability_result(
+        result,
+        invocation_id=invocation_id,
+        effect_id=str(identity["effect_id"]),
+        operation=operation_profile,
+    )
+    if validated != result:
+        raise ValueError("governed capability journal provider result is invalid")
+    allowed_statuses = (
+        {"running"}
+        if provider_status == "running"
+        else {"ready_to_settle", "settlement_failed", "committed"}
+    )
+    if status not in allowed_statuses:
+        raise ValueError("governed capability journal status is invalid")
+    if provider_status == "running":
+        if any(
+            journal.get(field) is not None
+            for field in ("writeback", "quota_spend", "settlement_result")
+        ):
+            raise ValueError("running governed capability has settlement receipts")
+        return
+
+    effect_receipt = _mapping(result.get("effect_receipt"), "external effect receipt")
+    effect_receipt_digest = _canonical_digest(effect_receipt)
+    for field, require_receipt_digest in (
+        ("writeback", True),
+        ("quota_spend", False),
+    ):
+        stored = journal.get(field)
+        if stored is None:
+            continue
+        payload = _mapping(stored, f"governed capability {field}")
+        checked = effect_runtime_result(
+            "governed_capability.validate_settlement_callback",
+            {
+                "payload": payload,
+                "effect_id": identity["effect_id"],
+                "effect_receipt_digest": effect_receipt_digest,
+                "require_receipt_digest": require_receipt_digest,
+            },
+        )
+        if checked != payload:
+            raise ValueError(f"governed capability journal {field} is invalid")
+    if status == "committed":
+        for field in ("writeback", "quota_spend"):
+            receipt_payload = journal.get(field)
+            if not (
+                isinstance(receipt_payload, Mapping)
+                and receipt_payload.get("ok") is True
+                and receipt_payload.get("appended") is True
+            ):
+                raise ValueError(
+                    f"committed governed capability has no {field} receipt"
+                )
+        settlement_result = journal.get("settlement_result")
+        if not (
+            isinstance(settlement_result, Mapping)
+            and settlement_result.get("failure") is None
+        ):
+            raise ValueError(
+                "committed governed capability has no successful settlement result"
+            )
+    elif status == "settlement_failed":
+        settlement_result = journal.get("settlement_result")
+        if not (
+            isinstance(settlement_result, Mapping)
+            and isinstance(settlement_result.get("failure"), Mapping)
+        ):
+            raise ValueError(
+                "failed governed capability has no typed settlement failure"
+            )
 
 
 def _public_receipt(journal: Mapping[str, Any], *, dry_run: bool) -> dict[str, Any]:
@@ -259,9 +386,14 @@ def start_governed_external_capability(
     _require_admission(
         admission,
         expected_identity=identity,
-        todo_contract=_mapping(
-            operation_profile.get("todo_contract"),
-            "operation todo_contract",
+        require_should_run=not execute,
+        todo_contract=(
+            _mapping(
+                operation_profile.get("todo_contract"),
+                "operation todo_contract",
+            )
+            if not execute
+            else None
         ),
     )
     request = _mapping(prepared["request"], "provider request")
@@ -300,6 +432,7 @@ def start_governed_external_capability(
     with exclusive_file_lock(path, operation="start_governed_external_capability"):
         if path.exists():
             current = _read_journal(path)
+            _validate_journal(current, invocation_id=invocation_id)
             if (
                 current.get("request_digest") != request_digest
                 or current.get("effect_id") != identity["effect_id"]
@@ -309,6 +442,15 @@ def start_governed_external_capability(
                 return _public_receipt(current, dry_run=False)
             journal = current
         else:
+            _require_admission(
+                admission,
+                expected_identity=identity,
+                require_should_run=True,
+                todo_contract=_mapping(
+                    operation_profile.get("todo_contract"),
+                    "operation todo_contract",
+                ),
+            )
             _write_journal(path, journal)
         provider_result = execute_extension_runtime_binding(
             binding,
@@ -360,6 +502,7 @@ def reconcile_governed_external_capability(
     path = _journal_path(run_dir, invocation_id)
     with exclusive_file_lock(path, operation="reconcile_governed_external_capability"):
         journal = _read_journal(path)
+        _validate_journal(journal, invocation_id=invocation_id)
         if journal.get("status") == "committed":
             return _public_receipt(journal, dry_run=False)
         identity = _settlement_identity(

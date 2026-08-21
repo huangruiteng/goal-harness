@@ -336,7 +336,12 @@ journal. Exact provider revision, request digest, Goal binding, settlement
 identity, provider effect receipt, writeback receipt, and quota receipt remain
 attached to the same invocation. A crash after an external effect therefore
 replays with the same idempotency key and reconciles the receipt instead of
-starting an unrelated operation.
+starting an unrelated operation. One settlement effect id owns exactly one
+material invocation: retrying the same request replays it, while attempting a
+different operation or input under the same Turn receipt fails before provider
+dispatch. A new invocation also requires `should_run=true`; an existing journal
+may still be recovered with its exact typed receipt after the runnable decision
+has changed.
 
 Goal enablement alone never grants write authority. Creating or updating the
 binding is an explicit Goal configuration change: it uses preview/apply, but it

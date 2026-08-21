@@ -216,11 +216,34 @@ export function validateGovernedCapabilityResult(input: {
     }
     return { result, journal_status: "running" };
   }
-  result.effect_receipt = externalEffectReceipt(
+  const receipt = externalEffectReceipt(
     result.effect_receipt,
     input.invocation_id,
     input.effect_id,
   );
+  if (result.status === "no_change") {
+    if (receipt.status !== "no_change") {
+      throw new Error(
+        "no-change external capability requires a no-change effect receipt",
+      );
+    }
+    for (const field of [
+      "domain_state_mutations",
+      "domain_transition_receipts",
+      "transition_proposals",
+    ]) {
+      if ((result[field] as unknown[]).length > 0) {
+        throw new Error(
+          `no-change external capability must leave ${field} empty`,
+        );
+      }
+    }
+  } else if (receipt.status !== "committed") {
+    throw new Error(
+      "succeeded external capability requires a committed effect receipt",
+    );
+  }
+  result.effect_receipt = receipt;
   return { result, journal_status: "ready_to_settle" };
 }
 
