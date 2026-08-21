@@ -824,6 +824,7 @@ def build_quota_should_run(
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     receipt_bound_todo_id: str | None = None,
     receipt_bound_replan_obligation_id: str | None = None,
+    turn_instance_id: str | None = None,
 ) -> dict[str, Any]:
     from .control_plane.quota.should_run import (
         build_quota_should_run as _build_quota_should_run,
@@ -841,6 +842,7 @@ def build_quota_should_run(
         operator_inbox_urgency_projector=operator_inbox_urgency_projector,
         receipt_bound_todo_id=receipt_bound_todo_id,
         receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
+        turn_instance_id=turn_instance_id,
     )
 
 

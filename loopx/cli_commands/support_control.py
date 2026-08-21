@@ -133,6 +133,13 @@ def register_support_control_commands(
         help="Optional public-safe automation agent id, such as codex-main-control or codex-side-bypass.",
     )
     heartbeat_prompt_parser.add_argument(
+        "--turn-instance-id",
+        help=(
+            "Optional exact public-safe heartbeat receipt id. Requires an exact "
+            "agent id and a receipt-producing runtime profile."
+        ),
+    )
+    heartbeat_prompt_parser.add_argument(
         "--agent-scope",
         dest="agent_scopes",
         action="append",
@@ -672,6 +679,7 @@ def handle_support_control_command(
                 ),
                 visible_goal_host=args.visible_goal_host,
                 turn_granularity=turn_granularity,
+                turn_instance_id=args.turn_instance_id,
             )
         except Exception as exc:
             fallback_active_state = active_state

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Any
 
+from ...turn_identity import normalize_turn_instance_id
 from ..scheduler.execution_context import (
     ExecutionMode,
     HostSurface,
@@ -11,7 +13,10 @@ from ..scheduler.execution_context import (
     SchedulerOwner,
     SchedulerRuntimeProfile,
     resolve_scheduler_execution_context,
+    scheduler_runtime_profile_for_execution_context,
 )
+
+HEARTBEAT_PROMPT_SCHEMA_VERSION = "loopx_heartbeat_prompt_v0"
 
 
 def uses_native_goal_host_loop(
@@ -62,3 +67,38 @@ def uses_ark_managed_agent_goal_host(
         and resolution.context is not None
         and resolution.context.host_surface is HostSurface.ARK_MANAGED_AGENT
     )
+
+
+def resolve_exact_heartbeat_turn_identity(
+    *,
+    turn_instance_id: str | None,
+    agent_id: str | None,
+    runtime_profile: str | None,
+    scheduler_execution_context: dict[str, Any] | None,
+) -> tuple[str | None, str, dict[str, str]]:
+    """Validate and project an optional receipt-producing heartbeat identity."""
+
+    normalized = normalize_turn_instance_id(turn_instance_id)
+    if normalized is None:
+        return None, "", {}
+    if not agent_id:
+        raise ValueError("--turn-instance-id requires exact --agent-id identity")
+    profile = (
+        SchedulerRuntimeProfile(runtime_profile)
+        if runtime_profile is not None
+        else scheduler_runtime_profile_for_execution_context(
+            scheduler_execution_context
+        )
+    )
+    if profile not in {
+        SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
+        SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
+    }:
+        raise ValueError(
+            "--turn-instance-id requires runtime-profile generic_cli or "
+            "codex_app_heartbeat so quota guard creates a heartbeat receipt"
+        )
+    return normalized, f" --turn-instance-id {shlex.quote(normalized)}", {
+        "schema_version": HEARTBEAT_PROMPT_SCHEMA_VERSION,
+        "turn_instance_id": normalized,
+    }

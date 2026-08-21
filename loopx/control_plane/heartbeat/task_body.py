@@ -41,6 +41,25 @@ def _render_compact_policy_tail(
     return " ".join(parts)
 
 
+def bind_exact_turn_settlement_task_body(
+    task_body: str,
+    *,
+    turn_instance_id: str | None,
+) -> str:
+    if turn_instance_id is None:
+        return task_body
+    bound = task_body.replace(
+        "LOOPX_TURN=<current_time_iso>",
+        f"LOOPX_TURN={turn_instance_id}",
+    )
+    return (
+        f"{bound}\n\nFor accountable delivery, execute "
+        "`interaction_contract.cli_channel.settlement_plan.ordered_steps` "
+        "in order using its exact identity and effect id. Do not fall back "
+        "to static unbound refresh or spend commands."
+    )
+
+
 def render_heartbeat_task_body(
     *,
     goal_id: str,

@@ -126,3 +126,67 @@ def test_public_facade_still_builds_and_renders_prompts() -> None:
     assert payload["goal_id"] == "loopx-meta"
     assert payload["task_body"]
     assert render_heartbeat_prompt_markdown(payload)
+
+
+@pytest.mark.parametrize("mode", ["full", "compact", "brief", "thin"])
+def test_exact_turn_identity_is_preserved_across_heartbeat_modes(mode: str) -> None:
+    turn_id = "dsh-turn:2026-08-21T12:34:56Z"
+    payload = build_heartbeat_prompt(
+        goal_id="loopx-meta",
+        agent_id="codex-main-control",
+        runtime_profile="generic_cli",
+        turn_instance_id=turn_id,
+        **{mode: True},
+    )
+
+    assert payload["turn_instance_id"] == turn_id
+    assert payload["schema_version"] == "loopx_heartbeat_prompt_v0"
+    assert f"LOOPX_TURN={turn_id}" in payload["task_body"]
+    assert "LOOPX_TURN=<current_time_iso>" not in payload["task_body"]
+    assert '--turn-instance-id "${LOOPX_TURN:?}"' in payload["quota_guard_command"]
+    assert "settlement_plan.ordered_steps" in payload["task_body"]
+    for command_name in (
+        "expanded_prompt_command",
+        "compact_prompt_command",
+        "brief_prompt_command",
+        "thin_prompt_command",
+    ):
+        command = payload.get(command_name)
+        if command is not None:
+            assert f"--turn-instance-id {turn_id}" in command
+
+
+def test_default_heartbeat_identity_behavior_remains_time_generated() -> None:
+    payload = build_heartbeat_prompt(goal_id="loopx-meta")
+
+    assert "turn_instance_id" not in payload
+    assert "schema_version" not in payload
+    assert "LOOPX_TURN=<current_time_iso>" in payload["task_body"]
+    assert "--turn-instance-id" not in payload["thin_prompt_command"]
+
+
+@pytest.mark.parametrize("turn_id", ["", "bad id", "x" * 129])
+def test_exact_heartbeat_rejects_invalid_turn_identity(turn_id: str) -> None:
+    with pytest.raises(ValueError, match="turn_instance_id"):
+        build_heartbeat_prompt(
+            goal_id="loopx-meta",
+            agent_id="codex-main-control",
+            runtime_profile="generic_cli",
+            turn_instance_id=turn_id,
+        )
+
+
+def test_exact_heartbeat_requires_agent_and_receipt_producing_profile() -> None:
+    with pytest.raises(ValueError, match="exact --agent-id"):
+        build_heartbeat_prompt(
+            goal_id="loopx-meta",
+            runtime_profile="generic_cli",
+            turn_instance_id="turn-exact",
+        )
+    with pytest.raises(ValueError, match="requires runtime-profile generic_cli"):
+        build_heartbeat_prompt(
+            goal_id="loopx-meta",
+            agent_id="codex-main-control",
+            runtime_profile="codex_cli",
+            turn_instance_id="turn-exact",
+        )

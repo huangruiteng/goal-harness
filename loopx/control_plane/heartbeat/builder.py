@@ -38,6 +38,7 @@ from .budget import (
     build_interface_budget,
 )
 from .host import (
+    resolve_exact_heartbeat_turn_identity,
     uses_ark_managed_agent_goal_host,
     uses_native_goal_host_loop,
 )
@@ -46,6 +47,7 @@ from .rules import (
     DEFAULT_PERMISSION_RULE,
 )
 from .task_body import (
+    bind_exact_turn_settlement_task_body,
     render_ark_managed_agent_goal_task_body,
     render_brief_heartbeat_task_body,
     render_compact_heartbeat_task_body,
@@ -104,6 +106,26 @@ def _select_task_body_renderer(
     return render_heartbeat_task_body
 
 
+def _heartbeat_regeneration_commands(
+    *,
+    cli_bin: str,
+    goal_id: str,
+    active_state_arg: str,
+    agent_args: str,
+    capability_args: str,
+    scheduler_args: str,
+    turn_identity_arg: str,
+) -> tuple[str, str, str, str]:
+    suffix = (
+        f" --goal-id {goal_id}{active_state_arg}{agent_args}"
+        f"{capability_args}{scheduler_args}{turn_identity_arg}"
+    )
+    return tuple(
+        f"{cli_bin} heartbeat-prompt --{mode}{suffix}"
+        for mode in ("full", "compact", "brief", "thin")
+    )
+
+
 def build_heartbeat_prompt(
     *,
     goal_id: str,
@@ -126,6 +148,7 @@ def build_heartbeat_prompt(
     scheduler_execution_context: dict[str, Any] | None = None,
     visible_goal_host: str | None = None,
     turn_granularity: str | None = None,
+    turn_instance_id: str | None = None,
 ) -> dict[str, Any]:
     if not (full or compact or brief or thin):
         thin = True
@@ -173,6 +196,16 @@ def build_heartbeat_prompt(
     normalized_agent_id = normalize_todo_claimed_by(agent_id) if agent_id else None
     if agent_id and not normalized_agent_id:
         raise ValueError("agent_id must be a public-safe token such as codex-main-control")
+    (
+        normalized_turn_instance_id,
+        turn_identity_arg,
+        turn_identity_payload,
+    ) = resolve_exact_heartbeat_turn_identity(
+        turn_instance_id=turn_instance_id,
+        agent_id=normalized_agent_id,
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+    )
     explicit_agent_scopes = normalize_agent_scopes(agent_scopes)
     profile_agent_scopes = agent_profile_scopes(agent_profile)
     normalized_agent_scopes = explicit_agent_scopes or profile_agent_scopes
@@ -298,10 +331,20 @@ def build_heartbeat_prompt(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
     )
-    expanded_prompt_command = f"{cli_bin} heartbeat-prompt --full --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
-    compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
-    brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
-    thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
+    (
+        expanded_prompt_command,
+        compact_prompt_command,
+        brief_prompt_command,
+        thin_prompt_command,
+    ) = _heartbeat_regeneration_commands(
+        cli_bin=cli_bin,
+        goal_id=goal_id,
+        active_state_arg=active_state_arg,
+        agent_args=agent_args,
+        capability_args=capability_args,
+        scheduler_args=scheduler_args,
+        turn_identity_arg=turn_identity_arg,
+    )
     task_body_renderer = _select_task_body_renderer(
         traex_visible_goal=traex_visible_goal,
         ark_managed_agent_goal=ark_managed_agent_goal,
@@ -330,6 +373,10 @@ def build_heartbeat_prompt(
         brief_prompt_command=brief_prompt_command,
         thin_prompt_command=thin_prompt_command,
     )
+    task_body = bind_exact_turn_settlement_task_body(
+        task_body,
+        turn_instance_id=normalized_turn_instance_id,
+    )
     if fine_grained:
         task_body = f"{task_body}\n\n{FINE_GRAINED_TURN_RULE}"
     if native_goal_host and len(task_body) > NATIVE_GOAL_HOST_MAX_CHARS:
@@ -357,6 +404,7 @@ def build_heartbeat_prompt(
         "thin": thin,
         "cli_bin": cli_bin,
         "agent_id": normalized_agent_id,
+        **turn_identity_payload,
         "agent_role": agent_role,
         "agent_scopes": normalized_agent_scopes,
         "agent_scope_source": agent_scope_source,

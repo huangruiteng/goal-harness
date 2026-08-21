@@ -169,6 +169,7 @@ def build_quota_should_run(
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     receipt_bound_todo_id: str | None = None,
     receipt_bound_replan_obligation_id: str | None = None,
+    turn_instance_id: str | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = str(goal_id or "").strip()
     resolved_scheduler_context = resolve_scheduler_execution_context(
@@ -235,6 +236,7 @@ def build_quota_should_run(
         return _build_quota_should_run_payload(
             prepared,
             _resolve_quota_should_run_route(prepared),
+            turn_instance_id=turn_instance_id,
         )
     if health_item:
         return {

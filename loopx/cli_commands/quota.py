@@ -592,6 +592,7 @@ def handle_quota_command(
                 receipt_bound_replan_obligation_id=(
                     receipt_bound_replan_obligation_id
                 ),
+                turn_instance_id=heartbeat_turn_id,
             )
             if heartbeat_turn_id:
                 if heartbeat_receipt_existing:
@@ -666,6 +667,7 @@ def handle_quota_command(
                             receipt_bound_replan_obligation_id=(
                                 receipt_bound_replan_obligation_id
                             ),
+                            turn_instance_id=heartbeat_turn_id,
                         )
                         cache_metadata = None
                         heartbeat_stall_observation = (

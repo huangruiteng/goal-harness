@@ -35,6 +35,7 @@ from loopx.control_plane.scheduler.execution_context import (
     scheduler_execution_context_for_runtime_profile,
 )
 from loopx.control_plane.work_items.interaction_contract import (
+    build_interaction_contract,
     interaction_next_cli_actions,
 )
 from loopx.rollout_event_log import rollout_event_log_path
@@ -379,6 +380,69 @@ def test_codex_app_external_observation_settles_only_substantive_writeback() -> 
     assert f"--todo-id {todo_id}" in actions[2]
     assert '--turn-instance-id "${LOOPX_TURN:?}"' in actions[2]
     assert "otherwise do not spend for unchanged observation" in actions[2]
+
+
+def _generic_cli_contract_payload(*, replan: bool = False) -> dict:
+    payload = {
+        "goal_id": GOAL_ID,
+        "agent_identity": {"agent_id": AGENT_ID},
+        "should_run": True,
+        "normal_delivery_allowed": True,
+        "execution_obligation": {
+            "must_attempt_work": True,
+            "delivery_allowed": True,
+            **({"kind": "autonomous_replan_required"} if replan else {}),
+        },
+    }
+    if replan:
+        payload["replan_action_packet"] = {
+            "obligation_id": "replan-0000000000000001"
+        }
+    else:
+        payload["selected_todo"] = {"todo_id": TODO_ID}
+    return payload
+
+
+@pytest.mark.parametrize("replan", [False, True])
+def test_turn_scoped_generic_cli_contract_uses_exact_settlement_identity(
+    replan: bool,
+) -> None:
+    contract = build_interaction_contract(
+        _generic_cli_contract_payload(replan=replan),
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP
+        ),
+        turn_instance_id=TURN_ID,
+    )
+
+    plan = contract["cli_channel"]["settlement_plan"]
+    identity = plan["identity"]
+    assert identity["turn_instance_id"] == TURN_ID
+    assert identity["effect_id"].endswith(f":{TURN_ID}")
+    binding = (
+        "--replan-obligation-id replan-0000000000000001"
+        if replan
+        else f"--todo-id {TODO_ID}"
+    )
+    for step in plan["ordered_steps"]:
+        command = step.get("command_template")
+        if command:
+            assert binding in command
+            assert f"--turn-instance-id {TURN_ID}" in command
+            assert "${LOOPX_TURN:?}" not in command
+
+
+def test_generic_cli_without_turn_identity_keeps_legacy_unbound_actions() -> None:
+    contract = build_interaction_contract(
+        _generic_cli_contract_payload(),
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP
+        ),
+    )
+
+    channel = contract["cli_channel"]
+    assert "settlement_plan" not in channel
+    assert all("--turn-instance-id" not in action for action in channel["next_cli_actions"])
 
 
 def test_guard_receipt_resolves_stable_settlement_identity(tmp_path: Path) -> None:
