@@ -190,10 +190,11 @@ def _typed_repeat_runs() -> list[dict]:
 
 def test_repair_delta_claim_alone_cannot_close_typed_repeat_obligation() -> None:
     runs = _typed_repeat_runs()
-    # The recovery row must not tell agents that a repair-delta/blocker claim
-    # alone closes a typed_progress_repeat obligation: the write gate rejects
-    # any writeback whose progress observation does not carry a NEW typed
-    # semantic delta relative to the obligation baseline.
+    # Semantic-gate level: a writeback whose progress observation does not
+    # carry a NEW typed semantic delta relative to the obligation baseline is
+    # rejected. This pins enforce_open_replan_writeback; the full
+    # repair-delta command path (blocker todo + --repair-delta-kind blocker)
+    # is covered by the refresh_state_run regressions below.
     with pytest.raises(ValueError) as exc:
         enforce_open_replan_writeback(
             newest_first_runs=runs,
@@ -222,9 +223,9 @@ def test_repair_delta_claim_alone_cannot_close_typed_repeat_obligation() -> None
 
 def test_atomic_new_blocker_delta_closes_typed_repeat_obligation() -> None:
     runs = _typed_repeat_runs()
-    # One atomic writeback carries BOTH the repair-delta/blocker claim and a
-    # NEW typed blocker relative to the obligation baseline; the semantic gate
-    # accepts it in the same refresh (no separate later fingerprint step).
+    # Semantic-gate level: a NEW typed blocker relative to the obligation
+    # baseline is accepted in the same writeback. The full refresh_state_run
+    # path (repair-delta evidence + persisted ack readback) is covered below.
     semantic_delta = enforce_open_replan_writeback(
         newest_first_runs=runs,
         state_text=STATE_TEXT,
@@ -240,6 +241,136 @@ def test_atomic_new_blocker_delta_closes_typed_repeat_obligation() -> None:
     assert semantic_delta is not None
     assert semantic_delta["accepted"] is True
     assert semantic_delta["satisfying_outcomes"] == ["new_concrete_blocker"]
+
+
+def _state_with_scoped_blocker_todo() -> str:
+    return f"""\
+## Agent Todo
+
+- [ ] [P1] Blocked on the external review gate.
+  <!-- loopx:todo todo_id=todo_scoped_blocker status=open task_class=blocker claimed_by={AGENT_ID} -->
+"""
+
+
+def _write_typed_repeat_runs_index(runs_index: Path) -> list[dict]:
+    runs_index.parent.mkdir(parents=True)
+    runs = _typed_repeat_runs()
+    with runs_index.open("w", encoding="utf-8") as handle:
+        for run in runs:
+            handle.write(json.dumps(run) + "\n")
+    return runs
+
+
+def _call_refresh_state_run(
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    project: Path,
+    progress_observation: dict | None = None,
+) -> dict:
+    return refresh_state_run(
+        registry_path=registry_path,
+        runtime_root_override=str(runtime_root),
+        goal_id=GOAL_ID,
+        project=project,
+        state_file=None,
+        classification="state_refreshed",
+        recommended_action="Observe the fixture.",
+        delivery_batch_scale="single_surface",
+        delivery_outcome="surface_only",
+        agent_id=AGENT_ID,
+        autonomous_replan_recorded=True,
+        repair_delta_kinds=["blocker"],
+        progress_observation=progress_observation,
+        dry_run=False,
+        sync_global=False,
+    )
+
+
+def _replan_gate_tmp_fixture(
+    tmp_path: Path,
+) -> tuple[Path, Path, Path, Path]:
+    project = tmp_path / "project"
+    state = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    state.parent.mkdir(parents=True)
+    state.write_text(_state_with_scoped_blocker_todo(), encoding="utf-8")
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": str(state.relative_to(project)),
+                        "coordination": {
+                            "agent_model": "peer_v1",
+                            "registered_agents": [AGENT_ID],
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    runtime_root = tmp_path / "runtime"
+    runs_index = (
+        runtime_root / "goals" / GOAL_ID / "runs" / "index.jsonl"
+    )
+    _write_typed_repeat_runs_index(runs_index)
+    return registry_path, project, runtime_root, runs_index
+
+
+def test_refresh_state_run_repair_delta_alone_rejected_without_new_typed_delta(
+    tmp_path: Path,
+) -> None:
+    registry_path, project, runtime_root, runs_index = _replan_gate_tmp_fixture(
+        tmp_path
+    )
+    before = runs_index.read_text().splitlines()
+    # The documented recovery command path, negative side: a scoped blocker
+    # todo plus --autonomous-replan-recorded --repair-delta-kind blocker, but
+    # no NEW typed observation, must fail closed and must not append a run.
+    with pytest.raises(ValueError, match="typed semantic delta"):
+        _call_refresh_state_run(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            project=project,
+        )
+    assert runs_index.read_text().splitlines() == before
+
+
+def test_refresh_state_run_atomic_blocker_delta_persists_repair_and_semantic_evidence(
+    tmp_path: Path,
+) -> None:
+    registry_path, project, runtime_root, runs_index = _replan_gate_tmp_fixture(
+        tmp_path
+    )
+    result = _call_refresh_state_run(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        progress_observation={
+            "schema_version": "typed_progress_observation_v0",
+            "result_class": "blocked",
+            "blocker_id": "blocker-new-external-review",
+            "evidence_ids": ["evidence-new-external-review"],
+        },
+    )
+    assert result.get("ok") is True
+    lines = runs_index.read_text().splitlines()
+    assert len(lines) == len(_typed_repeat_runs()) + 1
+    # Read the persisted run back: the blocker repair delta and the accepted
+    # typed semantic delta must both be present in the durable record.
+    json_path = Path(result["json_path"])
+    persisted = json.loads(json_path.read_text(encoding="utf-8"))
+    ack = persisted.get("autonomous_replan_ack") or {}
+    assert ack.get("recorded") is True
+    assert (ack.get("delta_contract") or {}).get("delta_kinds") == ["blocker"]
+    semantic_delta = ack.get("semantic_delta") or {}
+    assert semantic_delta.get("accepted") is True
+    assert semantic_delta.get("satisfying_outcomes") == ["new_concrete_blocker"]
 
 
 def test_refresh_state_run_rejects_maintenance_writeback(tmp_path: Path) -> None:
