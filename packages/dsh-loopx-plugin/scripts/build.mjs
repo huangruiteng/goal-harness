@@ -24,8 +24,10 @@ function run(modulePath, args) {
 rmSync(join(packageRoot, 'lib'), { recursive: true, force: true })
 rmSync(join(packageRoot, 'build-temp'), { recursive: true, force: true })
 try {
-  run(join(typescriptRoot, 'bin', 'tsc'), ['-p', 'tsconfig.build.json'])
-  run(join(tsdownRoot, 'dist', 'run.mjs'), [])
+  run(join(typescriptRoot, 'bin', 'tsc'), ['-p', 'tsconfig.host.json'])
+  run(join(tsdownRoot, 'dist', 'run.mjs'), ['--config', 'tsdown.config.ts'])
+  run(join(typescriptRoot, 'bin', 'tsc'), ['-p', 'tsconfig.client.json'])
+  run(join(tsdownRoot, 'dist', 'run.mjs'), ['--config', 'tsdown.client.config.ts'])
 } finally {
   rmSync(join(packageRoot, 'build-temp'), { recursive: true, force: true })
 }

@@ -1,7 +1,7 @@
 {
   "name": "dsh-loopx-plugin",
   "version": "0.1.0",
-  "description": "LoopX installer command and same-session driver for DeepSeek Harness",
+  "description": "LoopX installer, same-session driver, and local GoalBar for DeepSeek Harness",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -19,6 +19,10 @@
       "types": "./lib/types/driver.d.ts",
       "default": "./lib/driver.js"
     },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -35,23 +39,56 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tests.json",
     "test": "vitest run",
     "prepack": "pnpm build",
-    "smoke:profile": "node smoke/dsh-profile-smoke.mjs"
+    "smoke:artifact": "node smoke/dsh-client-artifact-smoke.mjs",
+    "smoke:profile": "node smoke/dsh-profile-smoke.mjs",
+    "smoke:runtime": "node smoke/dsh-goalbar-runtime-smoke.mjs"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
     }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.7",
+    "react": "^18.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh": "0.1.0-rc.7",
     "@deepseek-ai/dsh-agent": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-connection": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-locale": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.7",
     "@deepseek-ai/dsh-commands": "0.1.0-rc.7",
     "@deepseek-ai/dsh-session": "0.1.0-rc.7",
     "@types/node": "^22.19.0",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.1",
+    "jsdom": "^26.1.0",
+    "lightningcss": "1.33.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "tsdown": "0.22.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

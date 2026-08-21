@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": false,
+    "declarationDir": "./lib/types",
+    "jsx": "react-jsx",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "outDir": "./build-temp/client",
+    "rootDir": "./src",
+    "sourceMap": false,
+    "tsBuildInfoFile": "./build-temp/client.tsbuildinfo",
+    "types": []
+  },
+  "include": [
+    "src/client/**/*.ts",
+    "src/client/**/*.tsx",
+    "src/client/**/*.d.ts",
+    "src/goalbar/protocol.ts"
+  ]
+}

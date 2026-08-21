@@ -1,0 +1,233 @@
+.dock {
+  box-sizing: border-box;
+  width: calc(
+    100% - var(--dsh-composer-side-clearance, 0px) * 2 -
+    var(--dsh-composer-dock-inset, 0px) * 2
+  );
+  max-width: calc(
+    var(--dsh-composer-card-max-width, 760px) -
+    var(--dsh-composer-dock-inset, 0px) * 2
+  );
+  margin: 0 auto calc(0px - var(--dsh-composer-stack-gap, 0px) - 3px);
+  padding: 0 var(--dsh-composer-dock-inset, 0px);
+  flex: none;
+  font-family: var(
+    --font-sans,
+    var(--dsw-font-family, "Geist", "Inter", "Helvetica Neue", Arial, sans-serif)
+  );
+}
+
+.panel {
+  box-sizing: border-box;
+  width: 100%;
+  color: var(--color-ink, var(--dsw-alias-label-primary, #171717));
+  background: var(--color-surface, var(--dsw-alias-bg-base, #fff));
+  border: 1px solid var(--color-border, var(--dsw-alias-border-l1, #ebebeb));
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+}
+
+.stale {
+  background: var(--color-surface-soft, var(--dsw-specific-tip, #f2f2f2));
+}
+
+.row {
+  box-sizing: border-box;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 4px 12px;
+}
+
+.brand {
+  flex: none;
+  font-family: var(
+    --font-mono,
+    var(--ds-font-family-code, "Geist Mono", "SFMono-Regular", monospace)
+  );
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.goalId {
+  min-width: 48px;
+  max-width: min(30%, 240px);
+  overflow: hidden;
+  flex: 0 1 auto;
+  font-family: var(
+    --font-mono,
+    var(--ds-font-family-code, "Geist Mono", "SFMono-Regular", monospace)
+  );
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-body, var(--dsw-alias-label-secondary, #4d4d4d));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress {
+  width: clamp(48px, 14vw, 120px);
+  height: 4px;
+  flex: 1 1 80px;
+  overflow: hidden;
+  appearance: none;
+  color: var(--color-ink, var(--dsw-alias-label-primary, #171717));
+  background: var(--color-border, var(--dsw-alias-border-l1, #ebebeb));
+  border: 0;
+  border-radius: 9999px;
+}
+
+.progress::-webkit-progress-bar {
+  background: var(--color-border, var(--dsw-alias-border-l1, #ebebeb));
+  border-radius: 9999px;
+}
+
+.progress::-webkit-progress-value {
+  background: currentColor;
+  border-radius: 9999px;
+  transition: width 160ms ease;
+}
+
+.progress::-moz-progress-bar {
+  background: currentColor;
+  border-radius: 9999px;
+  transition: width 160ms ease;
+}
+
+.progressText,
+.status {
+  flex: none;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.progressText {
+  min-width: 42px;
+  font-family: var(
+    --font-mono,
+    var(--ds-font-family-code, "Geist Mono", "SFMono-Regular", monospace)
+  );
+  color: var(--color-body, var(--dsw-alias-label-secondary, #4d4d4d));
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  min-width: 68px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.statusMark {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  background: currentColor;
+  border: 1px solid currentColor;
+  border-radius: 9999px;
+}
+
+.status[data-status="paused"] .statusMark {
+  background: transparent;
+  border-radius: 1px;
+}
+
+.status[data-status="running"] .statusMark {
+  box-shadow: 0 0 0 2px var(--color-surface, var(--dsw-alias-bg-base, #fff));
+  outline: 1px solid currentColor;
+}
+
+.action,
+.refresh {
+  min-width: 58px;
+  min-height: 32px;
+  flex: none;
+  color: var(--color-ink, var(--dsw-alias-label-primary, #171717));
+  background: var(--color-surface, var(--dsw-alias-bg-base, #fff));
+  border: 1px solid var(--color-border, var(--dsw-alias-border-l2, #ebebeb));
+  border-radius: 6px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.action:hover:not(:disabled),
+.refresh:hover:not(:disabled) {
+  background: var(--color-surface-soft, var(--dsw-alias-interactive-bg-hover, #f2f2f2));
+}
+
+.action:focus-visible,
+.refresh:focus-visible {
+  outline: 2px solid var(--color-link, var(--dsw-alias-state-business-primary, #0070f3));
+  outline-offset: 2px;
+}
+
+.action:disabled,
+.refresh:disabled {
+  color: var(--color-faint, var(--dsw-alias-label-dimmed, #a1a1a1));
+  cursor: not-allowed;
+}
+
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 0 12px 8px;
+  color: var(--color-body, var(--dsw-alias-label-secondary, #4d4d4d));
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.error > :first-child {
+  flex: none;
+  font-family: var(
+    --font-mono,
+    var(--ds-font-family-code, "Geist Mono", "SFMono-Regular", monospace)
+  );
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .row {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .goalId {
+    max-width: calc(100% - 78px);
+    flex: 1 1 auto;
+  }
+
+  .progress {
+    order: 3;
+    flex-basis: 72px;
+  }
+
+  .progressText,
+  .status,
+  .action,
+  .refresh {
+    order: 3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress::-webkit-progress-value,
+  .progress::-moz-progress-bar,
+  .action,
+  .refresh {
+    transition: none;
+  }
+}

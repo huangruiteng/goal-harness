@@ -1,15 +1,16 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "composite": true,
     "declaration": true,
     "declarationMap": false,
     "declarationDir": "./lib/types",
-    "emitDeclarationOnly": false,
-    "outDir": "./build-temp",
+    "outDir": "./build-temp/host",
     "rootDir": "./src",
     "sourceMap": false,
+    "tsBuildInfoFile": "./build-temp/host.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["src"],
-  "exclude": ["tests"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/client/**/*", "tests"]
 }

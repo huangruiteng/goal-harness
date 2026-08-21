@@ -1,5 +1,9 @@
-# Host integration only. LoopX owns Goal, Todo, quota, and thread-binding authority.
+# LoopX owns Goal, Todo, quota, and thread-binding authority.
 - insert:
+    # The package-root Host row is also the discovery anchor for dsh.client.
+    - id: loopx-goalbar
+      name: dsh-loopx-plugin
+
     - id: loopx-init-command
       name: dsh-loopx-plugin/init-command
 

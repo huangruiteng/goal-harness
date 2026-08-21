@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   LoopXCliError,
   resolveLoopXCommand,
+  runFile,
   runJsonCommand,
+  runJsonMutationCommand,
 } from '../src/cli.ts'
 import type { FileRunner, LoopXCommand } from '../src/cli.ts'
 
@@ -100,5 +102,61 @@ describe('runJsonCommand', () => {
       validate: payload => payload.schema_version === 'current',
     })).rejects.toMatchObject({ kind: 'invalid_schema', retryable: false })
     expect(calls).toBe(1)
+  })
+})
+
+describe('reap-aware mutation execution', () => {
+  it('waits for child close after timeout termination', async () => {
+    const startedAt = Date.now()
+    await expect(runFile(process.execPath, [
+      '-e',
+      [
+        "process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),80))",
+        'setInterval(()=>{},1000)',
+      ].join(';'),
+    ], {
+      timeoutMs: 300,
+      maxOutputBytes: 1024,
+    })).rejects.toMatchObject({ kind: 'timeout' })
+
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(350)
+  })
+
+  it('waits for child close after output-limit termination', async () => {
+    const startedAt = Date.now()
+    await expect(runFile(process.execPath, [
+      '-e',
+      [
+        "process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),80))",
+        "setTimeout(()=>process.stdout.write('x'.repeat(10000)),50)",
+        'setInterval(()=>{},1000)',
+      ].join(';'),
+    ], {
+      timeoutMs: 1_000,
+      maxOutputBytes: 32,
+    })).rejects.toMatchObject({ kind: 'output_limit' })
+
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100)
+  })
+
+  it('runs a mutation once without forwarding caller cancellation', async () => {
+    const calls: Array<{ readonly args: readonly string[]; readonly signal: unknown }> = []
+    const runner: FileRunner = async (_file, args, options) => {
+      calls.push({ args, signal: options.signal })
+      return {
+        exitCode: 1,
+        stdout: '{"ok":false,"schema_version":"typed_failure"}',
+        stderr: '/private/diagnostic',
+      }
+    }
+
+    await expect(runJsonMutationCommand(command, ['mutate', '--execute'], {
+      runner,
+      timeoutMs: 50,
+    })).rejects.toMatchObject({ kind: 'typed_failure', retryable: false })
+    expect(calls).toEqual([{
+      args: ['mutate', '--execute'],
+      signal: undefined,
+    }])
   })
 })

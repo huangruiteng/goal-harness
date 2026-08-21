@@ -52,6 +52,7 @@ export interface LoopXCommand {
 
 const DEFAULT_TIMEOUT_MS = 20_000
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
+const FORCE_KILL_GRACE_MS = 250
 
 function transportKind(error: NodeJS.ErrnoException): LoopXCliError {
   if (error.code === 'ENOENT') {
@@ -77,19 +78,26 @@ export const runFile: FileRunner = (file, args, options) => new Promise((resolve
   const limit = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
   let outputBytes = 0
   let settled = false
+  let terminalError: LoopXCliError | undefined
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined
 
   const cleanup = (): void => {
     clearTimeout(timer)
+    if (forceKillTimer !== undefined) clearTimeout(forceKillTimer)
     options.signal?.removeEventListener('abort', abort)
   }
   const fail = (error: LoopXCliError): void => {
-    if (settled) return
-    settled = true
-    cleanup()
+    if (settled || terminalError !== undefined) return
+    terminalError = error
+    clearTimeout(timer)
+    options.signal?.removeEventListener('abort', abort)
     child.kill('SIGTERM')
-    reject(error)
+    forceKillTimer = setTimeout(() => {
+      if (!settled) child.kill('SIGKILL')
+    }, FORCE_KILL_GRACE_MS)
   }
   const collect = (target: Buffer[], chunk: Buffer): void => {
+    if (terminalError !== undefined) return
     outputBytes += chunk.byteLength
     if (outputBytes > limit) {
       fail(new LoopXCliError('output_limit', 'LoopX output exceeded its bounded limit', false))
@@ -112,6 +120,10 @@ export const runFile: FileRunner = (file, args, options) => new Promise((resolve
     if (settled) return
     settled = true
     cleanup()
+    if (terminalError !== undefined) {
+      reject(terminalError)
+      return
+    }
     resolve({
       exitCode: code ?? 1,
       stdout: Buffer.concat(stdout).toString('utf8'),
@@ -160,6 +172,70 @@ export interface JsonCommandOptions extends FileRunOptions {
   readonly attempts?: number | undefined
   readonly retryDelaysMs?: readonly number[] | undefined
   readonly validate?: ((payload: Record<string, unknown>) => boolean) | undefined
+}
+
+export type JsonMutationCommandOptions = Omit<
+  JsonCommandOptions,
+  'attempts' | 'retryDelaysMs' | 'signal'
+>
+
+/**
+ * Execute one mutation exactly once. Caller cancellation is intentionally not
+ * accepted: admission is fenced before this function is called, and the real
+ * runner waits for child close after every forced termination.
+ */
+export async function runJsonMutationCommand(
+  command: LoopXCommand,
+  args: readonly string[],
+  options: JsonMutationCommandOptions = {},
+): Promise<Record<string, unknown>> {
+  const runner = options.runner ?? runFile
+  let result: FileResult
+  try {
+    result = await runner(
+      command.file,
+      [...command.prefix, ...args],
+      {
+        cwd: options.cwd,
+        env: options.env,
+        timeoutMs: options.timeoutMs,
+        maxOutputBytes: options.maxOutputBytes,
+      },
+    )
+  } catch (error: unknown) {
+    throw error instanceof LoopXCliError
+      ? error
+      : new LoopXCliError(
+          'transport',
+          'LoopX mutation command failed to execute',
+          false,
+        )
+  }
+
+  const payload = parsePayload(result.stdout)
+  if (result.exitCode !== 0) {
+    throw new LoopXCliError(
+      payload === undefined ? 'exit' : 'typed_failure',
+      'LoopX mutation command did not verify',
+      false,
+      result.exitCode,
+    )
+  }
+  if (payload === undefined) {
+    throw new LoopXCliError(
+      'invalid_json',
+      'LoopX mutation command returned invalid JSON',
+      false,
+    )
+  }
+  if (options.validate !== undefined && !options.validate(payload)) {
+    throw new LoopXCliError(
+      'invalid_schema',
+      'LoopX mutation command returned an incompatible response schema',
+      false,
+    )
+  }
+  return payload
 }
 
 /** Execute fixed argv and retry only transport/timeout/untyped-exit failures. */

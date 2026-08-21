@@ -1,6 +1,7 @@
 # LoopX for DeepSeek Harness
 
-`dsh-loopx-plugin` intentionally has only two host capabilities:
+`dsh-loopx-plugin` is one independently versioned DSH package with three
+separate Loader rows:
 
 - `/loopx-init` installs or upgrades the LoopX CLI, installs the packaged
   workflow skills into `$DSH_AGENTS_HOME/skills` (default
@@ -9,16 +10,25 @@
   Session successfully invokes the exact `loopx` skill. It then asks LoopX
   whether another turn may run and queues the authoritative heartbeat task
   into that live DSH Agent.
+- the package-root Host registers a loopback-only `/loopx` Connection channel,
+  and its web Client contributes a compact GoalBar between DSH's native GoalBar
+  and Queue dock rows. It renders only for one exact live
+  `(goalId, loopxAgentId)` binding.
 
 Installing the plugin and running `/loopx-init` load and prepare these
-capabilities; neither activates the Driver. Until one exact Session contains
-valid typed `loopx` invocation evidence, its Driver makes no LoopX CLI,
-binding, quota, or heartbeat call, creates no timer, and queues no followup.
+capabilities; neither creates a binding nor activates the Driver. The GoalBar
+does one bounded read when a browser row mounts and then waits for DSH
+`turn/end` invalidation; it does not poll LoopX on a timer. Until one exact
+Session contains valid typed `loopx` invocation evidence, its Driver makes no
+LoopX CLI, binding, quota, or heartbeat call, creates no timer, and queues no
+followup.
 
-The package does not expose LoopX model tools, a service facade, a coordinator,
-receipts, a binding sidecar, or its own Goal/Todo state. Models use the
-installed LoopX skills and call the LoopX CLI directly. LoopX remains the only
-authority for Goal, Agent, Todo, quota, and durable thread binding data.
+The package does not expose LoopX model tools, a binding sidecar, or its own
+Goal/Todo state. Models use the installed LoopX skills and call the LoopX CLI
+directly. LoopX remains the only authority for Goal, Agent, Todo, quota,
+activation, and durable thread-binding data. The GoalBar protocol and its
+deferred atomicity limit are specified in the versioned
+[Phase 1 Client/Server design](../../docs/superpowers/specs/2026-08-21-dsh-loopx-goalbar-phase-1-client-server-design.md).
 
 ## Install
 
@@ -35,6 +45,72 @@ Then open DSH and run:
 ```text
 /loopx-init
 ```
+
+For a local web session, start DSH on loopback (port `0` asks the OS for a free
+port) and open the printed URL:
+
+```bash
+dsh --profile web --port 0
+```
+
+Installation is the GoalBar opt-in: there is no separate remote endpoint or
+per-session grant. A row remains hidden until the exact DSH Session has one
+unique LoopX binding. After invoking the installed `loopx` skill for that
+Session, run the minimum authority readback inside that Session's DSH shell
+(or replace `$DSH_SESSION_ID` with the exact Session id):
+
+```bash
+loopx --registry .loopx/registry.json --format json \
+  resolve-agent-thread \
+  --host-surface deepseek-harness-native \
+  --thread-id "$DSH_SESSION_ID"
+```
+
+`status=bound` with one exact pair admits the row; missing or ambiguous results
+fail closed and render nothing. `Start` resumes a stopped Goal and activates
+only that exact live Session. `Pause` stops the Goal and retires only future
+queued/scheduled continuation; it does not abort a claimed or running turn.
+
+Maintainers can validate the built and packed surfaces with:
+
+```bash
+pnpm build
+pnpm smoke:artifact
+pnpm smoke:profile
+pnpm smoke:runtime
+```
+
+The runtime smoke creates an isolated temporary DSH profile. Its real web
+process proves profile composition, boot-manifest discovery, bundle serving,
+Client materialization, and the loopback Connection fence. Separately, a
+packed rc.7 Context, Connection, and WebServer with a live Host Session fixture
+cover deterministic binding, pending-watch cancellation, successful actions,
+and handler disposal through the real HTTP carrier. The served Client is then
+applied in DSH's real ClientModuleSystem with a VM document harness; that layer
+covers slot order and coexistence, Session injection, and ordinary-unload/HMR
+style cleanup, but it is not a browser-mounted React interaction. These layers
+do not replace the owner-reviewed packed-browser gate: that separate manual
+layer mounts the served Client at a real DSH URL and exercises Client-to-carrier
+Start/Pause. Focused Client tests cover Session-generation replacement and old
+request cancellation without duplicating that matrix in the packed smoke.
+
+## GoalBar authority and privacy boundary
+
+`/loopx` is registered with Connection authority `loopback`. Loopback is a
+network reachability fence, not user authentication, and Phase 1 does not
+support LAN or remote browsers. The browser supplies only its injected DSH
+Session id and, for an action, the last validated Goal/Agent pair. The Host
+re-derives cwd and thread identity from the live DSH Agent, freshly resolves
+the binding, and executes only fixed LoopX argv.
+
+The wire allowlist contains ids, activation, live Agent status, full-lane
+counts, cursors, and fixed error codes. It excludes Todo text, Goal objective,
+quota, evidence, CLI output, exception messages, registry paths, credentials,
+and binding candidates. Installing the package grants no model tool authority,
+does not create or repair bindings, and does not change LoopX core state by
+itself.
+
+## `/loopx-init` behavior
 
 The command has no arguments. Extra input returns a usage error before any
 model work or CLI probe. A valid invocation queues a bounded start followup on
@@ -117,12 +193,30 @@ source and never satisfy a Driver reservation.
 
 ## Uninstall
 
-Remove the plugin from the DSH profile:
+There is no separate GoalBar switch in Phase 1. Disable all package faces by
+removing the plugin from the web profile, then restart the running DSH process:
 
 ```bash
 dsh plugin --profile web remove dsh-loopx-plugin
 ```
 
-This stops the Driver and removes `/loopx-init`; it does not remove LoopX or
-its skills. To remove only LoopX-managed skills, run
-`loopx workflow-skills --uninstall --skills-dir ~/.agents/skills`.
+This removes the GoalBar Host/Client row, stops the Driver, and removes
+`/loopx-init`; it does not remove LoopX, its registry, bindings, or skills. To
+remove only LoopX-managed skills, run:
+
+```bash
+loopx workflow-skills --uninstall \
+  --skills-dir "${DSH_AGENTS_HOME:-$HOME/.agents}/skills"
+```
+
+To roll back the plugin while preserving LoopX state, remove it and install a
+previously retained package tarball, then read the profile back. Replace the
+placeholder value with the exact path of the old tarball retained before the
+upgrade:
+
+```bash
+RETAINED_PREVIOUS_DSH_LOOPX_TARBALL=/absolute/path/to/retained/previous-dsh-loopx-plugin.tgz
+dsh plugin --profile web remove dsh-loopx-plugin
+dsh plugin --profile web add "$RETAINED_PREVIOUS_DSH_LOOPX_TARBALL" --ignore-scripts
+dsh --profile web --dump-config
+```

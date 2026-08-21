@@ -10,12 +10,45 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const dshBin = process.env.DSH_BIN || join(packageRoot, 'node_modules', '.bin', 'dsh')
+const packageId = 'dsh-loopx-plugin'
 const rows = [
-  ['loopx-init-command', 'dsh-loopx-plugin/init-command'],
-  ['loopx-driver', 'dsh-loopx-plugin/driver'],
+  ['loopx-goalbar', packageId],
+  ['loopx-init-command', `${packageId}/init-command`],
+  ['loopx-driver', `${packageId}/driver`],
 ]
+const packedStaticEntries = new Set([
+  'package/LICENSE',
+  'package/NOTICE',
+  'package/README.md',
+  'package/cordis.patch.yml',
+  'package/lib/client.js',
+  'package/lib/driver.js',
+  'package/lib/index.js',
+  'package/lib/init-command.js',
+  'package/lib/types/cli.d.ts',
+  'package/lib/types/client/LoopXGoalBar.d.ts',
+  'package/lib/types/client/index.d.ts',
+  'package/lib/types/client/locale.d.ts',
+  'package/lib/types/client/rpc.d.ts',
+  'package/lib/types/client/useGoalBar.d.ts',
+  'package/lib/types/driver.d.ts',
+  'package/lib/types/goalbar/connection-rpc.d.ts',
+  'package/lib/types/goalbar/events.d.ts',
+  'package/lib/types/goalbar/protocol.d.ts',
+  'package/lib/types/goalbar/read-model.d.ts',
+  'package/lib/types/goalbar/service.d.ts',
+  'package/lib/types/index.d.ts',
+  'package/lib/types/init-command.d.ts',
+  'package/package.json',
+])
+const packedHashedEntries = [
+  ['CLI chunk', /^package\/lib\/cli-[A-Za-z0-9_-]{8}\.js$/u],
+  ['Driver chunk', /^package\/lib\/driver-[A-Za-z0-9_-]{8}\.js$/u],
+]
+
 function specs(argv) {
   argv = argv.filter(value => value !== '--')
+  if (argv.length === 0) return [{ kind: 'path', value: packageRoot }]
   const result = []
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index]
@@ -48,7 +81,7 @@ function assertConfig(dump) {
   const packageNames = dump
     .split(/\r?\n/u)
     .map(line => line.match(/^\s*name:\s+(\S+)\s*$/u)?.[1])
-    .filter(name => name?.startsWith('dsh-loopx-plugin/'))
+    .filter(name => name === packageId || name?.startsWith(`${packageId}/`))
   assert.deepEqual(packageNames, rows.map(([, module]) => module))
   let previous = -1
   for (const [id, module] of rows) {
@@ -61,26 +94,74 @@ function assertConfig(dump) {
 
 function assertTarball(path) {
   const entries = run('tar', ['-tf', path], process.env).trim().split('\n')
-  for (const required of [
-    'package/package.json',
-    'package/LICENSE',
-    'package/cordis.patch.yml',
-    'package/lib/init-command.js',
-    'package/lib/driver.js',
-    'package/lib/types/init-command.d.ts',
-    'package/lib/types/driver.d.ts',
-  ]) assert(entries.includes(required), `tarball missing ${required}`)
-  for (const obsolete of ['service', 'command', 'tools', 'coordinator', 'receipts']) {
-    assert(!entries.includes(`package/lib/${obsolete}.js`), `tarball contains ${obsolete}`)
+  assert.equal(new Set(entries).size, entries.length, 'tarball contains duplicate entries')
+  for (const required of packedStaticEntries) {
+    assert(entries.includes(required), `tarball missing ${required}`)
   }
+  const hashedCounts = new Map(packedHashedEntries.map(([label]) => [label, 0]))
+  for (const entry of entries) {
+    if (packedStaticEntries.has(entry)) continue
+    const match = packedHashedEntries.find(([, pattern]) => pattern.test(entry))
+    assert(match, `tarball contains unapproved entry ${entry}`)
+    hashedCounts.set(match[0], hashedCounts.get(match[0]) + 1)
+  }
+  for (const [label] of packedHashedEntries) {
+    assert.equal(hashedCounts.get(label), 1, `tarball requires exactly one ${label}`)
+  }
+  assert.equal(entries.length, packedStaticEntries.size + packedHashedEntries.length)
+}
+
+async function clientModulesClass() {
+  const localRequire = createRequire(join(packageRoot, 'package.json'))
+  const dshRequire = createRequire(localRequire.resolve('@deepseek-ai/dsh/package.json'))
+  const appRequire = createRequire(dshRequire.resolve('@deepseek-ai/dsh-web-app/package.json'))
+  return (await import(pathToFileURL(appRequire.resolve('@deepseek-ai/dsh-client-modules')).href))
+    .ClientModuleRegistry
+}
+
+async function assertClientDiscovery(installed, manifest) {
+  assert.deepEqual(manifest.exports?.['./client'], {
+    types: './lib/types/client/index.d.ts',
+    default: './lib/client.js',
+  })
+  assert.equal(manifest.dsh?.client?.platform, 'web')
+  assert(Array.isArray(manifest.dsh?.client?.inject))
+
+  const ClientModuleRegistry = await clientModulesClass()
+  const installedRequire = createRequire(join(installed, 'package.json'))
+  const registry = Object.create(ClientModuleRegistry.prototype)
+  registry.pkgMeta = new Map()
+  registry.table = new Map()
+  registry.resolvePkgJson = specifier => installedRequire.resolve(`${specifier}/package.json`)
+  registry.ctx = {
+    loader: {
+      entries: () => [{
+        options: { name: packageId },
+        fiber: {},
+        disabled: false,
+      }],
+    },
+  }
+  const meta = registry.resolveMeta(packageId)
+  assert.equal(meta.clientPath, join(installed, 'lib', 'client.js'))
+  assert.deepEqual(meta.inject, manifest.dsh.client.inject)
+  assert.equal(registry.processOne(packageId), true)
+  assert.match(registry.table.get(packageId)?.entry.rev ?? '', /^[0-9a-f]{12}$/u)
+  const client = await readFile(join(installed, 'lib', 'client.js'), 'utf8')
+  assert(client.startsWith('window.__ModuleLoader__.load({'))
+  assert(client.includes('id: "dsh-loopx-plugin"'))
 }
 
 async function exerciseInstalled(installed) {
   const requireFromPlugin = createRequire(join(installed, 'package.json'))
-  const [initModule, driverModule] = await Promise.all([
+  const [hostModule, initModule, driverModule] = await Promise.all([
+    import(pathToFileURL(requireFromPlugin.resolve(packageId)).href),
     import(pathToFileURL(requireFromPlugin.resolve('dsh-loopx-plugin/init-command')).href),
     import(pathToFileURL(requireFromPlugin.resolve('dsh-loopx-plugin/driver')).href),
   ])
+  assert.equal(hostModule.name, packageId)
+  assert.deepEqual(hostModule.inject, ['agents', 'connection'])
+  assert.equal(typeof hostModule.createGoalBarService, 'function')
   const commands = new Map()
   initModule.apply({ commands: { register: definition => commands.set(definition.name, definition) } })
   assert.deepEqual([...commands.keys()], ['loopx-init'])
@@ -194,6 +275,7 @@ async function main() {
       const installed = await realpath(join(home, 'profiles', 'web', 'node_modules', 'dsh-loopx-plugin'))
       const manifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
       assert.equal(manifest.name, 'dsh-loopx-plugin')
+      await assertClientDiscovery(installed, manifest)
       await exerciseInstalled(installed)
       run(dshBin, ['plugin', '--profile', 'web', 'remove', 'dsh-loopx-plugin'], env)
       const removed = run(dshBin, ['--profile', 'web', '--dump-config'], env)

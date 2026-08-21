@@ -1,11 +1,12 @@
 import { defineConfig } from 'tsdown'
 
 export default defineConfig({
-  entry: [
-    'build-temp/index.js',
-    'build-temp/init-command.js',
-    'build-temp/driver.js',
-  ],
+  name: 'dsh-loopx-plugin/host',
+  entry: {
+    index: 'build-temp/host/index.js',
+    'init-command': 'build-temp/host/init-command.js',
+    driver: 'build-temp/host/driver.js',
+  },
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',

@@ -11,6 +11,11 @@ import {
   runJsonCommand,
 } from './cli.ts'
 import type { FileRunner, LoopXCommand } from './cli.ts'
+import { goalBarCoordinator } from './goalbar/events.ts'
+import type {
+  GoalBarDriverActionReceipt,
+  GoalBarSessionCapture,
+} from './goalbar/events.ts'
 
 export const name = 'dsh-loopx-driver'
 export const inject = ['agents']
@@ -41,12 +46,19 @@ interface Reservation extends Binding {
   readonly content: UserMessage['content']
   readonly turnInstanceId: string
   phase: ReservationPhase
+  /** Exact reservation already claimed/admitted when GoalBar Pause retired future work. */
+  preserveAcrossPause: boolean
 }
 
 interface ActivationProjection {
   readonly session: Agent['session']
   readonly pendingModelCalls: Set<string>
   activated: boolean
+}
+
+interface EvaluationWaiter {
+  readonly session: Agent['session']
+  readonly resolve: (evaluated: boolean) => void
 }
 
 interface DriverState {
@@ -59,6 +71,7 @@ interface DriverState {
   schedulerToken: string
   unchangedPolls: number
   readonly commands: Set<string>
+  readonly evaluationWaiters: Set<EvaluationWaiter>
   run?: Promise<void> | undefined
   controller?: AbortController | undefined
   timer?: TimerHandle | undefined
@@ -411,6 +424,59 @@ export class LoopXContinuationDriver {
     this.cancelPending(state)
   }
 
+  async activateAndEvaluate(
+    capture: GoalBarSessionCapture,
+  ): Promise<GoalBarDriverActionReceipt> {
+    if (!this.captureIsLive(capture)) {
+      return { kind: 'unavailable', reason: 'session_unavailable' }
+    }
+    const state = this.stateFor(capture.agent)
+    if (state.stopping || state.activation.session !== capture.session) {
+      return { kind: 'unavailable', reason: 'session_unavailable' }
+    }
+
+    state.pauseAfterTurnError = false
+    state.activation.pendingModelCalls.clear()
+    state.activation.activated = true
+    const evaluated = new Promise<boolean>(resolve => {
+      state.evaluationWaiters.add({ session: capture.session, resolve })
+    })
+    this.requestEvaluation(state)
+
+    if (!(await evaluated)) {
+      return this.captureIsLive(capture)
+        ? { kind: 'unavailable', reason: 'evaluation_unavailable' }
+        : { kind: 'unavailable', reason: 'session_unavailable' }
+    }
+    return this.captureIsLive(capture)
+      && state.activation.session === capture.session
+      ? { kind: 'applied' }
+      : { kind: 'unavailable', reason: 'session_unavailable' }
+  }
+
+  async cancelQueued(
+    capture: GoalBarSessionCapture,
+  ): Promise<GoalBarDriverActionReceipt> {
+    if (!this.captureIsLive(capture)) {
+      return { kind: 'unavailable', reason: 'session_unavailable' }
+    }
+    const state = this.states.get(capture.agent)
+    if (state === undefined) return { kind: 'applied' }
+    if (state.stopping || state.activation.session !== capture.session) {
+      return { kind: 'unavailable', reason: 'session_unavailable' }
+    }
+
+    const reservation = state.reservation
+    if (reservation?.phase === 'claimed' || reservation?.phase === 'admitted') {
+      reservation.preserveAcrossPause = true
+    }
+    this.cancelPending(state)
+    return this.captureIsLive(capture)
+      && state.activation.session === capture.session
+      ? { kind: 'applied' }
+      : { kind: 'unavailable', reason: 'session_unavailable' }
+  }
+
   onSessionEvent(agent: Agent, event: SessionEvent): void {
     const existing = this.states.get(agent)
     if (existing === undefined) return
@@ -530,6 +596,7 @@ export class LoopXContinuationDriver {
     const existing = this.states.get(agent)
     if (existing !== undefined) {
       if (existing.activation.session !== agent.session) {
+        this.resolveEvaluationWaiters(existing, false)
         this.cancelPending(existing)
         this.retireReservation(existing)
         existing.competing = agent.inbox.hasPending
@@ -551,9 +618,18 @@ export class LoopXContinuationDriver {
       schedulerToken: '',
       unchangedPolls: 0,
       commands: new Set(),
+      evaluationWaiters: new Set(),
     }
     this.states.set(agent, state)
     return state
+  }
+
+  private captureIsLive(capture: GoalBarSessionCapture): boolean {
+    return !this.disposed
+      && capture.agent.session === capture.session
+      && this.isLiveAgent(capture.agent)
+      && capture.agent.id === capture.session.id
+      && capture.agent.id === capture.session.header.id
   }
 
   private ready(state: DriverState): boolean {
@@ -585,11 +661,19 @@ export class LoopXContinuationDriver {
       run = this.runDetached(async () => {
         while (state.requested && !state.stopping) {
           state.requested = false
-          await this.evaluate(state)
+          const waiters = [...state.evaluationWaiters]
+          for (const waiter of waiters) state.evaluationWaiters.delete(waiter)
+          let evaluated = false
+          try {
+            evaluated = await this.evaluate(state)
+          } finally {
+            this.resolveEvaluationWaiterBatch(state, waiters, evaluated)
+          }
         }
       })
     } catch (error: unknown) {
       state.requested = false
+      this.resolveEvaluationWaiters(state, false)
       this.warn(`dsh-loopx-driver: could not start evaluation: ${renderThrown(error)}`)
       return
     }
@@ -604,13 +688,15 @@ export class LoopXContinuationDriver {
     })
   }
 
-  private async evaluate(state: DriverState): Promise<void> {
-    if (!this.ready(state)) return
+  private async evaluate(state: DriverState): Promise<boolean> {
+    if (!this.ready(state)) return false
     const controller = new AbortController()
     state.controller = controller
+    let evaluationStarted = false
     let plan: EvaluationPlan
     try {
       plan = await state.agent.runMaintenance(async maintenanceSignal => {
+        evaluationStarted = true
         const signal = AbortSignal.any([controller.signal, maintenanceSignal])
         return this.buildPlan(state, signal)
       })
@@ -622,7 +708,7 @@ export class LoopXContinuationDriver {
       if (!controller.signal.aborted && !cancelled) {
         this.warn(`dsh-loopx-driver: LoopX admission failed: ${renderThrown(error)}`)
       }
-      return
+      return evaluationStarted
     } finally {
       if (state.controller === controller) state.controller = undefined
     }
@@ -631,11 +717,11 @@ export class LoopXContinuationDriver {
       if (plan.schedulerToken !== undefined) state.schedulerToken = plan.schedulerToken
       if (plan.unchangedPolls !== undefined) state.unchangedPolls = plan.unchangedPolls
       if (plan.delayMs !== undefined) this.schedule(state, plan.delayMs)
-      return
+      return true
     }
     state.schedulerToken = ''
     state.unchangedPolls = 0
-    if (!this.ready(state) || state.agent.session !== plan.session) return
+    if (!this.ready(state) || state.agent.session !== plan.session) return true
     const message = automaticMessage(plan.taskBody)
     const reservation: Reservation = {
       messageId: message.id,
@@ -645,6 +731,7 @@ export class LoopXContinuationDriver {
       agentId: plan.agentId,
       turnInstanceId: plan.turnInstanceId,
       phase: 'queued',
+      preserveAcrossPause: false,
     }
     state.reservation = reservation
     try {
@@ -653,6 +740,7 @@ export class LoopXContinuationDriver {
       this.retireReservation(state)
       this.warn(`dsh-loopx-driver: could not queue same-session work: ${renderThrown(error)}`)
     }
+    return true
   }
 
   private ensureReady(
@@ -732,18 +820,16 @@ export class LoopXContinuationDriver {
     reservation: Reservation,
     signal: AbortSignal,
   ): Promise<boolean> {
-    if (signal.aborted || !this.isLiveAgent(state.agent)
-      || state.activation.session !== state.agent.session
-      || !state.activation.activated
-      || state.agent.session !== reservation.session
-      || state.stopping || state.pauseAfterTurnError
-      || state.competing || state.reservation !== reservation) return false
+    if (!this.reservationIsCurrent(state, reservation, signal)) return false
     try {
       const command = await this.loopXCommand(signal)
       const bindingPayload = await this.resolveBinding(command, state.agent, signal)
       const binding = exactBinding(bindingPayload, String(state.agent.id))
       if (binding?.goalId !== reservation.goalId || binding.agentId !== reservation.agentId) {
         return false
+      }
+      if (reservation.preserveAcrossPause) {
+        return this.reservationIsCurrent(state, reservation, signal)
       }
       const quota = await this.readQuota(
         command,
@@ -752,10 +838,8 @@ export class LoopXContinuationDriver {
         reservation.turnInstanceId,
         signal,
       )
-      return !signal.aborted
-        && state.reservation === reservation
-        && state.agent.session === reservation.session
-        && exactQuota(quota, reservation)
+      return this.reservationIsCurrent(state, reservation, signal)
+        && (reservation.preserveAcrossPause || exactQuota(quota, reservation))
     } catch (error: unknown) {
       if (error instanceof LoopXCliError && error.kind === 'missing') {
         this.command = undefined
@@ -765,6 +849,25 @@ export class LoopXContinuationDriver {
       }
       return false
     }
+  }
+
+  private reservationIsCurrent(
+    state: DriverState,
+    reservation: Reservation,
+    signal: AbortSignal,
+  ): boolean {
+    return !signal.aborted
+      && !this.disposed
+      && !state.stopping
+      && !state.pauseAfterTurnError
+      && !state.competing
+      && state.activation.activated
+      && state.activation.session === state.agent.session
+      && state.agent.session === reservation.session
+      && state.reservation === reservation
+      && this.isLiveAgent(state.agent)
+      && state.agent.id === reservation.session.id
+      && state.agent.id === reservation.session.header.id
   }
 
   private async loopXCommand(signal: AbortSignal): Promise<LoopXCommand> {
@@ -875,6 +978,30 @@ export class LoopXContinuationDriver {
     state.timer = handle
   }
 
+  private resolveEvaluationWaiterBatch(
+    state: DriverState,
+    waiters: readonly EvaluationWaiter[],
+    evaluated: boolean,
+  ): void {
+    for (const waiter of waiters) {
+      waiter.resolve(evaluated
+        && !this.disposed
+        && !state.stopping
+        && state.activation.session === waiter.session
+        && state.agent.session === waiter.session
+        && this.isLiveAgent(state.agent))
+    }
+  }
+
+  private resolveEvaluationWaiters(
+    state: DriverState,
+    evaluated: boolean,
+  ): void {
+    const waiters = [...state.evaluationWaiters]
+    state.evaluationWaiters.clear()
+    this.resolveEvaluationWaiterBatch(state, waiters, evaluated)
+  }
+
   private cancelPending(state: DriverState): void {
     state.requested = false
     state.controller?.abort()
@@ -910,6 +1037,7 @@ export class LoopXContinuationDriver {
 
   private stopState(state: DriverState): void {
     state.stopping = true
+    this.resolveEvaluationWaiters(state, false)
     this.cancelPending(state)
   }
 }
@@ -922,8 +1050,15 @@ export function apply(ctx: Context): void {
   })
 
   ctx.effect(function* () {
+    const unregisterDriverBridge = goalBarCoordinator.registerDriverBridge(driver)
     ctx.on('agent/created', ({ agent }) => { driver.observeAgent(agent) })
-    ctx.on('agent/disposed', ({ agent }) => { driver.onAgentDisposed(agent) })
+    ctx.on('agent/disposed', ({ agent }) => {
+      goalBarCoordinator.invalidateSession(agent.session)
+      driver.onAgentDisposed(agent)
+    })
+    ctx.on('session/disposed', session => {
+      goalBarCoordinator.invalidateSession(session)
+    })
     ctx.on('agent/session-start', ({ agent }) => { driver.onSessionStart(agent) })
     ctx.on('agent/status', ({ agent, status }) => { driver.onAgentStatus(agent, status) })
     ctx.on('agent/inbox/inserted', ({ agent, message }) => driver.onInboxInserted(agent, message))
@@ -934,10 +1069,16 @@ export function apply(ctx: Context): void {
       driver.onPreStep(agent, messages, signal, next)
     ))
     ctx.on('session/event', (session, event) => {
+      if (event.type === 'turn/end') {
+        goalBarCoordinator.publishTurnEnd(session, event)
+      }
       const agent = ctx.agents.get(session.id)
       if (agent?.session === session) driver.onSessionEvent(agent, event)
     })
     for (const agent of ctx.agents.list()) driver.observeAgent(agent)
-    yield () => driver.dispose()
+    yield async () => {
+      unregisterDriverBridge()
+      await driver.dispose()
+    }
   }, 'dsh-loopx-driver lifecycle')
 }

@@ -1,12 +1,18 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
+import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
 import type { FileRunner } from '../src/cli.ts'
 import {
+  apply as applyDriver,
   LoopXContinuationDriver,
 } from '../src/driver.ts'
 import type { DriverClock } from '../src/driver.ts'
+import {
+  GoalBarCoordinator,
+  goalBarCoordinator,
+} from '../src/goalbar/events.ts'
 
 const goalId = 'goal-fixture'
 const agentId = 'agent-fixture'
@@ -126,6 +132,64 @@ function sessionEvent(
   return { type, data } as unknown as SessionEvent
 }
 
+function turnEndEvent(
+  seq: number,
+  reason: 'completed' | 'max-tokens' = 'completed',
+): SessionEvent<'turn/end'> {
+  return {
+    type: 'turn/end',
+    seq,
+    time: 1,
+    data: {
+      turn: 0,
+      reason: { kind: reason },
+    },
+  }
+}
+
+interface AppliedDriverRuntime {
+  emitSessionEvent(session: Agent['session'], event: SessionEvent): void
+  dispose(): Promise<void>
+}
+
+function appliedDriverRuntime(
+  liveAgent: Agent,
+  initiallyObserved: boolean,
+): AppliedDriverRuntime {
+  type Handler = (...args: unknown[]) => unknown
+  const handlers = new Map<string, Handler[]>()
+  let disposeEffect: (() => unknown) | undefined
+  const ctx = {
+    agents: {
+      get: (id: string) => String(liveAgent.id) === String(id) ? liveAgent : undefined,
+      list: () => initiallyObserved ? [liveAgent] : [],
+      withoutInitiator: (operation: () => Promise<unknown>) => operation(),
+    },
+    logger: { warn() {} },
+    on(event: string, handler: Handler) {
+      const registered = handlers.get(event) ?? []
+      registered.push(handler)
+      handlers.set(event, registered)
+    },
+    effect(effect: () => Generator<unknown, void, unknown>) {
+      const iterator = effect()
+      const yielded = iterator.next().value
+      if (typeof yielded === 'function') disposeEffect = yielded as () => unknown
+    },
+  } as unknown as Context
+  applyDriver(ctx)
+  return {
+    emitSessionEvent(session, event) {
+      for (const handler of handlers.get('session/event') ?? []) {
+        handler(session, event)
+      }
+    },
+    async dispose() {
+      await disposeEffect?.()
+    },
+  }
+}
+
 function userSkillInvocationEvent(
   name = 'loopx',
   form = 'instructions',
@@ -208,13 +272,13 @@ interface RunnerFixture {
 
 function runnerFixture(options: {
   readonly quotaExitFailures?: number
-  readonly shouldRun?: boolean
+  readonly shouldRun?: boolean | (() => boolean)
   readonly waitMinutes?: number
   readonly schedulerMode?: 'poll' | 'stop' | 'missing'
   readonly unchangedPollLimit?: number
   readonly quotaAgentId?: string
   readonly typedQuotaFailure?: boolean
-  readonly bindingStatus?: 'bound' | 'missing'
+  readonly bindingStatus?: 'bound' | 'missing' | (() => 'bound' | 'missing')
 } = {}): RunnerFixture {
   const calls: string[][] = []
   const quotaCalls: string[][] = []
@@ -231,7 +295,10 @@ function runnerFixture(options: {
       if (args.includes('resolve-agent-thread')) {
         const threadIdIndex = args.indexOf('--thread-id')
         const threadId = args[threadIdIndex + 1]
-        if (options.bindingStatus === 'missing') {
+        const bindingStatus = typeof options.bindingStatus === 'function'
+          ? options.bindingStatus()
+          : options.bindingStatus ?? 'bound'
+        if (bindingStatus === 'missing') {
           return {
             exitCode: 0,
             stdout: JSON.stringify({
@@ -266,7 +333,9 @@ function runnerFixture(options: {
           quotaExitFailures -= 1
           return { exitCode: 1, stdout: '', stderr: 'transient diagnostic' }
         }
-        const shouldRun = options.shouldRun ?? true
+        const shouldRun = typeof options.shouldRun === 'function'
+          ? options.shouldRun()
+          : options.shouldRun ?? true
         const schedulerHint = shouldRun
           ? { action: 'run_now' }
           : options.schedulerMode === 'stop'
@@ -1112,5 +1181,424 @@ describe('same-session LoopX driver', () => {
     expect(fixture.calls).toHaveLength(callsBeforeReplacement)
     expect(host.maintenanceCalls).toBe(maintenanceBeforeReplacement)
     await driver.dispose()
+  })
+})
+
+describe('GoalBar exact-Session Driver bridge', () => {
+  it('publishes the committed event seq before Driver state and activation gates', async () => {
+    for (const initiallyObserved of [false, true]) {
+      const host = fakeAgent()
+      const runtime = appliedDriverRuntime(host.agent, initiallyObserved)
+      const watches = goalBarCoordinator.openWatchService()
+      const controller = new AbortController()
+      const capturedSession = host.agent.session
+      try {
+        const changed = watches.waitForTurnEnd(capturedSession, null, {
+          signal: controller.signal,
+          timeoutMs: 1_000,
+          isSessionCurrent: () => host.agent.session === capturedSession,
+        })
+        const event = turnEndEvent(initiallyObserved ? 41 : 17)
+        host.appendEvent(event)
+        runtime.emitSessionEvent(capturedSession, event)
+
+        await expect(changed).resolves.toEqual({
+          kind: 'changed',
+          sessionId,
+          turnEndSeq: event.seq,
+        })
+        expect(host.maintenanceCalls).toBe(0)
+        expect(host.nextTurn).toHaveLength(0)
+        await expect(goalBarCoordinator.cancelQueued({
+          agent: host.agent,
+          session: capturedSession,
+        })).resolves.toEqual({ kind: 'applied' })
+      } finally {
+        controller.abort()
+        watches.dispose()
+        await runtime.dispose()
+      }
+    }
+  })
+
+  it('keeps watches exact to the captured Session and disposes pending waiters', async () => {
+    const coordinator = new GoalBarCoordinator()
+    const first = fakeAgent()
+    const replacement = fakeAgent()
+    const watches = coordinator.openWatchService()
+    const controller = new AbortController()
+    let settled = false
+    const pending = watches.waitForTurnEnd(first.agent.session, 3, {
+      signal: controller.signal,
+      timeoutMs: 1_000,
+      isSessionCurrent: () => true,
+    }).then(receipt => {
+      settled = true
+      return receipt
+    })
+
+    coordinator.publishTurnEnd(replacement.agent.session, turnEndEvent(9))
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    coordinator.publishTurnEnd(first.agent.session, turnEndEvent(7))
+    await expect(pending).resolves.toEqual({
+      kind: 'changed',
+      sessionId,
+      turnEndSeq: 7,
+    })
+
+    const disposed = watches.waitForTurnEnd(first.agent.session, 7, {
+      signal: controller.signal,
+      timeoutMs: 1_000,
+      isSessionCurrent: () => true,
+    })
+    watches.dispose()
+    await expect(disposed).resolves.toEqual({ kind: 'service_disposed' })
+  })
+
+  it('echoes the watch cursor on timeout and fails closed on invalidation', async () => {
+    const coordinator = new GoalBarCoordinator()
+    const host = fakeAgent()
+    const watches = coordinator.openWatchService()
+    const controller = new AbortController()
+
+    await expect(watches.waitForTurnEnd(host.agent.session, 11, {
+      signal: controller.signal,
+      timeoutMs: 0,
+      isSessionCurrent: () => true,
+    })).resolves.toEqual({ kind: 'timeout', turnEndSeq: 11 })
+
+    const unavailable = watches.waitForTurnEnd(host.agent.session, null, {
+      signal: controller.signal,
+      timeoutMs: 1_000,
+      isSessionCurrent: () => true,
+    })
+    coordinator.invalidateSession(host.agent.session)
+    await expect(unavailable).resolves.toEqual({ kind: 'session_unavailable' })
+
+    const abortController = new AbortController()
+    const aborted = watches.waitForTurnEnd(host.agent.session, null, {
+      signal: abortController.signal,
+      timeoutMs: 1_000,
+      isSessionCurrent: () => true,
+    })
+    abortController.abort()
+    await expect(aborted).resolves.toEqual({ kind: 'aborted' })
+    watches.dispose()
+  })
+
+  it('returns fixed unavailable receipts for missing, throwing, or stale bridges', async () => {
+    const coordinator = new GoalBarCoordinator()
+    const host = fakeAgent()
+    const capture = { agent: host.agent, session: host.agent.session }
+    await expect(coordinator.cancelQueued(capture)).resolves.toEqual({
+      kind: 'unavailable',
+      reason: 'driver_unavailable',
+    })
+
+    const unregisterThrowing = coordinator.registerDriverBridge({
+      async activateAndEvaluate() { throw new Error('private driver failure') },
+      async cancelQueued() { throw new Error('private driver failure') },
+    })
+    await expect(coordinator.activateAndEvaluate(capture)).resolves.toEqual({
+      kind: 'unavailable',
+      reason: 'driver_unavailable',
+    })
+    unregisterThrowing()
+
+    let calls = 0
+    const unregister = coordinator.registerDriverBridge({
+      async activateAndEvaluate() {
+        calls += 1
+        return { kind: 'applied' }
+      },
+      async cancelQueued() {
+        calls += 1
+        return { kind: 'applied' }
+      },
+    })
+    host.replaceSession(undefined, [])
+    await expect(coordinator.cancelQueued(capture)).resolves.toEqual({
+      kind: 'unavailable',
+      reason: 'session_unavailable',
+    })
+    expect(calls).toBe(0)
+    unregister()
+  })
+
+  it('Start clears only the captured latch and awaits one real evaluation', async () => {
+    const base = runnerFixture()
+    let resolveStarted = false
+    let releaseResolve: (() => void) | undefined
+    const gate = new Promise<void>(resolve => { releaseResolve = resolve })
+    const controlled: RunnerFixture = {
+      ...base,
+      runner: async (file, args, options) => {
+        if (args.includes('resolve-agent-thread')) {
+          resolveStarted = true
+          await gate
+        }
+        return base.runner(file, args, options)
+      },
+    }
+    const captured = fakeAgent()
+    const unrelated = fakeAgent('another-session')
+    const driver = new LoopXContinuationDriver({
+      runner: controlled.runner,
+      isLiveAgent: agent => agent === captured.agent || agent === unrelated.agent,
+      retryDelaysMs: [0, 0],
+    })
+    driver.observeAgent(captured.agent)
+    driver.observeAgent(unrelated.agent)
+    driver.onAgentError(captured.agent)
+    let settled = false
+    const receipt = driver.activateAndEvaluate({
+      agent: captured.agent,
+      session: captured.agent.session,
+    }).then(value => {
+      settled = true
+      return value
+    })
+
+    await waitFor(() => resolveStarted)
+    expect(settled).toBe(false)
+    expect(unrelated.maintenanceCalls).toBe(0)
+    releaseResolve?.()
+
+    await expect(receipt).resolves.toEqual({ kind: 'applied' })
+    expect(captured.maintenanceCalls).toBe(1)
+    expect(captured.nextTurn).toHaveLength(1)
+    expect(unrelated.nextTurn).toHaveLength(0)
+    expect(base.calls.filter(call => call.includes('resolve-agent-thread')))
+      .toHaveLength(1)
+    await driver.dispose()
+  })
+
+  it('Start fails closed when the captured Session is replaced during evaluation', async () => {
+    const base = runnerFixture()
+    let resolveStarted = false
+    let releaseResolve: (() => void) | undefined
+    const gate = new Promise<void>(resolve => { releaseResolve = resolve })
+    const controlled: RunnerFixture = {
+      ...base,
+      runner: async (file, args, options) => {
+        if (args.includes('resolve-agent-thread')) {
+          resolveStarted = true
+          await gate
+        }
+        return base.runner(file, args, options)
+      },
+    }
+    const host = fakeAgent()
+    const driver = new LoopXContinuationDriver({
+      runner: controlled.runner,
+      isLiveAgent: () => true,
+      retryDelaysMs: [0, 0],
+    })
+    driver.observeAgent(host.agent)
+    const capturedSession = host.agent.session
+    const receipt = driver.activateAndEvaluate({
+      agent: host.agent,
+      session: capturedSession,
+    })
+
+    await waitFor(() => resolveStarted)
+    host.replaceSession(undefined, [])
+    releaseResolve?.()
+
+    await expect(receipt).resolves.toEqual({
+      kind: 'unavailable',
+      reason: 'session_unavailable',
+    })
+    expect(host.nextTurn).toHaveLength(0)
+    await driver.dispose()
+  })
+
+  it('Pause removes only the captured Session scheduled continuation', async () => {
+    const fixture = runnerFixture({ shouldRun: false, waitMinutes: 5 })
+    const first = fakeAgent()
+    const second = fakeAgent('another-session')
+    const timers: Array<{ cleared: boolean }> = []
+    const driver = new LoopXContinuationDriver({
+      runner: fixture.runner,
+      isLiveAgent: () => true,
+      retryDelaysMs: [0, 0],
+      clock: {
+        setTimeout() {
+          const timer = { cleared: false }
+          timers.push(timer)
+          return timer
+        },
+        clearTimeout(handle) {
+          (handle as { cleared: boolean }).cleared = true
+        },
+      },
+    })
+    observeActivated(driver, first)
+    observeActivated(driver, second)
+    await waitFor(() => timers.length === 2)
+
+    await expect(driver.cancelQueued({
+      agent: first.agent,
+      session: first.agent.session,
+    })).resolves.toEqual({ kind: 'applied' })
+    expect(timers[0]?.cleared).toBe(true)
+    expect(timers[1]?.cleared).toBe(false)
+    expect(first.cancelCalls).toBe(0)
+    expect(second.cancelCalls).toBe(0)
+    await driver.dispose()
+  })
+
+  it('Pause removes only the captured Session queued reservation', async () => {
+    const fixture = runnerFixture()
+    const first = fakeAgent()
+    const second = fakeAgent('another-session')
+    const driver = new LoopXContinuationDriver({
+      runner: fixture.runner,
+      isLiveAgent: () => true,
+      retryDelaysMs: [0, 0],
+    })
+    observeActivated(driver, first)
+    observeActivated(driver, second)
+    await waitFor(() => first.nextTurn.length === 1 && second.nextTurn.length === 1)
+
+    await expect(driver.cancelQueued({
+      agent: first.agent,
+      session: first.agent.session,
+    })).resolves.toEqual({ kind: 'applied' })
+    expect(first.nextTurn).toHaveLength(0)
+    expect(second.nextTurn).toHaveLength(1)
+    expect(first.cancelCalls).toBe(0)
+    expect(second.cancelCalls).toBe(0)
+    await driver.dispose()
+  })
+
+  it('Pause preserves the exact claimed turn after Goal stop without opening new work', async () => {
+    let shouldRun = true
+    const fixture = runnerFixture({ shouldRun: () => shouldRun })
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+    observeActivated(driver, host)
+    await waitFor(() => host.nextTurn.length === 1)
+    const queued = host.nextTurn.shift() as UserMessage
+    host.setStatus('running')
+    driver.onInboxClaimed(host.agent, queued)
+
+    // The Host has already committed goal-lifecycle stop before this receipt.
+    shouldRun = false
+    await expect(driver.cancelQueued({
+      agent: host.agent,
+      session: host.agent.session,
+    })).resolves.toEqual({ kind: 'applied' })
+    expect(host.cancelCalls).toBe(0)
+    const decision = await driver.onPreStep(
+      host.agent,
+      [queued],
+      new AbortController().signal,
+      async () => ({ kind: 'enter', messages: [queued] }),
+    )
+    expect(decision.kind).toBe('enter')
+    expect(fixture.quotaCalls).toHaveLength(1)
+    expect(fixture.calls.filter(call => call.includes('resolve-agent-thread')))
+      .toHaveLength(3)
+
+    driver.onSessionEvent(host.agent, sessionEvent('user/message', queued))
+    await expect(driver.cancelQueued({
+      agent: host.agent,
+      session: host.agent.session,
+    })).resolves.toEqual({ kind: 'applied' })
+    expect(host.cancelCalls).toBe(0)
+
+    host.setStatus('idle')
+    driver.onAgentStatus(host.agent, 'idle')
+    await waitFor(() => fixture.quotaCalls.length === 2)
+    expect(host.nextTurn).toHaveLength(0)
+    await driver.dispose()
+    expect(host.cancelCalls).toBe(0)
+  })
+
+  it('Pause preserves a claimed turn when stop lands during its quota recheck', async () => {
+    let shouldRun = true
+    const base = runnerFixture({ shouldRun: () => shouldRun })
+    let blockQuota = false
+    let quotaStarted = false
+    let releaseQuota: (() => void) | undefined
+    const gate = new Promise<void>(resolve => { releaseQuota = resolve })
+    const controlled: RunnerFixture = {
+      ...base,
+      runner: async (file, args, options) => {
+        if (blockQuota && args.includes('should-run')) {
+          quotaStarted = true
+          await gate
+        }
+        return base.runner(file, args, options)
+      },
+    }
+    const host = fakeAgent()
+    const driver = new LoopXContinuationDriver({
+      runner: controlled.runner,
+      isLiveAgent: () => true,
+      makeTurnInstanceId: () => 'turn-stable',
+      retryDelaysMs: [0, 0],
+    })
+    observeActivated(driver, host)
+    await waitFor(() => host.nextTurn.length === 1)
+    const queued = host.nextTurn.shift() as UserMessage
+    host.setStatus('running')
+    driver.onInboxClaimed(host.agent, queued)
+
+    blockQuota = true
+    const decision = driver.onPreStep(
+      host.agent,
+      [queued],
+      new AbortController().signal,
+      async () => ({ kind: 'enter', messages: [queued] }),
+    )
+    await waitFor(() => quotaStarted)
+    shouldRun = false
+    await driver.cancelQueued({ agent: host.agent, session: host.agent.session })
+    releaseQuota?.()
+
+    await expect(decision).resolves.toMatchObject({ kind: 'enter' })
+    expect(base.quotaCalls).toHaveLength(2)
+    expect(host.cancelCalls).toBe(0)
+    await driver.dispose()
+  })
+
+  it('Pause preservation still rejects a claimed turn whose exact binding changed', async () => {
+    let bindingStatus: 'bound' | 'missing' = 'bound'
+    let shouldRun = true
+    const fixture = runnerFixture({
+      bindingStatus: () => bindingStatus,
+      shouldRun: () => shouldRun,
+    })
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+    observeActivated(driver, host)
+    await waitFor(() => host.nextTurn.length === 1)
+    const queued = host.nextTurn.shift() as UserMessage
+    host.setStatus('running')
+    driver.onInboxClaimed(host.agent, queued)
+
+    shouldRun = false
+    bindingStatus = 'missing'
+    await driver.cancelQueued({ agent: host.agent, session: host.agent.session })
+    let nextCalls = 0
+    const decision = await driver.onPreStep(
+      host.agent,
+      [queued],
+      new AbortController().signal,
+      async () => {
+        nextCalls += 1
+        return { kind: 'enter', messages: [queued] }
+      },
+    )
+
+    expect(decision).toEqual({ kind: 'reject' })
+    expect(nextCalls).toBe(0)
+    expect(fixture.quotaCalls).toHaveLength(1)
+    await driver.dispose()
+    expect(host.cancelCalls).toBe(0)
   })
 })

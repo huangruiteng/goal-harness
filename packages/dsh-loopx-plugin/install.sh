@@ -12,9 +12,9 @@ usage() {
 Usage: ./install.sh [--help]
 
 Build and install the DSH LoopX host plugin into the DSH web profile. This
-installs only `/loopx-init` and the same-session Driver. LoopX itself is not a
-prerequisite; run `/loopx-init` inside DSH afterward to install or upgrade the
-LoopX CLI and its DSH skills.
+installs `/loopx-init`, the same-session Driver, and the loopback-only GoalBar
+Host/Client faces. LoopX itself is not a prerequisite; run `/loopx-init` inside
+DSH afterward to install or upgrade the LoopX CLI and its DSH skills.
 
 Environment:
   DSH_BIN=/path/to/dsh  Override the package-local DSH CLI.
@@ -101,13 +101,14 @@ printf '%s' "$profile_dump" | node -e '
   const fs = require("node:fs")
   const dump = fs.readFileSync(0, "utf8")
   const rows = [
+    ["loopx-goalbar", "dsh-loopx-plugin"],
     ["loopx-init-command", "dsh-loopx-plugin/init-command"],
     ["loopx-driver", "dsh-loopx-plugin/driver"],
   ]
   const packageNames = dump
     .split(/\r?\n/u)
     .map(line => line.match(/^\s*name:\s+(\S+)\s*$/u)?.[1])
-    .filter(name => name?.startsWith("dsh-loopx-plugin/"))
+    .filter(name => name === "dsh-loopx-plugin" || name?.startsWith("dsh-loopx-plugin/"))
   const expectedNames = rows.map(([, name]) => name)
   if (JSON.stringify(packageNames) !== JSON.stringify(expectedNames)) {
     throw new Error(`unexpected package rows: ${packageNames.join(",")}`)
@@ -120,7 +121,7 @@ printf '%s' "$profile_dump" | node -e '
     previous = position
   }
 ' || {
-  echo 'install: DSH profile readback did not match the two-face plugin contract' >&2
+  echo 'install: DSH profile readback did not match the Host/Client plugin contract' >&2
   exit 1
 }
 

@@ -1,0 +1,130 @@
+import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
+
+import {
+  GOALBAR_REQUEST_VERSION,
+  decodeGoalBarResponseV1,
+  endpointForGoalBarOp,
+} from '../goalbar/protocol.ts'
+import type {
+  GoalBarClientFaultCode,
+  GoalBarExpectedBindingV1,
+  GoalBarRequestV1,
+  GoalBarResponseFor,
+} from '../goalbar/protocol.ts'
+
+const GOALBAR_CHANNEL = '/loopx'
+
+export type GoalBarRpcOutcome<T> =
+  | { readonly ok: true; readonly response: T }
+  | { readonly ok: false; readonly code: GoalBarClientFaultCode }
+
+export type GoalBarReadResponseV1 = GoalBarResponseFor<Extract<
+  GoalBarRequestV1,
+  { readonly op: 'read' }
+>>
+
+export type GoalBarWatchResponseV1 = GoalBarResponseFor<Extract<
+  GoalBarRequestV1,
+  { readonly op: 'watch' }
+>>
+
+export type GoalBarStartResponseV1 = GoalBarResponseFor<Extract<
+  GoalBarRequestV1,
+  { readonly op: 'start' }
+>>
+
+export type GoalBarPauseResponseV1 = GoalBarResponseFor<Extract<
+  GoalBarRequestV1,
+  { readonly op: 'pause' }
+>>
+
+/** The four browser operations consumed by one mounted GoalBar instance. */
+export interface GoalBarRpc {
+  read(
+    sessionId: string,
+    signal: AbortSignal,
+  ): Promise<GoalBarRpcOutcome<GoalBarReadResponseV1>>
+  watch(
+    sessionId: string,
+    afterTurnEndSeq: number | null,
+    signal: AbortSignal,
+  ): Promise<GoalBarRpcOutcome<GoalBarWatchResponseV1>>
+  start(
+    sessionId: string,
+    expected: GoalBarExpectedBindingV1,
+    signal: AbortSignal,
+  ): Promise<GoalBarRpcOutcome<GoalBarStartResponseV1>>
+  pause(
+    sessionId: string,
+    expected: GoalBarExpectedBindingV1,
+    signal: AbortSignal,
+  ): Promise<GoalBarRpcOutcome<GoalBarPauseResponseV1>>
+}
+
+type ConnectionRpcCaller = Pick<ClientConnectionRpc, 'call'>
+
+async function callGoalBar<T extends GoalBarRequestV1>(
+  caller: ConnectionRpcCaller,
+  request: T,
+  signal: AbortSignal,
+): Promise<GoalBarRpcOutcome<GoalBarResponseFor<T>>> {
+  try {
+    const carrier = await caller.call(
+      GOALBAR_CHANNEL,
+      endpointForGoalBarOp(request.op),
+      request,
+      signal,
+    )
+    if (!carrier.ok) return { ok: false, code: 'transport_error' }
+    const response = decodeGoalBarResponseV1(request, carrier.value)
+    return response === undefined
+      ? { ok: false, code: 'protocol_error' }
+      : { ok: true, response }
+  } catch {
+    return { ok: false, code: 'transport_error' }
+  }
+}
+
+/**
+ * Wrap DSH's generic Connection caller with the closed GoalBar V1 wire.
+ * Carrier errors and thrown values are deliberately discarded at this boundary.
+ */
+export function createGoalBarRpc(caller: ConnectionRpcCaller): GoalBarRpc {
+  return {
+    read(sessionId, signal) {
+      const request = {
+        v: GOALBAR_REQUEST_VERSION,
+        op: 'read',
+        sessionId,
+      } as const
+      return callGoalBar(caller, request, signal)
+    },
+    watch(sessionId, afterTurnEndSeq, signal) {
+      const request = {
+        v: GOALBAR_REQUEST_VERSION,
+        op: 'watch',
+        sessionId,
+        afterTurnEndSeq,
+      } as const
+      return callGoalBar(caller, request, signal)
+    },
+    start(sessionId, expected, signal) {
+      const request = {
+        v: GOALBAR_REQUEST_VERSION,
+        op: 'start',
+        sessionId,
+        expected,
+      } as const
+      return callGoalBar(caller, request, signal)
+    },
+    pause(sessionId, expected, signal) {
+      const request = {
+        v: GOALBAR_REQUEST_VERSION,
+        op: 'pause',
+        sessionId,
+        expected,
+      } as const
+      return callGoalBar(caller, request, signal)
+    },
+  }
+}
