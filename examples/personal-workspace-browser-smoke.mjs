@@ -130,6 +130,31 @@ async function installApi(page) {
     }
     await route.fulfill({ contentType: "application/json", json: fixture, status: 200 });
   });
+  await page.route("http://127.0.0.1:8766/ssh-hosts", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        ok: true,
+        schema_version: "ssh_host_catalog_v0",
+        hosts: [{ alias: "remote-lab" }, { alias: "remote-build" }],
+      },
+      status: 200,
+    });
+  });
+  await page.route("http://127.0.0.1:8876/status.json", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: require(resolve(repoRoot, "examples/status.example.json")),
+      status: 200,
+    });
+  });
+  await page.route("http://127.0.0.1:8976/status.json", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: require(resolve(repoRoot, "examples/status.example.json")),
+      status: 200,
+    });
+  });
   await page.route("**/api/chat/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -1064,6 +1089,33 @@ async function main() {
       await page.screenshot({ path: resolve(outputDir, "refresh-recovery-failed.png"), fullPage: true, animations: "disabled" });
       observations.push(`Refresh recovery failure: ${error.message}`);
     }
+
+    const remote = await browser.newPage({ viewport: { width: 1512, height: 982 } });
+    await installApi(remote);
+    await remote.goto(url, { waitUntil: "networkidle" });
+    await remote.getByRole("button", { name: "添加 SSH 隧道来源" }).click();
+    await remote.getByLabel("本机 SSH Host").fill("remote-lab");
+    await remote.getByText("ssh -N -L 8876:127.0.0.1:8766 remote-lab", { exact: true }).waitFor({ state: "visible" });
+    await remote.getByRole("button", { name: "添加只读来源" }).click();
+    await remote.getByText("远端只读投影", { exact: true }).waitFor({ state: "visible" });
+    await remote.getByRole("button", { name: "添加 SSH 隧道来源" }).click();
+    await remote.getByRole("tab", { name: "手动 URL" }).click();
+    await remote.getByLabel("名称").fill("Remote build host");
+    await remote.getByLabel("本地转发 URL").fill("http://127.0.0.1:8976/status.json");
+    await remote.getByRole("button", { name: "添加只读来源" }).click();
+    const remoteSourceSelect = remote.getByLabel("选择控制面来源");
+    if (await remoteSourceSelect.locator("option").count() !== 3) throw new Error("Multiple SSH tunnel sources were not retained in the source catalog");
+    await remoteSourceSelect.selectOption({ label: "remote-lab" });
+    await remote.locator(".personal-channel-composer").waitFor({ state: "detached", timeout: 3_000 });
+    await remote.screenshot({ path: resolve(outputDir, "remote-read-only-source.png"), fullPage: false, animations: "disabled" });
+    const visibleRemoteCreateButtons = await remote.locator('button[aria-label="创建 Goal"]').evaluateAll((elements) => elements.filter((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    }).length);
+    if (visibleRemoteCreateButtons) throw new Error("Remote read-only source still exposed Goal creation");
+    if (!(await remote.getByText("remote-lab", { exact: true }).count())) throw new Error("Remote source identity is not visible");
+    await remote.close();
 
     const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true });
     await installApi(mobile);

@@ -68,6 +68,12 @@ def _write_logging_python_stub(path: Path, *, label: str) -> None:
     path.chmod(0o755)
 
 
+def _copy_dashboard_launcher(scripts_dir: Path) -> None:
+    source_scripts = Path(__file__).resolve().parents[1] / "scripts"
+    for name in ("dashboard-dev.sh", "loopx-python.sh"):
+        shutil.copy2(source_scripts / name, scripts_dir / name)
+
+
 def test_dashboard_command_is_registered() -> None:
     try:
         args = build_parser().parse_args(["dashboard"])
@@ -238,10 +244,7 @@ def test_dashboard_launcher_installs_missing_frontend_dependencies(
     scripts_dir.mkdir(parents=True)
     dashboard_dir.mkdir(parents=True)
     fake_bin.mkdir()
-    shutil.copy2(
-        Path(__file__).resolve().parents[1] / "scripts" / "dashboard-dev.sh",
-        scripts_dir / "dashboard-dev.sh",
-    )
+    _copy_dashboard_launcher(scripts_dir)
 
     npm_log = tmp_path / "npm.log"
     python_stub = fake_bin / "python3.13"
@@ -282,6 +285,72 @@ def test_dashboard_launcher_installs_missing_frontend_dependencies(
     ]
 
 
+@pytest.mark.parametrize(
+    "configured_via",
+    ["environment", "installer_record", "repository_venv"],
+)
+def test_dashboard_launcher_honors_configured_python_runtime(
+    tmp_path: Path,
+    configured_via: str,
+) -> None:
+    release_root = tmp_path / "release"
+    scripts_dir = release_root / "scripts"
+    dashboard_dir = release_root / "apps" / "presentation" / "dashboard"
+    fake_bin = tmp_path / "bin"
+    scripts_dir.mkdir(parents=True)
+    (dashboard_dir / "node_modules" / ".bin").mkdir(parents=True)
+    (dashboard_dir / "node_modules" / ".bin" / "vite").touch()
+    fake_bin.mkdir()
+    _copy_dashboard_launcher(scripts_dir)
+
+    python_log = tmp_path / "python.log"
+    configured_python = (
+        release_root / ".venv/bin/python"
+        if configured_via == "repository_venv"
+        else tmp_path / "configured-python"
+    )
+    configured_python.parent.mkdir(parents=True, exist_ok=True)
+    configured_python.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >> "$LOOPX_PYTHON_LOG"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    configured_python.chmod(0o755)
+    (fake_bin / "node").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (fake_bin / "npm").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    for executable in (fake_bin / "node", fake_bin / "npm"):
+        executable.chmod(0o755)
+
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "LOOPX_PYTHON_LOG": str(python_log),
+    }
+    if configured_via == "environment":
+        env["LOOPX_PYTHON"] = str(configured_python)
+    elif configured_via == "installer_record":
+        (release_root / ".loopx-python").write_text(
+            f"{configured_python}\n",
+            encoding="utf-8",
+        )
+
+    completed = subprocess.run(
+        ["bash", str(scripts_dir / "dashboard-dev.sh")],
+        cwd=release_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert f"Using LoopX Python: {configured_python}" in completed.stdout
+    commands = python_log.read_text(encoding="utf-8")
+    assert "-m loopx.cli serve-status" in commands
+    assert "-m loopx.cli chat" in commands
+
+
 def test_dashboard_launcher_selects_a_compatible_nvm_node(
     tmp_path: Path,
 ) -> None:
@@ -294,10 +363,7 @@ def test_dashboard_launcher_selects_a_compatible_nvm_node(
     dashboard_dir.mkdir(parents=True)
     fake_bin.mkdir()
     nvm_bin.mkdir(parents=True)
-    shutil.copy2(
-        Path(__file__).resolve().parents[1] / "scripts" / "dashboard-dev.sh",
-        scripts_dir / "dashboard-dev.sh",
-    )
+    _copy_dashboard_launcher(scripts_dir)
 
     npm_log = tmp_path / "npm.log"
     (fake_bin / "python3.13").write_text(
@@ -482,10 +548,7 @@ def test_dashboard_launcher_discovers_agent_bins_outside_restricted_path(
     fake_bin.mkdir()
     npm_global.mkdir(parents=True)
     nvm_bin.mkdir(parents=True)
-    shutil.copy2(
-        Path(__file__).resolve().parents[1] / "scripts" / "dashboard-dev.sh",
-        scripts_dir / "dashboard-dev.sh",
-    )
+    _copy_dashboard_launcher(scripts_dir)
     (dashboard_dir / "node_modules" / ".bin").mkdir(parents=True)
     (dashboard_dir / "node_modules" / ".bin" / "vite").touch()
 
@@ -556,10 +619,7 @@ def test_dashboard_launcher_selects_highest_semantic_nvm_lark_cli(
     fake_bin.mkdir()
     low_bin.mkdir(parents=True)
     high_bin.mkdir(parents=True)
-    shutil.copy2(
-        Path(__file__).resolve().parents[1] / "scripts" / "dashboard-dev.sh",
-        scripts_dir / "dashboard-dev.sh",
-    )
+    _copy_dashboard_launcher(scripts_dir)
     (dashboard_dir / "node_modules" / ".bin").mkdir(parents=True)
     (dashboard_dir / "node_modules" / ".bin" / "vite").touch()
 
