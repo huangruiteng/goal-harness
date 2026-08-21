@@ -29,6 +29,11 @@ import {
   type SettlementStepKind,
 } from "./effect_program.ts";
 import {
+  governedCapabilitySettlementStatus,
+  validateGovernedCapabilityResult,
+  validateGovernedCapabilitySettlementCallback,
+} from "./governed_capability.ts";
+import {
   interpretTurnJournal,
   type TurnJournalInspectionRequest,
 } from "./turn_driver/turn_journal.ts";
@@ -283,6 +288,32 @@ export function createEffectRuntimeHandlers(
         asObject(params.packet),
         asObject(params.identity),
       ),
+    ],
+    [
+      "governed_capability.validate_result",
+      (params) => validateGovernedCapabilityResult({
+        value: params.value,
+        invocation_id: requiredString(params.invocation_id, "invocation_id"),
+        effect_id: requiredString(params.effect_id, "effect_id"),
+        result_schema: requiredString(params.result_schema, "result_schema"),
+        effect_class: requiredString(params.effect_class, "effect_class"),
+      }),
+    ],
+    [
+      "governed_capability.validate_settlement_callback",
+      (params) => validateGovernedCapabilitySettlementCallback({
+        payload: params.payload,
+        effect_id: requiredString(params.effect_id, "effect_id"),
+        effect_receipt_digest: requiredString(
+          params.effect_receipt_digest,
+          "effect_receipt_digest",
+        ),
+        require_receipt_digest: params.require_receipt_digest === true,
+      }),
+    ],
+    [
+      "governed_capability.settlement_status",
+      (params) => governedCapabilitySettlementStatus(params.failure),
     ],
     [
       "settlement.identity",

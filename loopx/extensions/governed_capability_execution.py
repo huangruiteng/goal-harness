@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from ..control_plane.effect_program import settlement_result_payload
+from ..control_plane.effect_runtime import effect_runtime_result
 from ..control_plane.host_adapter_settlement import (
     HostGuardState,
     classify_host_guard_snapshot,
@@ -34,8 +35,6 @@ GOVERNED_CAPABILITY_RUN_SCHEMA_VERSION = "loopx_governed_capability_run_v0"
 GOVERNED_CAPABILITY_RECEIPT_SCHEMA_VERSION = (
     "loopx_governed_capability_execution_receipt_v0"
 )
-EXTERNAL_EFFECT_RECEIPT_SCHEMA_VERSION = "loopx_external_effect_receipt_v0"
-
 MaterialEffect = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
 
@@ -130,38 +129,31 @@ def _require_admission(
         )
 
 
-def _effect_receipt(
-    value: object,
+def _validated_governed_capability_result(
+    value: Mapping[str, Any],
     *,
     invocation_id: str,
     effect_id: str,
-) -> dict[str, Any]:
-    receipt = _mapping(value, "external capability effect_receipt")
-    allowed = {
-        "schema_version",
-        "invocation_id",
-        "idempotency_key",
-        "status",
-        "external_ref",
-        "evidence_digest",
-    }
-    if set(receipt) != allowed:
-        raise ValueError("external capability effect_receipt fields are invalid")
-    if receipt.get("schema_version") != EXTERNAL_EFFECT_RECEIPT_SCHEMA_VERSION:
-        raise ValueError("external capability effect_receipt schema is invalid")
-    if receipt.get("invocation_id") != invocation_id:
-        raise ValueError("external capability effect_receipt invocation_id is invalid")
-    if receipt.get("idempotency_key") != effect_id:
-        raise ValueError(
-            "external capability effect_receipt idempotency_key is invalid"
-        )
-    if receipt.get("status") not in {"committed", "no_change"}:
-        raise ValueError("external capability effect_receipt status is invalid")
-    for field in ("external_ref", "evidence_digest"):
-        if not isinstance(receipt.get(field), str) or not receipt[field].strip():
-            raise ValueError(f"external capability effect_receipt {field} is invalid")
-    validate_public_safe_value(receipt, path="provider_result.effect_receipt")
-    return receipt
+    operation: Mapping[str, Any],
+) -> tuple[dict[str, Any], str]:
+    payload = effect_runtime_result(
+        "governed_capability.validate_result",
+        {
+            "value": dict(value),
+            "invocation_id": invocation_id,
+            "effect_id": effect_id,
+            "result_schema": operation.get("result_schema"),
+            "effect_class": operation.get("effect_class"),
+        },
+    )
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("TypeScript governed capability result shape mismatch")
+    result = _mapping(payload.get("result"), "external capability result")
+    journal_status = str(payload.get("journal_status") or "")
+    if journal_status not in {"running", "ready_to_settle"}:
+        raise RuntimeError("TypeScript governed capability status shape mismatch")
+    validate_public_safe_value(result, path="provider_result")
+    return result, journal_status
 
 
 def validate_governed_capability_result(
@@ -171,63 +163,14 @@ def validate_governed_capability_result(
     effect_id: str,
     operation: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Validate one asynchronous material provider observation."""
+    """Adapt the TS-owned material provider state validation."""
 
-    result = _mapping(value, "external capability result")
-    allowed = {
-        "schema_version",
-        "invocation_id",
-        "status",
-        "observations",
-        "domain_state_mutations",
-        "domain_transition_receipts",
-        "transition_proposals",
-        "effect_receipt",
-        "follow_up",
-    }
-    if sorted(set(result) - allowed):
-        raise ValueError("external capability result has unsupported fields")
-    if operation.get("effect_class") != "external_write":
-        raise ValueError("governed capability execution requires external_write")
-    if result.get("schema_version") != operation.get("result_schema"):
-        raise ValueError("external capability result schema_version is invalid")
-    if result.get("invocation_id") != invocation_id:
-        raise ValueError("external capability result invocation_id is invalid")
-    status = str(result.get("status") or "")
-    if status not in {"running", "succeeded", "no_change"}:
-        raise ValueError("external capability result status is invalid")
-    for field in (
-        "observations",
-        "domain_state_mutations",
-        "domain_transition_receipts",
-        "transition_proposals",
-    ):
-        items = result.get(field)
-        if not isinstance(items, list) or len(items) > 64:
-            raise ValueError(f"external capability result {field} is invalid")
-    if not isinstance(result.get("follow_up"), Mapping):
-        raise ValueError("external capability result follow_up is invalid")
-    if status == "running":
-        if result.get("effect_receipt") is not None:
-            raise ValueError(
-                "running external capability cannot claim an effect receipt"
-            )
-        for field in (
-            "domain_state_mutations",
-            "domain_transition_receipts",
-            "transition_proposals",
-        ):
-            if result[field]:
-                raise ValueError(
-                    f"running external capability must leave {field} empty"
-                )
-    else:
-        result["effect_receipt"] = _effect_receipt(
-            result.get("effect_receipt"),
-            invocation_id=invocation_id,
-            effect_id=effect_id,
-        )
-    validate_public_safe_value(result, path="provider_result")
+    result, _journal_status = _validated_governed_capability_result(
+        value,
+        invocation_id=invocation_id,
+        effect_id=effect_id,
+        operation=operation,
+    )
     return result
 
 
@@ -350,16 +293,14 @@ def start_governed_external_capability(
             request=request,
             environment=environment,
         )
-        validated = validate_governed_capability_result(
+        validated, journal_status = _validated_governed_capability_result(
             provider_result,
             invocation_id=invocation_id,
             effect_id=str(identity["effect_id"]),
             operation=operation_profile,
         )
         journal["provider_result"] = validated
-        journal["status"] = (
-            "running" if validated["status"] == "running" else "ready_to_settle"
-        )
+        journal["status"] = journal_status
         _write_journal(path, journal)
         return _public_receipt(journal, dry_run=False)
 
@@ -372,24 +313,16 @@ def _settlement_callback(
     effect_id: str,
     require_receipt_digest: bool,
 ) -> dict[str, Any]:
-    payload = _mapping(effect(context), "governed capability settlement callback")
-    identity = payload.get("settlement_identity")
-    if not isinstance(identity, Mapping) or identity.get("effect_id") != effect_id:
-        return {
-            "ok": False,
-            "appended": False,
-            "reason": "settlement identity mismatch",
-        }
-    if (
-        require_receipt_digest
-        and payload.get("effect_receipt_digest") != effect_receipt_digest
-    ):
-        return {
-            "ok": False,
-            "appended": False,
-            "reason": "effect receipt was not written back",
-        }
-    return payload
+    payload = effect_runtime_result(
+        "governed_capability.validate_settlement_callback",
+        {
+            "payload": dict(effect(context)),
+            "effect_id": effect_id,
+            "effect_receipt_digest": effect_receipt_digest,
+            "require_receipt_digest": require_receipt_digest,
+        },
+    )
+    return _mapping(payload, "governed capability settlement callback")
 
 
 def reconcile_governed_external_capability(
@@ -428,18 +361,14 @@ def reconcile_governed_external_capability(
                 request=request,
                 environment=environment,
             )
-            provider_result = validate_governed_capability_result(
+            provider_result, journal_status = _validated_governed_capability_result(
                 observed,
                 invocation_id=invocation_id,
                 effect_id=str(identity["effect_id"]),
                 operation=operation_profile,
             )
             journal["provider_result"] = provider_result
-            journal["status"] = (
-                "running"
-                if provider_result["status"] == "running"
-                else "ready_to_settle"
-            )
+            journal["status"] = journal_status
             _write_journal(path, journal)
             if provider_result["status"] == "running":
                 return _public_receipt(journal, dry_run=False)
@@ -505,10 +434,22 @@ def reconcile_governed_external_capability(
             committed_effect_id=str(identity["effect_id"]),
         )
         journal["settlement_result"] = settlement_result_payload(settlement)
-        if settlement.failure is not None:
-            journal["status"] = "settlement_failed"
+        settlement_status = effect_runtime_result(
+            "governed_capability.settlement_status",
+            {
+                "failure": (
+                    settlement.failure.as_dict()
+                    if settlement.failure is not None
+                    else None
+                )
+            },
+        )
+        if settlement_status == "settlement_failed":
+            journal["status"] = settlement_status
             _write_journal(path, journal)
             return {**_public_receipt(journal, dry_run=False), "ok": False}
-        journal["status"] = "committed"
+        if settlement_status != "committed":
+            raise RuntimeError("TypeScript governed capability status shape mismatch")
+        journal["status"] = settlement_status
         _write_journal(path, journal)
         return _public_receipt(journal, dry_run=False)

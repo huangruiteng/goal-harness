@@ -28,6 +28,7 @@ MAX_REQUEST_BYTES = 2 * 1024 * 1024
 _NODE_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 _SOURCE_FILES = (
     "effect_program.ts",
+    "governed_capability.ts",
     "effect_runtime_handlers.ts",
     "effect_runtime_io.ts",
     "effect_runtime_server.ts",
