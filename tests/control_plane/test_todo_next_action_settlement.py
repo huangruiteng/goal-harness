@@ -97,6 +97,41 @@ def test_bootstrap_binds_generated_connection_validation_next_action(
     assert "loopx:next-action" not in json.dumps(record)
 
 
+def test_refresh_record_preserves_a_long_wrapped_next_action_losslessly(
+    tmp_path: Path,
+) -> None:
+    prefix = "Run one bounded settlement check and preserve its durable context"
+    tail = "through the final public-safe boundary sentence without truncation."
+    state_text = "\n".join(
+        [
+            "---",
+            f"goal_id: {GOAL_ID}",
+            "---",
+            "",
+            "## Next Action",
+            "",
+            f"- {prefix} " + ("across related control-plane state " * 8),
+            f"  {tail}",
+            "",
+        ]
+    )
+
+    assert active_state_next_action_entries(state_text)[0].endswith("…")
+    record = build_state_refresh_record(
+        goal_id=GOAL_ID,
+        state_file=tmp_path / "ACTIVE_GOAL_STATE.md",
+        state_text=state_text,
+        classification="state_refreshed",
+        recommended_action=prefix,
+        recommended_action_source="test",
+        generated_at="2026-08-21T00:01:00+08:00",
+        registry_goal=None,
+    )
+
+    assert record["state"]["next_action"][0].endswith(tail)
+    assert "…" not in record["state"]["next_action"][0]
+
+
 def test_complete_reprojects_typed_next_action_to_open_successor(
     tmp_path: Path,
 ) -> None:

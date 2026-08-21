@@ -390,16 +390,29 @@ def _section_lines(state_text: str, heading: str) -> list[str]:
     return lines
 
 
-def _section_entries(lines: list[str]) -> list[str]:
+def _section_entries(
+    lines: list[str],
+    *,
+    text_limit: int | None = 220,
+) -> list[str]:
     entries: list[str] = []
     current: list[str] = []
+
+    def append_entry(parts: list[str]) -> None:
+        text = compact_todo_text(" ".join(parts))
+        if not text:
+            return
+        entries.append(
+            text if text_limit is None else _compact_text(text, limit=text_limit)
+        )
+
     for line in lines:
         if line.strip().startswith("<!--"):
             continue
         bullet = BULLET_PATTERN.match(line)
         if bullet:
             if current:
-                entries.append(_compact_text(" ".join(current)))
+                append_entry(current)
             current = [bullet.group(1)]
             continue
         if current and line.startswith((" ", "\t")):
@@ -408,13 +421,13 @@ def _section_entries(lines: list[str]) -> list[str]:
                 current.append(continuation)
             continue
         if current:
-            entries.append(_compact_text(" ".join(current)))
+            append_entry(current)
             current = []
         stripped = line.strip()
         if stripped:
-            entries.append(_compact_text(stripped))
+            append_entry([stripped])
     if current:
-        entries.append(_compact_text(" ".join(current)))
+        append_entry(current)
     return [entry for entry in entries if entry]
 
 
@@ -422,8 +435,12 @@ def active_state_next_action_entries(
     state_text: str,
     *,
     limit: int | None = 3,
+    text_limit: int | None = 220,
 ) -> list[str]:
-    entries = _section_entries(_section_lines(state_text, "Next Action"))
+    entries = _section_entries(
+        _section_lines(state_text, "Next Action"),
+        text_limit=text_limit,
+    )
     if limit is None:
         return entries
     return entries[: max(0, limit)]
