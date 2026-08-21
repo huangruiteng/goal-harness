@@ -281,6 +281,7 @@ function runnerFixture(options: {
   readonly quotaAgentId?: string
   readonly quotaTurnInstanceId?: string
   readonly heartbeatTurnInstanceId?: string
+  readonly heartbeatTaskBody?: string
   readonly typedQuotaFailure?: boolean
   readonly bindingStatus?: 'bound' | 'missing' | (() => 'bound' | 'missing')
 } = {}): RunnerFixture {
@@ -406,7 +407,8 @@ function runnerFixture(options: {
             goal_id: goalId,
             agent_id: agentId,
             turn_instance_id: turnInstanceId,
-            task_body: `LOOPX_TURN=${turnInstanceId}\nContinue through the authoritative LoopX workflow.`,
+            task_body: options.heartbeatTaskBody
+              ?? `LOOPX_TURN=${turnInstanceId}\nContinue through the authoritative LoopX workflow.`,
           }),
           stderr: '',
         }
@@ -844,6 +846,40 @@ describe('same-session LoopX driver', () => {
     await driver.dispose()
   })
 
+  it('rejects the claimed message when its typed source has an extra field', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+    observeActivated(driver, host)
+    await waitFor(() => host.nextTurn.length === 1)
+    const queued = host.nextTurn.shift() as UserMessage
+    const tampered = {
+      ...queued,
+      source: {
+        ...queued.source,
+        unexpected: 'not-part-of-the-continuation-schema',
+      } as unknown as UserMessage['source'],
+    } satisfies UserMessage
+    host.setStatus('running')
+    driver.onInboxClaimed(host.agent, tampered)
+
+    let downstreamCalls = 0
+    const decision = await driver.onPreStep(
+      host.agent,
+      [tampered],
+      new AbortController().signal,
+      async () => {
+        downstreamCalls += 1
+        return { kind: 'enter', messages: [tampered] }
+      },
+    )
+
+    expect(decision).toEqual({ kind: 'reject' })
+    expect(downstreamCalls).toBe(0)
+    expect(fixture.quotaCalls).toHaveLength(1)
+    await driver.dispose()
+  })
+
   it('rejects the claimed message when its canonical content drifts', async () => {
     const fixture = runnerFixture()
     const host = fakeAgent()
@@ -896,6 +932,35 @@ describe('same-session LoopX driver', () => {
     await driver.dispose()
   })
 
+  it('rejects when a downstream pre-step adds a typed source field', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+    observeActivated(driver, host)
+    await waitFor(() => host.nextTurn.length === 1)
+    const queued = host.nextTurn.shift() as UserMessage
+    host.setStatus('running')
+    driver.onInboxClaimed(host.agent, queued)
+    const tampered = {
+      ...queued,
+      source: {
+        ...queued.source,
+        unexpected: 'not-part-of-the-continuation-schema',
+      } as unknown as UserMessage['source'],
+    } satisfies UserMessage
+
+    const decision = await driver.onPreStep(
+      host.agent,
+      [queued],
+      new AbortController().signal,
+      async () => ({ kind: 'enter', messages: [tampered] }),
+    )
+
+    expect(decision).toEqual({ kind: 'reject' })
+    expect(fixture.quotaCalls).toHaveLength(2)
+    await driver.dispose()
+  })
+
   it('fails closed when quota returns a different heartbeat receipt id', async () => {
     const fixture = runnerFixture({ quotaTurnInstanceId: 'turn-other' })
     const host = fakeAgent()
@@ -918,6 +983,32 @@ describe('same-session LoopX driver', () => {
 
   it('fails closed when heartbeat returns a different exact id', async () => {
     const fixture = runnerFixture({ heartbeatTurnInstanceId: 'turn-other' })
+    const host = fakeAgent()
+    const warnings: string[] = []
+    const driver = new LoopXContinuationDriver({
+      runner: fixture.runner,
+      isLiveAgent: () => true,
+      makeTurnInstanceId: () => 'turn-stable',
+      retryDelaysMs: [0, 0],
+      warn: message => warnings.push(message),
+    })
+    observeActivated(driver, host)
+    await waitFor(() => warnings.length === 1)
+
+    expect(host.nextTurn).toHaveLength(0)
+    expect(fixture.heartbeatCalls).toBe(1)
+    expect(warnings[0]).toContain('invalid_schema')
+    await driver.dispose()
+  })
+
+  it('fails closed when the canonical task body contains a conflicting turn id', async () => {
+    const fixture = runnerFixture({
+      heartbeatTaskBody: [
+        'LOOPX_TURN=turn-stable',
+        'LOOPX_TURN=turn-other',
+        'Continue through the authoritative LoopX workflow.',
+      ].join('\n'),
+    })
     const host = fakeAgent()
     const warnings: string[] = []
     const driver = new LoopXContinuationDriver({
@@ -1486,10 +1577,10 @@ describe('GoalBar exact-Session Driver bridge', () => {
     })
 
     const unregisterThrowing = coordinator.registerDriverBridge({
-      async activateAndEvaluate() { throw new Error('private driver failure') },
+      async evaluateActivatedSession() { throw new Error('private driver failure') },
       async cancelQueued() { throw new Error('private driver failure') },
     })
-    await expect(coordinator.activateAndEvaluate(capture)).resolves.toEqual({
+    await expect(coordinator.evaluateActivatedSession(capture)).resolves.toEqual({
       kind: 'unavailable',
       reason: 'driver_unavailable',
     })
@@ -1497,7 +1588,7 @@ describe('GoalBar exact-Session Driver bridge', () => {
 
     let calls = 0
     const unregister = coordinator.registerDriverBridge({
-      async activateAndEvaluate() {
+      async evaluateActivatedSession() {
         calls += 1
         return { kind: 'applied' }
       },
@@ -1515,7 +1606,7 @@ describe('GoalBar exact-Session Driver bridge', () => {
     unregister()
   })
 
-  it('Start clears only the captured latch and awaits one real evaluation', async () => {
+  it('Start clears only the captured latch and awaits one real evaluation for an activated Session', async () => {
     const base = runnerFixture()
     let resolveStarted = false
     let releaseResolve: (() => void) | undefined
@@ -1537,11 +1628,12 @@ describe('GoalBar exact-Session Driver bridge', () => {
       isLiveAgent: agent => agent === captured.agent || agent === unrelated.agent,
       retryDelaysMs: [0, 0],
     })
+    captured.appendEvent(userSkillInvocationEvent())
+    driver.onAgentError(captured.agent)
     driver.observeAgent(captured.agent)
     driver.observeAgent(unrelated.agent)
-    driver.onAgentError(captured.agent)
     let settled = false
-    const receipt = driver.activateAndEvaluate({
+    const receipt = driver.evaluateActivatedSession({
       agent: captured.agent,
       session: captured.agent.session,
     }).then(value => {
@@ -1560,6 +1652,30 @@ describe('GoalBar exact-Session Driver bridge', () => {
     expect(unrelated.nextTurn).toHaveLength(0)
     expect(base.calls.filter(call => call.includes('resolve-agent-thread')))
       .toHaveLength(1)
+    await driver.dispose()
+  })
+
+  it('Start leaves a Session without typed activation inactive and does not evaluate', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+    driver.observeAgent(host.agent)
+    driver.onAgentError(host.agent)
+
+    await expect(driver.evaluateActivatedSession({
+      agent: host.agent,
+      session: host.agent.session,
+    })).resolves.toEqual({ kind: 'applied' })
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(fixture.calls).toHaveLength(0)
+    expect(host.maintenanceCalls).toBe(0)
+    expect(host.nextTurn).toHaveLength(0)
+
+    driver.onAgentStatus(host.agent, 'idle')
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+    expect(fixture.calls).toHaveLength(0)
+    expect(host.nextTurn).toHaveLength(0)
     await driver.dispose()
   })
 
@@ -1586,7 +1702,8 @@ describe('GoalBar exact-Session Driver bridge', () => {
     })
     driver.observeAgent(host.agent)
     const capturedSession = host.agent.session
-    const receipt = driver.activateAndEvaluate({
+    host.appendEvent(userSkillInvocationEvent())
+    const receipt = driver.evaluateActivatedSession({
       agent: host.agent,
       session: capturedSession,
     })

@@ -222,7 +222,7 @@ interface Harness {
   readonly calls: string[][]
   readonly mutationOptions: FileRunOptions[]
   readonly warnings: string[]
-  readonly driverCalls: Array<'activateAndEvaluate' | 'cancelQueued'>
+  readonly driverCalls: Array<'evaluateActivatedSession' | 'cancelQueued'>
   readonly service: ReturnType<typeof createGoalBarService>
   readonly host: AgentFixture
   bindingMode: 'bound' | 'missing' | 'ambiguous'
@@ -263,7 +263,7 @@ function harness(options: {
   const calls: string[][] = []
   const mutationOptions: FileRunOptions[] = []
   const warnings: string[] = []
-  const driverCalls: Array<'activateAndEvaluate' | 'cancelQueued'> = []
+  const driverCalls: Array<'evaluateActivatedSession' | 'cancelQueued'> = []
   const state: HarnessMutableState = {
     bindingMode: 'bound',
     activation: 'stopped',
@@ -316,8 +316,8 @@ function harness(options: {
       ? { kind: 'unavailable' as const, reason: 'driver_unavailable' as const }
       : { kind: 'applied' as const }
     unregisterDriver = coordinator.registerDriverBridge({
-      activateAndEvaluate: async () => {
-        driverCalls.push('activateAndEvaluate')
+      evaluateActivatedSession: async () => {
+        driverCalls.push('evaluateActivatedSession')
         return receipt
       },
       cancelQueued: async () => {
@@ -729,6 +729,7 @@ describe('GoalBar Host lifecycle authority', () => {
       stderr: '',
     })
     expect((await first).result.kind).toBe('succeeded')
+    expect(fixture.driverCalls).toEqual(['evaluateActivatedSession'])
     expect((await reading).result.kind).toBe('present')
     await fixture.service.dispose()
   })
@@ -791,7 +792,7 @@ describe('GoalBar Host lifecycle authority', () => {
       '--execute',
     ])
     expect(fixture.driverCalls).toEqual(['cancelQueued'])
-    expect(fixture.driverCalls).not.toContain('activateAndEvaluate')
+    expect(fixture.driverCalls).not.toContain('evaluateActivatedSession')
     await fixture.service.dispose()
   })
 
@@ -859,7 +860,7 @@ describe('GoalBar Host lifecycle authority', () => {
     const fixture = harness()
     fixture.unregisterDriver()
     fixture.coordinator.registerDriverBridge({
-      activateAndEvaluate: async () => ({
+      evaluateActivatedSession: async () => ({
         kind: 'unavailable', reason: 'session_unavailable',
       }),
       cancelQueued: async () => ({

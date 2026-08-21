@@ -322,7 +322,7 @@ function coordinatorHarness() {
           : { kind: 'session_unavailable' })
       }
     },
-    async activateAndEvaluate() {
+    async evaluateActivatedSession() {
       activateCalls += 1
       return { kind: 'applied' }
     },

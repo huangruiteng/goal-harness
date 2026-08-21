@@ -67,7 +67,7 @@ interface ActionAdmission {
 
 export interface GoalBarCoordinatorPort {
   openWatchService(): GoalBarWatchService
-  activateAndEvaluate(
+  evaluateActivatedSession(
     capture: GoalBarSessionCapture,
   ): Promise<GoalBarDriverActionReceipt>
   cancelQueued(
@@ -704,7 +704,7 @@ export class GoalBarService implements GoalBarServiceHandle {
     let driverReceipt: GoalBarDriverActionReceipt
     try {
       driverReceipt = request.op === 'start'
-        ? await this.coordinator.activateAndEvaluate(capture)
+        ? await this.coordinator.evaluateActivatedSession(capture)
         : await this.coordinator.cancelQueued(capture)
     } catch {
       driverReceipt = { kind: 'unavailable', reason: 'driver_unavailable' }

@@ -16,7 +16,7 @@ export type GoalBarDriverActionReceipt = { readonly kind: 'applied' } | {
   readonly reason: 'driver_unavailable' | 'session_unavailable' | 'evaluation_unavailable'
 }
 export interface GoalBarDriverBridge {
-  activateAndEvaluate(capture: GoalBarSessionCapture): Promise<GoalBarDriverActionReceipt>
+  evaluateActivatedSession(capture: GoalBarSessionCapture): Promise<GoalBarDriverActionReceipt>
   cancelQueued(capture: GoalBarSessionCapture): Promise<GoalBarDriverActionReceipt>
 }
 export interface GoalBarSessionWaitOptions {
@@ -140,8 +140,8 @@ export class GoalBarCoordinator {
       if (this.driverBridge === bridge) this.driverBridge = undefined
     }
   }
-  activateAndEvaluate(capture: GoalBarSessionCapture): Promise<GoalBarDriverActionReceipt> {
-    return this.invokeDriver('activateAndEvaluate', capture)
+  evaluateActivatedSession(capture: GoalBarSessionCapture): Promise<GoalBarDriverActionReceipt> {
+    return this.invokeDriver('evaluateActivatedSession', capture)
   }
   cancelQueued(capture: GoalBarSessionCapture): Promise<GoalBarDriverActionReceipt> {
     return this.invokeDriver('cancelQueued', capture)

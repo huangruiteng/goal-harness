@@ -70,9 +70,11 @@ loopx --registry .loopx/registry.json --format json \
 ```
 
 `status=bound` with one exact pair admits the row; missing or ambiguous results
-fail closed and render nothing. `Start` resumes a stopped Goal and activates
-only that exact live Session. `Pause` stops the Goal and retires only future
-queued/scheduled continuation; it does not abort a claimed or running turn.
+fail closed and render nothing. `Start` resumes a stopped Goal and asks the
+Driver to evaluate only when that exact live Session already contains typed
+`loopx` skill activation evidence. It never activates an inactive Session.
+`Pause` stops the Goal and retires only future queued/scheduled continuation;
+it does not abort a claimed or running turn.
 
 Maintainers can validate the built and packed surfaces with:
 

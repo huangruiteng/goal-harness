@@ -59,6 +59,7 @@ interface Reservation extends Binding {
   readonly session: Agent['session']
   readonly messageId: UserMessage['id']
   readonly content: UserMessage['content']
+  readonly source: LoopXContinuationMessageSource
   readonly turnInstanceId: string
   phase: ReservationPhase
   /** Exact reservation already claimed/admitted when GoalBar Pause retired future work. */
@@ -131,7 +132,13 @@ const systemClock: DriverClock = Object.freeze({
 function continuationSource(
   message: UserMessage,
 ): LoopXContinuationMessageSource | undefined {
-  const source = record(message.source)
+  const source = exactRecord(message.source, [
+    'kind',
+    'schemaVersion',
+    'goalId',
+    'agentId',
+    'turnInstanceId',
+  ])
   return source?.kind === 'loopx-continuation'
     && source.schemaVersion === CONTINUATION_SCHEMA
     && typeof source.goalId === 'string'
@@ -151,13 +158,14 @@ function isDriverMessage(message: UserMessage): boolean {
 function sameReservation(message: UserMessage, reservation: Reservation): boolean {
   const source = continuationSource(message)
   return message.id === reservation.messageId
-    && source?.goalId === reservation.goalId
-    && source.agentId === reservation.agentId
-    && source.turnInstanceId === reservation.turnInstanceId
+    && source !== undefined
+    && isDeepStrictEqual(source, reservation.source)
     && isDeepStrictEqual(message.content, reservation.content)
 }
 
-function automaticMessage(plan: QueuePlan): UserMessage {
+function automaticMessage(
+  plan: QueuePlan,
+): UserMessage & { readonly source: LoopXContinuationMessageSource } {
   const content: UserMessage['content'] = Object.freeze([
     Object.freeze({ type: 'text' as const, text: plan.taskBody }),
   ]) as UserMessage['content']
@@ -178,6 +186,22 @@ function automaticMessage(plan: QueuePlan): UserMessage {
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
+    : undefined
+}
+
+function exactRecord(
+  value: unknown,
+  expectedKeys: readonly string[],
+): Record<string, unknown> | undefined {
+  const candidate = record(value)
+  if (candidate === undefined) return undefined
+  const keys = Reflect.ownKeys(candidate)
+  if (keys.some(key => typeof key !== 'string') || keys.length !== expectedKeys.length) {
+    return undefined
+  }
+  const allowed = new Set(expectedKeys)
+  return keys.every(key => typeof key === 'string' && allowed.has(key))
+    ? candidate
     : undefined
 }
 
@@ -377,7 +401,14 @@ function exactHeartbeat(
     || payload.agent_id !== binding.agentId
     || payload.turn_instance_id !== turnInstanceId) return undefined
   const taskBody = typeof payload.task_body === 'string' ? payload.task_body : ''
-  return taskBody.length > 0 && taskBody.length <= 32_000 ? taskBody : undefined
+  const assignments = [...taskBody.matchAll(/\bLOOPX_TURN=([^\s`'";]+)/gu)]
+    .map(match => match[1])
+  return taskBody.length > 0
+    && taskBody.length <= 32_000
+    && assignments.length === 1
+    && assignments[0] === turnInstanceId
+    ? taskBody
+    : undefined
 }
 
 function renderThrown(value: unknown): string {
@@ -475,7 +506,7 @@ export class LoopXContinuationDriver {
     this.cancelPending(state)
   }
 
-  async activateAndEvaluate(
+  async evaluateActivatedSession(
     capture: GoalBarSessionCapture,
   ): Promise<GoalBarDriverActionReceipt> {
     if (!this.captureIsLive(capture)) {
@@ -486,9 +517,10 @@ export class LoopXContinuationDriver {
       return { kind: 'unavailable', reason: 'session_unavailable' }
     }
 
+    state.activation = foldSessionActivation(capture.session)
+    if (!state.activation.activated) return { kind: 'applied' }
+
     state.pauseAfterTurnError = false
-    state.activation.pendingModelCalls.clear()
-    state.activation.activated = true
     const evaluated = new Promise<boolean>(resolve => {
       state.evaluationWaiters.add({ session: capture.session, resolve })
     })
@@ -791,6 +823,7 @@ export class LoopXContinuationDriver {
     const reservation: Reservation = {
       messageId: message.id,
       content: message.content,
+      source: message.source,
       session: plan.session,
       goalId: plan.goalId,
       agentId: plan.agentId,
