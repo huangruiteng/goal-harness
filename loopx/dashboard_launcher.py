@@ -8,6 +8,8 @@ import subprocess
 from urllib.parse import quote
 import webbrowser
 
+from .release_manifest import release_runtime_identity
+
 
 CHAT_CAPABILITIES_PATH = "/api/chat/capabilities"
 DASHBOARD_CHAT_PATH = "/chat/"
@@ -30,10 +32,11 @@ def default_packaged_assets_dir() -> Path:
 def _probe_existing_chat(host: str, port: int) -> str:
     """Return whether the target port already serves LoopX Chat.
 
-    The result is one of ``matching`` (a LoopX Chat v1 service is running),
-    ``foreign`` (some other process owns the port), or ``unavailable`` (the
-    port is free). Only the exact top-level capability fingerprint is
-    accepted so a mismatched frontend/backend pair is never silently reused.
+    The result is one of ``matching`` (the current LoopX runtime is running),
+    ``stale`` (another LoopX release owns the port), ``foreign`` (some other
+    process owns the port), or ``unavailable`` (the port is free). Both the
+    top-level capability fingerprint and release identity must match so a
+    mismatched frontend/backend pair is never silently reused.
     """
     try:
         connection = http.client.HTTPConnection(
@@ -69,6 +72,9 @@ def _probe_existing_chat(host: str, port: int) -> str:
         or capabilities.get("schema_version") != EXPECTED_CHAT_SCHEMA_VERSION
     ):
         return "foreign"
+    expected_identity = release_runtime_identity(dashboard_release_root())
+    if capabilities.get("runtime_identity") != expected_identity:
+        return "stale"
     return "matching"
 
 
@@ -107,6 +113,12 @@ def launch_dashboard(
         raise RuntimeError(
             f"port {port} is already used by a service that is not LoopX Chat; "
             "stop that service or start LoopX on another port with --port."
+        )
+    if existing_chat == "stale":
+        raise RuntimeError(
+            f"port {port} is serving LoopX Chat from a different installed runtime; "
+            "stop the old `loopx dashboard` or desktop app, then retry so the "
+            "current release can start its matching service."
         )
 
     from .chat_server import serve_chat

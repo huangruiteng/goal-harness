@@ -14,6 +14,7 @@ from . import __version__
 RELEASE_MANIFEST_SCHEMA_VERSION = "loopx_release_manifest_v0"
 RELEASE_MANIFEST_FILENAME = "release.json"
 PACKAGE_VERSION_SOURCE = "loopx.__version__"
+RUNTIME_IDENTITY_SCHEMA_VERSION = "loopx_runtime_identity_v1"
 
 
 def release_version_tag(version: str | None = None) -> str | None:
@@ -291,6 +292,49 @@ def load_release_manifest(release_root: Path | None) -> dict[str, Any]:
         "path": str(manifest_path),
         "reason": None,
         "manifest": manifest,
+    }
+
+
+def release_runtime_identity(release_root: Path | None = None) -> dict[str, str | None]:
+    """Return a public-safe identity for version-fencing local services.
+
+    Installed snapshots carry an immutable release id and source revision. A
+    source checkout has neither, so callers can retain development coexistence
+    while installed launchers require an exact snapshot match.
+    """
+
+    root = release_root
+    if root is None:
+        configured_root = os.environ.get("LOOPX_RELEASE_ROOT")
+        root = (
+            Path(configured_root).expanduser().resolve()
+            if configured_root
+            else Path(__file__).resolve().parents[1]
+        )
+    loaded = load_release_manifest(root)
+    manifest = loaded.get("manifest") if loaded.get("available") else None
+    manifest = manifest if isinstance(manifest, dict) else {}
+    package = manifest.get("package")
+    package = package if isinstance(package, dict) else {}
+    source = manifest.get("source")
+    source = source if isinstance(source, dict) else {}
+    return {
+        "schema_version": RUNTIME_IDENTITY_SCHEMA_VERSION,
+        "package_version": (
+            package.get("version")
+            if isinstance(package.get("version"), str)
+            else __version__
+        ),
+        "release_id": (
+            manifest.get("release_id")
+            if isinstance(manifest.get("release_id"), str)
+            else None
+        ),
+        "source_revision": (
+            source.get("git_commit")
+            if isinstance(source.get("git_commit"), str)
+            else None
+        ),
     }
 
 

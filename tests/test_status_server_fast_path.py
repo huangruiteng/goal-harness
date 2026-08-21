@@ -67,3 +67,20 @@ def test_status_endpoint_defers_repository_boundary_scan(
     assert payload["ok"] is True
     assert len(calls) == 1
     assert calls[0]["include_public_boundary_scan"] is False
+
+
+def test_status_service_identity_is_public_and_versioned(tmp_path: Path) -> None:
+    with _status_server(tmp_path) as base_url:
+        with urllib.request.urlopen(base_url, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+    assert payload["source"] == "serve-status"
+    assert payload["runtime_identity"]["schema_version"] == (
+        "loopx_runtime_identity_v1"
+    )
+    assert set(payload["runtime_identity"]) == {
+        "schema_version",
+        "package_version",
+        "release_id",
+        "source_revision",
+    }

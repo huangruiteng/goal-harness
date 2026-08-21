@@ -1,9 +1,9 @@
 use command_group::{CommandGroup, GroupChild};
 use std::{
-    env, fmt,
+    env, fmt, fs,
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
@@ -81,6 +81,7 @@ enum Probe {
     Matching,
     Unavailable,
     Foreign,
+    Stale,
 }
 
 #[derive(Debug)]
@@ -122,7 +123,9 @@ impl ServiceSet {
     }
 
     fn ensure(&mut self, kind: ServiceKind) -> Result<(), ServiceError> {
-        match probe(kind) {
+        let executable = loopx_executable();
+        let expected_runtime_identity = runtime_identity_for_executable(&executable);
+        match probe(kind, expected_runtime_identity.as_ref()) {
             Probe::Matching => return Ok(()),
             Probe::Foreign => {
                 return Err(ServiceError(format!(
@@ -131,10 +134,16 @@ impl ServiceSet {
                     kind.label()
                 )));
             }
+            Probe::Stale => {
+                return Err(ServiceError(format!(
+                    "port {} is serving LoopX {} from a different installed runtime; stop the old `loopx dashboard` or desktop app, then reopen LoopX",
+                    kind.port(),
+                    kind.label()
+                )));
+            }
             Probe::Unavailable => {}
         }
 
-        let executable = loopx_executable();
         let mut command = Command::new(&executable);
         command
             .args(kind.command_args())
@@ -151,11 +160,18 @@ impl ServiceSet {
 
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         while Instant::now() < deadline {
-            match probe(kind) {
+            match probe(kind, expected_runtime_identity.as_ref()) {
                 Probe::Matching => return Ok(()),
                 Probe::Foreign => {
                     return Err(ServiceError(format!(
                         "LoopX {} startup reached an unexpected service on port {}",
+                        kind.label(),
+                        kind.port()
+                    )));
+                }
+                Probe::Stale => {
+                    return Err(ServiceError(format!(
+                        "LoopX {} startup reached a stale runtime on port {}",
                         kind.label(),
                         kind.port()
                     )));
@@ -204,7 +220,30 @@ fn loopx_executable() -> String {
         .unwrap_or_else(|| "loopx".to_string())
 }
 
-fn probe(kind: ServiceKind) -> Probe {
+fn runtime_identity_from_manifest(manifest: &serde_json::Value) -> Option<serde_json::Value> {
+    let release_id = manifest.get("release_id")?.as_str()?;
+    let package_version = manifest.get("package")?.get("version")?.as_str()?;
+    let source_revision = manifest
+        .get("source")
+        .and_then(|source| source.get("git_commit"))
+        .and_then(serde_json::Value::as_str);
+    Some(serde_json::json!({
+        "schema_version": "loopx_runtime_identity_v1",
+        "package_version": package_version,
+        "release_id": release_id,
+        "source_revision": source_revision,
+    }))
+}
+
+fn runtime_identity_for_executable(executable: &str) -> Option<serde_json::Value> {
+    let canonical = fs::canonicalize(executable).ok()?;
+    let release_root = canonical.parent()?.parent()?;
+    let manifest = fs::read_to_string(Path::new(release_root).join("release.json")).ok()?;
+    let payload = serde_json::from_str::<serde_json::Value>(&manifest).ok()?;
+    runtime_identity_from_manifest(&payload)
+}
+
+fn probe(kind: ServiceKind, expected_runtime_identity: Option<&serde_json::Value>) -> Probe {
     let address = SocketAddr::from(([127, 0, 0, 1], kind.port()));
     let mut stream = match TcpStream::connect_timeout(&address, PROBE_TIMEOUT) {
         Ok(stream) => stream,
@@ -229,10 +268,14 @@ fn probe(kind: ServiceKind) -> Probe {
     {
         return Probe::Foreign;
     }
-    classify_response(kind, &response)
+    classify_response(kind, &response, expected_runtime_identity)
 }
 
-fn classify_response(kind: ServiceKind, response: &str) -> Probe {
+fn classify_response(
+    kind: ServiceKind,
+    response: &str,
+    expected_runtime_identity: Option<&serde_json::Value>,
+) -> Probe {
     let Some((headers, body)) = response.split_once("\r\n\r\n") else {
         return Probe::Foreign;
     };
@@ -256,6 +299,11 @@ fn classify_response(kind: ServiceKind, response: &str) -> Probe {
         .and_then(serde_json::Value::as_str)
         == Some(expected)
     {
+        if let Some(expected) = expected_runtime_identity {
+            if payload.get("runtime_identity") != Some(expected) {
+                return Probe::Stale;
+            }
+        }
         return Probe::Matching;
     }
     Probe::Foreign
@@ -293,35 +341,40 @@ mod tests {
         assert_eq!(
             classify_response(
                 ServiceKind::Status,
-                "HTTP/1.1 200 OK\r\n\r\n{\"source\":\"other\"}"
+                "HTTP/1.1 200 OK\r\n\r\n{\"source\":\"other\"}",
+                None,
             ),
             Probe::Foreign
         );
         assert_eq!(
             classify_response(
                 ServiceKind::Chat,
-                "HTTP/1.1 200 OK\r\n\r\n{\"schema_version\":\"other\"}"
+                "HTTP/1.1 200 OK\r\n\r\n{\"schema_version\":\"other\"}",
+                None,
             ),
             Probe::Foreign
         );
         assert_eq!(
             classify_response(
                 ServiceKind::Status,
-                "HTTP/1.1 200 OK\r\nX-LoopX: {\"source\":\"serve-status\"}\r\n\r\n{\"source\":\"other\"}"
+                "HTTP/1.1 200 OK\r\nX-LoopX: {\"source\":\"serve-status\"}\r\n\r\n{\"source\":\"other\"}",
+                None,
             ),
             Probe::Foreign
         );
         assert_eq!(
             classify_response(
                 ServiceKind::Status,
-                "HTTP/1.1 200 OK\r\n\r\n{\"nested\":{\"source\":\"serve-status\"}}"
+                "HTTP/1.1 200 OK\r\n\r\n{\"nested\":{\"source\":\"serve-status\"}}",
+                None,
             ),
             Probe::Foreign
         );
         assert_eq!(
             classify_response(
                 ServiceKind::Status,
-                "HTTP/1.1 201 Created\r\n\r\n{\"source\":\"serve-status\"}"
+                "HTTP/1.1 201 Created\r\n\r\n{\"source\":\"serve-status\"}",
+                None,
             ),
             Probe::Foreign
         );
@@ -332,23 +385,71 @@ mod tests {
         assert_eq!(
             classify_response(
                 ServiceKind::Status,
-                "HTTP/1.1 200 OK\r\n\r\n{\"source\": \"serve-status\"}"
+                "HTTP/1.1 200 OK\r\n\r\n{\"source\": \"serve-status\"}",
+                None,
             ),
             Probe::Matching
         );
         assert_eq!(
             classify_response(
                 ServiceKind::Status,
-                "HTTP/1.0 200 OK\r\n\r\n{\n  \"source\": \"serve-status\"\n}"
+                "HTTP/1.0 200 OK\r\n\r\n{\n  \"source\": \"serve-status\"\n}",
+                None,
             ),
             Probe::Matching
         );
         assert_eq!(
             classify_response(
                 ServiceKind::Chat,
-                "HTTP/1.1 200 OK\r\n\r\n{\"schema_version\":\"loopx_chat_capabilities_v1\"}"
+                "HTTP/1.1 200 OK\r\n\r\n{\"schema_version\":\"loopx_chat_capabilities_v1\"}",
+                None,
             ),
             Probe::Matching
+        );
+    }
+
+    #[test]
+    fn service_fingerprints_reject_stale_loopx_runtime() {
+        let expected = serde_json::json!({
+            "schema_version": "loopx_runtime_identity_v1",
+            "package_version": "0.5.1",
+            "release_id": "new-release",
+            "source_revision": "new-revision",
+        });
+        assert_eq!(
+            classify_response(
+                ServiceKind::Chat,
+                "HTTP/1.1 200 OK\r\n\r\n{\"schema_version\":\"loopx_chat_capabilities_v1\",\"runtime_identity\":{\"schema_version\":\"loopx_runtime_identity_v1\",\"package_version\":\"0.5.0\",\"release_id\":\"old-release\",\"source_revision\":\"old-revision\"}}",
+                Some(&expected),
+            ),
+            Probe::Stale
+        );
+        assert_eq!(
+            classify_response(
+                ServiceKind::Status,
+                "HTTP/1.1 200 OK\r\n\r\n{\"source\":\"serve-status\"}",
+                Some(&expected),
+            ),
+            Probe::Stale
+        );
+    }
+
+    #[test]
+    fn manifest_runtime_identity_is_public_and_exact() {
+        let manifest = serde_json::json!({
+            "release_id": "20260821T164921Z",
+            "package": {"version": "0.5.1"},
+            "source": {"git_commit": "62647e2e299d"},
+        });
+
+        assert_eq!(
+            runtime_identity_from_manifest(&manifest),
+            Some(serde_json::json!({
+                "schema_version": "loopx_runtime_identity_v1",
+                "package_version": "0.5.1",
+                "release_id": "20260821T164921Z",
+                "source_revision": "62647e2e299d",
+            }))
         );
     }
 }

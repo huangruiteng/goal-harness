@@ -12,12 +12,14 @@ import pytest
 
 from loopx.cli import build_parser, main
 from loopx.cli_commands import support_control
+from loopx.release_manifest import release_runtime_identity
 
 
 class _CapabilitiesHandler(BaseHTTPRequestHandler):
     capabilities: dict[str, object] = {
         "ok": True,
         "schema_version": "loopx_chat_capabilities_v1",
+        "runtime_identity": release_runtime_identity(),
     }
 
     def do_GET(self) -> None:
@@ -69,6 +71,28 @@ def _copy_dashboard_launcher(scripts_dir: Path) -> None:
     source_scripts = Path(__file__).resolve().parents[1] / "scripts"
     for name in ("dashboard-dev.sh", "loopx-python.sh"):
         shutil.copy2(source_scripts / name, scripts_dir / name)
+
+
+def test_release_runtime_identity_uses_immutable_manifest_fields(tmp_path: Path) -> None:
+    release_root = tmp_path / "release"
+    release_root.mkdir()
+    (release_root / "release.json").write_text(
+        json.dumps(
+            {
+                "release_id": "20260821T164921Z",
+                "package": {"version": "0.5.1"},
+                "source": {"git_commit": "62647e2e299d"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert release_runtime_identity(release_root) == {
+        "schema_version": "loopx_runtime_identity_v1",
+        "package_version": "0.5.1",
+        "release_id": "20260821T164921Z",
+        "source_revision": "62647e2e299d",
+    }
 
 
 def test_dashboard_command_is_registered() -> None:
@@ -182,6 +206,30 @@ def test_probe_existing_chat_rejects_unknown_capability_schema() -> None:
         thread.join(timeout=2)
 
 
+def test_probe_existing_chat_rejects_stale_runtime_identity() -> None:
+    from loopx.dashboard_launcher import _probe_existing_chat
+
+    class _StaleCapabilitiesHandler(_CapabilitiesHandler):
+        capabilities = {
+            "ok": True,
+            "schema_version": "loopx_chat_capabilities_v1",
+            "runtime_identity": {
+                "schema_version": "loopx_runtime_identity_v1",
+                "package_version": "0.5.0",
+                "release_id": "old-release",
+                "source_revision": "old-revision",
+            },
+        }
+
+    server, thread = _serve_capabilities(_StaleCapabilitiesHandler)
+    try:
+        assert _probe_existing_chat("127.0.0.1", server.server_address[1]) == "stale"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 def test_launch_dashboard_reuses_existing_matching_chat_service(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -221,6 +269,22 @@ def test_launch_dashboard_rejects_foreign_chat_service(
     )
 
     with pytest.raises(RuntimeError, match="not LoopX Chat"):
+        launch_dashboard(open_browser=False)
+
+
+def test_launch_dashboard_rejects_stale_chat_service(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from loopx.dashboard_launcher import launch_dashboard
+
+    monkeypatch.setenv("LOOPX_RELEASE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "loopx.dashboard_launcher._probe_existing_chat",
+        lambda _host, _port: "stale",
+    )
+
+    with pytest.raises(RuntimeError, match="different installed runtime"):
         launch_dashboard(open_browser=False)
 
 

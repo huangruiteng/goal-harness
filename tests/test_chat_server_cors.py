@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import http.client
+import json
 import threading
 
 from loopx.chat_server import ChatHTTPServer, ChatRequestHandler
@@ -57,6 +58,32 @@ def test_chat_json_echoes_loopback_cors_origin() -> None:
 
         assert response.status == 200
         assert response.getheader("Access-Control-Allow-Origin") == origin
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_chat_capabilities_expose_public_runtime_identity() -> None:
+    server, thread = _start_server()
+    try:
+        response = _request(
+            server.server_address[1],
+            method="GET",
+            origin=None,
+        )
+        payload = json.loads(response.read().decode("utf-8"))
+
+        assert response.status == 200
+        assert payload["runtime_identity"]["schema_version"] == (
+            "loopx_runtime_identity_v1"
+        )
+        assert set(payload["runtime_identity"]) == {
+            "schema_version",
+            "package_version",
+            "release_id",
+            "source_revision",
+        }
     finally:
         server.shutdown()
         thread.join(timeout=5)

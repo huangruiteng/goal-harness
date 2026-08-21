@@ -23,6 +23,7 @@ from .feedback import append_human_reward, compact_reward, validate_goal_id
 from .history import load_registry
 from .materials import read_review_material
 from .paths import resolve_runtime_root
+from .release_manifest import release_runtime_identity
 from .status import collect_status
 
 
@@ -804,6 +805,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
     def _local_dashboard_api_payload(self) -> dict[str, Any]:
         return {
             "source": "serve-status",
+            "runtime_identity": release_runtime_identity(),
             "status_url": self.server.status_path,
             "health_url": "/healthz",
             "review_material_url": DEFAULT_REVIEW_MATERIAL_PATH,

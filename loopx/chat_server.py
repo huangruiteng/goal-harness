@@ -59,6 +59,7 @@ from .extensions.runtime import (
 )
 from .history import load_registry
 from .paths import resolve_runtime_root
+from .release_manifest import release_runtime_identity
 from .registry import registry_goals, resolve_state_file
 from .state_projection import build_active_state_structured_projection
 from .status import collect_status
@@ -1285,6 +1286,7 @@ class ChatRequestHandler(
                 {
                     "ok": True,
                     "schema_version": "loopx_chat_capabilities_v1",
+                    "runtime_identity": release_runtime_identity(),
                     "agent_backend": "multi_adapter",
                     "sandbox": "read-only",
                     "approval_policy": "never",
