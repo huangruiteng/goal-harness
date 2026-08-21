@@ -174,6 +174,24 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "direction, insight, or material runner state changed."
             ),
         },
+        "active_progress_readback": {
+            "workspace_basis": [
+                "recorded_start_revision_to_current_head",
+                "current_worktree_status",
+            ],
+            "runtime_basis": [
+                "goal_state_and_event_freshness",
+                "typed_runner_error_category",
+            ],
+            "trajectory_basis": (
+                "solver_trajectory_phase_without_hidden_evaluator_feedback"
+            ),
+            "classification_rule": (
+                "Do not classify a run as stuck from a clean worktree or raw log-error "
+                "count alone; require absent committed and uncommitted progress plus "
+                "a stale trajectory or typed fatal runner evidence."
+            ),
+        },
         "hint": (
             "After the solver has stopped and scoring is complete, read the task, "
             "real trajectory, final patch or workspace, hidden tests, grader or "
@@ -185,6 +203,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "solver": (
                 "must not access hidden tests, grader or verifier sources, expected "
                 "answers, or official feedback during the solving phase"
+            ),
+            "active_campaign_monitor": (
+                "may inspect the solver-owned trajectory and exact-job runtime while "
+                "the solver is active, but must not read hidden evaluator evidence or "
+                "send findings back into the solving arm"
             ),
             "post_run_analyst": (
                 "may read the full private case evidence only after the solver is "

@@ -425,6 +425,16 @@ these score fields from the experiment board or benchmark-owned scoring projecti
 not from raw private evidence. Do not send a repetitive update when no score,
 coverage, direction, insight, or material runner state changed.
 
+During an active-campaign review, distinguish a clean worktree from a lack of
+solver progress. `git status` observes only uncommitted changes. Bind the readback
+to the exact job, compare its current `HEAD` with the start revision recorded at
+admission, and combine that committed delta with the current worktree status.
+Correlate those facts with Goal/event freshness, typed runner errors, and the
+solver's trajectory phase. A clean worktree or a high raw log-error count alone is
+not evidence that a run is stuck. Classify a run as stalled only when committed and
+uncommitted progress are both absent and the trajectory is stale or typed fatal
+runner evidence is present.
+
 Use this analyst hint:
 
 > After the solver has stopped and scoring is complete, read the task, real
@@ -436,6 +446,10 @@ The solver and analyst are separate roles. The solver remains unable to access
 hidden tests, evaluator sources, expected answers, or official feedback. Only the
 post-run analyst may read the complete private evaluation evidence, and only after
 the solver is terminal and scoring is complete.
+
+The active-campaign monitor may inspect the solver-owned trajectory and exact-job
+runtime while the solver is active, but it must not read hidden evaluator evidence
+or send its findings back into the solving arm.
 
 Record the result in this compact shape:
 

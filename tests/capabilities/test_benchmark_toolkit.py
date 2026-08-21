@@ -148,6 +148,18 @@ def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:
         "new_case_insights_and_next_probe",
     ]
     assert "Do not send a repetitive" in reporting["unchanged_policy"]
+    active = analysis["active_progress_readback"]
+    assert active["workspace_basis"] == [
+        "recorded_start_revision_to_current_head",
+        "current_worktree_status",
+    ]
+    assert active["runtime_basis"] == [
+        "goal_state_and_event_freshness",
+        "typed_runner_error_category",
+    ]
+    assert "solver_trajectory_phase" in active["trajectory_basis"]
+    assert "clean worktree" in active["classification_rule"]
+    assert "raw log-error count alone" in active["classification_rule"]
     hint = analysis["hint"]
     for evidence_name in (
         "real trajectory",
@@ -158,6 +170,10 @@ def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:
         assert evidence_name in hint
 
     assert "must not access" in analysis["role_boundary"]["solver"]
+    active_monitor = analysis["role_boundary"]["active_campaign_monitor"]
+    assert "exact-job runtime" in active_monitor
+    assert "must not read hidden evaluator evidence" in active_monitor
+    assert "send findings back" in active_monitor
     assert "only after" in analysis["role_boundary"]["post_run_analyst"]
     artifact = analysis["artifact_template"]
     assert artifact["schema_version"] == "benchmark_case_insight_v0"
