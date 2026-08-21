@@ -49,6 +49,7 @@ import {
   selectTodoCompletionState,
 } from "./todos/completion_state.ts";
 import { transitionTodoNextAction } from "./todos/next_action.ts";
+import { evaluateSchedulerStateTransition } from "./scheduler/state_transition_rules.ts";
 
 type EffectRuntimeHandler = (params: JsonObject) => unknown | Promise<unknown>;
 
@@ -284,6 +285,7 @@ export function createEffectRuntimeHandlers(
     ["todo.completion_state.evaluate", selectTodoCompletionState],
     ["todo.completion_state.metadata_updates", buildTodoCompletionMetadataUpdates],
     ["todo.next_action.transition", transitionTodoNextAction],
+    ["scheduler.state_transition.evaluate", evaluateSchedulerStateTransition],
     [
       "quota.delivery_workspace_causality.evaluate",
       evaluateDeliveryWorkspaceCausality,

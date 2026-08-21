@@ -1,0 +1,101 @@
+{
+  "schema_version": "loopx_scheduler_state_transition_characterization_v0",
+  "source_baseline": "3f923c4fe",
+  "cases": [
+    {
+      "name": "missing_state_starts_at_initial",
+      "request": {"operation": "cadence", "progression_size": 3, "state_present": false, "identity_matches": false, "applied_index": -1, "current_cadence_acknowledged": false, "advance_same_identity": true, "applied_interval_elapsed": true, "has_host_update_failures": false},
+      "expected_result": {"operation": "cadence", "current_index": 0, "state_status": "missing", "transition": "initial", "current_cadence_acknowledged": false}
+    },
+    {
+      "name": "changed_identity_resets_to_initial",
+      "request": {"operation": "cadence", "progression_size": 3, "state_present": true, "identity_matches": false, "applied_index": 1, "current_cadence_acknowledged": true, "advance_same_identity": true, "applied_interval_elapsed": true, "has_host_update_failures": false},
+      "expected_result": {"operation": "cadence", "current_index": 0, "state_status": "reset_required", "transition": "identity_reset", "current_cadence_acknowledged": false}
+    },
+    {
+      "name": "unacknowledged_failure_retries_current_index",
+      "request": {"operation": "cadence", "progression_size": 3, "state_present": true, "identity_matches": true, "applied_index": 1, "current_cadence_acknowledged": false, "advance_same_identity": true, "applied_interval_elapsed": true, "has_host_update_failures": true},
+      "expected_result": {"operation": "cadence", "current_index": 1, "state_status": "same_identity", "transition": "retry_unacknowledged_failure", "current_cadence_acknowledged": false}
+    },
+    {
+      "name": "acknowledged_failure_can_advance_after_interval",
+      "request": {"operation": "cadence", "progression_size": 3, "state_present": true, "identity_matches": true, "applied_index": 1, "current_cadence_acknowledged": true, "advance_same_identity": true, "applied_interval_elapsed": true, "has_host_update_failures": true},
+      "expected_result": {"operation": "cadence", "current_index": 2, "state_status": "same_identity", "transition": "advance_after_interval", "current_cadence_acknowledged": true}
+    },
+    {
+      "name": "active_work_holds_initial_cadence",
+      "request": {"operation": "cadence", "progression_size": 3, "state_present": true, "identity_matches": true, "applied_index": 2, "current_cadence_acknowledged": true, "advance_same_identity": false, "applied_interval_elapsed": true, "has_host_update_failures": false},
+      "expected_result": {"operation": "cadence", "current_index": 0, "state_status": "same_identity", "transition": "hold_active_initial", "current_cadence_acknowledged": true}
+    },
+    {
+      "name": "settled_cadence_holds_until_interval_elapsed",
+      "request": {"operation": "cadence", "progression_size": 3, "state_present": true, "identity_matches": true, "applied_index": 1, "current_cadence_acknowledged": true, "advance_same_identity": true, "applied_interval_elapsed": false, "has_host_update_failures": false},
+      "expected_result": {"operation": "cadence", "current_index": 1, "state_status": "same_identity", "transition": "hold_until_interval", "current_cadence_acknowledged": true}
+    },
+    {
+      "name": "elapsed_terminal_index_stays_capped",
+      "request": {"operation": "cadence", "progression_size": 3, "state_present": true, "identity_matches": true, "applied_index": 2, "current_cadence_acknowledged": true, "advance_same_identity": true, "applied_interval_elapsed": true, "has_host_update_failures": false},
+      "expected_result": {"operation": "cadence", "current_index": 2, "state_status": "same_identity", "transition": "advance_after_interval", "current_cadence_acknowledged": true}
+    },
+    {
+      "name": "invalid_failed_index_recovers_at_initial",
+      "request": {"operation": "cadence", "progression_size": 3, "state_present": true, "identity_matches": true, "applied_index": -1, "current_cadence_acknowledged": false, "advance_same_identity": true, "applied_interval_elapsed": true, "has_host_update_failures": true},
+      "expected_result": {"operation": "cadence", "current_index": 0, "state_status": "same_identity", "transition": "retry_unacknowledged_failure", "current_cadence_acknowledged": false}
+    },
+    {
+      "name": "out_of_range_failed_index_recovers_at_initial",
+      "request": {"operation": "cadence", "progression_size": 3, "state_present": true, "identity_matches": true, "applied_index": -1, "current_cadence_acknowledged": false, "advance_same_identity": true, "applied_interval_elapsed": true, "has_host_update_failures": true},
+      "expected_result": {"operation": "cadence", "current_index": 0, "state_status": "same_identity", "transition": "retry_unacknowledged_failure", "current_cadence_acknowledged": false}
+    },
+    {
+      "name": "settled_same_identity",
+      "request": {"operation": "host", "state_status": "same_identity", "observed_host_rrule_present": true, "current_rrule_already_applied": true, "scheduler_state_acknowledges_current_rrule": true, "current_target_has_failure": false, "repeated_failed_pair": false},
+      "expected_result": {"operation": "host", "transition": "settled", "current_target_has_failure": false, "repeated_failed_pair": false}
+    },
+    {
+      "name": "matching_host_repairs_identity_with_ack",
+      "request": {"operation": "host", "state_status": "reset_required", "observed_host_rrule_present": true, "current_rrule_already_applied": true, "scheduler_state_acknowledges_current_rrule": true, "current_target_has_failure": false, "repeated_failed_pair": false},
+      "expected_result": {"operation": "host", "transition": "host_match_ack_required", "current_target_has_failure": false, "repeated_failed_pair": false}
+    },
+    {
+      "name": "matching_host_new_progression_requires_ack",
+      "request": {"operation": "host", "state_status": "same_identity", "observed_host_rrule_present": true, "current_rrule_already_applied": true, "scheduler_state_acknowledges_current_rrule": false, "current_target_has_failure": false, "repeated_failed_pair": false},
+      "expected_result": {"operation": "host", "transition": "host_match_ack_required", "current_target_has_failure": false, "repeated_failed_pair": false}
+    },
+    {
+      "name": "matching_host_acks_current_target_failure",
+      "request": {"operation": "host", "state_status": "same_identity", "observed_host_rrule_present": true, "current_rrule_already_applied": true, "scheduler_state_acknowledges_current_rrule": true, "current_target_has_failure": true, "repeated_failed_pair": false},
+      "expected_result": {"operation": "host", "transition": "host_match_ack_required", "current_target_has_failure": true, "repeated_failed_pair": false}
+    },
+    {
+      "name": "unrelated_failure_does_not_unsettle_matching_host",
+      "request": {"operation": "host", "state_status": "same_identity", "observed_host_rrule_present": true, "current_rrule_already_applied": true, "scheduler_state_acknowledges_current_rrule": true, "current_target_has_failure": false, "repeated_failed_pair": false},
+      "expected_result": {"operation": "host", "transition": "settled", "current_target_has_failure": false, "repeated_failed_pair": false}
+    },
+    {
+      "name": "drift_requires_apply",
+      "request": {"operation": "host", "state_status": "same_identity", "observed_host_rrule_present": true, "current_rrule_already_applied": false, "scheduler_state_acknowledges_current_rrule": true, "current_target_has_failure": false, "repeated_failed_pair": false},
+      "expected_result": {"operation": "host", "transition": "apply_required", "current_target_has_failure": false, "repeated_failed_pair": false}
+    },
+    {
+      "name": "exact_failed_pair_suppresses_repeat",
+      "request": {"operation": "host", "state_status": "same_identity", "observed_host_rrule_present": true, "current_rrule_already_applied": false, "scheduler_state_acknowledges_current_rrule": true, "current_target_has_failure": false, "repeated_failed_pair": true},
+      "expected_result": {"operation": "host", "transition": "recorded_failure_suppressed", "current_target_has_failure": false, "repeated_failed_pair": true}
+    },
+    {
+      "name": "different_failed_target_does_not_suppress",
+      "request": {"operation": "host", "state_status": "same_identity", "observed_host_rrule_present": true, "current_rrule_already_applied": false, "scheduler_state_acknowledges_current_rrule": true, "current_target_has_failure": false, "repeated_failed_pair": false},
+      "expected_result": {"operation": "host", "transition": "apply_required", "current_target_has_failure": false, "repeated_failed_pair": false}
+    },
+    {
+      "name": "changed_host_invalidates_failed_pair",
+      "request": {"operation": "host", "state_status": "same_identity", "observed_host_rrule_present": true, "current_rrule_already_applied": false, "scheduler_state_acknowledges_current_rrule": true, "current_target_has_failure": false, "repeated_failed_pair": false},
+      "expected_result": {"operation": "host", "transition": "apply_required", "current_target_has_failure": false, "repeated_failed_pair": false}
+    },
+    {
+      "name": "persisted_match_without_host_observation_reapplies_after_reset",
+      "request": {"operation": "host", "state_status": "reset_required", "observed_host_rrule_present": false, "current_rrule_already_applied": true, "scheduler_state_acknowledges_current_rrule": true, "current_target_has_failure": false, "repeated_failed_pair": false},
+      "expected_result": {"operation": "host", "transition": "apply_required", "current_target_has_failure": false, "repeated_failed_pair": false}
+    }
+  ]
+}

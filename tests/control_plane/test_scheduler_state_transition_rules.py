@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from loopx.control_plane.scheduler.state import rrule_for_minutes
+from loopx.control_plane.scheduler import state_transition_rules
 from loopx.control_plane.scheduler.state_transition_rules import (
     SchedulerCadenceTransition,
     SchedulerHostTransition,
@@ -272,3 +273,101 @@ def test_unrelated_failure_order_does_not_change_host_transition() -> None:
     }
 
     assert transitions == {SchedulerHostTransition.SETTLED}
+
+
+def test_python_facade_sends_normalized_typed_facts(monkeypatch) -> None:
+    requests: list[dict] = []
+
+    def fake_runtime(method: str, params: dict) -> dict:
+        assert method == "scheduler.state_transition.evaluate"
+        requests.append(params)
+        if params["operation"] == "cadence":
+            return {
+                "schema_version": "loopx_scheduler_state_transition_result_v0",
+                "operation": "cadence",
+                "current_index": 1,
+                "state_status": "same_identity",
+                "transition": "hold_until_interval",
+                "current_cadence_acknowledged": True,
+            }
+        return {
+            "schema_version": "loopx_scheduler_state_transition_result_v0",
+            "operation": "host",
+            "transition": "settled",
+            "current_target_has_failure": False,
+            "repeated_failed_pair": False,
+        }
+
+    monkeypatch.setattr(state_transition_rules, "effect_runtime_result", fake_runtime)
+    decide_scheduler_cadence_transition(
+        [15, 30, 60],
+        scheduler_state=_scheduler_state(last_applied_rrule=" RRULE:  " + TARGET_30),
+        reset_token=RESET_TOKEN,
+        identity_signature=IDENTITY_SIGNATURE,
+        advance_same_identity=True,
+        applied_interval_elapsed=False,
+        has_host_update_failures=False,
+    )
+    decide_scheduler_host_transition(
+        state_status="same_identity",
+        observed_host_rrule=TARGET_15,
+        effective_host_rrule=TARGET_15,
+        current_rrule=TARGET_15,
+        current_rrule_already_applied=True,
+        scheduler_state_acknowledges_current_rrule=True,
+        all_host_update_failures=[_failure(target=TARGET_30, host=HOST_60)],
+        recorded_host_failure=None,
+    )
+
+    assert requests == [
+        {
+            "schema_version": "loopx_scheduler_state_transition_request_v0",
+            "operation": "cadence",
+            "progression_size": 3,
+            "state_present": True,
+            "identity_matches": True,
+            "applied_index": 1,
+            "current_cadence_acknowledged": True,
+            "advance_same_identity": True,
+            "applied_interval_elapsed": False,
+            "has_host_update_failures": False,
+        },
+        {
+            "schema_version": "loopx_scheduler_state_transition_request_v0",
+            "operation": "host",
+            "state_status": "same_identity",
+            "observed_host_rrule_present": True,
+            "current_rrule_already_applied": True,
+            "scheduler_state_acknowledges_current_rrule": True,
+            "current_target_has_failure": False,
+            "repeated_failed_pair": False,
+        },
+    ]
+
+
+def test_python_facade_rejects_malformed_runtime_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        state_transition_rules,
+        "effect_runtime_result",
+        lambda _method, _params: {
+            "schema_version": "loopx_scheduler_state_transition_result_v0",
+            "operation": "cadence",
+            "current_index": True,
+            "state_status": "same_identity",
+            "transition": "hold_until_interval",
+            "current_cadence_acknowledged": True,
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="cadence result shape mismatch"):
+        decide_scheduler_cadence_transition(
+            [15],
+            scheduler_state=_scheduler_state(
+                progression_index=0, last_applied_rrule=TARGET_15
+            ),
+            reset_token=RESET_TOKEN,
+            identity_signature=IDENTITY_SIGNATURE,
+            advance_same_identity=True,
+            applied_interval_elapsed=False,
+            has_host_update_failures=False,
+        )

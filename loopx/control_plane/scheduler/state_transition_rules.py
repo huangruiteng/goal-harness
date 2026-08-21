@@ -5,7 +5,16 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
 from .state import normalize_scheduler_rrule, rrule_for_minutes
+
+
+SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA = (
+    "loopx_scheduler_state_transition_request_v0"
+)
+SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA = (
+    "loopx_scheduler_state_transition_result_v0"
+)
 
 
 class SchedulerCadenceTransition(str, Enum):
@@ -25,6 +34,31 @@ class SchedulerCadenceDecision:
     current_cadence_acknowledged: bool
 
 
+def _runtime_result(params: dict[str, Any]) -> Mapping[str, Any]:
+    try:
+        result = effect_runtime_result("scheduler.state_transition.evaluate", params)
+    except EffectRuntimeRejected as exc:
+        raise ValueError(str(exc)) from None
+    if not isinstance(result, Mapping):
+        raise RuntimeError("TypeScript scheduler transition result must be an object")
+    if result.get("schema_version") != SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA:
+        raise RuntimeError("TypeScript scheduler transition result shape mismatch")
+    return result
+
+
+def _scheduler_applied_index(
+    progression_minutes: Sequence[int], scheduler_state: Mapping[str, Any]
+) -> int:
+    raw_index = scheduler_state.get("progression_index")
+    if raw_index is None:
+        return -1
+    try:
+        applied_index = int(raw_index)
+    except (TypeError, ValueError):
+        return -1
+    return applied_index if 0 <= applied_index < len(progression_minutes) else -1
+
+
 def decide_scheduler_cadence_transition(
     progression_minutes: Sequence[int],
     *,
@@ -35,36 +69,15 @@ def decide_scheduler_cadence_transition(
     applied_interval_elapsed: bool,
     has_host_update_failures: bool,
 ) -> SchedulerCadenceDecision:
-    """Choose the cadence index without rendering a scheduler hint."""
+    """Choose the cadence index through the TypeScript transition kernel."""
 
     if not progression_minutes:
         raise ValueError("scheduler cadence progression must not be empty")
-    if not scheduler_state:
-        return SchedulerCadenceDecision(
-            current_index=0,
-            state_status="missing",
-            transition=SchedulerCadenceTransition.INITIAL,
-            current_cadence_acknowledged=False,
-        )
-
-    same_identity = (
+    identity_matches = bool(scheduler_state) and (
         scheduler_state.get("reset_token") == reset_token
         and scheduler_state.get("identity_signature") == identity_signature
     )
-    if not same_identity:
-        return SchedulerCadenceDecision(
-            current_index=0,
-            state_status="reset_required",
-            transition=SchedulerCadenceTransition.IDENTITY_RESET,
-            current_cadence_acknowledged=False,
-        )
-
-    try:
-        applied_index = int(scheduler_state.get("progression_index"))
-    except (TypeError, ValueError):
-        applied_index = -1
-    if not 0 <= applied_index < len(progression_minutes):
-        applied_index = -1
+    applied_index = _scheduler_applied_index(progression_minutes, scheduler_state)
     applied_target_rrule = (
         rrule_for_minutes(progression_minutes[applied_index])
         if 0 <= applied_index < len(progression_minutes)
@@ -75,25 +88,38 @@ def decide_scheduler_cadence_transition(
         and normalize_scheduler_rrule(scheduler_state.get("last_applied_rrule"))
         == applied_target_rrule
     )
-
-    if has_host_update_failures and not current_cadence_acknowledged:
-        next_index = applied_index
-        transition = SchedulerCadenceTransition.RETRY_UNACKNOWLEDGED_FAILURE
-    elif not advance_same_identity:
-        next_index = 0
-        transition = SchedulerCadenceTransition.HOLD_ACTIVE_INITIAL
-    elif applied_interval_elapsed:
-        next_index = applied_index + 1
-        transition = SchedulerCadenceTransition.ADVANCE_AFTER_INTERVAL
-    else:
-        next_index = applied_index
-        transition = SchedulerCadenceTransition.HOLD_UNTIL_INTERVAL
-
+    result = _runtime_result(
+        {
+            "schema_version": SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,
+            "operation": "cadence",
+            "progression_size": len(progression_minutes),
+            "state_present": bool(scheduler_state),
+            "identity_matches": identity_matches,
+            "applied_index": applied_index,
+            "current_cadence_acknowledged": current_cadence_acknowledged,
+            "advance_same_identity": advance_same_identity,
+            "applied_interval_elapsed": applied_interval_elapsed,
+            "has_host_update_failures": has_host_update_failures,
+        }
+    )
+    transition = result.get("transition")
+    current_index = result.get("current_index")
+    state_status = result.get("state_status")
+    acknowledged = result.get("current_cadence_acknowledged")
+    if (
+        result.get("operation") != "cadence"
+        or isinstance(current_index, bool)
+        or not isinstance(current_index, int)
+        or not isinstance(state_status, str)
+        or transition not in {item.value for item in SchedulerCadenceTransition}
+        or not isinstance(acknowledged, bool)
+    ):
+        raise RuntimeError("TypeScript scheduler cadence result shape mismatch")
     return SchedulerCadenceDecision(
-        current_index=min(max(next_index, 0), len(progression_minutes) - 1),
-        state_status="same_identity",
-        transition=transition,
-        current_cadence_acknowledged=current_cadence_acknowledged,
+        current_index=current_index,
+        state_status=state_status,
+        transition=SchedulerCadenceTransition(str(transition)),
+        current_cadence_acknowledged=acknowledged,
     )
 
 
@@ -141,7 +167,7 @@ def decide_scheduler_host_transition(
     all_host_update_failures: Collection[Mapping[str, Any]],
     recorded_host_failure: Mapping[str, Any] | None,
 ) -> SchedulerHostDecision:
-    """Classify the host action from normalized scheduler facts."""
+    """Classify the host action through the TypeScript transition kernel."""
 
     current_target_has_failure = any(
         normalize_scheduler_rrule(failure.get("target_rrule")) == current_rrule
@@ -158,25 +184,32 @@ def decide_scheduler_host_transition(
         and failed_observed_host_rrule == effective_host_rrule
     )
 
+    result = _runtime_result(
+        {
+            "schema_version": SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,
+            "operation": "host",
+            "state_status": state_status,
+            "observed_host_rrule_present": bool(observed_host_rrule),
+            "current_rrule_already_applied": current_rrule_already_applied,
+            "scheduler_state_acknowledges_current_rrule": (
+                scheduler_state_acknowledges_current_rrule
+            ),
+            "current_target_has_failure": current_target_has_failure,
+            "repeated_failed_pair": repeated_failed_pair,
+        }
+    )
+    transition = result.get("transition")
+    result_has_failure = result.get("current_target_has_failure")
+    result_repeated_pair = result.get("repeated_failed_pair")
     if (
-        observed_host_rrule
-        and current_rrule_already_applied
-        and (
-            not scheduler_state_acknowledges_current_rrule
-            or state_status != "same_identity"
-            or current_target_has_failure
-        )
+        result.get("operation") != "host"
+        or transition not in {item.value for item in SchedulerHostTransition}
+        or not isinstance(result_has_failure, bool)
+        or not isinstance(result_repeated_pair, bool)
     ):
-        transition = SchedulerHostTransition.HOST_MATCH_ACK_REQUIRED
-    elif current_rrule_already_applied and state_status == "same_identity":
-        transition = SchedulerHostTransition.SETTLED
-    elif repeated_failed_pair:
-        transition = SchedulerHostTransition.RECORDED_FAILURE_SUPPRESSED
-    else:
-        transition = SchedulerHostTransition.APPLY_REQUIRED
-
+        raise RuntimeError("TypeScript scheduler host result shape mismatch")
     return SchedulerHostDecision(
-        transition=transition,
-        current_target_has_failure=current_target_has_failure,
-        repeated_failed_pair=repeated_failed_pair,
+        transition=SchedulerHostTransition(str(transition)),
+        current_target_has_failure=result_has_failure,
+        repeated_failed_pair=result_repeated_pair,
     )
