@@ -10,9 +10,12 @@ and domain policy (scheduler, Todo lifecycle, spend accounting, vision).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+import inspect
 from typing import Any
 
 from .effect_program import (
+    SettlementEffectResolution,
+    SettlementEffectResolutionKind,
     SettlementFailureKind,
     SettlementIdentity,
     SettlementReceipt,
@@ -22,7 +25,10 @@ from .effect_program import (
 
 
 SettlementPayload = Mapping[str, Any]
-SettlementEffect = Callable[[], Mapping[str, Any]]
+SettlementEffect = Callable[..., Mapping[str, Any]]
+SettlementEffectPrepare = Callable[[SettlementStepKind, str], None]
+SettlementEffectAbort = Callable[[SettlementStepKind, str], None]
+SettlementEffectResolver = Callable[[str], SettlementEffectResolution]
 SettlementCheckpoint = Callable[
     [SettlementStepKind, Mapping[str, Any], tuple[str, ...]],
     None,
@@ -64,6 +70,15 @@ def settlement_receipt(
         effect_id=identity.effect_id,
         source_ref=source_ref,
     )
+
+
+def settlement_effect_ref(
+    identity: SettlementIdentity,
+    step_kind: SettlementStepKind,
+) -> str:
+    """Return the stable provider idempotency key for one settlement step."""
+
+    return f"{identity.effect_id}#{step_kind.value}"
 
 
 def settlement_identity_from_plan(
@@ -271,6 +286,32 @@ def _callback_failure_kind(
     return SettlementFailureKind.QUOTA_SPEND_REJECTED
 
 
+def _invoke_settlement_effect(
+    effect: SettlementEffect,
+    effect_ref: str,
+) -> Mapping[str, Any]:
+    """Invoke new effect-ref callbacks while preserving legacy zero-arg ones."""
+
+    try:
+        signature = inspect.signature(effect)
+    except (TypeError, ValueError):
+        return effect(effect_ref)
+
+    try:
+        signature.bind(effect_ref=effect_ref)
+    except TypeError:
+        pass
+    else:
+        return effect(effect_ref=effect_ref)
+
+    try:
+        signature.bind()
+    except TypeError:
+        signature.bind(effect_ref)
+        return effect(effect_ref)
+    return effect()
+
+
 def commit_step_effect(
     identity: SettlementIdentity,
     *,
@@ -278,12 +319,82 @@ def commit_step_effect(
     transaction_phases: Sequence[str],
     effect: SettlementEffect,
     checkpoint: SettlementCheckpoint,
+    prepare: SettlementEffectPrepare | None = None,
+    abort: SettlementEffectAbort | None = None,
+    prepared_effect_ref: str | None = None,
+    resolve: SettlementEffectResolver | None = None,
     source_ref_prefix: str = "turn_journal",
 ) -> SettlementResult[Mapping[str, Any]]:
-    """Run one step effect and record its committed receipt."""
+    """Resolve or run one idempotent step effect and record its receipt."""
 
-    payload = dict(effect())
+    effect_ref = settlement_effect_ref(identity, step_kind)
+    if prepared_effect_ref is not None:
+        if prepared_effect_ref != effect_ref:
+            return SettlementResult.failed(
+                kind=SettlementFailureKind.IDENTITY_MISMATCH,
+                step_kind=step_kind,
+                reason=(
+                    "prepared settlement effect does not match the current "
+                    f"operation: journal effect is {prepared_effect_ref} but "
+                    f"plan effect is {effect_ref}"
+                ),
+            )
+        if resolve is None:
+            return SettlementResult.failed(
+                kind=SettlementFailureKind.EFFECT_OUTCOME_UNKNOWN,
+                step_kind=step_kind,
+                reason=(
+                    "prepared settlement effect has no provider readback; "
+                    "refusing to replay an ambiguous external effect"
+                ),
+            )
+        resolution = resolve(effect_ref)
+        if resolution.kind is SettlementEffectResolutionKind.UNKNOWN:
+            return SettlementResult.failed(
+                kind=SettlementFailureKind.EFFECT_OUTCOME_UNKNOWN,
+                step_kind=step_kind,
+                reason=(
+                    resolution.reason
+                    or "provider could not resolve the prepared settlement effect"
+                ),
+            )
+        if resolution.kind is SettlementEffectResolutionKind.COMMITTED:
+            payload = dict(resolution.payload or {})
+            if not is_committed_payload(payload):
+                return SettlementResult.failed(
+                    kind=SettlementFailureKind.RECEIPT_MISSING,
+                    step_kind=step_kind,
+                    reason=(
+                        "provider reported a committed settlement effect without "
+                        "a durable committed payload"
+                    ),
+                )
+            phase_index = tuple(transaction_phases).index(step_kind.value)
+            completed_phases = tuple(transaction_phases)[: phase_index + 1]
+            checkpoint(step_kind, payload, completed_phases)
+            return SettlementResult.pure(
+                payload,
+                receipts=(
+                    settlement_receipt(
+                        identity,
+                        step_kind=step_kind,
+                        source_ref=f"{source_ref_prefix}:{effect_ref}",
+                    ),
+                ),
+            )
+        if resolution.kind is not SettlementEffectResolutionKind.ABSENT:
+            return SettlementResult.failed(
+                kind=SettlementFailureKind.EFFECT_OUTCOME_UNKNOWN,
+                step_kind=step_kind,
+                reason="provider returned an unsupported effect resolution state",
+            )
+
+    if prepared_effect_ref is None and prepare is not None:
+        prepare(step_kind, effect_ref)
+    payload = dict(_invoke_settlement_effect(effect, effect_ref))
     if not is_committed_payload(payload):
+        if abort is not None:
+            abort(step_kind, effect_ref)
         reason = str(
             payload.get("error")
             or payload.get("reason")
@@ -303,7 +414,7 @@ def commit_step_effect(
             settlement_receipt(
                 identity,
                 step_kind=step_kind,
-                source_ref=f"{source_ref_prefix}:{identity.effect_id}#{step_kind.value}",
+                source_ref=f"{source_ref_prefix}:{effect_ref}",
             ),
         ),
     )

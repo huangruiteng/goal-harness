@@ -9,10 +9,13 @@ from unittest.mock import patch
 import pytest
 
 from loopx.control_plane.effect_program import (
+    SettlementEffectResolution,
     SettlementFailureKind,
+    SettlementIdentity,
     SettlementResult,
     SettlementStepKind,
 )
+from loopx.control_plane.settlement_driver import commit_step_effect
 from loopx.control_plane.turn_driver.settlement import (
     TurnSettlementState,
     execute_turn_driver_settlement,
@@ -136,6 +139,145 @@ def _prefix_id(prefix: Sequence[str]) -> str:
 
 def test_transaction_phase_order_matches_the_settlement_protocol() -> None:
     assert TRANSACTION_PHASES == EXPECTED_TRANSACTION_PHASES
+
+
+def test_committed_probe_repairs_post_effect_pre_checkpoint_crash_without_replay(
+) -> None:
+    identity = SettlementIdentity(
+        goal_id="fault-matrix-goal",
+        agent_id="codex-fault-matrix",
+        todo_id="todo_faultmatrix1",
+        turn_instance_id="fault-matrix-turn-1",
+    )
+    step_kind = SettlementStepKind.DURABLE_WRITEBACK
+    prepared: dict[SettlementStepKind, str] = {}
+    provider_receipts: dict[str, Mapping[str, Any]] = {}
+    effect_calls: list[str] = []
+
+    def prepare(kind: SettlementStepKind, effect_ref: str) -> None:
+        prepared[kind] = effect_ref
+
+    def effect(effect_ref: str) -> Mapping[str, Any]:
+        effect_calls.append(effect_ref)
+        payload = _committed_payload(step_kind, effect_id=identity.effect_id)
+        provider_receipts[effect_ref] = payload
+        return payload
+
+    def crash_before_committed_checkpoint(
+        _kind: SettlementStepKind,
+        _payload: Mapping[str, Any],
+        _phases: tuple[str, ...],
+    ) -> None:
+        raise SystemExit(91)
+
+    with pytest.raises(SystemExit, match="91"):
+        commit_step_effect(
+            identity,
+            step_kind=step_kind,
+            transaction_phases=TRANSACTION_PHASES,
+            effect=effect,
+            prepare=prepare,
+            checkpoint=crash_before_committed_checkpoint,
+        )
+
+    checkpoints: list[Mapping[str, Any]] = []
+    recovered = commit_step_effect(
+        identity,
+        step_kind=step_kind,
+        transaction_phases=TRANSACTION_PHASES,
+        effect=effect,
+        prepare=prepare,
+        prepared_effect_ref=prepared[step_kind],
+        resolve=lambda effect_ref: SettlementEffectResolution.committed(
+            provider_receipts[effect_ref]
+        ),
+        checkpoint=lambda _kind, payload, _phases: checkpoints.append(payload),
+    )
+
+    assert recovered.failure is None
+    assert effect_calls == [f"{identity.effect_id}#{step_kind.value}"]
+    assert checkpoints == [provider_receipts[prepared[step_kind]]]
+
+
+def test_absent_probe_retries_prepared_effect_with_the_same_reference() -> None:
+    identity = SettlementIdentity(
+        goal_id="fault-matrix-goal",
+        agent_id="codex-fault-matrix",
+        todo_id="todo_faultmatrix1",
+        turn_instance_id="fault-matrix-turn-1",
+    )
+    step_kind = SettlementStepKind.QUOTA_SPEND
+    effect_ref = f"{identity.effect_id}#{step_kind.value}"
+    calls: list[str] = []
+    checkpoints: list[Mapping[str, Any]] = []
+
+    result = commit_step_effect(
+        identity,
+        step_kind=step_kind,
+        transaction_phases=TRANSACTION_PHASES,
+        effect=lambda observed_ref: calls.append(observed_ref)
+        or _committed_payload(step_kind, effect_id=identity.effect_id),
+        prepared_effect_ref=effect_ref,
+        resolve=lambda _ref: SettlementEffectResolution.absent(),
+        checkpoint=lambda _kind, payload, _phases: checkpoints.append(payload),
+    )
+
+    assert result.failure is None
+    assert calls == [effect_ref]
+    assert len(checkpoints) == 1
+
+
+def test_unknown_probe_fails_closed_without_replaying_effect() -> None:
+    identity = SettlementIdentity(
+        goal_id="fault-matrix-goal",
+        agent_id="codex-fault-matrix",
+        todo_id="todo_faultmatrix1",
+        turn_instance_id="fault-matrix-turn-1",
+    )
+    step_kind = SettlementStepKind.DURABLE_WRITEBACK
+    calls: list[str] = []
+
+    result = commit_step_effect(
+        identity,
+        step_kind=step_kind,
+        transaction_phases=TRANSACTION_PHASES,
+        effect=lambda effect_ref: calls.append(effect_ref) or {},
+        prepared_effect_ref=f"{identity.effect_id}#{step_kind.value}",
+        resolve=lambda _ref: SettlementEffectResolution.unknown(
+            "provider readback timed out"
+        ),
+        checkpoint=lambda _kind, _payload, _phases: None,
+    )
+
+    assert result.failure is not None
+    assert result.failure.kind is SettlementFailureKind.EFFECT_OUTCOME_UNKNOWN
+    assert result.failure.reason == "provider readback timed out"
+    assert calls == []
+
+
+def test_prepared_effect_identity_drift_fails_closed_before_provider_calls() -> None:
+    identity = SettlementIdentity(
+        goal_id="fault-matrix-goal",
+        agent_id="codex-fault-matrix",
+        todo_id="todo_faultmatrix1",
+        turn_instance_id="fault-matrix-turn-1",
+    )
+    calls: list[str] = []
+
+    result = commit_step_effect(
+        identity,
+        step_kind=SettlementStepKind.DURABLE_WRITEBACK,
+        transaction_phases=TRANSACTION_PHASES,
+        effect=lambda effect_ref: calls.append(f"effect:{effect_ref}") or {},
+        prepared_effect_ref="another-effect#durable_writeback",
+        resolve=lambda effect_ref: calls.append(f"resolve:{effect_ref}")
+        or SettlementEffectResolution.absent(),
+        checkpoint=lambda _kind, _payload, _phases: None,
+    )
+
+    assert result.failure is not None
+    assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
+    assert calls == []
 
 
 @pytest.mark.parametrize(

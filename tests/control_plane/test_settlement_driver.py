@@ -22,6 +22,7 @@ from loopx.control_plane.settlement_driver import (
     effect_ids_match,
     require_matching_effect_id,
     seed_committed_steps,
+    settlement_effect_ref,
     settlement_identity_from_plan,
     settlement_receipt,
 )
@@ -280,6 +281,34 @@ def test_commit_step_effect_records_receipt_and_checkpoint() -> None:
             COMMITTED_PAYLOAD,
             ("host_execute", "typed_result", "validation", "durable_writeback"),
         )
+    ]
+
+
+@pytest.mark.parametrize("keyword_only", [False, True])
+def test_commit_step_effect_passes_stable_ref_to_new_callbacks(
+    keyword_only: bool,
+) -> None:
+    observed_refs: list[str] = []
+
+    def positional_effect(effect_ref: str) -> dict[str, Any]:
+        observed_refs.append(effect_ref)
+        return dict(COMMITTED_PAYLOAD)
+
+    def keyword_effect(*, effect_ref: str) -> dict[str, Any]:
+        observed_refs.append(effect_ref)
+        return dict(COMMITTED_PAYLOAD)
+
+    result = commit_step_effect(
+        IDENTITY,
+        step_kind=SettlementStepKind.DURABLE_WRITEBACK,
+        transaction_phases=TRANSACTION_PHASES,
+        effect=keyword_effect if keyword_only else positional_effect,
+        checkpoint=lambda *_args: None,
+    )
+
+    assert result.failure is None
+    assert observed_refs == [
+        settlement_effect_ref(IDENTITY, SettlementStepKind.DURABLE_WRITEBACK)
     ]
 
 

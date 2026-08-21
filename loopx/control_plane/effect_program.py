@@ -125,6 +125,45 @@ class SettlementFailureKind(StrEnum):
     CANCELLED = "cancelled"
     PERMISSION_DENIED = "permission_denied"
     BUDGET_REJECTED = "budget_rejected"
+    EFFECT_OUTCOME_UNKNOWN = "effect_outcome_unknown"
+
+
+class SettlementEffectResolutionKind(StrEnum):
+    """Provider readback result for one stable settlement operation."""
+
+    COMMITTED = "committed"
+    ABSENT = "absent"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementEffectResolution:
+    """Three-state proof used to recover a prepared settlement effect."""
+
+    kind: SettlementEffectResolutionKind
+    payload: Mapping[str, Any] | None = None
+    reason: str | None = None
+
+    @classmethod
+    def committed(
+        cls,
+        payload: Mapping[str, Any],
+    ) -> SettlementEffectResolution:
+        return cls(
+            kind=SettlementEffectResolutionKind.COMMITTED,
+            payload=dict(payload),
+        )
+
+    @classmethod
+    def absent(cls) -> SettlementEffectResolution:
+        return cls(kind=SettlementEffectResolutionKind.ABSENT)
+
+    @classmethod
+    def unknown(cls, reason: str) -> SettlementEffectResolution:
+        return cls(
+            kind=SettlementEffectResolutionKind.UNKNOWN,
+            reason=str(reason).strip() or "provider could not resolve effect outcome",
+        )
 
 
 @dataclass(frozen=True, slots=True)

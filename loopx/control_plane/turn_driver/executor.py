@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import os
 import re
 import subprocess
@@ -15,6 +16,7 @@ from ...authority import validate_public_safe_text
 from ...file_lock import LockAcquireTimeoutError, exclusive_file_lock
 from ...runtime import validate_goal_id_path_segment
 from ..effect_program import (
+    SettlementEffectResolution,
     SettlementResult,
     SettlementStepKind,
     interpret_turn_journal,
@@ -32,6 +34,7 @@ from .session_recovery import (
     require_host_recovery_kind,
 )
 from .settlement import (
+    TurnEffectRecovery,
     completion_writeback_outcome,
     execute_turn_driver_settlement,
     execute_verified_turn_terminal_closeout,
@@ -96,6 +99,7 @@ CompletionIntent = Callable[[dict[str, Any]], dict[str, Any]]
 TerminalCloseout = Callable[[dict[str, Any]], dict[str, Any]]
 Spend = Callable[[], dict[str, Any]]
 Scheduler = Callable[[dict[str, Any]], dict[str, Any]]
+EffectResolver = Callable[[str], SettlementEffectResolution]
 HostRunner = Callable[[Mapping[str, Any]], dict[str, Any]]
 TaskValidator = Callable[
     [Mapping[str, Any], Mapping[str, Any]],
@@ -112,6 +116,24 @@ class BuiltInHostError(RuntimeError):
         super().__init__(reason)
         self.reason = reason
         self.recovery_kind = recovery_kind
+
+
+def _invoke_effect_callback(
+    callback: Callable[..., Mapping[str, Any]],
+    *args: Any,
+    effect_ref: str,
+) -> Mapping[str, Any]:
+    """Pass the stable effect ref only to callbacks that declare support."""
+
+    parameters = inspect.signature(callback).parameters.values()
+    supports_effect_ref = any(
+        parameter.name == "effect_ref"
+        or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+    if supports_effect_ref:
+        return callback(*args, effect_ref=effect_ref)
+    return callback(*args)
 
 
 def _normalize_argv(value: Sequence[str], *, label: str) -> list[str]:
@@ -1118,6 +1140,9 @@ def _typed_settlement_stage(
     terminal_closeout: TerminalCloseout | None,
     spend: Spend,
     scheduler: Scheduler,
+    writeback_resolver: EffectResolver | None,
+    spend_resolver: EffectResolver | None,
+    terminal_closeout_resolver: EffectResolver | None,
 ) -> dict[str, Any]:
     transaction_plan = (
         plan.get("transaction")
@@ -1147,7 +1172,7 @@ def _typed_settlement_stage(
             )
         )
 
-    def writeback_effect() -> Mapping[str, Any]:
+    def writeback_effect(effect_ref: str) -> Mapping[str, Any]:
         if completion_intent_error:
             return {
                 "ok": False,
@@ -1161,7 +1186,11 @@ def _typed_settlement_stage(
         ):
             if completion_writeback is None:
                 raise ValueError("validated_completion requires a todo lifecycle adapter")
-            callback_payload = completion_writeback(result)
+            callback_payload = _invoke_effect_callback(
+                completion_writeback,
+                result,
+                effect_ref=effect_ref,
+            )
             completion_outcome = completion_writeback_outcome(
                 callback_payload,
                 plan=plan,
@@ -1183,7 +1212,33 @@ def _typed_settlement_stage(
                 **callback_payload,
                 "completion": completion_outcome,
             }
-        return writeback(result)
+        return _invoke_effect_callback(writeback, result, effect_ref=effect_ref)
+
+    def spend_effect(effect_ref: str) -> Mapping[str, Any]:
+        return _invoke_effect_callback(spend, effect_ref=effect_ref)
+
+    def prepare_effect(step_kind: SettlementStepKind, effect_ref: str) -> None:
+        attempts = dict(_mapping(journal.get("effect_attempts")))
+        attempts[step_kind.value] = {
+            "status": "prepared",
+            "step_kind": step_kind.value,
+            "effect_id": effect_ref.rpartition("#")[0],
+            "effect_ref": effect_ref,
+        }
+        journal["effect_attempts"] = attempts
+        _write_journal(journal_path, journal)
+
+    def clear_effect_attempt(step_kind: SettlementStepKind) -> None:
+        attempts = dict(_mapping(journal.get("effect_attempts")))
+        attempts.pop(step_kind.value, None)
+        if attempts:
+            journal["effect_attempts"] = attempts
+        else:
+            journal.pop("effect_attempts", None)
+
+    def abort_effect(step_kind: SettlementStepKind, _effect_ref: str) -> None:
+        clear_effect_attempt(step_kind)
+        _write_journal(journal_path, journal)
 
     def checkpoint(
         step_kind: SettlementStepKind,
@@ -1203,8 +1258,20 @@ def _typed_settlement_stage(
         elif step_kind is SettlementStepKind.QUOTA_SPEND:
             effects["quota_spent"] = True
             journal["quota_spend"] = _compact_callback(payload)
+        clear_effect_attempt(step_kind)
         journal["completed_phases"] = list(phases)
         _write_journal(journal_path, journal)
+
+    prepared_effect_refs = {
+        step_kind: str(attempt.get("effect_ref") or "")
+        for step_kind in (
+            SettlementStepKind.DURABLE_WRITEBACK,
+            SettlementStepKind.QUOTA_SPEND,
+            SettlementStepKind.TERMINAL_CLOSEOUT,
+        )
+        for attempt in [_mapping(_mapping(journal.get("effect_attempts")).get(step_kind.value))]
+        if attempt
+    }
 
     settlement_result = execute_turn_driver_settlement(
         transaction_plan,
@@ -1220,10 +1287,23 @@ def _typed_settlement_stage(
             if isinstance(journal.get("quota_spend"), Mapping)
             else None
         ),
-        writeback=writeback_effect,
-        spend=spend,
+        writeback=lambda: writeback_effect(""),
+        spend=lambda: spend_effect(""),
         checkpoint=checkpoint,
         committed_effect_id=_journal_committed_effect_id(journal),
+        prepare=prepare_effect,
+        abort=abort_effect,
+        prepared_effect_refs=prepared_effect_refs,
+        effect_recovery={
+            SettlementStepKind.DURABLE_WRITEBACK: TurnEffectRecovery(
+                apply=writeback_effect,
+                resolve=writeback_resolver,
+            ),
+            SettlementStepKind.QUOTA_SPEND: TurnEffectRecovery(
+                apply=spend_effect,
+                resolve=spend_resolver,
+            ),
+        },
     )
     settlement_state = settlement_result.value
     if settlement_result.failure is None and terminal_closeout_required:
@@ -1243,7 +1323,16 @@ def _typed_settlement_stage(
                 **_mapping(journal.get("writeback")),
                 "completion": compact.get("completion"),
             }
+            clear_effect_attempt(SettlementStepKind.TERMINAL_CLOSEOUT)
             _write_journal(journal_path, journal)
+
+        def terminal_effect(effect_ref: str) -> Mapping[str, Any]:
+            assert terminal_closeout is not None
+            return _invoke_effect_callback(
+                terminal_closeout,
+                result,
+                effect_ref=effect_ref,
+            )
 
         terminal_result = execute_verified_turn_terminal_closeout(
             transaction_plan,
@@ -1253,9 +1342,18 @@ def _typed_settlement_stage(
                 if isinstance(journal.get("terminal_closeout"), Mapping)
                 else None
             ),
-            closeout=lambda: terminal_closeout(result),
+            closeout=lambda: terminal_effect(""),
             checkpoint=terminal_checkpoint,
             committed_effect_id=_journal_committed_effect_id(journal),
+            prepare=prepare_effect,
+            abort=abort_effect,
+            prepared_effect_ref=prepared_effect_refs.get(
+                SettlementStepKind.TERMINAL_CLOSEOUT
+            ),
+            effect_recovery=TurnEffectRecovery(
+                apply=terminal_effect,
+                resolve=terminal_closeout_resolver,
+            ),
         )
         settlement_result = SettlementResult(
             value=settlement_state if terminal_result.failure is None else None,
@@ -1357,6 +1455,9 @@ def run_loopx_turn_once(
     terminal_closeout: TerminalCloseout | None = None,
     spend: Spend | None = None,
     scheduler: Scheduler | None = None,
+    writeback_resolver: EffectResolver | None = None,
+    spend_resolver: EffectResolver | None = None,
+    terminal_closeout_resolver: EffectResolver | None = None,
 ) -> dict[str, Any]:
     if host_runner is not None and host_argv is not None:
         raise ValueError("run-once accepts either host_argv or host_runner, not both")
@@ -1495,4 +1596,7 @@ def run_loopx_turn_once(
             terminal_closeout=terminal_closeout,
             spend=spend,
             scheduler=scheduler,
+            writeback_resolver=writeback_resolver,
+            spend_resolver=spend_resolver,
+            terminal_closeout_resolver=terminal_closeout_resolver,
         )
