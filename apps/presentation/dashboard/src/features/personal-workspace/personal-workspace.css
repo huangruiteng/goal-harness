@@ -40,6 +40,43 @@
 .personal-brand-mark, .personal-manager-icon { display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #2f66e9, #6f9bff); border-radius: 10px; box-shadow: 0 2px 6px rgb(47 102 233 / 28%); }
 .personal-brand-mark { width: 34px; height: 34px; }
 .personal-manager-icon { width: 30px; height: 30px; color: var(--pw-blue-ink); background: var(--pw-blue-soft); box-shadow: none; }
+.personal-status-source { position: relative; display: grid; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--pw-line); }
+.personal-status-source > header { display: flex; align-items: center; justify-content: space-between; padding: 0 3px; color: var(--pw-faint); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.personal-status-source > header button, .personal-status-source-meta button, .personal-status-source-form header button { display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--pw-muted); cursor: pointer; }
+.personal-status-source > header button:hover, .personal-status-source-meta button:hover, .personal-status-source-form header button:hover { background: #fff; color: var(--pw-text); box-shadow: 0 1px 3px rgb(30 28 20 / 10%); }
+.personal-status-source-select { display: grid; grid-template-columns: 18px minmax(0, 1fr) 14px; align-items: center; gap: 7px; min-height: 38px; padding: 0 10px; border: 1px solid var(--pw-line-strong); border-radius: 10px; background: #fff; color: var(--pw-muted); }
+.personal-status-source-select select { width: 100%; border: 0; outline: 0; background: transparent; color: var(--pw-text); font: 600 12.5px/1.2 inherit; appearance: none; }
+.personal-status-source-meta { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 0 3px; color: var(--pw-muted); font-size: 10.5px; }
+.personal-status-source-meta > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.personal-status-source-meta > span i { width: 6px; height: 6px; border-radius: 50%; background: #3fbf82; }
+.personal-status-source-meta > span.is-loading i { background: #e5a33d; }
+.personal-status-source-meta > span.is-error i { background: #dd5b47; }
+.personal-status-source-meta small { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.personal-status-source-meta button { margin-left: auto; width: 22px; height: 22px; color: var(--pw-faint); }
+.personal-status-source-error { margin: 0 3px; color: var(--pw-red); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.personal-status-source-form { position: absolute; z-index: 12; top: calc(100% - 4px); left: 12px; right: 12px; display: grid; gap: 10px; padding: 13px; border: 1px solid var(--pw-line-strong); border-radius: 12px; background: #fff; box-shadow: 0 12px 32px rgb(30 28 20 / 14%); }
+.personal-status-source-form > header { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; }
+.personal-status-source-form label { display: grid; gap: 5px; color: var(--pw-muted); font-size: 10.5px; }
+.personal-status-source-form input, .personal-status-source-form select { min-width: 0; width: 100%; height: 34px; padding: 0 9px; border: 1px solid var(--pw-line-strong); border-radius: 8px; outline: 0; background: #fff; color: var(--pw-text); font: 12px/1.2 inherit; }
+.personal-status-source-form input:focus, .personal-status-source-form select:focus { border-color: #8aa7ed; box-shadow: 0 0 0 2px rgb(47 102 233 / 10%); }
+.personal-status-source-form input:disabled, .personal-status-source-form select:disabled { background: #f6f5f2; color: var(--pw-faint); }
+.personal-status-source-form p { margin: 0; color: var(--pw-muted); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.personal-status-source-form p.is-error { color: var(--pw-red); }
+.personal-status-source-form code { font: 9.5px/1.5 "SF Mono", ui-monospace, Menlo, Consolas, monospace; }
+.personal-status-source-add { min-height: 34px; border: 0; border-radius: 8px; background: var(--pw-blue); color: #fff; cursor: pointer; font-size: 11.5px; font-weight: 650; }
+.personal-status-source-add:hover { background: var(--pw-blue-ink); }
+.personal-status-source-add:disabled { cursor: not-allowed; opacity: .48; }
+.personal-status-source-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border-radius: 9px; background: #f2f1ed; }
+.personal-status-source-modes button { min-height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--pw-muted); cursor: pointer; font-size: 10.5px; font-weight: 650; }
+.personal-status-source-modes button[aria-selected="true"] { background: #fff; color: var(--pw-text); box-shadow: 0 1px 3px rgb(30 28 20 / 10%); }
+.personal-status-source-field-row { display: grid; grid-template-columns: minmax(0, 1fr) 34px; gap: 6px; }
+.personal-status-source-field-row > button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--pw-line-strong); border-radius: 8px; background: #fff; color: var(--pw-muted); cursor: pointer; }
+.personal-status-source-field-row > button:hover { color: var(--pw-text); background: #f8f7f4; }
+.personal-status-source-field-row > button:disabled { cursor: wait; opacity: .45; }
+.personal-status-source-command { display: grid; gap: 7px; padding: 8px 9px; border-radius: 8px; background: #f6f5f2; }
+.personal-status-source-command code { color: #4e5668; overflow-wrap: anywhere; }
+.personal-status-source-command button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; justify-self: end; min-height: 25px; padding: 0 8px; border: 1px solid var(--pw-line-strong); border-radius: 7px; background: #fff; color: var(--pw-blue-ink); cursor: pointer; font-size: 10px; font-weight: 650; }
+.personal-status-source-command button:disabled { color: var(--pw-faint); cursor: not-allowed; }
 .personal-sidebar-nav { flex: 1; padding: 12px 12px; overflow: auto; }
 .personal-manager-link, .personal-goal-link, .personal-sidebar-utility { width: 100%; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
 .personal-manager-link { display: grid; grid-template-columns: 30px 1fr auto auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 11px; font-weight: 650; }
@@ -106,6 +143,9 @@
 .personal-agent-select { display: flex; align-items: center; gap: 7px; height: 38px; padding: 0 12px; border: 1px solid var(--pw-line-strong); border-radius: 10px; background: #fff; font-weight: 600; font-size: 13px; }
 .personal-agent-select:hover { border-color: var(--pw-faint); }
 .personal-agent-select select { max-width: 150px; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; appearance: none; }
+.personal-read-only-source { display: inline-flex; align-items: center; gap: 7px; max-width: 190px; height: 38px; padding: 0 10px; border: 1px solid var(--pw-line-strong); border-radius: 10px; background: #fff; color: var(--pw-text); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.personal-read-only-source > svg { flex: 0 0 auto; color: var(--pw-muted); }
+.personal-read-only-source > small { padding: 2px 6px; border-radius: 99px; background: #f2f1ed; color: var(--pw-muted); font-size: 9.5px; font-weight: 650; }
 .personal-live-indicator { display: inline-flex; align-items: center; gap: 6px; padding: 7px 4px; color: var(--pw-muted); font-size: 12px; }
 .personal-live-indicator i { width: 7px; height: 7px; border-radius: 50%; background: #3fbf82; }
 .personal-composer-attach { position: relative; display: grid; place-items: center; flex: 0 0 auto; overflow: hidden; border: 0; cursor: pointer; }
@@ -456,6 +496,8 @@
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-chat-receipt footer button { border: 2px solid #141414; border-radius: 4px; color: #141414; box-shadow: 2px 2px 0 #141414; }
 
 .personal-composer-wrap { padding: 10px max(26px, calc((100% - 820px) / 2)) 20px; background: linear-gradient(transparent, var(--pw-bg) 22%); }
+.personal-read-only-notice { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 10px 16px; border: 1px solid var(--pw-line); border-radius: 12px; background: #f5f4f1; color: var(--pw-muted); font-size: 11.5px; }
+.personal-read-only-notice strong { color: var(--pw-text); white-space: nowrap; }
 .personal-manager-conversation-tray { display: grid; width: 100%; gap: 9px; max-height: 320px; padding: 12px 14px; margin-bottom: 10px; overflow: hidden; border: 1px solid #bfcdf1; border-radius: 14px; background: rgb(255 255 255 / 97%); box-shadow: 0 5px 20px rgb(34 62 120 / 10%); color: inherit; font: inherit; text-align: left; animation: pw-tray-in 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
 @keyframes pw-tray-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .personal-manager-conversation-tray:hover { border-color: #8fa9ee; box-shadow: 0 7px 24px rgb(34 62 120 / 14%); }

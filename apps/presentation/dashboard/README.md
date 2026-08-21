@@ -154,9 +154,9 @@ LoopX services are already running separately. Vite proxies the default
 
 The full-stack launcher needs a Python 3.11+ interpreter for the status and
 Chat services. It honors `LOOPX_PYTHON` first, then the Python recorded by the
-LoopX installer in `.loopx-python`, then `python3.13`/`python3.12`/`python3.11`
-on `PATH` and common Homebrew locations. If your default `python3` is older,
-point it at an existing interpreter:
+LoopX installer in `.loopx-python`, then the repository `.venv`,
+`python3.13`/`python3.12`/`python3.11` on `PATH`, and common Homebrew locations.
+If your default `python3` is older, point it at an existing interpreter:
 
 ```bash
 LOOPX_PYTHON=/path/to/python3.12 npm run dev
@@ -256,6 +256,39 @@ Then open the dashboard root:
 ```text
 http://127.0.0.1:5174/
 ```
+
+### Named local and SSH-tunnel sources
+
+The Personal Workspace source switcher keeps a browser-local catalog with one
+built-in **Local** source and any number of named SSH-tunnel sources. Start the
+status server on each remote host, then forward each host to a distinct local
+port:
+
+```bash
+# On the remote host
+loopx serve-status --global-registry --host 127.0.0.1 --port 8766
+
+# On the operator machine; choose a different local port for every source
+ssh -N -L 8876:127.0.0.1:8766 <remote-host>
+```
+
+The add-source panel reads only explicit, shell-safe `Host` aliases from the
+operator machine's OpenSSH config through the loopback status service. Select
+an alias, choose a local port, copy and run the generated tunnel command, then
+add the source. Wildcard hosts, negated patterns, `IdentityFile`, `ProxyCommand`,
+hostnames, credentials, and config paths are never projected to the browser.
+The manual loopback-URL path remains available for custom forwarding setups.
+
+The browser catalog stores only the selected alias label and loopback URL;
+LoopX does not store SSH credentials or open the tunnel. The active source
+reports its connection health. Local stays interactive, while every custom
+SSH-tunnel source is explicitly read-only even though its forwarded URL is
+loopback.
+
+The switcher intentionally has no synthetic **All** source. Independent status
+feeds do not yet share authority, identity, or deduplication semantics, so
+combining them would imply cross-host coordination that the control plane has
+not established.
 
 For project-local debugging or a disposable `loopx demo`, start a local
 status server from the project you want to inspect:

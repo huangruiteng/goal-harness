@@ -69,7 +69,7 @@ export function GoalTasksView({
           </div>
           <footer>
             <button onClick={onOpenChat} type="button"><MessageSquareText size={14} />查看回复</button>
-            {latestReply && !replyPending ? <button onClick={() => onDraftTaskFromMessage?.(latestReply.text)} type="button"><ListPlus size={14} />转为 Task</button> : null}
+            {latestReply && !replyPending && onDraftTaskFromMessage ? <button onClick={() => onDraftTaskFromMessage(latestReply.text)} type="button"><ListPlus size={14} />转为 Task</button> : null}
           </footer>
         </section>
       ) : null}
@@ -115,7 +115,7 @@ export function GoalTasksView({
               </button>
               <div className="personal-task-card-actions">
                 {execution ? <button className="personal-task-session-link" aria-label={`查看执行过程：${todo.text}`} onClick={() => onSelect({ item: execution, kind: "run" })} title={execution.status === "completed" ? "查看结果" : "查看执行过程"} type="button"><ExternalLink size={14} /><span>{execution.status === "completed" ? "查看结果" : "查看执行过程"}</span></button> : null}
-                <button aria-label={`标记完成：${todo.text}`} onClick={() => onQuickComplete?.(enriched)} title="标记完成" type="button"><Check size={14} /></button>
+                {onQuickComplete ? <button aria-label={`标记完成：${todo.text}`} onClick={() => onQuickComplete(enriched)} title="标记完成" type="button"><Check size={14} /></button> : null}
                 <button aria-label={`更多操作：${todo.text}`} onClick={() => onSelect({ item: enriched, kind: "todo" })} title="更多操作" type="button"><MoreHorizontal size={14} /></button>
               </div>
             </div>

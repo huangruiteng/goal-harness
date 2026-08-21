@@ -96,74 +96,7 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-python_version_ok() {
-  "$1" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' 2>/dev/null
-}
-
-select_python_candidate() {
-  local requested="$1"
-  local resolved=""
-  if [ -x "${requested}" ]; then
-    resolved="${requested}"
-  elif ! resolved="$(command -v "${requested}" 2>/dev/null)"; then
-    return 1
-  fi
-  if ! python_version_ok "${resolved}"; then
-    return 1
-  fi
-  PYTHON_BIN="${resolved}"
-}
-
-select_python_runtime() {
-  local candidate=""
-  local configured_python=""
-  local authoritative=0
-
-  if [ -n "${LOOPX_PYTHON:-}" ]; then
-    configured_python="${LOOPX_PYTHON}"
-    authoritative=1
-  elif [ -f "${REPO_ROOT}/.loopx-python" ]; then
-    IFS= read -r configured_python <"${REPO_ROOT}/.loopx-python"
-  fi
-
-  if [ -n "${configured_python}" ]; then
-    if select_python_candidate "${configured_python}"; then
-      echo "Using LoopX Python: ${PYTHON_BIN}"
-      return 0
-    fi
-    if [ "${authoritative}" -eq 1 ]; then
-      echo "LOOPX_PYTHON is set but does not resolve to a Python 3.11+ interpreter: ${configured_python}" >&2
-      return 1
-    fi
-    echo "Ignoring non-functional Python recorded in .loopx-python: ${configured_python}" >&2
-  fi
-
-  for candidate in python3.13 python3.12 python3.11 python3; do
-    if select_python_candidate "${candidate}"; then
-      return 0
-    fi
-  done
-
-  for candidate in \
-    "${HOME}/.local/bin/python3.13" \
-    "${HOME}/.local/bin/python3.12" \
-    "${HOME}/.local/bin/python3.11" \
-    /opt/homebrew/bin/python3.13 \
-    /opt/homebrew/bin/python3.12 \
-    /opt/homebrew/bin/python3.11 \
-    /usr/local/bin/python3.13 \
-    /usr/local/bin/python3.12 \
-    /usr/local/bin/python3.11; do
-    if select_python_candidate "${candidate}"; then
-      echo "Using Python from ${PYTHON_BIN}"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-if ! select_python_runtime; then
+if ! PYTHON_BIN="$(bash "${SCRIPT_DIR}/loopx-python.sh")"; then
   echo "LoopX requires Python 3.11 or newer to start status and Chat services." >&2
   echo "Install Python 3.11+ (for example: brew install python@3.12), or set" >&2
   echo "LOOPX_PYTHON to an existing Python 3.11+ executable and retry, e.g.:" >&2
@@ -172,6 +105,7 @@ if ! select_python_runtime; then
   cd "${DASHBOARD_DIR}"
   exec npm run dev:web
 fi
+echo "Using LoopX Python: ${PYTHON_BIN}"
 
 resolve_agent_binary() {
   local binary_name="$1"

@@ -67,8 +67,19 @@ import {
   type WorkspaceActionPreview,
 } from "../features/personal-workspace/personal-workspace-model";
 import { routeWorkspaceInput } from "../features/personal-workspace/personal-workspace-router";
+import type { StatusSourceControl } from "../features/personal-workspace/status-source-switcher";
+import {
+  addSshTunnelStatusSource,
+  defaultLocalStatusSourceUrl,
+  loadStatusSourceCatalog,
+  localStatusSource,
+  projectedStatusSourceForUrl,
+  removeStatusSource,
+  saveStatusSourceCatalog,
+  type StatusSource,
+} from "../data/status-source-catalog";
 
-const defaultGlobalStatusUrl = "http://127.0.0.1:8766/status.json";
+const defaultGlobalStatusUrl = defaultLocalStatusSourceUrl;
 
 type BadgeVariant = "neutral" | "info" | "success" | "warning" | "danger";
 
@@ -1105,7 +1116,7 @@ function PersonalGoalHome({
   payload,
   rows,
   selectedGoalId,
-  source,
+  statusSourceControl,
   theme,
   toggleTheme,
 }: {
@@ -1117,10 +1128,11 @@ function PersonalGoalHome({
   payload: StatusPayload;
   rows: GoalDirectoryRow[];
   selectedGoalId: string;
-  source: DataSource;
+  statusSourceControl: StatusSourceControl;
   theme: "light" | "dark";
   toggleTheme: () => void;
 }) {
+  const readOnly = statusSourceControl.activeSource.readOnly;
   const [runtimeAgents, setRuntimeAgents] = useState<Array<{
     adapter_kind: string;
     agent_id: string;
@@ -1249,6 +1261,10 @@ function PersonalGoalHome({
   }
 
   useEffect(() => {
+    if (readOnly) {
+      setRuntimeAgents([]);
+      return;
+    }
     let cancelled = false;
     void fetchChatCapabilities()
       .then((capabilities) => {
@@ -1260,7 +1276,7 @@ function PersonalGoalHome({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [readOnly]);
 
   useEffect(() => {
     try {
@@ -1271,6 +1287,7 @@ function PersonalGoalHome({
   }, [selectedAgents]);
 
   useEffect(() => {
+    if (readOnly) return;
     if (!selectedAgent.available) return;
     const targetContextId = contextId;
     const sessionKey = `${targetContextId}:${selectedAgent.agentId}`;
@@ -1463,9 +1480,10 @@ function PersonalGoalHome({
       cancelled = true;
       recoveryController?.abort();
     };
-  }, [contextId, model.goals[0]?.goalId, selectedGoal?.goalId, selectedAgent.agentId, selectedAgent.available, selectedAgent.label]);
+  }, [contextId, model.goals[0]?.goalId, readOnly, selectedGoal?.goalId, selectedAgent.agentId, selectedAgent.available, selectedAgent.label]);
 
   useEffect(() => {
+    if (readOnly) return;
     if (selectedGoal || model.goals.length === 0) return;
     let cancelled = false;
     void Promise.all(model.goals.map(async (goal) => {
@@ -1497,9 +1515,14 @@ function PersonalGoalHome({
     return () => {
       cancelled = true;
     };
-  }, [sessionDiscoveryKey, selectedGoal?.goalId]);
+  }, [readOnly, sessionDiscoveryKey, selectedGoal?.goalId]);
 
   useEffect(() => {
+    if (readOnly) {
+      setExecutionSessions([]);
+      setExecutionSessionSnapshots({});
+      return;
+    }
     if (!selectedGoal) {
       setExecutionSessions([]);
       setExecutionSessionSnapshots({});
@@ -1531,7 +1554,7 @@ function PersonalGoalHome({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [selectedGoal?.goalId]);
+  }, [readOnly, selectedGoal?.goalId]);
 
   useEffect(() => {
     if (!agentMenuOpen) {
@@ -2297,8 +2320,10 @@ function PersonalGoalHome({
           onStartNewRunSession: startNewManagerSession,
         }}
         model={workspaceModel}
+        readOnly={readOnly}
         selectedAgentId={selectedAgent.agentId}
         selectedGoalId={selectedGoal?.goalId ?? null}
+        statusSourceControl={statusSourceControl}
       />
     </div>
   );
@@ -2390,6 +2415,9 @@ export function DashboardPage() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [payload, setPayload] = useState<StatusPayload>(exampleStatusPayload);
   const [source, setSource] = useState<DataSource>({ kind: "example", label: "bundled example" });
+  const [statusSourceCatalog, setStatusSourceCatalog] = useState(() =>
+    loadStatusSourceCatalog(window.localStorage, window.location.href)
+  );
   const [statusUrl, setStatusUrl] = useState(search.statusUrl);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -2403,8 +2431,16 @@ export function DashboardPage() {
     ? search.statusUrl.trim()
     : "";
   const activeStatusRequestUrl = requestedStatusUrl ?? routeStatusRequestUrl;
+  const loadedStatusUrl = source.kind === "url" ? source.label : defaultGlobalStatusUrl;
+  const activeStatusSource: StatusSource = projectedStatusSourceForUrl(
+    statusSourceCatalog,
+    loadedStatusUrl,
+    window.location.href,
+  );
 
-  const statusRequestActive = Boolean(activeStatusRequestUrl) && Boolean(loadError && requestedStatusUrl);
+  const statusRequestActive = source.kind === "example"
+    && Boolean(activeStatusRequestUrl)
+    && Boolean(loadError && requestedStatusUrl);
   const queue = payload.attention_queue;
   const runHistory = payload.run_history;
   const goalRows = useMemo(
@@ -2456,6 +2492,48 @@ export function DashboardPage() {
       if (!background) setIsLoading(false);
     }
   }
+
+  function persistStatusSourceCatalog(nextCatalog: typeof statusSourceCatalog) {
+    setStatusSourceCatalog(nextCatalog);
+    try {
+      saveStatusSourceCatalog(window.localStorage, nextCatalog);
+    } catch {
+      // Private browsing may disable storage; the source remains usable for this page session.
+    }
+  }
+
+  const statusSourceControl: StatusSourceControl = {
+    activeSource: activeStatusSource,
+    connectionState: isLoading
+      ? "loading"
+      : loadError && requestedStatusUrl === loadedStatusUrl
+        ? "error"
+        : "connected",
+    errorMessage: loadError
+      ? requestedStatusUrl === loadedStatusUrl
+        ? loadError
+        : `未切换到 ${requestedStatusUrl ?? "所选来源"}：${loadError}`
+      : null,
+    onAdd: (input) => {
+      const result = addSshTunnelStatusSource(statusSourceCatalog, input, window.location.href);
+      if ("error" in result) return { error: result.error };
+      persistStatusSourceCatalog(result.catalog);
+      void loadFromUrl(result.source.statusUrl);
+      return {};
+    },
+    onRemove: (sourceId) => {
+      const nextCatalog = removeStatusSource(statusSourceCatalog, sourceId);
+      persistStatusSourceCatalog(nextCatalog);
+      if (activeStatusSource.id === sourceId) void loadFromUrl(localStatusSource.statusUrl);
+    },
+    onSelect: (sourceId) => {
+      const nextSource = statusSourceCatalog.sources.find((candidate) => candidate.id === sourceId);
+      if (nextSource) void loadFromUrl(nextSource.statusUrl);
+    },
+    sources: activeStatusSource.id === "temporary"
+      ? [...statusSourceCatalog.sources, activeStatusSource]
+      : statusSourceCatalog.sources,
+  };
 
   function resetToExample() {
     statusProjectionRevisionRef.current += 1;
@@ -2559,7 +2637,7 @@ export function DashboardPage() {
       payload={payload}
       rows={goalRows}
       selectedGoalId={search.goalId}
-      source={source}
+      statusSourceControl={statusSourceControl}
       theme={theme}
       toggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
     />

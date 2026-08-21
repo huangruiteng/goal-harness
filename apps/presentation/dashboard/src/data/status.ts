@@ -730,6 +730,7 @@ export const localDashboardApiSchema = z.object({
   review_material_url: z.string().optional().nullable(),
   presentation_surfaces_url: z.string().optional().nullable(),
   presentation_detail_url: z.string().optional().nullable(),
+  ssh_hosts_url: z.string().optional().nullable(),
   reward_dry_run_url: z.string().optional().nullable(),
   reward_append_url: z.string().optional().nullable(),
   reward_write_enabled: z.boolean().optional().default(false),

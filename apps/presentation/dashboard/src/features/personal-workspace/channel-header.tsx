@@ -1,4 +1,4 @@
-import { Bot, ChevronDown, Info, Menu, RefreshCw } from "lucide-react";
+import { Bot, ChevronDown, Eye, Info, Menu, RefreshCw } from "lucide-react";
 
 import type { WorkspaceAgentOption, WorkspaceGoal, WorkspaceGoalTab } from "./personal-workspace-model";
 import { goalUsageLabel } from "./personal-workspace-model";
@@ -15,6 +15,7 @@ export function ChannelHeader({
   onSelectAgent,
   onReturnManagerHome,
   refreshState,
+  readOnlySourceLabel,
   selectedAgentId,
   selectedGoal,
   selectedGoalTab,
@@ -30,6 +31,7 @@ export function ChannelHeader({
   onSelectAgent: (agentId: string) => void;
   onReturnManagerHome?: () => void;
   refreshState?: "idle" | "loading" | "done" | "error";
+  readOnlySourceLabel?: string;
   selectedAgentId: string;
   selectedGoal: WorkspaceGoal | null;
   selectedGoalTab: WorkspaceGoalTab;
@@ -61,21 +63,25 @@ export function ChannelHeader({
         </button>
       ) : null}
       <div className="personal-channel-actions">
-        <label className="personal-agent-select">
-          <Bot size={16} />
-          <select
-            aria-label="选择 Agent"
-            onChange={(event) => onSelectAgent(event.target.value)}
-            value={selectedAgentId}
-          >
-            {agents.map((agent) => (
-              <option disabled={!agent.available} key={agent.agentId} value={agent.agentId}>
-                {agent.label}{agent.available ? "" : " · 不可用"}
-              </option>
-            ))}
-          </select>
-          <ChevronDown aria-hidden size={14} />
-        </label>
+        {readOnlySourceLabel ? (
+          <span className="personal-read-only-source" title={`${readOnlySourceLabel} 通过 SSH 隧道只读展示`}><Eye size={15} />{readOnlySourceLabel}<small>只读</small></span>
+        ) : (
+          <label className="personal-agent-select">
+            <Bot size={16} />
+            <select
+              aria-label="选择 Agent"
+              onChange={(event) => onSelectAgent(event.target.value)}
+              value={selectedAgentId}
+            >
+              {agents.map((agent) => (
+                <option disabled={!agent.available} key={agent.agentId} value={agent.agentId}>
+                  {agent.label}{agent.available ? "" : " · 不可用"}
+                </option>
+              ))}
+            </select>
+            <ChevronDown aria-hidden size={14} />
+          </label>
+        )}
         <span className="personal-live-indicator"><i />实时</span>
         {onRefresh ? (
           <span className={`personal-refresh-control is-${refreshState ?? "idle"}`}>

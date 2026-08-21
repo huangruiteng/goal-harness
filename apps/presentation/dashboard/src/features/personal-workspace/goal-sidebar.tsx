@@ -1,6 +1,7 @@
 import { Bot, ChevronDown, ChevronRight, Pause, Plus, RotateCcw, Settings2 } from "lucide-react";
 
 import type { WorkspaceGoal } from "./personal-workspace-model";
+import { StatusSourceSwitcher, type StatusSourceControl } from "./status-source-switcher";
 
 const goalStateClass: Record<WorkspaceGoal["state"], string> = {
   "需修复": "is-danger",
@@ -20,6 +21,7 @@ export function GoalSidebar({
   onRequestGoalLifecycle,
   onSelectGoal,
   selectedGoalId,
+  statusSourceControl,
 }: {
   attentionCount: number;
   goals: WorkspaceGoal[];
@@ -28,6 +30,7 @@ export function GoalSidebar({
   onRequestGoalLifecycle?: (goal: WorkspaceGoal, operation: "stop" | "resume") => void;
   onSelectGoal: (goalId: string | null) => void;
   selectedGoalId: string | null;
+  statusSourceControl?: StatusSourceControl;
 }) {
   const activeGoals = goals.filter((goal) => goal.activationState !== "stopped");
   const stoppedGoals = goals.filter((goal) => goal.activationState === "stopped");
@@ -66,6 +69,8 @@ export function GoalSidebar({
         <span><strong>LoopX</strong><small>个人 Agent 工作区</small></span>
       </div>
 
+      {statusSourceControl ? <StatusSourceSwitcher {...statusSourceControl} /> : null}
+
       <nav aria-label="工作区频道" className="personal-sidebar-nav">
         <button
           aria-current={selectedGoalId === null ? "page" : undefined}
@@ -81,7 +86,7 @@ export function GoalSidebar({
 
         <div className="personal-sidebar-section-title">
           <span>Goals</span>
-          <span className="personal-sidebar-title-actions"><small>{activeGoals.length}</small><button aria-label="创建 Goal" onClick={onRequestGoalCreate} type="button"><Plus size={15} /></button></span>
+          <span className="personal-sidebar-title-actions"><small>{activeGoals.length}</small>{onRequestGoalCreate ? <button aria-label="创建 Goal" onClick={onRequestGoalCreate} type="button"><Plus size={15} /></button> : null}</span>
         </div>
         <div className="personal-goal-list">
           {activeGoals.map((goal) => goalRow(goal, false))}

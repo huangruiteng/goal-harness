@@ -42,6 +42,7 @@ import { goalTitleFor, workspaceHomeLaneForGoal, workspaceSessionStatusLabel } f
 import { routeWorkspaceInput } from "./personal-workspace-router";
 import { WorkspaceSettingsPage } from "./workspace-settings-page";
 import { WorkspaceShell } from "./workspace-shell";
+import type { StatusSourceControl } from "./status-source-switcher";
 import "./personal-workspace.css";
 
 export function sanitizeTaskDraftFromReply(reply: string): string {
@@ -577,15 +578,19 @@ export function PersonalWorkspacePage({
   agents = [{ agentId: "codex", available: true, capability: "代码与项目执行", label: "Codex" }],
   callbacks = {},
   model,
+  readOnly = false,
   selectedAgentId: controlledAgentId,
   selectedGoalId: controlledGoalId,
+  statusSourceControl,
 }: {
   agents?: WorkspaceAgentOption[];
   callbacks?: PersonalWorkspaceCallbacks;
   model: WorkspaceModel;
   ownerLabel?: string;
+  readOnly?: boolean;
   selectedAgentId?: string;
   selectedGoalId?: string | null;
+  statusSourceControl?: StatusSourceControl;
 }) {
   const [localGoalId, setLocalGoalId] = useState<string | null>(controlledGoalId ?? null);
   const [localAgentId, setLocalAgentId] = useState(controlledAgentId ?? agents.find((agent) => agent.available)?.agentId ?? "codex");
@@ -808,6 +813,11 @@ export function PersonalWorkspacePage({
   }, [items, selection]);
 
   useEffect(() => {
+    if (readOnly) {
+      setGoalContexts({});
+      setLarkConnections([]);
+      return;
+    }
     let cancelled = false;
     void Promise.all([fetchGoalContexts(), fetchLarkConnections()])
       .then(([contexts, connections]) => {
@@ -819,7 +829,7 @@ export function PersonalWorkspacePage({
         // Local context is optional; the Goal workspace stays usable without it.
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [readOnly]);
 
   useEffect(() => {
     if (!mobileSidebarOpen) return;
@@ -854,6 +864,10 @@ export function PersonalWorkspacePage({
   }, [items, managerNeedsYouCount, selectedGoalId]);
 
   useEffect(() => {
+    if (readOnly) {
+      setProposals({});
+      return;
+    }
     let cancelled = false;
     void listTypedActions(selectedGoalId ? { goalId: selectedGoalId } : { contextKind: "manager" })
       .then((stored) => {
@@ -870,9 +884,10 @@ export function PersonalWorkspacePage({
         // The workspace remains usable when the optional local proposal store is unavailable.
       });
     return () => { cancelled = true; };
-  }, [selectedGoalId]);
+  }, [readOnly, selectedGoalId]);
 
   async function createPreview(request: WorkspaceActionPreviewRequest) {
+    if (readOnly) throw new Error("远端 SSH 隧道来源是只读投影，不能执行控制面写入。");
     let local: WorkspaceActionPreview;
     try {
       local = callbacks.onPreviewAction
@@ -1164,6 +1179,11 @@ export function PersonalWorkspacePage({
       });
     },
   };
+  const effectiveDrawerCallbacks: PersonalWorkspaceCallbacks = readOnly ? {
+    onOpenGoal: drawerCallbacks.onOpenGoal,
+    onOpenGoalView: drawerCallbacks.onOpenGoalView,
+    onOpenOutput: drawerCallbacks.onOpenOutput,
+  } : drawerCallbacks;
 
   function selectGoal(goalId: string | null) {
     setLocalGoalId(goalId);
@@ -1441,7 +1461,7 @@ export function PersonalWorkspacePage({
 
   return (
     <WorkspaceShell
-      drawer={drawerSelection ? <ContextDrawer agents={agents} callbacks={drawerCallbacks} goalNotifications={model.goalNotifications ?? []} goals={workspaceGoals} larkConnections={larkConnections} onClose={() => {
+      drawer={drawerSelection ? <ContextDrawer agents={agents} callbacks={effectiveDrawerCallbacks} goalNotifications={model.goalNotifications ?? []} goals={workspaceGoals} larkConnections={readOnly ? [] : larkConnections} onClose={() => {
         if (drawerSelection.kind === "proposal" && ["applied", "rejected"].includes(drawerSelection.item.status)) {
           setProposals((current) => {
             const next = { ...current };
@@ -1483,6 +1503,7 @@ export function PersonalWorkspacePage({
             }}
             selectedAgentId={selectedAgentId}
             refreshState={refreshState}
+            readOnlySourceLabel={readOnly ? statusSourceControl?.activeSource.label : undefined}
             selectedGoal={selectedGoal}
             selectedGoalTab={selectedGoalTab}
           />
@@ -1507,14 +1528,14 @@ export function PersonalWorkspacePage({
               <GoalTasksView
                 goal={selectedGoal}
                 items={items}
-                onDraftTaskFromMessage={(reply) => {
+                onDraftTaskFromMessage={readOnly ? undefined : (reply) => {
                   const taskDraft = sanitizeTaskDraftFromReply(reply);
                   setComposer(`创建一个 Task：${taskDraft}`);
                   setActionFeedback("已根据回复生成 Task 草稿。编辑后发送，LoopX 会先展示确认预览。");
                   window.requestAnimationFrame(() => composerRef.current?.focus());
                 }}
                 onOpenChat={() => setSelectedGoalTab("chat")}
-                onQuickComplete={(todo) => void createPreview({
+                onQuickComplete={readOnly ? undefined : (todo) => void createPreview({
                   actionKind: "todo.update",
                   context: { goal_id: todo.goalId, kind: "todo", todo_id: todo.todoId },
                   idempotencyKey: `workspace-todo-${todo.todoId}-complete-${Date.now().toString(36)}`,
@@ -1544,6 +1565,9 @@ export function PersonalWorkspacePage({
             )}
           </div>
           <div className="personal-composer-wrap">
+            {readOnly ? (
+              <div className="personal-read-only-notice"><strong>远端只读投影</strong><span>你可以查看 Goal、Task、证据与运行状态；写入、纠偏和 Agent 会话仍留在来源主机。</span></div>
+            ) : <>
             {!selectedGoal && !managerChatOpen && managerConversationReceiptVisible && managerMessages.length ? (
               <ManagerConversationTray
                 messages={managerMessages}
@@ -1648,6 +1672,7 @@ export function PersonalWorkspacePage({
               />
               <button aria-label={goalDraftActive ? "检查并创建 Goal" : "发送"} disabled={(!composer.trim() && imageAttachments.length === 0) || sending} onClick={() => void sendMessage()} title={goalDraftActive ? "检查 Goal 内容并进入确认" : "发送消息"} type="button"><Send size={18} /></button>
             </div>
+            </>}
           </div>
         </div>
       )}
@@ -1655,11 +1680,12 @@ export function PersonalWorkspacePage({
         <GoalSidebar
           attentionCount={managerNeedsYouCount}
           goals={workspaceGoals}
-          onRequestGoalCreate={requestGoalCreate}
-          onRequestGoalLifecycle={(goal, operation) => void requestGoalLifecycle(goal, operation)}
-          onOpenSettings={() => setSelection({ kind: "settings" })}
+          onRequestGoalCreate={readOnly ? undefined : requestGoalCreate}
+          onRequestGoalLifecycle={readOnly ? undefined : (goal, operation) => void requestGoalLifecycle(goal, operation)}
+          onOpenSettings={readOnly ? undefined : () => setSelection({ kind: "settings" })}
           onSelectGoal={selectGoal}
           selectedGoalId={selectedGoalId}
+          statusSourceControl={statusSourceControl}
         />
       )}
     />
