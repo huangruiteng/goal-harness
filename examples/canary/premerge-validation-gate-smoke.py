@@ -166,6 +166,35 @@ def assert_extension_change_selects_provider_lifecycle_validation() -> None:
     assert classification["manual_holds"] == [], payload
 
 
+def assert_dsh_plugin_change_selects_complete_package_validation() -> None:
+    payload = build_premerge_validation_gate(
+        changed_files=[
+            "loopx/canary/premerge.py",
+            "loopx/control_plane/work_items/interaction_contract.py",
+            "packages/dsh-loopx-plugin/src/driver.ts",
+        ],
+        execute=False,
+    )
+    classification = payload["classification"]
+    assert "dsh_loopx_plugin" in classification["surfaces"], payload
+    assert "dsh-loopx-plugin" in classification["risk_profiles"], payload
+    assert classification["risk_profiles"][0] == "dsh-loopx-plugin", payload
+    assert classification["manual_holds"] == [], payload
+    commands = commands_from(payload["risk_profile_run"])
+    assert commands[:3] == [
+        "python3 examples/canary/dsh-loopx-plugin-validation-smoke.py --phase quality",
+        "python3 examples/canary/dsh-loopx-plugin-validation-smoke.py --phase package",
+        "python3 examples/canary/dsh-loopx-plugin-validation-smoke.py --phase runtime",
+    ], payload
+    reasons = [
+        str(check.get("reason") or "")
+        for check in payload["risk_profile_run"]["selected_checks"]
+    ]
+    assert "typecheck" in reasons[0] and "tests" in reasons[0], payload
+    assert "builds" in reasons[1] and "artifact" in reasons[1] and "profile" in reasons[1], payload
+    assert "loopback socket" in reasons[2] and "restricted sandboxes" in reasons[2], payload
+
+
 def assert_cli_json_preview() -> None:
     completed = subprocess.run(
         [
@@ -493,6 +522,7 @@ def main() -> None:
     assert_benchmark_sensitive_change_blocks_self_merge()
     assert_lark_kanban_change_keeps_surface_without_reviewer_hold()
     assert_extension_change_selects_provider_lifecycle_validation()
+    assert_dsh_plugin_change_selects_complete_package_validation()
     assert_cli_json_preview()
     assert_cli_premerge_reports_progress_by_default()
     assert_no_changes_does_not_mask_direct_failures()

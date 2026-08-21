@@ -49,6 +49,9 @@ EXTENSION_RUNTIME_TOKENS = (
     "examples/capability-extension",
     "examples/openviking-extension",
 )
+DSH_LOOPX_PLUGIN_TOKENS = (
+    "packages/dsh-loopx-plugin/",
+)
 DOC_CONTENT_TOKENS = (
     "docs/",
     "README",
@@ -283,6 +286,10 @@ def classify_premerge_surfaces(
         if profile and profile not in risk_profiles:
             risk_profiles.append(profile)
 
+    # Co-located packages need their own toolchain checks before the shared
+    # profile limit is consumed by broad repository surfaces in a large diff.
+    if any(_path_matches(path, DSH_LOOPX_PLUGIN_TOKENS) for path in files):
+        mark("dsh_loopx_plugin", "dsh-loopx-plugin")
     if any(_path_matches(path, CONTROL_PLANE_TOKENS) for path in files):
         mark("control_plane", "core-control-plane")
     if any(_path_matches(path, CANARY_TOKENS) for path in files):

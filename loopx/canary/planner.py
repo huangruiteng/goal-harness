@@ -8,6 +8,7 @@ from .qualification_profiles import CONTROL_PLANE_QUALIFICATION_PROFILES
 from .quality_surface_catalog import (
     build_quality_surface_catalog_audit as _build_quality_surface_catalog_audit,
 )
+from .package_profiles import PACKAGE_QUALIFICATION_PROFILES
 from .release_profiles import RELEASE_PROMOTION_PROFILE
 
 
@@ -1296,6 +1297,7 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
             },
         ],
     },
+    *PACKAGE_QUALIFICATION_PROFILES,
     {
         "id": "benchmark-toolkit-boundary",
         "title": "Benchmark toolkit boundary",

@@ -568,7 +568,13 @@ def build_canary_smoke_suite_run(
             max_checks_per_family=max_checks_per_family,
             max_checks_per_profile=max_checks_per_profile,
         )
-        selected.extend(flatten_catalog_canary_checks(plan))
+        catalog_checks = flatten_catalog_canary_checks(plan)
+        if catalog_profiles:
+            # Explicit catalog profiles are targeted validation, so do not let
+            # a global limit get consumed first by broader named-suite matches.
+            selected = [*catalog_checks, *selected]
+        else:
+            selected.extend(catalog_checks)
 
     selected = _dedupe_checks(selected)
     matched_check_count = len(selected)
