@@ -1,4 +1,4 @@
-export const defaultConfiguredSshHostsUrl = "http://127.0.0.1:8766/ssh-hosts";
+export const defaultConfiguredSshHostsUrl = "/ssh-hosts";
 
 export type ConfiguredSshHost = {
   alias: string;

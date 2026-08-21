@@ -138,7 +138,7 @@ async function installApi(page) {
     }
     await route.fulfill({ contentType: "application/json", json: fixture, status: 200 });
   });
-  await page.route("http://127.0.0.1:8766/ssh-hosts", async (route) => {
+  await page.route(`http://127.0.0.1:${port}/ssh-hosts`, async (route) => {
     await route.fulfill({
       contentType: "application/json",
       json: {

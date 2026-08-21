@@ -11,6 +11,7 @@ import {
 } from "../src/data/status-source-catalog";
 import {
   configuredSshTunnelDraft,
+  defaultConfiguredSshHostsUrl,
   parseConfiguredSshHostCatalog,
 } from "../src/data/ssh-host-catalog";
 
@@ -93,6 +94,7 @@ const configuredHosts = parseConfiguredSshHostCatalog({
   schema_version: "ssh_host_catalog_v0",
   hosts: [{ alias: "remote-lab" }, { alias: "*.example" }, { alias: "remote-lab" }, { alias: "jump_box" }],
 });
+equal(defaultConfiguredSshHostsUrl, "/ssh-hosts", "configured Host discovery stays on the active local Dashboard origin");
 deepEqual(configuredHosts.hosts, [{ alias: "remote-lab" }, { alias: "jump_box" }], "only explicit safe SSH aliases enter the browser catalog");
 const configuredDraft = configuredSshTunnelDraft("remote-lab", "8876");
 assert("command" in configuredDraft, "a configured Host and valid local port produce a tunnel draft");

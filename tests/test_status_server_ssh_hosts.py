@@ -5,7 +5,11 @@ import json
 from pathlib import Path
 import threading
 
-from loopx.control_plane.status.ssh_host_catalog import configured_ssh_host_aliases
+from loopx.chat_server import ChatHTTPServer, ChatRequestHandler
+from loopx.control_plane.status.ssh_host_catalog import (
+    SSH_HOST_CATALOG_PATH,
+    configured_ssh_host_aliases,
+)
 from loopx.status_server import DEFAULT_SSH_HOSTS_PATH, StatusHTTPServer, StatusRequestHandler
 
 
@@ -80,6 +84,59 @@ def test_ssh_hosts_endpoint_rejects_non_loopback_browser_origin(tmp_path: Path) 
         connection.request(
             "GET",
             DEFAULT_SSH_HOSTS_PATH,
+            headers={"Origin": "https://example.com"},
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    assert response.status == 403
+    assert payload["ok"] is False
+
+
+def test_packaged_chat_serves_ssh_hosts_on_its_custom_loopback_port(tmp_path: Path) -> None:
+    server = ChatHTTPServer(("127.0.0.1", 0), ChatRequestHandler)
+    server.ssh_config_path = _write_config(tmp_path / ".ssh")
+    server.verbose = False
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", server.server_address[1], timeout=5
+        )
+        connection.request("GET", SSH_HOST_CATALOG_PATH)
+        response = connection.getresponse()
+        payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    assert response.status == 200
+    assert payload == {
+        "ok": True,
+        "schema_version": "ssh_host_catalog_v0",
+        "hosts": [{"alias": "jump-box"}, {"alias": "workstation"}],
+    }
+    assert "192.0.2" not in json.dumps(payload)
+
+
+def test_packaged_chat_ssh_hosts_rejects_non_loopback_origin(tmp_path: Path) -> None:
+    server = ChatHTTPServer(("127.0.0.1", 0), ChatRequestHandler)
+    server.ssh_config_path = _write_config(tmp_path / ".ssh")
+    server.verbose = False
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", server.server_address[1], timeout=5
+        )
+        connection.request(
+            "GET",
+            SSH_HOST_CATALOG_PATH,
             headers={"Origin": "https://example.com"},
         )
         response = connection.getresponse()

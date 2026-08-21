@@ -10,7 +10,10 @@ from urllib.parse import parse_qs, urlparse
 from .control_plane.goals.configure_goal_service import (
     configure_goal_with_global_sync,
 )
-from .control_plane.status.ssh_host_catalog import ssh_host_catalog_payload
+from .control_plane.status.ssh_host_catalog import (
+    SSH_HOST_CATALOG_PATH,
+    ssh_host_catalog_payload,
+)
 from .extensions.presentation import (
     collect_active_extension_presentation_surfaces,
     read_extension_projection,
@@ -33,7 +36,7 @@ DEFAULT_CONFIGURE_GOAL_APPLY_PATH = "/control-plane/configure-goal/apply"
 DEFAULT_REVIEW_MATERIAL_PATH = "/review-material"
 DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH = "/extension-presentation-surfaces"
 DEFAULT_EXTENSION_PROJECTION_PATH = "/extension-projection"
-DEFAULT_SSH_HOSTS_PATH = "/ssh-hosts"
+DEFAULT_SSH_HOSTS_PATH = SSH_HOST_CATALOG_PATH
 
 REWARD_REQUEST_FIELDS = {
     "goal_id",

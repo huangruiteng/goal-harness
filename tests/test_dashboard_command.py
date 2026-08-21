@@ -147,10 +147,11 @@ def test_launch_dashboard_in_installed_mode_serves_packaged_chat(
     )
 
     # Launch dashboard should invoke serve_chat using packaged web bundle
-    result = launch_dashboard(open_browser=False)
+    result = launch_dashboard(open_browser=False, port=49_123)
     assert result == 0
     assert len(calls) == 1
     assert calls[0]["open_browser"] is False
+    assert calls[0]["port"] == 49_123
     assert (Path(str(calls[0]["assets_dir"])) / "index.html").is_file()
 
 

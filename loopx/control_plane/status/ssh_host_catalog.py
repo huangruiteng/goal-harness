@@ -7,6 +7,7 @@ import shlex
 
 
 SSH_HOST_CATALOG_SCHEMA_VERSION = "ssh_host_catalog_v0"
+SSH_HOST_CATALOG_PATH = "/ssh-hosts"
 _SAFE_HOST_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 _MAX_CONFIG_FILES = 64
 _MAX_HOST_ALIASES = 512

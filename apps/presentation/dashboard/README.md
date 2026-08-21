@@ -273,11 +273,14 @@ ssh -N -L 8876:127.0.0.1:8766 <remote-host>
 ```
 
 The add-source panel reads only explicit, shell-safe `Host` aliases from the
-operator machine's OpenSSH config through the loopback status service. Select
-an alias, choose a local port, copy and run the generated tunnel command, then
-add the source. Wildcard hosts, negated patterns, `IdentityFile`, `ProxyCommand`,
-hostnames, credentials, and config paths are never projected to the browser.
-The manual loopback-URL path remains available for custom forwarding setups.
+operator machine's OpenSSH config through the current loopback Dashboard
+origin. Packaged `loopx dashboard` serves this endpoint from its Chat runtime,
+so a custom Dashboard port works without a fixed discovery port; development
+mode proxies the same path to the local Chat service. Select an alias, choose a
+local port, copy and run the generated tunnel command, then add the source.
+Wildcard hosts, negated patterns, `IdentityFile`, `ProxyCommand`, hostnames,
+credentials, and config paths are never projected to the browser. The manual
+loopback-URL path remains available for custom forwarding setups.
 
 The browser catalog stores only the selected alias label and loopback URL;
 LoopX does not store SSH credentials or open the tunnel. The active source

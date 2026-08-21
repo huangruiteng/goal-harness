@@ -23,6 +23,10 @@ from .chat_actions import ChatActionService, ProtectedActionGate
 from .chat_action_store import ACTION_KINDS, ActionConflictError, ChatActionStore
 from .chat_runtime import ChatRuntimeController, TERMINAL_TURN_STATES
 from .chat_store import ChatSessionStore
+from .control_plane.status.ssh_host_catalog import (
+    SSH_HOST_CATALOG_PATH,
+    ssh_host_catalog_payload,
+)
 from .chat_lark_api import (
     LarkChatRequestMixin,
     build_goal_repository_contexts as build_goal_repository_contexts,
@@ -405,6 +409,7 @@ class ChatHTTPServer(ThreadingHTTPServer):
     lark_cli_resolution: LarkCliResolution
     lark_app_setup_manager: LarkAppSetupManager
     lark_goal_topic_runtime: LarkGoalTopicRuntimeService
+    ssh_config_path: Path | None
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -474,6 +479,19 @@ class ChatRequestHandler(LarkChatRequestMixin, BaseHTTPRequestHandler):
             return True
         self._send_error("LoopX Chat only accepts loopback browser origins.", status=403)
         return False
+
+    def _ssh_hosts(self) -> None:
+        if not is_loopback_host(str(self.server.server_address[0])):
+            self._send_error(
+                "SSH Host discovery requires a loopback LoopX Chat server.",
+                status=403,
+            )
+            return
+        if not self._require_loopback_origin():
+            return
+        self._send_json(
+            ssh_host_catalog_payload(getattr(self.server, "ssh_config_path", None))
+        )
 
     def _registry_and_goal(self, goal_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
         registry = load_registry(self.server.registry_path)
@@ -1293,6 +1311,7 @@ class ChatRequestHandler(LarkChatRequestMixin, BaseHTTPRequestHandler):
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connections,
             CHAT_GOAL_CHANNEL_TARGETS_PATH: self._goal_channel_targets,
             DEFAULT_CHAT_STATUS_PATH: self._status,
+            SSH_HOST_CATALOG_PATH: self._ssh_hosts,
         }
         if path in get_dispatch:
             return get_dispatch[path]()
@@ -1425,6 +1444,7 @@ def serve_chat(
     server.codex_bin = codex_bin
     server.assets_dir = resolved_assets
     server.verbose = verbose
+    server.ssh_config_path = None
     server.lark_cli_resolution = lark_cli_resolution
     server.lark_runner = build_lark_command_runner(server.lark_cli_resolution)
     server.lark_app_setup_manager = LarkAppSetupManager(

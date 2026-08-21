@@ -12,6 +12,10 @@ export default defineConfig({
         target: "http://127.0.0.1:8766",
         changeOrigin: false,
       },
+      "/ssh-hosts": {
+        target: "http://127.0.0.1:8767",
+        changeOrigin: false,
+      },
       "/api/chat": {
         target: "http://127.0.0.1:8767",
         changeOrigin: false,

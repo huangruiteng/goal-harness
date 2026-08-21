@@ -82,6 +82,7 @@ includes(modelSource, '"run.correct"', "run correction action contract");
 includes(stylesSource, "@media (max-width: 720px)", "mobile workspace layout");
 includes(stylesSource, "prefers-reduced-motion", "reduced-motion behavior");
 includes(viteSource, '"/status.json"', "status proxy");
+includes(viteSource, '"/ssh-hosts"', "local SSH Host discovery proxy");
 includes(viteSource, '"/api/actions"', "typed action proxy");
 includes(packageSource, '"dev": "bash ../../../scripts/dashboard-dev.sh"', "one-command dashboard launcher");
 includes(dashboardDevSource, "serve-status", "status service launcher");
