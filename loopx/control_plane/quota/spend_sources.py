@@ -41,16 +41,20 @@ def build_quota_spend_action(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
 ) -> str:
+    source = quota_spend_source_for_execution_context(scheduler_execution_context)
     typed_command = settlement_step_command(
         settlement_plan,
         SettlementStepKind.QUOTA_SPEND,
     )
     if typed_command:
+        if source == VISIBLE_GOAL_SLOT_SPEND_SOURCE:
+            raise ValueError(
+                "native Goal runtime does not accept a Turn-bound settlement plan"
+            )
         return typed_command
     selected_value = payload.get("selected_todo")
     selected = selected_value if isinstance(selected_value, Mapping) else {}
     todo_id = normalize_todo_id(selected.get("todo_id"))
-    source = quota_spend_source_for_execution_context(scheduler_execution_context)
     todo_arg = (
         f" --todo-id {todo_id}"
         if todo_id and source == DEFAULT_SLOT_SPEND_SOURCE

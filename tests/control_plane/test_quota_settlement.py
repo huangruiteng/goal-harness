@@ -389,6 +389,33 @@ def test_native_goal_actions_preserve_visible_goal_spend_attribution(
     assert all("--turn-instance-id" not in command for command in actions)
 
 
+def test_native_goal_rejects_turn_bound_heartbeat_settlement_plan() -> None:
+    settlement_plan = build_codex_app_settlement_plan(
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        todo_id=TODO_ID,
+        scoped_cli_args=f" --agent-id {AGENT_ID}",
+        lifecycle_actor_args=f" --agent-id {AGENT_ID}",
+    ).as_dict()
+
+    with pytest.raises(
+        ValueError,
+        match="native Goal runtime does not accept a Turn-bound settlement plan",
+    ):
+        interaction_next_cli_actions(
+            {
+                "goal_id": GOAL_ID,
+                "agent_identity": {"agent_id": AGENT_ID},
+                "selected_todo": {"todo_id": TODO_ID},
+            },
+            mode="bounded_delivery",
+            scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+                SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE
+            ),
+            settlement_plan=settlement_plan,
+        )
+
+
 def test_codex_app_external_observation_settles_only_substantive_writeback() -> None:
     todo_id = "todo_external_observation"
     actions = interaction_next_cli_actions(
