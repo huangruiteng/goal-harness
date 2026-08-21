@@ -96,17 +96,70 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-for candidate in python3.13 python3.12 python3.11 python3; do
-  if command -v "${candidate}" >/dev/null 2>&1 \
-    && "${candidate}" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' 2>/dev/null; then
-    PYTHON_BIN="${candidate}"
-    break
-  fi
-done
+python_version_ok() {
+  "$1" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' 2>/dev/null
+}
 
-if [ -z "${PYTHON_BIN}" ]; then
+select_python_runtime() {
+  local candidate=""
+  local configured_python=""
+  local authoritative=0
+
+  if [ -n "${LOOPX_PYTHON:-}" ]; then
+    configured_python="${LOOPX_PYTHON}"
+    authoritative=1
+  elif [ -f "${REPO_ROOT}/.loopx-python" ]; then
+    IFS= read -r configured_python <"${REPO_ROOT}/.loopx-python"
+  fi
+
+  if [ -n "${configured_python}" ]; then
+    if { [ -x "${configured_python}" ] || command -v "${configured_python}" >/dev/null 2>&1; } \
+      && python_version_ok "${configured_python}"; then
+      echo "Using LoopX Python: ${configured_python}"
+      PYTHON_BIN="${configured_python}"
+      return 0
+    fi
+    if [ "${authoritative}" -eq 1 ]; then
+      echo "LOOPX_PYTHON is set but does not resolve to a Python 3.11+ interpreter: ${configured_python}" >&2
+      return 1
+    fi
+    echo "Ignoring non-functional Python recorded in .loopx-python: ${configured_python}" >&2
+  fi
+
+  for candidate in python3.13 python3.12 python3.11 python3; do
+    if command -v "${candidate}" >/dev/null 2>&1 \
+      && python_version_ok "$(command -v "${candidate}")"; then
+      PYTHON_BIN="$(command -v "${candidate}")"
+      return 0
+    fi
+  done
+
+  for candidate in \
+    "${HOME}/.local/bin/python3.13" \
+    "${HOME}/.local/bin/python3.12" \
+    "${HOME}/.local/bin/python3.11" \
+    /opt/homebrew/bin/python3.13 \
+    /opt/homebrew/bin/python3.12 \
+    /opt/homebrew/bin/python3.11 \
+    /usr/local/bin/python3.13 \
+    /usr/local/bin/python3.12 \
+    /usr/local/bin/python3.11; do
+    if [ -x "${candidate}" ] && python_version_ok "${candidate}"; then
+      echo "Using Python from ${candidate}"
+      PYTHON_BIN="${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+if ! select_python_runtime; then
   echo "LoopX requires Python 3.11 or newer to start status and Chat services." >&2
-  echo "Starting the Vite UI only; use the bundled example until Python is upgraded." >&2
+  echo "Install Python 3.11+ (for example: brew install python@3.12), or set" >&2
+  echo "LOOPX_PYTHON to an existing Python 3.11+ executable and retry, e.g.:" >&2
+  echo "  LOOPX_PYTHON=/path/to/python3.12 npm run dev" >&2
+  echo "Starting the Vite UI only; use 'npm run dev:web' for the same UI-only preview." >&2
   cd "${DASHBOARD_DIR}"
   exec npm run dev:web
 fi

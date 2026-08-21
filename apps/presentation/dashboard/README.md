@@ -22,7 +22,7 @@ status server:
 cd apps/presentation/dashboard
 npm ci
 npm run smoke:demo-readiness -- --skip-browser
-npm run dev
+npm run dev:web
 ```
 
 Then open `http://127.0.0.1:5173/`. Use the bundled example source for a public
@@ -30,6 +30,10 @@ demo, or switch to a loopback status URL only after you have started
 `loopx serve-status` locally. Do not commit `status.local.json` or live
 status exports; they can contain local registry/runtime paths and private
 project summaries.
+
+`npm run dev:web` starts only the Vite UI with the bundled example. `npm run dev`
+also starts the loopback status and Chat services and therefore requires a
+Python 3.11+ interpreter; see the development section below.
 
 The first read-only channel frontstage lives at `/frontstage`. It renders a
 public-safe `goal_channel_projection_v0` fixture as a dense channel board with
@@ -147,6 +151,16 @@ services on ports `5173`, `8766`, and `8767`. Use `npm run dev:web` when those
 LoopX services are already running separately. Vite proxies the default
 `/status.json` request to port `8766`, so an SSH user only needs to forward port
 `5173` for the normal development page.
+
+The full-stack launcher needs a Python 3.11+ interpreter for the status and
+Chat services. It honors `LOOPX_PYTHON` first, then the Python recorded by the
+LoopX installer in `.loopx-python`, then `python3.13`/`python3.12`/`python3.11`
+on `PATH` and common Homebrew locations. If your default `python3` is older,
+point it at an existing interpreter:
+
+```bash
+LOOPX_PYTHON=/path/to/python3.12 npm run dev
+```
 
 Both the root dashboard and the packaged `/chat/` route expose the same
 installable PWA manifest and icons. The default `loopx dashboard` command opens

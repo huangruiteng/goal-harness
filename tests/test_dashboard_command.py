@@ -39,6 +39,35 @@ def _serve_capabilities(handler_cls: type[_CapabilitiesHandler] = _CapabilitiesH
     return server, thread
 
 
+def _prepare_dashboard_runtime_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
+    release_root = tmp_path / "release"
+    scripts_dir = release_root / "scripts"
+    dashboard_dir = release_root / "apps" / "presentation" / "dashboard"
+    fake_bin = tmp_path / "bin"
+    scripts_dir.mkdir(parents=True)
+    (dashboard_dir / "node_modules" / ".bin").mkdir(parents=True)
+    (dashboard_dir / "node_modules" / ".bin" / "vite").touch()
+    fake_bin.mkdir()
+    shutil.copy2(
+        Path(__file__).resolve().parents[1] / "scripts" / "dashboard-dev.sh",
+        scripts_dir / "dashboard-dev.sh",
+    )
+    for executable in (fake_bin / "node", fake_bin / "npm"):
+        executable.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        executable.chmod(0o755)
+    return release_root, scripts_dir / "dashboard-dev.sh", fake_bin
+
+
+def _write_logging_python_stub(path: Path, *, label: str) -> None:
+    path.write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf "{label}:%s\\n" "$*" >> "$LOOPX_COMMAND_LOG"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
 def test_dashboard_command_is_registered() -> None:
     try:
         args = build_parser().parse_args(["dashboard"])
@@ -320,6 +349,85 @@ def test_dashboard_launcher_selects_a_compatible_nvm_node(
         "ci",
         "run dev:web",
     ]
+
+
+def test_dashboard_launcher_prefers_explicit_loopx_python(
+    tmp_path: Path,
+) -> None:
+    release_root, dashboard_script, fake_bin = _prepare_dashboard_runtime_fixture(
+        tmp_path
+    )
+    configured_python = tmp_path / "configured-python"
+    recorded_python = tmp_path / "recorded-python"
+
+    command_log = tmp_path / "commands.log"
+    for executable, label in (
+        (configured_python, "configured"),
+        (recorded_python, "recorded"),
+    ):
+        _write_logging_python_stub(executable, label=label)
+    (release_root / ".loopx-python").write_text(
+        f"{recorded_python}\n",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        ["bash", str(dashboard_script)],
+        cwd=release_root,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "LOOPX_COMMAND_LOG": str(command_log),
+            "LOOPX_PYTHON": str(configured_python),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert f"Using LoopX Python: {configured_python}" in completed.stdout
+    commands = command_log.read_text(encoding="utf-8")
+    assert "configured:-m loopx.cli serve-status" in commands
+    assert "configured:-m loopx.cli chat" in commands
+    assert "recorded:" not in commands
+
+
+def test_dashboard_launcher_uses_installer_recorded_python(
+    tmp_path: Path,
+) -> None:
+    release_root, dashboard_script, fake_bin = _prepare_dashboard_runtime_fixture(
+        tmp_path
+    )
+    recorded_python = tmp_path / "recorded-python"
+
+    command_log = tmp_path / "commands.log"
+    _write_logging_python_stub(recorded_python, label="recorded")
+    (release_root / ".loopx-python").write_text(
+        f"{recorded_python}\n",
+        encoding="utf-8",
+    )
+
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "LOOPX_COMMAND_LOG": str(command_log),
+    }
+    env.pop("LOOPX_PYTHON", None)
+    completed = subprocess.run(
+        ["bash", str(dashboard_script)],
+        cwd=release_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert f"Using LoopX Python: {recorded_python}" in completed.stdout
+    commands = command_log.read_text(encoding="utf-8")
+    assert "recorded:-m loopx.cli serve-status" in commands
+    assert "recorded:-m loopx.cli chat" in commands
 
 
 def test_dashboard_launcher_discovers_agent_bins_outside_restricted_path(
