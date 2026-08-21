@@ -267,25 +267,32 @@ interface RunnerFixture {
   readonly runner: FileRunner
   readonly calls: string[][]
   readonly quotaCalls: string[][]
+  readonly heartbeatArgv: string[][]
   heartbeatCalls: number
 }
 
 function runnerFixture(options: {
   readonly quotaExitFailures?: number
+  readonly heartbeatExitFailures?: number
   readonly shouldRun?: boolean | (() => boolean)
   readonly waitMinutes?: number
   readonly schedulerMode?: 'poll' | 'stop' | 'missing'
   readonly unchangedPollLimit?: number
   readonly quotaAgentId?: string
+  readonly quotaTurnInstanceId?: string
+  readonly heartbeatTurnInstanceId?: string
   readonly typedQuotaFailure?: boolean
   readonly bindingStatus?: 'bound' | 'missing' | (() => 'bound' | 'missing')
 } = {}): RunnerFixture {
   const calls: string[][] = []
   const quotaCalls: string[][] = []
+  const heartbeatArgv: string[][] = []
   let quotaExitFailures = options.quotaExitFailures ?? 0
+  let heartbeatExitFailures = options.heartbeatExitFailures ?? 0
   const fixture: RunnerFixture = {
     calls,
     quotaCalls,
+    heartbeatArgv,
     heartbeatCalls: 0,
     runner: async (_file, args) => {
       calls.push([...args])
@@ -336,6 +343,8 @@ function runnerFixture(options: {
         const shouldRun = typeof options.shouldRun === 'function'
           ? options.shouldRun()
           : options.shouldRun ?? true
+        const turnInstanceId = options.quotaTurnInstanceId
+          ?? args[args.indexOf('--turn-instance-id') + 1]
         const schedulerHint = shouldRun
           ? { action: 'run_now' }
           : options.schedulerMode === 'stop'
@@ -368,6 +377,13 @@ function runnerFixture(options: {
               agent_id: options.quotaAgentId ?? agentId,
               registered: true,
             },
+            ...(shouldRun ? {
+              heartbeat_receipt: {
+                schema_version: 'heartbeat_quota_receipt_v0',
+                turn_instance_id: turnInstanceId,
+                status: 'committed',
+              },
+            } : {}),
             scheduler_hint: schedulerHint,
           }),
           stderr: '',
@@ -375,6 +391,13 @@ function runnerFixture(options: {
       }
       if (args.includes('heartbeat-prompt')) {
         fixture.heartbeatCalls += 1
+        heartbeatArgv.push([...args])
+        if (heartbeatExitFailures > 0) {
+          heartbeatExitFailures -= 1
+          return { exitCode: 1, stdout: '', stderr: 'transient diagnostic' }
+        }
+        const turnInstanceId = options.heartbeatTurnInstanceId
+          ?? args[args.indexOf('--turn-instance-id') + 1]
         return {
           exitCode: 0,
           stdout: JSON.stringify({
@@ -382,7 +405,8 @@ function runnerFixture(options: {
             schema_version: 'loopx_heartbeat_prompt_v0',
             goal_id: goalId,
             agent_id: agentId,
-            task_body: 'Continue through the authoritative LoopX workflow.',
+            turn_instance_id: turnInstanceId,
+            task_body: `LOOPX_TURN=${turnInstanceId}\nContinue through the authoritative LoopX workflow.`,
           }),
           stderr: '',
         }
@@ -752,9 +776,23 @@ describe('same-session LoopX driver', () => {
     await waitFor(() => host.nextTurn.length === 1)
     const queued = host.nextTurn[0] as UserMessage
     expect(queued.content).toEqual([
-      { type: 'text', text: 'Continue through the authoritative LoopX workflow.' },
+      {
+        type: 'text',
+        text: 'LOOPX_TURN=turn-stable\nContinue through the authoritative LoopX workflow.',
+      },
     ])
+    expect(queued.source).toEqual({
+      kind: 'loopx-continuation',
+      schemaVersion: 'loopx_dsh_continuation_v0',
+      goalId,
+      agentId,
+      turnInstanceId: 'turn-stable',
+    })
     expect(fixture.quotaCalls).toHaveLength(1)
+    expect(fixture.heartbeatArgv).toHaveLength(1)
+    const heartbeatCall = fixture.heartbeatArgv[0] as string[]
+    expect(heartbeatCall[heartbeatCall.indexOf('--turn-instance-id') + 1])
+      .toBe('turn-stable')
 
     host.nextTurn.splice(0, 1)
     host.setStatus('running')
@@ -772,6 +810,129 @@ describe('same-session LoopX driver', () => {
       const index = call.indexOf('--turn-instance-id')
       expect(call[index + 1]).toBe('turn-stable')
     }
+    await driver.dispose()
+  })
+
+  it('rejects the reserved message when its typed source identity is replaced', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+    observeActivated(driver, host)
+    await waitFor(() => host.nextTurn.length === 1)
+    const queued = host.nextTurn.shift() as UserMessage
+    const tampered = {
+      ...queued,
+      source: { kind: 'user' as const },
+    } satisfies UserMessage
+    host.setStatus('running')
+    driver.onInboxClaimed(host.agent, tampered)
+
+    let downstreamCalls = 0
+    const decision = await driver.onPreStep(
+      host.agent,
+      [tampered],
+      new AbortController().signal,
+      async () => {
+        downstreamCalls += 1
+        return { kind: 'enter', messages: [tampered] }
+      },
+    )
+
+    expect(decision).toEqual({ kind: 'reject' })
+    expect(downstreamCalls).toBe(0)
+    expect(fixture.quotaCalls).toHaveLength(1)
+    await driver.dispose()
+  })
+
+  it('rejects the claimed message when its canonical content drifts', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+    observeActivated(driver, host)
+    await waitFor(() => host.nextTurn.length === 1)
+    const queued = host.nextTurn.shift() as UserMessage
+    host.setStatus('running')
+    driver.onInboxClaimed(host.agent, queued)
+    const tampered = {
+      ...queued,
+      content: [{ type: 'text' as const, text: 'replacement content' }],
+    } satisfies UserMessage
+
+    const decision = await driver.onPreStep(
+      host.agent,
+      [tampered],
+      new AbortController().signal,
+      async () => ({ kind: 'enter', messages: [tampered] }),
+    )
+
+    expect(decision).toEqual({ kind: 'reject' })
+    expect(fixture.quotaCalls).toHaveLength(1)
+    await driver.dispose()
+  })
+
+  it('rejects when a downstream pre-step replaces the canonical message', async () => {
+    const fixture = runnerFixture()
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+    observeActivated(driver, host)
+    await waitFor(() => host.nextTurn.length === 1)
+    const queued = host.nextTurn.shift() as UserMessage
+    host.setStatus('running')
+    driver.onInboxClaimed(host.agent, queued)
+    const replaced = {
+      ...queued,
+      content: [{ type: 'text' as const, text: 'downstream replacement' }],
+    } satisfies UserMessage
+
+    const decision = await driver.onPreStep(
+      host.agent,
+      [queued],
+      new AbortController().signal,
+      async () => ({ kind: 'enter', messages: [replaced] }),
+    )
+
+    expect(decision).toEqual({ kind: 'reject' })
+    expect(fixture.quotaCalls).toHaveLength(2)
+    await driver.dispose()
+  })
+
+  it('fails closed when quota returns a different heartbeat receipt id', async () => {
+    const fixture = runnerFixture({ quotaTurnInstanceId: 'turn-other' })
+    const host = fakeAgent()
+    const warnings: string[] = []
+    const driver = new LoopXContinuationDriver({
+      runner: fixture.runner,
+      isLiveAgent: () => true,
+      makeTurnInstanceId: () => 'turn-stable',
+      retryDelaysMs: [0, 0],
+      warn: message => warnings.push(message),
+    })
+    observeActivated(driver, host)
+    await waitFor(() => warnings.length === 1)
+
+    expect(host.nextTurn).toHaveLength(0)
+    expect(fixture.heartbeatCalls).toBe(0)
+    expect(warnings[0]).toContain('invalid_schema')
+    await driver.dispose()
+  })
+
+  it('fails closed when heartbeat returns a different exact id', async () => {
+    const fixture = runnerFixture({ heartbeatTurnInstanceId: 'turn-other' })
+    const host = fakeAgent()
+    const warnings: string[] = []
+    const driver = new LoopXContinuationDriver({
+      runner: fixture.runner,
+      isLiveAgent: () => true,
+      makeTurnInstanceId: () => 'turn-stable',
+      retryDelaysMs: [0, 0],
+      warn: message => warnings.push(message),
+    })
+    observeActivated(driver, host)
+    await waitFor(() => warnings.length === 1)
+
+    expect(host.nextTurn).toHaveLength(0)
+    expect(fixture.heartbeatCalls).toBe(1)
+    expect(warnings[0]).toContain('invalid_schema')
     await driver.dispose()
   })
 
@@ -816,6 +977,21 @@ describe('same-session LoopX driver', () => {
     expect(new Set(fixture.quotaCalls.map(call => (
       call[call.indexOf('--turn-instance-id') + 1]
     )))).toEqual(new Set(['turn-stable']))
+    await driver.dispose()
+  })
+
+  it('retries the canonical heartbeat read with the admitted receipt id', async () => {
+    const fixture = runnerFixture({ heartbeatExitFailures: 2 })
+    const host = fakeAgent()
+    const driver = makeDriver(fixture)
+    observeActivated(driver, host)
+    await waitFor(() => host.nextTurn.length === 1)
+
+    expect(fixture.heartbeatArgv).toHaveLength(3)
+    expect(new Set(fixture.heartbeatArgv.map(call => (
+      call[call.indexOf('--turn-instance-id') + 1]
+    )))).toEqual(new Set(['turn-stable']))
+    expect(host.nextTurn[0]?.source).toMatchObject({ turnInstanceId: 'turn-stable' })
     await driver.dispose()
   })
 

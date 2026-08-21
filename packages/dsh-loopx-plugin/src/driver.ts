@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentStatus, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session'
 import type { SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
 import {
@@ -20,10 +21,10 @@ import type {
 export const name = 'dsh-loopx-driver'
 export const inject = ['agents']
 
-const DRIVER_SOURCE_ID = 'dsh-loopx-plugin/driver'
 const HOST_SURFACE = 'deepseek-harness-native'
 const RESOLUTION_SCHEMA = 'loopx_thread_agent_binding_resolution_v0'
 const HEARTBEAT_SCHEMA = 'loopx_heartbeat_prompt_v0'
+const CONTINUATION_SCHEMA = 'loopx_dsh_continuation_v0'
 const DEFAULT_WAIT_MS = 5 * 60_000
 const MAX_WAIT_MS = 24 * 60 * 60_000
 
@@ -38,6 +39,20 @@ export interface DriverClock {
 interface Binding {
   readonly goalId: string
   readonly agentId: string
+}
+
+interface LoopXContinuationMessageSource {
+  readonly kind: 'loopx-continuation'
+  readonly schemaVersion: typeof CONTINUATION_SCHEMA
+  readonly goalId: string
+  readonly agentId: string
+  readonly turnInstanceId: string
+}
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'loopx-continuation': LoopXContinuationMessageSource
+  }
 }
 
 interface Reservation extends Binding {
@@ -113,25 +128,50 @@ const systemClock: DriverClock = Object.freeze({
   },
 })
 
+function continuationSource(
+  message: UserMessage,
+): LoopXContinuationMessageSource | undefined {
+  const source = record(message.source)
+  return source?.kind === 'loopx-continuation'
+    && source.schemaVersion === CONTINUATION_SCHEMA
+    && typeof source.goalId === 'string'
+    && source.goalId.length > 0
+    && typeof source.agentId === 'string'
+    && source.agentId.length > 0
+    && typeof source.turnInstanceId === 'string'
+    && source.turnInstanceId.length > 0
+    ? source as unknown as LoopXContinuationMessageSource
+    : undefined
+}
+
 function isDriverMessage(message: UserMessage): boolean {
-  return message.source.kind === 'plugin' && message.source.plugin === DRIVER_SOURCE_ID
+  return continuationSource(message) !== undefined
 }
 
 function sameReservation(message: UserMessage, reservation: Reservation): boolean {
+  const source = continuationSource(message)
   return message.id === reservation.messageId
-    && isDriverMessage(message)
+    && source?.goalId === reservation.goalId
+    && source.agentId === reservation.agentId
+    && source.turnInstanceId === reservation.turnInstanceId
     && isDeepStrictEqual(message.content, reservation.content)
 }
 
-function automaticMessage(taskBody: string): UserMessage {
+function automaticMessage(plan: QueuePlan): UserMessage {
   const content: UserMessage['content'] = Object.freeze([
-    Object.freeze({ type: 'text' as const, text: taskBody }),
+    Object.freeze({ type: 'text' as const, text: plan.taskBody }),
   ]) as UserMessage['content']
   return Object.freeze({
     id: randomUUID() as UserMessage['id'],
     role: 'user' as const,
     content,
-    source: Object.freeze({ kind: 'plugin' as const, plugin: DRIVER_SOURCE_ID }),
+    source: Object.freeze({
+      kind: 'loopx-continuation' as const,
+      schemaVersion: CONTINUATION_SCHEMA,
+      goalId: plan.goalId,
+      agentId: plan.agentId,
+      turnInstanceId: plan.turnInstanceId,
+    }),
   })
 }
 
@@ -261,13 +301,22 @@ function exactQuotaContext(
     && identity.registered === true
 }
 
+function exactQuotaReceipt(
+  payload: Record<string, unknown>,
+  turnInstanceId: string,
+): boolean {
+  return record(payload.heartbeat_receipt)?.turn_instance_id === turnInstanceId
+}
+
 function exactQuota(
   payload: Record<string, unknown>,
   binding: Binding,
+  turnInstanceId: string,
 ): boolean {
   return exactQuotaContext(payload, binding)
     && payload.ok === true
     && payload.should_run === true
+    && exactQuotaReceipt(payload, turnInstanceId)
 }
 
 function schedulerWait(
@@ -320,11 +369,13 @@ function schedulerWait(
 function exactHeartbeat(
   payload: Record<string, unknown>,
   binding: Binding,
+  turnInstanceId: string,
 ): string | undefined {
   if (payload.schema_version !== HEARTBEAT_SCHEMA
     || payload.ok !== true
     || payload.goal_id !== binding.goalId
-    || payload.agent_id !== binding.agentId) return undefined
+    || payload.agent_id !== binding.agentId
+    || payload.turn_instance_id !== turnInstanceId) return undefined
   const taskBody = typeof payload.task_body === 'string' ? payload.task_body : ''
   return taskBody.length > 0 && taskBody.length <= 32_000 ? taskBody : undefined
 }
@@ -523,11 +574,17 @@ export class LoopXContinuationDriver {
     next: () => Promise<PreStepDecision>,
   ): Promise<PreStepDecision> {
     const state = this.stateFor(agent)
-    const submitted = messages.find(message => isDriverMessage(message))
-    if (submitted === undefined) return next()
     const reservation = state.reservation
+    const submitted = reservation === undefined
+      ? messages.find(message => isDriverMessage(message))
+      : messages.find(message => message.id === reservation.messageId)
+        ?? messages.find(message => isDriverMessage(message))
+    if (submitted === undefined) return next()
     if (reservation === undefined || !sameReservation(submitted, reservation)
       || reservation.phase !== 'claimed') {
+      if (reservation !== undefined && submitted.id === reservation.messageId) {
+        this.retireReservation(state)
+      }
       this.restoreOtherMessages(agent, messages, submitted)
       return { kind: 'reject' }
     }
@@ -561,6 +618,14 @@ export class LoopXContinuationDriver {
       state.pauseAfterTurnError = true
       this.retireReservation(state)
       return decision
+    }
+    const admitted = decision.messages.find(message => message.id === reservation.messageId)
+    if (decision.messages.length !== 1
+      || admitted === undefined
+      || !sameReservation(admitted, reservation)) {
+      this.retireReservation(state)
+      this.restoreOtherMessages(agent, decision.messages, submitted)
+      return { kind: 'reject' }
     }
     if (!(await this.authorityStillAllows(state, reservation, signal))) {
       this.retireReservation(state)
@@ -722,7 +787,7 @@ export class LoopXContinuationDriver {
     state.schedulerToken = ''
     state.unchangedPolls = 0
     if (!this.ready(state) || state.agent.session !== plan.session) return true
-    const message = automaticMessage(plan.taskBody)
+    const message = automaticMessage(plan)
     const reservation: Reservation = {
       messageId: message.id,
       content: message.content,
@@ -785,7 +850,8 @@ export class LoopXContinuationDriver {
         false,
       )
     }
-    if (!exactQuotaContext(quota, binding)) {
+    if (!exactQuotaContext(quota, binding)
+      || (quota.should_run === true && !exactQuotaReceipt(quota, turnInstanceId))) {
       throw new LoopXCliError(
         'invalid_schema',
         'LoopX quota response did not match the bound Goal and Agent',
@@ -795,7 +861,13 @@ export class LoopXContinuationDriver {
     if (quota.should_run !== true) {
       return schedulerWait(quota, state.schedulerToken, state.unchangedPolls)
     }
-    const heartbeat = await this.readHeartbeat(command, state.agent, binding, signal)
+    const heartbeat = await this.readHeartbeat(
+      command,
+      state.agent,
+      binding,
+      turnInstanceId,
+      signal,
+    )
     this.ensureReady(state, signal, session)
     if (heartbeat.ok !== true) {
       throw new LoopXCliError(
@@ -804,7 +876,7 @@ export class LoopXContinuationDriver {
         false,
       )
     }
-    const taskBody = exactHeartbeat(heartbeat, binding)
+    const taskBody = exactHeartbeat(heartbeat, binding, turnInstanceId)
     if (taskBody === undefined) {
       throw new LoopXCliError(
         'invalid_schema',
@@ -839,7 +911,8 @@ export class LoopXContinuationDriver {
         signal,
       )
       return this.reservationIsCurrent(state, reservation, signal)
-        && (reservation.preserveAcrossPause || exactQuota(quota, reservation))
+        && (reservation.preserveAcrossPause
+          || exactQuota(quota, reservation, reservation.turnInstanceId))
     } catch (error: unknown) {
       if (error instanceof LoopXCliError && error.kind === 'missing') {
         this.command = undefined
@@ -940,6 +1013,7 @@ export class LoopXContinuationDriver {
     command: LoopXCommand,
     agent: Agent,
     binding: Binding,
+    turnInstanceId: string,
     signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
     return runJsonCommand(
@@ -951,6 +1025,7 @@ export class LoopXContinuationDriver {
         '--goal-id', binding.goalId,
         '--agent-id', binding.agentId,
         '--runtime-profile', 'generic_cli',
+        '--turn-instance-id', turnInstanceId,
       ],
       {
         runner: this.runner,
@@ -960,7 +1035,8 @@ export class LoopXContinuationDriver {
         retryDelaysMs: this.retryDelaysMs,
         validate: payload => payload.schema_version === HEARTBEAT_SCHEMA
           && payload.goal_id === binding.goalId
-          && payload.agent_id === binding.agentId,
+          && payload.agent_id === binding.agentId
+          && payload.turn_instance_id === turnInstanceId,
       },
     )
   }
