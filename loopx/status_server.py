@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 from .control_plane.goals.configure_goal_service import (
     configure_goal_with_global_sync,
 )
+from .control_plane.status.ssh_host_catalog import ssh_host_catalog_payload
 from .extensions.presentation import (
     collect_active_extension_presentation_surfaces,
     read_extension_projection,
@@ -32,6 +33,7 @@ DEFAULT_CONFIGURE_GOAL_APPLY_PATH = "/control-plane/configure-goal/apply"
 DEFAULT_REVIEW_MATERIAL_PATH = "/review-material"
 DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH = "/extension-presentation-surfaces"
 DEFAULT_EXTENSION_PROJECTION_PATH = "/extension-projection"
+DEFAULT_SSH_HOSTS_PATH = "/ssh-hosts"
 
 REWARD_REQUEST_FIELDS = {
     "goal_id",
@@ -155,6 +157,7 @@ class StatusHTTPServer(ThreadingHTTPServer):
     configure_goal_dry_run_path: str
     configure_goal_apply_path: str
     control_plane_write_enabled: bool
+    ssh_config_path: Path | None
     verbose: bool
 
 
@@ -772,6 +775,29 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_json({"ok": True, "presentation_surfaces": surfaces})
 
+    def _handle_ssh_hosts(self) -> None:
+        if not is_loopback_host(str(self.server.server_address[0])):
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": "SSH Host discovery requires a loopback status server",
+                },
+                status=403,
+            )
+            return
+        if not is_loopback_origin(self.headers.get("Origin")):
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": "SSH Host discovery only accepts loopback browser origins",
+                },
+                status=403,
+            )
+            return
+        self._send_json(
+            ssh_host_catalog_payload(getattr(self.server, "ssh_config_path", None))
+        )
+
     def _local_dashboard_api_payload(self) -> dict[str, Any]:
         return {
             "source": "serve-status",
@@ -782,6 +808,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
                 DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH
             ),
             "presentation_detail_url": DEFAULT_EXTENSION_PROJECTION_PATH,
+            "ssh_hosts_url": DEFAULT_SSH_HOSTS_PATH,
             "reward_dry_run_url": self.server.reward_dry_run_path,
             "reward_append_url": self.server.reward_append_path if self.server.reward_write_enabled else None,
             "reward_write_enabled": self.server.reward_write_enabled,
@@ -806,6 +833,9 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             return
         if path == DEFAULT_EXTENSION_PROJECTION_PATH:
             self._handle_extension_projection(parse_qs(parsed_url.query))
+            return
+        if path == DEFAULT_SSH_HOSTS_PATH:
+            self._handle_ssh_hosts()
             return
         if path in {"", "/"}:
             self._send_json(
@@ -919,6 +949,7 @@ def serve_status(
     server.configure_goal_dry_run_path = DEFAULT_CONFIGURE_GOAL_DRY_RUN_PATH
     server.configure_goal_apply_path = DEFAULT_CONFIGURE_GOAL_APPLY_PATH
     server.control_plane_write_enabled = enable_control_plane_write_api
+    server.ssh_config_path = None
     server.verbose = verbose
     print(f"Serving LoopX status at http://{host}:{port}{normalized_path}", flush=True)
     print(f"Reward dry-run: http://{host}:{port}{server.reward_dry_run_path}", flush=True)
