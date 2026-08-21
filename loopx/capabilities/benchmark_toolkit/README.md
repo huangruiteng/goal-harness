@@ -416,7 +416,9 @@ It then reports material aggregate changes to the user and, after the solver is
 terminal, runs a post-run analyst brief and writes one private
 `benchmark_case_insight_v0` artifact. A bounded periodic review while a campaign is
 active prevents a long run from silently accumulating results. This monitor is part
-of the benchmark lifecycle, not an optional cleanup pass.
+of the benchmark lifecycle, not an optional cleanup pass. The catalog entry is a
+guidance template rather than a scheduler: the benchmark startup provider creates
+the todo, and the registered monitor runtime owns its cadence.
 
 A material user update should include the current countable arm and pair coverage,
 aggregate primary metric by arm, binary outcomes when the benchmark exposes them,
@@ -424,6 +426,8 @@ improved/flat/regressed pair counts, and the new causal insight or next probe. D
 these score fields from the experiment board or benchmark-owned scoring projection,
 not from raw private evidence. Do not send a repetitive update when no score,
 coverage, direction, insight, or material runner state changed.
+Only public-safe conclusions from the private post-run insight may enter that user
+update; raw evaluation evidence remains private.
 
 During an active-campaign review, distinguish a clean worktree from a lack of
 solver progress. `git status` observes only uncommitted changes. Bind the readback
@@ -431,9 +435,9 @@ to the exact job, compare its current `HEAD` with the start revision recorded at
 admission, and combine that committed delta with the current worktree status.
 Correlate those facts with Goal/event freshness, typed runner errors, and the
 solver's trajectory phase. A clean worktree or a high raw log-error count alone is
-not evidence that a run is stuck. Classify a run as stalled only when committed and
-uncommitted progress are both absent and the trajectory is stale or typed fatal
-runner evidence is present.
+not evidence that a run is stuck. The provider-owned classifier may mark a run
+stalled only when committed and uncommitted progress are both absent and either the
+trajectory is stale or typed fatal runner evidence is present.
 
 Use this analyst hint:
 

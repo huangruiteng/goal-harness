@@ -143,6 +143,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "action_kind": "benchmark_case_insight_monitor",
             "trigger": "material_scored_case_transition",
             "active_campaign_review": "bounded_periodic",
+            "delivery_contract": {
+                "catalog_role": "guidance_template",
+                "creation_owner": "benchmark_startup_provider",
+                "scheduler_owner": "registered_monitor_runtime",
+            },
             "text": (
                 "On each material scored-case transition and bounded active-campaign "
                 "review, refresh the public-safe aggregate score and coverage summary, "
@@ -152,7 +157,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             ),
         },
         "aggregate_reporting": {
-            "source": "experiment_board_public_safe_projection",
+            "score_source": "experiment_board_public_safe_projection",
+            "insight_boundary": (
+                "report only public-safe conclusions from post-run insight; never "
+                "copy raw private evidence into the user update"
+            ),
             "report_on": [
                 "new_countable_terminal",
                 "countability_or_pairing_change",
@@ -186,11 +195,21 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "trajectory_basis": (
                 "solver_trajectory_phase_without_hidden_evaluator_feedback"
             ),
-            "classification_rule": (
-                "Do not classify a run as stuck from a clean worktree or raw log-error "
-                "count alone; require absent committed and uncommitted progress plus "
-                "a stale trajectory or typed fatal runner evidence."
-            ),
+            "classification_owner": "benchmark_monitor_provider",
+            "stalled_when": {
+                "all": [
+                    "no_committed_progress",
+                    "no_uncommitted_progress",
+                ],
+                "any": [
+                    "trajectory_stale",
+                    "typed_fatal_runner_error",
+                ],
+            },
+            "non_signals": [
+                "clean_worktree_alone",
+                "raw_log_error_count_alone",
+            ],
         },
         "hint": (
             "After the solver has stopped and scoring is complete, read the task, "

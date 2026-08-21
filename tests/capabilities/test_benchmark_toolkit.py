@@ -116,21 +116,22 @@ def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:
     analysis = capability["post_run_case_analysis"]
 
     assert "continuous_monitor" in analysis["benchmark_start_hint"]
-    assert analysis["monitor_todo_template"] == {
+    monitor_template = analysis["monitor_todo_template"]
+    assert {
         "task_class": "continuous_monitor",
         "action_kind": "benchmark_case_insight_monitor",
         "trigger": "material_scored_case_transition",
         "active_campaign_review": "bounded_periodic",
-        "text": (
-            "On each material scored-case transition and bounded active-campaign "
-            "review, refresh the public-safe aggregate score and coverage summary, "
-            "report material changes to the user, and after solver termination "
-            "read the complete private evaluation evidence and write one "
-            "benchmark_case_insight_v0."
-        ),
+    }.items() <= monitor_template.items()
+    assert monitor_template["delivery_contract"] == {
+        "catalog_role": "guidance_template",
+        "creation_owner": "benchmark_startup_provider",
+        "scheduler_owner": "registered_monitor_runtime",
     }
+    assert "benchmark_case_insight_v0" in monitor_template["text"]
     reporting = analysis["aggregate_reporting"]
-    assert reporting["source"] == "experiment_board_public_safe_projection"
+    assert reporting["score_source"] == "experiment_board_public_safe_projection"
+    assert "never copy raw private evidence" in reporting["insight_boundary"]
     assert reporting["report_on"] == [
         "new_countable_terminal",
         "countability_or_pairing_change",
@@ -158,8 +159,15 @@ def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:
         "typed_runner_error_category",
     ]
     assert "solver_trajectory_phase" in active["trajectory_basis"]
-    assert "clean worktree" in active["classification_rule"]
-    assert "raw log-error count alone" in active["classification_rule"]
+    assert active["classification_owner"] == "benchmark_monitor_provider"
+    assert active["stalled_when"] == {
+        "all": ["no_committed_progress", "no_uncommitted_progress"],
+        "any": ["trajectory_stale", "typed_fatal_runner_error"],
+    }
+    assert active["non_signals"] == [
+        "clean_worktree_alone",
+        "raw_log_error_count_alone",
+    ]
     hint = analysis["hint"]
     for evidence_name in (
         "real trajectory",
