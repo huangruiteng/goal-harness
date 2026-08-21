@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -729,6 +730,53 @@ def test_current_obligation_runnable_successor_is_the_semantic_receipt() -> None
     )
 
     assert after_transition is None
+    assert semantic_delta is None
+
+
+def test_rearmed_vision_obligation_accepts_only_its_fresh_successor_id() -> None:
+    """Quota/write-time reduction agrees after an older generation was ACKed."""
+
+    state_text = _completed_advancement_chain_state()
+    original_vision = _open_vision_after_prior_ack()
+    original_id = _current_obligation_id(
+        [original_vision],
+        state_text=state_text,
+    )
+    prior_ack = {
+        "classification": "bounded_replan_progress",
+        "generated_at": "2026-08-13T11:28:00+08:00",
+        "agent_id": AGENT_ID,
+        "autonomous_replan_ack": {
+            "schema_version": "autonomous_replan_ack_v0",
+            "recorded": True,
+            "source": "fixture",
+            "semantic_delta": {
+                "schema_version": "replan_semantic_delta_v0",
+                "accepted": True,
+                "outcomes": ["new_runnable_successor"],
+                "satisfying_outcomes": ["new_runnable_successor"],
+                "required_any_of": ["new_runnable_successor"],
+                "obligation_id": original_id,
+            },
+        },
+    }
+    rearmed_vision = deepcopy(original_vision)
+    rearmed_vision["generated_at"] = "2026-08-13T11:29:00+08:00"
+    rearmed_runs = [rearmed_vision, prior_ack, original_vision]
+
+    rearmed_id = _current_obligation_id(
+        rearmed_runs,
+        state_text=state_text,
+    )
+    remaining, semantic_delta = qualify_replan_writeback(
+        newest_first_runs=rearmed_runs,
+        state_text=_state_with_replan_successor(rearmed_id),
+        agent_id=AGENT_ID,
+        goal_id=GOAL_ID,
+    )
+
+    assert rearmed_id != original_id
+    assert remaining is None
     assert semantic_delta is None
 
 

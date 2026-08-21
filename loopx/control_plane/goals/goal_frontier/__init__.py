@@ -11,6 +11,7 @@ from ...agents.agent_scope import (
 from ...agents.profile import agent_profile_requires_vision
 from ...agents.runtime_model import peer_work_key, select_peer_for_work
 from ...runtime.time import parse_timestamp
+from ...todos.contract import normalize_todo_replan_obligation_id
 from ...todos.projection import todo_item_is_watch_only_monitor
 from ...todos.succession_warning import (
     TODO_SUCCESSION_WARNING_REASON_CODE,
@@ -1073,6 +1074,22 @@ def _vision_gap_acknowledged(
     )
 
 
+def _acknowledged_replan_obligation_id(
+    latest_replan_ack: dict[str, Any] | None,
+) -> str | None:
+    """Return the exact obligation generation closed by the latest ACK."""
+
+    semantic_delta = (
+        latest_replan_ack.get("semantic_delta")
+        if isinstance(latest_replan_ack, dict)
+        and isinstance(latest_replan_ack.get("semantic_delta"), dict)
+        else {}
+    )
+    return normalize_todo_replan_obligation_id(
+        semantic_delta.get("obligation_id")
+    )
+
+
 def derive_goal_frontier_replan_obligation_from_summaries(
     *,
     user_todo_summary: dict[str, Any] | None,
@@ -1258,6 +1275,9 @@ def derive_goal_frontier_replan_obligation_from_summaries(
             },
         )
     if replan_rule.rule is GoalFrontierReplanRule.VISION_ACCEPTANCE_GAP:
+        rearmed_after_obligation_id = _acknowledged_replan_obligation_id(
+            latest_replan_ack
+        )
         return build_autonomous_replan_obligation_payload(
             schema_version=AUTONOMOUS_REPLAN_OBLIGATION_SCHEMA_VERSION,
             agent_id=agent_id,
@@ -1276,6 +1296,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                     **{
                         key: gap.get(key)
                         for key in (
+                            "generated_at",
                             "completed_todo_id",
                             "completed_todo_count",
                             "completed_todo_threshold",
@@ -1311,6 +1332,15 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                 "run a bounded vision-gap replan before another quiet poll: create "
                 "successor work, update the agent vision, record evidence gap, or "
                 "record no-follow-up"
+            ),
+            extra_fields=(
+                {
+                    "rearmed_after_obligation_id": (
+                        rearmed_after_obligation_id
+                    )
+                }
+                if rearmed_after_obligation_id
+                else None
             ),
         )
     if replan_rule.rule is GoalFrontierReplanRule.LONG_TODO_CHAIN:

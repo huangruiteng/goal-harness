@@ -193,6 +193,13 @@ def ensure_replan_novelty_policy(
             str(normalized.get("recommended_action") or "run a bounded autonomous replan")
         )
         normalized["replan_novelty_policy"] = build_replan_novelty_policy()
+    rearmed_after_obligation_id = normalize_todo_replan_obligation_id(
+        normalized.get("rearmed_after_obligation_id")
+    )
+    if rearmed_after_obligation_id:
+        normalized["rearmed_after_obligation_id"] = rearmed_after_obligation_id
+    else:
+        normalized.pop("rearmed_after_obligation_id", None)
     trigger_identity = [
         {
             key: trigger.get(key)
@@ -212,6 +219,7 @@ def ensure_replan_novelty_policy(
         "schema_version": normalized.get("schema_version"),
         "agent_id": normalized.get("agent_id"),
         "frontier_identity": normalized.get("frontier_identity"),
+        "rearmed_after_obligation_id": rearmed_after_obligation_id,
         "trigger_identity": trigger_identity,
     }
     normalized["obligation_id"] = "replan-" + hashlib.sha256(

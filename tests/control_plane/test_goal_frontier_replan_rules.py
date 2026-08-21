@@ -8,6 +8,7 @@ from loopx.control_plane.goals.goal_frontier import (
     derive_goal_frontier_replan_obligation_from_summaries,
 )
 from loopx.control_plane.goals.goal_frontier.ack_policy import (
+    autonomous_replan_ack_satisfies_obligation,
     replan_successor_transition_ack,
 )
 from loopx.control_plane.goals.goal_frontier.replan_rules import (
@@ -621,6 +622,83 @@ def test_stale_ack_does_not_settle_newer_vision_gap() -> None:
     )
 
     assert obligation is not None, "an older non-vision ack must not settle a newer gap"
+
+
+def test_rearmed_vision_obligation_rotates_acked_generation_identity() -> None:
+    """A newer vision gap must not reuse an already-settled obligation id."""
+
+    summaries = {
+        "user_todo_summary": {"open_count": 0},
+        "agent_todo_summary": {
+            "open_count": 0,
+            "claimed_advancement_open_count": 0,
+            "current_agent_claimed_advancement_count": 0,
+            "unclaimed_priority_open_items": [],
+            "executable_backlog_items": [],
+            "claim_scope": {"other_agent_claimed_items": []},
+        },
+        "work_lane_contract": {
+            "lane": "advancement_task",
+            "must_attempt_work": True,
+        },
+        "agent_id": "current-agent",
+        "existing_replan_obligation": None,
+    }
+    original = derive_goal_frontier_replan_obligation_from_summaries(
+        **summaries,
+        acceptance_gaps=_vision_gap_with_generated_at(
+            "2026-08-13T09:00:00+08:00"
+        ),
+    )
+    assert original is not None
+    original_id = original["obligation_id"]
+    refreshed_without_ack = derive_goal_frontier_replan_obligation_from_summaries(
+        **summaries,
+        acceptance_gaps=_vision_gap_with_generated_at(
+            "2026-08-13T09:30:00+08:00"
+        ),
+    )
+    assert refreshed_without_ack is not None
+    assert refreshed_without_ack["obligation_id"] == original_id
+    prior_ack = _ack(
+        "2026-08-13T10:00:00+08:00",
+        delta_kind="successor_link",
+    )
+    prior_ack["semantic_delta"] = {
+        "schema_version": "replan_semantic_delta_v0",
+        "accepted": True,
+        "outcomes": ["new_runnable_successor"],
+        "satisfying_outcomes": ["new_runnable_successor"],
+        "obligation_id": original_id,
+    }
+
+    def derive_rearmed() -> dict[str, object]:
+        obligation = derive_goal_frontier_replan_obligation_from_summaries(
+            **summaries,
+            latest_replan_ack=prior_ack,
+            acceptance_gaps=_vision_gap_with_generated_at(
+                "2026-08-13T11:00:00+08:00"
+            ),
+        )
+        assert obligation is not None
+        return obligation
+
+    rearmed = derive_rearmed()
+    repeated_read = derive_rearmed()
+
+    assert rearmed["obligation_id"] != original_id
+    assert rearmed["obligation_id"] == repeated_read["obligation_id"]
+    assert rearmed["rearmed_after_obligation_id"] == original_id
+    assert rearmed["triggers"][0]["generated_at"] == (
+        "2026-08-13T11:00:00+08:00"
+    )
+    assert not autonomous_replan_ack_satisfies_obligation(
+        prior_ack,
+        replan_obligation=rearmed,
+        acceptance_gaps=_vision_gap_with_generated_at(
+            "2026-08-13T11:00:00+08:00"
+        ),
+    )
 
 
 def test_open_user_action_owns_empty_frontier_without_obligation() -> None:
