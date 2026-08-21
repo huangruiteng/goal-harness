@@ -17,8 +17,11 @@ separate Loader rows:
 
 Installing the plugin and running `/loopx-init` load and prepare these
 capabilities; neither creates a binding nor activates the Driver. The GoalBar
-does one bounded read when a browser row mounts and then waits for DSH
-`turn/end` invalidation; it does not poll LoopX on a timer. Until one exact
+does one bounded read when a browser row mounts, then watches exact-Session
+`step/end` and `turn/end` boundaries. It rereads LoopX only when the opaque
+revision of the authoritative binding or active Goal state changes; a watch
+lease also detects changes written outside that Session. DSH Agent-status
+events update an existing row without a LoopX business read. Until one exact
 Session contains valid typed `loopx` invocation evidence, its Driver makes no
 LoopX CLI, binding, quota, or heartbeat call, creates no timer, and queues no
 followup.
@@ -84,8 +87,9 @@ The runtime smoke creates an isolated temporary DSH profile. Its real web
 process proves profile composition, boot-manifest discovery, bundle serving,
 Client materialization, and the loopback Connection fence. Separately, a
 packed rc.7 Context, Connection, and WebServer with a live Host Session fixture
-cover deterministic binding, pending-watch cancellation, successful actions,
-and handler disposal through the real HTTP carrier. The served Client is then
+cover same-turn binding discovery, lease-time source reconciliation,
+status-only updates, pending-watch cancellation, successful actions, and
+handler disposal through the real HTTP carrier. The served Client is then
 applied in DSH's real ClientModuleSystem with a VM document harness; that layer
 covers slot order and coexistence, Session injection, and ordinary-unload/HMR
 style cleanup, but it is not a browser-mounted React interaction. These layers
@@ -104,11 +108,12 @@ re-derives cwd and thread identity from the live DSH Agent, freshly resolves
 the binding, and executes only fixed LoopX argv.
 
 The wire allowlist contains ids, activation, live Agent status, full-lane
-counts, cursors, and fixed error codes. It excludes Todo text, Goal objective,
-quota, evidence, CLI output, exception messages, registry paths, credentials,
-and binding candidates. Installing the package grants no model tool authority,
-does not create or repair bindings, and does not change LoopX core state by
-itself.
+counts, cursors, opaque source revisions, and fixed error codes. It excludes
+Todo text, Goal objective, quota, evidence, CLI output, exception messages,
+registry paths, credentials, and binding candidates. A source revision is only
+a change token, not authorization or a compare-and-swap guard. Installing the
+package grants no model tool authority, does not create or repair bindings, and
+does not change LoopX core state by itself.
 
 ## `/loopx-init` behavior
 
