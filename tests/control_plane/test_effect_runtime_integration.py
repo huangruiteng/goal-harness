@@ -7,6 +7,7 @@ import signal
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 from loopx.control_plane import effect_runtime
 
@@ -29,6 +30,21 @@ def _digest(path: Path) -> str | None:
         return hashlib.sha256(path.read_bytes()).hexdigest()
     except FileNotFoundError:
         return None
+
+
+def test_windows_pid_liveness_uses_a_non_signaling_probe(monkeypatch) -> None:
+    calls: list[int] = []
+    fake_os = SimpleNamespace(name="nt")
+
+    def probe(pid: int) -> bool:
+        calls.append(pid)
+        return True
+
+    monkeypatch.setattr(effect_runtime, "os", fake_os)
+    monkeypatch.setattr(effect_runtime, "_windows_pid_is_alive", probe)
+
+    assert effect_runtime._pid_is_alive(1234) is True
+    assert calls == [1234]
 
 
 def test_managed_runtime_is_reused_and_restart_safe_for_typed_write(
@@ -321,10 +337,16 @@ def test_early_runtime_exit_surfaces_stable_startup_diagnostic(
         def poll(self) -> int:
             return 23
 
+    launch: dict[str, object] = {}
+
+    def popen(*_args, **kwargs):
+        launch.update(kwargs)
+        return _ExitedProcess()
+
     monkeypatch.setattr(
         effect_runtime.subprocess,
         "Popen",
-        lambda *_args, **_kwargs: _ExitedProcess(),
+        popen,
     )
 
     try:
@@ -334,6 +356,7 @@ def test_early_runtime_exit_surfaces_stable_startup_diagnostic(
         assert "exit_code=23" in str(exc)
     else:
         raise AssertionError("an early runtime exit must fail with a stable diagnostic")
+    assert launch["close_fds"] is True
 
 
 def test_managed_runtime_releases_memory_after_idle_timeout(
