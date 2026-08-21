@@ -1,0 +1,72 @@
+{
+  "schema_version": "loopx_todo_completion_state_characterization_v0",
+  "source_baseline": "0c59d47f6",
+  "cases": [
+    {
+      "name": "truthy no-followup token",
+      "method": "normalize",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "kind": "no_followup", "value": "YES"},
+      "expected_result": {"schema_version": "loopx_todo_completion_state_result_v0", "kind": "no_followup", "value": true}
+    },
+    {
+      "name": "unknown no-followup token",
+      "method": "normalize",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "kind": "no_followup", "value": "maybe"},
+      "expected_result": {"schema_version": "loopx_todo_completion_state_result_v0", "kind": "no_followup", "value": null}
+    },
+    {
+      "name": "continuation normalization",
+      "method": "normalize",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "kind": "continuation", "value": "SUCCESSOR"},
+      "expected_result": {"schema_version": "loopx_todo_completion_state_result_v0", "kind": "continuation", "value": "successor"}
+    },
+    {
+      "name": "invalid required continuation",
+      "method": "require_metadata",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "key": "completion_continuation", "value": "implicit"},
+      "expected_error": "completion_continuation must be one of: active_goal, successor, no_followup"
+    },
+    {
+      "name": "empty optional recovery",
+      "method": "require_metadata",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "key": "completion_recovery", "value": ""},
+      "expected_result": {"schema_version": "loopx_todo_completion_state_result_v0", "value": null}
+    },
+    {
+      "name": "contradictory terminal write",
+      "method": "continuation_for_write",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "no_followup": true, "has_successor": true},
+      "expected_error": "todo completion cannot record both no_followup and a successor"
+    },
+    {
+      "name": "ordinary completion keeps goal active",
+      "method": "evaluate",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "todo": {"status": "open", "no_followup": false, "completion_continuation": ""}, "requested_no_followup": false, "has_successor": false},
+      "expected_result": {"schema_version": "loopx_todo_completion_state_result_v0", "continuation": "active_goal", "recovery": null}
+    },
+    {
+      "name": "persisted no-followup wins",
+      "method": "evaluate",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "todo": {"status": "done", "no_followup": "true", "completion_continuation": "no_followup"}, "requested_no_followup": false, "has_successor": false},
+      "expected_result": {"schema_version": "loopx_todo_completion_state_result_v0", "continuation": "no_followup", "recovery": null}
+    },
+    {
+      "name": "same-turn terminal closeout is the only recovery",
+      "method": "evaluate",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "todo": {"status": "done", "no_followup": false, "completion_continuation": "active_goal"}, "requested_no_followup": true, "has_successor": false},
+      "expected_result": {"schema_version": "loopx_todo_completion_state_result_v0", "continuation": "no_followup", "recovery": "same_turn_terminal_closeout"}
+    },
+    {
+      "name": "repair untyped completed successor",
+      "method": "metadata_updates",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "block": {"no_followup": false, "completion_continuation": "", "successor_todo_ids": ["todo_next001"]}, "target_status": "done", "normalized_status": "done", "completion_continuation": null, "completion_recovery": null, "no_followup": null, "successor_todo_ids": null},
+      "expected_result": {"schema_version": "loopx_todo_completion_state_result_v0", "updates": {"completion_continuation": "successor"}}
+    },
+    {
+      "name": "explicit completion metadata is preserved",
+      "method": "metadata_updates",
+      "request": {"schema_version": "loopx_todo_completion_state_request_v0", "block": {"no_followup": false, "completion_continuation": "active_goal", "successor_todo_ids": []}, "target_status": "done", "normalized_status": "done", "completion_continuation": "no_followup", "completion_recovery": "same_turn_terminal_closeout", "no_followup": true, "successor_todo_ids": []},
+      "expected_result": {"schema_version": "loopx_todo_completion_state_result_v0", "updates": {"completion_continuation": "no_followup", "completion_recovery": "same_turn_terminal_closeout"}}
+    }
+  ]
+}

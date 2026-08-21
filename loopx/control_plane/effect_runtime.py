@@ -33,6 +33,7 @@ _SOURCE_FILES = (
     "effect_runtime_io.ts",
     "effect_runtime_server.ts",
     "todos/completion_fence.ts",
+    "todos/completion_state.ts",
     "todos/next_action.ts",
     "turn_driver/turn_journal.ts",
     "turn_driver/turn_journal_effects.ts",

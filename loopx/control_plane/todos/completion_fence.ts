@@ -1,4 +1,9 @@
 import type { JsonObject } from "../effect_program.ts";
+import {
+  normalizeTodoCompletionContinuation,
+  normalizeTodoNoFollowup,
+  type TodoCompletionContinuation,
+} from "./completion_state.ts";
 
 export const TODO_COMPLETION_FENCE_REQUEST_SCHEMA =
   "loopx_todo_completion_fence_request_v0";
@@ -6,16 +11,9 @@ export const TODO_COMPLETION_FENCE_RESULT_SCHEMA =
   "loopx_todo_completion_fence_result_v0";
 
 const TODO_STATUSES = ["open", "done", "blocked", "deferred"] as const;
-const COMPLETION_CONTINUATIONS = [
-  "active_goal",
-  "successor",
-  "no_followup",
-] as const;
 const TODO_ID_PATTERN = /^todo_[a-z0-9_-]{3,64}$/;
 
 export type TodoStatus = (typeof TODO_STATUSES)[number];
-export type TodoCompletionContinuation =
-  (typeof COMPLETION_CONTINUATIONS)[number];
 export type TodoCompletionProjectionSource = "materialized" | "event_log";
 
 export interface TodoCompletionFenceRequest {
@@ -77,6 +75,28 @@ function optionalOpaqueString(value: unknown, label: string): string | null {
   return value;
 }
 
+function todoNoFollowup(value: unknown): boolean | null {
+  if (
+    value !== null && value !== undefined &&
+    typeof value !== "boolean" && typeof value !== "string"
+  ) {
+    throw new Error("todo.no_followup must be a boolean, string, or null");
+  }
+  return normalizeTodoNoFollowup(value);
+}
+
+function todoCompletionContinuation(
+  value: unknown,
+): TodoCompletionContinuation | null {
+  if (
+    value !== null && value !== undefined && value !== "" &&
+    typeof value !== "string"
+  ) {
+    throw new Error("todo.completion_continuation must be a string or null");
+  }
+  return normalizeTodoCompletionContinuation(value);
+}
+
 function todoStatus(value: unknown): TodoStatus {
   if (typeof value !== "string") {
     throw new Error("todo.status must be a supported string");
@@ -91,33 +111,6 @@ function todoStatus(value: unknown): TodoStatus {
 function projectionSource(value: unknown): TodoCompletionProjectionSource {
   if (value === "materialized" || value === "event_log") return value;
   throw new Error("projection_source is unsupported");
-}
-
-function normalizeNoFollowup(value: unknown): boolean | null {
-  if (typeof value === "boolean") return value;
-  if (value === null || value === undefined) return null;
-  if (typeof value !== "string") {
-    throw new Error("todo.no_followup must be a boolean, string, or null");
-  }
-  const candidate = value.trim().toLowerCase();
-  if (["1", "true", "yes", "y", "no_followup", "no-followup"].includes(candidate)) {
-    return true;
-  }
-  if (["0", "false", "no", "n"].includes(candidate)) return false;
-  return null;
-}
-
-function normalizeCompletionContinuation(
-  value: unknown,
-): TodoCompletionContinuation | null {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value !== "string") {
-    throw new Error("todo.completion_continuation must be a string or null");
-  }
-  const candidate = value.trim().toLowerCase();
-  return COMPLETION_CONTINUATIONS.some((item) => item === candidate)
-    ? candidate as TodoCompletionContinuation
-    : null;
 }
 
 function successorTodoIds(value: unknown): string[] {
@@ -155,7 +148,7 @@ export function decodeTodoCompletionFenceRequest(
     projection_source: projectionSource(request.projection_source),
     todo: {
       status: todoStatus(todo.status),
-      no_followup: normalizeNoFollowup(todo.no_followup),
+      no_followup: todoNoFollowup(todo.no_followup),
       completion_continuation: optionalOpaqueString(
         todo.completion_continuation,
         "todo.completion_continuation",
@@ -182,7 +175,7 @@ export function evaluateTodoCompletionFence(
 ): TodoCompletionFenceResult {
   const request = decodeTodoCompletionFenceRequest(value);
   const status = request.todo.status;
-  const continuation = normalizeCompletionContinuation(
+  const continuation = todoCompletionContinuation(
     request.todo.completion_continuation,
   );
   const done = status === "done";
@@ -199,7 +192,7 @@ export function evaluateTodoCompletionFence(
   }
 
   const terminalUpgrade = done && request.requested_no_followup &&
-    normalizeNoFollowup(request.todo.no_followup) !== true;
+    normalizeTodoNoFollowup(request.todo.no_followup) !== true;
   if (terminalUpgrade) {
     if (request.todo.successor_todo_ids.length > 0) {
       throw new Error(

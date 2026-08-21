@@ -40,6 +40,13 @@ import {
 } from "./turn_driver/turn_journal.ts";
 import { commitTurnJournal } from "./turn_driver/turn_journal_effects.ts";
 import { evaluateTodoCompletionFence } from "./todos/completion_fence.ts";
+import {
+  buildTodoCompletionMetadataUpdates,
+  normalizeTodoCompletionValue,
+  requireTodoCompletionMetadataValue,
+  selectTodoCompletionContinuation,
+  selectTodoCompletionState,
+} from "./todos/completion_state.ts";
 import { transitionTodoNextAction } from "./todos/next_action.ts";
 
 type EffectRuntimeHandler = (params: JsonObject) => unknown | Promise<unknown>;
@@ -270,6 +277,11 @@ export function createEffectRuntimeHandlers(
     ],
     ["turn_journal.write", commitTurnJournal],
     ["todo.completion_fence.evaluate", evaluateTodoCompletionFence],
+    ["todo.completion_state.normalize", normalizeTodoCompletionValue],
+    ["todo.completion_state.require_metadata", requireTodoCompletionMetadataValue],
+    ["todo.completion_state.continuation_for_write", selectTodoCompletionContinuation],
+    ["todo.completion_state.evaluate", selectTodoCompletionState],
+    ["todo.completion_state.metadata_updates", buildTodoCompletionMetadataUpdates],
     ["todo.next_action.transition", transitionTodoNextAction],
     [
       "effect.program_from_ordered_steps",
