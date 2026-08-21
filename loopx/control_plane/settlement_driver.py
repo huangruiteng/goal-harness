@@ -10,6 +10,7 @@ and domain policy (scheduler, Todo lifecycle, spend accounting, vision).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+import inspect
 from typing import Any
 
 from .effect_program import (
@@ -24,7 +25,7 @@ from .effect_program import (
 
 
 SettlementPayload = Mapping[str, Any]
-SettlementEffect = Callable[[str], Mapping[str, Any]]
+SettlementEffect = Callable[..., Mapping[str, Any]]
 SettlementEffectPrepare = Callable[[SettlementStepKind, str], None]
 SettlementEffectAbort = Callable[[SettlementStepKind, str], None]
 SettlementEffectResolver = Callable[[str], SettlementEffectResolution]
@@ -285,6 +286,32 @@ def _callback_failure_kind(
     return SettlementFailureKind.QUOTA_SPEND_REJECTED
 
 
+def _invoke_settlement_effect(
+    effect: SettlementEffect,
+    effect_ref: str,
+) -> Mapping[str, Any]:
+    """Invoke new effect-ref callbacks while preserving legacy zero-arg ones."""
+
+    try:
+        signature = inspect.signature(effect)
+    except (TypeError, ValueError):
+        return effect(effect_ref)
+
+    try:
+        signature.bind(effect_ref=effect_ref)
+    except TypeError:
+        pass
+    else:
+        return effect(effect_ref=effect_ref)
+
+    try:
+        signature.bind()
+    except TypeError:
+        signature.bind(effect_ref)
+        return effect(effect_ref)
+    return effect()
+
+
 def commit_step_effect(
     identity: SettlementIdentity,
     *,
@@ -364,7 +391,7 @@ def commit_step_effect(
 
     if prepared_effect_ref is None and prepare is not None:
         prepare(step_kind, effect_ref)
-    payload = dict(effect(effect_ref))
+    payload = dict(_invoke_settlement_effect(effect, effect_ref))
     if not is_committed_payload(payload):
         if abort is not None:
             abort(step_kind, effect_ref)
