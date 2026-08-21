@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
@@ -56,18 +55,23 @@ from ..todos.handoff_mode import (
     goal_handoff_mode_for_goal,
     resolve_todo_completion_handoff,
 )
+from .local_lease_record import (
+    TASK_LEASE_SCHEMA_VERSION,
+    TaskLeaseError,
+    assert_expected_version as assert_expected_version,
+    build_lease,
+    lease_acquire_ttl_seconds,
+    lease_epoch,
+    lease_version,
+    read_lease,
+    released_lease_payload,
+    require_expected_version,
+    write_lease,
+)
 
-TASK_LEASE_SCHEMA_VERSION = "task_lease_v0"
 DEFAULT_TASK_LEASE_TTL_SECONDS = 45 * 60
 MAX_TASK_LEASE_TTL_SECONDS = 24 * 60 * 60
 IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.:@/-]{1,160}$")
-
-
-class TaskLeaseError(ValueError):
-    def __init__(self, message: str, *, code: str, payload: dict[str, Any] | None = None) -> None:
-        super().__init__(message)
-        self.code = code
-        self.payload = payload or {}
 
 
 def now_utc() -> datetime:
@@ -817,115 +821,6 @@ def require_task_lease_owner_allowed(
     return todo
 
 
-def read_lease(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise TaskLeaseError(
-            f"lease file is not valid JSON: {path}",
-            code="corrupt_lease",
-            payload={"lease_path": str(path), "error": str(exc)},
-        ) from exc
-    if not isinstance(payload, dict):
-        raise TaskLeaseError(
-            f"lease file must contain an object: {path}",
-            code="corrupt_lease",
-            payload={"lease_path": str(path)},
-        )
-    return payload
-
-
-def write_lease(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{id(payload)}.tmp")
-    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temp_path.replace(path)
-
-
-def lease_epoch(lease: dict[str, Any] | None) -> int:
-    """Return the authority-owned generation for one todo's lease lineage.
-
-    Records written before ``lease_epoch`` shipped describe the one active
-    generation visible at migration time, so they migrate as epoch 1. Missing
-    records are the pre-history state at epoch 0.
-    """
-
-    if not lease:
-        return 0
-    raw_epoch = lease.get("lease_epoch")
-    if raw_epoch is None:
-        return 1
-    try:
-        epoch = int(raw_epoch)
-    except (TypeError, ValueError) as exc:
-        raise TaskLeaseError(
-            "lease epoch must be a positive integer",
-            code="corrupt_lease",
-            payload={"lease_epoch": raw_epoch},
-        ) from exc
-    if epoch <= 0:
-        raise TaskLeaseError(
-            "lease epoch must be a positive integer",
-            code="corrupt_lease",
-            payload={"lease_epoch": raw_epoch},
-        )
-    return epoch
-
-
-def lease_version(lease: dict[str, Any] | None) -> int:
-    """Normalize the local CAS version without leaking ``ValueError``."""
-
-    raw_version = (lease or {}).get("version")
-    if raw_version is None:
-        return 0
-    try:
-        version = int(raw_version)
-    except (TypeError, ValueError) as exc:
-        raise TaskLeaseError(
-            "lease version must be a non-negative integer",
-            code="corrupt_lease",
-            payload={"version": raw_version},
-        ) from exc
-    if version < 0:
-        raise TaskLeaseError(
-            "lease version must be a non-negative integer",
-            code="corrupt_lease",
-            payload={"version": raw_version},
-        )
-    return version
-
-
-def lease_acquire_ttl_seconds(lease: dict[str, Any] | None) -> int | None:
-    """Read the acquire fingerprint only for acquire replay decisions."""
-
-    raw_ttl = (lease or {}).get("acquire_ttl_seconds")
-    if raw_ttl is None:
-        return None
-    try:
-        return int(raw_ttl)
-    except (TypeError, ValueError) as exc:
-        raise TaskLeaseError(
-            "lease acquire_ttl_seconds must be an integer",
-            code="corrupt_lease",
-            payload={"acquire_ttl_seconds": raw_ttl},
-        ) from exc
-
-
-def released_lease_payload(
-    lease: dict[str, Any],
-    *,
-    at: datetime,
-) -> dict[str, Any]:
-    released = dict(lease)
-    released["lease_epoch"] = lease_epoch(lease)
-    released["status"] = "released"
-    released["released_at"] = isoformat(at)
-    released["updated_at"] = isoformat(at)
-    return released
-
-
 def persist_released_lease(path: Path, lease: dict[str, Any]) -> None:
     """Atomically retain the terminal record that fences the next generation."""
 
@@ -1008,59 +903,6 @@ def active_conflicts(
                 }
             )
     return conflicts
-
-
-def assert_expected_version(lease: dict[str, Any] | None, expected_version: int | None) -> None:
-    if expected_version is None:
-        return
-    actual = int((lease or {}).get("version") or 0)
-    if actual != expected_version:
-        raise TaskLeaseError(
-            f"lease version mismatch: expected {expected_version}, got {actual}",
-            code="version_mismatch",
-            payload={"expected_version": expected_version, "actual_version": actual},
-        )
-
-
-def require_expected_version(expected_version: int | None, *, action: str) -> int:
-    if expected_version is None:
-        raise TaskLeaseError(
-            f"task lease {action} requires the current lease version",
-            code="version_required",
-            payload={"action": action},
-        )
-    return int(expected_version)
-
-
-def build_lease(
-    *,
-    goal_id: str,
-    todo_id: str,
-    owner: str,
-    idempotency_key: str,
-    write_scopes: list[str],
-    acquire_ttl_seconds: int,
-    version: int,
-    lease_epoch: int,
-    acquired_at: str,
-    updated_at: str,
-    expires_at: str,
-) -> dict[str, Any]:
-    return {
-        "schema_version": TASK_LEASE_SCHEMA_VERSION,
-        "goal_id": goal_id,
-        "todo_id": todo_id,
-        "owner": owner,
-        "idempotency_key": idempotency_key,
-        "write_scopes": write_scopes,
-        "acquire_ttl_seconds": acquire_ttl_seconds,
-        "version": version,
-        "lease_epoch": lease_epoch,
-        "acquired_at": acquired_at,
-        "updated_at": updated_at,
-        "expires_at": expires_at,
-        "status": "active",
-    }
 
 
 def _raise_lease_transition(
@@ -1153,7 +995,13 @@ def acquire_task_lease(
             lease_active=lease_is_active(existing, at=at),
             lease_version=lease_version(existing),
             lease_epoch=lease_epoch(existing),
-            lease_acquire_ttl_seconds=lease_acquire_ttl_seconds(existing),
+            lease_acquire_ttl_seconds=(
+                lease_acquire_ttl_seconds(existing)
+                if lease_is_active(existing, at=at)
+                and (existing or {}).get("owner") == owner
+                and (existing or {}).get("idempotency_key") == idempotency_key
+                else None
+            ),
         )
         transition = decide(snapshot, command)
         if transition.outcome is DecisionOutcome.NO_CHANGE:
@@ -1201,7 +1049,14 @@ def acquire_task_lease(
                     lease_active=lease_is_active(existing, at=at),
                     lease_version=lease_version(existing),
                     lease_epoch=lease_epoch(existing),
-                    lease_acquire_ttl_seconds=lease_acquire_ttl_seconds(existing),
+                    lease_acquire_ttl_seconds=(
+                        lease_acquire_ttl_seconds(existing)
+                        if lease_is_active(existing, at=at)
+                        and (existing or {}).get("owner") == owner
+                        and (existing or {}).get("idempotency_key")
+                        == idempotency_key
+                        else None
+                    ),
                     conflicts=conflicts,
                 ),
                 command,
