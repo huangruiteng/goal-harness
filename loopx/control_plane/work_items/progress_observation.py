@@ -8,6 +8,7 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any
 
+from ...turn_identity import normalize_turn_instance_id
 from ..goals.goal_vision_state import normalize_goal_vision_state
 from ..todos.contract import (
     normalize_todo_task_domain,
@@ -203,10 +204,18 @@ def progress_observation_from_run(run: Mapping[str, Any]) -> dict[str, Any] | No
 def _progress_turn_instance_id(run: Mapping[str, Any]) -> str | None:
     """Return a trustworthy logical-turn id for retry de-duplication."""
 
-    direct = str(run.get("turn_instance_id") or "").strip()
+    def normalize(value: Any) -> str | None:
+        try:
+            return normalize_turn_instance_id(
+                str(value) if value is not None else None
+            )
+        except ValueError:
+            return None
+
+    direct = normalize(run.get("turn_instance_id"))
     settlement_value = run.get("settlement_identity")
     settlement = settlement_value if isinstance(settlement_value, Mapping) else {}
-    settled = str(settlement.get("turn_instance_id") or "").strip()
+    settled = normalize(settlement.get("turn_instance_id"))
     if direct and settled and direct != settled:
         return None
     return direct or settled or None

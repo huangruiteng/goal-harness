@@ -123,6 +123,46 @@ def test_settlement_identity_turn_id_deduplicates_retries() -> None:
     assert typed_progress_repeat_trigger(runs, agent_id=AGENT_ID) is None
 
 
+def test_conflicting_turn_id_sources_do_not_deduplicate_retries() -> None:
+    runs = [
+        {
+            **_run(
+                "2026-08-13T01:01:01Z",
+                _observation(),
+                turn_instance_id="turn-direct",
+            ),
+            "settlement_identity": {"turn_instance_id": "turn-settled"},
+        },
+        {
+            **_run(
+                "2026-08-13T01:01:00Z",
+                _observation(),
+                turn_instance_id="turn-direct",
+            ),
+            "settlement_identity": {"turn_instance_id": "turn-settled"},
+        },
+    ]
+
+    assert typed_progress_repeat_trigger(runs, agent_id=AGENT_ID) is not None
+
+
+def test_invalid_turn_ids_do_not_deduplicate_retries() -> None:
+    runs = [
+        _run(
+            "2026-08-13T01:01:01Z",
+            _observation(),
+            turn_instance_id="turn with prose",
+        ),
+        _run(
+            "2026-08-13T01:01:00Z",
+            _observation(),
+            turn_instance_id="turn with prose",
+        ),
+    ]
+
+    assert typed_progress_repeat_trigger(runs, agent_id=AGENT_ID) is not None
+
+
 def test_text_changes_cannot_hide_an_equivalent_typed_repeat() -> None:
     runs = [
         {
