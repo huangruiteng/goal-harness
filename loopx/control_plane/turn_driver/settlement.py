@@ -14,6 +14,7 @@ from ..settlement_driver import (
     commit_step_effect,
     require_matching_effect_id,
     seed_committed_steps,
+    settlement_next_action,
     settlement_identity_from_plan,
 )
 from .driver import selected_turn_todo
@@ -135,7 +136,13 @@ def execute_turn_driver_settlement(
 
     identity_result = settlement_identity_from_plan(transaction_plan)
     if identity_result.failure is not None:
-        return identity_result
+        return SettlementResult.failed(
+            kind=identity_result.failure.kind,
+            step_kind=identity_result.failure.step_kind,
+            reason=identity_result.failure.reason,
+            receipts=identity_result.receipts,
+            details=identity_result.failure.details,
+        )
     identity = identity_result.value
     assert identity is not None
     matched = require_matching_effect_id(committed_effect_id, identity.effect_id)
@@ -151,34 +158,41 @@ def execute_turn_driver_settlement(
         SettlementStepKind.DURABLE_WRITEBACK: writeback_payload,
         SettlementStepKind.QUOTA_SPEND: quota_spend_payload,
     }
-    seeded = seed_committed_steps(
-        identity,
-        ordered_steps=SETTLEMENT_STEPS,
-        committed_payloads=committed_payloads,
-        completed_phases=phases,
-        transaction_phases=transaction_phases,
-        require_validation=True,
-        source_ref_prefix="turn_journal",
-    )
-    if seeded.failure is not None:
-        return SettlementResult.failed(
-            kind=seeded.failure.kind,
-            step_kind=seeded.failure.step_kind,
-            reason=seeded.failure.reason,
-            receipts=seeded.receipts,
-        )
     state = TurnSettlementState(
         completed_phases=phases,
         writeback=writeback_payload,
         quota_spend=quota_spend_payload,
     )
-    receipts = list(seeded.receipts)
-    if "durable_writeback" not in phases:
+    callbacks = {
+        SettlementStepKind.DURABLE_WRITEBACK: writeback,
+        SettlementStepKind.QUOTA_SPEND: spend,
+    }
+    while True:
+        decision, step_kind, seeded = settlement_next_action(
+            identity,
+            ordered_steps=SETTLEMENT_STEPS,
+            committed_payloads=committed_payloads,
+            completed_phases=state.completed_phases,
+            transaction_phases=transaction_phases,
+            require_validation=True,
+            source_ref_prefix="turn_journal",
+        )
+        if seeded.failure is not None:
+            return SettlementResult.failed(
+                kind=seeded.failure.kind,
+                step_kind=seeded.failure.step_kind,
+                reason=seeded.failure.reason,
+                receipts=seeded.receipts,
+            )
+        if decision == "complete":
+            return SettlementResult.pure(state, receipts=seeded.receipts)
+        if decision != "execute" or step_kind not in callbacks:
+            raise RuntimeError("typed settlement selected an unsupported callback")
         step_result = commit_step_effect(
             identity,
-            step_kind=SettlementStepKind.DURABLE_WRITEBACK,
+            step_kind=step_kind,
             transaction_phases=transaction_phases,
-            effect=writeback,
+            effect=callbacks[step_kind],
             checkpoint=checkpoint,
         )
         if step_result.failure is not None:
@@ -186,40 +200,24 @@ def execute_turn_driver_settlement(
                 kind=step_result.failure.kind,
                 step_kind=step_result.failure.step_kind,
                 reason=step_result.failure.reason,
-                receipts=tuple(receipts),
+                receipts=seeded.receipts,
             )
-        receipts.extend(step_result.receipts)
-        phase_index = transaction_phases.index(
-            SettlementStepKind.DURABLE_WRITEBACK.value
-        )
+        phase_index = transaction_phases.index(step_kind.value)
+        completed = tuple(transaction_phases[: phase_index + 1])
+        committed_payloads[step_kind] = step_result.value
         state = TurnSettlementState(
-            completed_phases=tuple(transaction_phases[: phase_index + 1]),
-            writeback=step_result.value,
-            quota_spend=state.quota_spend,
+            completed_phases=completed,
+            writeback=(
+                step_result.value
+                if step_kind is SettlementStepKind.DURABLE_WRITEBACK
+                else state.writeback
+            ),
+            quota_spend=(
+                step_result.value
+                if step_kind is SettlementStepKind.QUOTA_SPEND
+                else state.quota_spend
+            ),
         )
-    if "quota_spend" not in phases:
-        step_result = commit_step_effect(
-            identity,
-            step_kind=SettlementStepKind.QUOTA_SPEND,
-            transaction_phases=transaction_phases,
-            effect=spend,
-            checkpoint=checkpoint,
-        )
-        if step_result.failure is not None:
-            return SettlementResult.failed(
-                kind=step_result.failure.kind,
-                step_kind=step_result.failure.step_kind,
-                reason=step_result.failure.reason,
-                receipts=tuple(receipts),
-            )
-        receipts.extend(step_result.receipts)
-        phase_index = transaction_phases.index(SettlementStepKind.QUOTA_SPEND.value)
-        state = TurnSettlementState(
-            completed_phases=tuple(transaction_phases[: phase_index + 1]),
-            writeback=state.writeback,
-            quota_spend=step_result.value,
-        )
-    return SettlementResult.pure(state, receipts=tuple(receipts))
 
 
 def execute_turn_terminal_closeout(
@@ -240,7 +238,13 @@ def execute_turn_terminal_closeout(
 
     identity_result = settlement_identity_from_plan(transaction_plan)
     if identity_result.failure is not None:
-        return identity_result
+        return SettlementResult.failed(
+            kind=identity_result.failure.kind,
+            step_kind=identity_result.failure.step_kind,
+            reason=identity_result.failure.reason,
+            receipts=identity_result.receipts,
+            details=identity_result.failure.details,
+        )
     identity = identity_result.value
     assert identity is not None
     matched = require_matching_effect_id(committed_effect_id, identity.effect_id)

@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": ["node"]
+  },
+  "include": [
+    "loopx/control_plane/effect_program.ts",
+    "loopx/control_plane/effect_runtime_handlers.ts",
+    "loopx/control_plane/effect_runtime_io.ts",
+    "loopx/control_plane/effect_runtime_server.ts",
+    "loopx/control_plane/turn_driver/turn_journal.ts",
+    "loopx/control_plane/turn_driver/turn_journal_effects.ts",
+    "tests/control_plane_ts/effect_program.test.ts",
+    "tests/control_plane_ts/turn_journal.test.ts",
+    "tests/control_plane_ts/turn_journal_effects.test.ts"
+  ]
+}

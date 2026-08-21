@@ -1,0 +1,12 @@
+{
+  "schema_version": "loopx_turn_transaction_contract_v0",
+  "phases": [
+    "host_execute",
+    "typed_result",
+    "validation",
+    "durable_writeback",
+    "quota_spend",
+    "scheduler_apply",
+    "scheduler_ack"
+  ]
+}

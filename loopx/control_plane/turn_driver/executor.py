@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
-import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -17,7 +15,6 @@ from ...runtime import validate_goal_id_path_segment
 from ..effect_program import (
     SettlementResult,
     SettlementStepKind,
-    interpret_turn_journal,
     interpret_turn_result_packet,
     settlement_result_payload,
 )
@@ -44,6 +41,10 @@ from .transaction import (
     LoopXTurnResultKind,
     build_loopx_turn_transaction_plan,
     validate_loopx_turn_receipt,
+)
+from .turn_journal_runtime import (
+    interpret_turn_journal_projection,
+    write_turn_journal,
 )
 
 LOOPX_TURN_HOST_REQUEST_SCHEMA_VERSION = "loopx_turn_host_request_v0"
@@ -565,16 +566,11 @@ def turn_journal_path(runtime_root: Path, *, goal_id: str, turn_key: str) -> Pat
 
 
 def _write_journal(path: Path, journal: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(journal, handle, ensure_ascii=False, indent=2, sort_keys=True)
-            handle.write("\n")
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_turn_journal(
+        str(path),
+        journal,
+        expected_effect_id=_journal_committed_effect_id(journal),
+    )
 
 
 def _load_journal(path: Path) -> dict[str, Any] | None:
@@ -615,28 +611,12 @@ def inspect_loopx_turn_journal(
     if journal is None:
         raise ValueError("LoopX Turn journal does not exist")
 
-    turn = interpret_turn_journal(
+    return interpret_turn_journal_projection(
         journal,
         goal_id=safe_goal_id,
         agent_id=agent_id,
         turn_key=turn_key,
     )
-    context = turn.request.context
-    return {
-        "ok": True,
-        "schema_version": LOOPX_TURN_JOURNAL_INSPECTION_SCHEMA_VERSION,
-        "decision": turn.observation.decision,
-        "journal_status": context["journal_status"],
-        "replay_legal": context["replay_legal"],
-        "goal_matches": context["goal_matches"],
-        "owner_matches": context["owner_matches"],
-        "turn_key_matches": context["turn_key_matches"],
-        "phases_form_ordered_prefix": context["phases_form_ordered_prefix"],
-        "completed_phases": list(context["completed_phases"]),
-        "tombstone_retained": context["tombstone_retained"],
-        "violations": list(context["violations"]),
-        "effects": [],
-    }
 
 
 def _journal_committed_effect_id(journal: Mapping[str, Any]) -> str | None:

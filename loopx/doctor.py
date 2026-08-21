@@ -866,6 +866,7 @@ def collect_doctor(
     from .control_plane.runtime.runtime_projection_route import (
         collect_runtime_projection_route_diagnostics,
     )
+    from .control_plane.effect_runtime import collect_effect_runtime_readiness
 
     from .host_loop_activation import (
         agent_type_uses_host_managed_skills,
@@ -1067,6 +1068,8 @@ def collect_doctor(
             "items": [],
         }
     )
+    typescript_control_plane = collect_effect_runtime_readiness(deep=deep)
+    typescript_runtime_required = True
     deep_validation = None
     if deep:
         from .release_candidate import collect_release_candidate_checks
@@ -1221,6 +1224,12 @@ def collect_doctor(
                 sort_keys=True,
             ),
         },
+        {
+            "id": "typescript_effect_runtime_ready",
+            "required": typescript_runtime_required,
+            "ok": bool(typescript_control_plane.get("ready")),
+            "detail": str(typescript_control_plane.get("status")),
+        },
     ]
     if deep_validation:
         checks.extend(deep_validation["checks"])
@@ -1263,6 +1272,7 @@ def collect_doctor(
         "release_provenance": release_provenance,
         "global_registry_writability": global_registry_writability,
         "runtime_projection_routes": runtime_projection_routes,
+        "typescript_control_plane": typescript_control_plane,
         "install_freshness": install_freshness,
         "upgrade_hint": install_freshness,
         "skill": {
@@ -1317,6 +1327,16 @@ def collect_doctor(
 def render_doctor_markdown(payload: dict[str, Any]) -> str:
     release_provenance = payload.get("release_provenance") or {}
     default_release = release_provenance.get("default_release") or {}
+    typescript_control_plane = (
+        payload.get("typescript_control_plane")
+        if isinstance(payload.get("typescript_control_plane"), dict)
+        else {}
+    )
+    typescript_runtime_lifecycle = (
+        typescript_control_plane.get("runtime_lifecycle")
+        if isinstance(typescript_control_plane.get("runtime_lifecycle"), dict)
+        else {}
+    )
     lines = [
         "# LoopX Doctor",
         "",
@@ -1338,6 +1358,9 @@ def render_doctor_markdown(payload: dict[str, Any]) -> str:
         f"- runtime_projection_routes_healthy: `{(payload.get('runtime_projection_routes') or {}).get('healthy')}`",
         f"- user_local_bin_on_path: `{(payload.get('path') or {}).get('user_local_bin_on_path')}`",
         f"- python: `{(payload.get('python') or {}).get('executable')}`",
+        f"- typescript_control_plane: `{typescript_control_plane.get('status')}`",
+        f"- typescript_runtime_state: `{typescript_runtime_lifecycle.get('state')}`",
+        f"- typescript_runtime_diagnostic: `{typescript_runtime_lifecycle.get('diagnostic_code')}`",
         "",
         "## Checks",
     ]
@@ -1432,6 +1455,28 @@ def render_doctor_markdown(payload: dict[str, Any]) -> str:
                 "```",
             ]
         )
+    typescript_control_plane = (
+        payload.get("typescript_control_plane")
+        if isinstance(payload.get("typescript_control_plane"), dict)
+        else {}
+    )
+    if typescript_control_plane:
+        lines.extend(
+            [
+                "",
+                "## TypeScript Control Plane",
+                f"- status: `{typescript_control_plane.get('status')}`",
+                f"- ready: `{typescript_control_plane.get('ready')}`",
+                f"- required_for: `{','.join(typescript_control_plane.get('required_for') or [])}`",
+                f"- default_cli_blocking: `{typescript_control_plane.get('default_cli_blocking')}`",
+                f"- minimum_node_version: `{typescript_control_plane.get('minimum_node_version')}`",
+                f"- detected_node_version: `{typescript_control_plane.get('detected_node_version')}`",
+                f"- semantic_probe: `{typescript_control_plane.get('semantic_probe')}`",
+            ]
+        )
+        recommended_action = typescript_control_plane.get("recommended_action")
+        if recommended_action:
+            lines.append(f"- recommended_action: {recommended_action}")
     if not payload.get("ok"):
         lines.extend(["", "## Fix", str(payload.get("fix"))])
         writable = payload.get("global_registry_writability")

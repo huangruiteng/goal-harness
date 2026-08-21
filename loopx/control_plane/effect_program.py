@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Generic, TypeVar, cast
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Generic, TypeVar
+
+from .effect_runtime import EffectRuntimeRejected, effect_runtime_result
 
 
 # Identity remains stable while the plan and receipt versions advance with the
@@ -75,30 +80,13 @@ class EffectProgram:
     execution_mode: str | None = None
 
 
-class TurnTransactionPhase(StrEnum):
-    HOST_EXECUTE = "host_execute"
-    TYPED_RESULT = "typed_result"
-    VALIDATION = "validation"
-    DURABLE_WRITEBACK = "durable_writeback"
-    QUOTA_SPEND = "quota_spend"
-    SCHEDULER_APPLY = "scheduler_apply"
-    SCHEDULER_ACK = "scheduler_ack"
-
-
-TURN_TRANSACTION_PHASES = tuple(phase.value for phase in TurnTransactionPhase)
-
-
-class TurnJournalViolation(StrEnum):
-    GOAL_IDENTITY_MISSING = "goal_identity_missing"
-    GOAL_MISMATCH = "goal_mismatch"
-    OWNER_IDENTITY_MISSING = "owner_identity_missing"
-    OWNER_MISMATCH = "owner_mismatch"
-    TURN_KEY_IDENTITY_MISSING = "turn_key_identity_missing"
-    TURN_KEY_MISMATCH = "turn_key_mismatch"
-    COMPLETED_PHASES_INVALID = "completed_phases_invalid"
-    COMPLETED_PHASES_NOT_ORDERED_PREFIX = "completed_phases_not_ordered_prefix"
-    JOURNAL_NOT_TERMINAL = "journal_not_terminal"
-    JOURNAL_STATUS_UNSUPPORTED = "journal_status_unsupported"
+_TURN_TRANSACTION_CONTRACT_PATH = Path(__file__).with_name(
+    "turn_transaction_contract.json"
+)
+_TURN_TRANSACTION_CONTRACT = json.loads(
+    _TURN_TRANSACTION_CONTRACT_PATH.read_text(encoding="utf-8")
+)
+TURN_TRANSACTION_PHASES = tuple(_TURN_TRANSACTION_CONTRACT["phases"])
 
 
 class SettlementStepKind(StrEnum):
@@ -127,6 +115,36 @@ class SettlementFailureKind(StrEnum):
     BUDGET_REJECTED = "budget_rejected"
 
 
+@lru_cache(maxsize=4096)
+def _settlement_identity_full(
+    goal_id: str,
+    agent_id: str,
+    todo_id: str | None,
+    turn_instance_id: str,
+    replan_obligation_id: str | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        result = effect_runtime_result(
+            "settlement.identity_full",
+            {
+                "goal_id": goal_id,
+                "agent_id": agent_id,
+                "todo_id": todo_id,
+                "turn_instance_id": turn_instance_id,
+                "replan_obligation_id": replan_obligation_id,
+            },
+        )
+    except EffectRuntimeRejected as exc:
+        raise ValueError(str(exc)) from None
+    if not isinstance(result, Mapping):
+        raise RuntimeError("TypeScript settlement identity shape mismatch")
+    identity = result.get("identity")
+    payload = result.get("payload")
+    if not isinstance(identity, Mapping) or not isinstance(payload, Mapping):
+        raise RuntimeError("TypeScript settlement identity shape mismatch")
+    return dict(identity), dict(payload)
+
+
 @dataclass(frozen=True, slots=True)
 class SettlementIdentity:
     goal_id: str
@@ -134,72 +152,46 @@ class SettlementIdentity:
     todo_id: str | None
     turn_instance_id: str
     replan_obligation_id: str | None = None
+    _runtime_identity: Mapping[str, Any] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _runtime_payload: Mapping[str, Any] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
-        todo_id = str(self.todo_id or "").strip()
-        replan_obligation_id = str(self.replan_obligation_id or "").strip()
-        if todo_id and replan_obligation_id:
-            raise ValueError(
-                "settlement identity cannot bind both todo_id and "
-                "replan_obligation_id"
-            )
-        object.__setattr__(self, "todo_id", todo_id or None)
-        object.__setattr__(
-            self,
-            "replan_obligation_id",
-            replan_obligation_id or None,
+        identity, payload = _settlement_identity_full(
+            self.goal_id,
+            self.agent_id,
+            self.todo_id,
+            self.turn_instance_id,
+            self.replan_obligation_id,
         )
+        object.__setattr__(self, "todo_id", identity.get("todo_id"))
+        object.__setattr__(
+            self, "replan_obligation_id", identity.get("replan_obligation_id")
+        )
+        object.__setattr__(self, "_runtime_identity", identity)
+        object.__setattr__(self, "_runtime_payload", payload)
 
     @property
     def binding_kind(self) -> SettlementBindingKind:
-        if self.todo_id:
-            return SettlementBindingKind.TODO
-        if self.replan_obligation_id:
-            return SettlementBindingKind.AUTONOMOUS_REPLAN
-        return SettlementBindingKind.UNBOUND
+        return SettlementBindingKind(str(self._runtime_identity["binding_kind"]))
 
     @property
     def binding_id(self) -> str:
-        return str(self.todo_id or self.replan_obligation_id or "").strip()
+        return str(self._runtime_identity["binding_id"])
 
     @property
     def effect_id(self) -> str:
-        if self.todo_id:
-            # Preserve the v0 Todo-bound effect id for compatibility with
-            # already-persisted receipts.
-            return (
-                f"{self.goal_id}:{self.agent_id}:{self.todo_id}:"
-                f"{self.turn_instance_id}"
-            )
-        if self.replan_obligation_id:
-            return (
-                f"{self.goal_id}:{self.agent_id}:autonomous_replan:"
-                f"{self.replan_obligation_id}:{self.turn_instance_id}"
-            )
-        return (
-            f"{self.goal_id}:{self.agent_id}::{self.turn_instance_id}"
-        )
+        return str(self._runtime_identity["effect_id"])
 
     def as_dict(self) -> dict[str, str]:
-        if self.todo_id or not self.replan_obligation_id:
-            return {
-                "schema_version": SETTLEMENT_IDENTITY_SCHEMA_VERSION,
-                "effect_id": self.effect_id,
-                "goal_id": self.goal_id,
-                "agent_id": self.agent_id,
-                "todo_id": str(self.todo_id or ""),
-                "turn_instance_id": self.turn_instance_id,
-            }
-        return {
-            "schema_version": SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION,
-            "effect_id": self.effect_id,
-            "goal_id": self.goal_id,
-            "agent_id": self.agent_id,
-            "turn_instance_id": self.turn_instance_id,
-            "binding_kind": self.binding_kind,
-            "binding_id": self.binding_id,
-            "replan_obligation_id": str(self.replan_obligation_id),
-        }
+        return {key: str(value) for key, value in self._runtime_payload.items()}
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +229,67 @@ class SettlementFailure:
         if self.details:
             result["details"] = dict(self.details)
         return result
+
+
+def _runtime_receipt(receipt: SettlementReceipt) -> dict[str, Any]:
+    return {
+        "step_kind": receipt.step_kind.value,
+        "status": receipt.status,
+        "effect_id": receipt.effect_id,
+        **({"source_ref": receipt.source_ref} if receipt.source_ref else {}),
+    }
+
+
+def _runtime_failure(failure: SettlementFailure | None) -> dict[str, Any] | None:
+    if failure is None:
+        return None
+    return {
+        "kind": failure.kind.value,
+        "step_kind": failure.step_kind.value,
+        "reason": failure.reason,
+        **({"details": dict(failure.details)} if failure.details else {}),
+    }
+
+
+def _runtime_result(result: SettlementResult[Any]) -> dict[str, Any]:
+    return {
+        "value": None,
+        "receipts": [_runtime_receipt(receipt) for receipt in result.receipts],
+        "failure": _runtime_failure(result.failure),
+    }
+
+
+def _runtime_result_metadata(
+    payload: Any,
+) -> tuple[tuple[SettlementReceipt, ...], SettlementFailure | None]:
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("TypeScript settlement result shape mismatch")
+    receipts_value = payload.get("receipts")
+    receipts = (
+        tuple(
+            SettlementReceipt(
+                step_kind=SettlementStepKind(str(receipt["step_kind"])),
+                status=str(receipt["status"]),
+                effect_id=str(receipt["effect_id"]),
+                source_ref=str(receipt.get("source_ref") or "") or None,
+            )
+            for receipt in receipts_value
+            if isinstance(receipt, Mapping)
+        )
+        if isinstance(receipts_value, list)
+        else ()
+    )
+    failure_value = payload.get("failure")
+    failure = None
+    if isinstance(failure_value, Mapping):
+        details = failure_value.get("details")
+        failure = SettlementFailure(
+            kind=SettlementFailureKind(str(failure_value["kind"])),
+            step_kind=SettlementStepKind(str(failure_value["step_kind"])),
+            reason=str(failure_value["reason"]),
+            details=dict(details) if isinstance(details, Mapping) else None,
+        )
+    return receipts, failure
 
 
 T = TypeVar("T")
@@ -280,17 +333,31 @@ class SettlementResult(Generic[T]):
         )
 
     def bind(self, step: Callable[[T], SettlementResult[U]]) -> SettlementResult[U]:
-        if self.failure is not None:
+        gate = effect_runtime_result(
+            "settlement.bind_gate",
+            {"result": _runtime_result(self)},
+        )
+        if not isinstance(gate, Mapping) or not isinstance(gate.get("execute"), bool):
+            raise RuntimeError("TypeScript settlement bind gate shape mismatch")
+        if gate["execute"] is False:
             return SettlementResult(
                 value=None,
                 receipts=self.receipts,
                 failure=self.failure,
             )
-        next_result = step(cast(T, self.value))
+        next_result = step(self.value)  # type: ignore[arg-type]
+        reduced = effect_runtime_result(
+            "settlement.bind_reduce",
+            {
+                "current": _runtime_result(self),
+                "next": _runtime_result(next_result),
+            },
+        )
+        receipts, failure = _runtime_result_metadata(reduced)
         return SettlementResult(
             value=next_result.value,
-            receipts=(*self.receipts, *next_result.receipts),
-            failure=next_result.failure,
+            receipts=receipts,
+            failure=failure,
         )
 
 
@@ -325,58 +392,116 @@ class SettlementPlan:
     steps: tuple[SettlementStep, ...]
 
     def as_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": SETTLEMENT_PLAN_SCHEMA_VERSION,
-            "identity": self.identity.as_dict(),
-            "ordered_steps": [step.as_dict() for step in self.steps],
-            "host_handoff": {
-                "owner": "host",
-                "kind": "scheduler_handoff",
-                "inside_agent_settlement": False,
+        payload = effect_runtime_result(
+            "settlement.plan_payload",
+            {
+                "plan": {
+                    "identity": self.identity.as_dict(),
+                    "steps": [step.as_dict() for step in self.steps],
+                }
             },
-        }
+        )
+        if not isinstance(payload, Mapping):
+            raise RuntimeError("TypeScript settlement plan shape mismatch")
+        return dict(payload)
 
 
 def settlement_result_payload(result: SettlementResult[Any]) -> dict[str, Any]:
-    return {
-        "ok": result.failure is None,
-        "receipts": [receipt.as_dict() for receipt in result.receipts],
-        "failure": result.failure.as_dict() if result.failure else None,
-    }
-
-
-def _mapping(value: Any) -> Mapping[str, Any]:
-    return value if isinstance(value, Mapping) else {}
-
-
-def _valid_identity_value(value: Any) -> bool:
-    return isinstance(value, str) and bool(value.strip())
-
-
-def _identity_state(
-    required_values: Sequence[Any],
-    *,
-    optional_values: Sequence[tuple[bool, Any]] = (),
-    expected: str | None = None,
-) -> tuple[bool, bool]:
-    required_complete = all(
-        _valid_identity_value(value) for value in required_values
+    payload = effect_runtime_result(
+        "settlement.result_payload",
+        {"result": _runtime_result(result)},
     )
-    optional_complete = all(
-        not present or _valid_identity_value(value)
-        for present, value in optional_values
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("TypeScript settlement result payload shape mismatch")
+    return dict(payload)
+
+
+def _effect_turn_from_payload(payload: Any) -> EffectTurn:
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("TypeScript Effect turn shape mismatch")
+    request = payload.get("request")
+    interpretation = payload.get("interpretation")
+    observation = payload.get("observation")
+    next_effect = payload.get("next_effect")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (request, interpretation, observation, next_effect)
+    ):
+        raise RuntimeError("TypeScript Effect turn shape mismatch")
+    assert isinstance(request, Mapping)
+    assert isinstance(interpretation, Mapping)
+    assert isinstance(observation, Mapping)
+    assert isinstance(next_effect, Mapping)
+    context = request.get("context")
+    normalized_context = dict(context) if isinstance(context, Mapping) else {}
+    if isinstance(normalized_context.get("completed_phases"), list):
+        normalized_context["completed_phases"] = tuple(
+            str(phase) for phase in normalized_context["completed_phases"]
+        )
+    return EffectTurn(
+        request=EffectRequest(
+            kind=str(request.get("kind") or ""),
+            source=str(request.get("source") or ""),
+            goal_id=str(request.get("goal_id"))
+            if request.get("goal_id") is not None
+            else None,
+            agent_id=str(request.get("agent_id"))
+            if request.get("agent_id") is not None
+            else None,
+            capabilities=tuple(str(item) for item in request.get("capabilities", [])),
+            context=normalized_context,
+        ),
+        interpretation=EffectInterpretation(
+            route=str(interpretation.get("route") or ""),
+            obligation=str(interpretation.get("obligation") or ""),
+            interaction_mode=str(interpretation.get("interaction_mode") or ""),
+            capability_action=(
+                str(interpretation["capability_action"])
+                if interpretation.get("capability_action") is not None
+                else None
+            ),
+            cadence_class=(
+                str(interpretation["cadence_class"])
+                if interpretation.get("cadence_class") is not None
+                else None
+            ),
+        ),
+        observation=EffectObservation(
+            decision=str(observation.get("decision") or ""),
+            should_run=observation.get("should_run") is True,
+            effective_action=str(observation.get("effective_action") or ""),
+            recommended_action=str(observation.get("recommended_action") or ""),
+            protocol_summary=(
+                str(observation["protocol_summary"])
+                if observation.get("protocol_summary") is not None
+                else None
+            ),
+        ),
+        next_effect=EffectNext(
+            cli_actions=tuple(str(item) for item in next_effect.get("cli_actions", [])),
+            execution_mode=(
+                str(next_effect["execution_mode"])
+                if next_effect.get("execution_mode") is not None
+                else None
+            ),
+            scheduler_action=(
+                str(next_effect["scheduler_action"])
+                if next_effect.get("scheduler_action") is not None
+                else None
+            ),
+            cadence_class=(
+                str(next_effect["cadence_class"])
+                if next_effect.get("cadence_class") is not None
+                else None
+            ),
+            ack_cli_args=tuple(
+                str(item) for item in next_effect.get("ack_cli_args", [])
+            ),
+            failure_cli_args=tuple(
+                str(item) for item in next_effect.get("failure_cli_args", [])
+            ),
+        ),
     )
-    expected_complete = expected is None or _valid_identity_value(expected)
-    complete = required_complete and optional_complete and expected_complete
-    observed = [value for value in required_values if _valid_identity_value(value)]
-    observed.extend(
-        value
-        for present, value in optional_values
-        if present and _valid_identity_value(value)
-    )
-    if expected is not None and _valid_identity_value(expected):
-        observed.append(expected)
-    return complete, complete and len(set(observed)) == 1
 
 
 def effect_program_from_ordered_steps(
@@ -386,30 +511,32 @@ def effect_program_from_ordered_steps(
 ) -> EffectProgram:
     """Map existing `guided_transaction.ordered_steps` onto an effect program."""
 
-    steps: list[EffectStep] = []
-    for step in ordered_steps:
-        if not isinstance(step, Mapping):
-            continue
-        steps.append(
-            EffectStep(
-                step_id=str(step.get("id") or "") or None,
-                kind=str(step.get("kind") or "") or None,
-                command=(
-                    str(
-                        step.get("command")
-                        or step.get("command_template")
-                        or step.get("prompt")
-                        or ""
-                    )
-                    or None
-                ),
-                purpose=str(step.get("purpose") or "") or None,
-                raw=dict(step),
-            )
+    payload = effect_runtime_result(
+        "effect.program_from_ordered_steps",
+        {
+            "ordered_steps": [
+                dict(step) if isinstance(step, Mapping) else step
+                for step in ordered_steps
+            ],
+            "execution_mode": execution_mode,
+        },
+    )
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("steps"), list):
+        raise RuntimeError("TypeScript Effect Program shape mismatch")
+    steps = tuple(
+        EffectStep(
+            step_id=str(step["step_id"]) if step.get("step_id") is not None else None,
+            kind=str(step["kind"]) if step.get("kind") is not None else None,
+            command=str(step["command"]) if step.get("command") is not None else None,
+            purpose=str(step["purpose"]) if step.get("purpose") is not None else None,
+            raw=dict(step["raw"]) if isinstance(step.get("raw"), Mapping) else {},
         )
+        for step in payload["steps"]
+        if isinstance(step, Mapping)
+    )
+    mode = payload.get("execution_mode")
     return EffectProgram(
-        steps=tuple(steps),
-        execution_mode=str(execution_mode or "") or None,
+        steps=steps, execution_mode=str(mode) if mode is not None else None
     )
 
 
@@ -421,198 +548,18 @@ def interpret_quota_should_run_packet(
     capabilities: Sequence[str] = (),
 ) -> EffectTurn:
     """Map an existing `quota should-run` packet onto canonical effect slots."""
-
-    interaction = _mapping(packet.get("interaction_contract"))
-    lane = _mapping(packet.get("work_lane_contract"))
-    scheduler = _mapping(packet.get("scheduler_hint"))
-    codex_app = _mapping(scheduler.get("codex_app"))
-    ack_hint = _mapping(codex_app.get("ack_hint"))
-    failure_hint = _mapping(codex_app.get("failure_hint"))
-    cli_channel = _mapping(interaction.get("cli_channel"))
-    gate = packet.get("capability_gate")
-    protocol = _mapping(packet.get("protocol_action_packet"))
-
-    request = EffectRequest(
-        kind="quota_should_run",
-        source="agent_or_host",
-        goal_id=goal_id,
-        agent_id=agent_id,
-        capabilities=tuple(capabilities),
-    )
-    interpretation = EffectInterpretation(
-        route=str(lane.get("lane") or ""),
-        obligation=str(lane.get("obligation") or ""),
-        interaction_mode=str(interaction.get("mode") or ""),
-        capability_action=(
-            str(gate.get("action")) if isinstance(gate, Mapping) else None
-        ),
-        cadence_class=str(scheduler.get("cadence_class") or None) or None,
-    )
-    observation = EffectObservation(
-        decision=str(packet.get("decision") or ""),
-        should_run=bool(packet.get("should_run")),
-        effective_action=str(packet.get("effective_action") or ""),
-        recommended_action=str(packet.get("recommended_action") or ""),
-        protocol_summary=(
-            str(protocol.get("summary")) if protocol.get("summary") else None
-        ),
-    )
-    next_effect = EffectNext(
-        cli_actions=tuple(
-            str(action)
-            for action in cli_channel.get("next_cli_actions", [])
-            if str(action).strip()
-        ),
-        execution_mode=(
-            str(
-                packet.get("execution_mode")
-                or codex_app.get("execution_mode")
-                or scheduler.get("execution_mode")
-                or None
-            )
-            or None
-        ),
-        scheduler_action=str(scheduler.get("action") or None) or None,
-        cadence_class=str(scheduler.get("cadence_class") or None) or None,
-        ack_cli_args=tuple(
-            str(arg)
-            for arg in ack_hint.get("cli_args", [])
-            if str(arg).strip()
-        ),
-        failure_cli_args=tuple(
-            str(arg)
-            for arg in failure_hint.get("cli_args", [])
-            if str(arg).strip()
-        ),
-    )
-    return EffectTurn(
-        request=request,
-        interpretation=interpretation,
-        observation=observation,
-        next_effect=next_effect,
-    )
-
-
-def interpret_turn_journal(
-    journal: Mapping[str, Any],
-    *,
-    goal_id: str | None = None,
-    agent_id: str | None = None,
-    turn_key: str | None = None,
-    capabilities: Sequence[str] = (),
-) -> EffectTurn:
-    """Read one fenced Turn journal through the canonical effect slots."""
-
-    plan = _mapping(journal.get("plan"))
-    envelope = _mapping(plan.get("turn_envelope"))
-    transaction = _mapping(plan.get("transaction"))
-    settlement = _mapping(transaction.get("settlement_plan"))
-    identity = _mapping(settlement.get("identity"))
-    host_result = _mapping(journal.get("host_result"))
-    receipt = _mapping(journal.get("receipt"))
-
-    goal_complete, goal_matches = _identity_state(
-        (
-            journal.get("goal_id"),
-            envelope.get("goal_id"),
-            identity.get("goal_id"),
-        ),
-        expected=goal_id,
-    )
-    owner_complete, owner_matches = _identity_state(
-        (envelope.get("agent_id"), identity.get("agent_id")),
-        expected=agent_id,
-    )
-    turn_key_complete, turn_key_matches = _identity_state(
-        (journal.get("turn_key"), transaction.get("turn_key")),
-        optional_values=(
-            ("turn_key" in host_result, host_result.get("turn_key")),
-            ("turn_key" in receipt, receipt.get("turn_key")),
-        ),
-        expected=turn_key,
-    )
-
-    violations: list[TurnJournalViolation] = []
-    if not goal_complete:
-        violations.append(TurnJournalViolation.GOAL_IDENTITY_MISSING)
-    elif not goal_matches:
-        violations.append(TurnJournalViolation.GOAL_MISMATCH)
-    if not owner_complete:
-        violations.append(TurnJournalViolation.OWNER_IDENTITY_MISSING)
-    elif not owner_matches:
-        violations.append(TurnJournalViolation.OWNER_MISMATCH)
-    if not turn_key_complete:
-        violations.append(TurnJournalViolation.TURN_KEY_IDENTITY_MISSING)
-    elif not turn_key_matches:
-        violations.append(TurnJournalViolation.TURN_KEY_MISMATCH)
-
-    raw_completed_phases = journal.get("completed_phases")
-    if isinstance(raw_completed_phases, list):
-        completed_phases = tuple(str(phase) for phase in raw_completed_phases)
-        phases_form_ordered_prefix = completed_phases == TURN_TRANSACTION_PHASES[
-            : len(completed_phases)
-        ]
-        if not phases_form_ordered_prefix:
-            violations.append(
-                TurnJournalViolation.COMPLETED_PHASES_NOT_ORDERED_PREFIX
-            )
-    else:
-        completed_phases = ()
-        phases_form_ordered_prefix = False
-        violations.append(TurnJournalViolation.COMPLETED_PHASES_INVALID)
-
-    journal_status = str(journal.get("status") or "")
-    tombstone_retained = journal_status in {"committed", "stopped", "failed"}
-    if journal_status in {"in_progress", "scheduler_action_required"}:
-        violations.append(TurnJournalViolation.JOURNAL_NOT_TERMINAL)
-    elif not tombstone_retained:
-        violations.append(TurnJournalViolation.JOURNAL_STATUS_UNSUPPORTED)
-
-    replay_legal = not violations
-    context = {
-        "replay_legal": replay_legal,
-        "goal_matches": goal_matches,
-        "owner_matches": owner_matches,
-        "turn_key_matches": turn_key_matches,
-        "phases_form_ordered_prefix": phases_form_ordered_prefix,
-        "journal_status": journal_status,
-        "tombstone_retained": tombstone_retained,
-        "completed_phases": completed_phases,
-        "violations": tuple(violation.value for violation in violations),
-    }
-    return EffectTurn(
-        request=EffectRequest(
-            kind="turn_journal",
-            source="turn_journal",
-            goal_id=goal_id,
-            agent_id=agent_id,
-            capabilities=tuple(capabilities),
-            context=context,
-        ),
-        interpretation=EffectInterpretation(
-            route="turn_journal_replay",
-            obligation="observe_fenced_replay",
-            interaction_mode="read_only",
-        ),
-        observation=EffectObservation(
-            decision="replay_legal" if replay_legal else "replay_blocked",
-            should_run=False,
-            effective_action=("observe_replay" if replay_legal else "block_replay"),
-            recommended_action=(
-                "Retain the terminal Turn journal tombstone."
-                if replay_legal
-                else "Inspect the structured Turn journal violations before replay."
-            ),
-            protocol_summary=(
-                "Turn journal replay is legal and effect-free."
-                if replay_legal
-                else (
-                    "Turn journal replay is blocked by "
-                    f"{len(violations)} structured violation(s)."
-                )
-            ),
-        ),
-        next_effect=EffectNext(),
+    return _effect_turn_from_payload(
+        effect_runtime_result(
+            "effect.interpret_quota",
+            {
+                "packet": dict(packet),
+                "identity": {
+                    "goal_id": goal_id,
+                    "agent_id": agent_id,
+                    "capabilities": list(capabilities),
+                },
+            },
+        )
     )
 
 
@@ -624,81 +571,16 @@ def interpret_turn_result_packet(
     capabilities: Sequence[str] = (),
 ) -> EffectTurn:
     """Map an existing `loopx_turn_result_v0` packet onto canonical slots."""
-
-    scheduler = _mapping(packet.get("scheduler_hint"))
-    codex_app = _mapping(scheduler.get("codex_app"))
-    ack_hint = _mapping(codex_app.get("ack_hint"))
-    failure_hint = _mapping(codex_app.get("failure_hint"))
-    completed_phases = tuple(
-        str(phase)
-        for phase in packet.get("completed_phases", [])
-        if str(phase).strip()
-    )
-    failed_phase = str(packet.get("failed_phase") or "") or None
-    result_kind = str(packet.get("result_kind") or "")
-
-    request = EffectRequest(
-        kind="turn_result",
-        source="host",
-        goal_id=goal_id,
-        agent_id=agent_id,
-        capabilities=tuple(capabilities),
-        context={
-            "completed_phases": completed_phases,
-            "failed_phase": failed_phase,
-            "classification": packet.get("classification"),
-            "delivery_outcome": packet.get("delivery_outcome"),
-        },
-    )
-    interpretation = EffectInterpretation(
-        route="turn_result_settlement",
-        obligation="settle_turn_receipt",
-        interaction_mode="host_result",
-        cadence_class=str(scheduler.get("cadence_class") or None) or None,
-    )
-    observation = EffectObservation(
-        decision=result_kind,
-        should_run=False,
-        effective_action=str(packet.get("effective_action") or result_kind),
-        recommended_action=(
-            str(packet.get("recommended_action") or "")
-            or "settle the turn receipt"
-        ),
-        protocol_summary=(
-            str(packet.get("summary")) if packet.get("summary") else None
-        ),
-    )
-    next_effect = EffectNext(
-        cli_actions=tuple(
-            str(action)
-            for action in packet.get("next_cli_actions", [])
-            if str(action).strip()
-        ),
-        execution_mode=(
-            str(
-                packet.get("execution_mode")
-                or codex_app.get("execution_mode")
-                or scheduler.get("execution_mode")
-                or None
-            )
-            or None
-        ),
-        scheduler_action=str(scheduler.get("action") or None) or None,
-        cadence_class=str(scheduler.get("cadence_class") or None) or None,
-        ack_cli_args=tuple(
-            str(arg)
-            for arg in ack_hint.get("cli_args", [])
-            if str(arg).strip()
-        ),
-        failure_cli_args=tuple(
-            str(arg)
-            for arg in failure_hint.get("cli_args", [])
-            if str(arg).strip()
-        ),
-    )
-    return EffectTurn(
-        request=request,
-        interpretation=interpretation,
-        observation=observation,
-        next_effect=next_effect,
+    return _effect_turn_from_payload(
+        effect_runtime_result(
+            "effect.interpret_turn_result",
+            {
+                "packet": dict(packet),
+                "identity": {
+                    "goal_id": goal_id,
+                    "agent_id": agent_id,
+                    "capabilities": list(capabilities),
+                },
+            },
+        )
     )
