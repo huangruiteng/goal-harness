@@ -725,6 +725,7 @@ def build_autonomous_replan_obligation_payload(
     recommended_action: str,
     agent_id: str | None = None,
     include_agent_id: bool = False,
+    rearmed_after_obligation_id: str | None = None,
     extra_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -742,6 +743,8 @@ def build_autonomous_replan_obligation_payload(
         payload["agent_id"] = agent_id
     if extra_fields:
         payload.update(extra_fields)
+    if rearmed_after_obligation_id is not None:
+        payload["rearmed_after_obligation_id"] = rearmed_after_obligation_id
     return ensure_replan_novelty_policy(payload)
 
 

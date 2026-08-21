@@ -159,6 +159,23 @@ def test_payload_builder_defaults_to_novelty_guidance_and_policy() -> None:
     assert policy["writeback"] == "typed_semantic_delta"
 
 
+def test_payload_builder_owns_rearm_lineage_field() -> None:
+    payload = build_autonomous_replan_obligation_payload(
+        schema_version="autonomous_replan_obligation_v0",
+        stall_threshold=1,
+        trigger_count=1,
+        triggers=[{"kind": "vision_acceptance_gap"}],
+        guidance_actions=["create_successor"],
+        todo_actions=[],
+        stop_condition="stop on owner-only authority",
+        recommended_action="run a bounded frontier replan",
+        rearmed_after_obligation_id="replan-0123456789abcdef",
+    )
+
+    assert payload["rearmed_after_obligation_id"] == "replan-0123456789abcdef"
+    assert payload["obligation_id"] != "replan-0123456789abcdef"
+
+
 def test_payload_builder_replaces_conflicting_policy_extra_fields() -> None:
     payload = build_autonomous_replan_obligation_payload(
         schema_version="autonomous_replan_obligation_v0",
@@ -298,4 +315,3 @@ def test_policy_normalization_precedes_deterministic_peer_scope_selection() -> N
 
     assert len(selected) == 1
     assert selected <= set(registered_agents)
-

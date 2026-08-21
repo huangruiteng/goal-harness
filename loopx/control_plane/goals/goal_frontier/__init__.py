@@ -1333,15 +1333,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                 "successor work, update the agent vision, record evidence gap, or "
                 "record no-follow-up"
             ),
-            extra_fields=(
-                {
-                    "rearmed_after_obligation_id": (
-                        rearmed_after_obligation_id
-                    )
-                }
-                if rearmed_after_obligation_id
-                else None
-            ),
+            rearmed_after_obligation_id=rearmed_after_obligation_id,
         )
     if replan_rule.rule is GoalFrontierReplanRule.LONG_TODO_CHAIN:
         assert long_chain_trigger is not None
