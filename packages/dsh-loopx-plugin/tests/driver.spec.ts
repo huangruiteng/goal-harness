@@ -1193,9 +1193,11 @@ describe('GoalBar exact-Session Driver bridge', () => {
       const controller = new AbortController()
       const capturedSession = host.agent.session
       try {
-        const changed = watches.waitForTurnEnd(capturedSession, null, {
+        const changed = watches.waitForSessionChange(capturedSession, null, {
           signal: controller.signal,
           timeoutMs: 1_000,
+          observedAgentStatus: host.agent.status,
+          getAgentStatus: () => host.agent.status,
           isSessionCurrent: () => host.agent.session === capturedSession,
         })
         const event = turnEndEvent(initiallyObserved ? 41 : 17)
@@ -1203,9 +1205,9 @@ describe('GoalBar exact-Session Driver bridge', () => {
         runtime.emitSessionEvent(capturedSession, event)
 
         await expect(changed).resolves.toEqual({
-          kind: 'changed',
+          kind: 'candidate',
           sessionId,
-          turnEndSeq: event.seq,
+          sessionEventSeq: event.seq,
         })
         expect(host.maintenanceCalls).toBe(0)
         expect(host.nextTurn).toHaveLength(0)
@@ -1228,29 +1230,33 @@ describe('GoalBar exact-Session Driver bridge', () => {
     const watches = coordinator.openWatchService()
     const controller = new AbortController()
     let settled = false
-    const pending = watches.waitForTurnEnd(first.agent.session, 3, {
+    const pending = watches.waitForSessionChange(first.agent.session, 3, {
       signal: controller.signal,
       timeoutMs: 1_000,
+      observedAgentStatus: first.agent.status,
+      getAgentStatus: () => first.agent.status,
       isSessionCurrent: () => true,
     }).then(receipt => {
       settled = true
       return receipt
     })
 
-    coordinator.publishTurnEnd(replacement.agent.session, turnEndEvent(9))
+    coordinator.publishSessionCandidate(replacement.agent.session, turnEndEvent(9))
     await Promise.resolve()
     expect(settled).toBe(false)
 
-    coordinator.publishTurnEnd(first.agent.session, turnEndEvent(7))
+    coordinator.publishSessionCandidate(first.agent.session, turnEndEvent(7))
     await expect(pending).resolves.toEqual({
-      kind: 'changed',
+      kind: 'candidate',
       sessionId,
-      turnEndSeq: 7,
+      sessionEventSeq: 7,
     })
 
-    const disposed = watches.waitForTurnEnd(first.agent.session, 7, {
+    const disposed = watches.waitForSessionChange(first.agent.session, 7, {
       signal: controller.signal,
       timeoutMs: 1_000,
+      observedAgentStatus: first.agent.status,
+      getAgentStatus: () => first.agent.status,
       isSessionCurrent: () => true,
     })
     watches.dispose()
@@ -1263,24 +1269,30 @@ describe('GoalBar exact-Session Driver bridge', () => {
     const watches = coordinator.openWatchService()
     const controller = new AbortController()
 
-    await expect(watches.waitForTurnEnd(host.agent.session, 11, {
+    await expect(watches.waitForSessionChange(host.agent.session, 11, {
       signal: controller.signal,
       timeoutMs: 0,
+      observedAgentStatus: host.agent.status,
+      getAgentStatus: () => host.agent.status,
       isSessionCurrent: () => true,
-    })).resolves.toEqual({ kind: 'timeout', turnEndSeq: 11 })
+    })).resolves.toEqual({ kind: 'timeout', sessionEventSeq: 11 })
 
-    const unavailable = watches.waitForTurnEnd(host.agent.session, null, {
+    const unavailable = watches.waitForSessionChange(host.agent.session, null, {
       signal: controller.signal,
       timeoutMs: 1_000,
+      observedAgentStatus: host.agent.status,
+      getAgentStatus: () => host.agent.status,
       isSessionCurrent: () => true,
     })
     coordinator.invalidateSession(host.agent.session)
     await expect(unavailable).resolves.toEqual({ kind: 'session_unavailable' })
 
     const abortController = new AbortController()
-    const aborted = watches.waitForTurnEnd(host.agent.session, null, {
+    const aborted = watches.waitForSessionChange(host.agent.session, null, {
       signal: abortController.signal,
       timeoutMs: 1_000,
+      observedAgentStatus: host.agent.status,
+      getAgentStatus: () => host.agent.status,
       isSessionCurrent: () => true,
     })
     abortController.abort()

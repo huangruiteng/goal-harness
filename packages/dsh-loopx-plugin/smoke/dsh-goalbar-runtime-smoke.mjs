@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { request as httpRequest } from 'node:http'
 import {
   chmod,
+  mkdir,
   mkdtemp,
   readFile,
   realpath,
@@ -25,7 +26,7 @@ const dshBin = process.env.DSH_BIN || join(packageRoot, 'node_modules', '.bin', 
 const sessionId = 'runtime-session'
 const goalId = 'runtime-goal'
 const loopxAgentId = 'runtime-agent'
-const requestVersion = 'loopx_goalbar_request_v1'
+const requestVersion = 'loopx_goalbar_request_v2'
 const approvedRequires = new Set([
   'react',
   'react/jsx-runtime',
@@ -226,8 +227,14 @@ function executionPayload(target) {
   }
 }
 
-function latestTurnEnd(session) {
-  return [...session.events].reverse().find(event => event.type === 'turn/end')?.seq ?? null
+function latestSessionEventSeq(session) {
+  return [...session.events].reverse().find(event => Number.isSafeInteger(event.seq))?.seq ?? null
+}
+
+function latestCandidateSeq(session) {
+  return [...session.events].reverse().find(
+    event => event.type === 'step/end' || event.type === 'turn/end',
+  )?.seq ?? null
 }
 
 function coordinatorHarness() {
@@ -239,10 +246,20 @@ function coordinatorHarness() {
     openWatchService() {
       let disposed = false
       return {
-        waitForTurnEnd(session, afterTurnEndSeq, options) {
-          const latest = latestTurnEnd(session)
-          if (latest !== null && (afterTurnEndSeq === null || latest > afterTurnEndSeq)) {
-            return Promise.resolve({ kind: 'changed', sessionId: String(session.id), turnEndSeq: latest })
+        waitForSessionChange(session, afterSessionEventSeq, options) {
+          const latest = latestCandidateSeq(session)
+          if (latest !== null
+            && (afterSessionEventSeq === null || latest > afterSessionEventSeq)) {
+            return Promise.resolve({
+              kind: 'candidate', sessionId: String(session.id), sessionEventSeq: latest,
+            })
+          }
+          if (options.getAgentStatus() !== options.observedAgentStatus) {
+            return Promise.resolve({
+              kind: 'runtime_changed',
+              sessionId: String(session.id),
+              agentStatus: options.getAgentStatus(),
+            })
           }
           return new Promise(resolve => {
             let settled = false
@@ -260,10 +277,13 @@ function coordinatorHarness() {
             }
             const timer = setTimeout(() => finish(
               options.isSessionCurrent()
-                ? { kind: 'timeout', turnEndSeq: afterTurnEndSeq }
+                ? {
+                    kind: 'timeout',
+                    sessionEventSeq: latestSessionEventSeq(session) ?? afterSessionEventSeq,
+                  }
                 : { kind: 'session_unavailable' },
             ), options.timeoutMs)
-            const waiter = { session, afterTurnEndSeq, finish, options }
+            const waiter = { session, afterSessionEventSeq, finish, options }
             waiters.add(waiter)
             options.signal.addEventListener('abort', aborted, { once: true })
             if (disposed) finish({ kind: 'service_disposed' })
@@ -276,18 +296,29 @@ function coordinatorHarness() {
         },
       }
     },
-    publish(session, seq) {
-      session.events.push({
-        type: 'turn/end',
+    publishCandidate(session, type, seq) {
+      const event = {
+        type,
         seq,
         time: 1,
-        data: { turn: 0, reason: { kind: 'completed' } },
-      })
+        data: type === 'step/end'
+          ? { turn: 0, step: 0 }
+          : { turn: 0, reason: { kind: 'completed' } },
+      }
+      session.events.push(event)
       for (const waiter of [...waiters]) {
         if (waiter.session !== session
-          || (waiter.afterTurnEndSeq !== null && seq <= waiter.afterTurnEndSeq)) continue
+          || (waiter.afterSessionEventSeq !== null && seq <= waiter.afterSessionEventSeq)) continue
         waiter.finish(waiter.options.isSessionCurrent()
-          ? { kind: 'changed', sessionId: String(session.id), turnEndSeq: seq }
+          ? { kind: 'candidate', sessionId: String(session.id), sessionEventSeq: seq }
+          : { kind: 'session_unavailable' })
+      }
+    },
+    publishAgentStatus(session, agentStatus) {
+      for (const waiter of [...waiters]) {
+        if (waiter.session !== session || waiter.options.observedAgentStatus === agentStatus) continue
+        waiter.finish(waiter.options.isSessionCurrent()
+          ? { kind: 'runtime_changed', sessionId: String(session.id), agentStatus }
           : { kind: 'session_unavailable' })
       }
     },
@@ -351,7 +382,7 @@ async function exercisePackedService(installed) {
   let currentAgent = agent
   let binding = 'bound'
   let activation = 'stopped'
-  let progress = { processed: 3, remaining: 2, total: 5 }
+  const progress = { processed: 3, remaining: 2, total: 5 }
   let replaceAfterBinding = false
   const calls = []
   const coordinator = coordinatorHarness()
@@ -381,7 +412,7 @@ async function exercisePackedService(installed) {
     command: { file: 'loopx', prefix: [], skillCommand: 'loopx', version: 'loopx smoke' },
     runner,
     retryDelaysMs: [0, 0],
-    watchTimeoutMs: 30_000,
+    watchTimeoutMs: 50,
   })
   const connection = await openPackedConnection(installed, host, service)
   const call = async (endpoint, payload, signal) => {
@@ -400,24 +431,118 @@ async function exercisePackedService(installed) {
   assert.equal(calls.length, 0, 'idle service construction invoked LoopX')
   binding = 'missing'
   let beforeRead = calls.length
-  assert.deepEqual(await read(), {
-    kind: 'hidden', reason: 'binding_missing', baseTurnEndSeq: null,
-  })
+  const hidden = await read()
+  assert.equal(hidden.kind, 'hidden')
+  assert.equal(hidden.reason, 'binding_missing')
+  assert.equal(hidden.baseSessionEventSeq, null)
+  assert.match(hidden.sourceRevision, /^sha256:[0-9a-f]{64}$/u)
   assert.equal(calls.length, beforeRead + 1, 'missing binding triggered downstream reads')
+
+  const hiddenRuntimeCalls = calls.length
+  const hiddenRuntime = await call('goalbar/watch', {
+    v: requestVersion,
+    op: 'watch',
+    sessionId,
+    afterSessionEventSeq: hidden.baseSessionEventSeq,
+    sourceRevision: hidden.sourceRevision,
+    expected: null,
+    agentStatus: null,
+  })
+  assert.deepEqual(hiddenRuntime.value.result, {
+    kind: 'runtime_changed', sessionEventSeq: null, agentStatus: 'idle',
+  })
+  assert.equal(calls.length, hiddenRuntimeCalls, 'hidden runtime update invoked LoopX')
+
+  const midTurnWatch = call('goalbar/watch', {
+    v: requestVersion,
+    op: 'watch',
+    sessionId,
+    afterSessionEventSeq: hidden.baseSessionEventSeq,
+    sourceRevision: hidden.sourceRevision,
+    expected: null,
+    agentStatus: 'idle',
+  })
+  await waitUntil(
+    () => coordinator.counts().waiters === 1,
+    'real Connection mid-turn watch never became pending',
+  )
+  await mkdir(join(installed, '.loopx'), { recursive: true })
+  await writeFile(join(installed, '.loopx', 'registry.json'), '{"goals":["runtime-goal"]}')
+  binding = 'bound'
+  coordinator.publishCandidate(session, 'step/end', 7)
+  assert.deepEqual((await midTurnWatch).value.result, {
+    kind: 'source_changed', sessionEventSeq: 7,
+  })
+  assert.equal(calls.length, hiddenRuntimeCalls, 'mid-turn source watch invoked LoopX')
+
+  const present = await read()
+  assert.equal(present.kind, 'present')
+  assert.equal(present.baseSessionEventSeq, 7)
+  assert.deepEqual(present.snapshot.progress, progress)
+  assert(!JSON.stringify(present).includes('sentinel-must-not-cross-wire'))
+
+  const runtimeCalls = calls.length
+  const runtimeWatch = call('goalbar/watch', {
+    v: requestVersion,
+    op: 'watch',
+    sessionId,
+    afterSessionEventSeq: present.baseSessionEventSeq,
+    sourceRevision: present.sourceRevision,
+    expected: { goalId, loopxAgentId },
+    agentStatus: 'idle',
+  })
+  await waitUntil(
+    () => coordinator.counts().waiters === 1,
+    'real Connection runtime-only watch never became pending',
+  )
+  status = 'running'
+  coordinator.publishAgentStatus(session, status)
+  assert.deepEqual((await runtimeWatch).value.result, {
+    kind: 'runtime_changed', sessionEventSeq: 7, agentStatus: 'running',
+  })
+  assert.equal(calls.length, runtimeCalls, 'runtime-only watch invoked LoopX')
+
+  const externalCalls = calls.length
+  const externalWatch = call('goalbar/watch', {
+    v: requestVersion,
+    op: 'watch',
+    sessionId,
+    afterSessionEventSeq: present.baseSessionEventSeq,
+    sourceRevision: present.sourceRevision,
+    expected: { goalId, loopxAgentId },
+    agentStatus: 'running',
+  })
+  await mkdir(join(installed, '.codex', 'goals', goalId), { recursive: true })
+  await writeFile(
+    join(installed, '.codex', 'goals', goalId, 'ACTIVE_GOAL_STATE.md'),
+    'runtime smoke state revision\n',
+  )
+  assert.deepEqual((await externalWatch).value.result, {
+    kind: 'source_changed', sessionEventSeq: 7,
+  })
+  assert.equal(calls.length, externalCalls, 'lease revision reconciliation invoked LoopX')
+
   binding = 'ambiguous'
   beforeRead = calls.length
   assert.equal((await read()).reason, 'binding_ambiguous')
   assert.equal(calls.length, beforeRead + 1, 'ambiguous binding triggered downstream reads')
   binding = 'bound'
-  const present = await read()
-  assert.deepEqual(present.snapshot.progress, progress)
-  assert(!JSON.stringify(present).includes('sentinel-must-not-cross-wire'))
+  const current = await read()
+  assert.deepEqual(current.snapshot.progress, progress)
 
   const abortedBefore = coordinator.abortedWaits()
   const cancelledWatch = disconnectableRpc(
     connection.baseUrl,
     'goalbar/watch',
-    { v: requestVersion, op: 'watch', sessionId, afterTurnEndSeq: null },
+    {
+      v: requestVersion,
+      op: 'watch',
+      sessionId,
+      afterSessionEventSeq: current.baseSessionEventSeq,
+      sourceRevision: current.sourceRevision,
+      expected: { goalId, loopxAgentId },
+      agentStatus: 'running',
+    },
   )
   const disconnected = cancelledWatch.completion.then(
     () => { throw new Error('disconnected real Connection watch unexpectedly completed') },
@@ -443,21 +568,8 @@ async function exercisePackedService(installed) {
     'real Connection cancellation retained the Host waiter',
   )
 
-  const changedWatch = call('goalbar/watch', {
-    v: requestVersion, op: 'watch', sessionId, afterTurnEndSeq: null,
-  })
-  await waitUntil(
-    () => coordinator.counts().waiters === 1,
-    'real Connection changed-watch never became pending',
-  )
-  progress = { processed: 4, remaining: 1, total: 5 }
-  coordinator.publish(session, 7)
-  assert.deepEqual((await changedWatch).value.result, { kind: 'changed', turnEndSeq: 7 })
-  const refreshed = await read()
-  assert.equal(refreshed.baseTurnEndSeq, 7)
-  assert.deepEqual(refreshed.snapshot.progress, progress)
-
   const expected = { goalId, loopxAgentId }
+  status = 'idle'
   const started = await call('goalbar/start', {
     v: requestVersion, op: 'start', sessionId, expected,
   })
@@ -476,7 +588,10 @@ async function exercisePackedService(installed) {
   status = 'idle'
   replaceAfterBinding = true
   const replaced = await read()
-  assert.deepEqual(replaced, { kind: 'fault', code: 'session_unavailable', baseTurnEndSeq: 7 })
+  assert.equal(replaced.kind, 'fault')
+  assert.equal(replaced.code, 'session_unavailable')
+  assert.equal(replaced.baseSessionEventSeq, 7)
+  assert.match(replaced.sourceRevision, /^sha256:[0-9a-f]{64}$/u)
   replaceAfterBinding = false
   currentAgent = agent
   await connection.disposeRpc()
@@ -737,9 +852,11 @@ async function exerciseRealDshWeb(home, env, cliLog) {
     const read = await rpc(baseUrl, 'goalbar/read', {
       v: requestVersion, op: 'read', sessionId: 'runtime-no-agent',
     })
-    assert.deepEqual(read.body.result.value.result, {
-      kind: 'fault', code: 'session_unavailable', baseTurnEndSeq: null,
-    })
+    const unavailable = read.body.result.value.result
+    assert.equal(unavailable.kind, 'fault')
+    assert.equal(unavailable.code, 'session_unavailable')
+    assert.equal(unavailable.baseSessionEventSeq, null)
+    assert.match(unavailable.sourceRevision, /^sha256:[0-9a-f]{64}$/u)
 
     const rejected = await rpc(baseUrl, 'goalbar/read', {
       v: requestVersion, op: 'read', sessionId: 'runtime-no-agent',
@@ -804,7 +921,7 @@ async function main() {
   process.stdout.write([
     'dsh-loopx GoalBar runtime smoke passed',
     '  real-profile: packed install, boot graph, served/materialized Client, /loopx registration, loopback fence, process teardown, idle no-CLI',
-    '  packed-rc7-connection: live missing/exact/ambiguous, pending-watch abort, turn-end refresh, successful Start/Pause, handler disposal',
+    '  packed-rc7-connection: live mid-turn binding, lease revision reconciliation, runtime-only update, pending-watch abort, successful Start/Pause, handler disposal',
     '  client-lifecycle: slot coexistence/session injection plus ordinary-unload and cached-reapply CSS cleanup',
     '  manual-evidence: mounted Client-to-carrier Start/Pause stays in the owner-reviewed packed-browser gate',
   ].join('\n') + '\n')

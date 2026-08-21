@@ -18,20 +18,27 @@ import type {
   GoalBarRequestV1,
   GoalBarResponseV1,
 } from '../src/goalbar/protocol.ts'
+import { unavailableGoalBarSourceRevision } from '../src/goalbar/read-model.ts'
 import type { GoalBarServiceHandle } from '../src/goalbar/service.ts'
 
 const sessionId = 'session-fixture'
+const sourceRevision = `sha256:${'0'.repeat(64)}`
 
 function readRequest(): Extract<GoalBarRequestV1, { readonly op: 'read' }> {
-  return { v: 'loopx_goalbar_request_v1', op: 'read', sessionId }
+  return { v: 'loopx_goalbar_request_v2', op: 'read', sessionId }
 }
 
 function readResponse(): Extract<GoalBarResponseV1, { readonly op: 'read' }> {
   return {
-    v: 'loopx_goalbar_response_v1',
+    v: 'loopx_goalbar_response_v2',
     op: 'read',
     sessionId,
-    result: { kind: 'hidden', reason: 'binding_missing', baseTurnEndSeq: null },
+    result: {
+      kind: 'hidden',
+      reason: 'binding_missing',
+      baseSessionEventSeq: null,
+      sourceRevision,
+    },
   }
 }
 
@@ -126,7 +133,7 @@ describe('GoalBar Connection carrier', () => {
     expect(serviceCalls).toBe(0)
   })
 
-  it('contains Host exceptions inside a valid V1 business response', async () => {
+  it('contains Host exceptions inside a valid V2 business response', async () => {
     const privateError = [
       '/workspace/project',
       'raw stdout',
@@ -147,13 +154,14 @@ describe('GoalBar Connection carrier', () => {
     expect(result).toEqual({
       ok: true,
       value: {
-        v: 'loopx_goalbar_response_v1',
+        v: 'loopx_goalbar_response_v2',
         op: 'read',
         sessionId,
         result: {
           kind: 'fault',
           code: 'protocol_mismatch',
-          baseTurnEndSeq: null,
+          baseSessionEventSeq: null,
+          sourceRevision: unavailableGoalBarSourceRevision(),
         },
       },
     })
@@ -173,7 +181,7 @@ describe('GoalBar Connection carrier', () => {
           else signal.addEventListener('abort', () => { resolve() }, { once: true })
         })
         return {
-          v: 'loopx_goalbar_response_v1',
+          v: 'loopx_goalbar_response_v2',
           op: request.op,
           sessionId: request.sessionId,
           result: { kind: 'fault', code: 'session_unavailable' },
@@ -185,10 +193,13 @@ describe('GoalBar Connection carrier', () => {
     const call = handler(
       'goalbar/watch',
       {
-        v: 'loopx_goalbar_request_v1',
+        v: 'loopx_goalbar_request_v2',
         op: 'watch',
         sessionId,
-        afterTurnEndSeq: null,
+        afterSessionEventSeq: null,
+        sourceRevision,
+        expected: null,
+        agentStatus: 'idle',
       },
       controller.signal,
     )
@@ -234,10 +245,13 @@ describe('package-root GoalBar Host', () => {
     const call = capture.calls[0]?.handler(
       'goalbar/watch',
       {
-        v: 'loopx_goalbar_request_v1',
+        v: 'loopx_goalbar_request_v2',
         op: 'watch',
         sessionId,
-        afterTurnEndSeq: null,
+        afterSessionEventSeq: null,
+        sourceRevision,
+        expected: null,
+        agentStatus: 'idle',
       },
       controller.signal,
     )

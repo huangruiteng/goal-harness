@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -38,6 +41,10 @@ function turnEnd(seq: number): SessionEvent<'turn/end'> {
   }
 }
 
+function stepEnd(seq: number): SessionEvent<'step/end'> {
+  return { type: 'step/end', seq, time: 1, data: {} } as SessionEvent<'step/end'>
+}
+
 interface AgentFixture {
   readonly agent: Agent
   readonly events: SessionEvent[]
@@ -48,12 +55,13 @@ function agentFixture(
   id = sessionId,
   initialStatus: 'idle' | 'running' = 'idle',
   eventSource?: (() => SessionEvent[]) | undefined,
+  cwd = '/fixture/project',
 ): AgentFixture {
   const events: SessionEvent[] = []
   let status = initialStatus
   const session = {
     id,
-    header: { version: 0, id, createdAt: 1, cwd: '/fixture/project' },
+    header: { version: 0, id, createdAt: 1, cwd },
     get events() { return eventSource?.() ?? events },
     surface: { nodes: [] },
   }
@@ -243,11 +251,13 @@ function harness(options: {
   readonly watchTimeoutMs?: number
   readonly eventSource?: () => SessionEvent[]
   readonly driver?: 'applied' | 'unavailable' | 'none'
+  readonly cwd?: string
 } = {}): Harness {
   const host = agentFixture(
     sessionId,
     options.status ?? 'idle',
     options.eventSource,
+    options.cwd,
   )
   const coordinator = new GoalBarCoordinator()
   const calls: string[][] = []
@@ -339,17 +349,26 @@ function harness(options: {
 }
 
 function readRequest(): Extract<GoalBarRequestV1, { readonly op: 'read' }> {
-  return { v: 'loopx_goalbar_request_v1', op: 'read', sessionId }
+  return { v: 'loopx_goalbar_request_v2', op: 'read', sessionId }
 }
 
 function watchRequest(
-  afterTurnEndSeq: number | null,
+  afterSessionEventSeq: number | null,
+  options: {
+    readonly sourceRevision?: string
+    readonly expected?: { readonly goalId: string; readonly loopxAgentId: string } | null
+    readonly agentStatus?: 'idle' | 'running' | null
+  } = {},
 ): Extract<GoalBarRequestV1, { readonly op: 'watch' }> {
   return {
-    v: 'loopx_goalbar_request_v1',
+    v: 'loopx_goalbar_request_v2',
     op: 'watch',
     sessionId,
-    afterTurnEndSeq,
+    afterSessionEventSeq,
+    sourceRevision: options.sourceRevision
+      ?? 'sha256:04284a0332528476ac54e743cb76d5c0731985225b77926e7f6a32941db96c42',
+    expected: options.expected ?? null,
+    agentStatus: options.agentStatus ?? 'idle',
   }
 }
 
@@ -357,7 +376,7 @@ function actionRequest(
   op: 'start' | 'pause',
 ): Extract<GoalBarRequestV1, { readonly op: 'start' | 'pause' }> {
   return {
-    v: 'loopx_goalbar_request_v1',
+    v: 'loopx_goalbar_request_v2',
     op,
     sessionId,
     expected: { goalId, loopxAgentId },
@@ -411,15 +430,15 @@ describe('GoalBar Host read/watch', () => {
 
     expect(response.result).toMatchObject({
       kind: 'present',
-      baseTurnEndSeq: 3,
+      baseSessionEventSeq: 3,
       snapshot: { progress: { processed: 3, remaining: 2, total: 5 } },
     })
     const callsBeforeWatch = fixture.calls.length
     const watched = await fixture.service.handle(
-      watchRequest(3),
+      watchRequest(3, { sourceRevision: `sha256:${'0'.repeat(64)}` }),
       new AbortController().signal,
     )
-    expect(watched.result).toEqual({ kind: 'changed', turnEndSeq: 4 })
+    expect(watched.result).toEqual({ kind: 'source_changed', sessionEventSeq: 4 })
     expect(fixture.calls).toHaveLength(callsBeforeWatch)
     await fixture.service.dispose()
   })
@@ -436,7 +455,8 @@ describe('GoalBar Host read/watch', () => {
     expect(response.result).toEqual({
       kind: 'fault',
       code: 'session_unavailable',
-      baseTurnEndSeq: null,
+      baseSessionEventSeq: null,
+      sourceRevision: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
     })
     await fixture.service.dispose()
   })
@@ -451,7 +471,8 @@ describe('GoalBar Host read/watch', () => {
     expect(response.result).toEqual({
       kind: 'hidden',
       reason: 'binding_ambiguous',
-      baseTurnEndSeq: null,
+      baseSessionEventSeq: null,
+      sourceRevision: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
     })
     expect(fixture.calls).toHaveLength(1)
     expect(fixture.warnings).toEqual([
@@ -465,38 +486,40 @@ describe('GoalBar Host read/watch', () => {
     const raceFixture = harness({
       eventSource: () => {
         eventReads += 1
-        return eventReads === 1 ? [] : [turnEnd(8)]
+        return eventReads === 1 ? [turnEnd(7)] : [turnEnd(7), turnEnd(8)]
       },
     })
     const raced = await raceFixture.service.handle(
-      watchRequest(7),
+      watchRequest(7, { sourceRevision: `sha256:${'0'.repeat(64)}` }),
       new AbortController().signal,
     )
-    expect(raced.result).toEqual({ kind: 'changed', turnEndSeq: 8 })
+    expect(raced.result).toEqual({ kind: 'source_changed', sessionEventSeq: 8 })
     expect(raceFixture.calls).toHaveLength(0)
     await raceFixture.service.dispose()
 
     const fixture = harness()
-    const first = fixture.service.handle(watchRequest(null), new AbortController().signal)
-    const second = fixture.service.handle(watchRequest(null), new AbortController().signal)
+    const changedRequest = watchRequest(null, { sourceRevision: `sha256:${'0'.repeat(64)}` })
+    const first = fixture.service.handle(changedRequest, new AbortController().signal)
+    const second = fixture.service.handle(changedRequest, new AbortController().signal)
     await Promise.resolve()
     fixture.host.events.push(turnEnd(2))
-    fixture.coordinator.publishTurnEnd(
+    fixture.coordinator.publishSessionCandidate(
       fixture.host.agent.session,
       turnEnd(2),
     )
-    expect((await first).result).toEqual({ kind: 'changed', turnEndSeq: 2 })
-    expect((await second).result).toEqual({ kind: 'changed', turnEndSeq: 2 })
+    expect((await first).result).toEqual({ kind: 'source_changed', sessionEventSeq: 2 })
+    expect((await second).result).toEqual({ kind: 'source_changed', sessionEventSeq: 2 })
     expect(fixture.calls).toHaveLength(0)
     await fixture.service.dispose()
   })
 
   it('returns bounded timeout and contains abort, replacement, and disposal', async () => {
     const timeoutFixture = harness({ watchTimeoutMs: 2 })
+    timeoutFixture.host.events.push(turnEnd(4))
     expect((await timeoutFixture.service.handle(
       watchRequest(4),
       new AbortController().signal,
-    )).result).toEqual({ kind: 'timeout', turnEndSeq: 4 })
+    )).result).toEqual({ kind: 'timeout', sessionEventSeq: 4 })
     await timeoutFixture.service.dispose()
 
     const abortFixture = harness()
@@ -536,7 +559,143 @@ describe('GoalBar Host read/watch', () => {
   it('publishes with no waiter as a zero-CLI no-op', async () => {
     const fixture = harness()
     fixture.host.events.push(turnEnd(1))
-    fixture.coordinator.publishTurnEnd(fixture.host.agent.session, turnEnd(1))
+    fixture.coordinator.publishSessionCandidate(fixture.host.agent.session, turnEnd(1))
+    expect(fixture.calls).toHaveLength(0)
+    await fixture.service.dispose()
+  })
+
+  it('absorbs unchanged candidates and publishes status without a CLI read', async () => {
+    const fixture = harness({ watchTimeoutMs: 5 })
+    const unchanged = fixture.service.handle(
+      watchRequest(null),
+      new AbortController().signal,
+    )
+    await Promise.resolve()
+    fixture.host.events.push(turnEnd(1))
+    fixture.coordinator.publishSessionCandidate(fixture.host.agent.session, turnEnd(1))
+    expect((await unchanged).result).toEqual({ kind: 'timeout', sessionEventSeq: 1 })
+    expect(fixture.calls).toHaveLength(0)
+
+    const runtime = fixture.service.handle(
+      watchRequest(1),
+      new AbortController().signal,
+    )
+    await Promise.resolve()
+    fixture.host.setStatus('running')
+    fixture.coordinator.publishAgentStatus(fixture.host.agent.session, 'running')
+    expect((await runtime).result).toEqual({
+      kind: 'runtime_changed',
+      sessionEventSeq: 1,
+      agentStatus: 'running',
+    })
+    expect(fixture.calls).toHaveLength(0)
+    await fixture.service.dispose()
+  })
+
+  it('detects mid-turn and lease-time authoritative file changes without CLI reads', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'loopx-goalbar-service-'))
+    await mkdir(join(cwd, '.loopx'), { recursive: true })
+    const fixture = harness({ cwd, watchTimeoutMs: 50 })
+    fixture.bindingMode = 'missing'
+    try {
+      const initial = await fixture.service.handle(readRequest(), new AbortController().signal)
+      if (initial.result.kind !== 'hidden') throw new Error('expected hidden fixture')
+      const callsAfterRead = fixture.calls.length
+      const watching = fixture.service.handle(watchRequest(
+        initial.result.baseSessionEventSeq,
+        {
+          sourceRevision: initial.result.sourceRevision,
+          agentStatus: 'idle',
+        },
+      ), new AbortController().signal)
+      await Promise.resolve()
+      await writeFile(join(cwd, '.loopx', 'registry.json'), '{"goals":[]}', 'utf8')
+      fixture.host.events.push(stepEnd(1))
+      fixture.host.setStatus('running')
+      fixture.coordinator.publishAgentStatus(fixture.host.agent.session, 'running')
+      expect((await watching).result).toEqual({
+        kind: 'source_changed', sessionEventSeq: 1,
+      })
+      expect(fixture.calls).toHaveLength(callsAfterRead)
+
+      fixture.host.setStatus('idle')
+      const current = await fixture.service.handle(readRequest(), new AbortController().signal)
+      if (current.result.kind !== 'hidden') throw new Error('expected hidden fixture')
+      const callsBeforeTurn = fixture.calls.length
+      const dedupedTurn = fixture.service.handle(watchRequest(
+        current.result.baseSessionEventSeq,
+        { sourceRevision: current.result.sourceRevision, agentStatus: 'idle' },
+      ), new AbortController().signal)
+      await Promise.resolve()
+      fixture.host.events.push(turnEnd(2))
+      fixture.coordinator.publishSessionCandidate(fixture.host.agent.session, turnEnd(2))
+      expect((await dedupedTurn).result).toEqual({
+        kind: 'timeout', sessionEventSeq: 2,
+      })
+      expect(fixture.calls).toHaveLength(callsBeforeTurn)
+
+      const leaseAnchor = await fixture.service.handle(readRequest(), new AbortController().signal)
+      if (leaseAnchor.result.kind !== 'hidden') throw new Error('expected hidden fixture')
+      const callsBeforeLease = fixture.calls.length
+      const lease = fixture.service.handle(watchRequest(
+        leaseAnchor.result.baseSessionEventSeq,
+        { sourceRevision: leaseAnchor.result.sourceRevision, agentStatus: 'idle' },
+      ), new AbortController().signal)
+      await writeFile(join(cwd, '.loopx', 'registry.json'), '{"goals":[1]}', 'utf8')
+      expect((await lease).result).toEqual({
+        kind: 'source_changed', sessionEventSeq: 2,
+      })
+      expect(fixture.calls).toHaveLength(callsBeforeLease)
+    } finally {
+      await fixture.service.dispose()
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('retries a read when the active state is atomically replaced during CLI reads', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'loopx-goalbar-stable-read-'))
+    const stateDir = join(cwd, '.codex', 'goals', goalId)
+    await mkdir(join(cwd, '.loopx'), { recursive: true })
+    await mkdir(stateDir, { recursive: true })
+    await writeFile(join(cwd, '.loopx', 'registry.json'), '{"goals":[]}', 'utf8')
+    const statePath = join(stateDir, 'ACTIVE_GOAL_STATE.md')
+    await writeFile(statePath, 'state=one', 'utf8')
+    const fixture = harness({ cwd })
+    let replacements = 0
+    fixture.onActivation = async () => {
+      if (replacements > 0) return
+      replacements += 1
+      const replacement = join(stateDir, 'ACTIVE_GOAL_STATE.md.next')
+      await writeFile(replacement, 'state=two', 'utf8')
+      await rename(replacement, statePath)
+    }
+    try {
+      const result = await fixture.service.handle(readRequest(), new AbortController().signal)
+      expect(result.result.kind).toBe('present')
+      expect(fixture.calls.filter(args => args.includes('resolve-agent-thread')))
+        .toHaveLength(2)
+      if (result.result.kind !== 'present') throw new Error('expected present fixture')
+      const wrongAgent = await fixture.service.handle(watchRequest(
+        result.result.baseSessionEventSeq,
+        {
+          sourceRevision: result.result.sourceRevision,
+          expected: { goalId, loopxAgentId: 'agent-other' },
+          agentStatus: 'idle',
+        },
+      ), new AbortController().signal)
+      expect(wrongAgent.result.kind).toBe('source_changed')
+    } finally {
+      await fixture.service.dispose()
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('fails closed when a watch cursor is beyond the exact Session log', async () => {
+    const fixture = harness()
+    expect((await fixture.service.handle(
+      watchRequest(1),
+      new AbortController().signal,
+    )).result).toEqual({ kind: 'fault', code: 'session_unavailable' })
     expect(fixture.calls).toHaveLength(0)
     await fixture.service.dispose()
   })

@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { LoopXCliError } from '../src/cli.ts'
 import type { FileResult, FileRunner, LoopXCommand } from '../src/cli.ts'
@@ -5,13 +8,76 @@ import {
   decodeAgentLaneTodoProgressV0,
   decodeGoalActivationPreviewV1,
   decodeThreadAgentBindingResolutionV0,
+  computeGoalBarSourceRevision,
   readGoalBarModel,
+  readStableGoalBarModel,
 } from '../src/goalbar/read-model.ts'
 
 const sessionId = 'dsh-session-1'
 const goalId = 'goal-one'
 const loopxAgentId = 'codex-main-control'
 const hostilePath = ['', 'sensitive-host', 'project'].join('/')
+
+describe('GoalBar source revision', () => {
+  it('covers existence, equal-size replacement, and the bound active state', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'loopx-goalbar-revision-'))
+    try {
+      const registryDir = join(cwd, '.loopx')
+      const stateDir = join(cwd, '.codex', 'goals', goalId)
+      await mkdir(registryDir, { recursive: true })
+      await mkdir(stateDir, { recursive: true })
+      const registry = join(registryDir, 'registry.json')
+      const state = join(stateDir, 'ACTIVE_GOAL_STATE.md')
+
+      const missing = await computeGoalBarSourceRevision({ cwd })
+      await writeFile(registry, '{"goals":[]}', 'utf8')
+      const registryPresent = await computeGoalBarSourceRevision({ cwd })
+      const exactBinding = { goalId, loopxAgentId }
+      const boundMissing = await computeGoalBarSourceRevision({ cwd, ...exactBinding })
+      await writeFile(state, 'state=one', 'utf8')
+      const first = await computeGoalBarSourceRevision({ cwd, ...exactBinding })
+      await writeFile(state, 'state=two', 'utf8')
+      const equalSizeReplacement = await computeGoalBarSourceRevision({ cwd, ...exactBinding })
+
+      expect(new Set([missing, registryPresent, boundMissing, first, equalSizeReplacement]).size)
+        .toBe(5)
+      expect(equalSizeReplacement).toMatch(/^sha256:[0-9a-f]{64}$/u)
+      expect(await computeGoalBarSourceRevision({
+        cwd,
+        goalId,
+        loopxAgentId: 'codex-side-control',
+      })).not.toBe(equalSizeReplacement)
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects unsafe goal path segments and non-normalized cwd values', async () => {
+    await expect(computeGoalBarSourceRevision({
+      cwd: '/fixture/project',
+      goalId: '../outside',
+    })).rejects.toThrow('safe path segment')
+    await expect(computeGoalBarSourceRevision({ cwd: 'relative/project' }))
+      .rejects.toThrow('absolute and normalized')
+  })
+
+  it('rejects an authoritative source symlink that resolves outside the project', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'loopx-goalbar-symlink-'))
+    const outside = await mkdtemp(join(tmpdir(), 'loopx-goalbar-outside-'))
+    try {
+      await mkdir(join(cwd, '.loopx'), { recursive: true })
+      const outsideRegistry = join(outside, 'registry.json')
+      await writeFile(outsideRegistry, '{}', 'utf8')
+      await symlink(outsideRegistry, join(cwd, '.loopx', 'registry.json'))
+      await expect(computeGoalBarSourceRevision({ cwd }))
+        .rejects.toThrow('outside project cwd')
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+})
+
 const command: LoopXCommand = {
   file: 'loopx',
   prefix: [],
@@ -475,5 +541,45 @@ describe('GoalBar read orchestration', () => {
       agentStatus: 'idle',
     })).resolves.toEqual({ kind: 'fault', code: 'protocol_mismatch' })
     expect(calls).toBe(0)
+  })
+})
+
+describe('GoalBar stable observation guards', () => {
+  it('rebinds when registry changes after exact sourceBefore is observed', async () => {
+    const fixture = readFixture()
+    const registryA = `sha256:${'a'.repeat(64)}`
+    const mixedExact = `sha256:${'b'.repeat(64)}`
+    const registryB = `sha256:${'c'.repeat(64)}`
+    const exactB = `sha256:${'d'.repeat(64)}`
+    const revisions = [
+      registryA,
+      registryA,
+      mixedExact,
+      registryB,
+      registryB,
+      registryB,
+      exactB,
+      registryB,
+      exactB,
+    ]
+    let revisionCalls = 0
+
+    const result = await readStableGoalBarModel({
+      command,
+      cwd: '/project',
+      runner: fixture.runner,
+      sessionId,
+      agentStatus: 'idle',
+    }, async () => revisions[revisionCalls++] as string)
+
+    expect(result.model.kind).toBe('present')
+    expect(result.sourceRevision).toBe(exactB)
+    expect(fixture.calls.filter(call => call.args.includes('resolve-agent-thread')))
+      .toHaveLength(2)
+    expect(fixture.calls.filter(call => call.args.includes('goal-lifecycle')))
+      .toHaveLength(1)
+    expect(fixture.calls.filter(call => call.args.includes('todo')))
+      .toHaveLength(1)
+    expect(revisionCalls).toBe(revisions.length)
   })
 })

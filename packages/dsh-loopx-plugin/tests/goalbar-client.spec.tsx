@@ -31,8 +31,24 @@ import {
   type GoalBarRpc,
   type GoalBarRpcOutcome,
   type GoalBarStartResponseV1,
+  type GoalBarWatchAnchorV1,
   type GoalBarWatchResponseV1,
 } from '../src/client/rpc.ts'
+
+const REVISION_ONE = `sha256:${'1'.repeat(64)}`
+const REVISION_TWO = `sha256:${'2'.repeat(64)}`
+
+type ReadResultFixture = GoalBarReadResultV1 extends infer TResult
+  ? TResult extends { readonly sourceRevision: string }
+    ? Omit<TResult, 'sourceRevision'> & { readonly sourceRevision?: string }
+    : TResult
+  : never
+
+type ActionResultFixture = GoalBarActionResultV1 extends infer TResult
+  ? TResult extends { readonly sourceRevision: string }
+    ? Omit<TResult, 'sourceRevision'> & { readonly sourceRevision?: string }
+    : TResult
+  : never
 
 const roots: Array<{ root: Root; container: HTMLDivElement; mounted: boolean }> = []
 
@@ -75,7 +91,7 @@ function snapshot(
 
 function readOutcome(
   sessionId: string,
-  result: GoalBarReadResultV1,
+  result: ReadResultFixture,
 ): GoalBarRpcOutcome<GoalBarReadResponseV1> {
   return {
     ok: true,
@@ -83,7 +99,7 @@ function readOutcome(
       v: GOALBAR_RESPONSE_VERSION,
       op: 'read',
       sessionId,
-      result,
+      result: { ...result, sourceRevision: result.sourceRevision ?? REVISION_ONE },
     },
   }
 }
@@ -106,7 +122,7 @@ function watchOutcome(
 function actionOutcome<T extends 'start' | 'pause'>(
   op: T,
   sessionId: string,
-  result: GoalBarActionResultV1,
+  result: ActionResultFixture,
 ): GoalBarRpcOutcome<T extends 'start' ? GoalBarStartResponseV1 : GoalBarPauseResponseV1> {
   return {
     ok: true,
@@ -114,7 +130,9 @@ function actionOutcome<T extends 'start' | 'pause'>(
       v: GOALBAR_RESPONSE_VERSION,
       op,
       sessionId,
-      result,
+      result: 'baseSessionEventSeq' in result
+        ? { ...result, sourceRevision: result.sourceRevision ?? REVISION_TWO }
+        : result,
     },
   } as GoalBarRpcOutcome<T extends 'start'
     ? GoalBarStartResponseV1
@@ -134,7 +152,7 @@ function fakeRpc(overrides: Partial<GoalBarRpc> = {}): GoalBarRpc {
     read: overrides.read ?? ((sessionId) => Promise.resolve(readOutcome(sessionId, {
       kind: 'hidden',
       reason: 'binding_missing',
-      baseTurnEndSeq: null,
+      baseSessionEventSeq: null,
     }))),
     watch: overrides.watch ?? ((_sessionId, _cursor, signal) => abortOutcome(signal)),
     start: overrides.start ?? ((_sessionId, _expected, signal) => abortOutcome(signal)),
@@ -191,7 +209,7 @@ describe('LoopXGoalBar presentation', () => {
         read: sessionId => Promise.resolve(readOutcome(sessionId, {
           kind: 'present',
           snapshot: snapshot({ sessionId, goalId, goalActivation, agentStatus }),
-          baseTurnEndSeq: 7,
+          baseSessionEventSeq: 7,
         })),
       })
       const view = mount({ rpcSessionId: 'session-one', rpc })
@@ -214,7 +232,7 @@ describe('LoopXGoalBar presentation', () => {
           sessionId,
           progress: { processed: 0, remaining: 0, total: 0 },
         }),
-        baseTurnEndSeq: 0,
+        baseSessionEventSeq: 0,
       })),
     })
     const view = mount({ rpcSessionId: 'session-one', rpc })
@@ -232,7 +250,7 @@ describe('LoopXGoalBar presentation', () => {
         read: sessionId => Promise.resolve(readOutcome(sessionId, {
           kind: 'hidden',
           reason,
-          baseTurnEndSeq: 1,
+          baseSessionEventSeq: 1,
         })),
       })
       const view = mount({ rpcSessionId: 'session-one', rpc })
@@ -245,7 +263,7 @@ describe('LoopXGoalBar presentation', () => {
 describe('GoalBar read/watch generations', () => {
   it.each([
     ['business', readOutcome('session-one', {
-      kind: 'fault', code: 'activation_read_failed', baseTurnEndSeq: 2,
+      kind: 'fault', code: 'activation_read_failed', baseSessionEventSeq: 2,
     })],
     ['transport', { ok: false, code: 'transport_error' } as const],
     ['protocol', { ok: false, code: 'protocol_error' } as const],
@@ -264,9 +282,9 @@ describe('GoalBar read/watch generations', () => {
     expect(watches).toBe(0)
   })
 
-  it('renews a timeout without a read and reads only after changed', async () => {
+  it('renews a timeout from the same V2 anchor and reads only after source change', async () => {
     let reads = 0
-    const cursors: Array<number | null> = []
+    const anchors: GoalBarWatchAnchorV1[] = []
     const rpc = fakeRpc({
       read: sessionId => {
         reads += 1
@@ -278,19 +296,19 @@ describe('GoalBar read/watch generations', () => {
               ? { processed: 2, remaining: 3, total: 5 }
               : { processed: 3, remaining: 2, total: 5 },
           }),
-          baseTurnEndSeq: reads === 1 ? 4 : 5,
+          baseSessionEventSeq: reads === 1 ? 4 : 5,
         }))
       },
-      watch: (sessionId, cursor, signal) => {
-        cursors.push(cursor)
-        if (cursors.length === 1) {
+      watch: (sessionId, anchor, signal) => {
+        anchors.push(anchor)
+        if (anchors.length === 1) {
           return Promise.resolve(watchOutcome(sessionId, {
-            kind: 'timeout', turnEndSeq: 4,
+            kind: 'timeout', sessionEventSeq: 4,
           }))
         }
-        if (cursors.length === 2) {
+        if (anchors.length === 2) {
           return Promise.resolve(watchOutcome(sessionId, {
-            kind: 'changed', turnEndSeq: 5,
+            kind: 'source_changed', sessionEventSeq: 5,
           }))
         }
         return abortOutcome(signal)
@@ -300,8 +318,136 @@ describe('GoalBar read/watch generations', () => {
     await flush(8)
 
     expect(reads).toBe(2)
-    expect(cursors).toEqual([4, 4, 5])
+    expect(anchors).toEqual([
+      {
+        afterSessionEventSeq: 4,
+        sourceRevision: REVISION_ONE,
+        expected: { goalId: 'goal-one', loopxAgentId: 'codex-main-control' },
+        agentStatus: 'idle',
+      },
+      {
+        afterSessionEventSeq: 4,
+        sourceRevision: REVISION_ONE,
+        expected: { goalId: 'goal-one', loopxAgentId: 'codex-main-control' },
+        agentStatus: 'idle',
+      },
+      {
+        afterSessionEventSeq: 5,
+        sourceRevision: REVISION_ONE,
+        expected: { goalId: 'goal-one', loopxAgentId: 'codex-main-control' },
+        agentStatus: 'idle',
+      },
+    ])
     expect(view.container.textContent).toContain('3 / 5')
+  })
+
+  it('turns a hidden binding into a visible row after source_changed', async () => {
+    let reads = 0
+    const anchors: GoalBarWatchAnchorV1[] = []
+    const rpc = fakeRpc({
+      read: sessionId => {
+        reads += 1
+        return Promise.resolve(readOutcome(sessionId, reads === 1
+          ? {
+              kind: 'hidden',
+              reason: 'binding_missing',
+              baseSessionEventSeq: 8,
+              sourceRevision: REVISION_ONE,
+            }
+          : {
+              kind: 'present',
+              snapshot: snapshot({ sessionId }),
+              baseSessionEventSeq: 9,
+              sourceRevision: REVISION_TWO,
+            }))
+      },
+      watch: (sessionId, anchor, signal) => {
+        anchors.push(anchor)
+        return anchors.length === 1
+          ? Promise.resolve(watchOutcome(sessionId, {
+              kind: 'source_changed', sessionEventSeq: 9,
+            }))
+          : abortOutcome(signal)
+      },
+    })
+    const view = mount({ rpcSessionId: 'session-one', rpc })
+    await flush(8)
+
+    expect(reads).toBe(2)
+    expect(anchors[0]).toEqual({
+      afterSessionEventSeq: 8,
+      sourceRevision: REVISION_ONE,
+      expected: null,
+      agentStatus: null,
+    })
+    expect(anchors[1]?.sourceRevision).toBe(REVISION_TWO)
+    expect(view.container.textContent).toContain('goal-one')
+  })
+
+  it('applies runtime_changed in place without a business read', async () => {
+    let reads = 0
+    const anchors: GoalBarWatchAnchorV1[] = []
+    const rpc = fakeRpc({
+      read: sessionId => {
+        reads += 1
+        return Promise.resolve(readOutcome(sessionId, {
+          kind: 'present',
+          snapshot: snapshot({ sessionId, agentStatus: 'idle' }),
+          baseSessionEventSeq: 12,
+        }))
+      },
+      watch: (sessionId, anchor, signal) => {
+        anchors.push(anchor)
+        return anchors.length === 1
+          ? Promise.resolve(watchOutcome(sessionId, {
+              kind: 'runtime_changed',
+              sessionEventSeq: 13,
+              agentStatus: 'running',
+            }))
+          : abortOutcome(signal)
+      },
+    })
+    const view = mount({ rpcSessionId: 'session-one', rpc })
+    await flush(8)
+
+    expect(reads).toBe(1)
+    expect(anchors[1]).toMatchObject({
+      afterSessionEventSeq: 13,
+      sourceRevision: REVISION_ONE,
+      agentStatus: 'running',
+    })
+    expect(view.container.textContent).toContain('Running')
+  })
+
+  it('absorbs runtime_changed while hidden without creating a snapshot', async () => {
+    const anchors: GoalBarWatchAnchorV1[] = []
+    const rpc = fakeRpc({
+      read: sessionId => Promise.resolve(readOutcome(sessionId, {
+        kind: 'hidden',
+        reason: 'binding_missing',
+        baseSessionEventSeq: 20,
+      })),
+      watch: (sessionId, anchor, signal) => {
+        anchors.push(anchor)
+        return anchors.length === 1
+          ? Promise.resolve(watchOutcome(sessionId, {
+              kind: 'runtime_changed',
+              sessionEventSeq: 21,
+              agentStatus: 'running',
+            }))
+          : abortOutcome(signal)
+      },
+    })
+    const view = mount({ rpcSessionId: 'session-one', rpc })
+    await flush(8)
+
+    expect(view.container.innerHTML).toBe('')
+    expect(anchors[1]).toEqual({
+      afterSessionEventSeq: 21,
+      sourceRevision: REVISION_ONE,
+      expected: null,
+      agentStatus: 'running',
+    })
   })
 
   it('stops on a fault, keeps last-good stale, and resumes only on Refresh', async () => {
@@ -312,7 +458,7 @@ describe('GoalBar read/watch generations', () => {
         reads += 1
         if (reads === 2) {
           return Promise.resolve(readOutcome(sessionId, {
-            kind: 'fault', code: 'todo_read_failed', baseTurnEndSeq: 3,
+            kind: 'fault', code: 'todo_read_failed', baseSessionEventSeq: 3,
           }))
         }
         return Promise.resolve(readOutcome(sessionId, {
@@ -323,13 +469,15 @@ describe('GoalBar read/watch generations', () => {
               ? { processed: 2, remaining: 3, total: 5 }
               : { processed: 4, remaining: 1, total: 5 },
           }),
-          baseTurnEndSeq: reads === 1 ? 2 : 3,
+          baseSessionEventSeq: reads === 1 ? 2 : 3,
         }))
       },
       watch: (sessionId, _cursor, signal) => {
         watches += 1
         return watches === 1
-          ? Promise.resolve(watchOutcome(sessionId, { kind: 'changed', turnEndSeq: 3 }))
+          ? Promise.resolve(watchOutcome(sessionId, {
+              kind: 'source_changed', sessionEventSeq: 3,
+            }))
           : abortOutcome(signal)
       },
     })
@@ -355,7 +503,7 @@ describe('GoalBar read/watch generations', () => {
     let watches = 0
     const rpc = fakeRpc({
       read: sessionId => Promise.resolve(readOutcome(sessionId, {
-        kind: 'present', snapshot: snapshot({ sessionId }), baseTurnEndSeq: 2,
+        kind: 'present', snapshot: snapshot({ sessionId }), baseSessionEventSeq: 2,
       })),
       watch: sessionId => {
         watches += 1
@@ -389,7 +537,7 @@ describe('GoalBar read/watch generations', () => {
         return Promise.resolve(readOutcome(sessionId, {
           kind: 'present',
           snapshot: snapshot({ sessionId, goalId: 'goal-new' }),
-          baseTurnEndSeq: 9,
+          baseSessionEventSeq: 9,
         }))
       },
       watch: (_sessionId, _cursor, signal) => {
@@ -407,7 +555,7 @@ describe('GoalBar read/watch generations', () => {
     resolveOld(readOutcome('session-old', {
       kind: 'present',
       snapshot: snapshot({ sessionId: 'session-old', goalId: 'goal-old' }),
-      baseTurnEndSeq: 8,
+      baseSessionEventSeq: 8,
     }))
     await flush()
     expect(view.container.textContent).not.toContain('goal-old')
@@ -420,7 +568,7 @@ describe('GoalBar read/watch generations', () => {
     const watchSignals: AbortSignal[] = []
     const rpc = fakeRpc({
       read: sessionId => Promise.resolve(readOutcome(sessionId, {
-        kind: 'present', snapshot: snapshot({ sessionId }), baseTurnEndSeq: 1,
+        kind: 'present', snapshot: snapshot({ sessionId }), baseSessionEventSeq: 1,
       })),
       watch: (_sessionId, _cursor, signal) => {
         watchSignals.push(signal)
@@ -455,7 +603,7 @@ describe('GoalBar read/watch generations', () => {
               ? { processed: 1, remaining: 4, total: 5 }
               : { processed: 2, remaining: 3, total: 5 },
           }),
-          baseTurnEndSeq: reads,
+          baseSessionEventSeq: reads,
         }))
       },
       watch: (_sessionId, _cursor, signal) => {
@@ -482,22 +630,72 @@ describe('GoalBar read/watch generations', () => {
     expect(reads).toBe(2)
     expect(view.container.textContent).toContain('2 / 5')
   })
+
+  it('fences a late runtime watch result after a Connection reset', async () => {
+    let reads = 0
+    let reset: (() => void) | undefined
+    let resolveOldWatch!: (value: GoalBarRpcOutcome<GoalBarWatchResponseV1>) => void
+    const oldWatch = new Promise<GoalBarRpcOutcome<GoalBarWatchResponseV1>>(resolve => {
+      resolveOldWatch = resolve
+    })
+    let watches = 0
+    const rpc = fakeRpc({
+      read: sessionId => {
+        reads += 1
+        return Promise.resolve(readOutcome(sessionId, {
+          kind: 'present',
+          snapshot: snapshot({ sessionId, agentStatus: 'idle' }),
+          baseSessionEventSeq: reads,
+        }))
+      },
+      watch: (_sessionId, _anchor, signal) => {
+        watches += 1
+        return watches === 1 ? oldWatch : abortOutcome(signal)
+      },
+    })
+    const view = mount({
+      rpcSessionId: 'session-one',
+      rpc,
+      subscribeConnectionReset: listener => {
+        reset = listener
+        return () => { reset = undefined }
+      },
+    })
+    await flush()
+    act(() => reset?.())
+    await flush()
+
+    resolveOldWatch(watchOutcome('session-one', {
+      kind: 'runtime_changed',
+      sessionEventSeq: 2,
+      agentStatus: 'running',
+    }))
+    await flush()
+    expect(reads).toBe(2)
+    expect(view.container.textContent).toContain('Active')
+    expect(view.container.textContent).not.toContain('Running')
+  })
 })
 
 describe('GoalBar actions', () => {
   it('guards same-frame duplicates, stays non-optimistic, and adopts the fresh result', async () => {
     let pauseCalls = 0
+    const watchAnchors: GoalBarWatchAnchorV1[] = []
     let resolvePause!: (value: GoalBarRpcOutcome<GoalBarPauseResponseV1>) => void
     const pause = new Promise<GoalBarRpcOutcome<GoalBarPauseResponseV1>>(resolve => {
       resolvePause = resolve
     })
     const rpc = fakeRpc({
       read: sessionId => Promise.resolve(readOutcome(sessionId, {
-        kind: 'present', snapshot: snapshot({ sessionId }), baseTurnEndSeq: 4,
+        kind: 'present', snapshot: snapshot({ sessionId }), baseSessionEventSeq: 4,
       })),
       pause: () => {
         pauseCalls += 1
         return pause
+      },
+      watch: (_sessionId, anchor, signal) => {
+        watchAnchors.push(anchor)
+        return abortOutcome(signal)
       },
     })
     const view = mount({ rpcSessionId: 'session-one', rpc })
@@ -515,11 +713,17 @@ describe('GoalBar actions', () => {
     resolvePause(actionOutcome('pause', 'session-one', {
       kind: 'succeeded',
       snapshot: snapshot({ goalActivation: 'stopped', agentStatus: 'idle' }),
-      baseTurnEndSeq: 5,
+      baseSessionEventSeq: 5,
     }))
     await flush()
     expect(view.container.textContent).toContain('Paused')
     expect(button(view.container, 'Start').disabled).toBe(false)
+    expect(watchAnchors.at(-1)).toEqual({
+      afterSessionEventSeq: 5,
+      sourceRevision: REVISION_TWO,
+      expected: { goalId: 'goal-one', loopxAgentId: 'codex-main-control' },
+      agentStatus: 'idle',
+    })
   })
 
   it.each([
@@ -538,7 +742,7 @@ describe('GoalBar actions', () => {
       read: sessionId => {
         reads += 1
         return Promise.resolve(readOutcome(sessionId, {
-          kind: 'present', snapshot: snapshot({ sessionId }), baseTurnEndSeq: reads,
+          kind: 'present', snapshot: snapshot({ sessionId }), baseSessionEventSeq: reads,
         }))
       },
       pause: sessionId => {
@@ -569,7 +773,7 @@ describe('GoalBar actions', () => {
         kind: 'applied_with_warning',
         code: 'driver_sync_failed',
         snapshot: snapshot({ goalActivation: 'stopped', agentStatus: 'idle' }),
-        baseTurnEndSeq: 2,
+        baseSessionEventSeq: 2,
       } as const,
       'Paused',
       'LoopX changed, but the session did not sync.',
@@ -587,7 +791,7 @@ describe('GoalBar actions', () => {
     let pauses = 0
     const rpc = fakeRpc({
       read: sessionId => Promise.resolve(readOutcome(sessionId, {
-        kind: 'present', snapshot: snapshot({ sessionId }), baseTurnEndSeq: 1,
+        kind: 'present', snapshot: snapshot({ sessionId }), baseSessionEventSeq: 1,
       })),
       pause: sessionId => {
         pauses += 1
@@ -606,6 +810,43 @@ describe('GoalBar actions', () => {
     act(() => action.click())
     expect(pauses).toBe(1)
     expect(button(view.container, 'Refresh')).toBeInstanceOf(HTMLButtonElement)
+  })
+
+  it('fences a late action result after a Connection reset generation', async () => {
+    let reset: (() => void) | undefined
+    let resolvePause!: (value: GoalBarRpcOutcome<GoalBarPauseResponseV1>) => void
+    const pause = new Promise<GoalBarRpcOutcome<GoalBarPauseResponseV1>>(resolve => {
+      resolvePause = resolve
+    })
+    const rpc = fakeRpc({
+      read: sessionId => Promise.resolve(readOutcome(sessionId, {
+        kind: 'present',
+        snapshot: snapshot({ sessionId, goalActivation: 'active' }),
+        baseSessionEventSeq: 3,
+      })),
+      pause: () => pause,
+    })
+    const view = mount({
+      rpcSessionId: 'session-one',
+      rpc,
+      subscribeConnectionReset: listener => {
+        reset = listener
+        return () => { reset = undefined }
+      },
+    })
+    await flush()
+    act(() => button(view.container, 'Pause').click())
+    act(() => reset?.())
+    await flush()
+
+    resolvePause(actionOutcome('pause', 'session-one', {
+      kind: 'succeeded',
+      snapshot: snapshot({ goalActivation: 'stopped' }),
+      baseSessionEventSeq: 4,
+    }))
+    await flush()
+    expect(view.container.textContent).toContain('Active')
+    expect(view.container.textContent).not.toContain('Paused')
   })
 })
 
@@ -632,7 +873,7 @@ describe('GoalBar Connection and registration boundaries', () => {
         op: 'read',
         sessionId: 'session-one',
         result: {
-          kind: 'hidden', reason: 'binding_missing', baseTurnEndSeq: 1,
+          kind: 'hidden', reason: 'binding_missing', baseSessionEventSeq: 1,
           message: secret,
         },
       } }),
@@ -657,7 +898,12 @@ describe('GoalBar Connection and registration boundaries', () => {
         v: GOALBAR_RESPONSE_VERSION,
         op: 'read',
         sessionId: (payload as { sessionId: string }).sessionId,
-        result: { kind: 'hidden', reason: 'binding_missing', baseTurnEndSeq: null },
+        result: {
+          kind: 'hidden',
+          reason: 'binding_missing',
+          baseSessionEventSeq: null,
+          sourceRevision: REVISION_ONE,
+        },
       },
     }))
     const rpc = createGoalBarRpc({ call })
@@ -667,9 +913,42 @@ describe('GoalBar Connection and registration boundaries', () => {
       '/loopx',
       'goalbar/read',
       {
-        v: 'loopx_goalbar_request_v1',
+        v: 'loopx_goalbar_request_v2',
         op: 'read',
         sessionId: 'session-one',
+      },
+      controller.signal,
+    )
+  })
+
+  it('sends the complete V2 watch anchor on the exact watch endpoint', async () => {
+    const call = vi.fn((_channel: string, _endpoint: string, payload: unknown) => Promise.resolve({
+      ok: true as const,
+      value: {
+        v: GOALBAR_RESPONSE_VERSION,
+        op: 'watch',
+        sessionId: (payload as { sessionId: string }).sessionId,
+        result: { kind: 'timeout', sessionEventSeq: 17 },
+      },
+    }))
+    const rpc = createGoalBarRpc({ call })
+    const controller = new AbortController()
+    const anchor: GoalBarWatchAnchorV1 = {
+      afterSessionEventSeq: 17,
+      sourceRevision: REVISION_ONE,
+      expected: { goalId: 'goal-one', loopxAgentId: 'codex-main-control' },
+      agentStatus: 'running',
+    }
+    await rpc.watch('session-one', anchor, controller.signal)
+
+    expect(call).toHaveBeenCalledWith(
+      '/loopx',
+      'goalbar/watch',
+      {
+        v: 'loopx_goalbar_request_v2',
+        op: 'watch',
+        sessionId: 'session-one',
+        ...anchor,
       },
       controller.signal,
     )

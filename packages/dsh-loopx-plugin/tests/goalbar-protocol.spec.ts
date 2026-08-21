@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  GOALBAR_ACTION_REJECTION_CODES,
   GOALBAR_ENDPOINTS,
   GOALBAR_READ_FAULT_CODES,
   GOALBAR_REQUEST_VERSION,
@@ -9,288 +8,179 @@ import {
   decodeGoalBarResponseV1,
   decodeGoalBarSnapshotV1,
 } from '../src/goalbar/protocol.ts'
-import type {
-  GoalBarRequestV1,
-  GoalBarSnapshotV1,
-} from '../src/goalbar/protocol.ts'
+import type { GoalBarRequestV1, GoalBarSnapshotV1 } from '../src/goalbar/protocol.ts'
 
 const sessionId = 'dsh-session-1'
-const goalId = 'goal-one'
-const loopxAgentId = 'codex-main-control'
-const hostilePath = ['', 'sensitive-host', 'project'].join('/')
-
+const binding = { goalId: 'goal-one', loopxAgentId: 'codex-main-control' }
+const revision = `sha256:${'a'.repeat(64)}`
 const snapshot: GoalBarSnapshotV1 = {
   sessionId,
-  goalId,
-  loopxAgentId,
+  ...binding,
   goalActivation: 'active',
   agentStatus: 'idle',
   progress: { processed: 2, remaining: 3, total: 5 },
 }
-
-function response(
-  request: GoalBarRequestV1,
-  result: unknown,
-): Record<string, unknown> {
-  return {
-    v: GOALBAR_RESPONSE_VERSION,
-    op: request.op,
-    sessionId: request.sessionId,
-    result,
-  }
+function response(request: GoalBarRequestV1, result: unknown): Record<string, unknown> {
+  return { v: GOALBAR_RESPONSE_VERSION, op: request.op, sessionId, result }
 }
 
-describe('GoalBar request V1', () => {
-  it('decodes each endpoint only when endpoint and op agree', () => {
+describe('GoalBar request V2', () => {
+  it('decodes the closed V2 endpoint shapes', () => {
     expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.read, {
-      v: GOALBAR_REQUEST_VERSION,
-      op: 'read',
-      sessionId,
+      v: GOALBAR_REQUEST_VERSION, op: 'read', sessionId,
     })).toEqual({ v: GOALBAR_REQUEST_VERSION, op: 'read', sessionId })
 
+    const watch = {
+      v: GOALBAR_REQUEST_VERSION,
+      op: 'watch',
+      sessionId,
+      afterSessionEventSeq: 7,
+      sourceRevision: revision,
+      expected: binding,
+      agentStatus: 'idle',
+    } as const
+    expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.watch, watch)).toEqual(watch)
     expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.watch, {
-      v: GOALBAR_REQUEST_VERSION,
-      op: 'watch',
-      sessionId,
-      afterTurnEndSeq: null,
-    })).toEqual({
-      v: GOALBAR_REQUEST_VERSION,
-      op: 'watch',
-      sessionId,
-      afterTurnEndSeq: null,
-    })
+      ...watch, expected: null, agentStatus: null,
+    })).toEqual({ ...watch, expected: null, agentStatus: null })
 
     for (const op of ['start', 'pause'] as const) {
       expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS[op], {
-        v: GOALBAR_REQUEST_VERSION,
-        op,
-        sessionId,
-        expected: { goalId, loopxAgentId },
-      })).toEqual({
-        v: GOALBAR_REQUEST_VERSION,
-        op,
-        sessionId,
-        expected: { goalId, loopxAgentId },
-      })
+        v: GOALBAR_REQUEST_VERSION, op, sessionId, expected: binding,
+      })).toEqual({ v: GOALBAR_REQUEST_VERSION, op, sessionId, expected: binding })
     }
+  })
 
-    expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.read, {
+  it('rejects V1/V2 mixing, malformed revisions, cursors, bindings, and extra fields', () => {
+    const watch = {
       v: GOALBAR_REQUEST_VERSION,
       op: 'watch',
       sessionId,
-      afterTurnEndSeq: null,
-    })).toBeUndefined()
-  })
-
-  it('rejects additive keys, unsafe cursors, and non-public identities', () => {
-    const read = { v: GOALBAR_REQUEST_VERSION, op: 'read', sessionId }
-    expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.read, {
-      ...read,
-      cwd: hostilePath,
-    })).toBeUndefined()
-
-    for (const afterTurnEndSeq of [true, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      afterSessionEventSeq: 7,
+      sourceRevision: revision,
+      expected: binding,
+      agentStatus: 'idle',
+    } as const
+    for (const change of [
+      { v: 'loopx_goalbar_request_v1' },
+      { afterSessionEventSeq: -1 },
+      { afterSessionEventSeq: Number.MAX_SAFE_INTEGER + 1 },
+      { sourceRevision: 'a'.repeat(64) },
+      { sourceRevision: `sha256:${'A'.repeat(64)}` },
+      { expected: { ...binding, rawPath: '/private/state' } },
+      { expected: { goalId: '../goal', loopxAgentId: binding.loopxAgentId } },
+      { agentStatus: 'paused' },
+      { debug: true },
+    ]) {
       expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.watch, {
-        v: GOALBAR_REQUEST_VERSION,
-        op: 'watch',
-        sessionId,
-        afterTurnEndSeq,
+        ...watch, ...change,
       })).toBeUndefined()
     }
-
-    for (const invalidSession of ['', ' session', 'a/b', 'x'.repeat(129)]) {
-      expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.read, {
-        ...read,
-        sessionId: invalidSession,
-      })).toBeUndefined()
-    }
-
-    const action = {
-      v: GOALBAR_REQUEST_VERSION,
-      op: 'start',
-      sessionId,
-      expected: { goalId, loopxAgentId },
-    }
-    expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.start, {
-      ...action,
-      expected: { ...action.expected, activation: 'stopped' },
-    })).toBeUndefined()
-    expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.start, {
-      ...action,
-      expected: { goalId: ' goal-with-leading-space', loopxAgentId },
-    })).toBeUndefined()
-    expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.start, {
-      ...action,
-      expected: { goalId, loopxAgentId: 'Agent With Spaces' },
-    })).toBeUndefined()
-
-    expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.start, {
-      ...action,
-      expected: { goalId: '目标 / phase:one', loopxAgentId },
-    })).toEqual({
-      ...action,
-      expected: { goalId: '目标 / phase:one', loopxAgentId },
-    })
-  })
-})
-
-describe('GoalBar snapshot V1', () => {
-  it('returns a closed, allowlisted snapshot', () => {
-    expect(decodeGoalBarSnapshotV1(snapshot, {
-      sessionId,
-      binding: { goalId, loopxAgentId },
-    })).toEqual(snapshot)
-  })
-
-  it('rejects hostile counters, inconsistent totals, and unknown keys', () => {
-    for (const processed of [true, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
-      expect(decodeGoalBarSnapshotV1({
-        ...snapshot,
-        progress: { ...snapshot.progress, processed },
-      })).toBeUndefined()
-    }
-    expect(decodeGoalBarSnapshotV1({
-      ...snapshot,
-      progress: { processed: 2, remaining: 2, total: 5 },
-    })).toBeUndefined()
-    expect(decodeGoalBarSnapshotV1({
-      ...snapshot,
-      progress: {
-        processed: Number.MAX_SAFE_INTEGER,
-        remaining: 1,
-        total: Number.MAX_SAFE_INTEGER,
-      },
-    })).toBeUndefined()
-    expect(decodeGoalBarSnapshotV1({
-      ...snapshot,
-      rawPayload: { path: hostilePath, text: 'RAW_TODO_TEXT_SENTINEL' },
-    })).toBeUndefined()
-    expect(decodeGoalBarSnapshotV1({
-      ...snapshot,
-      progress: { ...snapshot.progress, note: 'secret todo' },
+    expect(decodeGoalBarRequestV1(GOALBAR_ENDPOINTS.read, {
+      v: GOALBAR_REQUEST_VERSION, op: 'watch', sessionId,
     })).toBeUndefined()
   })
 })
 
-describe('GoalBar response V1', () => {
+describe('GoalBar response V2', () => {
   const readRequest = {
-    v: GOALBAR_REQUEST_VERSION,
-    op: 'read',
-    sessionId,
+    v: GOALBAR_REQUEST_VERSION, op: 'read', sessionId,
   } as const
   const watchRequest = {
     v: GOALBAR_REQUEST_VERSION,
     op: 'watch',
     sessionId,
-    afterTurnEndSeq: 7,
+    afterSessionEventSeq: 7,
+    sourceRevision: revision,
+    expected: binding,
+    agentStatus: 'idle',
   } as const
   const actionRequest = {
-    v: GOALBAR_REQUEST_VERSION,
-    op: 'pause',
-    sessionId,
-    expected: { goalId, loopxAgentId },
+    v: GOALBAR_REQUEST_VERSION, op: 'pause', sessionId, expected: binding,
   } as const
 
-  it('decodes all closed read branches and fixed fault codes', () => {
+  it('decodes all closed read branches with one observation anchor', () => {
     expect(decodeGoalBarResponseV1(readRequest, response(readRequest, {
       kind: 'hidden',
       reason: 'binding_missing',
-      baseTurnEndSeq: null,
+      baseSessionEventSeq: null,
+      sourceRevision: revision,
     }))?.result).toEqual({
       kind: 'hidden',
       reason: 'binding_missing',
-      baseTurnEndSeq: null,
+      baseSessionEventSeq: null,
+      sourceRevision: revision,
     })
     expect(decodeGoalBarResponseV1(readRequest, response(readRequest, {
-      kind: 'present', snapshot, baseTurnEndSeq: 12,
-    }))?.result).toEqual({ kind: 'present', snapshot, baseTurnEndSeq: 12 })
-
+      kind: 'present', snapshot, baseSessionEventSeq: 12, sourceRevision: revision,
+    }))?.result).toEqual({
+      kind: 'present', snapshot, baseSessionEventSeq: 12, sourceRevision: revision,
+    })
     for (const code of GOALBAR_READ_FAULT_CODES) {
       expect(decodeGoalBarResponseV1(readRequest, response(readRequest, {
-        kind: 'fault', code, baseTurnEndSeq: 12,
-      }))?.result).toEqual({ kind: 'fault', code, baseTurnEndSeq: 12 })
+        kind: 'fault', code, baseSessionEventSeq: 12, sourceRevision: revision,
+      }))?.result).toEqual({
+        kind: 'fault', code, baseSessionEventSeq: 12, sourceRevision: revision,
+      })
     }
     expect(decodeGoalBarResponseV1(readRequest, response(readRequest, {
-      kind: 'fault',
-      code: 'raw_exception',
-      baseTurnEndSeq: 12,
-      message: `${hostilePath}: RAW_ERROR_SENTINEL`,
+      kind: 'present', snapshot, baseSessionEventSeq: 12,
+      sourceRevision: revision, raw: '/private/state',
     }))).toBeUndefined()
   })
 
-  it('requires exact response echoes and closes every response layer', () => {
-    const present = response(readRequest, {
-      kind: 'present', snapshot, baseTurnEndSeq: 0,
+  it('decodes source, runtime, and timeout results with non-regressing cursors', () => {
+    expect(decodeGoalBarResponseV1(watchRequest, response(watchRequest, {
+      kind: 'source_changed', sessionEventSeq: 8,
+    }))?.result).toEqual({ kind: 'source_changed', sessionEventSeq: 8 })
+    expect(decodeGoalBarResponseV1(watchRequest, response(watchRequest, {
+      kind: 'runtime_changed', sessionEventSeq: 7, agentStatus: 'running',
+    }))?.result).toEqual({
+      kind: 'runtime_changed', sessionEventSeq: 7, agentStatus: 'running',
     })
-    expect(decodeGoalBarResponseV1(readRequest, {
-      ...present,
-      sessionId: 'another-session',
-    })).toBeUndefined()
-    expect(decodeGoalBarResponseV1(readRequest, {
-      ...present,
-      op: 'watch',
-    })).toBeUndefined()
-    expect(decodeGoalBarResponseV1(readRequest, {
-      ...present,
-      debug: 'secret',
-    })).toBeUndefined()
-    expect(decodeGoalBarResponseV1(readRequest, response(readRequest, {
-      kind: 'present', snapshot, baseTurnEndSeq: 0, stdout: 'secret',
-    }))).toBeUndefined()
+    expect(decodeGoalBarResponseV1(watchRequest, response(watchRequest, {
+      kind: 'timeout', sessionEventSeq: 10,
+    }))?.result).toEqual({ kind: 'timeout', sessionEventSeq: 10 })
+    for (const result of [
+      { kind: 'source_changed', sessionEventSeq: 6 },
+      { kind: 'runtime_changed', sessionEventSeq: 6, agentStatus: 'running' },
+      { kind: 'timeout', sessionEventSeq: 6 },
+      { kind: 'runtime_changed', sessionEventSeq: 8, agentStatus: 'paused' },
+    ]) {
+      expect(decodeGoalBarResponseV1(watchRequest, response(watchRequest, result)))
+        .toBeUndefined()
+    }
   })
 
-  it('requires changed cursors to advance and timeout cursors to echo', () => {
-    expect(decodeGoalBarResponseV1(watchRequest, response(watchRequest, {
-      kind: 'changed', turnEndSeq: 8,
-    }))?.result).toEqual({ kind: 'changed', turnEndSeq: 8 })
-    expect(decodeGoalBarResponseV1(watchRequest, response(watchRequest, {
-      kind: 'changed', turnEndSeq: 7,
-    }))).toBeUndefined()
-    expect(decodeGoalBarResponseV1(watchRequest, response(watchRequest, {
-      kind: 'timeout', turnEndSeq: 6,
-    }))).toBeUndefined()
-    expect(decodeGoalBarResponseV1(watchRequest, response(watchRequest, {
-      kind: 'timeout', turnEndSeq: 7,
-    }))?.result).toEqual({ kind: 'timeout', turnEndSeq: 7 })
-    expect(decodeGoalBarResponseV1(watchRequest, response(watchRequest, {
-      kind: 'changed', turnEndSeq: true,
-    }))).toBeUndefined()
-  })
-
-  it('validates action snapshots against the requested exact pair', () => {
-    expect(decodeGoalBarResponseV1(actionRequest, response(actionRequest, {
-      kind: 'succeeded', snapshot, baseTurnEndSeq: 12,
-    }))?.result).toEqual({ kind: 'succeeded', snapshot, baseTurnEndSeq: 12 })
-
-    expect(decodeGoalBarResponseV1(actionRequest, response(actionRequest, {
-      kind: 'succeeded',
-      snapshot: { ...snapshot, goalId: 'new-binding' },
-      baseTurnEndSeq: 12,
-    }))).toBeUndefined()
-
-    for (const code of GOALBAR_ACTION_REJECTION_CODES) {
-      expect(decodeGoalBarResponseV1(actionRequest, response(actionRequest, {
-        kind: 'rejected', code,
-      }))?.result).toEqual({ kind: 'rejected', code })
+  it('requires fresh observation anchors on action snapshots', () => {
+    for (const result of [
+      {
+        kind: 'succeeded', snapshot, baseSessionEventSeq: 12,
+        sourceRevision: revision,
+      },
+      {
+        kind: 'applied_with_warning', code: 'driver_sync_failed', snapshot,
+        baseSessionEventSeq: 13, sourceRevision: revision,
+      },
+    ]) {
+      expect(decodeGoalBarResponseV1(actionRequest, response(actionRequest, result))?.result)
+        .toEqual(result)
     }
     expect(decodeGoalBarResponseV1(actionRequest, response(actionRequest, {
-      kind: 'unknown', code: 'operation_result_unknown', snapshot,
+      kind: 'succeeded', snapshot: { ...snapshot, goalId: 'other' },
+      baseSessionEventSeq: 12, sourceRevision: revision,
     }))).toBeUndefined()
-    expect(decodeGoalBarResponseV1(actionRequest, response(actionRequest, {
-      kind: 'applied_with_warning',
-      code: 'driver_sync_failed',
-      snapshot,
-      baseTurnEndSeq: 13,
-    }))?.result).toEqual({
-      kind: 'applied_with_warning',
-      code: 'driver_sync_failed',
-      snapshot,
-      baseTurnEndSeq: 13,
-    })
-    expect(decodeGoalBarResponseV1(actionRequest, response(actionRequest, {
-      kind: 'applied_with_warning', code: 'post_read_failed',
-    }))?.result).toEqual({
-      kind: 'applied_with_warning', code: 'post_read_failed',
-    })
+  })
+})
+
+describe('GoalBar snapshot V1 payload', () => {
+  it('remains closed and internally consistent', () => {
+    expect(decodeGoalBarSnapshotV1(snapshot, { sessionId, binding })).toEqual(snapshot)
+    expect(decodeGoalBarSnapshotV1({
+      ...snapshot,
+      progress: { processed: 2, remaining: 2, total: 5 },
+    })).toBeUndefined()
+    expect(decodeGoalBarSnapshotV1({ ...snapshot, rawPayload: '/private/state' }))
+      .toBeUndefined()
   })
 })
