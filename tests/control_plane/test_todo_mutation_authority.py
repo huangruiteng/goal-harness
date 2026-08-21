@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from loopx.cli import main as cli_main
 from loopx.control_plane.scheduler.monitor_poll_writeback import (
     write_monitor_poll_todo_state,
 )
@@ -1029,8 +1030,11 @@ def test_reopened_todo_completes_unfenced_after_lease_release(
     }
 
 
-def test_release_after_auto_release_replays_terminal_tombstone(tmp_path: Path) -> None:
-    """A post-completion release returns the retained terminal result."""
+def test_cli_release_after_auto_release_replays_terminal_tombstone(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The public CLI replays the retained terminal result, not `missing`."""
 
     registry, _state = _write_fixture(tmp_path, multi_agent=False)
     todo = _add_agent_todo(registry)
@@ -1054,20 +1058,42 @@ def test_release_after_auto_release_replays_terminal_tombstone(tmp_path: Path) -
         evidence="completion already released the lease",
         no_followup=True,
     )
+    lease_path = _lease_path(tmp_path, todo["todo_id"])
+    tombstone = json.loads(lease_path.read_text(encoding="utf-8"))
 
-    released = release_task_lease(
-        runtime_root=tmp_path / "runtime",
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        owner=AUTHOR_AGENT,
-        idempotency_key=lease_key,
-        expected_version=1,
+    exit_code = cli_main(
+        [
+            "--registry",
+            str(registry),
+            "--format",
+            "json",
+            "task-lease",
+            "release",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            todo["todo_id"],
+            "--owner",
+            AUTHOR_AGENT,
+            "--idempotency-key",
+            lease_key,
+            "--expected-version",
+            "1",
+        ]
     )
+    released = json.loads(capsys.readouterr().out)
 
+    assert exit_code == 0
     assert released["ok"] is True
+    assert released["action"] == "release"
     assert released["released"] is True
     assert released["idempotent"] is True
+    assert released["lease"] == tombstone
     assert released["lease"]["status"] == "released"
+    assert released["lease"]["version"] == 1
+    assert released["lease"]["lease_epoch"] == 1
+    assert "missing" not in released
+    assert json.loads(lease_path.read_text(encoding="utf-8")) == tombstone
 
 
 def test_exception_after_verified_fence_leaves_lease_intact(
