@@ -682,6 +682,37 @@ class ChatSessionStore:
             _atomic_write_json(path, payload, preserve_mode=True)
             return payload
 
+    def append_completed_response_events(
+        self,
+        session_id: str,
+        turn_id: str,
+        *,
+        response: dict[str, Any],
+        terminal_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Emit the canonical structured-response events for a completed Turn."""
+
+        for proposal in response.get("proposals") or []:
+            self.append_event(
+                session_id,
+                turn_id,
+                kind="proposal.ready",
+                payload={"proposal": proposal},
+            )
+        if response.get("gate"):
+            self.append_event(
+                session_id,
+                turn_id,
+                kind="gate.ready",
+                payload={"gate": response["gate"]},
+            )
+        self.append_event(
+            session_id,
+            turn_id,
+            kind="turn.completed",
+            payload={**(terminal_metadata or {}), "response": response},
+        )
+
     def complete_attached_turn(
         self,
         session_id: str,
@@ -752,15 +783,16 @@ class ChatSessionStore:
                 message_id=f"attached.{normalized_completion_id}",
             )
             if created:
-                self.append_event(
-                    session_id,
-                    turn_id,
-                    kind="turn.completed",
-                    payload={
-                        "delivery_mode": CHAT_SESSION_MODE_ATTACHED,
-                        "completion_id": normalized_completion_id,
-                    },
-                )
+                if isinstance(stored_response, dict):
+                    self.append_completed_response_events(
+                        session_id,
+                        turn_id,
+                        response=stored_response,
+                        terminal_metadata={
+                            "delivery_mode": CHAT_SESSION_MODE_ATTACHED,
+                            "completion_id": normalized_completion_id,
+                        },
+                    )
             current_session = self.load_session(session_id)
             if current_session and current_session.get("active_turn_id") == turn_id:
                 self.update_session(
@@ -771,6 +803,44 @@ class ChatSessionStore:
                     last_error_code=None,
                 )
             return turn, created
+
+    def close_attached_session(self, session_id: str) -> bool:
+        """Close an idle attached Session without stranding a claimed Turn."""
+
+        session_path = self._session_path(session_id)
+        with exclusive_file_lock(
+            session_path,
+            agent_id="loopx-chat",
+            operation="close_attached_chat_session",
+        ):
+            session = self.load_session(session_id)
+            if session is None:
+                return False
+            if session.get("session_mode") != CHAT_SESSION_MODE_ATTACHED:
+                raise ValueError("the selected Session is not an attached host session")
+            if session.get("status") == "closed":
+                return True
+            active_turn_id = str(session.get("active_turn_id") or "")
+            if active_turn_id:
+                active_turn = self.load_turn(session_id, active_turn_id)
+                if active_turn and active_turn.get("status") not in {
+                    "completed",
+                    "interrupted",
+                    "timed_out",
+                    "failed",
+                }:
+                    raise RuntimeError("attached_session_turn_active")
+            now = utc_now()
+            session.update(
+                {
+                    "status": "closed",
+                    "active_turn_id": None,
+                    "last_activity_at": now,
+                    "updated_at": now,
+                }
+            )
+            _atomic_write_json(session_path, session, preserve_mode=True)
+            return True
 
     def _event_rows_locked(self, session_id: str, turn_id: str) -> list[dict[str, Any]]:
         key = (session_id, turn_id)

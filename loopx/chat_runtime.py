@@ -822,10 +822,6 @@ class ChatRuntimeController:
                 )
             if adapter.upstream_thread_id != str((self.store.load_session(session_id) or {}).get("upstream_thread_id") or ""):
                 self.store.update_session(session_id, upstream_thread_id=adapter.upstream_thread_id)
-            for proposal in response.get("proposals") or []:
-                self.store.append_event(session_id, turn_id, kind="proposal.ready", payload={"proposal": proposal})
-            if response.get("gate"):
-                self.store.append_event(session_id, turn_id, kind="gate.ready", payload={"gate": response["gate"]})
             completed = utc_now()
             self.store.update_turn(
                 session_id,
@@ -835,7 +831,11 @@ class ChatRuntimeController:
                 completed_at=completed,
                 last_activity_at=completed,
             )
-            self.store.append_event(session_id, turn_id, kind="turn.completed", payload={"response": response})
+            self.store.append_completed_response_events(
+                session_id,
+                turn_id,
+                response=response,
+            )
             self.store.update_session(
                 session_id,
                 status="ready",
@@ -974,6 +974,8 @@ class ChatRuntimeController:
         session = self.store.load_session(session_id)
         if session is None:
             return False
+        if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
+            return self.store.close_attached_session(session_id)
         with self.lock:
             adapter = self.adapters.pop(session_id, None)
             event_buffers = [

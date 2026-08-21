@@ -336,6 +336,144 @@ def test_web_and_lark_share_ordered_attached_session_without_spawning(
     ]
 
 
+def test_attached_completion_uses_canonical_response_and_terminal_events(
+    tmp_path: Path,
+) -> None:
+    store = ChatSessionStore(tmp_path)
+    session_id = str(_bind(store)["session"]["session_id"])
+    turn, _created = store.create_queued_turn(
+        session_id,
+        client_turn_id="web-response-contract",
+        message="return structured response",
+        origin="web",
+    )
+    turn_id = str(turn["turn_id"])
+    claim_attached_agent_turn(
+        store=store,
+        session_id=session_id,
+        host_surface=HOST_SURFACE,
+        host_session_id=HOST_SESSION_ID,
+        claim_id="response-contract-claim",
+    )
+
+    complete_attached_agent_turn(
+        store=store,
+        session_id=session_id,
+        turn_id=turn_id,
+        host_surface=HOST_SURFACE,
+        host_session_id=HOST_SESSION_ID,
+        claim_id="response-contract-claim",
+        completion_id="response-contract-completion",
+        response={
+            "message": "structured answer",
+            "proposals": [
+                "not-a-proposal",
+                {
+                    "kind": "todo",
+                    "text": "Follow the durable contract",
+                    "priority": "invalid",
+                    "rationale": "Keep the next action bounded.",
+                },
+            ],
+            "gate": {
+                "kind": "approval_gate",
+                "message": "Approval is required.",
+                "required_action": "Review the bounded proposal.",
+            },
+        },
+    )
+
+    completed = store.load_turn(session_id, turn_id)
+    assert completed is not None
+    response = completed["response"]
+    assert response["proposals"] == [
+        {
+            "kind": "todo",
+            "text": "Follow the durable contract",
+            "priority": "P1",
+            "rationale": "Keep the next action bounded.",
+        }
+    ]
+    events = store.events_after(session_id, turn_id, None)
+    assert [event["kind"] for event in events[-3:]] == [
+        "proposal.ready",
+        "gate.ready",
+        "turn.completed",
+    ]
+    assert events[-1]["payload"]["response"] == response
+
+
+def test_attached_close_rejects_active_claim_and_preserves_completion(
+    tmp_path: Path,
+) -> None:
+    store = ChatSessionStore(tmp_path)
+    session_id = str(_bind(store)["session"]["session_id"])
+    runtime = ChatRuntimeController(store=store, codex_bin="missing-codex")
+    turn, _created = runtime.submit_turn(
+        session_id=session_id,
+        client_turn_id="close-active-claim",
+        message="finish before close",
+        work_dir=tmp_path,
+        objective="sample objective",
+    )
+    turn_id = str(turn["turn_id"])
+    claim_attached_agent_turn(
+        store=store,
+        session_id=session_id,
+        host_surface=HOST_SURFACE,
+        host_session_id=HOST_SESSION_ID,
+        claim_id="close-active-claim",
+    )
+
+    responses: list[dict[str, object]] = []
+
+    class Handler:
+        path = f"/api/chat/sessions/{session_id}"
+        server = SimpleNamespace(runtime_controller=runtime)
+
+        def _require_loopback_origin(self) -> bool:
+            return True
+
+        def _send_error(self, message: str, **kwargs: object) -> None:
+            responses.append({"ok": False, "error": message, **kwargs})
+
+        def _send_json(self, payload: dict[str, object], *, status: int = 200) -> None:
+            responses.append({**payload, "status": status})
+
+        def _close_session(self, target_session_id: str) -> None:
+            ChatRequestHandler._close_session(self, target_session_id)  # type: ignore[arg-type]
+
+    ChatRequestHandler.do_DELETE(Handler())  # type: ignore[arg-type]
+    assert responses == [
+        {
+            "ok": False,
+            "error": "complete the active attached Agent turn before closing the session",
+            "status": 409,
+            "error_code": "attached_session_turn_active",
+        }
+    ]
+
+    session = store.load_session(session_id)
+    active_turn = store.load_turn(session_id, turn_id)
+    assert session is not None and session["status"] == "busy"
+    assert session["active_turn_id"] == turn_id
+    assert active_turn is not None and active_turn["status"] == "running"
+
+    complete_attached_agent_turn(
+        store=store,
+        session_id=session_id,
+        turn_id=turn_id,
+        host_surface=HOST_SURFACE,
+        host_session_id=HOST_SESSION_ID,
+        claim_id="close-active-claim",
+        completion_id="close-active-completion",
+        response={"message": "completed before close"},
+    )
+    assert runtime.wait_for_turn(session_id=session_id, turn_id=turn_id)["status"] == "completed"
+    assert runtime.close_session(session_id) is True
+    assert store.load_session(session_id)["status"] == "closed"  # type: ignore[index]
+
+
 def test_attached_live_steering_fails_closed_with_durable_receipt(tmp_path: Path) -> None:
     store = ChatSessionStore(tmp_path)
     session_id = str(_bind(store)["session"]["session_id"])

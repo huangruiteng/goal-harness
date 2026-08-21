@@ -15,7 +15,7 @@ def _compact_id(value: Any, *, limit: int = 160) -> str:
 
 
 class AttachedSessionRequestMixin:
-    """Serve the owner-local attached Session binding endpoint."""
+    """Serve owner-local attached Session binding and lifecycle boundaries."""
 
     server: Any
 
@@ -76,3 +76,20 @@ class AttachedSessionRequestMixin:
             self._send_error(str(exc))
             return
         self._send_json(packet, status=201 if packet.get("created") else 200)
+
+    def _close_session(self, session_id: str) -> None:
+        try:
+            closed = self.server.runtime_controller.close_session(session_id)
+        except RuntimeError as exc:
+            if str(exc) != "attached_session_turn_active":
+                raise
+            self._send_error(
+                "complete the active attached Agent turn before closing the session",
+                status=409,
+                error_code="attached_session_turn_active",
+            )
+            return
+        if not closed:
+            self._send_error("chat session was not found", status=404)
+            return
+        self._send_json({"ok": True, "session_id": session_id, "closed": True})

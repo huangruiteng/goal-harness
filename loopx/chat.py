@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from .todos import add_goal_todo
 
@@ -190,6 +190,29 @@ def _normalize_gate(value: Any, *, protected_paths: Iterable[Path | str]) -> dic
     }
 
 
+def normalize_agent_response(
+    payload: Mapping[str, Any],
+    *,
+    protected_paths: Iterable[Path | str] = (),
+) -> dict[str, Any]:
+    """Normalize one structured provider response to the public Chat contract."""
+
+    protected = tuple(protected_paths)
+    message = redact_local_paths(
+        str(payload.get("message") or ""),
+        protected_paths=protected,
+    ).strip()
+    return {
+        "schema_version": CHAT_AGENT_RESPONSE_SCHEMA_VERSION,
+        "message": message,
+        "proposals": _normalize_proposals(
+            payload.get("proposals"),
+            protected_paths=protected,
+        ),
+        "gate": _normalize_gate(payload.get("gate"), protected_paths=protected),
+    }
+
+
 def parse_agent_response(
     raw_text: str,
     *,
@@ -205,13 +228,7 @@ def parse_agent_response(
         except json.JSONDecodeError:
             payload = None
         if isinstance(payload, dict):
-            message = redact_local_paths(str(payload.get("message") or ""), protected_paths=protected).strip()
-            return {
-                "schema_version": CHAT_AGENT_RESPONSE_SCHEMA_VERSION,
-                "message": message,
-                "proposals": _normalize_proposals(payload.get("proposals"), protected_paths=protected),
-                "gate": _normalize_gate(payload.get("gate"), protected_paths=protected),
-            }
+            return normalize_agent_response(payload, protected_paths=protected)
         key = re.search(r'"message"\s*:\s*', body)
         if key:
             try:

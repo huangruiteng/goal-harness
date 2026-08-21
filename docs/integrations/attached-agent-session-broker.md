@@ -64,6 +64,10 @@ exposes a push transport for the already-running Turn. LoopX fails closed
 instead of starting a managed runtime or silently degrading one event into
 another ingress mode.
 
+An attached Session with an active host claim cannot be closed. Complete the
+claimed Turn first, then close the Session. This preserves the host's writeback
+authority and prevents a closed Session from stranding a running Turn.
+
 Opaque host identifiers, message bodies, and response files stay in the local
 runtime store. Public Session projections contain only the LoopX Session id,
 Goal/Agent binding, executor endpoint label, host surface, capability booleans,

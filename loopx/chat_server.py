@@ -1397,9 +1397,7 @@ class ChatRequestHandler(
         if not path.startswith(prefix):
             return self._send_error("unknown path", status=404)
         session_id = path[len(prefix) :].strip("/")
-        if not self.server.runtime_controller.close_session(session_id):
-            return self._send_error("chat session was not found", status=404)
-        self._send_json({"ok": True, "session_id": session_id, "closed": True})
+        self._close_session(session_id)
 
     def log_message(self, format: str, *args: object) -> None:
         if self.server.verbose:

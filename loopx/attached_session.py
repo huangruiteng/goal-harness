@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .chat import normalize_agent_response
 from .chat_store import CHAT_SESSION_MODE_ATTACHED, ChatSessionStore
 from .control_plane.todos.contract import normalize_todo_claimed_by
 from .file_lock import exclusive_file_lock
@@ -273,17 +274,15 @@ def complete_attached_agent_turn(
         host_surface=host_surface,
         host_session_id=host_session_id,
     )
-    message = str(response.get("message") or "").strip()
+    normalized_response = normalize_agent_response(
+        response,
+        protected_paths=(store.root,),
+    )
+    message = str(normalized_response.get("message") or "")
     if not message:
         raise ValueError("response.message is required")
     if len(message) > 200_000:
         raise ValueError("response.message is too large")
-    normalized_response = {
-        "schema_version": "loopx_chat_agent_response_v0",
-        "message": message,
-        "proposals": list(response.get("proposals") or [])[:5],
-        "gate": response.get("gate") if isinstance(response.get("gate"), Mapping) else None,
-    }
     _turn, created = store.complete_attached_turn(
         session_id,
         turn_id,
