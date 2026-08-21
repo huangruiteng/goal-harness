@@ -177,6 +177,7 @@ def test_mcp_uses_kunluncode_profile_and_rejects_agent_impersonation(
         "kunlun",
         "focused check passed",
         task_lease_idempotency_key="lease-fixture",
+        task_lease_expected_version=7,
         no_follow_up=True,
     )
     completed = json.loads(output)
@@ -192,6 +193,101 @@ def test_mcp_uses_kunluncode_profile_and_rejects_agent_impersonation(
     assert completed["settlement"]["terminal_closeout"][
         "completion_continuation"
     ] == "no_followup"
+    for lease_command in (first_completion, terminal_closeout):
+        version_at = lease_command.index("--task-lease-expected-version")
+        assert lease_command[version_at : version_at + 2] == [
+            "--task-lease-expected-version",
+            "7",
+        ]
+
+
+def test_fastmcp_complete_task_forwards_complete_task_lease_fence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, control = create_fastmcp_server(
+        GoalModeMCPConfig(
+            server_name="loopx-test",
+            runtime_profile="claude_code",
+            legacy_host_surface="claude_code",
+        ),
+        lambda: {
+            "goal_id": "shared-goal",
+            "registry": "/project/.loopx/registry.json",
+            "agent_id": "claude",
+        },
+    )
+    commands: list[list[str]] = []
+    control.command_prefix = lambda: ["loopx"]
+
+    def capture(command: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        if "--turn-instance-id" not in command:
+            payload = '{"ok": true}'
+        else:
+            args = command[command.index("json") + 1 :]
+            identity = SettlementIdentity(
+                goal_id="shared-goal",
+                agent_id="claude",
+                todo_id="todo_777777777777",
+                turn_instance_id=args[args.index("--turn-instance-id") + 1],
+            )
+            if "should-run" in command:
+                payload = json.dumps(
+                    {
+                        "ok": True,
+                        "should_run": True,
+                        "selected_todo": {"todo_id": "todo_777777777777"},
+                    }
+                )
+            elif "complete" in command:
+                payload = json.dumps(
+                    {
+                        "ok": True,
+                        "completed": True,
+                        "status": "done",
+                        "completion_continuation": "active_goal",
+                        "settlement_identity": identity.as_dict(),
+                        "settlement_result": {"failure": None},
+                    }
+                )
+            else:
+                payload = json.dumps(
+                    {
+                        "ok": True,
+                        "appended": True,
+                        "settlement_identity": identity.as_dict(),
+                        "settlement_result": {"failure": None},
+                    }
+                )
+        return subprocess.CompletedProcess(command, 0, payload, "")
+
+    monkeypatch.setattr(goal_mode_mcp.subprocess, "run", capture)
+
+    result = asyncio.run(
+        server.call_tool(
+            "complete_task",
+            {
+                "todo_id": "todo_777777777777",
+                "agent_id": "claude",
+                "evidence": "focused check passed",
+                "task_lease_idempotency_key": "lease-fixture",
+                "task_lease_expected_version": 7,
+            },
+        )
+    )
+    assert json.loads(result[0][0].text)["ok"] is True
+
+    complete_commands = [
+        command for command in commands if "complete" in command
+    ]
+    assert complete_commands, commands
+    for complete_command in complete_commands:
+        assert complete_command[
+            complete_command.index("--task-lease-idempotency-key") :
+        ][:2] == ["--task-lease-idempotency-key", "lease-fixture"]
+        assert complete_command[
+            complete_command.index("--task-lease-expected-version") :
+        ][:2] == ["--task-lease-expected-version", "7"]
 
 
 def test_mcp_spends_only_after_typed_completed_state(
@@ -1111,6 +1207,8 @@ def test_native_controller_blocks_model_visible_mcp_mutations(
                 "todo_id": "todo-1",
                 "agent_id": "kunlun",
                 "evidence": "premature evidence",
+                "task_lease_idempotency_key": "lease-fixture",
+                "task_lease_expected_version": 7,
             },
         )
     )
