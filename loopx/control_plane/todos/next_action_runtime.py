@@ -15,6 +15,26 @@ from .contract import (
 
 TODO_NEXT_ACTION_REQUEST_SCHEMA = "loopx_todo_next_action_transition_v0"
 TODO_NEXT_ACTION_RESULT_SCHEMA = "loopx_todo_next_action_result_v0"
+NEXT_ACTION_HEADING = "## Next Action"
+
+
+def _next_action_projection_bounds(lines: list[str]) -> tuple[int, int] | None:
+    start = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == NEXT_ACTION_HEADING
+        ),
+        None,
+    )
+    if start is None:
+        return None
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("## "):
+            end = index
+            break
+    return start, end
 
 
 def _agent_todo_snapshots(lines: list[str]) -> list[dict[str, Any]]:
@@ -78,12 +98,18 @@ def _apply_transition(
     operation: str,
     params: Mapping[str, Any],
 ) -> dict[str, Any]:
+    projection_bounds = _next_action_projection_bounds(lines)
+    if projection_bounds is None:
+        projection_lines: list[str] = []
+    else:
+        start, end = projection_bounds
+        projection_lines = lines[start:end]
     result = effect_runtime_result(
         "todo.next_action.transition",
         {
             "schema_version": TODO_NEXT_ACTION_REQUEST_SCHEMA,
             "operation": operation,
-            "lines": list(lines),
+            "lines": projection_lines,
             **dict(params),
         },
     )
@@ -102,12 +128,19 @@ def _apply_transition(
         isinstance(line, str) for line in updated_lines
     ):
         raise RuntimeError("TypeScript Todo Next Action lines shape mismatch")
-    changed = updated_lines != lines
+    changed = updated_lines != projection_lines
     if changed is not result["changed"]:
         raise RuntimeError("TypeScript Todo Next Action changed flag mismatch")
     if changed:
-        lines[:] = updated_lines
-    return dict(result)
+        if projection_bounds is None:
+            raise RuntimeError(
+                "TypeScript Todo Next Action changed a missing projection"
+            )
+        start, end = projection_bounds
+        lines[start:end] = updated_lines
+    materialized_result = dict(result)
+    materialized_result["lines"] = list(lines)
+    return materialized_result
 
 
 def bind_next_action_to_todo(lines: list[str], *, todo_id: str) -> bool:

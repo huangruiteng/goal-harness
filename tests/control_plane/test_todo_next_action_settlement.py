@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from loopx.bootstrap import render_state_markdown
+from loopx.control_plane.effect_runtime import MAX_REQUEST_BYTES
 from loopx.state_projection import active_state_next_action_entries
 from loopx.state_refresh import build_state_refresh_record
 from loopx.todos import add_goal_todo, complete_goal_todo, supersede_goal_todo
@@ -179,6 +180,59 @@ def test_complete_reprojects_typed_next_action_to_open_successor(
     assert active_state_next_action_entries(state.read_text(encoding="utf-8")) == [
         "[P0] Implement and validate the requested behavior."
     ]
+
+
+def test_complete_projects_next_action_when_archived_state_exceeds_runtime_limit(
+    tmp_path: Path,
+) -> None:
+    completed_text = "[P1] Finish the bounded implementation."
+    registry, state = _write_fixture(tmp_path, next_action=completed_text)
+    completed = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text=completed_text,
+        task_class="advancement_task",
+        action_kind="implementation",
+        claimed_by=AGENT_ID,
+    )
+    successor = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="[P1] Validate the bounded implementation.",
+        task_class="advancement_task",
+        action_kind="validation_review",
+        claimed_by=AGENT_ID,
+    )
+    archived_evidence = "x" * (MAX_REQUEST_BYTES + 1024)
+    state_text = state.read_text(encoding="utf-8").replace(
+        f"- {completed_text}\n",
+        f"- {completed_text}\n"
+        "<!-- loopx:next-action schema=loopx_next_action_binding_v0 "
+        f"todo_id={completed['todo_id']} -->\n",
+        1,
+    )
+    state.write_text(
+        f"{state_text}\n## Completed Work Archive\n\n{archived_evidence}\n",
+        encoding="utf-8",
+    )
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=str(completed["todo_id"]),
+        successor_todo_ids=[str(successor["todo_id"])],
+        agent_id=AGENT_ID,
+        evidence="implementation completed",
+    )
+
+    final_text = state.read_text(encoding="utf-8")
+    assert result["changed"] is True
+    assert active_state_next_action_entries(final_text) == [
+        "[P1] Validate the bounded implementation."
+    ]
+    assert archived_evidence in final_text
 
 
 def test_supersede_reprojects_after_generated_successor_is_materialized(
