@@ -8,6 +8,7 @@ Goal state-machine implementation.
 
 from loopx.capabilities.benchmark_toolkit.native_codex_goal import (
     NativeGoalConfig,
+    NativeGoalDeadlineExceeded,
     NativeGoalEventTransport,
     NativeGoalProtocolError,
     NativeGoalTransport,
@@ -47,6 +48,7 @@ __all__ = [
     "NativeCodexProfile",
     "NativeCodexProfileError",
     "NativeGoalConfig",
+    "NativeGoalDeadlineExceeded",
     "NativeGoalEventTransport",
     "NativeGoalProtocolError",
     "NativeGoalTransport",

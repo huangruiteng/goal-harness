@@ -25,6 +25,10 @@ class NativeGoalProtocolError(RuntimeError):
     """The app-server exchange did not prove the required Goal transaction."""
 
 
+class NativeGoalDeadlineExceeded(NativeGoalProtocolError):
+    """The admitted native Goal remained active through its total deadline."""
+
+
 class NativeGoalTransport(Protocol):
     def request(self, method: str, params: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
@@ -426,7 +430,7 @@ def run_native_goal_until_terminal(
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise NativeGoalProtocolError("goal_timeout_before_terminal")
+            raise NativeGoalDeadlineExceeded("goal_timeout_before_terminal")
         try:
             wait_native_goal_turn(
                 transport,
@@ -436,7 +440,9 @@ def run_native_goal_until_terminal(
             )
         except NativeGoalProtocolError as exc:
             if str(exc) == "goal_turn_timeout":
-                raise NativeGoalProtocolError("goal_timeout_before_terminal") from exc
+                raise NativeGoalDeadlineExceeded(
+                    "goal_timeout_before_terminal"
+                ) from exc
             raise
         completed_before = turn.turn_completed_count
         if refresh_native_goal_status(transport, turn) != "active":

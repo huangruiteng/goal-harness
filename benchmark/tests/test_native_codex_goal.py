@@ -14,6 +14,7 @@ import pytest
 from benchmark.deepswe import run_native_codex_goal as runnable_goal
 from benchmark.native_codex_goal import (
     NativeGoalConfig,
+    NativeGoalDeadlineExceeded,
     NativeGoalProtocolError,
     compact_native_goal_receipt,
     observe_native_goal_event,
@@ -316,6 +317,21 @@ def test_goal_runtime_fails_closed_when_active_goal_never_continues() -> None:
 
     with pytest.raises(NativeGoalProtocolError, match="goal_timeout_before_terminal"):
         run_native_goal_until_terminal(transport, _config(), timeout_sec=0.01)
+
+
+def test_goal_runtime_exposes_a_typed_total_deadline() -> None:
+    transport = ContinuationTransport(terminal_after_second_turn=False)
+    transport.events = transport.events[:2]
+
+    with pytest.raises(
+        NativeGoalDeadlineExceeded,
+        match="goal_timeout_before_terminal",
+    ):
+        run_native_goal_until_terminal(
+            transport,
+            _config(),
+            timeout_sec=0.01,
+        )
 
 
 def _write_fake_app_server(path: Path) -> None:
