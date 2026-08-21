@@ -292,6 +292,7 @@ assert.match(larkSettings, /message_context_permission_required/, "Received even
 assert.match(chatData, /im:message\.group_msg/, "Bot group-history preflight names the application scope");
 assert.match(chatData, /im:message\.group_msg\.include_bot:read/, "Bot group-history preflight includes Bot-authored messages");
 assert.match(larkSettings, /历史补读权限（独立能力）/, "Bot group-history preflight stays distinct from realtime message context");
+assert.match(chatData, /last_event_reason:\s*z\.enum\(larkTopicEventRejectionReasons\)/, "Listener rejection reasons use a typed UI contract");
 assert.match(larkSettings, /最近消息未直接 @ 机器人/, "Ignored unaddressed messages explain why LoopX did not reply");
 assert.match(larkSettings, /消息未匹配当前 Goal Topic/, "Route mismatches receive an actionable connection repair hint");
 assert.match(larkSettings, /connectLarkGoalTopic\([^)]*execute:\s*false/s, "Connect flow previews before execution");

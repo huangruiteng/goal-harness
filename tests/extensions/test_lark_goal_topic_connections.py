@@ -617,6 +617,45 @@ def test_connection_health_reports_safe_topic_route_mismatch(tmp_path: Path) -> 
     assert rows[0]["last_event_reason"] == "topic_mismatch"
 
 
+def test_connection_health_drops_unknown_route_reason(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    connected = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=_runner(state),
+        cli_bin="fake-lark",
+    )
+    assert connected["ok"] is True
+
+    rows = list_lark_connections(
+        registry=_registry(tmp_path),
+        target_path=target_path,
+        binding_paths={"goal-alpha": binding_path},
+        runner=_runner(state),
+        cli_bin="fake-lark",
+        runtime_health={
+            "mew": {
+                "status": "listening",
+                "event_count": 1,
+                "replied_count": 0,
+                "last_event_status": "ignored",
+                "last_event_reason": "future_private_reason",
+                "error_code": None,
+            }
+        },
+    )
+
+    assert rows[0]["last_event_reason"] is None
+
+
 def test_connect_uses_bot_chat_access_when_member_listing_is_unavailable(
     tmp_path: Path,
 ) -> None:

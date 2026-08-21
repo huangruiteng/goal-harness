@@ -81,9 +81,32 @@ class ReplyMode(str, Enum):
     TOPIC_REPLY = "topic_reply"
 
 
+class LarkTopicEventDecisionReason(str, Enum):
+    """Typed, content-free outcome of Goal Topic routing."""
+
+    MATCHED = "matched"
+    INVALID_EVENT = "invalid_event"
+    BINDING_UNAVAILABLE = "binding_unavailable"
+    CHAT_MISMATCH = "chat_mismatch"
+    TOPIC_MISMATCH = "topic_mismatch"
+    SELF_MESSAGE = "self_message"
+    INVALID_ROUTING_STATE = "invalid_routing_state"
+    NOT_ADDRESSED = "not_addressed"
+
+
 CAPTURE_SCOPES = {item.value for item in CaptureScope}
 INGRESS_MODES = {item.value for item in IngressMode}
 REPLY_MODES = {item.value for item in ReplyMode}
+LARK_TOPIC_EVENT_REJECTION_REASONS = {
+    item.value
+    for item in LarkTopicEventDecisionReason
+    if item is not LarkTopicEventDecisionReason.MATCHED
+}
+
+
+def normalize_lark_topic_event_rejection_reason(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized if normalized in LARK_TOPIC_EVENT_REJECTION_REASONS else None
 
 
 def _routing_value(
@@ -713,7 +736,9 @@ def list_lark_connections(
             else listener_status in {"starting", "listening"}
         )
         last_event_status = str(listener.get("last_event_status") or "")
-        last_event_reason = str(listener.get("last_event_reason") or "")
+        last_event_reason = normalize_lark_topic_event_rejection_reason(
+            listener.get("last_event_reason")
+        ) or ""
         event_count = int(listener.get("event_count") or 0)
         event_blocker = (
             last_event_status
@@ -921,7 +946,11 @@ def decide_lark_topic_event(
         and MESSAGE_ID_PATTERN.fullmatch(root_id)
         and MESSAGE_ID_PATTERN.fullmatch(message_id)
     ):
-        return {"matched": False, "reason": "invalid_event", "route": None}
+        return {
+            "matched": False,
+            "reason": LarkTopicEventDecisionReason.INVALID_EVENT.value,
+            "route": None,
+        }
     has_binding = False
     matched_chat = False
     matched_topic = False
@@ -951,7 +980,11 @@ def decide_lark_topic_event(
             str(identity.get("bot_app_id") or ""),
             str(identity.get("bot_open_id") or ""),
         }:
-            return {"matched": False, "reason": "self_message", "route": None}
+            return {
+                "matched": False,
+                "reason": LarkTopicEventDecisionReason.SELF_MESSAGE.value,
+                "route": None,
+            }
         try:
             capture_scope = _routing_value(
                 CaptureScope,
@@ -977,11 +1010,19 @@ def decide_lark_topic_event(
                 field="reply_mode",
             )
         except ValueError:
-            return {"matched": False, "reason": "invalid_routing_state", "route": None}
+            return {
+                "matched": False,
+                "reason": LarkTopicEventDecisionReason.INVALID_ROUTING_STATE.value,
+                "route": None,
+            }
         if capture_scope != "configured_chat_all" and not is_event_addressed_to_bot(
             event, identity
         ):
-            return {"matched": False, "reason": "not_addressed", "route": None}
+            return {
+                "matched": False,
+                "reason": LarkTopicEventDecisionReason.NOT_ADDRESSED.value,
+                "route": None,
+            }
         route = {
             "app_ref": str(identity.get("sender_profile") or "default"),
             "goal_id": goal_id,
@@ -1000,17 +1041,21 @@ def decide_lark_topic_event(
                     "inbox_config_ref": str(routing.get("inbox_config_ref") or ""),
                 }
             )
-        return {"matched": True, "reason": "matched", "route": route}
+        return {
+            "matched": True,
+            "reason": LarkTopicEventDecisionReason.MATCHED.value,
+            "route": route,
+        }
     reason = (
-        "binding_unavailable"
+        LarkTopicEventDecisionReason.BINDING_UNAVAILABLE
         if not has_binding
-        else "chat_mismatch"
+        else LarkTopicEventDecisionReason.CHAT_MISMATCH
         if not matched_chat
-        else "topic_mismatch"
+        else LarkTopicEventDecisionReason.TOPIC_MISMATCH
         if not matched_topic
-        else "binding_unavailable"
+        else LarkTopicEventDecisionReason.BINDING_UNAVAILABLE
     )
-    return {"matched": False, "reason": reason, "route": None}
+    return {"matched": False, "reason": reason.value, "route": None}
 
 
 def route_lark_topic_event(

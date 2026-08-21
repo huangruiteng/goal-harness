@@ -995,6 +995,16 @@ export type LarkGroupChat = { chat_id: string; chat_name: string };
 export type LarkCaptureScope = "addressed_only" | "configured_chat_all";
 export type LarkIngressMode = "live_steering" | "session_queue" | "async_inbox" | "direct_session";
 export type LarkReplyMode = "topic_reply";
+const larkTopicEventRejectionReasons = [
+  "invalid_event",
+  "binding_unavailable",
+  "chat_mismatch",
+  "topic_mismatch",
+  "self_message",
+  "invalid_routing_state",
+  "not_addressed",
+] as const;
+export type LarkTopicEventRejectionReason = typeof larkTopicEventRejectionReasons[number];
 export type LarkPermissionGuidance = {
   action: "enable_application_scopes_and_publish";
   api_document_url: string;
@@ -1031,7 +1041,7 @@ export type LarkGoalConnection = {
   incoming_mode: "mentions" | "all";
   ingress_mode: LarkIngressMode;
   event_count: number;
-  last_event_reason: string | null;
+  last_event_reason: LarkTopicEventRejectionReason | null;
   last_event_status: string | null;
   listener_error_code: string | null;
   listener_status: "starting" | "listening" | "retrying" | "stopped" | null;
@@ -1070,7 +1080,7 @@ const larkConnectionsSchema = z.object({
     incoming_mode: z.enum(["mentions", "all"]),
     ingress_mode: z.enum(["live_steering", "session_queue", "async_inbox", "direct_session"]).default("async_inbox"),
     event_count: z.number().int().nonnegative().default(0),
-    last_event_reason: z.string().nullable().default(null),
+    last_event_reason: z.enum(larkTopicEventRejectionReasons).nullable().default(null).catch(null),
     last_event_status: z.string().nullable().default(null),
     listener_error_code: z.string().nullable().default(null),
     listener_status: z.enum(["starting", "listening", "retrying", "stopped"]).nullable().default(null),

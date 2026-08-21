@@ -20,7 +20,10 @@ from .event_inbox import (
 )
 from .goal_channel_contracts import binding_for_goal
 from .goal_channel_targets import goal_channel_target_for_name
-from .goal_topic_connections import decide_lark_topic_event
+from .goal_topic_connections import (
+    LarkTopicEventDecisionReason,
+    decide_lark_topic_event,
+)
 from .inbox_reply import CommandRunner, reply_lark_event_inbox
 
 Answer = Callable[[Mapping[str, Any], str], str]
@@ -753,7 +756,10 @@ def process_lark_goal_topic_event(
         return {
             "ok": True,
             "status": "ignored",
-            "reason": str(decision.get("reason") or "binding_unavailable"),
+            "reason": str(
+                decision.get("reason")
+                or LarkTopicEventDecisionReason.BINDING_UNAVAILABLE.value
+            ),
         }
     ingress_mode = str(route.get("ingress_mode") or "direct_session")
     if ingress_mode == "async_inbox":
