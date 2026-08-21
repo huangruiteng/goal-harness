@@ -209,6 +209,27 @@ Treat code volume as a cost, especially during refactors. A good LoopX change
 should make the next change easier to localize, test, and revert; it should not
 turn a design possibility into unused production structure.
 
+### Bounded Future-Facing Refactoring
+
+During development and again before approving or merging each PR, explicitly
+ask whether the touched behavior or its adjacent owning boundary has a small,
+related, behavior-preserving refactor that would make the next likely product
+or control-plane change easier. Prefer removing duplicate authority,
+strengthening typed contracts, narrowing module ownership, and retiring
+obsolete compatibility seams over adding speculative frameworks. For
+control-plane work, keep state-machine and effect authority in the typed
+TypeScript boundary when that is the established owner; Python may adapt or
+bridge that contract, but must not silently recreate a second source of truth.
+
+Apply the refactor in the current PR when it shares the same domain or change
+reason, remains locally reviewable and reversible, and is covered by
+characterization or parity validation; it need not be strictly required for
+the immediate fix. Do not use this principle to justify broad migration or
+unrelated cleanup. When the valuable related refactor is larger than a bounded
+companion change, record a focused follow-up instead. PR review and merge notes
+should state whether this future-facing pass was applied, deferred, or found
+unnecessary, with the concrete boundary considered.
+
 ## Capability And Extension Placement
 
 Before adding an ability, decide its capability owner and provider boundary;
