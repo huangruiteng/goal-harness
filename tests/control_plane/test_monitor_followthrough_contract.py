@@ -94,6 +94,38 @@ def test_exact_todo_id_precedes_ambiguous_target_key(tmp_path: Path) -> None:
     assert first["todo_id"] != second["todo_id"]
 
 
+def test_todo_update_preserves_omitted_monitor_schedule_fields(tmp_path: Path) -> None:
+    registry, runtime, _state = _write_fixture(tmp_path)
+    monitor = _add_monitor(
+        registry,
+        text="Poll a public release target.",
+        target_key="public-release:42",
+    )
+
+    updated = run_json_cli(
+        "todo",
+        "update",
+        "--goal-id",
+        GOAL_ID,
+        "--todo-id",
+        monitor["todo_id"],
+        "--role",
+        "agent",
+        "--agent-id",
+        AGENT_ID,
+        "--note",
+        "No material change.",
+        "--watch-only",
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+
+    assert updated["target_key"] == "public-release:42"
+    assert updated["cadence"] == "1h"
+    assert updated["next_due_at"] == "2099-01-01T00:00:00+00:00"
+    assert updated["watch_only"] == "true"
+
+
 def test_monitor_resume_when_is_a_supported_bounded_policy(
     tmp_path: Path,
 ) -> None:
