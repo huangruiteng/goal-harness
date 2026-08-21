@@ -48,10 +48,7 @@ def _prepare_dashboard_runtime_fixture(tmp_path: Path) -> tuple[Path, Path, Path
     (dashboard_dir / "node_modules" / ".bin").mkdir(parents=True)
     (dashboard_dir / "node_modules" / ".bin" / "vite").touch()
     fake_bin.mkdir()
-    shutil.copy2(
-        Path(__file__).resolve().parents[1] / "scripts" / "dashboard-dev.sh",
-        scripts_dir / "dashboard-dev.sh",
-    )
+    _copy_dashboard_launcher(scripts_dir)
     for executable in (fake_bin / "node", fake_bin / "npm"):
         executable.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
         executable.chmod(0o755)

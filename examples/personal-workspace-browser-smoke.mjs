@@ -47,6 +47,14 @@ async function waitFor(url) {
   throw new Error(`Timed out waiting for ${url}`);
 }
 
+async function visibleElementCount(locator) {
+  return locator.evaluateAll((elements) => elements.filter((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+  }).length);
+}
+
 async function installApi(page) {
   let turnCounter = 0;
   const runtime = page.__loopxRuntime ??= { actionProposals: new Map(), larkConnections: [], messages: new Map(), sessions: new Map(), turnMessages: new Map() };
@@ -1106,15 +1114,31 @@ async function main() {
     const remoteSourceSelect = remote.getByLabel("选择控制面来源");
     if (await remoteSourceSelect.locator("option").count() !== 3) throw new Error("Multiple SSH tunnel sources were not retained in the source catalog");
     await remoteSourceSelect.selectOption({ label: "remote-lab" });
+    await remote.locator(".personal-read-only-source", { hasText: "remote-lab" }).waitFor({ state: "visible", timeout: 10_000 });
     await remote.locator(".personal-channel-composer").waitFor({ state: "detached", timeout: 3_000 });
     await remote.screenshot({ path: resolve(outputDir, "remote-read-only-source.png"), fullPage: false, animations: "disabled" });
-    const visibleRemoteCreateButtons = await remote.locator('button[aria-label="创建 Goal"]').evaluateAll((elements) => elements.filter((element) => {
-      const rect = element.getBoundingClientRect();
-      const style = getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
-    }).length);
+    const visibleRemoteCreateButtons = await visibleElementCount(remote.locator('button[aria-label="创建 Goal"]'));
     if (visibleRemoteCreateButtons) throw new Error("Remote read-only source still exposed Goal creation");
     if (!(await remote.getByText("remote-lab", { exact: true }).count())) throw new Error("Remote source identity is not visible");
+    await remote.locator(".personal-goal-link").first().click();
+    await remote.getByRole("button", { name: "Tasks", current: "page" }).waitFor({ state: "visible" });
+    await remote.locator(".personal-object-list", { hasText: "进行中" }).locator("button").first().click();
+    await remote.getByText("Todo 详情").waitFor({ state: "visible" });
+    const remoteTodoDrawer = remote.getByRole("dialog", { name: "Todo 详情" });
+    for (const label of ["标记完成", "检查变更", "检查暂缓"]) {
+      const visibleMatches = await visibleElementCount(remoteTodoDrawer.getByRole("button", { name: label, exact: true }));
+      if (visibleMatches) throw new Error(`Remote Todo drawer exposed ${label}`);
+    }
+    await remote.getByRole("button", { name: /关闭详情/ }).click();
+    await remote.locator(".personal-object-list", { hasText: "定时与持续" }).locator("button").first().click();
+    await remote.getByText("定时检查", { exact: true }).last().waitFor({ state: "visible" });
+    const remoteScheduleDrawer = remote.getByRole("dialog", { name: "定时检查" });
+    for (const label of ["立即运行", "暂停", "改为每 2 小时", "停止定时检查"]) {
+      const visibleMatches = await visibleElementCount(remoteScheduleDrawer.getByRole("button", { name: label, exact: true }));
+      if (visibleMatches) {
+        throw new Error(`Remote schedule drawer exposed ${label}: ${(await remoteScheduleDrawer.innerText()).slice(0, 2000)}`);
+      }
+    }
     await remote.close();
 
     const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true });

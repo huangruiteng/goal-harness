@@ -58,13 +58,14 @@ const decisionTransitions = [
 
 type ContextDrawerSelection = Exclude<WorkspaceDrawerSelection, { kind: "settings" }>;
 
-export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals = [], larkConnections = [], onClose, runs = [], selection }: {
+export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals = [], larkConnections = [], onClose, readOnly = false, runs = [], selection }: {
   agents: WorkspaceAgentOption[];
   callbacks: PersonalWorkspaceCallbacks;
   goalNotifications?: WorkspaceGoalNotification[];
   goals?: WorkspaceGoal[];
   larkConnections?: LarkGoalConnection[];
   onClose: () => void;
+  readOnly?: boolean;
   runs?: WorkspaceRun[];
   selection: ContextDrawerSelection;
 }) {
@@ -227,16 +228,18 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                 <div><dt>证据</dt><dd>{selection.item.evidence ?? "当前状态没有附加公开安全证据；下一步仍会先展示 Preview。"}</dd></div>
               </dl>
             </section>
-            <button className="personal-primary-action" onClick={() => void previewDecision(selection.item, "approve", "确认处理")} type="button"><Check size={17} />查看影响并决定</button>
-            <details className="personal-compact-menu">
-              <summary><MoreHorizontal size={17} />更多决定</summary>
-              <div>
-                <button onClick={() => void callbacks.onExplainDecision?.(selection.item)} type="button"><MessageCircleQuestion size={16} />解释此决定</button>
-                {decisionTransitions.map((transition) => (
-                  <button key={transition.resolution} onClick={() => void previewDecision(selection.item, transition.resolution, transition.label)} type="button">{transition.label}</button>
-                ))}
-              </div>
-            </details>
+            {!readOnly ? <>
+              <button className="personal-primary-action" onClick={() => void previewDecision(selection.item, "approve", "确认处理")} type="button"><Check size={17} />查看影响并决定</button>
+              <details className="personal-compact-menu">
+                <summary><MoreHorizontal size={17} />更多决定</summary>
+                <div>
+                  <button onClick={() => void callbacks.onExplainDecision?.(selection.item)} type="button"><MessageCircleQuestion size={16} />解释此决定</button>
+                  {decisionTransitions.map((transition) => (
+                    <button key={transition.resolution} onClick={() => void previewDecision(selection.item, transition.resolution, transition.label)} type="button">{transition.label}</button>
+                  ))}
+                </div>
+              </details>
+            </> : null}
           </>
         ) : null}
 
@@ -254,7 +257,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                 <div><dt>下一转换</dt><dd>{selection.item.nextTransition ?? (selection.item.done ? "可创建后续 Todo" : "推进或更新状态")}</dd></div>
               </dl>
             </section>
-            <div className="personal-todo-actions" aria-label="Todo 待确认操作">
+            {!readOnly ? <div className="personal-todo-actions" aria-label="Todo 待确认操作">
               <strong className="personal-todo-actions-title">操作</strong>
               {selection.item.done ? null : (
                 <button className="personal-primary-action" onClick={() => void previewTodoTransition(selection.item, "complete", "标记完成")} type="button"><Check size={17} />标记完成</button>
@@ -297,7 +300,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                   ))}
                 </div>
               </details>
-            </div>
+            </div> : null}
           </>
         ) : null}
 
@@ -339,7 +342,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                       {repositoryCopyState === "error" ? <p className="personal-copy-feedback is-error" role="status">复制失败，请检查浏览器剪贴板权限。</p> : repositoryCopyState === "copied" ? <p className="personal-copy-feedback" role="status">已复制，可粘贴到其他工具。</p> : null}
                     </section>
                   ) : null}
-                  <section className="personal-detail-card personal-goal-notification">
+                  {!readOnly ? <section className="personal-detail-card personal-goal-notification">
                   <small>Lark connection</small>
                   {connection ? (
                     <>
@@ -362,7 +365,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                     </>
                   )}
                   <button className="personal-secondary-action" onClick={() => callbacks.onOpenNotificationSettings?.(selection.item.goalId)} type="button"><Bell size={16} />{connection ? "管理 Lark connection" : "Connect Lark App"}</button>
-                  </section>
+                  </section> : <section className="personal-detail-card personal-goal-notification"><small>Lark connection</small><h3>远端详情未投影</h3><p>SSH 来源只展示公开安全状态，不读取来源主机上的连接配置。</p></section>}
                 </>
               );
             })()}
@@ -372,7 +375,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                 <>
                   <h3>{workspaceSessionStatusLabel(selectedGoalRun.sessionStatus ?? selectedGoalRun.status)}</h3>
                   <p>{selectedGoalRun.title}</p>
-                  <button className="personal-primary-action" onClick={() => void callbacks.onOpenRunSession?.(selectedGoalRun)} type="button"><Play size={16} />查看最近执行过程</button>
+                  {callbacks.onOpenRunSession ? <button className="personal-primary-action" onClick={() => void callbacks.onOpenRunSession?.(selectedGoalRun)} type="button"><Play size={16} />查看最近执行过程</button> : null}
                 </>
               ) : (
                 <>
@@ -381,10 +384,10 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                 </>
               )}
             </section>
-            <div className="personal-drawer-action-grid">
+            {!readOnly ? <div className="personal-drawer-action-grid">
               <button className="personal-secondary-action" onClick={() => callbacks.onRequestScheduleConfig?.("heartbeat", selection.item.goalId)} type="button"><Radio size={16} />设置 Heartbeat</button>
               <button className="personal-secondary-action" onClick={() => callbacks.onRequestScheduleConfig?.("monitor", selection.item.goalId)} type="button"><CalendarClock size={16} />添加定时检查</button>
-            </div>
+            </div> : null}
           </>
         ) : null}
 
@@ -444,7 +447,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                     <div><dt>可恢复</dt><dd>{selection.item.resumable === false ? "否" : "是"}</dd></div>
                   </dl>
                 </section>
-                {selection.item.sessionStatus === "resume_failed" ? (
+                {selection.item.sessionStatus === "resume_failed" && !readOnly ? (
                   <section className="personal-recovery-panel" aria-label="Session 恢复失败">
                     <strong>上游 Session 恢复失败</strong>
                     <p>本地历史已经保留，请选择恢复路径。</p>
@@ -452,7 +455,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                     <button className="personal-secondary-action" onClick={() => void callbacks.onStartNewRunSession?.(selection.item)} type="button"><Play size={16} />携带上下文开始新 Session</button>
                   </section>
                 ) : null}
-                <section className="personal-correction-panel">
+                {!readOnly ? <section className="personal-correction-panel">
                   <header><span><Bot size={16} />与 {selection.item.agentLabel} 纠偏</span></header>
                   <p>消息会沿用当前 Goal、Todo 与 Agent Session 上下文。</p>
                   <div className="personal-correction-composer">
@@ -465,8 +468,8 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                     />
                     <button aria-label="发送纠偏" disabled={!correction.trim()} onClick={() => void sendCorrection()} type="button"><Send size={16} /></button>
                   </div>
-                </section>
-                <details className="personal-compact-menu personal-run-more">
+                </section> : null}
+                {!readOnly ? <details className="personal-compact-menu personal-run-more">
                   <summary><MoreHorizontal size={17} />更多运行操作</summary>
                   <div>
                     <button disabled={!selection.item.canInterrupt} onClick={() => void callbacks.onInterruptRun?.(selection.item)} type="button"><Pause size={16} />中断本次运行</button>
@@ -474,7 +477,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                     <button onClick={() => void callbacks.onStartNewRunSession?.(selection.item)} type="button"><Play size={16} />开始新 Session</button>
                     <button onClick={() => void callbacks.onCloseRunSession?.(selection.item)} type="button"><Square size={16} />关闭 Session</button>
                   </div>
-                </details>
+                </details> : null}
               </>
             )}
           </>
@@ -530,10 +533,10 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                 </section>
               );
             })() : null}
-            {selection.item.workspaceCandidates?.length ? <div className="personal-workspace-candidates" aria-label="可选择的工作区">{selection.item.workspaceCandidates.map((candidate) => <button key={candidate.workspaceRef} onClick={() => void callbacks.onSelectWorkspaceCandidate?.(selection.item, candidate.workspaceRef)} type="button"><strong>{candidate.label}</strong><small>{candidate.workspaceRef}</small></button>)}</div> : null}
-            {selection.item.status === "error" ? <button className="personal-primary-action" onClick={() => void callbacks.onTransitionProposal?.(selection.item, "regenerate")} type="button"><RotateCcw size={17} />基于最新状态重试</button> : selection.item.status !== "gated" ? <button className="personal-primary-action" disabled={!['ready', 'deferred'].includes(selection.item.status)} onClick={() => void callbacks.onApplyProposal?.(selection.item)} type="button"><Check size={17} />{selection.item.status === "applying" ? "正在应用…" : selection.item.primaryLabel ?? "确认并应用"}</button> : null}
-            {["stale", "gated", "rejected"].includes(selection.item.status) ? <button className="personal-secondary-action" onClick={() => void callbacks.onTransitionProposal?.(selection.item, "regenerate")} type="button"><RotateCcw size={16} />按最新状态重新检查</button> : null}
-            {["ready", "gated"].includes(selection.item.status) ? <div className="personal-drawer-action-grid"><button className="personal-secondary-action" onClick={() => void callbacks.onTransitionProposal?.(selection.item, "defer")} type="button">稍后</button><button className="personal-secondary-action" onClick={() => void callbacks.onTransitionProposal?.(selection.item, "reject")} type="button">拒绝</button></div> : null}
+            {!readOnly && selection.item.workspaceCandidates?.length ? <div className="personal-workspace-candidates" aria-label="可选择的工作区">{selection.item.workspaceCandidates.map((candidate) => <button key={candidate.workspaceRef} onClick={() => void callbacks.onSelectWorkspaceCandidate?.(selection.item, candidate.workspaceRef)} type="button"><strong>{candidate.label}</strong><small>{candidate.workspaceRef}</small></button>)}</div> : null}
+            {!readOnly && selection.item.status === "error" ? <button className="personal-primary-action" onClick={() => void callbacks.onTransitionProposal?.(selection.item, "regenerate")} type="button"><RotateCcw size={17} />基于最新状态重试</button> : !readOnly && selection.item.status !== "gated" ? <button className="personal-primary-action" disabled={!['ready', 'deferred'].includes(selection.item.status)} onClick={() => void callbacks.onApplyProposal?.(selection.item)} type="button"><Check size={17} />{selection.item.status === "applying" ? "正在应用…" : selection.item.primaryLabel ?? "确认并应用"}</button> : null}
+            {!readOnly && ["stale", "gated", "rejected"].includes(selection.item.status) ? <button className="personal-secondary-action" onClick={() => void callbacks.onTransitionProposal?.(selection.item, "regenerate")} type="button"><RotateCcw size={16} />按最新状态重新检查</button> : null}
+            {!readOnly && ["ready", "gated"].includes(selection.item.status) ? <div className="personal-drawer-action-grid"><button className="personal-secondary-action" onClick={() => void callbacks.onTransitionProposal?.(selection.item, "defer")} type="button">稍后</button><button className="personal-secondary-action" onClick={() => void callbacks.onTransitionProposal?.(selection.item, "reject")} type="button">拒绝</button></div> : null}
             {!["applied", "applying"].includes(selection.item.status) ? <button className="personal-secondary-action" onClick={onClose} type="button">关闭</button> : null}
           </>
         ) : null}
@@ -552,12 +555,12 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                 <div><dt>停止条件</dt><dd>{selection.item.stopCondition ?? "Goal 完成或 owner 停止"}</dd></div>
               </dl>
             </section>
-            {selection.item.scheduleKind === "monitor" ? <button className="personal-primary-action" onClick={() => void callbacks.onUpdateSchedule?.(selection.item, "run_now")} type="button"><Play size={16} />立即运行</button> : null}
-            <div className="personal-drawer-action-grid">
+            {!readOnly && selection.item.scheduleKind === "monitor" ? <button className="personal-primary-action" onClick={() => void callbacks.onUpdateSchedule?.(selection.item, "run_now")} type="button"><Play size={16} />立即运行</button> : null}
+            {!readOnly ? <div className="personal-drawer-action-grid">
               <button className="personal-secondary-action" onClick={() => void callbacks.onUpdateSchedule?.(selection.item, selection.item.status === "paused" ? "resume" : "pause")} type="button">{selection.item.status === "paused" ? <Play size={16} /> : <Pause size={16} />}{selection.item.status === "paused" ? "恢复" : "暂停"}</button>
               <button className="personal-secondary-action" onClick={() => void callbacks.onUpdateSchedule?.(selection.item, "edit")} type="button"><CalendarClock size={16} />改为每 2 小时</button>
-            </div>
-            <button className="personal-danger-action" onClick={() => void callbacks.onUpdateSchedule?.(selection.item, "stop")} type="button"><Square size={16} />停止{selection.item.scheduleKind === "heartbeat" ? " Heartbeat" : "定时检查"}</button>
+            </div> : null}
+            {!readOnly ? <button className="personal-danger-action" onClick={() => void callbacks.onUpdateSchedule?.(selection.item, "stop")} type="button"><Square size={16} />停止{selection.item.scheduleKind === "heartbeat" ? " Heartbeat" : "定时检查"}</button> : null}
             <section className="personal-execution-history" aria-labelledby="personal-execution-history-title">
               <h3 id="personal-execution-history-title">执行历史</h3>
               {selection.item.executionHistory?.length ? (

@@ -1470,7 +1470,7 @@ export function PersonalWorkspacePage({
           });
         }
         setSelection(null);
-      }} runs={items.flatMap((item) => item.kind === "run" ? [item.run] : [])} selection={drawerSelection} /> : null}
+      }} readOnly={readOnly} runs={items.flatMap((item) => item.kind === "run" ? [item.run] : [])} selection={drawerSelection} /> : null}
       drawerOpen={drawerSelection !== null}
       mobileSidebarOpen={mobileSidebarOpen}
       onCloseMobileSidebar={() => setMobileSidebarOpen(false)}
