@@ -28,12 +28,20 @@ def _observation(**overrides: object) -> dict[str, object]:
     return value
 
 
-def _run(generated_at: str, observation: dict[str, object]) -> dict[str, object]:
-    return {
+def _run(
+    generated_at: str,
+    observation: dict[str, object],
+    *,
+    turn_instance_id: str | None = None,
+) -> dict[str, object]:
+    run: dict[str, object] = {
         "generated_at": generated_at,
         "agent_id": AGENT_ID,
         "progress_observation": normalize_progress_observation(observation),
     }
+    if turn_instance_id:
+        run["turn_instance_id"] = turn_instance_id
+    return run
 
 
 def test_normalization_rejects_prose_in_semantic_identifiers() -> None:
@@ -55,6 +63,64 @@ def test_two_equivalent_typed_observations_trigger_replan_without_text() -> None
     assert trigger["kind"] == "typed_progress_repeat"
     assert trigger["run_count"] == 2
     assert trigger["progress_baseline"]["surface_id"] == "surface-auth"
+
+
+def test_same_turn_retry_does_not_trigger_replan() -> None:
+    runs = [
+        _run(
+            "2026-08-13T01:01:01Z",
+            _observation(),
+            turn_instance_id="turn-retry",
+        ),
+        _run(
+            "2026-08-13T01:01:00Z",
+            _observation(),
+            turn_instance_id="turn-retry",
+        ),
+    ]
+
+    assert typed_progress_repeat_trigger(runs, agent_id=AGENT_ID) is None
+
+
+def test_same_turn_retry_and_prior_distinct_turn_trigger_replan() -> None:
+    runs = [
+        _run(
+            "2026-08-13T01:02:01Z",
+            _observation(),
+            turn_instance_id="turn-current",
+        ),
+        _run(
+            "2026-08-13T01:02:00Z",
+            _observation(),
+            turn_instance_id="turn-current",
+        ),
+        _run(
+            "2026-08-13T01:00:00Z",
+            _observation(),
+            turn_instance_id="turn-prior",
+        ),
+    ]
+
+    trigger = typed_progress_repeat_trigger(runs, agent_id=AGENT_ID)
+
+    assert trigger is not None
+    assert trigger["latest_generated_at"] == "2026-08-13T01:02:01Z"
+    assert trigger["oldest_counted_generated_at"] == "2026-08-13T01:00:00Z"
+
+
+def test_settlement_identity_turn_id_deduplicates_retries() -> None:
+    runs = [
+        {
+            **_run("2026-08-13T01:01:01Z", _observation()),
+            "settlement_identity": {"turn_instance_id": "turn-retry"},
+        },
+        {
+            **_run("2026-08-13T01:01:00Z", _observation()),
+            "settlement_identity": {"turn_instance_id": "turn-retry"},
+        },
+    ]
+
+    assert typed_progress_repeat_trigger(runs, agent_id=AGENT_ID) is None
 
 
 def test_text_changes_cannot_hide_an_equivalent_typed_repeat() -> None:
