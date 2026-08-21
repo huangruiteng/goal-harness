@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..effect_program import (
+    SettlementEffectResolution,
+    SettlementEffectResolutionKind,
     SettlementResult,
     SettlementStepKind,
 )
@@ -24,6 +26,10 @@ from .transaction import (
 
 
 TurnEffect = Callable[[], Mapping[str, Any]]
+TurnIdempotentEffect = Callable[[str], Mapping[str, Any]]
+TurnEffectResolver = Callable[[str], SettlementEffectResolution]
+TurnSettlementPrepare = Callable[[SettlementStepKind, str], None]
+TurnSettlementAbort = Callable[[SettlementStepKind, str], None]
 TurnSettlementCheckpoint = Callable[
     [SettlementStepKind, Mapping[str, Any], tuple[str, ...]],
     None,
@@ -38,6 +44,14 @@ class TurnSettlementState:
     completed_phases: tuple[str, ...]
     writeback: Mapping[str, Any] | None = None
     quota_spend: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TurnEffectRecovery:
+    """Provider operations required to recover one prepared Turn effect."""
+
+    apply: TurnIdempotentEffect
+    resolve: TurnEffectResolver | None = None
 
 
 SETTLEMENT_STEPS = (
@@ -120,6 +134,10 @@ def execute_turn_driver_settlement(
     spend: TurnEffect,
     checkpoint: TurnSettlementCheckpoint,
     committed_effect_id: str | None = None,
+    prepare: TurnSettlementPrepare | None = None,
+    abort: TurnSettlementAbort | None = None,
+    prepared_effect_refs: Mapping[SettlementStepKind, str] | None = None,
+    effect_recovery: Mapping[SettlementStepKind, TurnEffectRecovery] | None = None,
 ) -> SettlementResult[TurnSettlementState]:
     """Bind validation -> writeback -> spend for the isolated Turn adapter.
 
@@ -173,13 +191,30 @@ def execute_turn_driver_settlement(
         quota_spend=quota_spend_payload,
     )
     receipts = list(seeded.receipts)
+    prepared_refs = dict(prepared_effect_refs or {})
+    recovery = dict(effect_recovery or {})
     if "durable_writeback" not in phases:
+        writeback_recovery = recovery.get(SettlementStepKind.DURABLE_WRITEBACK)
         step_result = commit_step_effect(
             identity,
             step_kind=SettlementStepKind.DURABLE_WRITEBACK,
             transaction_phases=transaction_phases,
-            effect=writeback,
+            effect=(
+                writeback_recovery.apply
+                if writeback_recovery is not None
+                else lambda _effect_ref: writeback()
+            ),
             checkpoint=checkpoint,
+            prepare=prepare,
+            abort=abort,
+            prepared_effect_ref=prepared_refs.get(
+                SettlementStepKind.DURABLE_WRITEBACK
+            ),
+            resolve=(
+                writeback_recovery.resolve
+                if writeback_recovery is not None
+                else None
+            ),
         )
         if step_result.failure is not None:
             return SettlementResult.failed(
@@ -198,12 +233,21 @@ def execute_turn_driver_settlement(
             quota_spend=state.quota_spend,
         )
     if "quota_spend" not in phases:
+        spend_recovery = recovery.get(SettlementStepKind.QUOTA_SPEND)
         step_result = commit_step_effect(
             identity,
             step_kind=SettlementStepKind.QUOTA_SPEND,
             transaction_phases=transaction_phases,
-            effect=spend,
+            effect=(
+                spend_recovery.apply
+                if spend_recovery is not None
+                else lambda _effect_ref: spend()
+            ),
             checkpoint=checkpoint,
+            prepare=prepare,
+            abort=abort,
+            prepared_effect_ref=prepared_refs.get(SettlementStepKind.QUOTA_SPEND),
+            resolve=spend_recovery.resolve if spend_recovery is not None else None,
         )
         if step_result.failure is not None:
             return SettlementResult.failed(
@@ -229,6 +273,10 @@ def execute_turn_terminal_closeout(
     closeout: TurnEffect,
     checkpoint: TerminalCloseoutCheckpoint,
     committed_effect_id: str | None = None,
+    prepare: TurnSettlementPrepare | None = None,
+    abort: TurnSettlementAbort | None = None,
+    prepared_effect_ref: str | None = None,
+    effect_recovery: TurnEffectRecovery | None = None,
 ) -> SettlementResult[Mapping[str, Any]]:
     """Commit or replay the terminal closeout after durable spend.
 
@@ -278,8 +326,16 @@ def execute_turn_terminal_closeout(
         identity,
         step_kind=SettlementStepKind.TERMINAL_CLOSEOUT,
         transaction_phases=TERMINAL_SETTLEMENT_STEPS,
-        effect=closeout,
+        effect=(
+            effect_recovery.apply
+            if effect_recovery is not None
+            else lambda _effect_ref: closeout()
+        ),
         checkpoint=lambda _step, payload, _phases: checkpoint(payload),
+        prepare=prepare,
+        abort=abort,
+        prepared_effect_ref=prepared_effect_ref,
+        resolve=effect_recovery.resolve if effect_recovery is not None else None,
     )
     return result
 
@@ -292,11 +348,14 @@ def execute_verified_turn_terminal_closeout(
     closeout: TurnEffect,
     checkpoint: TerminalCloseoutCheckpoint,
     committed_effect_id: str | None = None,
+    prepare: TurnSettlementPrepare | None = None,
+    abort: TurnSettlementAbort | None = None,
+    prepared_effect_ref: str | None = None,
+    effect_recovery: TurnEffectRecovery | None = None,
 ) -> SettlementResult[Mapping[str, Any]]:
     """Commit a terminal effect only when it durably proves no-followup."""
 
-    def verified_closeout() -> Mapping[str, Any]:
-        callback_payload = closeout()
+    def verify_payload(callback_payload: Mapping[str, Any]) -> Mapping[str, Any]:
         outcome = completion_writeback_outcome(callback_payload, plan=plan)
         if outcome is None or outcome.get("continuation") != "no_followup":
             return {
@@ -309,10 +368,41 @@ def execute_verified_turn_terminal_closeout(
             }
         return {**callback_payload, "completion": outcome}
 
+    def verified_closeout() -> Mapping[str, Any]:
+        return verify_payload(closeout())
+
+    verified_recovery = None
+    if effect_recovery is not None:
+        def resolve_verified(effect_ref: str) -> SettlementEffectResolution:
+            if effect_recovery.resolve is None:
+                return SettlementEffectResolution.unknown(
+                    "terminal closeout provider has no readback"
+                )
+            resolution = effect_recovery.resolve(effect_ref)
+            if resolution.kind is not SettlementEffectResolutionKind.COMMITTED:
+                return resolution
+            verified = verify_payload(resolution.payload or {})
+            if verified.get("ok") is not True or verified.get("appended") is not True:
+                return SettlementEffectResolution.unknown(
+                    str(verified.get("reason") or "terminal closeout readback is invalid")
+                )
+            return SettlementEffectResolution.committed(verified)
+
+        verified_recovery = TurnEffectRecovery(
+            apply=lambda effect_ref: verify_payload(
+                effect_recovery.apply(effect_ref)
+            ),
+            resolve=resolve_verified,
+        )
+
     return execute_turn_terminal_closeout(
         transaction_plan,
         committed_payload=committed_payload,
         closeout=verified_closeout,
         checkpoint=checkpoint,
         committed_effect_id=committed_effect_id,
+        prepare=prepare,
+        abort=abort,
+        prepared_effect_ref=prepared_effect_ref,
+        effect_recovery=verified_recovery,
     )

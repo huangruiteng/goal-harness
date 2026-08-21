@@ -10,7 +10,24 @@ from ..capabilities.explore.composition_frontier import (
     project_live_explore_composition_frontier,
 )
 from ..control_plane.quota.live_decision import build_live_quota_should_run_decision
+from ..control_plane.quota.heartbeat_receipt import (
+    ensure_turn_heartbeat_settlement_receipt,
+)
+from ..cli_rollout import append_cli_rollout_event
+from ..control_plane.effect_program import (
+    SettlementEffectResolution,
+    SettlementStepKind,
+)
+from ..control_plane.quota.settlement import (
+    find_settlement_spend_run,
+    find_settlement_step_event,
+    find_settlement_writeback,
+)
 from ..control_plane.quota.turn_envelope import build_turn_envelope
+from ..control_plane.settlement_driver import (
+    settlement_effect_ref,
+    settlement_identity_from_plan,
+)
 from ..control_plane.runtime.status_projection_cache import (
     resolve_status_projection_cache_runtime_root,
 )
@@ -517,6 +534,82 @@ def handle_turn_command(
                 task_validator = None
             envelope = payload.get("turn_envelope") if isinstance(payload.get("turn_envelope"), dict) else {}
             selected_todo = selected_turn_todo(envelope)
+            transaction_plan = (
+                payload.get("transaction")
+                if isinstance(payload.get("transaction"), Mapping)
+                else {}
+            )
+            identity_result = settlement_identity_from_plan(transaction_plan)
+            if identity_result.failure is not None or identity_result.value is None:
+                raise ValueError(
+                    identity_result.failure.reason
+                    if identity_result.failure is not None
+                    else "Turn settlement has no identity"
+                )
+            settlement_identity = identity_result.value
+            if args.execute:
+                ensure_turn_heartbeat_settlement_receipt(
+                    runtime_root,
+                    settlement_identity,
+                )
+
+            def require_effect_ref(
+                effect_ref: str,
+                step_kind: SettlementStepKind,
+            ) -> None:
+                expected = settlement_effect_ref(settlement_identity, step_kind)
+                if effect_ref != expected:
+                    raise ValueError(
+                        f"{step_kind.value} effect ref does not match Turn identity"
+                    )
+
+            def append_settlement_event(
+                effect_payload: dict[str, object],
+                *,
+                event_kind: str,
+                status: str,
+                details: dict[str, object],
+            ) -> dict[str, object]:
+                event_payload = {
+                    **effect_payload,
+                    "ok": True,
+                    "goal_id": args.goal_id,
+                    "runtime_root": str(runtime_root),
+                    "agent_id": settlement_identity.agent_id,
+                    "todo_id": settlement_identity.todo_id,
+                }
+                append_cli_rollout_event(
+                    event_payload,
+                    registry_path=registry_path,
+                    runtime_root_arg=runtime_root_arg,
+                    event_kind=event_kind,
+                    agent_id=settlement_identity.agent_id,
+                    todo_id=settlement_identity.todo_id,
+                    run_id=settlement_identity.turn_instance_id,
+                    status=status,
+                    summary=(
+                        f"Turn settlement {event_kind} recorded for "
+                        f"turn={settlement_identity.turn_instance_id}"
+                    ),
+                    details={
+                        **details,
+                        "settlement_effect_id": settlement_identity.effect_id,
+                        "replan_obligation_id": str(
+                            settlement_identity.replan_obligation_id or ""
+                        ),
+                    },
+                    idempotency_fields=[
+                        "goal_id",
+                        "event_kind",
+                        "agent_id",
+                        *(("todo_id",) if settlement_identity.todo_id else ()),
+                        "run_id",
+                        *(("status",) if event_kind == "todo_complete" else ()),
+                    ],
+                )
+                if event_payload.get("rollout_event_log_error"):
+                    raise OSError(f"failed to persist {event_kind} settlement receipt")
+                return event_payload
             writeback_contract = (
                 envelope.get("writeback")
                 if isinstance(envelope.get("writeback"), dict)
@@ -535,7 +628,9 @@ def handle_turn_command(
                 *,
                 completion_todo_id: str | None = None,
                 completion_turn_key: str | None = None,
+                effect_ref: str,
             ) -> dict[str, object]:
+                require_effect_ref(effect_ref, SettlementStepKind.DURABLE_WRITEBACK)
                 # The host workspace is execution context, not state authority.
                 state_project = None
                 result_kind = str(result.get("result_kind") or "")
@@ -554,7 +649,7 @@ def handle_turn_command(
                         project=state_project,
                         dry_run=False,
                     )
-                return refresh_state_run(
+                refresh = refresh_state_run(
                     registry_path=registry_path,
                     runtime_root_override=runtime_root_arg,
                     goal_id=args.goal_id,
@@ -566,6 +661,9 @@ def handle_turn_command(
                     delivery_batch_scale=str(result["delivery_batch_scale"]),
                     delivery_outcome=str(result["delivery_outcome"]),
                     delivery_workspace_path=delivery_workspace_path,
+                    todo_id=settlement_identity.todo_id,
+                    turn_instance_id=settlement_identity.turn_instance_id,
+                    replan_obligation_id=settlement_identity.replan_obligation_id,
                     agent_id=args.agent_id,
                     progress_scope="goal",
                     autonomous_replan_recorded=result_kind == "replan_required",
@@ -582,6 +680,22 @@ def handle_turn_command(
                     dry_run=False,
                     sync_global=not bool(args.no_global_sync),
                 )
+                if refresh.get("ok") and (
+                    refresh.get("appended")
+                    or refresh.get("idempotent_replay")
+                    or refresh.get("receipt_repair_required")
+                ):
+                    append_settlement_event(
+                        refresh,
+                        event_kind="refresh_state",
+                        status=(
+                            "receipt_repaired"
+                            if refresh.get("receipt_repair_required")
+                            else "appended"
+                        ),
+                        details={"command": "turn run-once"},
+                    )
+                return refresh
 
             def completion_intent(_result: dict[str, object]) -> dict[str, object]:
                 todo_id = str(selected_todo.get("todo_id") or "")
@@ -607,7 +721,11 @@ def handle_turn_command(
                     existing_todo_ids=existing_todo_ids,
                 )
 
-            def todo_completion(result: dict[str, object]) -> dict[str, object]:
+            def todo_completion(
+                result: dict[str, object],
+                *,
+                effect_ref: str,
+            ) -> dict[str, object]:
                 todo_id = str(selected_todo.get("todo_id") or "")
                 if not todo_id:
                     raise ValueError(
@@ -618,7 +736,7 @@ def handle_turn_command(
                     goal_id=args.goal_id,
                     todo_id=todo_id,
                     role="agent",
-                    completion_turn_key=str(result["turn_key"]),
+                    completion_turn_key=settlement_identity.turn_instance_id,
                     evidence=(
                         "LoopX Turn validated completion: "
                         + str(result.get("summary") or result["classification"])
@@ -660,7 +778,7 @@ def handle_turn_command(
                         "appended": False,
                         "reason": f"durable completion projection failed: {exc}",
                     }
-                return {
+                completion_payload = {
                     "ok": bool(completion.get("ok")),
                     # A completed Todo is idempotent under Turn replay: after an
                     # interrupted journal write, the retry may observe it done.
@@ -670,16 +788,39 @@ def handle_turn_command(
                     ),
                     "completion": completion_outcome,
                 }
+                if completion_payload["ok"] and completion_payload["appended"]:
+                    append_settlement_event(
+                        completion_payload,
+                        event_kind="todo_complete",
+                        status=(
+                            "terminal_no_followup"
+                            if completion_outcome.get("continuation") == "no_followup"
+                            else "completed"
+                        ),
+                        details={
+                            "command": "turn run-once",
+                            "no_followup": (
+                                completion_outcome.get("continuation") == "no_followup"
+                            ),
+                        },
+                    )
+                return completion_payload
 
-            def completion_writeback(result: dict[str, object]) -> dict[str, object]:
-                completion = todo_completion(result)
+            def completion_writeback(
+                result: dict[str, object],
+                *,
+                effect_ref: str,
+            ) -> dict[str, object]:
+                require_effect_ref(effect_ref, SettlementStepKind.DURABLE_WRITEBACK)
+                completion = todo_completion(result, effect_ref=effect_ref)
                 if not completion.get("ok"):
                     return completion
                 todo_id = str(selected_todo.get("todo_id") or "")
                 refresh = writeback(
                     result,
                     completion_todo_id=todo_id,
-                    completion_turn_key=str(result["turn_key"]),
+                    completion_turn_key=settlement_identity.turn_instance_id,
+                    effect_ref=effect_ref,
                 )
                 return {
                     "ok": bool(refresh.get("ok")),
@@ -700,8 +841,9 @@ def handle_turn_command(
                     available_capabilities=args.available_capabilities,
                 )
 
-            def spend() -> dict[str, object]:
-                return spend_quota_slot(
+            def spend(*, effect_ref: str) -> dict[str, object]:
+                require_effect_ref(effect_ref, SettlementStepKind.QUOTA_SPEND)
+                spent = spend_quota_slot(
                     current_status(),
                     goal_id=args.goal_id,
                     slots=1,
@@ -712,6 +854,174 @@ def handle_turn_command(
                     available_capabilities=args.available_capabilities,
                     operator_inbox_urgency_projector=operator_inbox_urgency_projector,
                 )
+                if spent.get("ok") and (
+                    spent.get("appended")
+                    or spent.get("idempotent_replay")
+                    or spent.get("receipt_repair_required")
+                ):
+                    append_settlement_event(
+                        spent,
+                        event_kind="quota_spend",
+                        status=(
+                            "receipt_repaired"
+                            if spent.get("receipt_repair_required")
+                            else "appended"
+                        ),
+                        details={"command": "turn run-once"},
+                    )
+                return spent
+
+            def completion_readback() -> dict[str, object] | None:
+                todo_id = str(selected_todo.get("todo_id") or "")
+                if not todo_id:
+                    return None
+                try:
+                    _state_project, state_file = resolve_todo_state_path(
+                        registry_path=registry_path,
+                        goal_id=args.goal_id,
+                        project=None,
+                        state_file=None,
+                    )
+                    durable_todo, existing_todo_ids = read_persisted_todo_record(
+                        state_file,
+                        todo_id=todo_id,
+                        registry_path=registry_path,
+                        goal_id=args.goal_id,
+                    )
+                    return project_durable_completion_outcome(
+                        todo=durable_todo,
+                        expected_todo_id=todo_id,
+                        existing_todo_ids=existing_todo_ids,
+                    )
+                except ValueError:
+                    return None
+
+            def writeback_resolver(effect_ref: str) -> SettlementEffectResolution:
+                try:
+                    require_effect_ref(
+                        effect_ref,
+                        SettlementStepKind.DURABLE_WRITEBACK,
+                    )
+                    run = find_settlement_writeback(runtime_root, settlement_identity)
+                    event = find_settlement_step_event(
+                        runtime_root,
+                        settlement_identity,
+                        event_kind="refresh_state",
+                    )
+                    if run is None and event is None:
+                        return SettlementEffectResolution.absent()
+                    if run is None:
+                        return SettlementEffectResolution.unknown(
+                            "refresh-state receipt exists without its durable run"
+                        )
+                    if event is None:
+                        append_settlement_event(
+                            dict(run),
+                            event_kind="refresh_state",
+                            status="receipt_repaired",
+                            details={"command": "turn recovery probe"},
+                        )
+                    committed: dict[str, object] = {
+                        "ok": True,
+                        "appended": True,
+                        "classification": run.get("classification"),
+                    }
+                    completion = completion_readback()
+                    if completion is not None:
+                        committed["completion"] = completion
+                    return SettlementEffectResolution.committed(committed)
+                except (OSError, ValueError) as exc:
+                    return SettlementEffectResolution.unknown(str(exc))
+
+            def spend_resolver(effect_ref: str) -> SettlementEffectResolution:
+                try:
+                    require_effect_ref(effect_ref, SettlementStepKind.QUOTA_SPEND)
+                    run = find_settlement_spend_run(runtime_root, settlement_identity)
+                    event = find_settlement_step_event(
+                        runtime_root,
+                        settlement_identity,
+                        event_kind="quota_spend",
+                    )
+                    if event is not None:
+                        return SettlementEffectResolution.committed(
+                            {"ok": True, "appended": True, "mode": "spend-slot"}
+                        )
+                    if run is None:
+                        return SettlementEffectResolution.unknown(
+                            "quota-spend outcome has no identity-bound receipt"
+                        )
+                    if event is None:
+                        append_settlement_event(
+                            dict(run),
+                            event_kind="quota_spend",
+                            status="receipt_repaired",
+                            details={"command": "turn recovery probe"},
+                        )
+                    return SettlementEffectResolution.committed(
+                        {"ok": True, "appended": True, "mode": "spend-slot"}
+                    )
+                except (OSError, ValueError) as exc:
+                    return SettlementEffectResolution.unknown(str(exc))
+
+            def terminal_closeout_resolver(
+                effect_ref: str,
+            ) -> SettlementEffectResolution:
+                try:
+                    require_effect_ref(
+                        effect_ref,
+                        SettlementStepKind.TERMINAL_CLOSEOUT,
+                    )
+                    event = find_settlement_step_event(
+                        runtime_root,
+                        settlement_identity,
+                        event_kind="todo_complete",
+                    )
+                    completion = completion_readback()
+                    if event is None:
+                        if completion is None:
+                            return SettlementEffectResolution.absent()
+                        if completion.get("continuation") != "no_followup":
+                            return SettlementEffectResolution.unknown(
+                                "Todo completion does not prove terminal no-followup"
+                            )
+                        append_settlement_event(
+                            {
+                                "ok": True,
+                                "appended": True,
+                                "completion": completion,
+                            },
+                            event_kind="todo_complete",
+                            status="terminal_no_followup",
+                            details={
+                                "command": "turn recovery probe",
+                                "no_followup": True,
+                            },
+                        )
+                        return SettlementEffectResolution.committed(
+                            {
+                                "ok": True,
+                                "appended": True,
+                                "completion": completion,
+                            }
+                        )
+                    details = (
+                        event.get("details")
+                        if isinstance(event.get("details"), Mapping)
+                        else {}
+                    )
+                    if details.get("no_followup") is not True or completion is None:
+                        return SettlementEffectResolution.unknown(
+                            "terminal closeout readback is incomplete"
+                        )
+                    return SettlementEffectResolution.committed(
+                        {
+                            "ok": True,
+                            "appended": True,
+                            "completion": completion,
+                        }
+                    )
+                except (OSError, ValueError) as exc:
+                    return SettlementEffectResolution.unknown(str(exc))
 
             def scheduler(_spend_payload: dict[str, object]) -> dict[str, object]:
                 turn_scheduler_context = (
@@ -787,6 +1097,11 @@ def handle_turn_command(
                 terminal_closeout=todo_completion if args.execute else None,
                 spend=spend if args.execute else None,
                 scheduler=scheduler if args.execute else None,
+                writeback_resolver=writeback_resolver if args.execute else None,
+                spend_resolver=spend_resolver if args.execute else None,
+                terminal_closeout_resolver=(
+                    terminal_closeout_resolver if args.execute else None
+                ),
             )
         else:
             raise ValueError("turn requires the `plan` or `run-once` subcommand")
