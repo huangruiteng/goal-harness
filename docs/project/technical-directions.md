@@ -133,7 +133,7 @@ remain later explicit decisions.
 | Exploration | Stage | Current entry | Implementation rule |
 | --- | --- | --- | --- |
 | Effect Program and settlement algebra | Accepted / runtime hardening | [RFC](../architecture/rfcs/agent-loop-effect-interpreter-v0.md) | Improve the shared typed contract and negative coverage; keep scheduler ownership and domain-local ACK semantics explicit. |
-| TypeScript control-plane migration | Draft / parity experiment | [#3225](https://github.com/huangruiteng/loopx/issues/3225) | Start with process-boundary parity over existing fixtures; Python remains canonical during transition. |
+| TypeScript control-plane migration | Draft / first bounded cutover | [RFC](../architecture/rfcs/typescript-control-plane-migration-v0.md) | Replace the Effect Program vertical first behind one managed runtime; keep one semantic owner per migrated rule and stop at owner review before later domain slices. |
 | Hierarchical agent stride | Active research | [#3203](https://github.com/huangruiteng/loopx/issues/3203) | Qualify read-only and shadow evidence before adaptive selection. |
 | Research exploration control plane | Draft / typed frontier | [RFC](../architecture/rfcs/research-exploration-control-plane-v0.md) | Keep Explore, goal-frontier, and execution authority separate. |
 | Human Attention Wishlist | Draft / non-blocking sidecar | [#3179](https://github.com/huangruiteng/loopx/issues/3179) | Do not change user gates, selected work, quota, or notification authority. |

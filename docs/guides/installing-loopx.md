@@ -10,7 +10,26 @@ loopx workflow-skills --install
 loopx doctor
 ```
 
-The package has no runtime dependencies outside the Python standard library.
+LoopX's Effect Program core runs in a managed, idle-exiting TypeScript runtime
+and requires Node.js 22.6 or later. LoopX starts and reuses that local runtime
+automatically; users do not run a daemon manually. The runtime binds only to
+loopback, authenticates requests with a user-private token, rotates when the
+packaged Effect core changes, and exits after an idle period. `loopx doctor`
+reports it as `ready`, `missing`, `unsupported`, or `probe_failed`; a missing
+or stale runtime fails closed instead of falling back to a second Python rule
+engine. The same doctor projection exposes `runtime_lifecycle.state` as
+`running`, `stopped`, or `unavailable`, plus a public-safe `diagnostic_code`;
+the App can render this projection without inventing a second health model.
+`stopped` is healthy and means the idle-exited runtime will restart on the next
+control-plane request. Validate Node before installing or upgrading LoopX:
+
+```bash
+node --version
+# v22.6.0 or newer
+```
+
+Use `loopx doctor --deep` after installation to start the managed runtime and
+exercise the packaged Effect semantics and native journal checkpoint handler.
 `workflow-skills --install` copies the packaged LoopX workflow skills into the
 user's Codex skill directory and writes a revision readback; it does not change
 project state or grant repository, network, or merge authority. Restart the
@@ -111,7 +130,19 @@ loopx doctor
 
 `loopx doctor` reports `install_kind: python_distribution` for this path and
 returns the same pip-native repair sequence when packaged skills are missing or
-stale.
+stale. It also verifies the required TypeScript Effect runtime before a
+control-plane upgrade is considered healthy. Runtime metadata is fingerprinted
+by the installed sources, so an upgraded LoopX starts a matching process while
+an older process exits after becoming idle. When a release needs to be rolled
+back, reinstall the previously selected version, refresh the packaged host
+material, and validate again:
+
+```bash
+python3 -m pip install "loopx==<previous-version>"
+loopx workflow-skills --install
+loopx slash-commands --install
+loopx doctor
+```
 
 ## Archive Fallback
 

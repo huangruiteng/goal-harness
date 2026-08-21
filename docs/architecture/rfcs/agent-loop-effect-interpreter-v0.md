@@ -568,19 +568,25 @@ and budget rejection distinct, and leave scheduler apply or ACK outside the
 agent-owned settlement boundary.
 
 M7.3: after both M7.2 adapters consume the proven plan and receipt semantics,
-compare their execution ownership. Extract the smallest shared executor or
-Kleisli-like bind protocol only if it deletes duplicate orchestration without
-crossing the Codex App agent/host boundary. Do not add a registry or generic
-composition framework. `quota should-run` may derive both its packet and
-effect projection from one canonical decision plan, but constructing
-`EffectTurn` earlier is not itself an acceptance condition. If the two callers
-share only the algebra and not an executor boundary, close M7.3 with a
-structured no-follow-up decision and keep their executors local.
+compare their execution ownership. The 2026-08-21 cutover qualification found
+that settlement identity, bind/short-circuit, replay seeding, next-action
+selection, and commit reduction were still duplicated across the adapters.
+This reopens M7.3 for one bounded TypeScript Effect runtime. The runtime owns
+that shared algebra and the first internal effect, atomic Turn-journal
+checkpointing. Its server is only a temporary Python-to-TypeScript transport;
+one static typed handler registry routes coarse transactions to domain owners.
+It is not a generic composition framework and does not move model, user, host
+scheduler, credential, or third-party authority behind a universal executor.
+Every replaced Python semantic path is deleted in the same cutover PR.
 
 M7.4: expand one bounded family at a time only when it removes duplicate
-knowledge. Todo, monitor, capability, scheduler, and gate state machines keep
-their domain transition invariants. They do not move behind a shared protocol
-merely because their packets have similar fields.
+knowledge and switches a real production caller. Todo, monitor, capability,
+scheduler, and gate state machines keep their domain transition invariants.
+They may execute through the same managed runtime as they migrate, but they do
+not move behind one generic state protocol merely because their packets have
+similar fields. After the CLI is native TypeScript, CLI-only execution imports
+the kernel in-process; the daemon remains optional for App/multi-client shared
+authority rather than a mandatory server per family.
 
 The replan semantic-exit repair in #3208 is an explicit non-candidate:
 `refresh-state` already re-derives the current obligation and records a typed

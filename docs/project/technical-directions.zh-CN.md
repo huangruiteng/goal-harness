@@ -118,7 +118,7 @@ replay。真实 NoKV qualification、renew/reclaim、distributed quota、认证�
 | 探索 | 阶段 | 当前入口 | 实现规则 |
 | --- | --- | --- | --- |
 | Effect Program 与 settlement algebra | Accepted / runtime hardening | [RFC](../architecture/rfcs/agent-loop-effect-interpreter-v0.zh-CN.md) | 改善共享 typed contract 与 negative coverage；明确 scheduler ownership 和 domain-local ACK 语义。 |
-| TypeScript 控制面迁移 | Draft / parity experiment | [#3225](https://github.com/huangruiteng/loopx/issues/3225) | 从基于已有 fixture 的进程边界 parity 开始；迁移期内 Python 保持 canonical。 |
+| TypeScript 控制面迁移 | Draft / 首个 bounded cutover | [RFC](../architecture/rfcs/typescript-control-plane-migration-v0.zh-CN.md) | 先在一个 managed runtime 后替换 Effect Program vertical；每条已迁规则只保留一个语义 owner，后续 domain slice 必须等待 owner review。 |
 | 分层 Agent stride | Active research | [#3203](https://github.com/huangruiteng/loopx/issues/3203) | 引入 adaptive selection 前先验证 read-only 与 shadow evidence。 |
 | 研究型探索控制面 | Draft / typed frontier | [RFC](../architecture/rfcs/research-exploration-control-plane-v0.zh-CN.md) | 保持 Explore、goal-frontier 和 execution authority 分离。 |
 | Human Attention Wishlist | Draft / non-blocking sidecar | [#3179](https://github.com/huangruiteng/loopx/issues/3179) | 不改变 user gate、selected work、quota 或 notification authority。 |

@@ -1,172 +1,267 @@
 # RFC：LoopX 控制面 TypeScript 渐进迁移方向 v0
 
-- Status: Draft，维护者评审中
-- Proposed by: LoopX maintainers
-- Date: 2026-08-15
-- Scope: LoopX 控制面核心从 Python 到 TypeScript 的增量迁移策略；
-  契约优先、parity 门禁、逐块替换
-- Source baseline: `d1fe05932`
-- Tracking issue: [#3225](https://github.com/huangruiteng/loopx/issues/3225)
-- Language note: 本中文版与
+- Status：Draft，首个 bounded cutover 等待维护者评审
+- Proposed by：LoopX maintainers
+- Date：2026-08-15
+- Last revised：2026-08-21
+- Scope：LoopX 控制面核心从 Python 到 TypeScript 的增量、replacement-first
+  迁移；不长期维护两份语义实现
+- Tracking issue：[#3225](https://github.com/huangruiteng/loopx/issues/3225)
+- Language note：本中文版与
   [英文版](./typescript-control-plane-migration-v0.md) 为语义镜像；
   两者不一致视为缺陷。
 
 ---
 
-## 0. 示例
+## 0. 用一个例子说明决策
 
-某个宿主希望在不需要 Python 运行时的情况下内嵌 LoopX 的决策能力。现在
-Pi 扩展（`loopx/pi_goal_mode/loopx-goal.ts`）已经通过子进程调用 Python CLI
-（`loopx quota should-run --runtime-profile generic_cli`）来完成 quota
-决策。扩展本身的 goal loop 用 TypeScript 实现，只有决策内核是 Python。
+迁移期间，Python `loopx` CLI 向 LoopX 托管的 TypeScript runtime 发送一笔
+粗粒度 typed transaction。已迁移的 TypeScript 模块拥有规则和已经迁移的
+LoopX 内部 effect；Python 只保留 transport 与 legacy callback adapter。同一
+PR 会删除被替代的 Python 规则和只验证旧实现的测试。
 
-迁移问题是：这个切分能否不经过一次性重写，逐步长成完整的 TypeScript
-控制面核心——Python 和 TypeScript 相互调用、一次迁移一块、用户体验不变。
-
-本 RFC 的结论是：可以，但不是靠进程内互调，而是基于三个已有接缝做
-契约优先的 strangler 迁移：事件存储、parity fixture 层、CLI 边界。
+CLI 自身迁到 TypeScript 后，CLI-only 使用方式会在进程内直接 import 同一份
+kernel，Python 到 TypeScript 的桥随之删除。当 App、CLI、scheduler 或多个
+host 需要一个共享 writer 时，同一 kernel 可以运行在一个可选的 managed
+daemon 内。这是一份 kernel 的两种部署形态，不是每个控制面状态族一个
+server。
 
 ## 1. 问题
 
-- 外部项目已经在把 LoopX 内核移植到 TypeScript，最完整的草图是
-  [Foreman PR #1](https://github.com/needware/foreman/pull/1)。
-- frontstage/dashboard 表面已经是 TypeScript。
-- 共享运行时能简化 CLI 分发与宿主集成，包括 npm 包。
-- 控制面核心约 34.3 万行 Python，`tests/` 与 `examples/` 下超过 1,200
-  个文件。一次性重写风险高、几乎不可评审，并且会把生产行为押在一次
-  切换上。
-- "Python 和 TypeScript 互相调"如果指进程内直接 import，不现实：
-  在 Node 里嵌入 CPython、在 Python 里嵌入 V8 都有 GIL/ABI/打包成本；
-  Pyodide/WASM 有启动、单线程、文件系统与进程能力的限制。
+LoopX 已有 TypeScript host 与 dashboard 表面，但权威控制面规则在 Python。
+一次性重写风险过高，长期保留双实现则更差：每次修 bug 都要改两份，parity
+会从迁移工具变成永久产品能力。
 
-因此真正的问题变成：哪条边界能承载"双语言渐进切换 + parity 保证 +
-可回滚"？
+因此，中间迁移节点必须同时满足：
 
-## 2. 决策
+- 每条已迁规则只有一个语义 owner；
+- 用户看不到 CLI 分叉，也无需手动管理 daemon；
+- 可以迁移真实副作用，而不只迁纯投影；
+- 基于 pinned 迁移前基线和独立定义的不变量验证正确性；
+- 每次 cutover 都测量 latency、packaging、upgrade、rollback 与 crash recovery；
+- 每个 PR 都是完整、可评审的 replacement slice。
 
-采用契约优先、parity 门禁、逐块迁移：
+## 2. 架构决策
 
-1. 互调走进程边界 + JSON 契约（stdio JSON-RPC/NDJSON），不做进程内
-   import。调用粒度是粗粒度的——一条 CLI 命令、一次投影渲染、一个决策
-   请求——所以单次调用延迟可接受。
-2. 事件存储是双语言的共同事实面：append-only 事件带版本化 schema
-   （`loopx_state_event_v0`），两种语言都从同一事件流构建投影。
-3. 读路径与投影先迁（纯函数、无副作用），然后是确定性决策内核
-   （quota `should-run`、todo 生命周期迁移、scheduler 状态迁移），用
-   parity fixture 与决策回放校验；事件存储与写路径最后迁，走
-   dual-read → dual-write → flip 序列，带有限 canary 与已记录的
-   rollback 计划。
-4. 过渡期内 Python 仍是权威实现。一个块只有在 parity 门禁通过且
-   rollback 计划已记录之后才能翻转。
+### 2.1 一份 TypeScript kernel
 
-### 2.1 互调方案对比
+`@loopx/control-plane` 是目标语义 kernel。Domain module 拥有 typed state、
+解释、transition rule 和属于这些规则的内部 effect。Transport shell 不能成为
+第二个业务 owner。
 
-| 方案 | 结论 | 说明 |
-| --- | --- | --- |
-| TS 子进程调 Python | ✅ 已在生产 | `pi_goal_mode` 用 `execFile("loopx", ...)`，30s 超时；粗粒度调用最简单、已被验证 |
-| Python 子进程调 TS | ✅ 可行 | `node dist/...` + stdin JSON；已迁移的内核被 Python 调用时同构 |
-| 长驻 sidecar（Unix socket 上 JSON-RPC） | ⚠️ 后续优化 | 摊薄启动开销，适合热路径；需要生命周期、版本与锁纪律 |
-| Pyodide / WASM | ❌ 不适合生产 CLI | 启动秒级、单线程、文件系统/进程受限 |
-| Rust 核心 + PyO3/napi-rs 双绑定 | ⚠️ 另一个项目 | 真正的共享核心 + Python/TS 薄绑定（类似 huggingface/tokenizers），但那是 Rust 重写，不是 TS 迁移 |
+```text
+迁移期 Python CLI ─────────┐
+LoopX App / scheduler ─────┼─> 一个 typed runtime boundary ─> TS kernel
+未来 TS CLI ───────────────┘
+```
 
-## 3. 让该方案可行的现有接缝
+边界传递“结算这个 Turn”“提交这个 journal”这类粗粒度、版本化请求，而不是
+频繁的属性 getter。Runtime 只有一个静态 typed handler registry；新增 domain
+handler 不会新增 server。
 
-迁移不是从零赌一个方案，仓库里已有三个接缝：
+### 2.2 两种部署形态，一份实现
 
-- `loopx/pi_goal_mode/loopx-goal.ts` 与 `pi-goal-loop-runtime.mjs`：
-  生产级 TypeScript 表面，通过进程边界把 quota 决策委托给 Python CLI。
-- `loopx/control_plane/testing/quota_should_run_parity.py`：用于新旧 quota
-  构建器对比的 compact 稳定表面；是未来所有 parity fixture 的模板。
-- `loopx/control_plane/testing/decision_replay.py`：用历史真实输入回放决策
-  构建器——即双实现对比的 harness。
-- `loopx/control_plane/testing/cli_output_differential.py`：约束 CLI 输出
-  契约与增长预算。
-- `loopx/event_sourced_state.py`：append-only、schema 版本化的事件状态
-  （`loopx_state_event_v0`）。
-- `loopx/control_plane/runtime/event_store_migration_bridge.py`：已建模
-  dual-read parity、有限 canary 与事件投影晋升的 rollback 记录。
+| 产品拓扑 | 执行形态 |
+| --- | --- |
+| TS CLI cutover 后的 CLI-only | CLI 进程内 import 并执行 TS kernel；没有 daemon |
+| 仅 App | App runtime 内嵌同一 kernel |
+| App + CLI + scheduler，或多个并发 client | 一个 managed local authority daemon；client 连接当前 writer |
+| Python 仍是 CLI 的迁移期 | 一个 idle-exiting loopback runtime 把 Python 桥接到已迁 TS kernel |
 
-## 4. 迁移阶段
+如果 authority daemon 已拥有某个 registry/workspace，CLI 必须连接它，而不能
+绕过它再打开第二个直接 writer。Runtime discovery 与启动全自动；用户无需配置
+端口或守护进程。
 
-### Phase 0 — 契约冻结
+### 2.3 TypeScript 拥有已迁 effect
 
-把 #3225 的候选范围固化为类型化 schema 与 parity fixture 清单：
-append-only 事件状态与幂等写入；todo 生命周期（claim、lease、status、
-revision、完成校验）；gates 与决策范围；quota（`should-run`/spend）与
-scheduler/monitor 契约；Turn envelope 与事务语义；handoff 与 review-packet
-投影；CLI 与 status/quota JSON parity。本阶段不迁移任何代码。
+目标不是“TypeScript 决策、Python 永远执行”。TypeScript 可以拥有 atomic
+state checkpoint、event append、receipt commit、幂等 reducer write 等 LoopX
+内部 effect。每个 effect 都有 typed request、稳定 idempotency identity、typed
+receipt 与 retry policy。
 
-### Phase 1 — 读路径与投影
+异步执行不会削弱 settlement ordering：只有被 `await` 的 durability boundary
+成功后，才能发出 effect receipt。但异步允许请求并发，因此拥有已迁写入 authority
+的一方也必须拥有按 key 串行化或 compare-and-swap 合同。Caller-side lock 只能作为
+明确的迁移期 guard；native TypeScript caller 在 cutover 后不得绕过这个 invariant。
+Retry identity 必须绑定具体 operation：当一个 Turn effect 连续 checkpoint 多个
+journal 状态时，仅凭宽粒度 Turn effect id 不能证明两次写入 payload 是同一 operation。
 
-迁移 status JSON、todo list projection、handoff review-packet projection 与
-frontstage 渲染。这些是纯函数、无副作用。TypeScript 实现每个表面，Python
-生成 golden fixture；dual-read 门禁要求 TS 投影与 Python 头一致后才能对外
-服务。
+外部 authority 仍是显式 adapter：model call、human gate、host scheduler、
+credential 和第三方 mutation 不会藏到一个万能 executor 后面。它们的 receipt
+回到 Effect Program 完成 settlement。
 
-### Phase 2 — 确定性决策内核
+### 2.4 替换，而不是生产双跑
 
-迁移 `quota should-run`、todo 状态迁移与 scheduler 状态迁移规则。这些是
-无 IO 的纯决策，天然适合 parity 验证。`decision_replay` 把历史输入回放给
-两个实现；只有逐字段一致才允许翻转。此阶段完成后，Pi 扩展可以去掉对
-Python quota 的依赖。
+Characterization 可以离线让新旧实现运行同一份 pinned corpus。生产环境不保留
+两个 rule engine，也不 dual-write semantic state。一个 slice 通过门禁后，caller
+翻到 TypeScript，并删除被替代的 Python 规则。只有真实 public import、持久化
+schema 或未迁 callback 需要时，才保留窄 compatibility facade。
 
-### Phase 3 — 事件存储与写路径
+### 2.5 在每个信任边界只验证一次
 
-TypeScript 先作为投影读取者（dual-read），再双写并做幂等校验，最后翻转
-写路径。每一步都套用 `event_store_migration_bridge` 的 canary 与 rollback
-门禁。
+TypeScript 类型在运行时会被擦除。因此 network/RPC payload、解析后的 JSON、
+持久化状态、extension 输入与 adapter response 都必须以 `unknown` 进入系统；
+静态类型标注或 `as T` 断言不能证明这些字节满足合同。每个已迁 domain 都必须先
+通过 typed decoder 或显式的版本化 schema parser 解码，再交给 domain handler
+或 Effect interpreter 消费。
 
-### Phase 4 — 分发
+解码成功后，TypeScript kernel 拥有这个 typed value，domain 内部可以依赖编译器，
+而不必在每层重复临时字段检查。Framing、authentication、size limit 等 transport
+检查与 schema validation、semantic invariant 分层负责。未经检查的
+`JSON.parse(...) as T` 不能建立控制面 authority。
 
-发布 npm 包与 pip shim（或二者之一）。TypeScript CLI shim 把未迁移命令
-转发给 Python，`loopx` 的用户体验全程不变。
+`as unknown as T` 只允许作为具名迁移缝：cutover PR 必须明确其调用点、上游
+validator、负向边界覆盖和移除 owner。只要 public、持久化、RPC 或 extension
+输入仍通过未经验证的断言进入已迁 domain 的 semantic core，该 domain 就不能
+通过 promotion gate。TypeScript 补充运行时验证，而不是替代它。
 
-## 5. 互调契约
+## 3. 为什么先迁 Effect Program
 
-- 每个表面带版本化 JSON schema（`..._v0`）。
-- 请求/响应以 NDJSON 走 stdio；长驻 sidecar 可加 content-length 帧。
-- 错误用机器可读信封（code + message），不传原始 traceback。
-- 调用方设置超时，沿用现有 `LOOPX_CLI_TIMEOUT_MS` 模式。
-- 写入幂等：事件带稳定 id，重复应用是 no-op。
-- 边界上不出现凭据、原始日志或私有路径。
+Effect Program 是已经连接 ordered step、identity、short-circuit failure、replay、
+receipt 与 settlement 的底层合同。先迁它，后续 todo、quota、scheduler 和 gate
+就能共用一套 typed execution language，而不是各自发明跨语言合同。
 
-## 6. 验证
+这不意味着把所有状态机塞进一个通用 protocol。Domain transition invariant
+仍属于 domain owner。只有真实 caller 能切换、且 PR 能删除相应 Python 知识时，
+才迁一个状态族。
 
-- 每个表面的 parity fixture：同一输入语料在两个实现上产生完全相同的
-  compact JSON 输出。
-- 决策回放：历史输入回放两个实现。
-- Dual-read 门禁：TS 投影服务流量前必须与 Python 头一致。
-- 有限 canary：翻转前在一小组 canary goal 上运行新路径。
-- Rollback 记录：翻转由 flag 控制，翻转前记录回滚计划。
-- CLI 输出预算继续由 `cli_output_differential` 强制。
+## 4. 迁移顺序
 
-## 7. 非目标
+### Stage 0 — 固定行为与 authority
 
-- 不做行为变更；过渡期内 Python 仍是权威实现。
-- 不做进程内嵌入（Node 内嵌 CPython，或 Python 内嵌 V8）。
-- 不以 Pyodide/WASM 作为生产运行时。
-- 不做 fork-first 迁移；上游主导、欢迎贡献。
-- 不做控制面核心的一次性全量重写。
+对选中的 slice 记录：
 
-## 8. 开放问题
+- 权威 schema 和经过独立 review 的合法/非法 transition；
+- pinned-base characterization fixtures；
+- 生产 caller 与 side effects；
+- latency 与 package/install 基线；
+- rollback boundary 与 state compatibility。
 
-- 运行时选择：Node.js、Bun 还是 Deno？
-- 打包/分发：npm 包、pip shim，还是两者都要？
-- TypeScript 轨道的贡献者归属与评审通道？
-- 热路径预算：哪些表面值得引入长驻 sidecar？
-- 最终共享核心是否应改为 Rust + Python/TS 薄绑定（单独 RFC）？
+### Stage 1 — Effect Program cutover
 
-## 9. 最小可用实现切片
+把 Effect algebra 与 normal-Turn settlement 语义迁到 TypeScript：ordered
+program、settlement identity、bind/short-circuit、replay、receipt construction、
+next-action selection 和 commit reduction。增加第一个 native internal effect——
+atomic Turn-journal checkpoint——证明 runtime 不只拥有纯投影。
 
-用 TypeScript 实现 `quota should-run` 的 compact parity 表面，与
-`quota_should_run_parity.py` 使用同一 fixture 语料，输出完全一致的 JSON。
-可选配一个读路径探针：TypeScript 的 todo list/status 投影渲染与 Python
-投影相同的事件 fixtures。这能以接近零的生产风险验证整条管线——契约、
-parity fixtures、双实现与进程边界。
+Python caller 使用 managed runtime，只保留 DTO conversion 和未迁外部 callback。
+Parity 与 invariant coverage 成立后，删除 Python 语义实现及其 implementation-
+specific tests。
 
-## 10. 上线与回滚
+### Stage 2 — Domain slices
 
-每个块都走同一序列：双实现 → parity 门禁 → dual-read（读路径）→ 有限
-canary → flag 控制翻转 → 记录回滚计划。任何 parity 不一致都会阻止翻转。
-回滚即翻回并保留双实现，直到该块重新通过验证；用户状态不会二次迁移，
-也不会留下半迁移状态。
+一次迁一个 bounded owner，按重复知识与 runtime 价值选，不按文件大小选。候选
+顺序是：
+
+1. todo lifecycle 与 completion fence；
+2. quota settlement/spend reducer 与 typed receipt；
+3. scheduler/monitor state transition，host mutation 仍保持 delegated；
+4. gate、capability resolution 与 status projection；
+5. event-store writer 与 multi-client authority。
+
+测试跟随规则一起迁。仓库不会先把整套 Python 测试改写成 TypeScript，因为
+没有迁移 owner 的 TS 测试要么间接调用 Python，要么复制实现假设。
+
+### Stage 3 — CLI 与 App 汇合
+
+交付 native TS CLI，并在进程内 import kernel。只保留一个自动选择的 authority
+路径：CLI-only 时进程内直接执行；App/scheduler 已拥有 workspace 时连接 managed
+daemon。所有生产 caller 不再需要 Python bridge 后，删除 bridge 与协议。
+
+### Stage 4 — 清理分发
+
+通过 npm 与 LoopX release artifact 分发 kernel，删除 Python runtime 依赖，并
+决定可选 daemon 使用普通 Node entry point 还是 LoopX 自建 single executable。
+不要静默依赖非官方第三方 Node wheel。
+
+## 5. 首个 bounded PR 合同
+
+第一个 PR 是一个有意收敛的完整 vertical replacement：
+
+- TypeScript 完整拥有现有生产 caller 使用的 Effect Program 与 settlement 语义；
+- 一个 managed、idle-exiting loopback runtime，transport 与 typed handler
+  registry 分离；
+- 对已迁 authority input 使用集中式 runtime decoder；首个 slice 不允许
+  `as unknown as T` 或 `as never` 断言跨过 RPC 边界；
+- TS-owned Turn-journal interpretation 与 atomic checkpoint write；
+- Python compatibility facade 切到 TS owner，并删除被替代的 Python rule code
+  与 obsolete tests；
+- Node readiness 与可行动的 doctor 输出；
+- 自动恢复 stale PID 与 abandoned startup lock，提供稳定、public-safe 的启动
+  diagnostic code，并让 CLI 与 App 消费同一个 lifecycle health projection，
+  不另建第二套健康模型；
+- wheel/sdist 包含、clean-environment probe、Windows coverage、crash restart、
+  idempotent retry 与 upgrade fingerprint；
+- pinned-base characterization、native TS invariant tests、Python caller regressions
+  与 end-to-end latency evidence。
+
+它**不**迁完整 CLI，不迁 todo/quota/scheduler domain，不发布 release，也不授权
+第二个 PR。完成后停在 owner review gate。
+
+## 6. 正确性与性能门禁
+
+### 正确性
+
+- 独立定义 algebra properties：identity、适用场景下的 associativity、ordering、
+  short-circuit、replay 与 effect-id isolation。
+- pinned characterization corpus 输出精确一致。
+- malformed state、cross-effect overwrite、partial commit、cancellation、
+  permission denial 与 budget rejection 的负例。
+- 边界 decoder 必须在 domain dispatch 前拒绝缺失字段、错误类型、不支持的 schema
+  版本，以及 oversized 或 malformed payload。Cutover inventory 必须列出仍存在的
+  `as unknown as T` 迁移缝并证明其已受保护；promotion 要求移除已迁 domain
+  authority 输入上的未经验证断言。
+- 被 `await` 的写入只有在其声明的 durability point 成功后才能发出 receipt；同 key
+  并发 mutation 必须串行化或使用经过测试的 CAS 合同，retry identity 必须区分同一
+  Turn 内连续发生的 checkpoint。
+- 进程 crash 与 retry 不得重复已经提交的内部 effect。
+- wheel 与 sdist 安装到全新环境后，从打包文件执行 deep semantic probe。
+
+Characterization output 是证据，不是 specification。Pinned 行为若与独立 review 的
+invariant 冲突，PR 必须披露，并把行为变更单独批准。
+
+### 性能
+
+Cold startup 与 steady-state 分开测量。第一个 PR 必须报告：
+
+- managed runtime cold-start p50/p95；
+- warm typed request p50/p95；
+- representative settlement transaction p50/p95；
+- 相比 pinned Python baseline 的完整 CLI p50/p95；
+- idle 后和 bounded request burst 下的 daemon 内存。
+
+默认验收目标是 warm internal transition p95 低于 2 ms，完整 CLI 不出现物质
+回退（p95 超过 5% 或出现无法解释的 25 ms 额外开销）。不达标是 owner review
+gate，不能静默放宽 benchmark。
+
+## 7. 安装、升级与回滚
+
+迁移不能要求用户管理服务。Python 过渡版本可以要求 Node.js 22.6 或更新版本，
+但 installer 与 `loopx doctor` 必须在正常控制面工作前检测，并给出精确修复方式。
+Wheel 与 sdist 携带 TS source 和版本化 schema。
+
+Runtime 因 idle 退出时仍是健康状态：`stopped` 表示下一次控制面请求会自动拉起，
+不表示用户需要手工执行 daemon 命令。CLI 与 App 消费同一个 lifecycle projection
+（`running`、`stopped` 或 `unavailable`）和稳定 diagnostic code；raw stderr、token、
+本地路径和私有 runtime metadata 不进入投影。
+
+Runtime fingerprint 包含每个实际执行的 TS module 与 contract。升级会启动新
+fingerprint 的 runtime；旧进程可完成 in-flight work，并在 idle 后退出。Request
+携带稳定 effect identity；只有显式幂等的 handler 才允许 transport retry。
+
+Rollback 恢复上一版本 artifact 与 fingerprint。在单独通过 state-schema cutover
+前，不把持久化状态改写为 TS-only 格式。
+
+## 8. 非目标与停止条件
+
+- 不永久维护 Python/TS 语义双胞胎。
+- 不为每个 domain 建 server，也不建 arbitrary-command 通用 executor。
+- 不 big-bang 重写 CLI。
+- 不以 dual-write production semantic state 作为迁移策略。
+- 不只凭 microbenchmark 声称性能。
+- 首个 PR 的正确性、性能、packaging 与 maintainability evidence 未通过 owner
+  review 前，不开始下一 slice。
+
+如果 bridge 需要用户手动管理、已迁规则仍有 Python 语义 owner、handler boundary
+变得 chatty，或首个 slice 只能靠削弱既有行为才能通过 parity/recovery/performance
+门禁，就停止或 replan。
