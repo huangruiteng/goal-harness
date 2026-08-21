@@ -11,7 +11,7 @@ DOC = REPO_ROOT / "docs" / "integrations" / "session-runtime-control-plane-adapt
 DOCS_INDEX = REPO_ROOT / "docs" / "README.md"
 INTEGRATIONS_INDEX = REPO_ROOT / "docs" / "integrations" / "README.md"
 ARCHITECTURE = REPO_ROOT / "docs" / "architecture.md"
-CONTRIBUTOR_TASKS = REPO_ROOT / "CONTRIBUTOR_TASKS.md"
+CONTRIBUTOR_TASKS = REPO_ROOT / "docs/development/contributor-tasks.md"
 
 def require(text: str, snippets: list[str], *, source: Path) -> None:
     missing = [snippet for snippet in snippets if snippet not in text]

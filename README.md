@@ -648,10 +648,10 @@ deeper documents and versioned protocols.
 
 - [Current Technical Directions](docs/project/technical-directions.md)
 - [Project Governance](.github/GOVERNANCE.md)
-- [Contributing](CONTRIBUTING.md) and [Contributor Tasks](CONTRIBUTOR_TASKS.md)
-- [Authors and Contributors](AUTHORS.md)
+- [Contributing](CONTRIBUTING.md) and [Contributor Tasks](docs/development/contributor-tasks.md)
+- [Authors and Contributors](docs/project/authors.md)
 - [Project History](docs/project/history.md)
-- [Name and Marks](TRADEMARKS.md)
+- [Name and Marks](docs/project/trademarks.md)
 - [Ecosystem Adoption](docs/community/ecosystem-adoption.md) - integrations,
   sampling, and derivatives we observe and track
 
@@ -693,11 +693,11 @@ official publication sources.
 ## Contributing
 
 External contributors should start with
-[Contributor Tasks](CONTRIBUTOR_TASKS.md) for public, claimable work and
+[Contributor Tasks](docs/development/contributor-tasks.md) for public, claimable work and
 [Contributing](CONTRIBUTING.md) for setup, validation, and boundary rules.
 Project roles and public history are recorded in
 [Governance](.github/GOVERNANCE.md),
-[Authors and Contributors](AUTHORS.md), and
+[Authors and Contributors](docs/project/authors.md), and
 [Project History](docs/project/history.md).
 
 LoopX keeps local active state separate from the public repository. Do not

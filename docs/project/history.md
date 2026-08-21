@@ -66,7 +66,7 @@ public [release archive](https://github.com/huangruiteng/loopx/releases).
 - Keep private operating context, raw trajectories, internal links, and local
   paths out of the public timeline.
 
-See [AUTHORS.md](https://github.com/huangruiteng/loopx/blob/main/AUTHORS.md) for
+See [AUTHORS.md](https://github.com/huangruiteng/loopx/blob/main/docs/project/authors.md) for
 creator and contributor attribution and
 [Governance](https://github.com/huangruiteng/loopx/blob/main/.github/GOVERNANCE.md)
 for the current maintainer model.

@@ -60,7 +60,7 @@ they are not part of this repository's Apache-2.0 core distribution.
 
 Apache-2.0 itself permits commercial use, modification, and distribution
 subject to its terms. The separate project-name and logo guidance in
-[`TRADEMARKS.md`](https://github.com/huangruiteng/loopx/blob/main/TRADEMARKS.md)
+[`TRADEMARKS.md`](https://github.com/huangruiteng/loopx/blob/main/docs/project/trademarks.md)
 still applies; the software license does not create endorsement or trademark
 rights.
 

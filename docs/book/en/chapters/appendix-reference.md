@@ -203,7 +203,7 @@ intend to mutate state or invoke the Provider.
 
 ## Source contribution entrypoints
 
-- [Contributor Task Board](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTOR_TASKS.md)
+- [Contributor Task Board](https://github.com/huangruiteng/loopx/blob/main/docs/development/contributor-tasks.md)
 - [Contributing](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTING.md)
 - [Control-Plane Developer Course](https://github.com/huangruiteng/loopx/tree/main/docs/development/control-plane-course)
 - [Core Control-Plane Graphs](https://github.com/huangruiteng/loopx/tree/main/docs/product/core-control-plane)

@@ -43,9 +43,9 @@ project endorsement clear.
 
 ## Copyright License And Project Identity
 
-The [Apache License 2.0](LICENSE) grants copyright and patent permissions for
+The [Apache License 2.0](../../LICENSE) grants copyright and patent permissions for
 the code and documentation subject to its terms. Historical MIT terms are
-preserved in [LICENSE-MIT](LICENSE-MIT). Neither software license grants
+preserved in [LICENSE-MIT](../../LICENSE-MIT). Neither software license grants
 permission to misrepresent the source of a distribution or imply project
 endorsement.
 
@@ -55,4 +55,4 @@ issue. Ask a maintainer for a private contact path without including the
 sensitive details.
 
 Changes to this guidance require maintainer review under
-[Governance](.github/GOVERNANCE.md).
+[Governance](../../.github/GOVERNANCE.md).

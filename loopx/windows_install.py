@@ -24,7 +24,7 @@ from .slash_command_install import install_slash_commands, materialize_loopx_ent
 POINTER_SCHEMA_VERSION = "loopx_windows_release_pointer_v0"
 LAUNCHER_POINTER_FILENAME = "loopx-current-release.json"
 COPY_DIRECTORIES = ("loopx", "scripts", "skills", "docs", "man", "examples", "apps", ".github")
-COPY_FILES = ("README.md", "README.zh-CN.md", "CONTRIBUTOR_TASKS.md", "LICENSE", "pyproject.toml")
+COPY_FILES = ("README.md", "README.zh-CN.md", "LICENSE", "pyproject.toml")
 REQUIRED_DEEP_CHECKS = {
     "command_package_same_root",
     "representative_cli_commands",

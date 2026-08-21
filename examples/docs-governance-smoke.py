@@ -70,6 +70,10 @@ MOVED_PATHS = {
     "docs/project-skill-delivery.md": (
         "loopx/capabilities/project_skill_delivery/README.md"
     ),
+    "CONTRIBUTOR_TASKS.md": "docs/development/contributor-tasks.md",
+    "DESIGN.md": "docs/development/design.md",
+    "AUTHORS.md": "docs/project/authors.md",
+    "TRADEMARKS.md": "docs/project/trademarks.md",
 }
 
 
@@ -163,7 +167,7 @@ def assert_effect_interpreter_docs_are_canonical() -> None:
 
 
 def assert_contributor_task_board_is_current() -> None:
-    tasks = compact(read("CONTRIBUTOR_TASKS.md"))
+    tasks = compact(read("docs/development/contributor-tasks.md"))
     for required in (
         "The four canonical global manager CLI commands are shipped",
         "`/loop-goal-summary` remains host-only and outside this contributor slice",
@@ -194,7 +198,7 @@ def assert_technical_direction_governance_is_current() -> None:
     direction = read("docs/project/technical-directions.md")
     direction_zh = read("docs/project/technical-directions.zh-CN.md")
     rfc_index = read("docs/architecture/rfcs/README.md")
-    tasks = read("CONTRIBUTOR_TASKS.md")
+    tasks = read("docs/development/contributor-tasks.md")
     issue_template = read(".github/ISSUE_TEMPLATE/contributor-task.yml")
     pr_template = read(".github/PULL_REQUEST_TEMPLATE.md")
     governance = read(".github/GOVERNANCE.md")
@@ -354,10 +358,10 @@ def main() -> int:
             "docs/project/technical-directions.md",
             ".github/GOVERNANCE.md",
             "CONTRIBUTING.md",
-            "CONTRIBUTOR_TASKS.md",
-            "AUTHORS.md",
+            "docs/development/contributor-tasks.md",
+            "docs/project/authors.md",
             "docs/project/history.md",
-            "TRADEMARKS.md",
+            "docs/project/trademarks.md",
         ],
     }
     navigation_contracts_zh = {
@@ -495,7 +499,7 @@ def main() -> int:
     combined_public_indexes = "\n".join(
         [
             read("README.md"),
-            read("CONTRIBUTOR_TASKS.md"),
+            read("docs/development/contributor-tasks.md"),
             read("docs/README.md"),
             read("docs/archive/README.md"),
             read("docs/product/README.md"),

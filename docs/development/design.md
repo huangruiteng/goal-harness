@@ -6,7 +6,7 @@ documentation chrome, prototypes, screenshots, or any UI reproduction task.
 
 The visual direction adapts the black-and-white precision, Geist typography,
 hairline surfaces, and restrained accent system documented in the
-[Vercel DESIGN.md reference](https://getdesign.md/vercel/design-md). LoopX is
+[Vercel docs/development/design.md reference](https://getdesign.md/vercel/design-md). LoopX is
 not affiliated with Vercel. The reference is an inspiration and token source;
 this document owns the LoopX-specific decisions.
 
@@ -259,7 +259,7 @@ parity is required. Framework migration alone must not alter the UI.
 
 ## Review Checklist
 
-- [ ] The task read and followed `DESIGN.md`.
+- [ ] The task read and followed `docs/development/design.md`.
 - [ ] Core tokens are reused rather than duplicated.
 - [ ] Marketing and application controls use the correct shape language.
 - [ ] Desktop and mobile layouts are validated.

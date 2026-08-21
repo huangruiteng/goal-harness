@@ -434,7 +434,7 @@ What remains owner-held?
 ## 关联 Issue 与公开任务
 
 非 trivial 工作优先关联
-[`CONTRIBUTOR_TASKS.md`](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTOR_TASKS.md)
+[`CONTRIBUTOR_TASKS.md`](https://github.com/huangruiteng/loopx/blob/main/docs/development/contributor-tasks.md)
 或 GitHub Issue：
 
 - 在开始大改前声明准备处理的 slice；

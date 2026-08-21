@@ -439,7 +439,7 @@ What remains owner-held?
 ## Link public work, not local runtime state
 
 Nontrivial contributions should link
-[`CONTRIBUTOR_TASKS.md`](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTOR_TASKS.md)
+[`CONTRIBUTOR_TASKS.md`](https://github.com/huangruiteng/loopx/blob/main/docs/development/contributor-tasks.md)
 or a GitHub Issue:
 
 - state the intended slice before a large change;

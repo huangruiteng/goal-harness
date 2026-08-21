@@ -324,7 +324,7 @@ instead of teaching the protocol.
 Do not infer public work from maintainer-local state. Use public surfaces:
 
 1. Read
-   [`CONTRIBUTOR_TASKS.md`](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTOR_TASKS.md).
+   [`CONTRIBUTOR_TASKS.md`](https://github.com/huangruiteng/loopx/blob/main/docs/development/contributor-tasks.md).
 2. Choose a `Starter`, `Focused`, or already-agreed design task.
 3. Read the protocols and validation named by that task.
 4. State the smallest intended slice in the linked Issue.

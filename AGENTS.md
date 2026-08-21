@@ -158,9 +158,9 @@ change is finalized.
 ## UI Design Standard
 
 Before changing or reproducing any LoopX UI, read and follow the repository-root
-`DESIGN.md`. This includes websites, dashboards, desktop applications,
+`docs/development/design.md`. This includes websites, dashboards, desktop applications,
 documentation, prototypes, screenshots, and framework migrations. When an
-approved design source is provided, match it and use `DESIGN.md` for unspecified
+approved design source is provided, match it and use `docs/development/design.md` for unspecified
 details.
 
 ## Public And Private Boundary

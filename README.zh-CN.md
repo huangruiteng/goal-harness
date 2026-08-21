@@ -579,10 +579,10 @@ LoopX 当前有三个活跃战略计划和一个架构与研究孵化器。这�
 
 - [当前技术方向](docs/project/technical-directions.zh-CN.md)
 - [Project Governance](.github/GOVERNANCE.md)
-- [Contributing](CONTRIBUTING.md)与[Contributor Tasks](CONTRIBUTOR_TASKS.md)
-- [Authors and Contributors](AUTHORS.md)
+- [Contributing](CONTRIBUTING.md)与[Contributor Tasks](docs/development/contributor-tasks.md)
+- [Authors and Contributors](docs/project/authors.md)
 - [Project History](docs/project/history.md)
-- [Name and Marks](TRADEMARKS.md)
+- [Name and Marks](docs/project/trademarks.md)
 - [生态采用清单](docs/community/ecosystem-adoption.zh-CN.md) - 我们观察并持续追踪的
   真实集成、采样借鉴与衍生周边
 
@@ -618,14 +618,14 @@ agent 项目里的反馈：控制面帮到了哪里、哪里太重，哪些 gate
 
 ## 贡献
 
-公开、可认领的任务见 [Contributor Tasks](CONTRIBUTOR_TASKS.md)。贡献前请读
+公开、可认领的任务见 [Contributor Tasks](docs/development/contributor-tasks.md)。贡献前请读
 [Contributing](CONTRIBUTING.md)，尤其是 public/private 边界、smoke 保留规则和
 benchmark 证据边界。
 
 项目角色与维护权限见 [Governance](.github/GOVERNANCE.md)，创建者与贡献者归属见
-[Authors and Contributors](AUTHORS.md)，关键公开演进见
+[Authors and Contributors](docs/project/authors.md)，关键公开演进见
 [Project History](docs/project/history.md)，名称与标识使用见
-[Name and Marks](TRADEMARKS.md)。
+[Name and Marks](docs/project/trademarks.md)。
 
 不要提交 `.loopx/`、`.codex/goals/`、live `ACTIVE_GOAL_STATE.md`、内部链接、
 raw benchmark task/log/trajectory/verifier output、credentials、token、私有路径或

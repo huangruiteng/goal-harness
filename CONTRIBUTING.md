@@ -30,7 +30,7 @@ keep the reporter's identity confidential to the extent possible.
 
 Start with the [current technical directions](docs/project/technical-directions.md)
 to understand the active programs and their maturity, then use
-[CONTRIBUTOR_TASKS.md](CONTRIBUTOR_TASKS.md) to find public work that is useful,
+[docs/development/contributor-tasks.md](docs/development/contributor-tasks.md) to find public work that is useful,
 claimable, and safe to discuss in the repository.
 
 If you do not see a matching task:
@@ -64,7 +64,7 @@ Run the public/private scan before sending docs or examples:
 loopx check \
   --scan-path README.md \
   --scan-path CONTRIBUTING.md \
-  --scan-path CONTRIBUTOR_TASKS.md \
+  --scan-path docs/development/contributor-tasks.md \
   --scan-path docs/ \
   --scan-path examples/
 ```
@@ -197,20 +197,20 @@ For every controller or host-loop change, prove:
   host-local paths.
 
 See the [LoopX Turn protocol](docs/reference/protocols/loopx-turn-v0.md) and the
-[Contributor Task Board](CONTRIBUTOR_TASKS.md) for the staged controller plan.
+[Contributor Task Board](docs/development/contributor-tasks.md) for the staged controller plan.
 
 ## Governance And Attribution
 
 Repository roles and decision authority are defined in
 [Governance](.github/GOVERNANCE.md). Creator and contributor attribution is
-recorded in [AUTHORS.md](AUTHORS.md), while path-scoped maintenance and
+recorded in [docs/project/authors.md](docs/project/authors.md), while path-scoped maintenance and
 preferred review assignments are recorded in the same governance document.
 The public Git history records individual contributions. Contribution does not
 automatically grant merge or release authority, and an agent or automation
 identity is not a human maintainer.
 
 When naming or packaging a fork, integration, or hosted service, follow the
-project's [name and marks guidance](TRADEMARKS.md).
+project's [name and marks guidance](docs/project/trademarks.md).
 
 For dashboard changes:
 

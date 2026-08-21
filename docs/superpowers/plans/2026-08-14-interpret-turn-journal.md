@@ -378,7 +378,7 @@ Run:
 ```powershell
 python -m pytest -q tests/control_plane/test_effect_turn_turn_journal.py tests/control_plane/test_effect_interpreter_packet.py tests/control_plane/test_effect_turn_turn_result.py tests/test_loopx_turn_transaction.py tests/test_loopx_turn_executor.py
 python examples/loopx-turn-fake-host-walkthrough-smoke.py
-loopx check --scan-path docs/reference/effect-interpreter-packet.md --scan-path CONTRIBUTOR_TASKS.md
+loopx check --scan-path docs/reference/effect-interpreter-packet.md --scan-path docs/development/contributor-tasks.md
 loopx canary premerge --from-git-diff --git-diff-base upstream/main
 git diff --check upstream/main...HEAD
 ```

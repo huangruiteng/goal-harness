@@ -309,7 +309,7 @@ contract。`loopx/extensions/` 也不是“所有外部集成”的收纳箱：�
 外部开发者不应从本地 maintainer state 猜工作。公开入口是：
 
 1. 阅读
-   [`CONTRIBUTOR_TASKS.md`](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTOR_TASKS.md)；
+   [`CONTRIBUTOR_TASKS.md`](https://github.com/huangruiteng/loopx/blob/main/docs/development/contributor-tasks.md)；
 2. 选择 `Starter`、`Focused` 或已达成设计共识的任务；
 3. 阅读任务涉及的协议和 validation；
 4. 在关联 Issue 中声明准备处理的最小切片；

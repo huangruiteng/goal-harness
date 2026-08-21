@@ -25,16 +25,16 @@ periodic snapshot.
 Automation or agent identities may appear in commit provenance. They should not
 be interpreted as human contributors or maintainers unless a human is also
 identified by the public contribution record. Maintainer authority is defined
-in [Governance](.github/GOVERNANCE.md), not by authorship volume.
+in [Governance](../../.github/GOVERNANCE.md), not by authorship volume.
 
 ## Attribution And License
 
 LoopX's unified open source core is distributed under the
-[Apache License 2.0](LICENSE) beginning with `v0.4.8`, with copyright held by
+[Apache License 2.0](../../LICENSE) beginning with `v0.4.8`, with copyright held by
 LoopX contributors for their respective contributions. Releases through
 `v0.4.7` retain their original MIT terms, whose license text and copyright
-notice are preserved in [LICENSE-MIT](LICENSE-MIT). See the
-[licensing policy](docs/project/licensing.md) for the transition boundary.
+notice are preserved in [LICENSE-MIT](../../LICENSE-MIT). See the
+[licensing policy](licensing.md) for the transition boundary.
 
 This attribution file does not transfer copyright, require copyright
 assignment, or alter either license.

@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DOC = REPO_ROOT / "docs" / "development" / "benchmark-developer-workflow.md"
 DOCS_INDEX = REPO_ROOT / "docs" / "README.md"
 DEVELOPMENT_INDEX = REPO_ROOT / "docs" / "development" / "README.md"
-TASKS = REPO_ROOT / "CONTRIBUTOR_TASKS.md"
+TASKS = REPO_ROOT / "docs/development/contributor-tasks.md"
 
 FORBIDDEN_SNIPPETS = (
     "/Users/",
