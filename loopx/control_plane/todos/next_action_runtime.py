@@ -11,9 +11,10 @@ from .contract import (
     normalize_todo_id_list,
     normalize_todo_status,
 )
+from .projection import todo_priority_label
 
 
-TODO_NEXT_ACTION_REQUEST_SCHEMA = "loopx_todo_next_action_transition_v0"
+TODO_NEXT_ACTION_REQUEST_SCHEMA = "loopx_todo_next_action_transition_v1"
 TODO_NEXT_ACTION_RESULT_SCHEMA = "loopx_todo_next_action_result_v0"
 NEXT_ACTION_HEADING = "## Next Action"
 
@@ -59,6 +60,7 @@ def _agent_todo_snapshots(lines: list[str]) -> list[dict[str, Any]]:
                 "status": normalize_todo_status(block.get("status"))
                 or TODO_STATUS_OPEN,
                 "task_class": str(block.get("task_class") or "").strip() or None,
+                "priority": todo_priority_label(block, text_mode="prefix"),
                 "text": str(block.get("text") or "").strip(),
                 "index": int(block.get("index") or 0),
                 "completion_continuation": (

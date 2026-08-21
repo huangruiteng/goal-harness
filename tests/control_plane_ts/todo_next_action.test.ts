@@ -16,6 +16,7 @@ function todo(
     todo_id: todoId,
     status: "open",
     task_class: "advancement_task",
+    priority: "P1",
     text: `[P1] ${todoId}`,
     index: 1,
     completion_continuation: null,
@@ -23,6 +24,40 @@ function todo(
     ...overrides,
   };
 }
+
+test("completion orders open work by typed priority, not display text", () => {
+  const completed = todo("todo_completed", {
+    status: "done",
+    text: "[P1] Complete the current work.",
+    completion_continuation: "successor",
+    successor_todo_ids: ["todo_typed_p1", "todo_typed_p2"],
+  });
+  const typedP1 = todo("todo_typed_p1", {
+    priority: "P1",
+    text: "[P4] Text intentionally disagrees with typed priority.",
+    index: 3,
+  });
+  const typedP2 = todo("todo_typed_p2", {
+    priority: "P2",
+    text: "[P0] Text intentionally disagrees with typed priority.",
+    index: 2,
+  });
+  const lines = [
+    "## Next Action",
+    "",
+    `- ${completed.text}`,
+    `<!-- loopx:next-action schema=${NEXT_ACTION_BINDING_SCHEMA} todo_id=${completed.todo_id} -->`,
+    "",
+  ];
+
+  const result = transitionTodoNextAction(
+    settleRequest(lines, [completed, typedP2, typedP1]),
+  );
+
+  assert.equal(result.outcome, "settled");
+  assert.equal(result.next_todo_id, typedP1.todo_id);
+  assert.equal(result.next_action, typedP1.text);
+});
 
 function settleRequest(
   lines: string[],
@@ -238,6 +273,22 @@ test("owner-authored, multiply-bound, and unknown-schema routes fail closed", ()
 });
 
 test("runtime decoder rejects malformed authority input before transition", () => {
+  const { priority: _priority, ...snapshotWithoutPriority } = todo(
+    "todo_completed",
+    { status: "done" },
+  );
+  assert.throws(
+    () =>
+      transitionTodoNextAction({
+        schema_version: TODO_NEXT_ACTION_REQUEST_SCHEMA,
+        operation: "settle_completion",
+        lines: ["## Next Action"],
+        todo_id: "todo_completed",
+        agent_todos: [snapshotWithoutPriority],
+        materialized_todo_ids: ["todo_completed"],
+      }),
+    /priority must be a non-empty string/,
+  );
   assert.throws(
     () =>
       transitionTodoNextAction({

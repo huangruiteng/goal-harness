@@ -5,12 +5,36 @@ from pathlib import Path
 
 from loopx.bootstrap import render_state_markdown
 from loopx.control_plane.effect_runtime import MAX_REQUEST_BYTES
+from loopx.control_plane.todos.next_action_runtime import _agent_todo_snapshots
+from loopx.control_plane.todos.projection import TODO_MISSING_PRIORITY_RANK, todo_priority_rank
 from loopx.state_projection import active_state_next_action_entries
 from loopx.state_refresh import build_state_refresh_record
 from loopx.todos import add_goal_todo, complete_goal_todo, supersede_goal_todo
 
 GOAL_ID = "todo-next-action-settlement"
 AGENT_ID = "codex-next-action"
+
+
+def test_agent_todo_snapshot_uses_structured_prefix_priority() -> None:
+    snapshots = _agent_todo_snapshots(
+        [
+            "## Agent Todo",
+            "",
+            "- [ ] [P2-review] Validate the typed priority contract.",
+            "  <!-- loopx:todo todo_id=todo_typed task_class=advancement_task -->",
+            "- [ ] Explain why a P0 mention in prose is not priority metadata.",
+            "  <!-- loopx:todo todo_id=todo_untyped task_class=advancement_task -->",
+            "",
+            "## Next Action",
+            "",
+        ]
+    )
+
+    assert [snapshot["priority"] for snapshot in snapshots] == ["P2-REVIEW", None]
+    assert [todo_priority_rank(snapshot["priority"]) for snapshot in snapshots] == [
+        2,
+        TODO_MISSING_PRIORITY_RANK,
+    ]
 
 
 def _write_fixture(tmp_path: Path, *, next_action: str) -> tuple[Path, Path]:

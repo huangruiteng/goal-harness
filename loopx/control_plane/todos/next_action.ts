@@ -1,7 +1,7 @@
 import type { JsonObject } from "../effect_program.ts";
 
 export const TODO_NEXT_ACTION_REQUEST_SCHEMA =
-  "loopx_todo_next_action_transition_v0";
+  "loopx_todo_next_action_transition_v1";
 export const TODO_NEXT_ACTION_RESULT_SCHEMA =
   "loopx_todo_next_action_result_v0";
 export const NEXT_ACTION_BINDING_SCHEMA = "loopx_next_action_binding_v0";
@@ -10,16 +10,21 @@ const TODO_ID_PATTERN = /^todo_[a-z0-9_-]{3,64}$/;
 const NEXT_ACTION_BINDING_PATTERN =
   /^\s*<!--\s*loopx:next-action\s+schema=([A-Za-z0-9_-]+)\s+todo_id=(todo_[A-Za-z0-9_-]+)\s*-->\s*$/;
 const TODO_STATUSES = new Set(["open", "done", "blocked", "deferred"]);
+const TODO_PRIORITY_PATTERN = /^P([0-4])/;
+const TODO_MISSING_PRIORITY_RANK = 50;
 const CONTROL_TASK_CLASSES = new Set([
   "continuous_monitor",
   "user_gate",
   "blocker",
 ]);
 
+export type TodoPriority = `P${0 | 1 | 2 | 3 | 4}${string}`;
+
 export interface TodoNextActionSnapshot {
   todo_id: string;
   status: string;
   task_class: string | null;
+  priority: TodoPriority | null;
   text: string;
   index: number;
   completion_continuation: string | null;
@@ -80,6 +85,18 @@ function optionalString(value: unknown, label: string): string | null {
   return requiredString(value, label);
 }
 
+function nullableTodoPriority(
+  value: unknown,
+  label: string,
+): TodoPriority | null {
+  if (value === null) return null;
+  const priority = requiredString(value, label).trim().toUpperCase();
+  if (!TODO_PRIORITY_PATTERN.test(priority)) {
+    throw new Error(`${label} must start with P0, P1, P2, P3, or P4`);
+  }
+  return priority as TodoPriority;
+}
+
 function normalizedTodoId(value: unknown, label: string): string {
   const candidate = requiredString(value, label).trim().toLowerCase();
   if (!TODO_ID_PATTERN.test(candidate)) {
@@ -109,6 +126,7 @@ function todoSnapshot(value: unknown, index: number): TodoNextActionSnapshot {
     todo_id: normalizedTodoId(item.todo_id, `${label}.todo_id`),
     status,
     task_class: optionalString(item.task_class, `${label}.task_class`),
+    priority: nullableTodoPriority(item.priority, `${label}.priority`),
     text: normalizeText(requiredString(item.text, `${label}.text`)),
     index: Number(item.index),
     completion_continuation: optionalString(
@@ -311,9 +329,9 @@ function bindNextAction(
   };
 }
 
-function priorityRank(text: string): number {
-  const match = /\bP([0-4])\b/i.exec(text);
-  return match ? Number(match[1]) : 50;
+function priorityRank(priority: TodoPriority | null): number {
+  const match = priority ? TODO_PRIORITY_PATTERN.exec(priority) : null;
+  return match ? Number(match[1]) : TODO_MISSING_PRIORITY_RANK;
 }
 
 function nextOpenAgentTodo(
@@ -327,7 +345,7 @@ function nextOpenAgentTodo(
     const leftClass = left.task_class === "advancement_task" ? 0 : 1;
     const rightClass = right.task_class === "advancement_task" ? 0 : 1;
     return leftClass - rightClass ||
-      priorityRank(left.text) - priorityRank(right.text) ||
+      priorityRank(left.priority) - priorityRank(right.priority) ||
       left.index - right.index;
   });
   return candidates[0] ?? null;
