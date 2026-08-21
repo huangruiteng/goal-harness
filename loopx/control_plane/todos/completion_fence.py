@@ -1,21 +1,80 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
-from .contract import (
-    TODO_STATUS_DONE,
-    normalize_todo_id_list,
-    normalize_todo_no_followup,
-)
-from .completion_state import (
-    TodoCompletionContinuation,
-    normalize_todo_completion_continuation,
-)
+from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
+
+
+TODO_COMPLETION_FENCE_REQUEST_SCHEMA = "loopx_todo_completion_fence_request_v0"
+TODO_COMPLETION_FENCE_RESULT_SCHEMA = "loopx_todo_completion_fence_result_v0"
+
+
+def _json_successor_value(value: Any) -> Any:
+    if isinstance(value, (tuple, set)):
+        return list(value)
+    return value
+
+
+def evaluate_todo_completion_fence(
+    *,
+    todo: Mapping[str, Any],
+    projection_source: str,
+    completion_turn_key: str | None,
+    no_followup: bool,
+) -> dict[str, Any]:
+    """Ask the TypeScript Todo owner for the canonical replay-fence decision."""
+
+    raw_no_followup = todo.get("no_followup")
+    if raw_no_followup is not None and not isinstance(raw_no_followup, (bool, str)):
+        raw_no_followup = str(raw_no_followup)
+    raw_continuation = todo.get("completion_continuation")
+    if raw_continuation is not None and not isinstance(raw_continuation, str):
+        raw_continuation = str(raw_continuation)
+    raw_turn_key = todo.get("completion_turn_key")
+    if raw_turn_key is not None and not isinstance(raw_turn_key, str):
+        raw_turn_key = str(raw_turn_key)
+    try:
+        result = effect_runtime_result(
+            "todo.completion_fence.evaluate",
+            {
+                "schema_version": TODO_COMPLETION_FENCE_REQUEST_SCHEMA,
+                "projection_source": projection_source,
+                "todo": {
+                    "status": str(todo.get("status") or "open"),
+                    "no_followup": raw_no_followup,
+                    "completion_continuation": raw_continuation,
+                    "completion_turn_key": raw_turn_key,
+                    "successor_todo_ids": _json_successor_value(
+                        todo.get("successor_todo_ids")
+                    ),
+                },
+                "requested_no_followup": no_followup,
+                "requested_completion_turn_key": completion_turn_key,
+            },
+        )
+    except EffectRuntimeRejected as exc:
+        raise ValueError(str(exc)) from None
+    if not isinstance(result, Mapping):
+        raise RuntimeError("TypeScript Todo completion fence result must be an object")
+    if (
+        result.get("schema_version") != TODO_COMPLETION_FENCE_RESULT_SCHEMA
+        or result.get("outcome") not in {"continue", "replay"}
+        or not isinstance(result.get("reason"), str)
+        or not isinstance(result.get("status"), str)
+        or not isinstance(result.get("terminal_before_request"), bool)
+        or not (
+            result.get("completion_continuation") is None
+            or isinstance(result.get("completion_continuation"), str)
+        )
+    ):
+        raise RuntimeError("TypeScript Todo completion fence result shape mismatch")
+    return dict(result)
 
 
 def completed_todo_replay(
     *,
-    todo: dict[str, Any],
+    todo: Mapping[str, Any],
     goal_id: str,
     todo_id: str,
     completion_turn_key: str | None,
@@ -26,7 +85,7 @@ def completed_todo_replay(
     project: str | None,
     dry_run: bool,
 ) -> dict[str, Any] | None:
-    """Return local terminal-replay response-shape parity for a completed Todo.
+    """Project a typed TS replay decision into the legacy Python response.
 
     ``handoff_mode`` is the currently resolved goal mode, not a persisted copy
     of the original completion result. This local replay therefore is not a
@@ -37,41 +96,20 @@ def completed_todo_replay(
     no-follow-up state; it cannot replace a successor or cross a turn fence.
     """
 
-    if str(todo.get("status") or "") != TODO_STATUS_DONE:
-        return None
-    existing_turn_key = str(todo.get("completion_turn_key") or "")
-    if completion_turn_key and completion_turn_key != existing_turn_key:
-        raise ValueError(
-            "todo is already completed under a different completion_turn_key"
-        )
-    terminal_upgrade = (
-        no_followup and normalize_todo_no_followup(todo.get("no_followup")) is not True
+    # This fast path runs before the caller selects the event writer. Treat it
+    # as a materialized projection; an event-only deferred Todo falls through
+    # and is evaluated with ``projection_source=event_log`` by that writer.
+    fence = evaluate_todo_completion_fence(
+        todo=todo,
+        projection_source="materialized",
+        completion_turn_key=completion_turn_key,
+        no_followup=no_followup,
     )
-    completion_continuation = normalize_todo_completion_continuation(
-        todo.get("completion_continuation")
-    )
-    if terminal_upgrade:
-        if normalize_todo_id_list(todo.get("successor_todo_ids")):
-            raise ValueError(
-                "todo terminal closeout cannot replace an existing successor"
-            )
-        if completion_continuation is None:
-            raise ValueError(
-                "completed todo is missing completion_continuation; repair the "
-                "Todo with `loopx todo complete` without --no-follow-up before terminal "
-                "closeout"
-            )
-        if completion_continuation != TodoCompletionContinuation.ACTIVE_GOAL.value:
-            raise ValueError(
-                "todo terminal closeout recovery requires "
-                "completion_continuation=active_goal"
-            )
-        if not completion_turn_key or completion_turn_key != existing_turn_key:
-            raise ValueError(
-                "todo terminal closeout requires the original completion_turn_key"
-            )
-        return None
-    if completion_continuation is None:
+
+    # Event-projected deferred rows must pass through the event writer so the
+    # existing lease-fence receipt remains visible. Done rows preserve the
+    # earlier fast replay path for both projection sources.
+    if fence.get("outcome") != "replay" or fence.get("status") != "done":
         return None
     return {
         "ok": True,
@@ -81,8 +119,8 @@ def completed_todo_replay(
         "changed": False,
         "goal_id": goal_id,
         "todo_id": todo_id,
-        "status": TODO_STATUS_DONE,
-        "completion_continuation": completion_continuation,
+        "status": "done",
+        "completion_continuation": fence.get("completion_continuation"),
         "completion_recovery": todo.get("completion_recovery"),
         "handoff_mode": handoff_mode,
         "mutation_authority": mutation_authority,

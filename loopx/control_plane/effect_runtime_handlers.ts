@@ -39,6 +39,7 @@ import {
   type TurnJournalInspectionRequest,
 } from "./turn_driver/turn_journal.ts";
 import { commitTurnJournal } from "./turn_driver/turn_journal_effects.ts";
+import { evaluateTodoCompletionFence } from "./todos/completion_fence.ts";
 import { transitionTodoNextAction } from "./todos/next_action.ts";
 
 type EffectRuntimeHandler = (params: JsonObject) => unknown | Promise<unknown>;
@@ -268,6 +269,7 @@ export function createEffectRuntimeHandlers(
       (params) => interpretTurnJournal(turnJournalInspectionRequest(params)),
     ],
     ["turn_journal.write", commitTurnJournal],
+    ["todo.completion_fence.evaluate", evaluateTodoCompletionFence],
     ["todo.next_action.transition", transitionTodoNextAction],
     [
       "effect.program_from_ordered_steps",

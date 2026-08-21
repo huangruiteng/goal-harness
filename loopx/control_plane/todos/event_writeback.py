@@ -22,7 +22,6 @@ from .active_state_todo_parser import parse_active_state_todos
 from .contract import (
     TODO_CONTINUATION_POLICY_VALUES,
     TODO_STATUS_DONE,
-    TODO_STATUS_OPEN,
     TODO_TASK_CLASS_USER_GATE,
     build_todo_id,
     merge_todo_id_lists,
@@ -34,14 +33,11 @@ from .contract import (
     normalize_todo_excluded_agents,
     normalize_todo_id,
     normalize_todo_id_list,
-    normalize_todo_no_followup,
     normalize_todo_task_repository,
-    todo_done_for_status,
 )
+from .completion_fence import evaluate_todo_completion_fence
 from .completion_state import (
-    TodoCompletionContinuation,
     completion_state_for_todo_write,
-    normalize_todo_completion_continuation,
 )
 from .text import (
     TODO_PRIORITY_PREFIX_PATTERN,
@@ -331,6 +327,7 @@ def complete_event_projected_goal_todo(
     dry_run: bool,
     completion_turn_key: str | None = None,
     actor_agent_id: str | None = None,
+    completion_fence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     item = dict(context["item"])
     role = str(context["role"])
@@ -341,45 +338,21 @@ def complete_event_projected_goal_todo(
         item.pop("claimed_by", None)
     effective_claimed_by = claimed_by or normalize_todo_claimed_by(item.get("claimed_by"))
     store = AppendOnlyStateEventStore(Path(context["event_log_path"]))
-    already_done = todo_done_for_status(str(item.get("status") or TODO_STATUS_OPEN))
-    terminal_upgrade_requested = (
-        str(item.get("status") or "") == TODO_STATUS_DONE
-        and no_followup
-        and normalize_todo_no_followup(item.get("no_followup")) is not True
+    if completion_fence is None:
+        completion_fence = evaluate_todo_completion_fence(
+            todo=item,
+            projection_source="event_log",
+            completion_turn_key=completion_turn_key,
+            no_followup=no_followup,
+        )
+    already_done = bool(completion_fence["terminal_before_request"])
+    terminal_upgrade = (
+        completion_fence["reason"] == "same_turn_terminal_upgrade"
     )
     untyped_completion_repair = (
-        str(item.get("status") or "") == TODO_STATUS_DONE
-        and normalize_todo_completion_continuation(
-            item.get("completion_continuation")
-        )
-        is None
+        completion_fence["reason"] == "untyped_completion_repair"
     )
-    if terminal_upgrade_requested:
-        if normalize_todo_id_list(item.get("successor_todo_ids")):
-            raise ValueError(
-                "todo terminal closeout cannot replace an existing successor"
-            )
-        existing_continuation = normalize_todo_completion_continuation(
-            item.get("completion_continuation")
-        )
-        if existing_continuation is None:
-            raise ValueError(
-                "completed todo is missing completion_continuation; repair the "
-                "Todo with `loopx todo complete` without --no-follow-up before terminal "
-                "closeout"
-            )
-        if existing_continuation != TodoCompletionContinuation.ACTIVE_GOAL.value:
-            raise ValueError(
-                "todo terminal closeout recovery requires "
-                "completion_continuation=active_goal"
-            )
-        existing_turn_key = str(item.get("completion_turn_key") or "")
-        if not completion_turn_key or completion_turn_key != existing_turn_key:
-            raise ValueError(
-                "todo terminal closeout requires the original completion_turn_key"
-            )
-    terminal_upgrade = terminal_upgrade_requested
-    if already_done and not terminal_upgrade and not untyped_completion_repair:
+    if completion_fence["outcome"] == "replay":
         return {
             "ok": True,
             "dry_run": dry_run,
@@ -392,8 +365,8 @@ def complete_event_projected_goal_todo(
             "todo": item.get("text") or item.get("title"),
             "todo_id": todo_id,
             "status": TODO_STATUS_DONE,
-            "completion_continuation": normalize_todo_completion_continuation(
-                item.get("completion_continuation")
+            "completion_continuation": completion_fence.get(
+                "completion_continuation"
             ),
             "completion_recovery": item.get("completion_recovery"),
             "status_changed": False,
