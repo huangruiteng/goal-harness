@@ -244,6 +244,47 @@ def test_excluded_actor_cannot_mutate_unclaimed_todo(tmp_path: Path) -> None:
     assert state.read_text(encoding="utf-8") == before
 
 
+def test_unresolved_decision_scope_is_not_a_local_claim_gate(tmp_path: Path) -> None:
+    """Characterize the local writer before shared revision publishers exist.
+
+    The shared-authority RFC names dependency and decision-gate revisions as
+    command preconditions.  The current Markdown writer stores the scopes but
+    has no authoritative publisher for their resolution, so Stage 1 must not
+    silently invent a gate and change local claim behavior.
+    """
+
+    registry, state = _write_fixture(tmp_path)
+    todo = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Wait for one exact release decision.",
+        task_class="advancement_task",
+        required_decision_scopes=[DECISION_SCOPE],
+    )
+
+    result = update_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=str(todo["todo_id"]),
+        claimed_by=AUTHOR_AGENT,
+        agent_id=AUTHOR_AGENT,
+        claim_only=True,
+    )
+
+    assert result["claimed_by"] == AUTHOR_AGENT
+    item = _agent_todo(state, str(todo["todo_id"]))
+    assert item["required_decision_scopes"] == [
+        {
+            "schema_version": "decision_scope_v0",
+            "kind": "direction",
+            "granularity": "action",
+            "scope_key": "publish_release",
+        }
+    ]
+    assert item["claimed_by"] == AUTHOR_AGENT
+
+
 @pytest.mark.parametrize("command", ["update", "complete", "supersede"])
 def test_non_owner_cannot_mutate_claimed_todo(
     tmp_path: Path,
@@ -1665,6 +1706,52 @@ def test_exact_user_gate_decision_scope_uses_controller_override(
     assert authority["decision_scope"]["scope_key"] == "publish_release"
 
 
+def test_exact_user_gate_ignores_unrelated_malformed_lifecycle_grant(
+    tmp_path: Path,
+) -> None:
+    registry, _state = _write_fixture(
+        tmp_path,
+        lifecycle_authority=[
+            {
+                "agent_id": ORCHESTRATION_AGENT,
+                "actions": [],
+            }
+        ],
+    )
+    target = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Publish the approved release.",
+        task_class="advancement_task",
+        claimed_by=AUTHOR_AGENT,
+        required_decision_scopes=[DECISION_SCOPE],
+    )
+    gate = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="user",
+        text="Approve the exact release publication.",
+        task_class="user_gate",
+        blocks_agent=AUTHOR_AGENT,
+        decision_scope=DECISION_SCOPE,
+        unblocks_todo_id=target["todo_id"],
+    )
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=gate["todo_id"],
+        role="user",
+        decision_outcome="approve",
+        evidence="owner approved the exact decision scope",
+    )
+
+    assert result["mutation_authority"]["mode"] == (
+        "exact_user_gate_decision_scope_override"
+    )
+
+
 def test_non_exact_user_gate_cannot_bypass_actor_attribution(tmp_path: Path) -> None:
     registry, state = _write_fixture(tmp_path)
     target = add_goal_todo(
@@ -1714,6 +1801,58 @@ def test_single_agent_goal_keeps_lifecycle_compatibility(tmp_path: Path) -> None
 
     assert result["mutation_authority"]["mode"] == "single_agent_compatibility"
     assert _agent_todo(state, todo["todo_id"])["note"] == "legacy single-agent update"
+
+
+def test_single_agent_ignores_unrelated_malformed_lifecycle_grant(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(
+        tmp_path,
+        multi_agent=False,
+        lifecycle_authority=[
+            {
+                "agent_id": REVIEW_AGENT,
+                "actions": ["complete"],
+            }
+        ],
+    )
+    todo = _add_agent_todo(registry)
+
+    result = update_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        note="legacy single-agent update",
+    )
+
+    assert result["mutation_authority"]["mode"] == "single_agent_compatibility"
+    assert _agent_todo(state, todo["todo_id"])["note"] == "legacy single-agent update"
+
+
+def test_current_owner_ignores_unrelated_malformed_lifecycle_grant(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(
+        tmp_path,
+        lifecycle_authority=[
+            {
+                "agent_id": ORCHESTRATION_AGENT,
+                "actions": ["unsupported-action"],
+            }
+        ],
+    )
+    todo = _add_agent_todo(registry)
+
+    result = update_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AUTHOR_AGENT,
+        note="owner-attributed update",
+    )
+
+    assert result["mutation_authority"]["mode"] == "registered_peer_actor"
+    assert _agent_todo(state, todo["todo_id"])["note"] == "owner-attributed update"
 
 
 @pytest.mark.parametrize("command", ["complete", "supersede"])
