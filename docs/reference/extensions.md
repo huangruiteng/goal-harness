@@ -303,17 +303,42 @@ remains available as a compatibility and debugging input, but normal execution
 should resolve the binding from `--goal-id` so the LoopX registry remains the
 task ground truth.
 
-The v0 route admits read-only operations only: provider results must not contain
-domain mutations, transition proposals, effect receipts, raw payloads,
-credential-like fields, or private-looking strings. It does not write LoopX
-state or spend quota. A future material operation must use a separate governed
-Turn adapter bound to the exact Todo and settlement contract; Goal enablement
-alone never grants write authority. Creating or updating the binding is an
-explicit Goal configuration change: it uses preview/apply, but it does not
-create a Turn or spend Turn quota. Turn scope starts only when an invocation
-may produce a material external or LoopX-state effect. The Goal binding is a
-local typed projection, not a security token or proof of a remote issuer;
-service authentication and authorization remain the provider's responsibility.
+The direct `capability invoke` route admits read-only operations only: provider
+results must not contain domain mutations, transition proposals, effect
+receipts, raw payloads, credential-like fields, or private-looking strings. It
+does not write LoopX state or spend quota.
+
+An integration profile may also declare `effect_class: external_write`, but
+that operation is deliberately unavailable through direct invocation. A host
+adapter must call the governed material lifecycle in
+`loopx.extensions.governed_capability_execution`:
+
+1. obtain `quota should-run` admission for one exact Goal, Agent, Todo, and
+   `turn_instance_id`;
+2. call `start_governed_external_capability(...)`, which journals intent before
+   dispatch and gives the provider the settlement effect id as its stable
+   idempotency key;
+3. call `reconcile_governed_external_capability(...)` until the provider returns
+   a terminal `loopx_external_effect_receipt_v0`;
+4. supply typed writeback and spend callbacks. LoopX reuses the shared Turn
+   settlement driver, requires the effect receipt digest in durable writeback,
+   and never spends quota before that writeback commits.
+
+The provider may return `running`, so a service-side job can outlive the bounded
+provider process. Start and reconcile are separately replayable from a mode-0600
+journal. Exact provider revision, request digest, Goal binding, settlement
+identity, provider effect receipt, writeback receipt, and quota receipt remain
+attached to the same invocation. A crash after an external effect therefore
+replays with the same idempotency key and reconciles the receipt instead of
+starting an unrelated operation.
+
+Goal enablement alone never grants write authority. Creating or updating the
+binding is an explicit Goal configuration change: it uses preview/apply, but it
+does not create a Turn or spend Turn quota. Turn scope starts only when an
+invocation may produce a material external or LoopX-state effect. The Goal
+binding is a local typed projection, not a security token or proof of a remote
+issuer; service authentication and authorization remain the provider's
+responsibility.
 
 The generic runner is deliberately non-effectful and grants no operation
 effects. Both manifest `permissions` and runtime `required_permissions` must
