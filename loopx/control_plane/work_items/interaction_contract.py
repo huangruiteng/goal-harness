@@ -11,7 +11,6 @@ from ..goals.goal_frontier import AUTONOMOUS_REPLAN_REQUIRED_MODE
 from ..goals.goal_vision_wait import exact_blocked_successor_wait_state
 from ..quota.settlement import (
     SettlementStepKind,
-    build_accountable_cli_settlement_plan,
     settlement_binding_args,
     settlement_step_command,
 )
@@ -34,6 +33,7 @@ from .autonomous_replan_obligation import (
     replan_obligation_id_from_packet,
     todo_lifecycle_settlement_obligation,
 )
+from .accountable_settlement import build_accountable_work_item_settlement_plan
 from .primary_action import (
     build_primary_action_projection,
     protocol_action_label as _protocol_action_label,
@@ -601,7 +601,7 @@ def _turn_scoped_cli_settlement_plan(
         agent_identity,
         available_capabilities=available_capabilities,
     )
-    plan = build_accountable_cli_settlement_plan(
+    plan = build_accountable_work_item_settlement_plan(
         runtime_profile=scheduler_runtime_profile_for_execution_context(
             scheduler_execution_context
         ),
