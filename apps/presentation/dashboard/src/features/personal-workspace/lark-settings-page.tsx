@@ -64,7 +64,7 @@ function larkConnectionHealth(connection: LarkGoalConnection): { label: string; 
     return { label: "监听未启动", detail: "请刷新连接或重新启动 LoopX 后再试。", ready: false };
   }
   if (connection.last_event_status === "message_context_permission_required") {
-    return { label: "消息权限不足", detail: "已收到消息事件，但无法读取群消息上下文。请发布并授权该 App 的群消息读取权限。", ready: false };
+    return { label: "消息上下文权限不足", detail: "已收到消息事件，但 Bot 无法按 message_id 读取事件对应消息。此读取路径与分页补读群历史是两个独立能力。", ready: false };
   }
   if (connection.last_event_status === "processing_failed") {
     return { label: "消息处理失败", detail: "已收到消息事件，但 Agent 处理失败。请查看本地诊断后重试。", ready: false };
@@ -113,6 +113,10 @@ function larkConnectionHealth(connection: LarkGoalConnection): { label: string; 
     };
   }
   return { label: connection.reply_ready ? "监听中" : "自动回复不可用", detail: `最近事件状态：${connection.last_event_status ?? "等待处理"}`, ready: connection.reply_ready };
+}
+
+function larkGroupHistoryPermissionUrl(connection: LarkGoalConnection): string | null {
+  return connection.history_permission_guidance?.api_document_url ?? null;
 }
 
 function larkErrorMessage(cause: unknown, fallback: string): string {
@@ -454,6 +458,9 @@ export function LarkSettingsPage({
                   <small>{larkConnectionHealth(connection).detail}</small>
                   {connection.health_error_code === "lark_event_delivery_unverified" ? (
                     <a href="https://open.feishu.cn/document/server-docs/im-v1/message/events/receive?lang=zh-CN" rel="noreferrer" target="_blank"><ExternalLink size={12} />查看飞书事件配置</a>
+                  ) : null}
+                  {larkGroupHistoryPermissionUrl(connection) ? (
+                    <a href={larkGroupHistoryPermissionUrl(connection) ?? undefined} rel="noreferrer" target="_blank"><ExternalLink size={12} />历史补读权限（独立能力）</a>
                   ) : null}
                 </span>
                 <span><strong>{connection.goal_title}</strong><small># {connection.topic_name}</small></span>

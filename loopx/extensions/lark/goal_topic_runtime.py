@@ -20,9 +20,8 @@ from .event_inbox import (
 )
 from .goal_channel_contracts import binding_for_goal
 from .goal_channel_targets import goal_channel_target_for_name
-from .goal_topic_connections import route_lark_topic_event
+from .goal_topic_connections import decide_lark_topic_event
 from .inbox_reply import CommandRunner, reply_lark_event_inbox
-
 
 Answer = Callable[[Mapping[str, Any], str], str]
 SnapshotProvider = Callable[[], Mapping[str, Any]]
@@ -216,6 +215,7 @@ def poll_lark_goal_topic_profile_once(
     events = _event_payloads(result.get("stdout"))
     replied_count = 0
     event_statuses: list[str] = []
+    event_reasons: list[str | None] = []
     for event in events:
         chat_id = str(event.get("chat_id") or "")
         target_match = _target_for_profile_chat(
@@ -225,6 +225,7 @@ def poll_lark_goal_topic_profile_once(
         )
         if target_match is None:
             event_statuses.append("target_unmatched")
+            event_reasons.append(None)
             continue
         target_ref, _target = target_match
         routed_event = dict(event)
@@ -236,9 +237,11 @@ def poll_lark_goal_topic_profile_once(
             )
             if len(candidate_roots) > 1:
                 event_statuses.append("topic_context_ambiguous")
+                event_reasons.append(None)
                 continue
             if not candidate_roots:
                 event_statuses.append("topic_context_missing")
+                event_reasons.append(None)
                 continue
             routed_event["root_id"] = candidate_roots[0]
         try:
@@ -261,8 +264,12 @@ def poll_lark_goal_topic_profile_once(
             )
         except Exception:
             event_statuses.append("processing_failed")
+            event_reasons.append(None)
             continue
         event_statuses.append(str(event_result.get("status") or "unknown"))
+        event_reasons.append(
+            str(event_result.get("reason") or "") or None
+        )
         replied_count += int(event_result.get("status") == "replied_and_acknowledged")
     return {
         "ok": True,
@@ -270,6 +277,7 @@ def poll_lark_goal_topic_profile_once(
         "event_count": len(events),
         "replied_count": replied_count,
         "event_statuses": event_statuses,
+        "event_reasons": event_reasons,
     }
 
 
@@ -364,6 +372,7 @@ def stream_lark_goal_topic_profile(
             replied_count += int(result.get("replied_count") or 0)
             if health_sink is not None and int(result.get("event_count") or 0):
                 statuses = list(result.get("event_statuses") or [])
+                reasons = list(result.get("event_reasons") or [])
                 health_sink(
                     {
                         "status": "listening",
@@ -371,6 +380,9 @@ def stream_lark_goal_topic_profile(
                         "event_count": int(result.get("event_count") or 0),
                         "replied_count": int(result.get("replied_count") or 0),
                         "last_event_status": str(statuses[-1]) if statuses else None,
+                        "last_event_reason": (
+                            str(reasons[-1]) if reasons and reasons[-1] else None
+                        ),
                     }
                 )
             if int(result.get("event_count") or 0):
@@ -381,6 +393,7 @@ def stream_lark_goal_topic_profile(
                             "event_count": int(result.get("event_count") or 0),
                             "replied_count": int(result.get("replied_count") or 0),
                             "event_statuses": list(result.get("event_statuses") or []),
+                            "event_reasons": list(result.get("event_reasons") or []),
                         },
                         separators=(",", ":"),
                     ),
@@ -730,13 +743,18 @@ def process_lark_goal_topic_event(
 ) -> dict[str, Any]:
     """Route, persist, answer, reply, and ACK one bound Topic event."""
 
-    route = route_lark_topic_event(
+    decision = decide_lark_topic_event(
         target_payload=target_payload,
         binding_payloads=binding_payloads,
         event=event,
     )
+    route = decision.get("route")
     if route is None:
-        return {"ok": True, "status": "ignored"}
+        return {
+            "ok": True,
+            "status": "ignored",
+            "reason": str(decision.get("reason") or "binding_unavailable"),
+        }
     ingress_mode = str(route.get("ingress_mode") or "direct_session")
     if ingress_mode == "async_inbox":
         contexts = goal_contexts if isinstance(goal_contexts, Mapping) else {}

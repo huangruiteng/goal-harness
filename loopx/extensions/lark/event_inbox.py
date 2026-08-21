@@ -12,7 +12,6 @@ from ...control_plane.work_items.operator_inbox import (
     project_operator_inbox_urgency,
 )
 
-
 EVENT_SCHEMA_VERSION = "lark_event_inbox_event_v0"
 CONFIG_SCHEMA_VERSION = "lark_event_inbox_config_v0"
 PROCESSED_SCHEMA_VERSION = "lark_event_inbox_processed_v0"
@@ -120,16 +119,15 @@ def load_lark_event_inbox_config(
             "received_reaction_emoji"
         )
     if reply_enabled and (
-        capture_scope != "configured_chat_all"
-        or not SAFE_PROFILE_PATTERN.fullmatch(sender_profile)
+        not SAFE_PROFILE_PATTERN.fullmatch(sender_profile)
         or sender_profile.lower() == "default"
         or sender_identity != "bot"
         or not bot_display_name
         or not CHAT_ID_PATTERN.fullmatch(chat_id)
     ):
         raise ValueError(
-            "enabled lark inbox reply requires configured_chat_all plus an explicit "
-            "non-default sender_profile, bot identity, bot_display_name, and chat_id"
+            "enabled lark inbox reply requires an explicit non-default "
+            "sender_profile, bot identity, bot_display_name, and chat_id"
         )
     return {
         "enabled": enabled,

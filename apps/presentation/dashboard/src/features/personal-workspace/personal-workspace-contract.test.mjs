@@ -17,6 +17,7 @@ const styles = source("./personal-workspace.css");
 const dashboard = source("../../views/dashboard-page.tsx");
 const tasks = source("./goal-tasks-view.tsx");
 const status = source("../../data/status.ts");
+const chatData = source("../../data/chat.ts");
 
 assert.match(model, /kind: "todo"/, "Todo has its own drawer selection");
 for (const field of ["dependencies", "nextTransition", "ownerLabel", "todoId", "taskClass"]) {
@@ -288,6 +289,9 @@ assert.match(larkSettings, /im:message\.group_at_msg:readonly/, "Group mention p
 assert.match(larkSettings, /发布新版/, "Permission guidance reminds operators to publish a new app version");
 assert.match(larkSettings, /未收到消息事件/, "Connections explain when Feishu event delivery has not been observed");
 assert.match(larkSettings, /message_context_permission_required/, "Received events with missing context permissions get an actionable repair hint");
+assert.match(chatData, /im:message\.group_msg/, "Bot group-history preflight names the application scope");
+assert.match(chatData, /im:message\.group_msg\.include_bot:read/, "Bot group-history preflight includes Bot-authored messages");
+assert.match(larkSettings, /历史补读权限（独立能力）/, "Bot group-history preflight stays distinct from realtime message context");
 assert.match(larkSettings, /最近消息未直接 @ 机器人/, "Ignored unaddressed messages explain why LoopX did not reply");
 assert.match(larkSettings, /消息未匹配当前 Goal Topic/, "Route mismatches receive an actionable connection repair hint");
 assert.match(larkSettings, /connectLarkGoalTopic\([^)]*execute:\s*false/s, "Connect flow previews before execution");

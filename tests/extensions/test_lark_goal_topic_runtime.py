@@ -7,8 +7,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from loopx.extensions.lark.event_inbox import inspect_lark_event_inbox
 from loopx.extensions.lark.event_collector import _jq_projection
+from loopx.extensions.lark.event_inbox import inspect_lark_event_inbox
 from loopx.extensions.lark.goal_channel_contracts import read_goal_channel_binding
 from loopx.extensions.lark.goal_channel_targets import read_goal_channel_targets
 from loopx.extensions.lark.goal_topic_connections import connect_lark_goal_topic
@@ -228,6 +228,8 @@ def test_agent_scoped_async_inbox_queues_without_chat_reply_or_ack(
     assert binding["routing"]["ingress_mode"] == "async_inbox"
     config_ref = Path(binding["routing"]["inbox_config_ref"])
     assert (tmp_path / config_ref).is_file()
+    config_payload = json.loads((tmp_path / config_ref).read_text(encoding="utf-8"))
+    assert config_payload["capture_scope"] == "addressed_only"
 
     result = process_lark_goal_topic_event(
         target_payload=read_goal_channel_targets(target_path),
@@ -258,6 +260,8 @@ def test_agent_scoped_async_inbox_queues_without_chat_reply_or_ack(
     )
     assert projection["pending_count"] == 1
     assert projection["processed_count"] == 0
+    assert projection["thread_complete"] is False
+    assert projection["coverage_warning"]
 
 
 def test_invalid_persisted_routing_state_never_answers_replies_or_acknowledges(
@@ -310,7 +314,11 @@ def test_invalid_persisted_routing_state_never_answers_replies_or_acknowledges(
         ),
     )
 
-    assert result == {"ok": True, "status": "ignored"}
+    assert result == {
+        "ok": True,
+        "status": "ignored",
+        "reason": "invalid_routing_state",
+    }
     assert not (tmp_path / "runtime" / ".loopx").exists()
 
 
@@ -650,7 +658,9 @@ def test_profile_stream_keeps_one_consumer_open_between_messages(tmp_path: Path)
 
 
 def test_profile_poll_routes_provider_event_through_existing_reply_path(tmp_path: Path) -> None:
-    from loopx.extensions.lark.goal_topic_runtime import poll_lark_goal_topic_profile_once
+    from loopx.extensions.lark.goal_topic_runtime import (
+        poll_lark_goal_topic_profile_once,
+    )
 
     state: dict[str, Any] = {}
     target_payload = {
@@ -731,6 +741,7 @@ def test_profile_poll_routes_provider_event_through_existing_reply_path(tmp_path
         "event_count": 1,
         "replied_count": 1,
         "event_statuses": ["replied_and_acknowledged"],
+        "event_reasons": [None],
     }
     assert state["consume_args"][:3] == ["fake-lark", "--profile", "mew"]
     assert "event" in state["consume_args"]
@@ -745,7 +756,9 @@ def test_profile_poll_routes_provider_event_through_existing_reply_path(tmp_path
 def test_profile_poll_routes_the_only_goal_in_a_chat_without_querying_message_history(
     tmp_path: Path,
 ) -> None:
-    from loopx.extensions.lark.goal_topic_runtime import poll_lark_goal_topic_profile_once
+    from loopx.extensions.lark.goal_topic_runtime import (
+        poll_lark_goal_topic_profile_once,
+    )
 
     snapshot = {
         "target_payload": {
@@ -818,7 +831,9 @@ def test_profile_poll_routes_the_only_goal_in_a_chat_without_querying_message_hi
 def test_profile_poll_reports_ambiguous_topic_context_without_querying_message_history(
     tmp_path: Path,
 ) -> None:
-    from loopx.extensions.lark.goal_topic_runtime import poll_lark_goal_topic_profile_once
+    from loopx.extensions.lark.goal_topic_runtime import (
+        poll_lark_goal_topic_profile_once,
+    )
 
     target = {
         "name": "mew-product",
@@ -888,7 +903,9 @@ def test_profile_poll_reports_ambiguous_topic_context_without_querying_message_h
 def test_profile_poll_does_not_reply_or_invoke_agent_when_message_mentions_other_user_or_all(
     tmp_path: Path,
 ) -> None:
-    from loopx.extensions.lark.goal_topic_runtime import poll_lark_goal_topic_profile_once
+    from loopx.extensions.lark.goal_topic_runtime import (
+        poll_lark_goal_topic_profile_once,
+    )
 
     target = {
         "name": "mew-product",

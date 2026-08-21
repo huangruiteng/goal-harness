@@ -995,6 +995,14 @@ export type LarkGroupChat = { chat_id: string; chat_name: string };
 export type LarkCaptureScope = "addressed_only" | "configured_chat_all";
 export type LarkIngressMode = "live_steering" | "session_queue" | "async_inbox" | "direct_session";
 export type LarkReplyMode = "topic_reply";
+export type LarkPermissionGuidance = {
+  action: "enable_application_scopes_and_publish";
+  api_document_url: string;
+  capability: "group_history_pagination";
+  identity: "bot";
+  required_scopes: ["im:message.group_msg", "im:message.group_msg.include_bot:read"];
+  schema_version: "lark_bot_group_history_permission_guidance_v0";
+};
 
 const larkGroupChatsSchema = z.object({
   ok: z.literal(true),
@@ -1019,6 +1027,7 @@ export type LarkGoalConnection = {
   goal_id: string;
   goal_title: string;
   health_error_code: string | null;
+  history_permission_guidance: LarkPermissionGuidance | null;
   incoming_mode: "mentions" | "all";
   ingress_mode: LarkIngressMode;
   event_count: number;
@@ -1047,6 +1056,17 @@ const larkConnectionsSchema = z.object({
     goal_id: z.string(),
     goal_title: z.string(),
     health_error_code: z.string().nullable().default(null),
+    history_permission_guidance: z.object({
+      action: z.literal("enable_application_scopes_and_publish"),
+      api_document_url: z.string().url(),
+      capability: z.literal("group_history_pagination"),
+      identity: z.literal("bot"),
+      required_scopes: z.tuple([
+        z.literal("im:message.group_msg"),
+        z.literal("im:message.group_msg.include_bot:read"),
+      ]),
+      schema_version: z.literal("lark_bot_group_history_permission_guidance_v0"),
+    }).nullable().default(null),
     incoming_mode: z.enum(["mentions", "all"]),
     ingress_mode: z.enum(["live_steering", "session_queue", "async_inbox", "direct_session"]).default("async_inbox"),
     event_count: z.number().int().nonnegative().default(0),

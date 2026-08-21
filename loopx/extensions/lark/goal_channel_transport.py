@@ -8,12 +8,35 @@ from typing import Any
 
 from .presentation.kanban import CommandRunner
 
-
 CHAT_ID_PATTERN = re.compile(r"oc_[A-Za-z0-9_-]+")
 MESSAGE_ID_PATTERN = re.compile(r"om_[A-Za-z0-9_-]+")
 APP_ID_PATTERN = re.compile(r"cli_[A-Za-z0-9_-]+")
+OPEN_ID_PATTERN = re.compile(r"ou_[A-Za-z0-9_-]+")
 SAFE_PROFILE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}")
 REQUIRED_GOAL_TOPIC_SCOPES = ("im:message", "im:message:readonly")
+REQUIRED_BOT_GROUP_HISTORY_SCOPES = (
+    "im:message.group_msg",
+    "im:message.group_msg.include_bot:read",
+)
+BOT_GROUP_HISTORY_API_PATH = "/document/server-docs/im-v1/message/list"
+
+
+def bot_group_history_permission_guidance(app_id: str) -> dict[str, Any] | None:
+    """Return an app-bound, credential-free repair contract for Bot history reads."""
+
+    if not APP_ID_PATTERN.fullmatch(str(app_id or "")):
+        return None
+    query = f"?appId={app_id}"
+    return {
+        "schema_version": "lark_bot_group_history_permission_guidance_v0",
+        "identity": "bot",
+        "capability": "group_history_pagination",
+        "action": "enable_application_scopes_and_publish",
+        "required_scopes": list(REQUIRED_BOT_GROUP_HISTORY_SCOPES),
+        "api_document_url": (
+            f"https://open.feishu.cn{BOT_GROUP_HISTORY_API_PATH}{query}"
+        ),
+    }
 
 
 def json_payload(result: Mapping[str, Any]) -> Mapping[str, Any]:

@@ -43,7 +43,9 @@ from .goal_channel_transport import (
     APP_ID_PATTERN,
     CHAT_ID_PATTERN,
     MESSAGE_ID_PATTERN,
+    OPEN_ID_PATTERN,
     SAFE_PROFILE_PATTERN,
+    bot_group_history_permission_guidance,
     bot_membership_verified,
     call,
     chat_verified,
@@ -141,17 +143,21 @@ def _app_identity(
     identities = payload.get("identities")
     bot = identities.get("bot") if isinstance(identities, Mapping) else None
     app_id = str(payload.get("appId") or "")
+    open_id = str(bot.get("openId") or "") if isinstance(bot, Mapping) else ""
     if (
         result.get("returncode") != 0
         or not isinstance(bot, Mapping)
         or not APP_ID_PATTERN.fullmatch(app_id)
     ):
         return None
-    return {
+    identity = {
         "app_id": app_id,
         "label": public_safe_compact_text(bot.get("appName") or profile, limit=60),
         "ready": bot.get("available") is True and bot.get("verified") is True,
     }
+    if OPEN_ID_PATTERN.fullmatch(open_id):
+        identity["open_id"] = open_id
+    return identity
 
 
 def list_lark_apps(
@@ -273,6 +279,7 @@ def _agent_inbox_config(
     app_ref: str,
     chat_id: str,
     bot_display_name: str,
+    capture_scope: str,
 ) -> tuple[Path, str, dict[str, Any]]:
     project = Path(str(goal.get("repo") or "")).expanduser().resolve()
     if not project.is_dir():
@@ -286,10 +293,10 @@ def _agent_inbox_config(
         "schema_version": "lark_event_inbox_config_v0",
         "enabled": True,
         "inbox_dir": f".loopx/inbox/lark-goal-topics/{digest}",
-        # Goal Topic routing has already applied capture_scope before ingestion.
-        # The generic inbox must accept every routed event so its reply contract
-        # remains valid without reinterpreting provider mentions.
-        "capture_scope": "configured_chat_all",
+        # Goal Topic routing applies this same scope before ingestion. Keeping
+        # the local inbox declaration identical prevents an addressed-only
+        # stream from being projected as thread-complete.
+        "capture_scope": capture_scope,
         "reply": {
             "enabled": True,
             "sender_profile": app_ref,
@@ -384,6 +391,7 @@ def connect_lark_goal_topic(
             app_ref=profile,
             chat_id=safe_chat_id,
             bot_display_name=profile,
+            capture_scope=effective_capture_scope,
         )
 
     target_payload = read_goal_channel_targets(target_path)
@@ -476,24 +484,27 @@ def connect_lark_goal_topic(
             public_summary="invite the selected Lark App to the group and retry",
         )
 
-    if matched is None:
-        target_name = _target_name(profile, safe_chat_id)
-        added = add_lark_goal_channel_target(
-            target_path=target_path,
-            target_name=target_name,
-            chat_id=safe_chat_id,
-            chat_name=chat_name,
-            identity_mode="local_user",
-            sender_profile=profile,
-            bot_app_id=str(identity["app_id"]),
-            bot_display_name=str(identity["label"]),
-            cli_bin=effective_cli_bin,
-            execute=True,
-        )
-        if not added.get("ok"):
-            return added
-    else:
-        target_name = matched[0]
+    target_name = matched[0] if matched is not None else _target_name(profile, safe_chat_id)
+    matched_identity = matched[1].get("identity") if matched is not None else None
+    added = add_lark_goal_channel_target(
+        target_path=target_path,
+        target_name=target_name,
+        chat_id=safe_chat_id,
+        chat_name=chat_name,
+        identity_mode=(
+            str(matched_identity.get("mode") or "local_user")
+            if isinstance(matched_identity, Mapping)
+            else "local_user"
+        ),
+        sender_profile=profile,
+        bot_app_id=str(identity["app_id"]),
+        bot_open_id=str(identity.get("open_id") or "") or None,
+        bot_display_name=str(identity["label"]),
+        cli_bin=effective_cli_bin,
+        execute=True,
+    )
+    if not added.get("ok"):
+        return added
 
     objective = goal_objective(goal)
     topic_text = f"LoopX Goal Topic: {objective}\nGoal ID: {goal_id}"
@@ -752,6 +763,9 @@ def list_lark_connections(
             health_error_code = event_blocker
         if health_error_code is None and event_delivery_unverified:
             health_error_code = "lark_event_delivery_unverified"
+        history_permission_guidance = bot_group_history_permission_guidance(
+            str(identity.get("bot_app_id") or "")
+        )
         topic = binding.get("topic") if isinstance(binding.get("topic"), Mapping) else {}
         routing = binding.get("routing") if isinstance(binding.get("routing"), Mapping) else {}
         try:
@@ -811,6 +825,7 @@ def list_lark_connections(
                 "topic_setup_required": not bool(topic.get("root_message_id") or legacy_root),
                 "reply_ready": reply_ready,
                 "health_error_code": health_error_code,
+                "history_permission_guidance": history_permission_guidance,
                 "listener_status": listener_status or None,
                 "listener_error_code": listener.get("error_code"),
                 "last_event_status": last_event_status or None,
@@ -844,9 +859,10 @@ def is_event_addressed_to_bot(
     if event.get("reply_to_bot") is True and event.get("reply_context_verified") is True:
         return True
     bot_app_id = str(identity.get("bot_app_id") or "").strip()
+    bot_open_id = str(identity.get("bot_open_id") or "").strip()
     bot_display_name = str(identity.get("bot_display_name") or identity.get("bot_name") or "").strip()
     sender_profile = str(identity.get("sender_profile") or "").strip()
-    if not (bot_app_id or bot_display_name or sender_profile):
+    if not (bot_app_id or bot_open_id or bot_display_name or sender_profile):
         return False
 
     norm_bot_display_name = _normalize_mention_name(bot_display_name)
@@ -869,6 +885,8 @@ def is_event_addressed_to_bot(
                     if val:
                         candidate_ids.append(str(val))
                 if bot_app_id and any(c == bot_app_id for c in candidate_ids):
+                    return True
+                if bot_open_id and any(c == bot_open_id for c in candidate_ids):
                     return True
                 norm_item_name = _normalize_mention_name(str(item.get("name") or ""))
                 if norm_bot_display_name and norm_item_name == norm_bot_display_name:
@@ -928,7 +946,11 @@ def decide_lark_topic_event(
         if topic_root != root_id:
             continue
         matched_topic = True
-        if str(event.get("sender_id") or "") == str(identity.get("bot_app_id") or ""):
+        sender_id = str(event.get("sender_id") or "")
+        if sender_id and sender_id in {
+            str(identity.get("bot_app_id") or ""),
+            str(identity.get("bot_open_id") or ""),
+        }:
             return {"matched": False, "reason": "self_message", "route": None}
         try:
             capture_scope = _routing_value(

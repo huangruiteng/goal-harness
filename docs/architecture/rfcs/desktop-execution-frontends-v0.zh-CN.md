@@ -195,6 +195,11 @@ agent_external_connector_v0 = {
 读回、评论回复和已解决状态观察。缺失的能力保持不可用；LoopX 不会通过抓取
 无关 surface 来模拟它们。
 
+Connector capability 还可以暴露类型化的 `permission_requirements`，包含 provider
+身份、精确 scope、发布要求，以及绑定所选 App 的官方修复入口。这些事实由
+provider 扩展拥有；LoopX 内核只负责渲染类型化指引。实时接收、响应写入和历史
+追补是彼此独立的能力，不得压缩成一个笼统的“消息权限”标志。
+
 ### 权威材料与协作事件
 
 持久文档与其评论具有不同的权威语义：
@@ -281,6 +286,16 @@ reply_mode: source_thread | topic_reply | configured_mirror
 `capture_scope` 回答哪些 provider 事件合格。`ingress_mode` 回答一个合格事件
 如何到达 Agent。`reply_mode` 回答已验证响应投递到哪里。现有
 `incoming_mode=mentions|all` 只表达捕获范围；它不是会话挂接的证据。
+
+持久 Inbox 范围必须与实际 provider 路由范围一致。即使启用了精确源消息回复，
+`addressed_only` 流也不得投影成 `thread_complete`。`configured_chat_all` 仍是 owner
+的显式选择：它会为领域解释保存已配置会话，但只有 typed question、mention 或
+已验证的 Bot reply 才会激活 `reply_due`。
+
+mention 准入同时绑定已验证 provider profile 返回的 App id 与 Bot open id；渲染后
+的 display name 只是兼容信号，不能成为唯一身份依据。每个被拒绝的 provider event
+都要在 listener health 中保留 `not_addressed`、`topic_mismatch` 等无内容决策原因，
+让“已经看到但未持久化”的事件不再隐藏在一个裸 `ignored` 状态后面。
 
 回退是显式的，默认失败关闭。`live_steering` 连接在会话不可用时可以选择加入
 `session_queue` 或 `async_inbox`，但不得静默启动另一个运行时，也不得把同一

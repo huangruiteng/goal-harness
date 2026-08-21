@@ -8,10 +8,9 @@ from typing import Any
 
 from ...control_plane.runtime.public_safety import public_safe_compact_text
 from .goal_channel_contracts import operation_packet
-from .goal_channel_transport import APP_ID_PATTERN, CHAT_ID_PATTERN
+from .goal_channel_transport import APP_ID_PATTERN, CHAT_ID_PATTERN, OPEN_ID_PATTERN
 from .presentation.kanban import DEFAULT_CLI_BIN
 from .private_json import write_private_json_atomic
-
 
 GOAL_CHANNEL_TARGETS_SCHEMA_VERSION = "loopx_goal_channel_provider_targets_v0"
 TARGET_NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
@@ -68,6 +67,7 @@ def _normalized_lark_target(
     sender_profile: str | None,
     sender_identity: str | None,
     bot_app_id: str | None,
+    bot_open_id: str | None,
     bot_display_name: str | None,
     cli_bin: str | None,
 ) -> dict[str, Any]:
@@ -86,13 +86,16 @@ def _normalized_lark_target(
     app_id = str(bot_app_id or "").strip()
     if not APP_ID_PATTERN.fullmatch(app_id):
         raise ValueError("Lark Goal Channel target bot app id must begin with cli_")
+    open_id = str(bot_open_id or "").strip()
+    if open_id and not OPEN_ID_PATTERN.fullmatch(open_id):
+        raise ValueError("Lark Goal Channel target bot open id must begin with ou_")
     profile = str(sender_profile or "")
     bot_name = str(bot_display_name or "")
     if mode == "project_bot" and (not profile or not bot_name):
         raise ValueError(
             "project_bot targets require sender profile and bot display name"
         )
-    return {
+    target = {
         "name": safe_name,
         "provider": "lark",
         "enabled": True,
@@ -109,6 +112,9 @@ def _normalized_lark_target(
             "cli_bin": str(cli_bin or DEFAULT_CLI_BIN),
         },
     }
+    if open_id:
+        target["identity"]["bot_open_id"] = open_id
+    return target
 
 
 def add_lark_goal_channel_target(
@@ -121,6 +127,7 @@ def add_lark_goal_channel_target(
     sender_profile: str | None = None,
     sender_identity: str | None = None,
     bot_app_id: str | None = None,
+    bot_open_id: str | None = None,
     bot_display_name: str | None = None,
     cli_bin: str | None = None,
     execute: bool = False,
@@ -133,6 +140,7 @@ def add_lark_goal_channel_target(
         sender_profile=sender_profile,
         sender_identity=sender_identity,
         bot_app_id=bot_app_id,
+        bot_open_id=bot_open_id,
         bot_display_name=bot_display_name,
         cli_bin=cli_bin,
     )

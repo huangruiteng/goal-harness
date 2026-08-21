@@ -226,6 +226,13 @@ reply-chain readback, comment reply, and resolved-state observation. Missing
 capabilities remain unavailable; LoopX does not emulate them by scraping an
 unrelated surface.
 
+A Connector capability may also expose typed `permission_requirements` with
+the provider identity, exact scopes, publication requirement, and an official
+repair URL bound to the selected App. The provider extension owns those facts;
+the LoopX core only renders the typed guidance. Realtime receive, response
+write, and history catch-up remain separate capabilities and must not be
+collapsed into one generic "message permission" flag.
+
 ### Authority material versus collaboration events
 
 A durable document and its comments have different authority semantics:
@@ -326,6 +333,20 @@ reply_mode: source_thread | topic_reply | configured_mirror
 answers how one eligible event reaches the Agent. `reply_mode` answers where a
 verified response is delivered. The existing `incoming_mode=mentions|all`
 expresses capture scope only; it is not proof of session attachment.
+
+The persisted inbox scope must equal the effective provider routing scope. An
+`addressed_only` stream is never projected as `thread_complete`, even when it
+has an enabled source-message reply binding. `configured_chat_all` remains an
+explicit owner choice: it stores the configured conversation for domain
+interpretation, but only typed questions, mentions, or verified bot replies
+activate `reply_due`.
+
+Mention admission binds both the App id and the Bot open id returned by the
+verified provider profile. A rendered display name is a compatibility signal,
+not the only identity proof. Every rejected provider event retains one
+content-free decision reason such as `not_addressed` or `topic_mismatch` in
+listener health, so an event that was seen but not persisted cannot disappear
+behind a bare `ignored` status.
 
 Fallback is explicit and defaults to fail closed. A `live_steering`
 connection may opt into `session_queue` or `async_inbox` when the session is

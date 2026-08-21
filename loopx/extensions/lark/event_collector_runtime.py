@@ -24,7 +24,6 @@ from .inbox_reactions import (
     record_lark_inbox_reaction,
 )
 
-
 APP_ID_PATTERN = re.compile(r"cli_[A-Za-z0-9_-]+")
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 Sleeper = Callable[[float], None]
@@ -72,13 +71,25 @@ def _run_json_with_status(
         return {}, "message_context_lookup_failed"
     except (OSError, subprocess.SubprocessError):
         return {}, "message_context_lookup_failed"
-    try:
-        payload: object = json.loads(result.stdout)
-    except (json.JSONDecodeError, TypeError):
-        payload = {}
-    provider_code = str(payload.get("code") or "") if isinstance(payload, Mapping) else ""
+    payloads: list[object] = []
+    for raw in (result.stdout, result.stderr):
+        try:
+            payloads.append(json.loads(raw))
+        except (json.JSONDecodeError, TypeError):
+            continue
+    payload = payloads[0] if payloads else {}
+
+    def provider_error_code(candidate: object) -> str:
+        if not isinstance(candidate, Mapping):
+            return ""
+        direct = str(candidate.get("code") or "")
+        if direct:
+            return direct
+        error = candidate.get("error")
+        return str(error.get("code") or "") if isinstance(error, Mapping) else ""
+
     if result.returncode != 0:
-        if provider_code == "230027":
+        if any(provider_error_code(candidate) == "230027" for candidate in payloads):
             return {}, "message_context_permission_required"
         return {}, "message_context_lookup_failed"
     return payload, "message_context_available"

@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-
 OPERATOR_INBOX_URGENCY_SCHEMA_VERSION = "operator_inbox_urgency_v0"
 CAPTURE_SCOPES = {"addressed_only", "configured_chat_all"}
 QUESTION_SIGNAL_PATTERN = re.compile(
@@ -199,8 +198,7 @@ def project_operator_inbox_urgency(
     sender_identity = str(reply.get("sender_identity") or "").strip()
     destination = str(reply.get(source_contract.destination_field) or "").strip()
     if reply_enabled and (
-        capture_scope != "configured_chat_all"
-        or not source_contract.sender_profile_pattern.fullmatch(sender_profile)
+        not source_contract.sender_profile_pattern.fullmatch(sender_profile)
         or sender_profile.lower() == "default"
         or sender_identity != source_contract.required_sender_identity
         or not operator_display_name

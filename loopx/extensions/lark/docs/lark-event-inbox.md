@@ -88,9 +88,11 @@ reports `thread_complete=false` and a coverage warning for that mode. For
 `configured_chat_all`, the collector's jq filter should select the configured
 chat only; do not add a content-level `@bot` predicate.
 
-Optional source-thread replies are a separate, default-off boundary. Enable
-them only for a `configured_chat_all` inbox and bind an explicit non-default
-bot profile to the same local-private chat:
+Optional source-thread replies are a separate, default-off boundary. Bind an
+explicit non-default bot profile to the same local-private chat. An
+`addressed_only` inbox may reply to the exact captured source message, but it
+remains `thread_complete=false` and cannot discover unmentioned follow-up
+messages; use `configured_chat_all` for complete collaboration threads:
 
 ```json
 {
@@ -208,9 +210,18 @@ loopx lark-inbox collector-status \
 
 Missing `lark-cli` produces a non-blocking install hint. Reply-target
 verification also requires the configured bot to read messages in the selected
-chat. Missing scopes or bot configuration still belong to `lark-cli`; LoopX
-does not authenticate a bot,
-copy app credentials, or silently install packages. Service installation is a
+chat. Bot-identity group-history catch-up requires the application scopes
+`im:message.group_msg` and `im:message.group_msg.include_bot:read`; the latter
+keeps Bot-authored messages in the paginated result. When the Bot list-messages
+history path reports provider error `230027`, LoopX must surface both scopes
+and an official API page bound to the selected App id. The operator enables
+the application scopes and publishes a new App
+version; this is not a user OAuth login. These requirements belong to the
+list-messages history capability. Exact message-by-id hydration and realtime
+event delivery remain separate capabilities and must keep their own failure
+status and permission evidence. LoopX does not authenticate a bot,
+copy app credentials, silently grant provider permissions, or silently install
+packages. Service installation is a
 local host write and therefore requires explicit `--execute`. Status separates
 `healthy` from `real_event_evidence_present`: a running subscriber can be
 healthy before the first message, while acceptance of a real integration still

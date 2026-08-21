@@ -6,6 +6,11 @@ from typing import Any
 
 import pytest
 
+from loopx.extensions.lark.goal_channel_contracts import read_goal_channel_binding
+from loopx.extensions.lark.goal_channel_targets import (
+    add_lark_goal_channel_target,
+    read_goal_channel_targets,
+)
 from loopx.extensions.lark.goal_topic_connections import (
     LarkGroupChatLookupError,
     connect_lark_goal_topic,
@@ -17,10 +22,6 @@ from loopx.extensions.lark.goal_topic_connections import (
     reply_lark_goal_topic,
     route_lark_topic_event,
 )
-from loopx.extensions.lark.goal_channel_contracts import read_goal_channel_binding
-from loopx.extensions.lark.goal_channel_targets import read_goal_channel_targets
-from loopx.extensions.lark.goal_channel_targets import add_lark_goal_channel_target
-
 
 APP_ID = "cli_public_fixture"
 CHAT_ID = "oc_public_fixture"
@@ -519,6 +520,20 @@ def test_connection_health_reports_received_event_processing_blocker(tmp_path: P
 
     assert rows[0]["reply_ready"] is False
     assert rows[0]["health_error_code"] == "message_context_permission_required"
+    assert rows[0]["history_permission_guidance"] == {
+        "schema_version": "lark_bot_group_history_permission_guidance_v0",
+        "identity": "bot",
+        "capability": "group_history_pagination",
+        "action": "enable_application_scopes_and_publish",
+        "required_scopes": [
+            "im:message.group_msg",
+            "im:message.group_msg.include_bot:read",
+        ],
+        "api_document_url": (
+            "https://open.feishu.cn/document/server-docs/im-v1/message/list"
+            "?appId=cli_public_fixture"
+        ),
+    }
 
 
 def test_connection_health_reports_ambiguous_topic_context(tmp_path: Path) -> None:
@@ -865,6 +880,54 @@ def test_routes_bound_topic_messages_and_replies_in_thread(tmp_path: Path) -> No
     assert reply["ok"] is True
     assert "--reply-in-thread" in state["reply_args"]
     assert state["reply_args"][state["reply_args"].index("--message-id") + 1] == "om_incoming"
+
+
+def test_provider_bot_open_id_is_persisted_and_routes_tokenized_mentions(
+    tmp_path: Path,
+) -> None:
+    state: dict[str, Any] = {}
+    base_runner = _runner(state)
+
+    def runner(args: list[str], cwd: object, timeout: object) -> dict[str, Any]:
+        result = base_runner(args, cwd, timeout)
+        if "auth" in args and "status" in args and result["returncode"] == 0:
+            payload = json.loads(result["stdout"])
+            payload["identities"]["bot"]["openId"] = "ou_loopx_mew"
+            result = {**result, "stdout": json.dumps(payload)}
+        return result
+
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    connected = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=runner,
+        cli_bin="fake-lark",
+    )
+
+    assert connected["ok"] is True
+    targets = read_goal_channel_targets(target_path)
+    target = next(iter(targets["targets"].values()))
+    assert target["identity"]["bot_open_id"] == "ou_loopx_mew"
+    decision = decide_lark_topic_event(
+        target_payload=targets,
+        binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
+        event={
+            "chat_id": CHAT_ID,
+            "root_id": "om_topic_alpha",
+            "message_id": "om_tokenized_mention",
+            "content": "@_user_1 请处理",
+            "mentions": [{"id": {"open_id": "ou_loopx_mew"}}],
+        },
+    )
+    assert decision["matched"] is True
+    assert decision["reason"] == "matched"
 
 
 def test_topic_route_decision_reports_safe_reason_codes(tmp_path: Path) -> None:
