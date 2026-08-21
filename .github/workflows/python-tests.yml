@@ -8,7 +8,10 @@ on:
       - "scripts/**"
       - "tests/**"
       - "examples/**"
+      - "package.json"
+      - "package-lock.json"
       - "pyproject.toml"
+      - "tsconfig.control-plane.json"
   push:
     branches:
       - main
@@ -18,7 +21,10 @@ on:
       - "scripts/**"
       - "tests/**"
       - "examples/**"
+      - "package.json"
+      - "package-lock.json"
       - "pyproject.toml"
+      - "tsconfig.control-plane.json"
 
 permissions:
   contents: read
@@ -43,8 +49,21 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Set up the TypeScript Effect runtime
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.6"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
       - name: Install test dependencies
         run: python -m pip install --disable-pip-version-check -e ".[test]"
+
+      - name: Qualify the TypeScript Effect core
+        run: |
+          npm ci --ignore-scripts
+          npm run typecheck:control-plane
+          npm run test:control-plane
 
       - name: Lint test suite
         run: >-
@@ -85,6 +104,11 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Set up the TypeScript Effect runtime
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.6"
+
       - name: Install test dependencies
         run: python -m pip install --disable-pip-version-check -e ".[test]"
 
@@ -95,5 +119,6 @@ jobs:
           tests/test_doctor_install_freshness.py
           tests/test_file_lock.py
           tests/test_file_lock_cross_process.py
+          tests/control_plane/test_effect_runtime_integration.py
           tests/test_self_update_runtime_activation.py
           tests/test_windows_install.py

@@ -1,0 +1,261 @@
+{
+  "schema_version": "loopx_turn_journal_characterization_corpus_v0",
+  "description": "Public-safe, implementation-neutral Turn-journal replay invariants for pinned-base versus candidate qualification.",
+  "cases": [
+    {
+      "case_id": "committed-complete-prefix",
+      "invariant_id": "terminal-consistent-journal-is-replayable",
+      "rationale": "A committed journal with consistent identities and an ordered phase prefix is a retained, effect-free replay tombstone.",
+      "request": {
+        "goal_id": "fixture-goal",
+        "agent_id": "fixture-agent",
+        "turn_key": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "journal": {
+          "schema_version": "loopx_turn_journal_v0",
+          "goal_id": "fixture-goal",
+          "turn_key": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "committed",
+          "completed_phases": ["host_execute", "typed_result", "validation", "durable_writeback", "quota_spend", "scheduler_apply", "scheduler_ack"],
+          "plan": {
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "transaction": {
+              "turn_key": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+            }
+          },
+          "host_result": {"turn_key": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+          "receipt": {"turn_key": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        }
+      },
+      "invariant": {"decision": "replay_legal", "replay_legal": true, "goal_matches": true, "owner_matches": true, "turn_key_matches": true, "phases_form_ordered_prefix": true, "tombstone_retained": true}
+    },
+    {
+      "case_id": "stopped-partial-prefix",
+      "invariant_id": "terminal-partial-prefix-is-replayable",
+      "rationale": "A stopped journal may retain a valid partial transaction prefix without reopening execution.",
+      "request": {
+        "goal_id": "fixture-goal",
+        "agent_id": "fixture-agent",
+        "turn_key": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "journal": {
+          "schema_version": "loopx_turn_journal_v0",
+          "goal_id": "fixture-goal",
+          "turn_key": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "status": "stopped",
+          "completed_phases": ["host_execute", "typed_result"],
+          "plan": {
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "transaction": {
+              "turn_key": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+            }
+          },
+          "host_result": {"turn_key": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+          "receipt": {"turn_key": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+        }
+      },
+      "invariant": {"decision": "replay_legal", "replay_legal": true, "phases_form_ordered_prefix": true, "tombstone_retained": true}
+    },
+    {
+      "case_id": "failed-empty-prefix",
+      "invariant_id": "failed-terminal-tombstone-is-retained",
+      "rationale": "A failed journal with an empty ordered prefix is terminal evidence, not an instruction to repeat work.",
+      "request": {
+        "goal_id": "fixture-goal",
+        "agent_id": "fixture-agent",
+        "turn_key": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "journal": {
+          "schema_version": "loopx_turn_journal_v0",
+          "goal_id": "fixture-goal",
+          "turn_key": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "status": "failed",
+          "completed_phases": [],
+          "plan": {
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "transaction": {
+              "turn_key": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+            }
+          }
+        }
+      },
+      "invariant": {"decision": "replay_legal", "replay_legal": true, "phases_form_ordered_prefix": true, "tombstone_retained": true}
+    },
+    {
+      "case_id": "goal-identity-mismatch",
+      "invariant_id": "goal-identity-is-fenced",
+      "rationale": "A terminal journal from another goal cannot be replayed through the selected goal path.",
+      "request": {
+        "goal_id": "fixture-goal",
+        "agent_id": "fixture-agent",
+        "turn_key": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "journal": {
+          "schema_version": "loopx_turn_journal_v0",
+          "goal_id": "other-goal",
+          "turn_key": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "status": "committed",
+          "completed_phases": ["host_execute"],
+          "plan": {
+            "turn_envelope": {"goal_id": "other-goal", "agent_id": "fixture-agent"},
+            "transaction": {
+              "turn_key": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "settlement_plan": {"identity": {"goal_id": "other-goal", "agent_id": "fixture-agent"}}
+            }
+          }
+        }
+      },
+      "invariant": {"decision": "replay_blocked", "replay_legal": false, "goal_matches": false, "owner_matches": true, "turn_key_matches": true}
+    },
+    {
+      "case_id": "owner-identity-mismatch",
+      "invariant_id": "owner-identity-is-fenced",
+      "rationale": "A journal owned by another agent cannot authorize replay for the selected agent.",
+      "request": {
+        "goal_id": "fixture-goal",
+        "agent_id": "fixture-agent",
+        "turn_key": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "journal": {
+          "schema_version": "loopx_turn_journal_v0",
+          "goal_id": "fixture-goal",
+          "turn_key": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "status": "committed",
+          "completed_phases": ["host_execute"],
+          "plan": {
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "other-agent"},
+            "transaction": {
+              "turn_key": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "other-agent"}}
+            }
+          }
+        }
+      },
+      "invariant": {"decision": "replay_blocked", "replay_legal": false, "goal_matches": true, "owner_matches": false, "turn_key_matches": true}
+    },
+    {
+      "case_id": "turn-key-mismatch",
+      "invariant_id": "turn-key-is-fenced",
+      "rationale": "A journal whose embedded transaction identity differs from the selected path must not replay.",
+      "request": {
+        "goal_id": "fixture-goal",
+        "agent_id": "fixture-agent",
+        "turn_key": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "journal": {
+          "schema_version": "loopx_turn_journal_v0",
+          "goal_id": "fixture-goal",
+          "turn_key": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "status": "committed",
+          "completed_phases": ["host_execute"],
+          "plan": {
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "transaction": {
+              "turn_key": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+            }
+          },
+          "host_result": {"turn_key": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}
+        }
+      },
+      "invariant": {"decision": "replay_blocked", "replay_legal": false, "goal_matches": true, "owner_matches": true, "turn_key_matches": false}
+    },
+    {
+      "case_id": "unordered-phase-prefix",
+      "invariant_id": "settlement-phases-form-an-ordered-prefix",
+      "rationale": "Skipping a transaction phase makes the journal structurally unsafe even when its identities and terminal status match.",
+      "request": {
+        "goal_id": "fixture-goal",
+        "agent_id": "fixture-agent",
+        "turn_key": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "journal": {
+          "schema_version": "loopx_turn_journal_v0",
+          "goal_id": "fixture-goal",
+          "turn_key": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "status": "committed",
+          "completed_phases": ["host_execute", "validation"],
+          "plan": {
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "transaction": {
+              "turn_key": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+            }
+          }
+        }
+      },
+      "invariant": {"decision": "replay_blocked", "replay_legal": false, "phases_form_ordered_prefix": false, "tombstone_retained": true}
+    },
+    {
+      "case_id": "non-terminal-journal",
+      "invariant_id": "only-terminal-journals-are-replayable",
+      "rationale": "An in-progress journal remains live settlement state and cannot be consumed as a replay tombstone.",
+      "request": {
+        "goal_id": "fixture-goal",
+        "agent_id": "fixture-agent",
+        "turn_key": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "journal": {
+          "schema_version": "loopx_turn_journal_v0",
+          "goal_id": "fixture-goal",
+          "turn_key": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+          "status": "in_progress",
+          "completed_phases": ["host_execute"],
+          "plan": {
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "transaction": {
+              "turn_key": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+            }
+          }
+        }
+      },
+      "invariant": {"decision": "replay_blocked", "replay_legal": false, "phases_form_ordered_prefix": true, "tombstone_retained": false}
+    },
+    {
+      "case_id": "unsupported-terminal-label",
+      "invariant_id": "terminal-status-vocabulary-is-closed",
+      "rationale": "An unknown status label cannot silently acquire terminal replay semantics.",
+      "request": {
+        "goal_id": "fixture-goal",
+        "agent_id": "fixture-agent",
+        "turn_key": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "journal": {
+          "schema_version": "loopx_turn_journal_v0",
+          "goal_id": "fixture-goal",
+          "turn_key": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+          "status": "retired",
+          "completed_phases": ["host_execute"],
+          "plan": {
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "transaction": {
+              "turn_key": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+            }
+          }
+        }
+      },
+      "invariant": {"decision": "replay_blocked", "replay_legal": false, "tombstone_retained": false}
+    },
+    {
+      "case_id": "non-string-phase-element",
+      "invariant_id": "phase-elements-are-typed-strings",
+      "rationale": "A non-string phase must remain blocked across runtimes even if implementations differ in their diagnostic normalization.",
+      "request": {
+        "goal_id": "fixture-goal",
+        "agent_id": "fixture-agent",
+        "turn_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "journal": {
+          "schema_version": "loopx_turn_journal_v0",
+          "goal_id": "fixture-goal",
+          "turn_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+          "status": "committed",
+          "completed_phases": ["host_execute", null],
+          "plan": {
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "transaction": {
+              "turn_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+            }
+          }
+        }
+      },
+      "invariant": {"decision": "replay_blocked", "replay_legal": false, "phases_form_ordered_prefix": false, "tombstone_retained": true}
+    }
+  ]
+}

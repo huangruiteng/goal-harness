@@ -16,6 +16,7 @@ from loopx.control_plane.turn_driver import (
 )
 from loopx.control_plane.turn_driver.executor import (
     BuiltInHostError,
+    LOOPX_TURN_JOURNAL_SCHEMA_VERSION,
     _task_validation_stage,
 )
 from loopx.control_plane.turn_driver.settlement import execute_turn_driver_settlement
@@ -127,6 +128,7 @@ def test_task_validation_stage_reads_result_kind_through_effect_turn(
     plan = _plan()
     result = _host_result(plan, kind="wait")
     journal = {
+        "schema_version": LOOPX_TURN_JOURNAL_SCHEMA_VERSION,
         "status": "in_progress",
         "completed_phases": list(TRANSACTION_PHASES[:2]),
     }

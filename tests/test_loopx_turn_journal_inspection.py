@@ -11,6 +11,7 @@ import pytest
 from loopx.cli import main as cli_main
 from loopx.cli_commands import turn as turn_command
 from loopx.control_plane.turn_driver import executor
+from loopx.control_plane.turn_driver import turn_journal_runtime
 
 
 TURN_KEY = "sha256:" + "a" * 64
@@ -357,3 +358,115 @@ def test_inspect_journal_cli_does_not_expose_path_on_read_failure(
     assert exit_code == 1
     assert payload["error"] == "LoopX Turn journal could not be read"
     assert str(journal_path) not in raw_output
+
+
+def test_inspection_has_no_python_fallback_when_typescript_runtime_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_journal(tmp_path, _journal())
+
+    def missing_node(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("Turn-journal inspection requires Node.js 22.6 or newer")
+
+    monkeypatch.setattr(turn_journal_runtime, "effect_runtime_result", missing_node)
+
+    exit_code, raw_output = _run_inspection_cli(tmp_path, output_format="json")
+
+    payload = json.loads(raw_output)
+    assert exit_code == 1
+    assert payload == {
+        "ok": False,
+        "schema_version": "loopx_turn_journal_inspection_v0",
+        "error": "Turn-journal inspection requires Node.js 22.6 or newer",
+        "effects": [],
+    }
+
+
+def test_typescript_runtime_uses_one_typed_rpc_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def rpc(method: str, params: dict[str, object]) -> dict[str, object]:
+        calls.append((method, params))
+        return {
+            "ok": True,
+            "schema_version": "loopx_turn_journal_inspection_v0",
+            "decision": "replay_legal",
+            "journal_status": "committed",
+            "replay_legal": True,
+            "goal_matches": True,
+            "owner_matches": True,
+            "turn_key_matches": True,
+            "phases_form_ordered_prefix": True,
+            "completed_phases": COMPLETED_PHASES,
+            "tombstone_retained": True,
+            "violations": [],
+            "effects": [],
+        }
+
+    monkeypatch.setattr(turn_journal_runtime, "effect_runtime_result", rpc)
+
+    result = turn_journal_runtime.interpret_turn_journal_projection(
+        _journal(),
+        goal_id="fixture-goal",
+        agent_id="fixture-agent",
+        turn_key=TURN_KEY,
+    )
+
+    assert result["decision"] == "replay_legal"
+    assert len(calls) == 1
+    assert calls[0][0] == "turn_journal.inspect"
+    assert calls[0][1]["turn_key"] == TURN_KEY
+
+
+def test_typescript_runtime_fails_closed_when_process_cannot_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def cannot_start(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("TypeScript Effect runtime request failed")
+
+    monkeypatch.setattr(turn_journal_runtime, "effect_runtime_result", cannot_start)
+
+    with pytest.raises(RuntimeError, match="runtime request failed"):
+        turn_journal_runtime.interpret_turn_journal_projection(
+            _journal(),
+            goal_id="fixture-goal",
+            agent_id="fixture-agent",
+            turn_key=TURN_KEY,
+        )
+
+
+def test_typescript_runtime_rejects_malformed_projection_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "ok": True,
+        "schema_version": "loopx_turn_journal_inspection_v0",
+        "decision": "replay_legal",
+        "journal_status": "committed",
+        "replay_legal": "true",
+        "goal_matches": True,
+        "owner_matches": True,
+        "turn_key_matches": True,
+        "phases_form_ordered_prefix": True,
+        "completed_phases": COMPLETED_PHASES,
+        "tombstone_retained": True,
+        "violations": [],
+        "effects": [],
+    }
+
+    monkeypatch.setattr(
+        turn_journal_runtime,
+        "effect_runtime_result",
+        lambda *_args, **_kwargs: payload,
+    )
+
+    with pytest.raises(RuntimeError, match="projection type mismatch"):
+        turn_journal_runtime.interpret_turn_journal_projection(
+            _journal(),
+            goal_id="fixture-goal",
+            agent_id="fixture-agent",
+            turn_key=TURN_KEY,
+        )

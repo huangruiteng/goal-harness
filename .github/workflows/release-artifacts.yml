@@ -6,9 +6,12 @@ on:
       - ".github/workflows/release-artifacts.yml"
       - "examples/release-artifacts-smoke.py"
       - "loopx/**"
+      - "package.json"
+      - "package-lock.json"
       - "pyproject.toml"
       - "README.md"
       - "scripts/release_artifacts.py"
+      - "tsconfig.control-plane.json"
   release:
     types: [published]
   workflow_dispatch:
@@ -48,6 +51,11 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+
+      - name: Set up the packaged TypeScript control-plane runtime
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.6"
 
       - name: Resolve and validate release identity
         id: identity
@@ -102,6 +110,93 @@ jobs:
             dist/packages/*.whl
           test "$("${RUNNER_TEMP}/loopx-wheel/bin/loopx" --version)" = \
             "loopx ${RELEASE_TAG#v}"
+          "${RUNNER_TEMP}/loopx-wheel/bin/python" - <<'PY'
+          from loopx.control_plane.effect_program import SettlementIdentity
+          from loopx.control_plane.effect_runtime import (
+              collect_effect_runtime_readiness,
+          )
+          from loopx.control_plane.turn_driver.turn_journal_runtime import (
+              interpret_turn_journal_projection,
+              write_turn_journal,
+          )
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+
+          turn_key = "sha256:" + "a" * 64
+          journal = {
+              "schema_version": "loopx_turn_journal_v0",
+              "goal_id": "fixture-goal",
+              "turn_key": turn_key,
+              "status": "committed",
+              "completed_phases": [
+                  "host_execute",
+                  "typed_result",
+                  "validation",
+                  "durable_writeback",
+                  "quota_spend",
+                  "scheduler_apply",
+                  "scheduler_ack",
+              ],
+              "plan": {
+                  "turn_envelope": {
+                      "goal_id": "fixture-goal",
+                      "agent_id": "fixture-agent",
+                  },
+                  "transaction": {
+                      "turn_key": turn_key,
+                      "settlement_plan": {
+                          "identity": {
+                              "goal_id": "fixture-goal",
+                              "agent_id": "fixture-agent",
+                          }
+                      },
+                  },
+              },
+          }
+          result = interpret_turn_journal_projection(
+              journal,
+              goal_id="fixture-goal",
+              agent_id="fixture-agent",
+              turn_key=turn_key,
+          )
+          assert result["decision"] == "replay_legal", result
+          assert result["effects"] == [], result
+          identity = SettlementIdentity(
+              goal_id="fixture-goal",
+              agent_id="fixture-agent",
+              todo_id="fixture-todo",
+              turn_instance_id="fixture-turn",
+          )
+          assert identity.effect_id == (
+              "fixture-goal:fixture-agent:fixture-todo:fixture-turn"
+          ), identity
+          readiness = collect_effect_runtime_readiness(deep=True)
+          assert readiness["status"] == "ready", readiness
+          assert readiness["semantic_probe"] == "passed", readiness
+          with TemporaryDirectory() as temporary_directory:
+              effect_id = identity.effect_id
+              writable_journal = {
+                  "schema_version": "loopx_turn_journal_v0",
+                  "goal_id": "fixture-goal",
+                  "turn_key": turn_key,
+                  "status": "in_progress",
+                  "completed_phases": ["host_execute"],
+                  "plan": {
+                      "transaction": {
+                          "settlement_plan": {
+                              "identity": {"effect_id": effect_id}
+                          }
+                      }
+                  },
+              }
+              committed = write_turn_journal(
+                  str(Path(temporary_directory) / "turn.json"),
+                  writable_journal,
+                  expected_effect_id=effect_id,
+              )
+              assert committed["appended"] is True, committed
+              assert committed["replayed"] is False, committed
+          PY
           skills_dir="${RUNNER_TEMP}/loopx-wheel-skills"
           "${RUNNER_TEMP}/loopx-wheel/bin/loopx" --format json \
             workflow-skills --install --skills-dir "${skills_dir}" \
