@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+import loopx.control_plane.turn_driver.executor as executor_module
+from loopx.control_plane.effect_program import SettlementEffectResolution
 from loopx.control_plane.turn_driver import (
     LOOPX_TURN_RESULT_SCHEMA_VERSION,
     build_loopx_turn_plan,
@@ -239,9 +241,13 @@ def _callbacks(calls: dict[str, int]):
 
 
 def _journal(runtime_root: Path) -> dict[str, object]:
-    journal_paths = list(
-        (runtime_root / "goals" / "fixture-goal" / "turns").glob("*.json")
-    )
+    journal_paths = [
+        path
+        for path in (runtime_root / "goals" / "fixture-goal" / "turns").glob(
+            "*.json"
+        )
+        if not path.name.endswith(".lock.holder.json")
+    ]
     assert len(journal_paths) == 1
     return json.loads(journal_paths[0].read_text(encoding="utf-8"))
 
@@ -878,6 +884,90 @@ def test_terminal_closeout_lost_receipt_retries_without_repeating_effects(
     }
 
 
+def test_terminal_closeout_committed_before_checkpoint_is_recovered_by_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _plan()
+    provider_receipts: dict[str, dict[str, object]] = {}
+    calls = {"terminal": 0, "scheduler": 0}
+    original_write_journal = executor_module._write_journal
+    crash_once = {"armed": True}
+
+    def terminal_closeout(
+        _result: dict[str, object],
+        *,
+        effect_ref: str,
+    ) -> dict[str, object]:
+        calls["terminal"] += 1
+        payload: dict[str, object] = {
+            "ok": True,
+            "appended": True,
+            "completion": {
+                "todo_id": "todo_fixture0001",
+                "continuation": "no_followup",
+            },
+        }
+        provider_receipts[effect_ref] = payload
+        return payload
+
+    def crash_before_terminal_checkpoint(
+        journal_path: Path,
+        journal: dict[str, object],
+    ) -> None:
+        if crash_once["armed"] and "terminal_closeout" in journal:
+            crash_once["armed"] = False
+            raise SystemExit(93)
+        original_write_journal(journal_path, journal)
+
+    monkeypatch.setattr(
+        executor_module,
+        "_write_journal",
+        crash_before_terminal_checkpoint,
+    )
+    common = {
+        "host_runner": lambda _request: _host_result(
+            plan,
+            kind="validated_completion",
+        ),
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "task_validator": _passing_validator,
+        "writeback": lambda _result: {"ok": True, "appended": True},
+        "completion_writeback": lambda _result: pytest.fail(
+            "terminal completion must run after spend"
+        ),
+        "completion_intent": lambda _result: {
+            "todo_id": "todo_fixture0001",
+            "continuation": "no_followup",
+        },
+        "spend": lambda: {"ok": True, "appended": True},
+        "terminal_closeout": terminal_closeout,
+        "terminal_closeout_resolver": lambda effect_ref: (
+            SettlementEffectResolution.committed(provider_receipts[effect_ref])
+        ),
+        "scheduler": lambda _spend: calls.__setitem__(
+            "scheduler", calls["scheduler"] + 1
+        )
+        or {"completed": True, "acknowledged": True},
+    }
+
+    with pytest.raises(SystemExit, match="93"):
+        run_loopx_turn_once(plan, **common)
+
+    interrupted = _journal(tmp_path / "runtime")
+    assert interrupted["effect_attempts"]["terminal_closeout"]["status"] == "prepared"
+    assert "terminal_closeout" not in interrupted
+
+    recovered = run_loopx_turn_once(plan, **common)
+
+    assert recovered["status"] == "committed"
+    assert calls == {"terminal": 1, "scheduler": 1}
+
+
 def test_validated_completion_recovers_after_writeback_without_repeating_completion(
     tmp_path: Path,
 ) -> None:
@@ -932,6 +1022,7 @@ def test_validated_completion_recovers_after_writeback_without_repeating_complet
                 "continuation": "no_followup",
             },
         },
+        "spend_resolver": lambda _effect_ref: SettlementEffectResolution.absent(),
         "scheduler": scheduler,
     }
     with pytest.raises(SystemExit):
@@ -966,6 +1057,7 @@ def test_run_once_recovers_after_process_exit_before_writeback(tmp_path: Path) -
         "timeout_seconds": 5,
         "execute": True,
         "task_validator": _passing_validator,
+        "writeback_resolver": lambda _effect_ref: SettlementEffectResolution.absent(),
         "spend": spend,
         "scheduler": scheduler,
     }
@@ -985,6 +1077,147 @@ def test_run_once_recovers_after_process_exit_before_writeback(tmp_path: Path) -
 
     assert recovered["status"] == "committed"
     assert count_path.read_text(encoding="utf-8") == "1"
+    assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
+
+
+def test_run_once_repairs_effect_committed_before_writeback_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _plan()
+    provider_receipts: dict[str, dict[str, object]] = {}
+    calls = {"writeback": 0, "spend": 0, "scheduler": 0}
+    original_write_journal = executor_module._write_journal
+    crash_once = {"armed": True}
+
+    def writeback(
+        _result: dict[str, object],
+        *,
+        effect_ref: str,
+    ) -> dict[str, object]:
+        calls["writeback"] += 1
+        payload: dict[str, object] = {"ok": True, "appended": True}
+        provider_receipts[effect_ref] = payload
+        return payload
+
+    def resolve_writeback(effect_ref: str) -> SettlementEffectResolution:
+        payload = provider_receipts.get(effect_ref)
+        return (
+            SettlementEffectResolution.committed(payload)
+            if payload is not None
+            else SettlementEffectResolution.absent()
+        )
+
+    def crash_after_effect_before_checkpoint(
+        journal_path: Path,
+        journal: dict[str, object],
+    ) -> None:
+        if crash_once["armed"] and "writeback" in journal:
+            crash_once["armed"] = False
+            raise SystemExit(92)
+        original_write_journal(journal_path, journal)
+
+    monkeypatch.setattr(
+        executor_module,
+        "_write_journal",
+        crash_after_effect_before_checkpoint,
+    )
+    common = {
+        "host_runner": lambda _request: _host_result(plan),
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "task_validator": _passing_validator,
+        "writeback": writeback,
+        "writeback_resolver": resolve_writeback,
+        "spend": lambda: calls.__setitem__("spend", calls["spend"] + 1)
+        or {"ok": True, "appended": True},
+        "scheduler": lambda _spend: calls.__setitem__(
+            "scheduler", calls["scheduler"] + 1
+        )
+        or {"completed": True, "acknowledged": True},
+    }
+
+    with pytest.raises(SystemExit, match="92"):
+        run_loopx_turn_once(plan, **common)
+
+    interrupted = _journal(tmp_path / "runtime")
+    prepared = interrupted["effect_attempts"]["durable_writeback"]
+    assert prepared["status"] == "prepared"
+    assert prepared["effect_ref"] in provider_receipts
+    assert "writeback" not in interrupted
+
+    recovered = run_loopx_turn_once(plan, **common)
+
+    assert recovered["status"] == "committed"
+    assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
+    assert "effect_attempts" not in _journal(tmp_path / "runtime")
+
+
+def test_run_once_repairs_spend_committed_before_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _plan()
+    provider_receipts: dict[str, dict[str, object]] = {}
+    calls = {"writeback": 0, "spend": 0, "scheduler": 0}
+    original_write_journal = executor_module._write_journal
+    crash_once = {"armed": True}
+
+    def spend(*, effect_ref: str) -> dict[str, object]:
+        calls["spend"] += 1
+        payload: dict[str, object] = {"ok": True, "appended": True}
+        provider_receipts[effect_ref] = payload
+        return payload
+
+    def crash_after_spend_before_checkpoint(
+        journal_path: Path,
+        journal: dict[str, object],
+    ) -> None:
+        if crash_once["armed"] and "quota_spend" in journal:
+            crash_once["armed"] = False
+            raise SystemExit(94)
+        original_write_journal(journal_path, journal)
+
+    monkeypatch.setattr(
+        executor_module,
+        "_write_journal",
+        crash_after_spend_before_checkpoint,
+    )
+    common = {
+        "host_runner": lambda _request: _host_result(plan),
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "task_validator": _passing_validator,
+        "writeback": lambda _result: calls.__setitem__(
+            "writeback", calls["writeback"] + 1
+        )
+        or {"ok": True, "appended": True},
+        "spend": spend,
+        "spend_resolver": lambda effect_ref: (
+            SettlementEffectResolution.committed(provider_receipts[effect_ref])
+        ),
+        "scheduler": lambda _spend: calls.__setitem__(
+            "scheduler", calls["scheduler"] + 1
+        )
+        or {"completed": True, "acknowledged": True},
+    }
+
+    with pytest.raises(SystemExit, match="94"):
+        run_loopx_turn_once(plan, **common)
+
+    interrupted = _journal(tmp_path / "runtime")
+    assert interrupted["effect_attempts"]["quota_spend"]["status"] == "prepared"
+    assert "quota_spend" not in interrupted
+
+    recovered = run_loopx_turn_once(plan, **common)
+
+    assert recovered["status"] == "committed"
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
 
 
@@ -1008,6 +1241,7 @@ def test_run_once_resumes_after_writeback_without_duplicate_effects(tmp_path: Pa
         "execute": True,
         "task_validator": _passing_validator,
         "writeback": writeback,
+        "spend_resolver": lambda _effect_ref: SettlementEffectResolution.absent(),
         "scheduler": scheduler,
     }
     with pytest.raises(SystemExit):
@@ -1059,6 +1293,7 @@ def test_cancellation_before_writeback_preserves_prefix_and_resumes(
         "timeout_seconds": 5,
         "execute": True,
         "task_validator": _passing_validator,
+        "writeback_resolver": lambda _effect_ref: SettlementEffectResolution.absent(),
         "spend": lambda: calls.__setitem__("spend", calls["spend"] + 1)
         or {"ok": True, "appended": True},
         "scheduler": lambda _spend: {"completed": True, "acknowledged": True},
@@ -1210,6 +1445,7 @@ def test_permission_denial_during_spend_preserves_writeback_and_resumes(
         "execute": True,
         "task_validator": _passing_validator,
         "writeback": writeback,
+        "spend_resolver": lambda _effect_ref: SettlementEffectResolution.absent(),
         "scheduler": lambda _spend: {"completed": True, "acknowledged": True},
     }
     with pytest.raises(PermissionError):
