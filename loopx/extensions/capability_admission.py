@@ -483,19 +483,24 @@ def validate_external_capability_result(
     return result
 
 
-def invoke_external_capability(
+def prepare_external_capability_invocation(
     *,
     state_file: str | Path,
     capability_id: str,
     operation: str,
+    provider_input: Mapping[str, Any],
     goal_binding: Mapping[str, Any] | None = None,
     registry_path: str | Path | None = None,
     goal_id: str | None = None,
-    provider_input: Mapping[str, Any],
-    execute: bool = False,
-    environment: Mapping[str, str] | None = None,
+    authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Preview or run one read-only provider enabled for a durable Goal."""
+    """Resolve and freeze one Goal-bound provider request before dispatch.
+
+    Read-only callers omit ``authority`` and retain the original deterministic
+    invocation identity. Material adapters pass the typed settlement identity;
+    this keeps otherwise identical operations in separate governed Turns from
+    collapsing onto one provider idempotency key.
+    """
 
     binding = resolve_external_capability_binding(
         state_file=state_file,
@@ -503,10 +508,6 @@ def invoke_external_capability(
         operation=operation,
     )
     operation_profile = _mapping(binding.get("operation"), "operation profile")
-    if operation_profile.get("effect_class") != "read_only":
-        raise ValueError(
-            "material external capability invocation requires a governed Turn adapter"
-        )
     if goal_binding is None:
         if registry_path is None or goal_id is None:
             raise ValueError(
@@ -533,12 +534,19 @@ def invoke_external_capability(
         expected_goal_id=expected_goal_id,
     )
     provided = _provider_input(provider_input)
+    normalized_authority = (
+        _mapping(authority, "external capability authority")
+        if authority is not None
+        else None
+    )
     invocation_seed = {
         "goal_binding_digest": goal["binding_digest"],
         "capability_id": capability_id,
         "operation": operation,
         "provider_input_digest": _canonical_digest(provided),
     }
+    if normalized_authority is not None:
+        invocation_seed["authority_digest"] = _canonical_digest(normalized_authority)
     invocation_id = (
         "capability-" + _canonical_digest(invocation_seed).split(":", 1)[1][:24]
     )
@@ -559,6 +567,57 @@ def invoke_external_capability(
         "context_refs": provided["context_refs"],
         "input": provided["input"],
     }
+    if normalized_authority is not None:
+        request["authority"] = normalized_authority
+    return {
+        "binding": binding,
+        "operation_profile": operation_profile,
+        "goal": goal,
+        "provider_input": provided,
+        "request": request,
+        "invocation_id": invocation_id,
+        "request_digest": _canonical_digest(request),
+    }
+
+
+def invoke_external_capability(
+    *,
+    state_file: str | Path,
+    capability_id: str,
+    operation: str,
+    goal_binding: Mapping[str, Any] | None = None,
+    registry_path: str | Path | None = None,
+    goal_id: str | None = None,
+    provider_input: Mapping[str, Any],
+    execute: bool = False,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Preview or run one read-only provider enabled for a durable Goal."""
+
+    prepared = prepare_external_capability_invocation(
+        state_file=state_file,
+        capability_id=capability_id,
+        operation=operation,
+        goal_binding=goal_binding,
+        registry_path=registry_path,
+        goal_id=goal_id,
+        provider_input=provider_input,
+    )
+    binding = prepared["binding"]
+    assert isinstance(binding, Mapping)
+    operation_profile = prepared["operation_profile"]
+    assert isinstance(operation_profile, Mapping)
+    if operation_profile.get("effect_class") != "read_only":
+        raise ValueError(
+            "material external capability invocation requires a governed Turn adapter"
+        )
+    goal = prepared["goal"]
+    assert isinstance(goal, Mapping)
+    provided = prepared["provider_input"]
+    assert isinstance(provided, Mapping)
+    invocation_id = str(prepared["invocation_id"])
+    request = prepared["request"]
+    assert isinstance(request, Mapping)
     receipt: dict[str, Any] = {
         "ok": True,
         "schema_version": EXTERNAL_CAPABILITY_INVOCATION_SCHEMA_VERSION,
@@ -579,7 +638,7 @@ def invoke_external_capability(
             "turn_required": False,
         },
         "invocation_id": invocation_id,
-        "request_digest": _canonical_digest(request),
+        "request_digest": prepared["request_digest"],
         "context_ref_count": len(provided["context_refs"]),
         "effects": {
             "provider_invoked": False,
