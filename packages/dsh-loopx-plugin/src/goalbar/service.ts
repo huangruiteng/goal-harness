@@ -412,14 +412,6 @@ export class GoalBarService implements GoalBarServiceHandle {
     if (operationSignal.aborted || !this.captureIsCurrent(capture)) {
       return this.readFault(capture, 'session_unavailable', baseSessionEventSeq)
     }
-    if (!this.captureIsCurrent(capture)) {
-      return {
-        kind: 'fault',
-        code: 'session_unavailable',
-        baseSessionEventSeq,
-        sourceRevision,
-      }
-    }
     if (model.kind === 'hidden') {
       if (model.reason === 'binding_ambiguous') {
         this.logAmbiguity(sessionId, model.uniquePairCount)

@@ -5,7 +5,7 @@ execution: code
 product_contract_source: owner-confirmed-design
 ---
 
-# DeepSeek Harness Native LoopX Skill And Driver
+# DeepSeek Harness Native LoopX Skill, Driver, And GoalBar
 
 ## Goal
 
@@ -15,10 +15,13 @@ Give a visible DeepSeek Harness (DSH) Session a small, native LoopX surface:
 - the `loopx` Skill teaches the model to use the authoritative LoopX CLI;
 - one globally loaded but passive Driver becomes eligible only after the exact
   Session successfully invokes the `loopx` Skill, then continues quota-approved
-  work through the exact live DSH Agent.
+  work through the exact live DSH Agent;
+- one compact GoalBar projects the exact bound Goal, Agent-lane progress, and
+  lifecycle state, and offers Start/Pause through LoopX lifecycle mutations.
 
-LoopX remains the durable Goal, Agent, Todo, quota, and scheduler authority.
-DSH remains the model, tool, inbox, and same-session execution authority.
+LoopX remains the only durable Goal, Agent, Todo, binding, quota, receipt,
+lifecycle, progress, and scheduler authority. DSH remains the model, tool,
+inbox, same-session execution, and UI-transport authority.
 
 ## Placement
 
@@ -26,9 +29,10 @@ DSH remains the model, tool, inbox, and same-session execution authority.
   installation contracts.
 - Provider: optional `dsh-loopx-plugin` package under `packages/`.
 - Delivery: extension package, not a new built-in LoopX capability.
-- The package owns only a DSH command and Driver. It does not introduce a
-  provider-neutral Service, model tools, a coordinator API, or plugin-owned
-  durable state.
+- The package owns a DSH command, same-Session Driver, loopback Host service,
+  and compact web GoalBar. The Host and Client are a thin projection and
+  interaction layer over LoopX; they do not introduce model tools, a second
+  control plane, or plugin-owned durable business state.
 - Existing `loopx/dsh_goal_mode` remains the separate external/headless
   `deepseek-harness` Turn adapter.
 
@@ -179,11 +183,19 @@ idle checkpoint the Driver:
 2. resolves the current Session binding from LoopX;
 3. calls `quota should-run` with the resolved Goal/Agent and one stable attempt
    identity;
-4. stops, schedules the typed next wakeup, or obtains the exact thin task body;
+4. stops, schedules the typed next wakeup, or asks LoopX for the canonical thin
+   task body bound to that same exact `turn_instance_id`;
 5. queues at most one Driver-authored `Agent.followup()` for that automatic
-   admission in the same Session;
+   admission in the same Session, with typed LoopX continuation attribution;
 6. revalidates the exact Agent, Session, reservation, competing input, and
-   binding before the queued message enters a model step.
+   binding before the queued message enters a model step;
+7. requires the accountable task to execute the guard-projected typed
+   settlement plan, whose writeback and spend commands use the original exact
+   turn identity and deterministic effect id.
+
+The typed DSH message source is durable attribution used to match the queued
+message to its reservation. It grants no execution authority: admission and
+settlement still require the matching LoopX receipt and fresh quota guard.
 
 There is one Agent-local serialized evaluation and one pending automatic
 reservation. Human input wins before the automatic reservation is admitted.
@@ -231,13 +243,18 @@ installed.
 
 - `/loopx` command grammar and semantic fallback;
 - model-facing `loopx_*` tools;
-- plugin Service abstraction;
-- coordinator registry or public/private coordinator protocol;
+- provider-neutral model-execution Service abstraction;
+- coordinator registry or durable public/private coordinator protocol;
 - sidecar state, plugin-owned durable activation state, activation epochs, and
   failure suppression counters;
 - custom operation receipts and planning checkpoints;
 - `switchConfirmation` and plugin-owned Goal switching;
 - raw CLI or registry mutation performed on behalf of model prose.
+
+The compact GoalBar is not removed by these exclusions. It owns only
+process-local waiters, action serialization, watch cursors, pending UI state,
+and error state. Binding, lifecycle, and progress are rebuilt from LoopX; DSH
+Session events and Agent status only wake or update the live transport view.
 
 ## Verification
 
@@ -268,10 +285,17 @@ Focused validation must cover:
 - post-activation idle admission, human-input priority, exact reservation
   checks, Agent or Session replacement, command collision, cancellation, wait
   scheduling, and the one-Driver-followup maximum per automatic admission;
+- one exact turn identity across quota admission, heartbeat task, typed DSH
+  source, both pre-step checks, typed settlement plan, durable writeback, and
+  quota spend, with one idempotent receipt and no unbound fallback spend;
 - finite CLI retry with stable quota idempotency and no retry for unsafe
   outcomes;
-- built tarball installation and real DSH profile readback containing only the
-  two intended package rows.
+- GoalBar reconstruction after Host/Client restart, source events that force an
+  authoritative reread, runtime-only events that cannot create business state,
+  stale binding rejection, serialized lifecycle mutations, and post-mutation
+  readback;
+- built tarball installation and real DSH profile readback containing the
+  intended command, Driver, Host, and Client faces.
 
 ## Definition Of Done
 
@@ -286,7 +310,10 @@ Focused validation must cover:
 - an inactive Session performs no LoopX call or timer work; only a successfully
   invoked `loopx` Skill activates that exact Session.
 - An activated, bound visible DSH Session continues only fresh quota-approved
-  work through its exact live Agent, with binding and quota authority unchanged.
+  work through its exact live Agent, with one exact identity from admission
+  through durable writeback and spend.
+- The GoalBar stays hidden without one exact binding, reconstructs from LoopX
+  after restart, and never becomes a Goal/Todo/lifecycle authority.
 - Existing external DSH Turn mode remains compatible.
-- No rejected Service/tools/coordinator/sidecar design survives in production
-  code or public guidance.
+- No rejected model-tools, binding-sidecar, or durable plugin state design
+  survives in production code or public guidance.

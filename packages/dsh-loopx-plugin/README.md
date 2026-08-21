@@ -187,6 +187,16 @@ stops that evaluation; it does not create a periodic error-retry loop. Only a
 typed LoopX local-scheduler plan can schedule another wakeup, and its limit on
 unchanged polls is enforced.
 
+For an admitted automatic continuation, that exact turn id is also carried in
+the LoopX-owned canonical heartbeat body and the typed DSH continuation source.
+The source is attribution for reservation matching, not authority. Before work
+enters a model step, the Driver replays the same receipt and the LoopX guard
+returns the typed settlement plan for that exact id. Accountable work writes
+back and spends through that plan's single deterministic effect identity; it
+does not fall back to an unbound generic spend command. Human priority, Pause,
+dispose, or a failed pre-step check before work begins does not fabricate a
+writeback, spend, or void receipt.
+
 The Driver resolves the current project registry with
 `resolve-agent-thread`, requires one exact Goal/Agent match for the live DSH
 session, and rechecks binding plus quota before and after downstream pre-step
