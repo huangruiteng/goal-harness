@@ -1,6 +1,6 @@
 {
   "name": "dsh-loopx-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1-beta.1",
   "description": "LoopX installer, same-session driver, and local GoalBar for DeepSeek Harness",
   "private": true,
   "type": "module",
