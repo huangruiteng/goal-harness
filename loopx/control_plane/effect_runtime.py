@@ -32,6 +32,7 @@ _SOURCE_FILES = (
     "effect_runtime_handlers.ts",
     "effect_runtime_io.ts",
     "effect_runtime_server.ts",
+    "quota/settlement_workspace_causality.ts",
     "todos/completion_fence.ts",
     "todos/completion_state.ts",
     "todos/next_action.ts",

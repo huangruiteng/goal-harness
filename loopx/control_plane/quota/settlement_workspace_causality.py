@@ -1,10 +1,11 @@
-"""Typed repository-workspace causality for quota settlement effects."""
+"""Python facade for TypeScript-owned quota settlement workspace causality."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
+from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
 from ..todos.contract import (
     normalize_required_write_scopes,
     normalize_todo_continuation_policy,
@@ -13,9 +14,76 @@ from ..todos.contract import (
 )
 
 DELIVERY_WORKSPACE_CAUSALITY_SCHEMA_VERSION = "delivery_workspace_causality_v0"
-DELIVERY_WORKSPACE_REQUIREMENTS = frozenset(
-    {"required", "not_required", "unknown"}
+DELIVERY_WORKSPACE_CAUSALITY_REQUEST_SCHEMA = (
+    "loopx_delivery_workspace_causality_request_v0"
 )
+DELIVERY_WORKSPACE_CAUSALITY_RESULT_SCHEMA = (
+    "loopx_delivery_workspace_causality_result_v0"
+)
+DELIVERY_WORKSPACE_REQUIREMENTS = frozenset({"required", "not_required", "unknown"})
+
+
+def _runtime_result(operation: str, **params: Any) -> Mapping[str, Any]:
+    try:
+        result = effect_runtime_result(
+            "quota.delivery_workspace_causality.evaluate",
+            {
+                "schema_version": DELIVERY_WORKSPACE_CAUSALITY_REQUEST_SCHEMA,
+                "operation": operation,
+                **params,
+            },
+        )
+    except EffectRuntimeRejected as exc:
+        raise RuntimeError(str(exc)) from None
+    if not isinstance(result, Mapping):
+        raise RuntimeError(
+            "TypeScript delivery workspace causality result must be an object"
+        )
+    if result.get("schema_version") != DELIVERY_WORKSPACE_CAUSALITY_RESULT_SCHEMA:
+        raise RuntimeError(
+            "TypeScript delivery workspace causality result shape mismatch"
+        )
+    return result
+
+
+def _prepared_causality(value: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return {
+        "schema_version": value.get("schema_version"),
+        "todo_id": normalize_todo_id(value.get("todo_id")),
+        "requirement": str(value.get("requirement") or "").strip(),
+        "source": str(value.get("source") or "").strip(),
+        "reason": str(value.get("reason") or "").strip(),
+    }
+
+
+def _causality_result(result: Mapping[str, Any]) -> dict[str, str] | None:
+    value = result.get("causality")
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise RuntimeError(
+            "TypeScript delivery workspace causality result shape mismatch"
+        )
+    expected_keys = ("schema_version", "todo_id", "requirement", "source", "reason")
+    if set(value) != set(expected_keys) or any(
+        not isinstance(value.get(key), str) for key in expected_keys
+    ):
+        raise RuntimeError(
+            "TypeScript delivery workspace causality result shape mismatch"
+        )
+    if (
+        value["schema_version"] != DELIVERY_WORKSPACE_CAUSALITY_SCHEMA_VERSION
+        or normalize_todo_id(value["todo_id"]) != value["todo_id"]
+        or value["requirement"] not in DELIVERY_WORKSPACE_REQUIREMENTS
+        or not value["source"]
+        or not value["reason"]
+    ):
+        raise RuntimeError(
+            "TypeScript delivery workspace causality result shape mismatch"
+        )
+    return {key: str(value[key]) for key in expected_keys}
 
 
 def build_delivery_workspace_causality(
@@ -23,12 +91,7 @@ def build_delivery_workspace_causality(
     *,
     source: str = "selected_todo_contract",
 ) -> dict[str, str] | None:
-    """Classify whether one exact Todo makes a repository workspace causal.
-
-    Missing repository metadata alone cannot bypass the workspace guard. Only
-    an explicit non-delivery continuation without a write capability is a
-    positive no-workspace contract; underspecified legacy Todos stay unknown.
-    """
+    """Classify whether one exact Todo makes a repository workspace causal."""
 
     if not isinstance(todo, Mapping):
         return None
@@ -40,32 +103,32 @@ def build_delivery_workspace_causality(
         todo.get("required_write_scopes") or todo.get("required_write_scope")
     )
     capabilities = todo.get("required_capabilities")
-    required_capabilities = {
-        str(capability).strip()
-        for capability in (
-            capabilities if isinstance(capabilities, (list, tuple, set)) else []
-        )
-        if str(capability).strip()
-    }
+    required_capabilities = sorted(
+        {
+            str(capability).strip()
+            for capability in (
+                capabilities if isinstance(capabilities, (list, tuple, set)) else []
+            )
+            if str(capability).strip()
+        }
+    )
     continuation_policy = normalize_todo_continuation_policy(
         todo.get("continuation_policy")
     )
-    if task_repository or required_write_scopes or "filesystem_write" in required_capabilities:
-        requirement = "required"
-        reason = "declared_repository_or_write_contract"
-    elif continuation_policy == "same_agent_non_delivery":
-        requirement = "not_required"
-        reason = "explicit_non_delivery_without_repository_writes"
-    else:
-        requirement = "unknown"
-        reason = "todo_write_contract_not_explicit"
-    return {
-        "schema_version": DELIVERY_WORKSPACE_CAUSALITY_SCHEMA_VERSION,
-        "todo_id": todo_id,
-        "requirement": requirement,
-        "source": source,
-        "reason": reason,
-    }
+    return _causality_result(
+        _runtime_result(
+            "classify",
+            expected_todo_id=None,
+            normalized_todo_contract={
+                "todo_id": todo_id,
+                "task_repository": task_repository,
+                "required_write_scopes": required_write_scopes,
+                "required_capabilities": required_capabilities,
+                "continuation_policy": continuation_policy,
+                "source": source,
+            },
+        )
+    )
 
 
 def normalize_delivery_workspace_causality(
@@ -73,47 +136,49 @@ def normalize_delivery_workspace_causality(
     *,
     todo_id: str | None = None,
 ) -> dict[str, str] | None:
-    if not isinstance(value, Mapping):
+    prepared = _prepared_causality(value if isinstance(value, Mapping) else None)
+    if prepared is None:
         return None
-    if value.get("schema_version") != DELIVERY_WORKSPACE_CAUSALITY_SCHEMA_VERSION:
-        return None
-    normalized_todo_id = normalize_todo_id(value.get("todo_id"))
-    expected_todo_id = normalize_todo_id(todo_id)
-    if not normalized_todo_id or (
-        expected_todo_id and normalized_todo_id != expected_todo_id
-    ):
-        return None
-    requirement = str(value.get("requirement") or "").strip()
-    if requirement not in DELIVERY_WORKSPACE_REQUIREMENTS:
-        return None
-    source = str(value.get("source") or "").strip()
-    reason = str(value.get("reason") or "").strip()
-    if not source or not reason:
-        return None
-    return {
-        "schema_version": DELIVERY_WORKSPACE_CAUSALITY_SCHEMA_VERSION,
-        "todo_id": normalized_todo_id,
-        "requirement": requirement,
-        "source": source,
-        "reason": reason,
-    }
+    return _causality_result(
+        _runtime_result(
+            "normalize",
+            expected_todo_id=normalize_todo_id(todo_id),
+            causality=prepared,
+        )
+    )
 
 
 def delivery_workspace_causality_event_fields(
     causality: Mapping[str, Any] | None,
 ) -> dict[str, str]:
-    normalized = normalize_delivery_workspace_causality(causality)
-    if not normalized:
+    prepared = _prepared_causality(causality)
+    if prepared is None:
         return {}
-    return {
-        "delivery_workspace_causality_schema_version": normalized[
-            "schema_version"
-        ],
-        "delivery_workspace_causality_todo_id": normalized["todo_id"],
-        "delivery_workspace_requirement": normalized["requirement"],
-        "delivery_workspace_causality_source": normalized["source"],
-        "delivery_workspace_causality_reason": normalized["reason"],
+    result = _runtime_result(
+        "event_fields",
+        expected_todo_id=None,
+        causality=prepared,
+    )
+    fields = result.get("fields")
+    expected_keys = {
+        "delivery_workspace_causality_schema_version",
+        "delivery_workspace_causality_todo_id",
+        "delivery_workspace_requirement",
+        "delivery_workspace_causality_source",
+        "delivery_workspace_causality_reason",
     }
+    if (
+        not isinstance(fields, Mapping)
+        or (fields and set(fields) != expected_keys)
+        or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in fields.items()
+        )
+    ):
+        raise RuntimeError(
+            "TypeScript delivery workspace event fields result shape mismatch"
+        )
+    return dict(fields)
 
 
 def delivery_workspace_causality_from_event_details(
@@ -123,22 +188,26 @@ def delivery_workspace_causality_from_event_details(
 ) -> dict[str, str] | None:
     if not isinstance(details, Mapping):
         return None
-    nested = normalize_delivery_workspace_causality(
-        details.get("delivery_workspace_causality"), todo_id=todo_id
-    )
-    if nested:
-        return nested
-    return normalize_delivery_workspace_causality(
-        {
-            "schema_version": details.get(
-                "delivery_workspace_causality_schema_version"
+    nested = details.get("delivery_workspace_causality")
+    return _causality_result(
+        _runtime_result(
+            "from_event",
+            expected_todo_id=normalize_todo_id(todo_id),
+            nested_causality=_prepared_causality(
+                nested if isinstance(nested, Mapping) else None
             ),
-            "todo_id": details.get("delivery_workspace_causality_todo_id"),
-            "requirement": details.get("delivery_workspace_requirement"),
-            "source": details.get("delivery_workspace_causality_source"),
-            "reason": details.get("delivery_workspace_causality_reason"),
-        },
-        todo_id=todo_id,
+            flat_causality=_prepared_causality(
+                {
+                    "schema_version": details.get(
+                        "delivery_workspace_causality_schema_version"
+                    ),
+                    "todo_id": details.get("delivery_workspace_causality_todo_id"),
+                    "requirement": details.get("delivery_workspace_requirement"),
+                    "source": details.get("delivery_workspace_causality_source"),
+                    "reason": details.get("delivery_workspace_causality_reason"),
+                }
+            ),
+        )
     )
 
 

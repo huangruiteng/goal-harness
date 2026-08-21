@@ -34,6 +34,7 @@ import {
   validateGovernedCapabilityResult,
   validateGovernedCapabilitySettlementCallback,
 } from "./governed_capability.ts";
+import { evaluateDeliveryWorkspaceCausality } from "./quota/settlement_workspace_causality.ts";
 import {
   interpretTurnJournal,
   type TurnJournalInspectionRequest,
@@ -283,6 +284,10 @@ export function createEffectRuntimeHandlers(
     ["todo.completion_state.evaluate", selectTodoCompletionState],
     ["todo.completion_state.metadata_updates", buildTodoCompletionMetadataUpdates],
     ["todo.next_action.transition", transitionTodoNextAction],
+    [
+      "quota.delivery_workspace_causality.evaluate",
+      evaluateDeliveryWorkspaceCausality,
+    ],
     [
       "effect.program_from_ordered_steps",
       (params) => effectProgramFromOrderedSteps(
