@@ -22,6 +22,12 @@ import type {
 
 export const GOALBAR_HOST_SURFACE = 'deepseek-harness-native' as const
 export const GOALBAR_PROJECT_REGISTRY = '.loopx/registry.json' as const
+export const GOALBAR_ACTIVE_STATE_ROOT = '.codex/goals' as const
+export const GOALBAR_ACTIVE_STATE_FILE = 'ACTIVE_GOAL_STATE.md' as const
+
+const SOURCE_REVISION_FAILURE = `sha256:${createHash('sha256')
+  .update('loopx-goalbar-source-revision-unavailable-v1')
+  .digest('hex')}`
 
 const BINDING_SCHEMA = 'loopx_thread_agent_binding_resolution_v0'
 const ACTIVATION_TRANSITION_SCHEMA = 'loopx_goal_activation_transition_v1'
@@ -42,6 +48,208 @@ export interface GoalBarCliReadOptions {
 export interface GoalBarReadModelOptions extends GoalBarCliReadOptions {
   readonly sessionId: string
   readonly agentStatus: GoalBarAgentStatusV1
+}
+
+export interface GoalBarSourceRevisionOptions {
+  readonly cwd: string
+  readonly goalId?: string | undefined
+  readonly loopxAgentId?: string | undefined
+}
+
+export class GoalBarSourceRevisionError extends Error {}
+
+export function unavailableGoalBarSourceRevision(): string {
+  return SOURCE_REVISION_FAILURE
+}
+
+function frame(hash: ReturnType<typeof createHash>, label: string, value: Buffer): void {
+  const labelBytes = Buffer.from(label, 'utf8')
+  const lengths = Buffer.allocUnsafe(8)
+  lengths.writeUInt32BE(labelBytes.length, 0)
+  lengths.writeUInt32BE(value.length, 4)
+  hash.update(lengths)
+  hash.update(labelBytes)
+  hash.update(value)
+}
+
+function isContained(root: string, candidate: string): boolean {
+  const pathFromRoot = relative(root, candidate)
+  return pathFromRoot === ''
+    || (!pathFromRoot.startsWith(`..${sep}`)
+      && pathFromRoot !== '..'
+      && !isAbsolute(pathFromRoot))
+}
+
+function validatedSourcePaths(options: GoalBarSourceRevisionOptions): string[] {
+  if (!isAbsolute(options.cwd) || resolve(options.cwd) !== options.cwd) {
+    throw new GoalBarSourceRevisionError('project cwd must be absolute and normalized')
+  }
+  const paths = [resolve(options.cwd, GOALBAR_PROJECT_REGISTRY)]
+  if (options.goalId !== undefined) {
+    if (!isGoalBarGoalId(options.goalId)
+      || options.goalId === '.'
+      || options.goalId === '..'
+      || options.goalId.includes('/')
+      || options.goalId.includes('\\')) {
+      throw new GoalBarSourceRevisionError('goal id is not a safe path segment')
+    }
+    paths.push(resolve(
+      options.cwd,
+      GOALBAR_ACTIVE_STATE_ROOT,
+      options.goalId,
+      GOALBAR_ACTIVE_STATE_FILE,
+    ))
+  }
+  if ((options.goalId === undefined) !== (options.loopxAgentId === undefined)
+    || (options.loopxAgentId !== undefined
+      && !isGoalBarAgentId(options.loopxAgentId))) {
+    throw new GoalBarSourceRevisionError('source revision requires an exact binding pair')
+  }
+  if (paths.some(candidate => !isContained(options.cwd, candidate))) {
+    throw new GoalBarSourceRevisionError('source path escaped project cwd')
+  }
+  return paths
+}
+
+async function readRevisionSource(
+  cwd: string,
+  path: string,
+): Promise<{ readonly exists: boolean; readonly content: Buffer }> {
+  try {
+    const resolved = await realpath(path)
+    const resolvedRoot = await realpath(cwd)
+    if (!isContained(resolvedRoot, resolved)) {
+      throw new GoalBarSourceRevisionError('source resolved outside project cwd')
+    }
+    return { exists: true, content: await readFile(resolved) }
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return { exists: false, content: Buffer.alloc(0) }
+    }
+    throw error instanceof GoalBarSourceRevisionError
+      ? error
+      : new GoalBarSourceRevisionError('authoritative source read failed')
+  }
+}
+
+/** Hash only the fixed authoritative paths; contents and local paths never cross the wire. */
+export async function computeGoalBarSourceRevision(
+  options: GoalBarSourceRevisionOptions,
+): Promise<string> {
+  const paths = validatedSourcePaths(options)
+  const hash = createHash('sha256')
+  frame(hash, 'contract', Buffer.from('loopx-goalbar-source-revision-v1'))
+  if (options.goalId !== undefined && options.loopxAgentId !== undefined) {
+    frame(hash, 'binding.goal-id', Buffer.from(options.goalId, 'utf8'))
+    frame(hash, 'binding.agent-id', Buffer.from(options.loopxAgentId, 'utf8'))
+  }
+  for (let index = 0; index < paths.length; index += 1) {
+    const source = await readRevisionSource(options.cwd, paths[index] as string)
+    frame(hash, index === 0 ? 'registry.exists' : 'active-state.exists',
+      Buffer.from(source.exists ? '1' : '0'))
+    frame(hash, index === 0 ? 'registry.content' : 'active-state.content', source.content)
+  }
+  return `sha256:${hash.digest('hex')}`
+}
+
+export interface GoalBarStableReadResult {
+  readonly model: GoalBarReadModelResult
+  readonly sourceRevision: string
+}
+
+export type GoalBarSourceRevisionReader = (
+  options: GoalBarSourceRevisionOptions,
+) => Promise<string>
+
+/**
+ * Observe the same authoritative bytes before and after their CLI-derived read.
+ * A concurrent equal-size write or atomic replacement retries the whole model.
+ */
+export async function readStableGoalBarModel(
+  options: GoalBarReadModelOptions,
+  revisionReader: GoalBarSourceRevisionReader = computeGoalBarSourceRevision,
+): Promise<GoalBarStableReadResult> {
+  let lastRevision = await revisionReader({ cwd: options.cwd })
+  for (let attempt = 0; attempt < READ_ATTEMPTS; attempt += 1) {
+    const registryBefore = attempt === 0
+      ? lastRevision
+      : await revisionReader({ cwd: options.cwd })
+    const binding = await readGoalBarBinding(options, options.sessionId)
+    const registryAfter = await revisionReader({ cwd: options.cwd })
+    lastRevision = registryAfter
+    if (registryBefore !== registryAfter) continue
+    if (binding.kind === 'fault') return { model: binding, sourceRevision: registryAfter }
+    if (binding.kind === 'missing') {
+      return {
+        model: { kind: 'hidden', reason: 'binding_missing' },
+        sourceRevision: registryAfter,
+      }
+    }
+    if (binding.kind === 'ambiguous') {
+      return {
+        model: {
+          kind: 'hidden',
+          reason: 'binding_ambiguous',
+          uniquePairCount: binding.uniquePairCount,
+        },
+        sourceRevision: registryAfter,
+      }
+    }
+    if (binding.kind === 'unavailable') {
+      return {
+        model: { kind: 'fault', code: 'binding_read_failed' },
+        sourceRevision: registryAfter,
+      }
+    }
+
+    const exact = { goalId: binding.goalId, loopxAgentId: binding.loopxAgentId }
+    const sourceBefore = await revisionReader({
+      cwd: options.cwd,
+      ...exact,
+    })
+    const registryGuard = await revisionReader({ cwd: options.cwd })
+    if (registryGuard !== registryAfter) {
+      lastRevision = registryGuard
+      continue
+    }
+    const [activation, progress] = await Promise.all([
+      readGoalBarActivation(options, binding.goalId),
+      readGoalBarProgress(options, binding.goalId, binding.loopxAgentId),
+    ])
+    const sourceAfter = await revisionReader({
+      cwd: options.cwd,
+      ...exact,
+    })
+    lastRevision = sourceAfter
+    if (sourceBefore !== sourceAfter) continue
+    const fault = preferredReadFault(activation, progress)
+    if (fault !== undefined) {
+      return { model: { ...fault, binding }, sourceRevision: sourceAfter }
+    }
+    if (activation.kind !== 'value' || progress.kind !== 'value') {
+      return {
+        model: { kind: 'fault', code: 'protocol_mismatch', binding },
+        sourceRevision: sourceAfter,
+      }
+    }
+    return {
+      model: {
+        kind: 'present',
+        snapshot: {
+          sessionId: options.sessionId,
+          ...exact,
+          goalActivation: activation.goalActivation,
+          agentStatus: options.agentStatus,
+          progress: progress.progress,
+        },
+      },
+      sourceRevision: sourceAfter,
+    }
+  }
+  return {
+    model: { kind: 'fault', code: 'binding_read_failed' },
+    sourceRevision: lastRevision,
+  }
 }
 
 export type DecodedBindingResolutionV0 =
@@ -74,14 +282,18 @@ export type GoalBarReadModelResult =
       readonly uniquePairCount: number
     }
   | { readonly kind: 'present'; readonly snapshot: GoalBarSnapshotV1 }
-  | { readonly kind: 'fault'; readonly code: GoalBarReadFaultCode }
+  | {
+      readonly kind: 'fault'
+      readonly code: GoalBarReadFaultCode
+      readonly binding?: BindingPair | undefined
+    }
 
 interface JsonReadResult {
   readonly exitCode: number
   readonly payload: Record<string, unknown>
 }
 
-interface BindingPair {
+export interface BindingPair {
   readonly goalId: string
   readonly loopxAgentId: string
 }
@@ -451,9 +663,9 @@ export async function readGoalBarModel(
     readGoalBarProgress(options, binding.goalId, binding.loopxAgentId),
   ])
   const fault = preferredReadFault(activation, progress)
-  if (fault !== undefined) return fault
+  if (fault !== undefined) return { ...fault, binding }
   if (activation.kind !== 'value' || progress.kind !== 'value') {
-    return { kind: 'fault', code: 'protocol_mismatch' }
+    return { kind: 'fault', code: 'protocol_mismatch', binding }
   }
   return {
     kind: 'present',
@@ -467,3 +679,6 @@ export async function readGoalBarModel(
     },
   }
 }
+import { createHash } from 'node:crypto'
+import { readFile, realpath } from 'node:fs/promises'
+import { isAbsolute, relative, resolve, sep } from 'node:path'

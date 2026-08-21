@@ -1060,7 +1060,12 @@ export function apply(ctx: Context): void {
       goalBarCoordinator.invalidateSession(session)
     })
     ctx.on('agent/session-start', ({ agent }) => { driver.onSessionStart(agent) })
-    ctx.on('agent/status', ({ agent, status }) => { driver.onAgentStatus(agent, status) })
+    ctx.on('agent/status', ({ agent, status }) => {
+      if (status === 'idle' || status === 'running') {
+        goalBarCoordinator.publishAgentStatus(agent.session, status)
+      }
+      driver.onAgentStatus(agent, status)
+    })
     ctx.on('agent/inbox/inserted', ({ agent, message }) => driver.onInboxInserted(agent, message))
     ctx.on('agent/inbox/claimed', ({ agent, message }) => driver.onInboxClaimed(agent, message))
     ctx.on('agent/inbox/discarded', ({ agent, message }) => driver.onInboxDiscarded(agent, message))
@@ -1069,8 +1074,8 @@ export function apply(ctx: Context): void {
       driver.onPreStep(agent, messages, signal, next)
     ))
     ctx.on('session/event', (session, event) => {
-      if (event.type === 'turn/end') {
-        goalBarCoordinator.publishTurnEnd(session, event)
+      if (event.type === 'step/end' || event.type === 'turn/end') {
+        goalBarCoordinator.publishSessionCandidate(session, event)
       }
       const agent = ctx.agents.get(session.id)
       if (agent?.session === session) driver.onSessionEvent(agent, event)

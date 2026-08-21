@@ -9,7 +9,7 @@ import type {
   LoopXCommand,
 } from '../cli.ts'
 import {
-  latestCommittedTurnEndSeq,
+  latestSessionEventSeq,
 } from './events.ts'
 import type {
   GoalBarDriverActionReceipt,
@@ -18,9 +18,11 @@ import type {
 } from './events.ts'
 import {
   GOALBAR_PROJECT_REGISTRY,
+  computeGoalBarSourceRevision,
   readGoalBarActivation,
   readGoalBarBinding,
-  readGoalBarModel,
+  readStableGoalBarModel,
+  unavailableGoalBarSourceRevision,
 } from './read-model.ts'
 import {
   GOALBAR_RESPONSE_VERSION,
@@ -184,7 +186,12 @@ export function fixedGoalBarFailureResponseV1(
       v: GOALBAR_RESPONSE_VERSION,
       op: 'read',
       sessionId: request.sessionId,
-      result: { kind: 'fault', code: 'protocol_mismatch', baseTurnEndSeq: null },
+      result: {
+        kind: 'fault',
+        code: 'protocol_mismatch',
+        baseSessionEventSeq: null,
+        sourceRevision: unavailableGoalBarSourceRevision(),
+      },
     }
   }
   if (request.op === 'watch') {
@@ -349,15 +356,20 @@ export class GoalBarService implements GoalBarServiceHandle {
   ): Promise<GoalBarReadResultV1> {
     const capture = this.capture(sessionId)
     if (capture === undefined) {
-      return { kind: 'fault', code: 'session_unavailable', baseTurnEndSeq: null }
+      return {
+        kind: 'fault',
+        code: 'session_unavailable',
+        baseSessionEventSeq: null,
+        sourceRevision: unavailableGoalBarSourceRevision(),
+      }
     }
 
     // This cursor is captured before command resolution or any other CLI read.
-    const baseTurnEndSeq = latestCommittedTurnEndSeq(capture.session)
+    const baseSessionEventSeq = latestSessionEventSeq(capture.session)
     const operationSignal = this.combinedSignal(signal)
     if (!(await this.waitForAdmittedMutation(operationSignal))
       || !this.captureIsCurrent(capture)) {
-      return { kind: 'fault', code: 'session_unavailable', baseTurnEndSeq }
+      return this.readFault(capture, 'session_unavailable', baseSessionEventSeq)
     }
 
     let command: LoopXCommand
@@ -370,42 +382,84 @@ export class GoalBarService implements GoalBarServiceHandle {
         : operationSignal.aborted
           ? 'session_unavailable'
           : 'binding_read_failed'
-      return { kind: 'fault', code, baseTurnEndSeq }
+      return this.readFault(capture, code, baseSessionEventSeq)
     }
     if (operationSignal.aborted || !this.captureIsCurrent(capture)) {
-      return { kind: 'fault', code: 'session_unavailable', baseTurnEndSeq }
+      return this.readFault(capture, 'session_unavailable', baseSessionEventSeq)
     }
 
-    const model = await readGoalBarModel({
-      command,
-      cwd: capture.cwd,
-      runner: this.runner,
-      signal: operationSignal,
-      env: this.env,
-      retryDelaysMs: this.retryDelaysMs,
-      sessionId: String(capture.agent.id),
-      agentStatus: capture.agent.status,
-    })
+    let stableRead: Awaited<ReturnType<typeof readStableGoalBarModel>>
+    try {
+      stableRead = await readStableGoalBarModel({
+        command,
+        cwd: capture.cwd,
+        runner: this.runner,
+        signal: operationSignal,
+        env: this.env,
+        retryDelaysMs: this.retryDelaysMs,
+        sessionId: String(capture.agent.id),
+        agentStatus: capture.agent.status,
+      })
+    } catch {
+      return {
+        kind: 'fault',
+        code: 'binding_read_failed',
+        baseSessionEventSeq,
+        sourceRevision: unavailableGoalBarSourceRevision(),
+      }
+    }
+    const { model, sourceRevision } = stableRead
     if (operationSignal.aborted || !this.captureIsCurrent(capture)) {
-      return { kind: 'fault', code: 'session_unavailable', baseTurnEndSeq }
+      return this.readFault(capture, 'session_unavailable', baseSessionEventSeq)
+    }
+    if (!this.captureIsCurrent(capture)) {
+      return {
+        kind: 'fault',
+        code: 'session_unavailable',
+        baseSessionEventSeq,
+        sourceRevision,
+      }
     }
     if (model.kind === 'hidden') {
       if (model.reason === 'binding_ambiguous') {
         this.logAmbiguity(sessionId, model.uniquePairCount)
       }
-      return { kind: 'hidden', reason: model.reason, baseTurnEndSeq }
+      return { kind: 'hidden', reason: model.reason, baseSessionEventSeq, sourceRevision }
     }
     if (model.kind === 'fault') {
-      return { kind: 'fault', code: model.code, baseTurnEndSeq }
+      return { kind: 'fault', code: model.code, baseSessionEventSeq, sourceRevision }
     }
     return {
       kind: 'present',
-      baseTurnEndSeq,
+      baseSessionEventSeq,
+      sourceRevision,
       snapshot: {
         ...model.snapshot,
         // Status is process-local authority and is refreshed at publication.
         agentStatus: capture.agent.status,
       },
+    }
+  }
+
+  private async readFault(
+    capture: LiveCapture,
+    code: GoalBarReadFaultCode,
+    baseSessionEventSeq: number | null,
+  ): Promise<GoalBarReadResultV1> {
+    try {
+      return {
+        kind: 'fault',
+        code,
+        baseSessionEventSeq,
+        sourceRevision: await computeGoalBarSourceRevision({ cwd: capture.cwd }),
+      }
+    } catch {
+      return {
+        kind: 'fault',
+        code,
+        baseSessionEventSeq,
+        sourceRevision: unavailableGoalBarSourceRevision(),
+      }
     }
   }
 
@@ -430,24 +484,7 @@ export class GoalBarService implements GoalBarServiceHandle {
     if (capture === undefined) {
       result = { kind: 'fault', code: 'session_unavailable' }
     } else {
-      const receipt = await this.watchService.waitForTurnEnd(
-        capture.session,
-        request.afterTurnEndSeq,
-        {
-          signal: this.combinedSignal(signal),
-          timeoutMs: this.watchTimeoutMs,
-          isSessionCurrent: () => this.captureIsCurrent(capture),
-        },
-      )
-      result = receipt.kind === 'changed'
-        && receipt.sessionId === request.sessionId
-        && (request.afterTurnEndSeq === null
-          || receipt.turnEndSeq > request.afterTurnEndSeq)
-        ? { kind: 'changed', turnEndSeq: receipt.turnEndSeq }
-        : receipt.kind === 'timeout'
-          && receipt.turnEndSeq === request.afterTurnEndSeq
-          ? { kind: 'timeout', turnEndSeq: receipt.turnEndSeq }
-          : { kind: 'fault', code: 'session_unavailable' }
+      result = await this.waitForWatchChange(capture, request, signal)
     }
     return {
       v: GOALBAR_RESPONSE_VERSION,
@@ -455,6 +492,86 @@ export class GoalBarService implements GoalBarServiceHandle {
       sessionId: request.sessionId,
       result,
     }
+  }
+
+  private async waitForWatchChange(
+    capture: LiveCapture,
+    request: Extract<GoalBarRequestV1, { readonly op: 'watch' }>,
+    signal: AbortSignal,
+  ): Promise<GoalBarWatchResultV1> {
+    const operationSignal = this.combinedSignal(signal)
+    const deadline = Date.now() + this.watchTimeoutMs
+    let cursor = request.afterSessionEventSeq
+    const upperBound = latestSessionEventSeq(capture.session)
+    if (cursor !== null && (upperBound === null || cursor > upperBound)) {
+      return { kind: 'fault', code: 'session_unavailable' }
+    }
+    while (!operationSignal.aborted && this.captureIsCurrent(capture)) {
+      const remaining = Math.max(0, deadline - Date.now())
+      const receipt = await this.watchService.waitForSessionChange(
+        capture.session,
+        cursor,
+        {
+          signal: operationSignal,
+          timeoutMs: remaining,
+          observedAgentStatus: request.agentStatus,
+          isSessionCurrent: () => this.captureIsCurrent(capture),
+          getAgentStatus: () => capture.agent.status,
+        },
+      )
+      if (receipt.kind === 'runtime_changed'
+        && receipt.sessionId === request.sessionId) {
+        try {
+          const revision = await computeGoalBarSourceRevision({
+            cwd: capture.cwd,
+            goalId: request.expected?.goalId,
+            loopxAgentId: request.expected?.loopxAgentId,
+          })
+          if (!this.captureIsCurrent(capture)) {
+            return { kind: 'fault', code: 'session_unavailable' }
+          }
+          if (revision !== request.sourceRevision) {
+            return {
+              kind: 'source_changed',
+              sessionEventSeq: latestSessionEventSeq(capture.session) ?? cursor,
+            }
+          }
+        } catch {
+          return { kind: 'fault', code: 'session_unavailable' }
+        }
+        return {
+          kind: 'runtime_changed',
+          sessionEventSeq: latestSessionEventSeq(capture.session) ?? cursor,
+          agentStatus: receipt.agentStatus,
+        }
+      }
+      if (receipt.kind === 'candidate' && receipt.sessionId === request.sessionId) {
+        cursor = receipt.sessionEventSeq
+      } else if (receipt.kind === 'timeout') {
+        cursor = receipt.sessionEventSeq
+      } else {
+        return { kind: 'fault', code: 'session_unavailable' }
+      }
+      try {
+        const revision = await computeGoalBarSourceRevision({
+          cwd: capture.cwd,
+          goalId: request.expected?.goalId,
+          loopxAgentId: request.expected?.loopxAgentId,
+        })
+        if (!this.captureIsCurrent(capture)) {
+          return { kind: 'fault', code: 'session_unavailable' }
+        }
+        if (revision !== request.sourceRevision) {
+          return { kind: 'source_changed', sessionEventSeq: cursor }
+        }
+      } catch {
+        return { kind: 'fault', code: 'session_unavailable' }
+      }
+      if (receipt.kind === 'timeout' || Date.now() >= deadline) {
+        return { kind: 'timeout', sessionEventSeq: cursor }
+      }
+    }
+    return { kind: 'fault', code: 'session_unavailable' }
   }
 
   private actionAdmission(): ActionAdmission {
@@ -616,13 +733,15 @@ export class GoalBarService implements GoalBarServiceHandle {
         kind: 'applied_with_warning',
         code: 'driver_sync_failed',
         snapshot: postRead.snapshot,
-        baseTurnEndSeq: postRead.baseTurnEndSeq,
+        baseSessionEventSeq: postRead.baseSessionEventSeq,
+        sourceRevision: postRead.sourceRevision,
       }
     }
     return {
       kind: 'succeeded',
       snapshot: postRead.snapshot,
-      baseTurnEndSeq: postRead.baseTurnEndSeq,
+      baseSessionEventSeq: postRead.baseSessionEventSeq,
+      sourceRevision: postRead.sourceRevision,
     }
   }
 }

@@ -7,6 +7,7 @@ import {
 } from '../goalbar/protocol.ts'
 import type {
   GoalBarClientFaultCode,
+  GoalBarAgentStatusV1,
   GoalBarExpectedBindingV1,
   GoalBarRequestV1,
   GoalBarResponseFor,
@@ -38,6 +39,13 @@ export type GoalBarPauseResponseV1 = GoalBarResponseFor<Extract<
   { readonly op: 'pause' }
 >>
 
+export interface GoalBarWatchAnchorV1 {
+  readonly afterSessionEventSeq: number | null
+  readonly sourceRevision: string
+  readonly expected: GoalBarExpectedBindingV1 | null
+  readonly agentStatus: GoalBarAgentStatusV1 | null
+}
+
 /** The four browser operations consumed by one mounted GoalBar instance. */
 export interface GoalBarRpc {
   read(
@@ -46,7 +54,7 @@ export interface GoalBarRpc {
   ): Promise<GoalBarRpcOutcome<GoalBarReadResponseV1>>
   watch(
     sessionId: string,
-    afterTurnEndSeq: number | null,
+    anchor: GoalBarWatchAnchorV1,
     signal: AbortSignal,
   ): Promise<GoalBarRpcOutcome<GoalBarWatchResponseV1>>
   start(
@@ -86,7 +94,7 @@ async function callGoalBar<T extends GoalBarRequestV1>(
 }
 
 /**
- * Wrap DSH's generic Connection caller with the closed GoalBar V1 wire.
+ * Wrap DSH's generic Connection caller with the closed GoalBar V2 wire.
  * Carrier errors and thrown values are deliberately discarded at this boundary.
  */
 export function createGoalBarRpc(caller: ConnectionRpcCaller): GoalBarRpc {
@@ -99,12 +107,12 @@ export function createGoalBarRpc(caller: ConnectionRpcCaller): GoalBarRpc {
       } as const
       return callGoalBar(caller, request, signal)
     },
-    watch(sessionId, afterTurnEndSeq, signal) {
+    watch(sessionId, anchor, signal) {
       const request = {
         v: GOALBAR_REQUEST_VERSION,
         op: 'watch',
         sessionId,
-        afterTurnEndSeq,
+        ...anchor,
       } as const
       return callGoalBar(caller, request, signal)
     },

@@ -34,7 +34,7 @@ function successCarrier(value: GoalBarResponseV1): ConnectionRpcResult {
 }
 
 /**
- * Close the generic Connection carrier around the GoalBar V1 business union.
+ * Close the generic Connection carrier around the GoalBar V2 business union.
  * No exception value or request payload is ever rendered into the carrier.
  */
 export function createGoalBarConnectionHandler(

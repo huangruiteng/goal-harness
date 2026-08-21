@@ -1,5 +1,5 @@
-export const GOALBAR_REQUEST_VERSION = 'loopx_goalbar_request_v1' as const
-export const GOALBAR_RESPONSE_VERSION = 'loopx_goalbar_response_v1' as const
+export const GOALBAR_REQUEST_VERSION = 'loopx_goalbar_request_v2' as const
+export const GOALBAR_RESPONSE_VERSION = 'loopx_goalbar_response_v2' as const
 
 export const GOALBAR_ENDPOINTS = Object.freeze({
   read: 'goalbar/read',
@@ -68,7 +68,10 @@ export type GoalBarRequestV1 =
       readonly v: typeof GOALBAR_REQUEST_VERSION
       readonly op: 'watch'
       readonly sessionId: string
-      readonly afterTurnEndSeq: number | null
+      readonly afterSessionEventSeq: number | null
+      readonly sourceRevision: string
+      readonly expected: GoalBarExpectedBindingV1 | null
+      readonly agentStatus: GoalBarAgentStatusV1 | null
     }
   | {
       readonly v: typeof GOALBAR_REQUEST_VERSION
@@ -87,29 +90,38 @@ export type GoalBarReadResultV1 =
   | {
       readonly kind: 'hidden'
       readonly reason: 'binding_missing' | 'binding_ambiguous'
-      readonly baseTurnEndSeq: number | null
+      readonly baseSessionEventSeq: number | null
+      readonly sourceRevision: string
     }
   | {
       readonly kind: 'present'
       readonly snapshot: GoalBarSnapshotV1
-      readonly baseTurnEndSeq: number | null
+      readonly baseSessionEventSeq: number | null
+      readonly sourceRevision: string
     }
   | {
       readonly kind: 'fault'
       readonly code: GoalBarReadFaultCode
-      readonly baseTurnEndSeq: number | null
+      readonly baseSessionEventSeq: number | null
+      readonly sourceRevision: string
     }
 
 export type GoalBarWatchResultV1 =
-  | { readonly kind: 'changed'; readonly turnEndSeq: number }
-  | { readonly kind: 'timeout'; readonly turnEndSeq: number | null }
+  | { readonly kind: 'source_changed'; readonly sessionEventSeq: number | null }
+  | {
+      readonly kind: 'runtime_changed'
+      readonly sessionEventSeq: number | null
+      readonly agentStatus: GoalBarAgentStatusV1
+    }
+  | { readonly kind: 'timeout'; readonly sessionEventSeq: number | null }
   | { readonly kind: 'fault'; readonly code: 'session_unavailable' }
 
 export type GoalBarActionResultV1 =
   | {
       readonly kind: 'succeeded'
       readonly snapshot: GoalBarSnapshotV1
-      readonly baseTurnEndSeq: number | null
+      readonly baseSessionEventSeq: number | null
+      readonly sourceRevision: string
     }
   | {
       readonly kind: 'rejected'
@@ -120,7 +132,8 @@ export type GoalBarActionResultV1 =
       readonly kind: 'applied_with_warning'
       readonly code: 'driver_sync_failed'
       readonly snapshot: GoalBarSnapshotV1
-      readonly baseTurnEndSeq: number | null
+      readonly baseSessionEventSeq: number | null
+      readonly sourceRevision: string
     }
   | {
       readonly kind: 'applied_with_warning'
@@ -202,6 +215,12 @@ function isCursor(value: unknown): value is number | null {
   return value === null || isSequence(value)
 }
 
+const SOURCE_REVISION_PATTERN = /^sha256:[0-9a-f]{64}$/u
+
+export function isGoalBarSourceRevision(value: unknown): value is string {
+  return typeof value === 'string' && SOURCE_REVISION_PATTERN.test(value)
+}
+
 export function isGoalBarSessionId(value: unknown): value is string {
   return typeof value === 'string'
     && value.length > 0
@@ -216,6 +235,14 @@ export function isGoalBarGoalId(value: unknown): value is string {
     && [...value].length <= GOAL_ID_MAX_LENGTH
     && value.trim() === value
     && !/[\u0000-\u001f\u007f]/u.test(value)
+}
+
+function isGoalBarRevisionGoalId(value: unknown): value is string {
+  return isGoalBarGoalId(value)
+    && value !== '.'
+    && value !== '..'
+    && !value.includes('/')
+    && !value.includes('\\')
 }
 
 export function isGoalBarAgentId(value: unknown): value is string {
@@ -245,16 +272,41 @@ export function decodeGoalBarRequestV1(
   }
 
   if (op === 'watch') {
-    const input = exactRecord(value, ['v', 'op', 'sessionId', 'afterTurnEndSeq'])
+    const input = exactRecord(value, [
+      'v',
+      'op',
+      'sessionId',
+      'afterSessionEventSeq',
+      'sourceRevision',
+      'expected',
+      'agentStatus',
+    ])
+    const expected = input?.expected === null
+      ? null
+      : exactRecord(input?.expected, ['goalId', 'loopxAgentId'])
     return input?.v === GOALBAR_REQUEST_VERSION
       && input.op === op
       && isGoalBarSessionId(input.sessionId)
-      && isCursor(input.afterTurnEndSeq)
+      && isCursor(input.afterSessionEventSeq)
+      && isGoalBarSourceRevision(input.sourceRevision)
+      && (expected === null
+        || (isGoalBarRevisionGoalId(expected?.goalId)
+          && isGoalBarAgentId(expected.loopxAgentId)))
+      && (input.agentStatus === null
+        || isOneOf(input.agentStatus, ['idle', 'running'] as const))
       ? {
           v: GOALBAR_REQUEST_VERSION,
           op,
           sessionId: input.sessionId,
-          afterTurnEndSeq: input.afterTurnEndSeq,
+          afterSessionEventSeq: input.afterSessionEventSeq,
+          sourceRevision: input.sourceRevision,
+          expected: expected === null
+            ? null
+            : {
+                goalId: expected.goalId as string,
+                loopxAgentId: expected.loopxAgentId as string,
+              },
+          agentStatus: input.agentStatus,
         }
       : undefined
   }
@@ -330,30 +382,52 @@ function decodeReadResult(
 ): GoalBarReadResultV1 | undefined {
   const candidate = record(value)
   if (candidate?.kind === 'hidden') {
-    const input = exactRecord(value, ['kind', 'reason', 'baseTurnEndSeq'])
+    const input = exactRecord(value, [
+      'kind', 'reason', 'baseSessionEventSeq', 'sourceRevision',
+    ])
     return input !== undefined
       && isOneOf(input.reason, ['binding_missing', 'binding_ambiguous'] as const)
-      && isCursor(input.baseTurnEndSeq)
+      && isCursor(input.baseSessionEventSeq)
+      && isGoalBarSourceRevision(input.sourceRevision)
       ? {
           kind: 'hidden',
           reason: input.reason,
-          baseTurnEndSeq: input.baseTurnEndSeq,
+          baseSessionEventSeq: input.baseSessionEventSeq,
+          sourceRevision: input.sourceRevision,
         }
       : undefined
   }
   if (candidate?.kind === 'present') {
-    const input = exactRecord(value, ['kind', 'snapshot', 'baseTurnEndSeq'])
+    const input = exactRecord(value, [
+      'kind', 'snapshot', 'baseSessionEventSeq', 'sourceRevision',
+    ])
     const snapshot = decodeGoalBarSnapshotV1(input?.snapshot, { sessionId })
-    return input !== undefined && snapshot !== undefined && isCursor(input.baseTurnEndSeq)
-      ? { kind: 'present', snapshot, baseTurnEndSeq: input.baseTurnEndSeq }
+    return input !== undefined
+      && snapshot !== undefined
+      && isCursor(input.baseSessionEventSeq)
+      && isGoalBarSourceRevision(input.sourceRevision)
+      ? {
+          kind: 'present',
+          snapshot,
+          baseSessionEventSeq: input.baseSessionEventSeq,
+          sourceRevision: input.sourceRevision,
+        }
       : undefined
   }
   if (candidate?.kind === 'fault') {
-    const input = exactRecord(value, ['kind', 'code', 'baseTurnEndSeq'])
+    const input = exactRecord(value, [
+      'kind', 'code', 'baseSessionEventSeq', 'sourceRevision',
+    ])
     return input !== undefined
       && isOneOf(input.code, GOALBAR_READ_FAULT_CODES)
-      && isCursor(input.baseTurnEndSeq)
-      ? { kind: 'fault', code: input.code, baseTurnEndSeq: input.baseTurnEndSeq }
+      && isCursor(input.baseSessionEventSeq)
+      && isGoalBarSourceRevision(input.sourceRevision)
+      ? {
+          kind: 'fault',
+          code: input.code,
+          baseSessionEventSeq: input.baseSessionEventSeq,
+          sourceRevision: input.sourceRevision,
+        }
       : undefined
   }
   return undefined
@@ -361,21 +435,42 @@ function decodeReadResult(
 
 function decodeWatchResult(
   value: unknown,
-  afterTurnEndSeq: number | null,
+  afterSessionEventSeq: number | null,
 ): GoalBarWatchResultV1 | undefined {
   const candidate = record(value)
-  if (candidate?.kind === 'changed') {
-    const input = exactRecord(value, ['kind', 'turnEndSeq'])
+  if (candidate?.kind === 'source_changed') {
+    const input = exactRecord(value, ['kind', 'sessionEventSeq'])
     return input !== undefined
-      && isSequence(input.turnEndSeq)
-      && (afterTurnEndSeq === null || input.turnEndSeq > afterTurnEndSeq)
-      ? { kind: 'changed', turnEndSeq: input.turnEndSeq }
+      && isCursor(input.sessionEventSeq)
+      && (afterSessionEventSeq === null
+        || (input.sessionEventSeq !== null
+          && input.sessionEventSeq >= afterSessionEventSeq))
+      ? { kind: 'source_changed', sessionEventSeq: input.sessionEventSeq }
+      : undefined
+  }
+  if (candidate?.kind === 'runtime_changed') {
+    const input = exactRecord(value, ['kind', 'sessionEventSeq', 'agentStatus'])
+    return input !== undefined
+      && isCursor(input.sessionEventSeq)
+      && (afterSessionEventSeq === null
+        || (input.sessionEventSeq !== null
+          && input.sessionEventSeq >= afterSessionEventSeq))
+      && isOneOf(input.agentStatus, ['idle', 'running'] as const)
+      ? {
+          kind: 'runtime_changed',
+          sessionEventSeq: input.sessionEventSeq,
+          agentStatus: input.agentStatus,
+        }
       : undefined
   }
   if (candidate?.kind === 'timeout') {
-    const input = exactRecord(value, ['kind', 'turnEndSeq'])
-    return input !== undefined && input.turnEndSeq === afterTurnEndSeq
-      ? { kind: 'timeout', turnEndSeq: afterTurnEndSeq }
+    const input = exactRecord(value, ['kind', 'sessionEventSeq'])
+    return input !== undefined
+      && isCursor(input.sessionEventSeq)
+      && (afterSessionEventSeq === null
+        || (input.sessionEventSeq !== null
+          && input.sessionEventSeq >= afterSessionEventSeq))
+      ? { kind: 'timeout', sessionEventSeq: input.sessionEventSeq }
       : undefined
   }
   if (candidate?.kind === 'fault') {
@@ -394,10 +489,20 @@ function decodeActionResult(
 ): GoalBarActionResultV1 | undefined {
   const candidate = record(value)
   if (candidate?.kind === 'succeeded') {
-    const input = exactRecord(value, ['kind', 'snapshot', 'baseTurnEndSeq'])
+    const input = exactRecord(value, [
+      'kind', 'snapshot', 'baseSessionEventSeq', 'sourceRevision',
+    ])
     const snapshot = decodeGoalBarSnapshotV1(input?.snapshot, { sessionId, binding })
-    return input !== undefined && snapshot !== undefined && isCursor(input.baseTurnEndSeq)
-      ? { kind: 'succeeded', snapshot, baseTurnEndSeq: input.baseTurnEndSeq }
+    return input !== undefined
+      && snapshot !== undefined
+      && isCursor(input.baseSessionEventSeq)
+      && isGoalBarSourceRevision(input.sourceRevision)
+      ? {
+          kind: 'succeeded',
+          snapshot,
+          baseSessionEventSeq: input.baseSessionEventSeq,
+          sourceRevision: input.sourceRevision,
+        }
       : undefined
   }
   if (candidate?.kind === 'rejected') {
@@ -419,16 +524,20 @@ function decodeActionResult(
         ? { kind: 'applied_with_warning', code: 'post_read_failed' }
         : undefined
     }
-    const input = exactRecord(value, ['kind', 'code', 'snapshot', 'baseTurnEndSeq'])
+    const input = exactRecord(value, [
+      'kind', 'code', 'snapshot', 'baseSessionEventSeq', 'sourceRevision',
+    ])
     const snapshot = decodeGoalBarSnapshotV1(input?.snapshot, { sessionId, binding })
     return input?.code === 'driver_sync_failed'
       && snapshot !== undefined
-      && isCursor(input.baseTurnEndSeq)
+      && isCursor(input.baseSessionEventSeq)
+      && isGoalBarSourceRevision(input.sourceRevision)
       ? {
           kind: 'applied_with_warning',
           code: 'driver_sync_failed',
           snapshot,
-          baseTurnEndSeq: input.baseTurnEndSeq,
+          baseSessionEventSeq: input.baseSessionEventSeq,
+          sourceRevision: input.sourceRevision,
         }
       : undefined
   }
@@ -448,7 +557,7 @@ export function decodeGoalBarResponseV1<T extends GoalBarRequestV1>(
   if (request.op === 'read') {
     result = decodeReadResult(input.result, request.sessionId)
   } else if (request.op === 'watch') {
-    result = decodeWatchResult(input.result, request.afterTurnEndSeq)
+    result = decodeWatchResult(input.result, request.afterSessionEventSeq)
   } else {
     result = decodeActionResult(input.result, request.sessionId, request.expected)
   }

@@ -7,6 +7,7 @@ import type {
   GoalBarSnapshotV1,
 } from '../goalbar/protocol.ts'
 import type { GoalBarRpc } from './rpc.ts'
+import type { GoalBarWatchAnchorV1 } from './rpc.ts'
 
 export type GoalBarAction = 'start' | 'pause'
 
@@ -74,7 +75,7 @@ export function useGoalBar({
   const activeSessionRef = useRef(rpcSessionId)
   const generationRef = useRef(0)
   const controllerRef = useRef<AbortController | null>(null)
-  const cursorRef = useRef<number | null>(null)
+  const anchorRef = useRef<GoalBarWatchAnchorV1 | null>(null)
   const actionGuardRef = useRef(false)
 
   const commit = useCallback((
@@ -114,10 +115,10 @@ export function useGoalBar({
 
   const runReadWatchCycle = useCallback(async (
     generation: SessionGeneration,
-    initialCursor: number | null,
+    initialAnchor: GoalBarWatchAnchorV1 | null,
     readFirst: boolean,
   ): Promise<void> => {
-    let cursor = initialCursor
+    let anchor = initialAnchor
     let shouldRead = readFirst
 
     while (isCurrent(generation)) {
@@ -131,8 +132,16 @@ export function useGoalBar({
         }
 
         const result = read.response.result
-        cursor = result.baseTurnEndSeq
-        cursorRef.current = cursor
+        const snapshot = result.kind === 'present' ? result.snapshot : null
+        anchor = {
+          afterSessionEventSeq: result.baseSessionEventSeq,
+          sourceRevision: result.sourceRevision,
+          expected: snapshot === null
+            ? null
+            : { goalId: snapshot.goalId, loopxAgentId: snapshot.loopxAgentId },
+          agentStatus: snapshot?.agentStatus ?? null,
+        }
+        anchorRef.current = anchor
 
         if (result.kind === 'present') {
           actionGuardRef.current = false
@@ -158,9 +167,11 @@ export function useGoalBar({
         if (!isCurrent(generation)) return
       }
 
+      if (anchor === null) return
+
       const watch = await rpc.watch(
         rpcSessionId,
-        cursor,
+        anchor,
         generation.controller.signal,
       )
       if (!isCurrent(generation)) return
@@ -176,11 +187,31 @@ export function useGoalBar({
       }
       if (result.kind === 'timeout') {
         // A timeout is a normal lease boundary: renew immediately, without read.
+        anchor = { ...anchor, afterSessionEventSeq: result.sessionEventSeq }
+        anchorRef.current = anchor
+        continue
+      }
+      if (result.kind === 'runtime_changed') {
+        anchor = {
+          ...anchor,
+          afterSessionEventSeq: result.sessionEventSeq,
+          agentStatus: result.agentStatus,
+        }
+        anchorRef.current = anchor
+        commit(current => {
+          const snapshot = current.snapshot
+          return snapshot?.sessionId === rpcSessionId
+            ? {
+                ...current,
+                snapshot: { ...snapshot, agentStatus: result.agentStatus },
+              }
+            : current
+        })
         continue
       }
 
-      cursor = result.turnEndSeq
-      cursorRef.current = cursor
+      anchor = { ...anchor, afterSessionEventSeq: result.sessionEventSeq }
+      anchorRef.current = anchor
       shouldRead = true
       commit(current => ({ ...current, syncing: true }))
     }
@@ -198,7 +229,7 @@ export function useGoalBar({
       syncing: true,
       pendingAction: false,
     }))
-    void runReadWatchCycle(generation, cursorRef.current, true)
+    void runReadWatchCycle(generation, anchorRef.current, true)
   }, [commit, replaceGeneration, rpcSessionId, runReadWatchCycle])
 
   const requestAction = useCallback((requestedAction: GoalBarAction) => {
@@ -247,7 +278,16 @@ export function useGoalBar({
 
       const result = action.response.result
       if (result.kind === 'succeeded') {
-        cursorRef.current = result.baseTurnEndSeq
+        const anchor = {
+          afterSessionEventSeq: result.baseSessionEventSeq,
+          sourceRevision: result.sourceRevision,
+          expected: {
+            goalId: result.snapshot.goalId,
+            loopxAgentId: result.snapshot.loopxAgentId,
+          },
+          agentStatus: result.snapshot.agentStatus,
+        } satisfies GoalBarWatchAnchorV1
+        anchorRef.current = anchor
         commit({
           snapshot: result.snapshot,
           errorCode: null,
@@ -257,7 +297,7 @@ export function useGoalBar({
         actionGuardRef.current = false
         void runReadWatchCycle(
           generation,
-          result.baseTurnEndSeq,
+          anchor,
           false,
         )
         return
@@ -265,7 +305,15 @@ export function useGoalBar({
 
       if (result.kind === 'applied_with_warning'
         && result.code === 'driver_sync_failed') {
-        cursorRef.current = result.baseTurnEndSeq
+        anchorRef.current = {
+          afterSessionEventSeq: result.baseSessionEventSeq,
+          sourceRevision: result.sourceRevision,
+          expected: {
+            goalId: result.snapshot.goalId,
+            loopxAgentId: result.snapshot.loopxAgentId,
+          },
+          agentStatus: result.snapshot.agentStatus,
+        }
         commit({
           snapshot: result.snapshot,
           errorCode: result.code,
@@ -296,7 +344,7 @@ export function useGoalBar({
 
   useEffect(() => {
     activeSessionRef.current = rpcSessionId
-    cursorRef.current = null
+    anchorRef.current = null
     actionGuardRef.current = false
     commit(INITIAL_STATE)
     const generation = replaceGeneration()
