@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   governedCapabilitySettlementStatus,
+  validateGovernedCapabilityAdmission,
   validateGovernedCapabilityResult,
   validateGovernedCapabilitySettlementCallback,
 } from "../../loopx/control_plane/governed_capability.ts";
@@ -37,6 +38,52 @@ function result(status: "running" | "succeeded") {
     follow_up: { kind: status === "running" ? "poll" : "none" },
   };
 }
+
+test("material admission binds the exact Todo action to the operation", () => {
+  const admission = {
+    selected_todo: {
+      todo_id: "todo_material1",
+      role: "agent",
+      status: "open",
+      action_kind: "publish_requirement",
+      target_key: "requirement:REQ-1",
+    },
+  };
+  assert.equal(
+    validateGovernedCapabilityAdmission({
+      admission,
+      todo_id: "todo_material1",
+      todo_contract: {
+        action_kinds: ["publish_requirement"],
+        target_key_prefixes: ["requirement:"],
+      },
+    }).todo_id,
+    "todo_material1",
+  );
+  assert.throws(
+    () => validateGovernedCapabilityAdmission({
+      admission,
+      todo_id: "todo_material1",
+      todo_contract: {
+        action_kinds: ["deploy_release"],
+        target_key_prefixes: ["release:"],
+      },
+    }),
+    /not authorized by selected_todo action_kind/,
+  );
+
+  assert.throws(
+    () => validateGovernedCapabilityAdmission({
+      admission,
+      todo_id: "todo_material1",
+      todo_contract: {
+        action_kinds: ["publish_requirement"],
+        target_key_prefixes: ["release:"],
+      },
+    }),
+    /not authorized by selected_todo target_key/,
+  );
+});
 
 test("material provider state reduces to a typed journal status", () => {
   assert.equal(

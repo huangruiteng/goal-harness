@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from pathlib import Path
@@ -29,7 +30,6 @@ from ..control_plane.turn_driver.transaction import (
 from ..file_lock import exclusive_file_lock
 from .capability_admission import prepare_external_capability_invocation
 from .runtime import execute_extension_runtime_binding
-
 
 GOVERNED_CAPABILITY_RUN_SCHEMA_VERSION = "loopx_governed_capability_run_v0"
 GOVERNED_CAPABILITY_RECEIPT_SCHEMA_VERSION = (
@@ -92,13 +92,19 @@ def _read_journal(path: Path) -> dict[str, Any]:
 
 def _write_journal(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    serialized = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.tmp.",
+        dir=path.parent,
     )
-    temporary.chmod(0o600)
-    os.replace(temporary, path)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(serialized)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def _settlement_identity(transaction_plan: Mapping[str, Any]) -> dict[str, Any]:
@@ -110,6 +116,7 @@ def _require_admission(
     admission: Mapping[str, Any],
     *,
     expected_identity: Mapping[str, Any],
+    todo_contract: Mapping[str, Any],
 ) -> None:
     guard = classify_host_guard_snapshot(
         json.dumps(dict(admission), ensure_ascii=False, sort_keys=True)
@@ -127,6 +134,14 @@ def _require_admission(
         raise ValueError(
             "quota guard settlement identity does not match the invocation"
         )
+    effect_runtime_result(
+        "governed_capability.validate_admission",
+        {
+            "admission": dict(admission),
+            "todo_id": expected["todo_id"],
+            "todo_contract": dict(todo_contract),
+        },
+    )
 
 
 def _validated_governed_capability_result(
@@ -229,7 +244,6 @@ def start_governed_external_capability(
         turn_instance_id=turn_instance_id,
     )
     identity = _settlement_identity(transaction_plan)
-    _require_admission(admission, expected_identity=identity)
     prepared = prepare_external_capability_invocation(
         state_file=state_file,
         capability_id=capability_id,
@@ -242,6 +256,14 @@ def start_governed_external_capability(
     operation_profile = _mapping(prepared["operation_profile"], "operation profile")
     if operation_profile.get("effect_class") != "external_write":
         raise ValueError("governed capability execution requires external_write")
+    _require_admission(
+        admission,
+        expected_identity=identity,
+        todo_contract=_mapping(
+            operation_profile.get("todo_contract"),
+            "operation todo_contract",
+        ),
+    )
     request = _mapping(prepared["request"], "provider request")
     request["lifecycle"] = {
         "phase": "start",

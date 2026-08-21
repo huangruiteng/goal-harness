@@ -313,8 +313,14 @@ that operation is deliberately unavailable through direct invocation. A host
 adapter must call the governed material lifecycle in
 `loopx.extensions.governed_capability_execution`:
 
+An external-write operation also declares a typed `todo_contract` beside
+`effect_class`, containing one or more lower-snake `action_kinds` and bounded
+`target_key_prefixes`.
+
 1. obtain `quota should-run` admission for one exact Goal, Agent, Todo, and
-   `turn_instance_id`;
+   `turn_instance_id`; the selected open Agent Todo's `action_kind` and
+   `target_key` must match the operation profile's `todo_contract`, so an
+   admitted Turn cannot borrow an unrelated Goal-bound write capability;
 2. call `start_governed_external_capability(...)`, which journals intent before
    dispatch and gives the provider the settlement effect id as its stable
    idempotency key;

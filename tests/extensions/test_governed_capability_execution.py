@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import stat
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from loopx.control_plane.effect_program import SettlementIdentity
+from loopx.control_plane.effect_runtime import EffectRuntimeRejected
 from loopx.extensions.capability_admission import (
     bind_external_capability_to_goal,
     invoke_external_capability,
@@ -76,6 +78,10 @@ def _installed_material_extension(tmp_path: Path) -> tuple[Path, Path, Path]:
                     {
                         "id": "publish",
                         "effect_class": "external_write",
+                        "todo_contract": {
+                            "action_kinds": ["fixture_material_delivery"],
+                            "target_key_prefixes": ["fixture-material:"],
+                        },
                         "required_permission": "fixture.delivery.write",
                         "request_schema": "fixture_material_capability_request_v0",
                         "result_schema": "fixture_material_capability_result_v0",
@@ -159,6 +165,13 @@ def _admission(identity: SettlementIdentity) -> dict[str, object]:
     return {
         "ok": True,
         "should_run": True,
+        "selected_todo": {
+            "todo_id": identity.todo_id,
+            "role": "agent",
+            "status": "open",
+            "action_kind": "fixture_material_delivery",
+            "target_key": "fixture-material:delivery-1",
+        },
         "heartbeat_receipt": {"settlement_identity": identity.as_dict()},
     }
 
@@ -203,6 +216,8 @@ def test_material_start_is_previewable_and_provider_idempotent(tmp_path: Path) -
     assert started["status"] == "running"
     assert replay["invocation_id"] == started["invocation_id"]
     assert call_log.read_text(encoding="utf-8").splitlines() == ["start"]
+    journal = Path(arguments["run_dir"]) / f"{started['invocation_id']}.json"
+    assert stat.S_IMODE(journal.stat().st_mode) == 0o600
 
 
 def test_material_operation_remains_unavailable_through_direct_invoke(
@@ -284,6 +299,25 @@ def test_material_start_rejects_a_different_selected_turn(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError, match="does not match the invocation"):
         start_governed_external_capability(**arguments, execute=True)
+
+
+def test_material_start_rejects_an_unrelated_selected_todo_action(
+    tmp_path: Path,
+) -> None:
+    arguments = _start_arguments(tmp_path)
+    admission = _admission(_identity())
+    selected_todo = admission["selected_todo"]
+    assert isinstance(selected_todo, dict)
+    selected_todo["action_kind"] = "different_material_action"
+    arguments["admission"] = admission
+
+    with pytest.raises(
+        EffectRuntimeRejected,
+        match="not authorized by selected_todo",
+    ):
+        start_governed_external_capability(**arguments, execute=True)
+
+    assert not (tmp_path / "provider-calls.txt").exists()
 
 
 def test_material_settlement_fails_closed_without_effect_receipt_writeback(

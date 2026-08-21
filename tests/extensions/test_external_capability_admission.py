@@ -228,16 +228,40 @@ def test_manifest_accepts_external_write_for_the_governed_adapter(
 ) -> None:
     provider = _provider(tmp_path / "provider")
     profile = _profile(tmp_path / "profile.json")
-    profile.write_text(
-        profile.read_text(encoding="utf-8").replace("read_only", "external_write"),
-        encoding="utf-8",
-    )
+    payload = json.loads(profile.read_text(encoding="utf-8"))
+    operation = payload["operations"][0]
+    operation["effect_class"] = "external_write"
+    operation["todo_contract"] = {
+        "action_kinds": ["publish_requirement"],
+        "target_key_prefixes": ["requirement:"],
+    }
+    profile.write_text(json.dumps(payload), encoding="utf-8")
     manifest = _manifest(tmp_path / "extension.toml", provider=provider)
 
     loaded = load_extension_manifest(manifest)
 
     operation = loaded["capabilities"][0]["integration_profile"]["operations"][0]
     assert operation["effect_class"] == "external_write"
+    assert operation["todo_contract"] == {
+        "action_kinds": ["publish_requirement"],
+        "target_key_prefixes": ["requirement:"],
+    }
+
+
+def test_manifest_rejects_external_write_without_todo_contract(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    profile = _profile(tmp_path / "profile.json")
+    profile.write_text(
+        profile.read_text(encoding="utf-8").replace("read_only", "external_write"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="requires todo_contract"):
+        load_extension_manifest(
+            _manifest(tmp_path / "extension.toml", provider=provider)
+        )
 
 
 def test_manifest_rejects_unknown_external_capability_effect_class(

@@ -95,6 +95,71 @@ function externalEffectReceipt(
   return receipt;
 }
 
+export function validateGovernedCapabilityAdmission(input: {
+  admission: unknown;
+  todo_id: string;
+  todo_contract: unknown;
+}): JsonObject {
+  const admission = requiredObject(
+    input.admission,
+    "governed capability admission",
+  );
+  const selectedTodo = requiredObject(
+    admission.selected_todo,
+    "governed capability selected_todo",
+  );
+  if (selectedTodo.todo_id !== input.todo_id) {
+    throw new Error(
+      "governed capability selected_todo does not match the settlement Todo",
+    );
+  }
+  if (selectedTodo.role !== "agent" || selectedTodo.status !== "open") {
+    throw new Error(
+      "governed capability selected_todo must be an open agent Todo",
+    );
+  }
+  const todoContract = requiredObject(
+    input.todo_contract,
+    "governed capability todo_contract",
+  );
+  requireExactFields(
+    todoContract,
+    new Set(["action_kinds", "target_key_prefixes"]),
+    "governed capability todo_contract",
+  );
+  const actionKinds = boundedArray(
+    todoContract.action_kinds,
+    "governed capability todo_contract action_kinds",
+  );
+  const targetKeyPrefixes = boundedArray(
+    todoContract.target_key_prefixes,
+    "governed capability todo_contract target_key_prefixes",
+  );
+  if (
+    actionKinds.length === 0 ||
+    actionKinds.some((value) => typeof value !== "string") ||
+    !actionKinds.includes(selectedTodo.action_kind)
+  ) {
+    throw new Error(
+      "governed capability operation is not authorized by selected_todo action_kind",
+    );
+  }
+  const targetKey = requiredString(
+    selectedTodo.target_key,
+    "governed capability selected_todo target_key",
+  );
+  if (
+    targetKeyPrefixes.length === 0 ||
+    targetKeyPrefixes.some((value) => typeof value !== "string") ||
+    !targetKeyPrefixes.some((prefix) => targetKey.startsWith(prefix as string))
+  ) {
+    throw new Error(
+      "governed capability operation is not authorized by selected_todo target_key",
+    );
+  }
+  return selectedTodo;
+}
+
 export function validateGovernedCapabilityResult(input: {
   value: unknown;
   invocation_id: string;

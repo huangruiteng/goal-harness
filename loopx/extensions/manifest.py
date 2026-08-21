@@ -21,6 +21,7 @@ _API_CLAUSE = re.compile(r"^(>=|<=|==|>|<)?\s*(\d+)$")
 _EXTENSION_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _PROTOCOL_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}_v\d+$")
 _OPERATION_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_TARGET_KEY_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,127}$")
 _PYTHON_MODULE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
 _EXTERNAL_CAPABILITY_EFFECT_CLASSES = {"read_only", "external_write"}
 _PYTHON_CALLABLE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*$")
@@ -342,6 +343,7 @@ def _integration_profile(
             "required_permission",
             "request_schema",
             "result_schema",
+            "todo_contract",
         }
         unknown_operation_fields = sorted(set(item) - allowed_operation_fields)
         if unknown_operation_fields:
@@ -363,6 +365,55 @@ def _integration_profile(
             raise ValueError(
                 f"{operation_context} effect_class must be one of "
                 f"{sorted(_EXTERNAL_CAPABILITY_EFFECT_CLASSES)}"
+            )
+        todo_contract = item.get("todo_contract")
+        if effect_class == "external_write":
+            if not isinstance(todo_contract, Mapping):
+                raise ValueError(
+                    f"{operation_context} external_write requires todo_contract"
+                )
+            if set(todo_contract) != {"action_kinds", "target_key_prefixes"}:
+                raise ValueError(
+                    f"{operation_context} todo_contract fields are invalid"
+                )
+            action_kinds = _string_list(
+                todo_contract,
+                "action_kinds",
+                context=f"{operation_context} todo_contract",
+            )
+            target_key_prefixes = _string_list(
+                todo_contract,
+                "target_key_prefixes",
+                context=f"{operation_context} todo_contract",
+            )
+            if (
+                not 1 <= len(action_kinds) <= 32
+                or len(action_kinds) != len(set(action_kinds))
+                or any(not _OPERATION_RE.fullmatch(value) for value in action_kinds)
+            ):
+                raise ValueError(
+                    f"{operation_context} todo_contract action_kinds are invalid"
+                )
+            if (
+                not 1 <= len(target_key_prefixes) <= 32
+                or len(target_key_prefixes) != len(set(target_key_prefixes))
+                or any(
+                    not _TARGET_KEY_PREFIX_RE.fullmatch(value)
+                    for value in target_key_prefixes
+                )
+            ):
+                raise ValueError(
+                    f"{operation_context} todo_contract target_key_prefixes are "
+                    "invalid"
+                )
+            todo_contract = {
+                "action_kinds": action_kinds,
+                "target_key_prefixes": target_key_prefixes,
+            }
+        elif todo_contract is not None:
+            raise ValueError(
+                f"{operation_context} todo_contract is only valid for "
+                "external_write"
             )
         permission = _required_string(
             item, "required_permission", context=operation_context
@@ -391,6 +442,8 @@ def _integration_profile(
             "request_schema": request_schema,
             "result_schema": result_schema,
         }
+        if todo_contract is not None:
+            normalized_operation["todo_contract"] = todo_contract
         normalized_operations.append(normalized_operation)
     normalized = {
         "schema_version": EXTERNAL_CAPABILITY_PROFILE_SCHEMA_VERSION,

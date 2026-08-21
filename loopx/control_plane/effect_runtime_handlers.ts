@@ -30,6 +30,7 @@ import {
 } from "./effect_program.ts";
 import {
   governedCapabilitySettlementStatus,
+  validateGovernedCapabilityAdmission,
   validateGovernedCapabilityResult,
   validateGovernedCapabilitySettlementCallback,
 } from "./governed_capability.ts";
@@ -288,6 +289,14 @@ export function createEffectRuntimeHandlers(
         asObject(params.packet),
         asObject(params.identity),
       ),
+    ],
+    [
+      "governed_capability.validate_admission",
+      (params) => validateGovernedCapabilityAdmission({
+        admission: params.admission,
+        todo_id: requiredString(params.todo_id, "todo_id"),
+        todo_contract: params.todo_contract,
+      }),
     ],
     [
       "governed_capability.validate_result",
