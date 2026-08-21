@@ -31,7 +31,7 @@ Goal/Todo state. Models use the installed LoopX skills and call the LoopX CLI
 directly. LoopX remains the only authority for Goal, Agent, Todo, quota,
 activation, and durable thread-binding data. The GoalBar protocol and its
 deferred atomicity limit are specified in the versioned
-[Phase 1 Client/Server design](../../docs/superpowers/specs/2026-08-21-dsh-loopx-goalbar-phase-1-client-server-design.md).
+[DSH native LoopX design](../../docs/plans/2026-08-20-dsh-native-skill-driver.md).
 
 ## Install
 
