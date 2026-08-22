@@ -30,6 +30,7 @@ from loopx.control_plane.quota.settlement_cli import (
     quota_rollout_replan_obligation_id,
     quota_rollout_todo_id,
 )
+from loopx.control_plane.quota.turn_envelope import quota_action_signature_document
 from loopx.control_plane.scheduler.execution_context import (
     SchedulerRuntimeProfile,
     scheduler_execution_context_for_runtime_profile,
@@ -491,6 +492,66 @@ def test_turn_scoped_generic_cli_contract_uses_exact_settlement_identity(
             assert binding in command
             assert f"--turn-instance-id {TURN_ID}" in command
             assert "${LOOPX_TURN:?}" not in command
+
+
+def test_todo_bound_replan_projects_one_settlement_binding_and_full_chain() -> None:
+    obligation_id = "replan-0000000000000001"
+    payload = {
+        **_generic_cli_contract_payload(),
+        "execution_obligation": {
+            "kind": "autonomous_replan_required",
+            "must_attempt_work": True,
+            "delivery_allowed": True,
+        },
+        "replan_action_packet": {
+            "schema_version": "replan_action_packet_v0",
+            "obligation_id": obligation_id,
+            "required_outcome": "semantic_delta",
+            "uncovered_frontier": {"required_any_of": ["new_surface"]},
+            "writeback_contract": {},
+            "allowed_terminal": ["blocked"],
+        },
+    }
+
+    contract = build_interaction_contract(
+        payload,
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP
+        ),
+        turn_instance_id=TURN_ID,
+    )
+
+    channel = contract["cli_channel"]
+    assert channel["replan_settlement_contract"] == {
+        "schema_version": "replan_settlement_contract_v0",
+        "single_binding_required": True,
+        "settlement_binding": {
+            "kind": "todo",
+            "id": TODO_ID,
+            "cli_argument": "--todo-id",
+        },
+        "semantic_obligation": {
+            "kind": "autonomous_replan",
+            "id": obligation_id,
+            "settlement_bound": False,
+            "discharge": "todo_bound_writeback",
+        },
+    }
+    identity = channel["settlement_plan"]["identity"]
+    assert identity["todo_id"] == TODO_ID
+    assert "replan_obligation_id" not in identity
+    actions = channel["next_cli_actions"]
+    assert len(actions) == 2
+    assert "--delivery-outcome outcome_progress" in actions[0]
+    assert "spend-slot" in actions[1]
+    assert all(f"--todo-id {TODO_ID}" in action for action in actions)
+    assert all("--replan-obligation-id" not in action for action in actions)
+    signature = quota_action_signature_document(
+        {**payload, "interaction_contract": contract}
+    )
+    assert signature["writeback"]["replan_settlement_contract"] == channel[
+        "replan_settlement_contract"
+    ]
 
 
 def test_generic_cli_without_turn_identity_keeps_legacy_unbound_actions() -> None:

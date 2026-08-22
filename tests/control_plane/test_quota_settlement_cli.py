@@ -15,6 +15,7 @@ TODO_ID = "todo_fixture_settlement"
 REENTRY_TODO_ID = "todo_fixture_network_reentry"
 DUE_MONITOR_TODO_ID = "todo_fixture_due_monitor"
 TURN_ID = "turn-settlement-cli-1"
+SELECTED_REPLAN_TODO_ID = "todo_chain_000000000000"
 
 
 def _write_fixture(
@@ -289,6 +290,45 @@ def _configure_autonomous_replan_fixture(
         )
     (runs_dir / "index.jsonl").write_text(
         "".join(json.dumps(run) + "\n" for run in runs),
+        encoding="utf-8",
+    )
+
+
+def _configure_selected_todo_replan_fixture(
+    project: Path,
+    registry_path: Path,
+) -> None:
+    state_path = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    todo_rows = "\n".join(
+        (
+            f"- [ ] [P1] Validate bounded slice {index}.\n"
+            "  <!-- loopx:todo "
+            f"todo_id=todo_chain_{index:012d} status=open "
+            "task_class=advancement_task action_kind=validate "
+            f"claimed_by={AGENT_ID} -->"
+        )
+        for index in range(15)
+    )
+    state_path.write_text(
+        "---\n"
+        "status: active\n"
+        "owner_mode: goal\n"
+        'objective: "Settle one Todo-bound autonomous replan."\n'
+        "updated_at: 2026-01-01T00:00:00+00:00\n"
+        "---\n\n"
+        "# Todo-bound Replan Settlement Fixture\n\n"
+        "## Objective\n\n"
+        "Settle one Todo-bound autonomous replan.\n\n"
+        "## Next Action\n\n"
+        "- Validate bounded slice 0.\n\n"
+        "## Agent Todo\n\n"
+        f"{todo_rows}\n",
+        encoding="utf-8",
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["status"] = "active"
+    registry_path.write_text(
+        json.dumps(registry, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
@@ -1031,6 +1071,100 @@ def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
     assert replay_rc == 0, replay
     assert replay["idempotent_replay"] is True
     assert replay["appended"] is False
+    assert _spend_run_count(runtime) == 1
+
+
+def test_todo_bound_autonomous_replan_uses_one_binding_for_refresh_and_spend(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_selected_todo_replan_fixture(project, registry_path)
+    turn_instance_id = "turn-todo-bound-replan-settlement-1"
+
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--scan-path",
+        str(project),
+    )
+
+    assert guard_rc == 0, guard
+    assert guard["decision"] == "autonomous_replan_required", guard
+    assert guard["selected_todo"]["todo_id"] == SELECTED_REPLAN_TODO_ID
+    obligation_id = guard["replan_action_packet"]["obligation_id"]
+    cli_channel = guard["interaction_contract"]["cli_channel"]
+    contract = cli_channel["replan_settlement_contract"]
+    assert contract["settlement_binding"] == {
+        "kind": "todo",
+        "id": SELECTED_REPLAN_TODO_ID,
+        "cli_argument": "--todo-id",
+    }
+    assert contract["semantic_obligation"] == {
+        "kind": "autonomous_replan",
+        "id": obligation_id,
+        "settlement_bound": False,
+        "discharge": "todo_bound_writeback",
+    }
+    identity = cli_channel["settlement_plan"]["identity"]
+    assert identity["todo_id"] == SELECTED_REPLAN_TODO_ID
+    assert "replan_obligation_id" not in identity
+    actions = cli_channel["next_cli_actions"]
+    refresh_command = next(action for action in actions if "refresh-state" in action)
+    spend_command = next(action for action in actions if "spend-slot" in action)
+    for command in (refresh_command, spend_command):
+        assert f"--todo-id {SELECTED_REPLAN_TODO_ID}" in command
+        assert "--replan-obligation-id" not in command
+        assert '--turn-instance-id "${LOOPX_TURN:?}"' in command
+
+    refresh_command = (
+        refresh_command.replace(
+            "<advanced|blocked|exploration_exhausted|no_followup>",
+            "advanced",
+        )
+        .replace("<surface-id>", "surface-new")
+        .replace("<hypothesis-id>", "hypothesis-new")
+        .replace("<probe-kind>", "probe-new")
+        .replace("<evidence-id>", "evidence-new")
+    )
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        *_projected_cli_args(
+            refresh_command,
+            turn_instance_id=turn_instance_id,
+        ),
+    )
+
+    assert refresh_rc == 0, refresh.get("error") or refresh
+    assert refresh["settlement_result"]["ok"] is True
+    assert refresh["autonomous_replan_ack"]["semantic_delta"]["accepted"] is True
+
+    spend_args = _projected_cli_args(
+        spend_command,
+        turn_instance_id=turn_instance_id,
+    )
+    spend_rc, spend = _run_cli(
+        registry_path,
+        runtime,
+        *spend_args,
+        "--scan-path",
+        str(project),
+    )
+
+    assert spend_rc == 0, spend
+    assert spend["settlement_result"]["ok"] is True
+    assert [
+        receipt["step_kind"] for receipt in spend["settlement_result"]["receipts"]
+    ] == ["validation", "durable_writeback", "quota_spend"]
     assert _spend_run_count(runtime) == 1
 
 
