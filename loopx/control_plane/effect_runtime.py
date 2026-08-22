@@ -48,6 +48,7 @@ _SOURCE_FILES = (
     "turn_driver/delivery_continuity.ts",
     "turn_driver/settlement.ts",
     "work_items/delivery_outcome.ts",
+    "work_items/replan_settlement.ts",
     "turn_transaction_contract.json",
 )
 

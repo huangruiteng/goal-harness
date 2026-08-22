@@ -63,6 +63,7 @@ import {
   evaluateDeliveryContinuity,
 } from "./turn_driver/delivery_continuity.ts";
 import { reduceTurnSettlementTransaction } from "./turn_driver/settlement.ts";
+import { projectReplanSettlementContract } from "./work_items/replan_settlement.ts";
 
 type EffectRuntimeHandler = (params: JsonObject) => unknown | Promise<unknown>;
 
@@ -374,6 +375,7 @@ export function createEffectRuntimeHandlers(
       ),
     ],
     ["turn.settlement.reduce", reduceTurnSettlementTransaction],
+    ["work_item.replan_settlement.project", projectReplanSettlementContract],
   ]);
 }
 

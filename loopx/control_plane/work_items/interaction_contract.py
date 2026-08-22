@@ -27,6 +27,7 @@ from ..todos.contract import (
     TODO_TASK_CLASS_MONITOR,
     TODO_TASK_CLASS_USER_ACTION,
     normalize_todo_id,
+    normalize_todo_replan_obligation_id,
 )
 from ..todos.projection import todo_item_task_class
 from ..todos.user_gate import open_todo_count
@@ -44,6 +45,7 @@ from .primary_action import (
     protocol_first_candidate_action as _protocol_first_candidate_action,
     protocol_monitor_action as _protocol_monitor_action,
 )
+from .replan_settlement import project_replan_settlement_contract
 from .runtime_capability_reentry import build_runtime_capability_reentry_packet
 
 INTERACTION_CONTRACT_SCHEMA_VERSION = "loopx_interaction_contract_v0"
@@ -571,7 +573,7 @@ def _scoped_cli_args(
     return f" --agent-id {agent_id}{capability_args}"
 
 
-def _turn_scoped_cli_settlement_plan(
+def _turn_scoped_cli_settlement_context(
     payload: dict[str, Any],
     *,
     available_capabilities: Any,
@@ -579,7 +581,7 @@ def _turn_scoped_cli_settlement_plan(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ),
     turn_instance_id: str | None = None,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     agent_identity = (
         payload.get("agent_identity")
         if isinstance(payload.get("agent_identity"), dict)
@@ -592,14 +594,28 @@ def _turn_scoped_cli_settlement_plan(
     )
     goal_id = str(payload.get("goal_id") or "").strip()
     agent_id = str(agent_identity.get("agent_id") or "").strip()
-    todo_id = normalize_todo_id(selected_todo.get("todo_id"))
-    replan_obligation_id = (
-        replan_obligation_id_from_packet(payload.get("replan_action_packet"))
-        if todo_id is None
-        else None
+    selected_todo_id = normalize_todo_id(selected_todo.get("todo_id"))
+    semantic_replan_obligation_id = replan_obligation_id_from_packet(
+        payload.get("replan_action_packet")
     )
+    replan_settlement_contract = None
+    todo_id = selected_todo_id
+    replan_obligation_id = None
+    if semantic_replan_obligation_id is not None:
+        replan_settlement_contract = project_replan_settlement_contract(
+            selected_todo_id=selected_todo_id,
+            semantic_replan_obligation_id=semantic_replan_obligation_id,
+        )
+        binding = replan_settlement_contract["settlement_binding"]
+        if binding["kind"] == "todo":
+            todo_id = normalize_todo_id(binding["id"])
+        else:
+            todo_id = None
+            replan_obligation_id = normalize_todo_replan_obligation_id(
+                binding["id"]
+            )
     if not goal_id or not agent_id or bool(todo_id) == bool(replan_obligation_id):
-        return None
+        return None, replan_settlement_contract
     scoped_cli_args = _scoped_cli_args(
         agent_identity,
         available_capabilities=available_capabilities,
@@ -622,7 +638,10 @@ def _turn_scoped_cli_settlement_plan(
             else None
         ),
     )
-    return plan.as_dict() if plan is not None else None
+    return (
+        plan.as_dict() if plan is not None else None,
+        replan_settlement_contract,
+    )
 
 
 def _terminal_cli_actions(
@@ -698,11 +717,13 @@ def interaction_next_cli_actions(
         else ""
     )
     if settlement_plan is None:
-        settlement_plan = _turn_scoped_cli_settlement_plan(
-            payload,
-            available_capabilities=available_capabilities,
-            scheduler_execution_context=scheduler_execution_context,
-            turn_instance_id=turn_instance_id,
+        settlement_plan, _replan_settlement_contract = (
+            _turn_scoped_cli_settlement_context(
+                payload,
+                available_capabilities=available_capabilities,
+                scheduler_execution_context=scheduler_execution_context,
+                turn_instance_id=turn_instance_id,
+            )
         )
     settlement_args = settlement_binding_args(settlement_plan)
     try:
@@ -897,21 +918,12 @@ def interaction_next_cli_actions(
             typed_quota_guard,
         ]
     if mode == "autonomous_replan":
-        settlement_identity = (
-            settlement_plan.get("identity")
-            if isinstance(settlement_plan, Mapping)
-            and isinstance(settlement_plan.get("identity"), Mapping)
-            else {}
-        )
         return build_autonomous_replan_cli_actions(
             payload,
             goal_id=goal_id,
             settlement_args=settlement_args,
             scoped_cli_args=scoped_cli_args,
             quota_spend_action=quota_spend_action,
-            replan_settlement_bound=bool(
-                settlement_identity.get("replan_obligation_id")
-            ),
             lifecycle_actor_args=lifecycle_actor_args,
         )
     return _terminal_cli_actions(
@@ -1248,11 +1260,13 @@ def _build_interaction_cli_channel(
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
         )
-    settlement_plan = _turn_scoped_cli_settlement_plan(
-        payload,
-        available_capabilities=available_capabilities,
-        scheduler_execution_context=scheduler_execution_context,
-        turn_instance_id=turn_instance_id,
+    settlement_plan, replan_settlement_contract = (
+        _turn_scoped_cli_settlement_context(
+            payload,
+            available_capabilities=available_capabilities,
+            scheduler_execution_context=scheduler_execution_context,
+            turn_instance_id=turn_instance_id,
+        )
     )
     channel = {
         "next_cli_actions": interaction_next_cli_actions(
@@ -1275,6 +1289,8 @@ def _build_interaction_cli_channel(
     }
     if settlement_plan is not None and spend_after_validation:
         channel["settlement_plan"] = settlement_plan
+    if replan_settlement_contract is not None:
+        channel["replan_settlement_contract"] = replan_settlement_contract
     if capability_reentry is not None:
         channel["runtime_capability_reentry"] = capability_reentry
     selected_todo = (

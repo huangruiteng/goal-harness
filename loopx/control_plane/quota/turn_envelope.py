@@ -722,6 +722,11 @@ def _action_projection(
         "spend_after_validation": bool(cli_channel.get("spend_after_validation")),
         "spend_policy": _text(cli_channel.get("spend_policy"), limit=280),
     }
+    replan_settlement_contract = _mapping(
+        cli_channel.get("replan_settlement_contract")
+    )
+    if replan_settlement_contract:
+        writeback["replan_settlement_contract"] = replan_settlement_contract
     delivery_workspace_causality = _mapping(
         cli_channel.get("delivery_workspace_causality")
     )
