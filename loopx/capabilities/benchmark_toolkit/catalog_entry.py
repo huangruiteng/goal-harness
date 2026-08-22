@@ -82,6 +82,21 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "command": (
+                "loopx benchmark experiment-board-reconcile --goal-id <goal-id> "
+                "--source-ledger <provider-board.jsonl> --execute --format json"
+            ),
+            "purpose": (
+                "Monotonically fold one or more provider-owned public-safe board "
+                "shards into the canonical project experiment board; omit --execute "
+                "for a no-write preview."
+            ),
+            "write_boundary": (
+                "explicit project-local canonical board write; source paths are "
+                "never recorded and conflicting terminal states fail closed"
+            ),
+        },
+        {
+            "command": (
                 "loopx benchmark integrity-qualification "
                 "--trajectory-json <private.json> "
                 "--runtime-attestation-json <attestation.json> "
@@ -131,7 +146,8 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         "benchmark_start_hint": (
             "At benchmark start, read the experiment board before selecting or "
             "launching a case; update the same stable row at every material run "
-            "transition."
+            "transition. Providers that keep separate board shards reconcile them "
+            "into the canonical board before agent readback."
         ),
         "required_sequence": [
             "read_experiment_board_before_launch_or_case_selection",
@@ -152,6 +168,10 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "write": (
                 "loopx benchmark experiment-board-upsert --goal-id <goal-id> "
                 "--row-json <compact-row.json> --execute --format json"
+            ),
+            "reconcile": (
+                "loopx benchmark experiment-board-reconcile --goal-id <goal-id> "
+                "--source-ledger <provider-board.jsonl> --execute --format json"
             ),
         },
         "selection_rule": (
