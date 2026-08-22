@@ -28,7 +28,9 @@ from ..control_plane.runtime.status_projection_cache import (
 from ..control_plane.todos.durable_completion import (
     project_durable_completion_intent,
     project_durable_completion_outcome,
+    project_durable_terminal_completion_readback,
     read_persisted_todo_record,
+    read_persisted_todo_record_with_source,
 )
 from ..control_plane.scheduler.execution_context import (
     scheduler_execution_context_for_turn,
@@ -905,6 +907,44 @@ def handle_turn_command(
                 except (OSError, ValueError):
                     return None
 
+            def terminal_completion_readback() -> dict[str, object] | None:
+                todo_id = str(selected_todo.get("todo_id") or "")
+                if not todo_id:
+                    raise ValueError("terminal completion requires one selected Todo")
+                _state_project, state_file = resolve_todo_state_path(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    project=None,
+                    state_file=None,
+                )
+                (
+                    durable_todo,
+                    existing_todo_ids,
+                    projection_source,
+                ) = read_persisted_todo_record_with_source(
+                    state_file,
+                    todo_id=todo_id,
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                )
+                readback = project_durable_terminal_completion_readback(
+                    todo=durable_todo,
+                    expected_todo_id=todo_id,
+                    expected_completion_turn_key=(
+                        settlement_identity.turn_instance_id
+                    ),
+                    projection_source=projection_source,
+                    existing_todo_ids=existing_todo_ids,
+                )
+                if readback["kind"] == "absent":
+                    return None
+                completion = readback.get("completion")
+                if not isinstance(completion, dict):
+                    raise ValueError(
+                        "terminal completion readback is missing its completion"
+                    )
+                return completion
+
             def writeback_resolver(effect_ref: str) -> dict[str, object]:
                 try:
                     require_effect_ref(
@@ -985,7 +1025,7 @@ def handle_turn_command(
                         settlement_identity,
                         event_kind="todo_complete",
                     )
-                    completion = completion_readback()
+                    completion = terminal_completion_readback()
                     if event is None and completion is None:
                         return {"kind": "absent"}
                     if (
