@@ -27,6 +27,17 @@ interface VisionCheckpointRequest {
   autonomous_replan_recorded: boolean;
 }
 
+export type VisionCheckpointDecision =
+  | "patched"
+  | "unchanged_with_reason"
+  | "missing_required"
+  | "not_required";
+
+interface ExistingVisionContinuityBasis extends JsonObject {
+  kind: "existing_vision_unchanged";
+  vision_generated_at: string;
+}
+
 function requiredObject(value: unknown, label: string): JsonObject {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
@@ -52,6 +63,18 @@ function requiredBoolean(value: unknown, label: string): boolean {
     throw new Error(`${label} must be a boolean`);
   }
   return value;
+}
+
+function existingVisionContinuityBasis(
+  vision: JsonObject | null,
+): ExistingVisionContinuityBasis | null {
+  if (vision === null) return null;
+  const generatedAt = vision.generated_at;
+  if (typeof generatedAt !== "string" || !generatedAt.trim()) return null;
+  return {
+    kind: "existing_vision_unchanged",
+    vision_generated_at: generatedAt.trim(),
+  };
 }
 
 function deliveryBoundary(value: unknown): DeliveryBoundary {
@@ -157,7 +180,7 @@ export function buildVisionCheckpoint(value: unknown): JsonObject {
     trigger.kind !== "in_flight_continuation"
   );
   const required = requiredTriggers.length > 0 || unchanged !== null;
-  let decision: string;
+  let decision: VisionCheckpointDecision;
   let satisfied: boolean;
   if (request.agent_vision !== null) {
     decision = "patched";
@@ -188,6 +211,12 @@ export function buildVisionCheckpoint(value: unknown): JsonObject {
   if (unchanged !== null && request.existing_agent_vision !== null) {
     checkpoint.unchanged_reason = unchanged;
     checkpoint.agent_vision_state = request.existing_agent_vision.state;
+    const continuityBasis = existingVisionContinuityBasis(
+      request.existing_agent_vision,
+    );
+    if (continuityBasis !== null) {
+      checkpoint.continuity_basis = continuityBasis;
+    }
   } else if (unchanged !== null) {
     checkpoint.missing_baseline = true;
     checkpoint.rejected_unchanged_reason = unchanged;

@@ -229,6 +229,118 @@ def test_material_unchanged_checkpoint_rejects_stale_planning_evidence() -> None
     assert gaps[0]["fresh_vision_patch"] is False
 
 
+def test_typed_unchanged_checkpoint_preserves_same_evidence_linked_revision() -> None:
+    generated_at = "2026-07-12T00:00:00Z"
+    active_vision = _outcome_vision(
+        generated_at=generated_at,
+        outcome="replan",
+        evidence_refs=["result:bounded-route-decision"],
+    )
+    checkpoint = {
+        **_material_checkpoint(
+            generated_at="2026-07-12T00:01:00Z",
+            decision="unchanged_with_reason",
+        ),
+        "continuity_basis": {
+            "kind": "existing_vision_unchanged",
+            "vision_generated_at": generated_at,
+        },
+    }
+
+    assert acceptance_gaps_from_outcome_checkpoint(active_vision, checkpoint) == []
+
+
+def test_unchanged_checkpoint_cannot_borrow_a_different_vision_revision() -> None:
+    active_vision = _outcome_vision(
+        generated_at="2026-07-12T00:02:00Z",
+        evidence_refs=["result:newer-route-decision"],
+    )
+    checkpoint = {
+        **_material_checkpoint(decision="unchanged_with_reason"),
+        "continuity_basis": {
+            "kind": "existing_vision_unchanged",
+            "vision_generated_at": "2026-07-12T00:00:00Z",
+        },
+    }
+
+    gaps = acceptance_gaps_from_outcome_checkpoint(active_vision, checkpoint)
+
+    assert len(gaps) == 1
+    assert gaps[0]["unchanged_vision_revision"] is False
+
+
+def test_same_revision_unchanged_closeout_does_not_rearm_accepted_vision_gap() -> None:
+    vision_generated_at = "2026-07-12T00:00:00Z"
+    active_vision = _outcome_vision(
+        generated_at=vision_generated_at,
+        outcome="replan",
+        evidence_refs=["result:accepted-route-decision"],
+    )
+    active_vision["vision_patch"]["advancement_policy"] = "repeat_until_closed"
+    checkpoint = {
+        **_material_checkpoint(
+            generated_at="2026-07-12T00:01:00Z",
+            decision="unchanged_with_reason",
+        ),
+        "continuity_basis": {
+            "kind": "existing_vision_unchanged",
+            "vision_generated_at": vision_generated_at,
+        },
+    }
+    gaps = acceptance_gaps_from_agent_vision(
+        active_vision,
+        goal_status="active",
+    ) + acceptance_gaps_from_outcome_checkpoint(active_vision, checkpoint)
+    summaries = {
+        "user_todo_summary": {"open_count": 0},
+        "agent_todo_summary": {
+            "open_count": 1,
+            "current_agent_claimed_advancement_count": 1,
+            "unclaimed_priority_open_items": [],
+            "executable_backlog_items": [],
+            "claim_scope": {"other_agent_claimed_items": []},
+        },
+        "work_lane_contract": {
+            "lane": "advancement_task",
+            "must_attempt_work": True,
+        },
+        "agent_id": AGENT_ID,
+        "existing_replan_obligation": None,
+        "acceptance_gaps": gaps,
+        "latest_replan_ack": {
+            "recorded": True,
+            "generated_at": vision_generated_at,
+            "semantic_delta": {
+                "accepted": True,
+                "outcomes": ["fresh_vision_path_outcome"],
+            },
+        },
+    }
+
+    assert derive_goal_frontier_replan_obligation_from_summaries(**summaries) is None
+
+    changed_checkpoint = {
+        **checkpoint,
+        "generated_at": "2026-07-12T00:02:00Z",
+        "satisfied": False,
+        "decision": "missing_required",
+        "continuity_basis": {},
+    }
+    changed_gaps = acceptance_gaps_from_agent_vision(
+        active_vision,
+        goal_status="active",
+    ) + acceptance_gaps_from_outcome_checkpoint(active_vision, changed_checkpoint)
+
+    rearmed = derive_goal_frontier_replan_obligation_from_summaries(
+        **{**summaries, "acceptance_gaps": changed_gaps}
+    )
+
+    assert rearmed is not None
+    assert "vision_outcome_checkpoint_required" in {
+        trigger["kind"] for trigger in rearmed["triggers"]
+    }
+
+
 def test_fresh_evidence_linked_continue_checkpoint_preserves_frontier() -> None:
     active_vision = _outcome_vision(evidence_refs=["result:final-outcome-receipt"])
     checkpoint = _material_checkpoint()

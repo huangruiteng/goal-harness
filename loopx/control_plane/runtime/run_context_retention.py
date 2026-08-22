@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..work_items.delivery_outcome import MATERIAL_DELIVERY_OUTCOMES
+from ..work_items.autonomous_replan_ack import autonomous_replan_ack_recorded
 
 GOAL_SEMANTIC_HISTORY_SCHEMA_VERSION = "goal_semantic_history_v0"
 SEMANTIC_CONTEXT_RUN_FIELDS = (
@@ -145,8 +146,9 @@ def goal_semantic_history_from_runs(
         ):
             context["latest_outcome_vision_checkpoint_run"] = run
 
-        if "latest_autonomous_replan_ack_run" not in context and isinstance(
-            run.get("autonomous_replan_ack"), dict
+        if (
+            "latest_autonomous_replan_ack_run" not in context
+            and autonomous_replan_ack_recorded(run)
         ):
             context["latest_autonomous_replan_ack_run"] = run
 

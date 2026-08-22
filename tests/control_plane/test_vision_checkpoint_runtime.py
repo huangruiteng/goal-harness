@@ -64,6 +64,12 @@ def test_python_facade_sends_explicit_boundary_context(monkeypatch) -> None:
         _runtime_result(required="false"),
         _runtime_result(decision="skip"),
         _runtime_result(triggers={}),
+        _runtime_result(
+            continuity_basis={
+                "kind": "existing_vision_unchanged",
+                "vision_generated_at": "",
+            }
+        ),
     ],
 )
 def test_python_facade_rejects_malformed_runtime_results(
@@ -101,3 +107,26 @@ def test_python_facade_preserves_typed_rejection(monkeypatch) -> None:
             delivery_boundary="in_flight_continuation",
             todo_id="todo_current001",
         )
+
+
+def test_python_facade_preserves_typed_unchanged_revision() -> None:
+    generated_at = "2026-08-22T18:30:17+08:00"
+
+    result = vision_checkpoint.build_vision_checkpoint(
+        agent_id="codex-main",
+        agent_vision=None,
+        existing_agent_vision={
+            "agent_id": "codex-main",
+            "state": "vision_active",
+            "generated_at": generated_at,
+        },
+        vision_unchanged_reason="Validated evidence keeps the route intact.",
+        delivery_outcome="outcome_progress",
+        active_state_next_action_update=None,
+    )
+
+    assert result["decision"] == "unchanged_with_reason"
+    assert result["continuity_basis"] == {
+        "kind": "existing_vision_unchanged",
+        "vision_generated_at": generated_at,
+    }

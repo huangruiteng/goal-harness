@@ -66,6 +66,10 @@ VISION_CHECKPOINT_TRIGGER_FIELDS = (
     "delivery_outcome",
     "todo_id",
 )
+VISION_CHECKPOINT_CONTINUITY_BASIS_FIELDS = (
+    "kind",
+    "vision_generated_at",
+)
 QUOTA_MONITOR_TARGET_COMPACT_FIELDS = (
     "schema_version",
     "target_id",
@@ -199,6 +203,15 @@ def compact_vision_checkpoint(checkpoint: Any) -> dict[str, Any] | None:
                 triggers.append(compact_trigger)
     if triggers:
         compact["triggers"] = triggers
+    continuity_basis = checkpoint.get("continuity_basis")
+    if isinstance(continuity_basis, dict):
+        compact_basis = {
+            field: continuity_basis[field]
+            for field in VISION_CHECKPOINT_CONTINUITY_BASIS_FIELDS
+            if field in continuity_basis
+        }
+        if compact_basis:
+            compact["continuity_basis"] = compact_basis
     required_resolution = checkpoint.get("required_resolution")
     if isinstance(required_resolution, list):
         compact["required_resolution"] = [

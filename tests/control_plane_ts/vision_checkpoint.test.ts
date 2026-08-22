@@ -55,6 +55,32 @@ test("non-material delivery remains valid without opening a vision checkpoint", 
   assert.deepEqual(result.triggers, []);
 });
 
+test("unchanged closeout binds the exact persisted vision revision", () => {
+  const result = buildVisionCheckpoint(request({
+    existing_agent_vision: {
+      state: "vision_active",
+      generated_at: "2026-08-22T18:30:17+08:00",
+    },
+    vision_unchanged_reason: "Validated evidence keeps the current route intact.",
+  }));
+  assert.equal(result.required, true);
+  assert.equal(result.satisfied, true);
+  assert.equal(result.decision, "unchanged_with_reason");
+  assert.deepEqual(result.continuity_basis, {
+    kind: "existing_vision_unchanged",
+    vision_generated_at: "2026-08-22T18:30:17+08:00",
+  });
+});
+
+test("legacy vision without a revision cannot claim outcome continuity", () => {
+  const result = buildVisionCheckpoint(request({
+    existing_agent_vision: { state: "vision_active" },
+    vision_unchanged_reason: "The legacy route is still current.",
+  }));
+  assert.equal(result.decision, "unchanged_with_reason");
+  assert.equal("continuity_basis" in result, false);
+});
+
 test("completion, replan, and durable route changes reject in-flight claims", () => {
   assert.throws(
     () => buildVisionCheckpoint(request({

@@ -95,7 +95,13 @@ def test_semantic_history_uses_independent_agent_slots() -> None:
                 "state": "vision_replanned",
                 "vision_patch": {"acceptance_summary": "Prove the outcome."},
             },
-            autonomous_replan_ack={"recorded": True},
+            autonomous_replan_ack={
+                "recorded": True,
+                "semantic_delta": {
+                    "accepted": True,
+                    "outcomes": ["fresh_vision_path_outcome"],
+                },
+            },
         ),
         _run(
             "2026-08-09T00:00:00Z",
@@ -155,6 +161,36 @@ def test_rejected_replan_feedback_survives_compaction_and_semantic_history() -> 
     assert context["latest_replan_ack_feedback_run"] is compacted
 
 
+def test_rejected_ack_does_not_shadow_older_accepted_semantic_ack() -> None:
+    accepted = _run(
+        "2026-08-09T00:05:00Z",
+        autonomous_replan_ack={
+            "recorded": True,
+            "semantic_delta": {
+                "accepted": True,
+                "outcomes": ["fresh_vision_path_outcome"],
+            },
+        },
+    )
+    rejected = _run(
+        "2026-08-09T00:06:00Z",
+        classification="replan_noop",
+        autonomous_replan_ack={"recorded": False},
+        replan_ack_feedback={
+            "schema_version": "replan_ack_feedback_v0",
+            "reason": "the attempted delta did not satisfy the obligation",
+        },
+    )
+
+    context = _agent_context(
+        goal_semantic_history_from_runs([rejected, accepted]),
+        AGENT_ID,
+    )
+
+    assert context["latest_autonomous_replan_ack_run"] is accepted
+    assert context["latest_replan_ack_feedback_run"] is rejected
+
+
 def test_in_flight_todo_binding_survives_run_compaction() -> None:
     compacted = compact_run(
         _run(
@@ -185,6 +221,39 @@ def test_in_flight_todo_binding_survives_run_compaction() -> None:
     assert compacted["vision_checkpoint"]["triggers"] == [
         {"kind": "in_flight_continuation", "todo_id": "todo_current001"}
     ]
+
+
+def test_unchanged_vision_revision_survives_run_compaction() -> None:
+    compacted = compact_run(
+        _run(
+            "2026-08-09T00:08:00Z",
+            delivery_outcome="outcome_progress",
+            vision_checkpoint={
+                "schema_version": "vision_checkpoint_v0",
+                "agent_id": AGENT_ID,
+                "required": True,
+                "satisfied": True,
+                "decision": "unchanged_with_reason",
+                "unchanged_reason": "The evidence-linked route remains current.",
+                "continuity_basis": {
+                    "kind": "existing_vision_unchanged",
+                    "vision_generated_at": "2026-08-09T00:05:00Z",
+                    "private_extra": "drop-me",
+                },
+                "triggers": [
+                    {
+                        "kind": "material_delivery_outcome",
+                        "delivery_outcome": "outcome_progress",
+                    }
+                ],
+            },
+        )
+    )
+
+    assert compacted["vision_checkpoint"]["continuity_basis"] == {
+        "kind": "existing_vision_unchanged",
+        "vision_generated_at": "2026-08-09T00:05:00Z",
+    }
 
 
 def test_default_delivery_boundary_is_implicit_after_run_compaction() -> None:

@@ -140,6 +140,9 @@ def latest_outcome_vision_checkpoint_from_status_payload(
             else [],
             "generated_at": run.get("generated_at"),
         }
+        continuity_basis = checkpoint.get("continuity_basis")
+        if isinstance(continuity_basis, dict):
+            result["continuity_basis"] = dict(continuity_basis)
         run_vision = run.get("agent_vision")
         if isinstance(run_vision, dict):
             result["qualification_agent_vision"] = {
@@ -256,10 +259,17 @@ def acceptance_gaps_from_outcome_checkpoint(
         and checkpoint.get("generated_at")
         == qualification_vision.get("generated_at")
     )
+    continuity_basis = _dict_field(checkpoint, "continuity_basis")
+    unchanged_vision_revision = bool(
+        checkpoint.get("decision") == "unchanged_with_reason"
+        and continuity_basis.get("kind") == "existing_vision_unchanged"
+        and continuity_basis.get("vision_generated_at")
+        == qualification_vision.get("generated_at")
+    )
     outcome_gap_reported = "outcome_gap" in delivery_outcomes
     checkpoint_complete = bool(
         checkpoint.get("satisfied") is True
-        and fresh_vision_patch
+        and (fresh_vision_patch or unchanged_vision_revision)
         and claim
         and evidence_refs
         and path_outcome in VISION_OUTCOME_CHECKPOINT_CONTINUATION_OUTCOMES
@@ -286,6 +296,7 @@ def acceptance_gaps_from_outcome_checkpoint(
         "checkpoint_decision": checkpoint.get("decision"),
         "delivery_outcomes": delivery_outcomes[:3],
         "fresh_vision_patch": fresh_vision_patch,
+        "unchanged_vision_revision": unchanged_vision_revision,
         "path_outcome": path_outcome,
         "evidence_ref_count": len(evidence_refs),
         "required_path_outcomes": ["continue", "no_change", "replan"],

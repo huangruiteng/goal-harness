@@ -83,4 +83,12 @@ def build_vision_checkpoint(
         or not isinstance(result.get("delivery_boundary"), str)
     ):
         raise RuntimeError("TypeScript vision checkpoint result shape mismatch")
+    continuity_basis = result.get("continuity_basis")
+    if continuity_basis is not None and not (
+        isinstance(continuity_basis, dict)
+        and continuity_basis.get("kind") == "existing_vision_unchanged"
+        and isinstance(continuity_basis.get("vision_generated_at"), str)
+        and continuity_basis["vision_generated_at"].strip()
+    ):
+        raise RuntimeError("TypeScript vision checkpoint result shape mismatch")
     return result
