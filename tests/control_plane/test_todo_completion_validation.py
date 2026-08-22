@@ -5,12 +5,26 @@ import re
 import shlex
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import loopx.control_plane.todos.completion_validation as completion_validation_module
+from loopx.event_sourced_state import (
+    TODO_ADDED,
+    TODO_COMPLETED,
+    AppendOnlyStateEventStore,
+    PUBLIC_BACKFILL_REDACTION,
+    backfill_todo_events_from_markdown,
+    build_state_projection,
+    make_state_event,
+    render_todo_markdown,
+)
 from loopx.status import parse_active_state_todos
-from loopx.todos import add_goal_todo, complete_goal_todo, update_goal_todo
+from loopx.control_plane.todos.completion_validation_projection import (
+    project_completion_validation_authority,
+)
+from loopx.todos import add_goal_todo, complete_goal_todo, list_goal_todos, update_goal_todo
 
 GOAL_ID = "todo-completion-validation"
 AGENT = "codex-author"
@@ -605,3 +619,520 @@ def test_agent_todo_update_done_keeps_guard_error_without_running_gate(
     # The gate never runs for agent sections; the pre-existing guard fires.
     assert calls["count"] == 0
     assert _agent_todo(state, str(todo["todo_id"]))["status"] == "open"
+
+
+def _add_event_only_todo(
+    state: Path,
+    *,
+    todo_id: str = "todo_event_validation",
+    validation_command: str | None = None,
+    validation_command_argv: list[str] | None = None,
+    validation_label: str | None = None,
+    validation_timeout_seconds: int | None = None,
+) -> str:
+    store = AppendOnlyStateEventStore(state.with_name("events.jsonl"))
+    payload: dict[str, Any] = {
+        "role": "agent",
+        "title": "Deliver one event-projected change.",
+        "task_class": "advancement_task",
+        "claimed_by": AGENT,
+    }
+    if validation_command:
+        payload["validation_command"] = validation_command
+    if validation_command_argv is not None:
+        payload["validation_command_argv"] = validation_command_argv
+    if validation_label:
+        payload["validation_label"] = validation_label
+    if validation_timeout_seconds is not None:
+        payload["validation_timeout_seconds"] = validation_timeout_seconds
+    store.append(
+        make_state_event(
+            event_id=f"evt-{todo_id}-add",
+            goal_id=GOAL_ID,
+            event_type=TODO_ADDED,
+            refs={"todo_id": todo_id},
+            payload=payload,
+            recorded_at="2026-08-22T00:00:00+00:00",
+        )
+    )
+    return todo_id
+
+
+def _event_todo_completed_count(state: Path) -> int:
+    events = AppendOnlyStateEventStore(state.with_name("events.jsonl")).load()
+    return sum(event["event_type"] == TODO_COMPLETED for event in events)
+
+
+def test_event_projected_failing_validation_blocks_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo_id = _add_event_only_todo(
+        state,
+        validation_command=_FAIL_COMMAND,
+        validation_label="event-projected smoke",
+    )
+    calls = _spy_validation_runner(monkeypatch)
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="claim of completion",
+        no_followup=True,
+    )
+
+    assert calls["count"] == 1
+    assert result["ok"] is False
+    assert result["validation_blocked_completion"] is True
+    assert result["changed"] is False
+    assert result["validation"]["passed"] is False
+    assert _event_todo_completed_count(state) == 0
+
+
+def test_event_projected_passing_validation_commits_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo_id = _add_event_only_todo(
+        state,
+        validation_command=_PASS_COMMAND,
+        validation_label="event-projected smoke",
+    )
+    calls = _spy_validation_runner(monkeypatch)
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="validated completion",
+        no_followup=True,
+    )
+
+    assert calls["count"] == 1
+    assert result["ok"] is True
+    assert result["changed"] is True
+    assert result["source"] == "event_log"
+    assert "validation_blocked_completion" not in result
+    assert _event_todo_completed_count(state) == 1
+
+
+def test_event_projected_without_validation_keeps_fast_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo_id = _add_event_only_todo(state)
+    calls = _spy_validation_runner(monkeypatch)
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="undeclared fast path",
+        no_followup=True,
+    )
+
+    assert calls["count"] == 0
+    assert result["ok"] is True
+    assert result["changed"] is True
+    assert result["source"] == "event_log"
+    assert _event_todo_completed_count(state) == 1
+
+
+def test_event_projection_preserves_declared_validation_command() -> None:
+    events = backfill_todo_events_from_markdown(
+        "\n".join(
+            [
+                "## Agent Todo",
+                "",
+                "- [ ] Deliver one event-projected change.",
+                (
+                    "  <!-- loopx:todo todo_id=todo_event_val001 status=open "
+                    "task_class=advancement_task claimed_by=codex-author "
+                    "validation_command=pytest validation_label=caller-smoke "
+                    "validation_timeout_seconds=5 -->"
+                ),
+            ]
+        ),
+        goal_id=GOAL_ID,
+    )
+    projection = build_state_projection(events)
+    item = projection["agent_todos"]["items"][0]
+    assert item["validation_command"] == "pytest"
+    assert item["validation_label"] == "caller-smoke"
+    assert item["validation_timeout_seconds"] == "5"
+    rendered = "\n".join(render_todo_markdown(item))
+    assert "validation_command=pytest" in rendered
+    assert "validation_timeout_seconds=5" in rendered
+    public = project_completion_validation_authority(item)
+    assert public["completion_validation_required"] is True
+    assert "validation_command" not in public
+    assert "validation_timeout_seconds" not in public
+    assert "validation_command_argv" not in public
+    assert "validation_label" not in public
+
+
+def test_event_projected_passing_argv_commits_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo_id = _add_event_only_todo(
+        state,
+        todo_id="todo_event_argv_pass",
+        validation_command_argv=[sys.executable, "-c", "pass"],
+        validation_label="event argv smoke",
+    )
+    calls = _spy_validation_runner(monkeypatch)
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="validated argv completion",
+        no_followup=True,
+    )
+    assert calls["count"] == 1
+    assert result["ok"] is True
+    assert result["changed"] is True
+    assert result["source"] == "event_log"
+    assert _event_todo_completed_count(state) == 1
+
+
+def test_event_projected_failing_argv_blocks_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo_id = _add_event_only_todo(
+        state,
+        todo_id="todo_event_argv",
+        validation_command_argv=[sys.executable, "-c", "raise SystemExit(1)"],
+        validation_label="event argv smoke",
+    )
+    calls = _spy_validation_runner(monkeypatch)
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="claim of completion",
+        no_followup=True,
+    )
+    assert calls["count"] == 1
+    assert result["ok"] is False
+    assert result["validation_blocked_completion"] is True
+    assert _event_todo_completed_count(state) == 0
+
+
+def test_event_projected_empty_argv_fails_closed(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo_id = _add_event_only_todo(
+        state,
+        todo_id="todo_event_empty_argv",
+        validation_command_argv=[],
+    )
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="corrupted argv must not skip the gate",
+        no_followup=True,
+    )
+    assert result["ok"] is False
+    assert result["validation_blocked_completion"] is True
+    assert result["validation"]["status"] == "command_malformed"
+    assert _event_todo_completed_count(state) == 0
+
+
+def test_event_projected_timeout_blocks_completion(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo_id = _add_event_only_todo(
+        state,
+        todo_id="todo_event_timeout",
+        validation_command=_SLEEP_COMMAND,
+        validation_timeout_seconds=1,
+    )
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="timed-out claim",
+        no_followup=True,
+    )
+    assert result["ok"] is False
+    assert result["validation_blocked_completion"] is True
+    assert result["validation"]["status"] == "timeout"
+    assert _event_todo_completed_count(state) == 0
+
+
+def test_markdown_todo_remains_authoritative_over_event_declaration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = _add_todo(registry)
+    _add_event_only_todo(
+        state,
+        todo_id=str(todo["todo_id"]),
+        validation_command=_FAIL_COMMAND,
+    )
+    calls = _spy_validation_runner(monkeypatch)
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=str(todo["todo_id"]),
+        agent_id=AGENT,
+        evidence="markdown has no declared command",
+        no_followup=True,
+    )
+    assert calls["count"] == 0
+    assert result["ok"] is True
+    assert result["changed"] is True
+    assert "validation_blocked_completion" not in result
+
+
+def test_event_list_projection_strips_command_but_complete_still_runs_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo_id = _add_event_only_todo(
+        state,
+        todo_id="todo_event_list_strip",
+        validation_command_argv=[sys.executable, "-c", "raise SystemExit(1)"],
+        validation_label="must not leak",
+        validation_timeout_seconds=5,
+    )
+    listed = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)
+    item = next(todo for todo in listed["todos"] if todo["todo_id"] == todo_id)
+    assert item.get("completion_validation_required") is True
+    assert "validation_command" not in item
+    assert "validation_command_argv" not in item
+    assert "validation_label" not in item
+    assert "validation_timeout_seconds" not in item
+    calls = _spy_validation_runner(monkeypatch)
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="list stripping must not disable the gate",
+        no_followup=True,
+    )
+    assert calls["count"] == 1
+    assert result["ok"] is False
+    assert result["validation_blocked_completion"] is True
+    assert _event_todo_completed_count(state) == 0
+
+
+def test_event_projected_corrupt_argv_object_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    store = AppendOnlyStateEventStore(state.with_name("events.jsonl"))
+    todo_id = "todo_event_corrupt_argv"
+    store.append(
+        make_state_event(
+            event_id=f"evt-{todo_id}-add",
+            goal_id=GOAL_ID,
+            event_type=TODO_ADDED,
+            refs={"todo_id": todo_id},
+            payload={
+                "role": "agent",
+                "title": "Deliver one event-projected change.",
+                "task_class": "advancement_task",
+                "claimed_by": AGENT,
+                "validation_command_argv": {},
+            },
+            recorded_at="2026-08-22T00:00:00+00:00",
+        )
+    )
+    calls = _spy_validation_runner(monkeypatch)
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="corrupt argv must not skip the gate",
+        no_followup=True,
+    )
+    assert calls["count"] == 1
+    assert result["ok"] is False
+    assert result["validation_blocked_completion"] is True
+    assert result["validation"]["status"] == "command_malformed"
+    assert _event_todo_completed_count(state) == 0
+
+
+def test_event_projected_null_argv_string_fails_closed(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
+    store = AppendOnlyStateEventStore(state.with_name("events.jsonl"))
+    todo_id = "todo_event_null_argv"
+    store.append(
+        make_state_event(
+            event_id=f"evt-{todo_id}-add",
+            goal_id=GOAL_ID,
+            event_type=TODO_ADDED,
+            refs={"todo_id": todo_id},
+            payload={
+                "role": "agent",
+                "title": "Deliver one event-projected change.",
+                "task_class": "advancement_task",
+                "claimed_by": AGENT,
+                "validation_command_argv": "null",
+            },
+            recorded_at="2026-08-22T00:00:00+00:00",
+        )
+    )
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="null argv string must fail closed",
+        no_followup=True,
+    )
+    assert result["ok"] is False
+    assert result["validation_blocked_completion"] is True
+    assert result["validation"]["status"] == "command_malformed"
+    public = project_completion_validation_authority(
+        {"validation_command_argv": "null"}
+    )
+    assert public["completion_validation_required"] is True
+    assert "validation_command_argv" not in public
+
+
+def test_event_log_for_another_goal_does_not_supply_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    store = AppendOnlyStateEventStore(state.with_name("events.jsonl"))
+    todo_id = "todo_event_foreign_goal"
+    store.append(
+        make_state_event(
+            event_id=f"evt-{todo_id}-add",
+            goal_id="other-goal",
+            event_type=TODO_ADDED,
+            refs={"todo_id": todo_id},
+            payload={
+                "role": "agent",
+                "title": "Deliver one event-projected change.",
+                "task_class": "advancement_task",
+                "claimed_by": AGENT,
+                "validation_command": _FAIL_COMMAND,
+            },
+            recorded_at="2026-08-22T00:00:00+00:00",
+        )
+    )
+    calls = _spy_validation_runner(monkeypatch)
+    with pytest.raises(ValueError, match="was not found"):
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo_id,
+            agent_id=AGENT,
+            evidence="foreign goal declaration must not run",
+            no_followup=True,
+        )
+    assert calls["count"] == 0
+
+
+def test_missing_markdown_file_gate_still_reads_event_declaration(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo_id = _add_event_only_todo(
+        state,
+        todo_id="todo_event_no_markdown",
+        validation_command=_FAIL_COMMAND,
+    )
+    state.unlink()
+    result = completion_validation_module.run_completion_validation_gate(
+        state_file=state,
+        todo_id=todo_id,
+        role="agent",
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        dry_run=False,
+    )
+    assert result is not None
+    assert result["ok"] is False
+    assert result["validation_blocked_completion"] is True
+    assert _event_todo_completed_count(state) == 0
+
+
+def test_sidecar_declaration_is_not_masked_by_earlier_undeclared_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo_id = "todo_event_two_logs"
+    older = state.with_name("older-events.jsonl")
+    AppendOnlyStateEventStore(older).append(
+        make_state_event(
+            event_id=f"evt-{todo_id}-old",
+            goal_id=GOAL_ID,
+            event_type=TODO_ADDED,
+            refs={"todo_id": todo_id},
+            payload={
+                "role": "agent",
+                "title": "Deliver one event-projected change.",
+                "task_class": "advancement_task",
+                "claimed_by": AGENT,
+            },
+            recorded_at="2026-08-21T00:00:00+00:00",
+        )
+    )
+    _add_event_only_todo(
+        state,
+        todo_id=todo_id,
+        validation_command=_FAIL_COMMAND,
+    )
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    data["goals"][0]["event_log"] = str(older)
+    registry.write_text(json.dumps(data), encoding="utf-8")
+    calls = _spy_validation_runner(monkeypatch)
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        agent_id=AGENT,
+        evidence="older undeclared snapshot must not skip the sidecar gate",
+        no_followup=True,
+    )
+    assert calls["count"] == 1
+    assert result["ok"] is False
+    assert result["validation_blocked_completion"] is True
+    assert _event_todo_completed_count(state) == 0
+
+
+def test_public_safe_backfill_redacts_unsafe_validation_command() -> None:
+    events = backfill_todo_events_from_markdown(
+        "\n".join(
+            [
+                "## Agent Todo",
+                "",
+                "- [ ] Deliver one event-projected change.",
+                (
+                    "  <!-- loopx:todo todo_id=todo_event_val_redact status=open "
+                    "task_class=advancement_task claimed_by=codex-author "
+                    "validation_command=/Users/loopx/bin/pytest -->"
+                ),
+            ]
+        ),
+        goal_id=GOAL_ID,
+        privacy="public_safe",
+    )
+    payload = events[0]["payload"]
+    assert payload["validation_command"] == PUBLIC_BACKFILL_REDACTION
+    assert "/Users/" not in json.dumps(events)

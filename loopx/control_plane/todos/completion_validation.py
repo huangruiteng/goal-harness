@@ -5,14 +5,21 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from ...event_sourced_state import (
+    AppendOnlyStateEventStore,
+    StateEventError,
+    build_state_projection,
+)
 from ...history import load_registry
 from ...materials import find_registry_goal, goal_repo
+from ..goals.active_state_event_projection import state_event_log_candidates
+from ..goals.path_resolution import resolve_goal_local_path
 from ..runtime.validation_command import (
     CALLER_VALIDATION_RECEIPT_SCHEMA_VERSION,
     run_caller_validation,
 )
 from .active_state_editing import find_todo_block
-from .contract import TODO_STATUS_DONE
+from .contract import TODO_STATUS_DONE, normalize_todo_id
 
 # Kept safely under the 30s outer CLI/MCP subprocess budget so a timed-out
 # validation still produces a typed receipt before the outer call is killed.
@@ -33,35 +40,10 @@ def _resolve_goal_repo_workspace(registry_path: Path, goal_id: str) -> Path | No
     return repo
 
 
-def _read_declared_validation(
-    *, state_file: Path, todo_id: str, role: str | None
+def _declaration_from_mapping(
+    block: dict[str, Any],
 ) -> tuple[str | None, list[str] | None, str | None, int | None, bool]:
-    """Pre-read a todo's declared validation command without the mutation lock.
-
-    Returns ``(validation_command, validation_argv, validation_label,
-    validation_timeout_seconds, already_completed)`` from the markdown state
-    file, or ``(None, None, None, None, False)`` when the todo is not
-    materialized in markdown. Read-only; safe to call before acquiring the
-    state-file lock so a slow validation command does not block concurrent todo
-    operations on the same goal (the MUTATION lock deadline is 5s).
-    ``validation_command``, ``validation_command_argv`` and
-    ``validation_timeout_seconds`` are set only at ``todo add`` and have no
-    update path, so the values cannot drift between this pre-read and the
-    in-lock commit. A stored timeout that fails to parse as an int falls back
-    to ``None`` (the default), matching the writer-side range check that
-    guarantees a well-formed value. A stored argv that fails to parse as a
-    non-empty string list collapses to ``[]`` — never to ``None`` — so a
-    corrupted declaration still runs the gate and fails closed as a malformed
-    command instead of silently skipping validation.
-    """
-    try:
-        lines = state_file.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return None, None, None, None, False
-    match = find_todo_block(lines, todo_id=todo_id, role=role)
-    if not match:
-        return None, None, None, None, False
-    _role, _section, _start, _end, block = match
+    """Parse a stored validation declaration from markdown or event projection."""
     try:
         timeout_seconds: int | None = (
             int(block["validation_timeout_seconds"])
@@ -71,11 +53,15 @@ def _read_declared_validation(
     except (TypeError, ValueError):
         timeout_seconds = None
     validation_argv: list[str] | None = None
-    if block.get("validation_command_argv"):
-        try:
-            parsed_argv = json.loads(block["validation_command_argv"])
-        except ValueError:
-            parsed_argv = None
+    raw_argv = block.get("validation_command_argv")
+    if raw_argv is not None and raw_argv != "":
+        if isinstance(raw_argv, list):
+            parsed_argv: Any = raw_argv
+        else:
+            try:
+                parsed_argv = json.loads(raw_argv)
+            except ValueError:
+                parsed_argv = None
         if (
             isinstance(parsed_argv, list)
             and parsed_argv
@@ -84,13 +70,121 @@ def _read_declared_validation(
             validation_argv = parsed_argv
         else:
             validation_argv = []
+    already_completed = (
+        block.get("status") == TODO_STATUS_DONE or block.get("done") is True
+    )
     return (
         block.get("validation_command") or None,
         validation_argv,
         block.get("validation_label") or None,
         timeout_seconds,
-        block.get("status") == TODO_STATUS_DONE,
+        already_completed,
     )
+
+
+def _event_projected_todo_item(
+    *,
+    state_file: Path,
+    todo_id: str,
+    role: str | None,
+    registry_path: Path,
+    goal_id: str,
+) -> dict[str, Any] | None:
+    """Read one todo from the append-only event log without holding the lock.
+
+    Do not reuse ``event_projection_todo_context`` here. That helper renders
+    Markdown and runs the public status projector, which strips
+    ``validation_command`` / argv down to ``completion_validation_required``.
+    The completion gate needs the actual declared command, so it must read the
+    raw event-sourced projection. When multiple logs contain the same todo,
+    a later log that still carries a validation declaration wins over an
+    earlier log that only has the todo identity; otherwise an older undeclared
+    snapshot would skip the gate.
+    """
+    goal = find_registry_goal(load_registry(registry_path), goal_id)
+    if goal is None:
+        log_paths = [state_file.with_name("events.jsonl")]
+    else:
+        log_paths = state_event_log_candidates(
+            goal,
+            state_path=state_file,
+            resolve_goal_local_path=resolve_goal_local_path,
+        )
+    normalized_todo_id = normalize_todo_id(todo_id) or todo_id
+    roles = [role] if role in {"user", "agent"} else ["user", "agent"]
+    undeclared_item: dict[str, Any] | None = None
+    for log_path in log_paths:
+        if not log_path.exists():
+            continue
+        try:
+            events = AppendOnlyStateEventStore(log_path).load()
+            if not events:
+                continue
+            projection = build_state_projection(events, goal_id=goal_id or None)
+        except (OSError, StateEventError):
+            continue
+        for item_role in roles:
+            summary = projection.get(f"{item_role}_todos") or {}
+            items = summary.get("items") if isinstance(summary, dict) else []
+            for item in items if isinstance(items, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                if (normalize_todo_id(item.get("todo_id")) or "") != normalized_todo_id:
+                    continue
+                command, argv, _label, _timeout, _done = _declaration_from_mapping(item)
+                if command or argv is not None:
+                    return item
+                if undeclared_item is None:
+                    undeclared_item = item
+    return undeclared_item
+
+
+def _read_declared_validation(
+    *,
+    state_file: Path,
+    todo_id: str,
+    role: str | None,
+    registry_path: Path,
+    goal_id: str,
+) -> tuple[str | None, list[str] | None, str | None, int | None, bool]:
+    """Pre-read a todo's declared validation command without the mutation lock.
+
+    Returns ``(validation_command, validation_argv, validation_label,
+    validation_timeout_seconds, already_completed)`` from the markdown state
+    file, or from the event-sourced projection when the todo exists only in
+    the append-only log. Missing todos return
+    ``(None, None, None, None, False)``. Read-only; safe to call before
+    acquiring the state-file lock so a slow validation command does not block
+    concurrent todo operations on the same goal (the MUTATION lock deadline
+    is 5s). ``validation_command``, ``validation_command_argv`` and
+    ``validation_timeout_seconds`` are set only at ``todo add`` and have no
+    update path, so the values cannot drift between this pre-read and the
+    in-lock commit. A stored timeout that fails to parse as an int falls back
+    to ``None`` (the default), matching the writer-side range check that
+    guarantees a well-formed value. A stored argv that fails to parse as a
+    non-empty string list collapses to ``[]`` — never to ``None`` — so a
+    corrupted declaration still runs the gate and fails closed as a malformed
+    command instead of silently skipping validation. Markdown remains
+    authoritative when the todo is materialized there.
+    """
+    try:
+        lines = state_file.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    match = find_todo_block(lines, todo_id=todo_id, role=role) if lines else None
+    if match:
+        _role, _section, _start, _end, block = match
+        return _declaration_from_mapping(block)
+    item = _event_projected_todo_item(
+        state_file=state_file,
+        todo_id=todo_id,
+        role=role,
+        registry_path=registry_path,
+        goal_id=goal_id,
+    )
+    if item is None:
+        return None, None, None, None, False
+    return _declaration_from_mapping(item)
 
 
 def _run_declared_completion_validation(
@@ -221,7 +315,13 @@ def run_completion_validation_gate(
         validation_label,
         validation_timeout_seconds,
         already_completed,
-    ) = _read_declared_validation(state_file=state_file, todo_id=todo_id, role=role)
+    ) = _read_declared_validation(
+        state_file=state_file,
+        todo_id=todo_id,
+        role=role,
+        registry_path=registry_path,
+        goal_id=goal_id,
+    )
     completion_validation = (
         _run_declared_completion_validation(
             validation_command=validation_command,

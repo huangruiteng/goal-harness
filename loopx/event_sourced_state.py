@@ -116,6 +116,32 @@ def compact_text(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
 
 
+def _copy_todo_added_validation_fields(
+    source: dict[str, Any], target: dict[str, Any]
+) -> None:
+    """Copy caller-approved completion validation fields from a TODO_ADDED payload."""
+    for key in (
+        "validation_command",
+        "validation_label",
+        "validation_timeout_seconds",
+    ):
+        value = compact_text(source.get(key))
+        if value:
+            target[key] = value
+    argv = source.get("validation_command_argv")
+    if "validation_command_argv" not in source:
+        return
+    if isinstance(argv, list):
+        target["validation_command_argv"] = json.dumps(
+            argv, separators=(",", ":"), ensure_ascii=False
+        )
+        return
+    compact_argv = compact_text(argv)
+    # Persist a gate-visible value even for empty/corrupt payloads so complete
+    # fail-closes as malformed instead of treating the declaration as absent.
+    target["validation_command_argv"] = compact_argv if compact_argv else "[]"
+
+
 def _redact_public_backfill_text(value: Any, *, privacy: str) -> str:
     text = compact_text(value)
     if privacy != PUBLIC_PRIVACY:
@@ -326,6 +352,17 @@ def backfill_todo_events_from_markdown(
             payload["global_gate"] = global_gate
         if excluded_agents:
             payload["excluded_agents"] = excluded_agents
+        _copy_todo_added_validation_fields(record, payload)
+        if privacy == PUBLIC_PRIVACY:
+            for key in (
+                "validation_command",
+                "validation_command_argv",
+                "validation_label",
+            ):
+                if key in payload:
+                    payload[key] = _redact_public_backfill_text(
+                        payload[key], privacy=privacy
+                    )
         events.append(
             make_state_event(
                 event_id=_backfill_event_id(goal_id=normalized_goal_id, todo_id=todo_id, suffix="add"),
@@ -701,6 +738,7 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
         todo["claimed_by"] = claimed_by
     if actor_agent_id:
         todo["created_by"] = actor_agent_id
+    _copy_todo_added_validation_fields(payload, todo)
     return todo
 
 
@@ -951,6 +989,14 @@ def render_todo_markdown(item: dict[str, Any]) -> list[str]:
         **monitor_metadata,
         note=item.get("note"),
         evidence=item.get("evidence"),
+        validation_command=item.get("validation_command"),
+        validation_command_argv=item.get("validation_command_argv"),
+        validation_label=item.get("validation_label"),
+        validation_timeout_seconds=(
+            str(item.get("validation_timeout_seconds"))
+            if item.get("validation_timeout_seconds") is not None
+            else None
+        ),
         completion_turn_key=item.get("completion_turn_key"),
         reason=item.get("reason"),
         completed_at=item.get("completed_at"),

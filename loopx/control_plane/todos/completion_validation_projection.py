@@ -15,10 +15,12 @@ def project_completion_validation_authority(item: dict[str, Any]) -> dict[str, A
     """Replace private validation execution details with one authority marker."""
 
     projected = dict(item)
-    required = bool(str(projected.pop("validation_command", "") or "").strip())
+    command = str(projected.pop("validation_command", "") or "").strip()
+    argv = projected.pop("validation_command_argv", None)
     projected.pop("validation_label", None)
     projected.pop("validation_timeout_seconds", None)
-    if required:
+    argv_declared = argv is not None and str(argv).strip() != ""
+    if command or argv_declared:
         projected["completion_validation_required"] = True
     return projected
 
