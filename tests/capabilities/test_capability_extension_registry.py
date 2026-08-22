@@ -41,6 +41,7 @@ BUILTIN_IDS = [
     "explore",
     "auto-research",
     "public-safe-outbound",
+    "connector-registry",
 ]
 
 
@@ -147,6 +148,26 @@ def test_material_lifecycle_catalog_exposes_managed_project_skill() -> None:
         "install_command": (
             "loopx project-skill install --project . --skill "
             "loopx-material --surface codex --execute"
+        ),
+    }
+
+
+def test_benchmark_toolkit_catalog_exposes_packaged_task_triggered_skill() -> None:
+    capability = build_capability_detail_packet("benchmark-toolkit")["capability"]
+
+    assert capability["origin"] == "builtin"
+    assert capability["workflow_skill"] == {
+        "name": "loopx-benchmark",
+        "delivery": "packaged_host_skill",
+        "activation": "task_triggered",
+        "goal_switch_required": False,
+        "project_copy_required": False,
+        "install_command": "loopx workflow-skills --install",
+        "readback_command": "loopx doctor",
+        "authority_boundary": (
+            "Skill discovery does not grant runner, shell, network, credential, "
+            "private-evidence, or Goal mutation authority; todo requirements, "
+            "provider bindings, and host permissions remain authoritative."
         ),
     }
 

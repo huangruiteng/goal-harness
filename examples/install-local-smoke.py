@@ -22,6 +22,7 @@ from loopx import __version__  # noqa: E402
 from loopx.doctor import add_promotion_readiness_freshness, build_install_freshness  # noqa: E402
 from loopx.release_manifest import release_version_tag  # noqa: E402
 from loopx.release_manifest import build_release_manifest, load_release_manifest  # noqa: E402
+from loopx.skill_install_readback import PACKAGED_HOST_SKILL_IDS  # noqa: E402
 
 
 def git_output(args: list[str]) -> str | None:
@@ -244,11 +245,10 @@ def main() -> int:
             f"- legacy command disabled: {bin_dir / 'goal-harness-canary.legacy-disabled'}"
             in install.stdout
         ), install.stdout
-        assert f"- skill: {codex_home / 'skills' / 'loopx-doc-registry'}" in install.stdout, install.stdout
-        assert f"- skill: {codex_home / 'skills' / 'loopx-pr-program'}" in install.stdout, install.stdout
-        assert f"- skill: {codex_home / 'skills' / 'loopx-pr-review'}" in install.stdout, install.stdout
-        assert f"- skill: {codex_home / 'skills' / 'loopx-project'}" in install.stdout, install.stdout
-        assert f"- skill: {codex_home / 'skills' / 'loopx-self-repair'}" in install.stdout, install.stdout
+        for skill_id in PACKAGED_HOST_SKILL_IDS:
+            assert (
+                f"- skill: {codex_home / 'skills' / skill_id}" in install.stdout
+            ), install.stdout
         assert "project skill source:" in install.stdout, install.stdout
         assert "install explicitly per project" in install.stdout, install.stdout
         assert f"codex skills: {codex_home / 'skills'}" in install.stdout, install.stdout
@@ -359,11 +359,7 @@ def main() -> int:
         assert skill_readback["source"]["revision"] == source_commit
         assert set(skill_readback["materialized_skill_ids"]) == {
             "loopx",
-            "loopx-doc-registry",
-            "loopx-pr-program",
-            "loopx-pr-review",
-            "loopx-project",
-            "loopx-self-repair",
+            *PACKAGED_HOST_SKILL_IDS,
         }
         skill_text = skill.read_text(encoding="utf-8")
         compact_skill_text = " ".join(skill_text.split())
@@ -481,6 +477,16 @@ def main() -> int:
             "loopx --registry .loopx/registry.json register-authority-source",
         ):
             assert phrase in doc_registry_text, phrase
+        benchmark_skill = codex_home / "skills" / "loopx-benchmark" / "SKILL.md"
+        benchmark_text = " ".join(
+            benchmark_skill.read_text(encoding="utf-8").split()
+        )
+        assert "builtin `benchmark-toolkit` capability" in benchmark_text
+        assert "without a per-Goal enable switch" in benchmark_text
+        benchmark_metadata = benchmark_skill.parent / "agents" / "openai.yaml"
+        assert 'display_name: "LoopX Benchmark"' in benchmark_metadata.read_text(
+            encoding="utf-8"
+        )
         self_repair_skill = codex_home / "skills" / "loopx-self-repair" / "SKILL.md"
         self_repair_text = " ".join(self_repair_skill.read_text(encoding="utf-8").split())
         for phrase in (
@@ -521,13 +527,7 @@ def main() -> int:
         assert (
             codex_home / "skills" / "loopx-self-repair" / "agents" / "openai.yaml"
         ).is_file()
-        for implicit_skill_name in (
-            "loopx-project",
-            "loopx-pr-program",
-            "loopx-pr-review",
-            "loopx-doc-registry",
-            "loopx-self-repair",
-        ):
+        for implicit_skill_name in PACKAGED_HOST_SKILL_IDS:
             implicit_metadata = codex_home / "skills" / implicit_skill_name / "agents" / "openai.yaml"
             if implicit_metadata.exists():
                 implicit_metadata_text = implicit_metadata.read_text(encoding="utf-8")
@@ -594,16 +594,11 @@ def main() -> int:
             "loopx-change-quality",
         }.issubset(set(doctor_payload["project_scoped_skill_ids"])), doctor_payload
         assert doctor_payload["globally_visible_project_skills"] == [], doctor_payload
-        assert doctor_payload["skills"]["loopx-project"]["exists"] is True, doctor_payload
-        assert doctor_payload["skills"]["loopx-project"]["required_phrases"] is True, doctor_payload
-        assert doctor_payload["skills"]["loopx-pr-program"]["exists"] is True, doctor_payload
-        assert doctor_payload["skills"]["loopx-pr-program"]["required_phrases"] is True, doctor_payload
-        assert doctor_payload["skills"]["loopx-pr-review"]["exists"] is True, doctor_payload
-        assert doctor_payload["skills"]["loopx-pr-review"]["required_phrases"] is True, doctor_payload
-        assert doctor_payload["skills"]["loopx-doc-registry"]["exists"] is True, doctor_payload
-        assert doctor_payload["skills"]["loopx-doc-registry"]["required_phrases"] is True, doctor_payload
-        assert doctor_payload["skills"]["loopx-self-repair"]["exists"] is True, doctor_payload
-        assert doctor_payload["skills"]["loopx-self-repair"]["required_phrases"] is True, doctor_payload
+        for skill_id in PACKAGED_HOST_SKILL_IDS:
+            assert doctor_payload["skills"][skill_id]["exists"] is True, doctor_payload
+            assert (
+                doctor_payload["skills"][skill_id]["required_phrases"] is True
+            ), doctor_payload
         provenance = doctor_payload["release_provenance"]
         assert provenance["default_release"]["root"] == str(release_root), provenance
         assert provenance["default_release"]["release_id"] == release_root.name, provenance
@@ -648,7 +643,7 @@ def main() -> int:
         assert "installed_skill_delivery_hints: `True`" in doctor_markdown, doctor_markdown
         assert (
             "installed_required_skills: "
-            "`loopx-doc-registry,loopx-pr-program,loopx-pr-review,loopx-project,loopx-self-repair`"
+            f"`{','.join(sorted(PACKAGED_HOST_SKILL_IDS))}`"
             in doctor_markdown
         ), doctor_markdown
         assert "loopx_canary_realpath:" in doctor_markdown, doctor_markdown
@@ -689,11 +684,8 @@ def main() -> int:
             release_root=root / "releases" / "20260101T000000Z",
             repo_root=REPO_ROOT,
             skills={
-                "loopx-project": {"exists": True, "required_phrases": True},
-                "loopx-pr-program": {"exists": True, "required_phrases": True},
-                "loopx-pr-review": {"exists": True, "required_phrases": True},
-                "loopx-doc-registry": {"exists": True, "required_phrases": True},
-                "loopx-self-repair": {"exists": True, "required_phrases": True},
+                skill_id: {"exists": True, "required_phrases": True}
+                for skill_id in PACKAGED_HOST_SKILL_IDS
             },
             now=datetime(2026, 1, 9, tzinfo=timezone.utc),
         )
@@ -707,11 +699,8 @@ def main() -> int:
             release_root=root / "releases" / "20260108T000000Z",
             repo_root=REPO_ROOT,
             skills={
-                "loopx-project": {"exists": True, "required_phrases": True},
-                "loopx-pr-program": {"exists": True, "required_phrases": True},
-                "loopx-pr-review": {"exists": True, "required_phrases": True},
-                "loopx-doc-registry": {"exists": True, "required_phrases": True},
-                "loopx-self-repair": {"exists": True, "required_phrases": True},
+                skill_id: {"exists": True, "required_phrases": True}
+                for skill_id in PACKAGED_HOST_SKILL_IDS
             },
             now=datetime(2026, 1, 9, tzinfo=timezone.utc),
         )
@@ -723,11 +712,8 @@ def main() -> int:
             release_root=root / "releases" / "20260108T000000Z",
             repo_root=REPO_ROOT,
             skills={
-                "loopx-project": {"exists": True, "required_phrases": True},
-                "loopx-pr-program": {"exists": True, "required_phrases": True},
-                "loopx-pr-review": {"exists": True, "required_phrases": True},
-                "loopx-doc-registry": {"exists": True, "required_phrases": True},
-                "loopx-self-repair": {"exists": True, "required_phrases": True},
+                skill_id: {"exists": True, "required_phrases": True}
+                for skill_id in PACKAGED_HOST_SKILL_IDS
             },
             release_manifest={
                 "available": True,

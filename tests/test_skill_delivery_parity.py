@@ -69,13 +69,17 @@ class TestPackagedSkills:
         assert "loopx-pr-program" in REQUIRED_HOST_SKILL_IDS
         assert REQUIRED_HOST_SKILL_IDS is ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS
 
+    def test_benchmark_workflow_is_packaged(self):
+        assert "loopx-benchmark" in PACKAGED_HOST_SKILL_IDS
+        assert "loopx-benchmark" in REQUIRED_HOST_SKILL_IDS
+
     def test_packaged_skill_dirs_exist(self):
         skills_root = REPO_ROOT / "skills"
         for skill_id in PACKAGED_HOST_SKILL_IDS:
             assert (skills_root / skill_id / "SKILL.md").is_file(), skill_id
 
-    def test_repo_has_six_skills(self):
-        assert len(REQUIRED_HOST_SKILL_IDS) == 6  # loopx + 5 packaged
+    def test_repo_has_seven_skills(self):
+        assert len(REQUIRED_HOST_SKILL_IDS) == 7  # loopx + 6 packaged
 
 
 # -- Skill install readback lifecycle -----------------------------------------

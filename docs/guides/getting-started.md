@@ -469,6 +469,7 @@ The reusable skills have intentionally narrow jobs:
 | `loopx-pr-program` | Reconciling a multi-PR/MR delivery program, preserving requirement/dependency priority, maintaining a roadmap, and monitoring material changes. | Deep per-PR review, provider-specific acquisition, approval, commenting, retargeting, closing, or merging. |
 | `loopx-pr-review` | Running `/loopx-pr-review`, preserving the `loopx pr-review` packet, and guiding per-PR five-block reviews. | Approving, commenting on, merging, self-merging, or admin-bypassing a PR. |
 | `loopx-doc-registry` | Registering durable project material and redacted authority-source metadata. | Copying raw doc bodies, internal URLs, or private comments into public repo docs. |
+| `loopx-benchmark` | Running, monitoring, and analyzing a LoopX-managed benchmark experiment through the builtin `benchmark-toolkit` contract. | Casual benchmark discussion, ordinary microbenchmarks, or treating skill discovery as runner, credential, or private-evidence authority. |
 | `loopx-material` | Operating an explicitly activated project's lossless material inventory, lifecycle, ranked-entry rebuild, bounded rerank, owner-gated apply, and rollback. | Ordinary one-off reading, project-specific source discovery, or mutating a material store merely because the project skill is discoverable. |
 | `loopx-change-quality` | Reviewing one exact final diff, optionally applying one bounded safe fix, and recording a policy-enforced receipt. | Acting when the goal policy is disabled, recursively reviewing reviewers, or replacing project-native validators. |
 | `loopx-self-repair` | Repairing surprising control-plane behavior, stale projection, tiny turns, or contradictory guard payloads. | Lowering gates, guessing around missing authority, or committing private runtime state. |
@@ -570,6 +571,7 @@ rm -rf ~/.codex/skills/loopx-project \
        ~/.codex/skills/loopx-pr-program \
        ~/.codex/skills/loopx-pr-review \
        ~/.codex/skills/loopx-doc-registry \
+       ~/.codex/skills/loopx-benchmark \
        ~/.codex/skills/loopx-self-repair
 ```
 

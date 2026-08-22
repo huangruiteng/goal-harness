@@ -62,6 +62,12 @@ REQUIRED_INSTALLED_SKILL_PHRASES = {
         "use `.loopx/registry.json` as the project-local doc registry",
         "not a substitute for project-local authority registration",
     ),
+    "loopx-benchmark": (
+        "builtin `benchmark-toolkit` capability owns provider-neutral",
+        "without a per-Goal enable switch",
+        "Installing this skill does not grant runner",
+        "For a generic library microbenchmark",
+    ),
     "loopx-self-repair": (
         "Build a compact evidence packet",
         "loopx --format json diagnose --goal-id <goal-id>",

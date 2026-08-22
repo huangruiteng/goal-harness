@@ -97,6 +97,12 @@ include = ["loopx*"]
 "share/loopx/skills/loopx-doc-registry/agents" = [
   "skills/loopx-doc-registry/agents/openai.yaml",
 ]
+"share/loopx/skills/loopx-benchmark" = [
+  "skills/loopx-benchmark/SKILL.md",
+]
+"share/loopx/skills/loopx-benchmark/agents" = [
+  "skills/loopx-benchmark/agents/openai.yaml",
+]
 "share/loopx/skills/loopx-self-repair" = [
   "skills/loopx-self-repair/SKILL.md",
 ]

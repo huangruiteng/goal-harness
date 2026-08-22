@@ -1,4 +1,4 @@
 interface:
   display_name: "LoopX Benchmark"
-  short_description: "Run and track benchmark experiments with the LoopX experiment board"
-  default_prompt: "Use the LoopX benchmark workflow: read the experiment board first, preregister each run row, qualify sources and integrity, then close terminal rows and compare arms before selecting the next case."
+  short_description: "Operate LoopX-managed benchmark experiments"
+  default_prompt: "Use benchmark-toolkit for this LoopX-managed experiment: choose the correct operator lane, read the experiment board before run selection, preserve solver/analyst boundaries, preview writes, and compare only countable matched arms."

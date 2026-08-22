@@ -39,6 +39,7 @@ PACKAGED_HOST_SKILL_IDS = [
     "loopx-pr-program",
     "loopx-pr-review",
     "loopx-doc-registry",
+    "loopx-benchmark",
     "loopx-self-repair",
 ]
 ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS = [

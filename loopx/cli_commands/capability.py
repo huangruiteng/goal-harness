@@ -15,11 +15,6 @@ from ..capabilities.catalog import (
 from ..extensions.capability_admission import (
     bind_external_capability_to_goal,
     invoke_external_capability,
-    set_goal_enabled_capability,
-)
-from ..workflow_skill_install import (
-    install_capability_gated_skills,
-    uninstall_capability_gated_skills,
 )
 from ..extensions.runtime import (
     MAX_EXTENSION_REQUEST_BYTES,
@@ -157,24 +152,6 @@ def register_capability_commands(
     )
     bind_parser.add_argument("--execute", action="store_true")
     bind_parser.set_defaults(capability_operation_parser=bind_parser)
-    enable_parser = capability_sub.add_parser(
-        "enable",
-        help="Enable one builtin capability for a Goal and install its gated host skills.",
-    )
-    add_subcommand_format(enable_parser)
-    enable_parser.add_argument("capability_id")
-    enable_parser.add_argument("--goal-id", required=True)
-    enable_parser.add_argument("--execute", action="store_true")
-    enable_parser.set_defaults(capability_operation_parser=enable_parser)
-    disable_parser = capability_sub.add_parser(
-        "disable",
-        help="Disable one builtin capability for a Goal and uninstall its gated host skills.",
-    )
-    add_subcommand_format(disable_parser)
-    disable_parser.add_argument("capability_id")
-    disable_parser.add_argument("--goal-id", required=True)
-    disable_parser.add_argument("--execute", action="store_true")
-    disable_parser.set_defaults(capability_operation_parser=disable_parser)
     invoke_parser = capability_sub.add_parser(
         "invoke",
         help="Preview or run one external capability enabled for a Goal.",
@@ -262,36 +239,6 @@ def handle_capability_command(
                 operations=args.operation,
                 execute=args.execute,
             )
-            renderer = _render_external_binding
-        elif args.capability_command in {"enable", "disable"}:
-            enabled = args.capability_command == "enable"
-            payload = set_goal_enabled_capability(
-                registry_path=registry_path,
-                goal_id=args.goal_id,
-                capability_id=args.capability_id,
-                enabled=enabled,
-                execute=args.execute,
-            )
-            if args.execute and payload.get("changed"):
-                payload["skill_lifecycle"] = (
-                    install_capability_gated_skills(
-                        args.capability_id, execute=True
-                    )
-                    if enabled
-                    else uninstall_capability_gated_skills(
-                        args.capability_id, execute=True
-                    )
-                )
-            elif not args.execute:
-                payload["skill_lifecycle"] = (
-                    install_capability_gated_skills(
-                        args.capability_id, execute=False
-                    )
-                    if enabled
-                    else uninstall_capability_gated_skills(
-                        args.capability_id, execute=False
-                    )
-                )
             renderer = _render_external_binding
         elif args.capability_command == "invoke":
             if args.goal_binding_json == "-" and args.input_json == "-":

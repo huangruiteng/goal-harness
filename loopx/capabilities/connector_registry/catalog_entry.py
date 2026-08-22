@@ -50,4 +50,7 @@ CONNECTOR_REGISTRY_CATALOG_ENTRY: dict[str, Any] = {
             "write_boundary": "read-only",
         },
     ],
+    "smokes": [
+        "python -m pytest loopx/capabilities/connector_registry/tests/test_connector_registry.py -q",
+    ],
 }

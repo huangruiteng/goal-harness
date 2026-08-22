@@ -121,6 +121,7 @@ def main() -> None:
             "loopx-pr-program",
             "loopx-pr-review",
             "loopx-doc-registry",
+            "loopx-benchmark",
             "loopx-self-repair",
         ):
             assert (home / ".codex" / "skills" / skill / "SKILL.md").exists(), skill

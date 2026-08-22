@@ -40,12 +40,6 @@ _PACKAGED_SKILL_SENTINEL = PurePosixPath(
 # lock file at the path installs have always used.
 _INSTALL_LOCK_STEM = ".loopx-workflow-skills"
 
-# Capability ids whose gated host skills are installed only while the
-# capability is enabled for a Goal, and removed again when it is disabled.
-CAPABILITY_GATED_HOST_SKILLS: dict[str, tuple[str, ...]] = {
-    "benchmark-toolkit": ("loopx-benchmark",),
-}
-
 
 def _valid_source_root(path: Path) -> bool:
     return all(
@@ -144,126 +138,6 @@ def _install_one_skill(source: Path, target: Path) -> str:
         if backup and backup.exists():
             shutil.rmtree(backup)
     return "updated" if backup else "created"
-
-
-def capability_gated_skill_ids(capability_id: str) -> tuple[str, ...]:
-    """Return the host skill ids gated on one capability id enablement."""
-    return CAPABILITY_GATED_HOST_SKILLS.get(str(capability_id or ""), ())
-
-
-def install_capability_gated_skills(
-    capability_id: str,
-    *,
-    skills_dir: Path | None = None,
-    execute: bool = False,
-) -> dict[str, Any]:
-    """Install host skills that are gated on ``capability_id`` enablement.
-
-    Preview returns what would be installed without writing. Execute installs
-    each gated skill id atomically from the canonical workflow-skills source.
-    """
-
-    skill_ids = capability_gated_skill_ids(capability_id)
-    target_root = (skills_dir or default_workflow_skills_dir()).expanduser().resolve()
-    source = resolve_workflow_skill_source()
-    if not skill_ids:
-        return {
-            "ok": True,
-            "capability_id": capability_id,
-            "operation": "install" if execute else "preview",
-            "skills_dir": str(target_root),
-            "installed": {},
-            "reason": "no gated host skills for this capability",
-        }
-    if not source.get("available"):
-        return {
-            "ok": False,
-            "capability_id": capability_id,
-            "operation": "install" if execute else "preview",
-            "skills_dir": str(target_root),
-            "installed": {},
-            "reason": source["reason"],
-        }
-    installed: dict[str, str] = {}
-    if execute:
-        with _exclusive_install_lock(target_root):
-            for skill_id in skill_ids:
-                installed[skill_id] = _install_one_skill(
-                    Path(source["skills_root"]) / skill_id,
-                    target_root / skill_id,
-                )
-    else:
-        for skill_id in skill_ids:
-            target = target_root / skill_id
-            source_dir = Path(source["skills_root"]) / skill_id
-            if target.is_dir() and hash_skill_tree(source_dir) == hash_skill_tree(target):
-                installed[skill_id] = "unchanged"
-            elif target.is_dir():
-                installed[skill_id] = "would_update"
-            else:
-                installed[skill_id] = "would_create"
-    return {
-        "ok": True,
-        "capability_id": capability_id,
-        "operation": "install" if execute else "preview",
-        "skills_dir": str(target_root),
-        "installed": installed,
-    }
-
-
-def uninstall_capability_gated_skills(
-    capability_id: str,
-    *,
-    skills_dir: Path | None = None,
-    execute: bool = False,
-) -> dict[str, Any]:
-    """Remove host skills gated on ``capability_id`` when it is disabled.
-
-    A gated skill is removed only when it still matches the canonical source
-    (i.e. was not locally modified after installation). Preview returns the
-    would-be removed set without writing.
-    """
-
-    skill_ids = capability_gated_skill_ids(capability_id)
-    target_root = (skills_dir or default_workflow_skills_dir()).expanduser().resolve()
-    source = resolve_workflow_skill_source()
-    if not skill_ids:
-        return {
-            "ok": True,
-            "capability_id": capability_id,
-            "operation": "uninstall" if execute else "preview",
-            "skills_dir": str(target_root),
-            "removed": [],
-            "preserved_modified": [],
-            "reason": "no gated host skills for this capability",
-        }
-    removed: list[str] = []
-    preserved_modified: list[str] = []
-    for skill_id in skill_ids:
-        target = target_root / skill_id
-        if not target.exists():
-            continue
-        if source.get("available") and hash_skill_tree(
-            Path(source["skills_root"]) / skill_id
-        ) == hash_skill_tree(target):
-            if execute:
-                shutil.rmtree(target)
-            removed.append(skill_id)
-        else:
-            preserved_modified.append(skill_id)
-    return {
-        "ok": not preserved_modified,
-        "capability_id": capability_id,
-        "operation": "uninstall" if execute else "preview",
-        "skills_dir": str(target_root),
-        "removed": removed,
-        "preserved_modified": preserved_modified,
-        "reason": (
-            "removed gated host skills"
-            if not preserved_modified
-            else "preserved gated skills whose content changed after installation"
-        ),
-    }
 
 
 def _load_manifest(skills_dir: Path) -> dict[str, Any] | None:

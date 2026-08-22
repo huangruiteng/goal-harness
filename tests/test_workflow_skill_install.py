@@ -27,6 +27,7 @@ def test_source_checkout_contains_packaged_workflow_skills() -> None:
 
     assert source["available"] is True
     assert source["kind"] == "source_checkout"
+    assert "loopx-benchmark" in PACKAGED_HOST_SKILL_IDS
     for skill_id in PACKAGED_HOST_SKILL_IDS:
         assert (Path(source["skills_root"]) / skill_id / "SKILL.md").is_file()
 
@@ -44,6 +45,7 @@ def test_install_is_idempotent_and_uninstall_removes_managed_skills(
         ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS
     )
     assert set(installed["installed"]) == set(PACKAGED_HOST_SKILL_IDS)
+    assert (skills_dir / "loopx-benchmark" / "SKILL.md").is_file()
     assert "'" in installed["rollback_command"]
     manifest = json.loads(
         (skills_dir / SKILL_INSTALL_READBACK_FILENAME).read_text(encoding="utf-8")
@@ -187,45 +189,3 @@ def test_install_and_inspect_dsh_native_entry(tmp_path: Path) -> None:
     generic = workflow_skill_install(skills_dir=skills_dir)
     assert generic["install_required"] is True
     assert generic["entry"]["status"] == "updated"
-
-
-def test_capability_gated_skills_install_and_uninstall(tmp_path: Path) -> None:
-    from loopx.workflow_skill_install import (
-        capability_gated_skill_ids,
-        install_capability_gated_skills,
-        uninstall_capability_gated_skills,
-    )
-
-    assert "loopx-benchmark" in capability_gated_skill_ids("benchmark-toolkit")
-    assert capability_gated_skill_ids("issue-fix") == ()
-
-    skills_dir = tmp_path / "gated skills"
-
-    preview = install_capability_gated_skills(
-        "benchmark-toolkit", skills_dir=skills_dir, execute=False
-    )
-    assert preview["installed"]["loopx-benchmark"] == "would_create"
-    assert not (skills_dir / "loopx-benchmark").exists()
-
-    installed = install_capability_gated_skills(
-        "benchmark-toolkit", skills_dir=skills_dir, execute=True
-    )
-    assert installed["installed"]["loopx-benchmark"] == "created"
-    assert (skills_dir / "loopx-benchmark" / "SKILL.md").is_file()
-
-    unrelated = install_capability_gated_skills(
-        "issue-fix", skills_dir=skills_dir, execute=True
-    )
-    assert unrelated["installed"] == {}
-
-    removed = uninstall_capability_gated_skills(
-        "benchmark-toolkit", skills_dir=skills_dir, execute=True
-    )
-    assert removed["removed"] == ["loopx-benchmark"]
-    assert removed["preserved_modified"] == []
-    assert not (skills_dir / "loopx-benchmark").exists()
-
-    again = uninstall_capability_gated_skills(
-        "benchmark-toolkit", skills_dir=skills_dir, execute=True
-    )
-    assert again["removed"] == []

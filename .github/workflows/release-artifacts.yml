@@ -225,6 +225,7 @@ jobs:
           assert payload["ok"] is True, payload
           assert sorted(payload["result"]["removed"]) == [
               "loopx",
+              "loopx-benchmark",
               "loopx-doc-registry",
               "loopx-pr-program",
               "loopx-pr-review",

@@ -80,8 +80,10 @@ does not grant permission or satisfy a user gate.
 For `other-agent`, doctor intentionally does not inspect `~/.codex/skills`.
 CLI health and workflow delivery are separate checks. The custom host must
 deliver `loopx-project`, `loopx-pr-program`, `loopx-pr-review`,
-`loopx-doc-registry`, and `loopx-self-repair` from the same LoopX revision through its own skill
-manifest or equivalent prompt injection. When the current goal enables
+`loopx-doc-registry`, `loopx-benchmark`, and `loopx-self-repair` from the same
+LoopX revision through its own skill manifest or equivalent prompt injection.
+`loopx-benchmark` is task-triggered for LoopX-managed experiments; loading it
+does not grant benchmark runner or private-evidence authority. When the current goal enables
 `change_quality_qualification`, the onboarding packet also lists
 `loopx-change-quality` as an active project skill; deliver that workflow or its
 equivalent self-contained prepare-packet instructions. Then read back the

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from loopx.capabilities.benchmark_toolkit.reward_contract import (
     verify_verifier_reward_file,
     verify_verifier_reward_json,
@@ -38,8 +36,6 @@ def test_nested_and_bool_rejected() -> None:
 
 
 def test_non_finite_float_rejected() -> None:
-    import math
-
     receipt = verify_verifier_reward_json({"reward": float("nan")})
     assert receipt["valid"] is False
 

@@ -23,6 +23,20 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         "evidence and structure to explain benchmark outcomes."
     ),
     "entry_command": "loopx benchmark --help",
+    "workflow_skill": {
+        "name": "loopx-benchmark",
+        "delivery": "packaged_host_skill",
+        "activation": "task_triggered",
+        "goal_switch_required": False,
+        "project_copy_required": False,
+        "install_command": "loopx workflow-skills --install",
+        "readback_command": "loopx doctor",
+        "authority_boundary": (
+            "Skill discovery does not grant runner, shell, network, credential, "
+            "private-evidence, or Goal mutation authority; todo requirements, "
+            "provider bindings, and host permissions remain authoritative."
+        ),
+    },
     "commands": [
         {
             "command": (

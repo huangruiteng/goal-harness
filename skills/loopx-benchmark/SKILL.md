@@ -1,15 +1,18 @@
 ---
 name: loopx-benchmark
-description: Use when running, tracking, scoring, or analyzing a benchmark experiment with LoopX, including launching solver arms, recording experiment-board rows, qualifying integrity, comparing baseline vs treatment, or writing case insights. Triggers on benchmark, bench, eval, experiment board, experiment-board, arm, baseline/treatment comparison, campaign monitor, and scored-case transitions.
+description: Use when a LoopX-managed goal runs, tracks, scores, or analyzes a benchmark experiment through benchmark-toolkit, including experiment-board rows, solver arms, integrity qualification, matched comparisons, or case insights. Do not use for casual benchmark discussion, ordinary software microbenchmarks, or eval mentions without LoopX experiment state.
 ---
 
 # LoopX Benchmark Workflow
 
-Use this skill whenever a task involves a benchmark experiment: launching solver
-arms, recording or reading the experiment board, qualifying a run, comparing
-baseline/treatment, or summarizing scores. The `benchmark-toolkit` capability
-owns the provider-neutral boundaries; this skill is the agent-facing playbook so
-solver, monitor, and post-run analyst lanes all follow the same contract.
+Use this skill for a LoopX-managed benchmark experiment. The builtin
+`benchmark-toolkit` capability owns provider-neutral experiment state and
+integrity boundaries. This packaged skill is its task-triggered Agent playbook.
+
+The capability is catalog-ready without a per-Goal enable switch. Installing
+this skill does not grant runner, shell, network, credential, private-evidence,
+or Goal mutation authority. Respect the selected todo's required capabilities,
+any external provider binding, host permissions, and user gates.
 
 ## Capability surface
 
@@ -19,7 +22,24 @@ solver, monitor, and post-run analyst lanes all follow the same contract.
   experiment-board-upsert, source-revision-fence, integrity-qualification,
   classify-artifacts).
 
-## Required sequence (do not skip steps)
+## Select the operating lane
+
+- **Inspect or explain:** use `capability show` and `benchmark --help`; remain
+  read-only. Do not create an experiment-board row merely because the user asks
+  what the toolkit does.
+- **Plan, select, or launch a run:** follow the experiment sequence below. The
+  first action is to read the board; a launch still requires an authorized
+  runner and admitted source.
+- **Monitor an active campaign:** read the board and runtime-owned projections;
+  update only on material run transitions. Do not manufacture progress from a
+  timer tick.
+- **Analyze a terminal run:** wait until solving is terminal and scoring is
+  complete before reading hidden evaluator evidence or writing a case insight.
+
+For a generic library microbenchmark or an eval with no LoopX Goal/board, use
+the task's normal tools instead of imposing this workflow.
+
+## Experiment sequence
 
 1. **Read the experiment board before launching or selecting a case.**
    ```bash
@@ -39,8 +59,10 @@ solver, monitor, and post-run analyst lanes all follow the same contract.
    The fence fails closed unless the clean pinned source matches the observed
    reference head.
 
-3. **Preregister or mark the run row when it starts.**
+3. **Preview, then preregister or mark the run row when it starts.**
    ```bash
+   loopx benchmark experiment-board-upsert --goal-id <GOAL_ID> \
+     --row-json <running-row.json> --format json
    loopx benchmark experiment-board-upsert --goal-id <GOAL_ID> \
      --row-json <running-row.json> --execute --format json
    ```
@@ -48,7 +70,7 @@ solver, monitor, and post-run analyst lanes all follow the same contract.
    `countability={integrity_qualified:false, official_result_present:false,
    score_countable:false}`. Keep the same stable `run_id` for every transition.
 
-4. **Upsert terminal score, countability, effort, and insight when it ends.**
+4. **Preview and upsert terminal score, countability, effort, and insight.**
    ```bash
    loopx benchmark experiment-board-upsert --goal-id <GOAL_ID> \
      --row-json <terminal-row.json> --execute --format json
@@ -93,12 +115,17 @@ solver, monitor, and post-run analyst lanes all follow the same contract.
 - The solver lane must not read hidden tests, verifier sources, gold answers, or
   official feedback during the solving phase. The post-run analyst may read full
   private evidence only after the solver is terminal and scoring is complete.
+- `capability bind` selects an external provider implementation for a Goal; it
+  is not the activation mechanism for this builtin capability. Todo
+  `required_capability` fields remain runtime prerequisites, not product
+  capability switches.
 
 ## Campaign monitoring and post-run insight
 
-- When a campaign starts, add one `continuous_monitor` todo that refreshes the
-  aggregate score/coverage and writes `benchmark_case_insight_v0` on every
-  material scored-case transition.
+- When a campaign starts and the caller authorizes ongoing monitoring, add one
+  `continuous_monitor` todo. Refresh aggregate score/coverage and write
+  `benchmark_case_insight_v0` on material scored-case transitions, with bounded
+  periodic reviews while the campaign remains active.
 - Report only public-safe conclusions (countable baselines, countable
   treatments, matched pairs, aggregate primary metric by arm, improved/flat/
   regressed pair counts). Never copy raw private evidence into a user update.

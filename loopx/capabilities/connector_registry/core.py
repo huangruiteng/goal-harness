@@ -118,7 +118,6 @@ def load_connector_registry(path: Path | None = None) -> dict[str, Any]:
         except (OSError, ValueError):
             pass
     # Re-sync against the builtin catalog, preserving any stored usage.
-    catalog = _catalog_index()
     merged_connectors: list[dict[str, Any]] = []
     usage = state.get("usage") if isinstance(state.get("usage"), dict) else {}
     merged_usage: dict[str, dict[str, Any]] = {}
