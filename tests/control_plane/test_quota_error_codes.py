@@ -6,6 +6,8 @@ import pytest
 
 from loopx.control_plane.quota.error_codes import (
     QuotaCommandValidationError,
+    QuotaIdentityPrecondition,
+    QuotaIdentityPreconditionError,
     quota_error_code,
 )
 
@@ -16,6 +18,13 @@ from loopx.control_plane.quota.error_codes import (
         (
             QuotaCommandValidationError("bad argument"),
             "quota_invalid_arguments",
+        ),
+        (
+            QuotaIdentityPreconditionError(
+                QuotaIdentityPrecondition.REGISTERED_AGENT_ROSTER_PRESENT,
+                agent_id="agent-alpha",
+            ),
+            "quota_agent_registry_roster_missing",
         ),
         (ValueError("bad state value"), "quota_unexpected_collection_error"),
         (OSError("state unavailable"), "quota_state_io_failed"),
