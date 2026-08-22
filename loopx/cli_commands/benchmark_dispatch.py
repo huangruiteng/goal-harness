@@ -11,6 +11,11 @@ from .benchmark_boundary import (
     handle_benchmark_boundary_command,
     register_benchmark_boundary_commands,
 )
+from .benchmark_concurrency import (
+    BENCHMARK_CONCURRENCY_COMMANDS,
+    handle_benchmark_concurrency_command,
+    register_benchmark_concurrency_commands,
+)
 from .benchmark_experiment_board import (
     BENCHMARK_EXPERIMENT_BOARD_COMMANDS,
     handle_benchmark_experiment_board_command,
@@ -20,6 +25,10 @@ from .benchmark_experiment_board import (
 AddSubcommandFormat = Callable[[argparse.ArgumentParser], None]
 OutputFormat = Callable[..., str]
 PrintPayload = Callable[..., None]
+
+BENCHMARK_PROJECT_COMMANDS = (
+    BENCHMARK_CONCURRENCY_COMMANDS | BENCHMARK_EXPERIMENT_BOARD_COMMANDS
+)
 
 
 def _registry_has_goal(registry_path: Path, goal_id: str) -> bool:
@@ -34,7 +43,7 @@ def _resolve_benchmark_project(
     *,
     registry_path: Path,
 ) -> Path | None:
-    if args.benchmark_command not in BENCHMARK_EXPERIMENT_BOARD_COMMANDS:
+    if args.benchmark_command not in BENCHMARK_PROJECT_COMMANDS:
         return None
     goal_id = str(args.goal_id)
     project_override = getattr(args, "project", None)
@@ -62,6 +71,12 @@ def _resolve_benchmark_project(
     return requested
 
 
+def _benchmark_project_parser(args: argparse.Namespace) -> argparse.ArgumentParser:
+    if args.benchmark_command in BENCHMARK_CONCURRENCY_COMMANDS:
+        return args.benchmark_concurrency_parser
+    return args.benchmark_experiment_board_parser
+
+
 def register_benchmark_command_group(
     subparsers: argparse._SubParsersAction,
     add_subcommand_format: AddSubcommandFormat,
@@ -75,6 +90,7 @@ def register_benchmark_command_group(
         required=True,
     )
     register_benchmark_boundary_commands(benchmark_sub, add_subcommand_format)
+    register_benchmark_concurrency_commands(benchmark_sub, add_subcommand_format)
     register_benchmark_experiment_board_commands(
         benchmark_sub,
         add_subcommand_format,
@@ -93,9 +109,17 @@ def handle_benchmark_command(
     try:
         project = _resolve_benchmark_project(args, registry_path=registry_path)
     except (OSError, UnicodeError, ValueError) as exc:
-        args.benchmark_experiment_board_parser.error(str(exc))
+        _benchmark_project_parser(args).error(str(exc))
     handled = handle_benchmark_boundary_command(
         args,
+        print_payload=print_payload,
+        output_format=output_format,
+    )
+    if handled is not None:
+        return handled
+    handled = handle_benchmark_concurrency_command(
+        args,
+        project=project,
         print_payload=print_payload,
         output_format=output_format,
     )

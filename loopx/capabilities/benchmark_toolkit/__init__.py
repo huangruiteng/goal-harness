@@ -8,6 +8,20 @@ from .artifacts import (
     filter_public_benchmark_artifact_paths,
     materialize_public_benchmark_artifacts,
 )
+from .concurrency_envelope import (
+    BENCHMARK_CONCURRENCY_ENVELOPE_FILENAME,
+    BENCHMARK_CONCURRENCY_ENVELOPE_SCHEMA_VERSION,
+    admit_benchmark_case,
+    build_benchmark_concurrency_config,
+    build_benchmark_concurrency_status,
+    configure_benchmark_concurrency_envelope,
+    default_benchmark_concurrency_envelope_path,
+    normalize_benchmark_concurrency_config,
+    normalize_benchmark_concurrency_envelope,
+    read_benchmark_concurrency_envelope,
+    release_benchmark_case,
+    render_benchmark_concurrency_markdown,
+)
 from .container_binding import (
     BENCHMARK_EXACT_CONTAINER_BINDING_SCHEMA_VERSION,
     DockerContainerBinding,
@@ -35,11 +49,6 @@ from .integrity import (
     INTEGRITY_EVIDENCE_CATEGORIES,
     REQUIRED_RUNTIME_ATTESTATIONS,
     build_benchmark_integrity_qualification,
-)
-from .reward_contract import (
-    REWARD_CONTRACT_SCHEMA_VERSION,
-    verify_verifier_reward_file,
-    verify_verifier_reward_json,
 )
 from .native_codex_goal import (
     NativeGoalConfig,
@@ -91,6 +100,11 @@ from .public_trajectory import (
     PublicTrajectorySummaryError,
     build_native_goal_public_trajectory_summary,
 )
+from .reward_contract import (
+    REWARD_CONTRACT_SCHEMA_VERSION,
+    verify_verifier_reward_file,
+    verify_verifier_reward_json,
+)
 from .run_permissions import (
     DEFAULT_RUN_PERMISSION_ALLOWED_ACTIONS,
     DEFAULT_RUN_PERMISSION_FORBIDDEN_ACTIONS,
@@ -111,6 +125,8 @@ from .source_revision_fence import (
 
 __all__ = [
     "BENCHMARK_CANDIDATE_SOURCE_BOUNDARY_SCHEMA_VERSION",
+    "BENCHMARK_CONCURRENCY_ENVELOPE_FILENAME",
+    "BENCHMARK_CONCURRENCY_ENVELOPE_SCHEMA_VERSION",
     "BENCHMARK_EXACT_CONTAINER_BINDING_SCHEMA_VERSION",
     "BENCHMARK_EXPERIMENT_BOARD_LEDGER_FILENAME",
     "BENCHMARK_EXPERIMENT_BOARD_ROW_SCHEMA_VERSION",
@@ -128,6 +144,7 @@ __all__ = [
     "NATIVE_GOAL_LIFECYCLE_SCHEMA_VERSION",
     "PUBLIC_TRAJECTORY_SUMMARY_SCHEMA_VERSION",
     "REQUIRED_RUNTIME_ATTESTATIONS",
+    "REWARD_CONTRACT_SCHEMA_VERSION",
     "RUN_PERMISSION_POLICY_SCHEMA_VERSION",
     "RUN_PERMISSION_QUOTA_PROJECTION_SCHEMA_VERSION",
     "BenchmarkSourceRevisionFence",
@@ -151,9 +168,12 @@ __all__ = [
     "PublicTrajectorySummaryError",
     "RunPermissionAction",
     "StdioNativeGoalTransport",
+    "admit_benchmark_case",
     "attach_native_goal",
     "benchmark_experiment_board_row_key",
     "build_benchmark_candidate_source_boundary",
+    "build_benchmark_concurrency_config",
+    "build_benchmark_concurrency_status",
     "build_benchmark_experiment_board",
     "build_benchmark_integrity_qualification",
     "build_native_codex_isolation_envelope",
@@ -167,6 +187,8 @@ __all__ = [
     "compact_native_codex_profile_receipt",
     "compact_native_goal_receipt",
     "compact_run_permission_policy_for_quota",
+    "configure_benchmark_concurrency_envelope",
+    "default_benchmark_concurrency_envelope_path",
     "default_benchmark_experiment_board_path",
     "filter_public_benchmark_artifact_paths",
     "inspect_benchmark_source_revision_fence",
@@ -175,17 +197,20 @@ __all__ = [
     "materialize_public_benchmark_artifacts",
     "native_codex_app_server_environment",
     "native_codex_profile_environment",
+    "normalize_benchmark_concurrency_config",
+    "normalize_benchmark_concurrency_envelope",
     "normalize_benchmark_experiment_board_row",
     "observe_native_goal_event",
     "preview_benchmark_experiment_board_upsert",
     "probe_native_goal_process",
+    "read_benchmark_concurrency_envelope",
     "read_benchmark_experiment_board_rows",
     "rebase_native_codex_loopx_workspace_state",
     "refresh_native_goal_status",
+    "release_benchmark_case",
+    "render_benchmark_concurrency_markdown",
     "render_benchmark_experiment_board_markdown",
     "render_native_codex_goal_prompt",
-    "verify_verifier_reward_file",
-    "verify_verifier_reward_json",
     "run_native_goal_process",
     "run_native_goal_process_until_terminal",
     "run_native_goal_turn",
@@ -194,5 +219,7 @@ __all__ = [
     "start_native_goal_turn",
     "upsert_benchmark_experiment_board_row",
     "validate_run_permission_policy",
+    "verify_verifier_reward_file",
+    "verify_verifier_reward_json",
     "wait_native_goal_turn",
 ]
