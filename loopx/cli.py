@@ -60,6 +60,10 @@ from .capabilities.value_connectors.cli import (
     handle_value_connector_command,
     register_value_connector_commands,
 )
+from .capabilities.connector_registry.cli import (
+    handle_connector_command,
+    register_connector_commands,
+)
 from .cli_commands import (
     handle_turn_command,
     handle_benchmark_command,
@@ -278,6 +282,8 @@ def build_parser() -> LoopXArgumentParser:
     register_semantic_preference_commands(sub, add_subcommand_format)
 
     register_value_connector_commands(sub, add_subcommand_format)
+
+    register_connector_commands(sub, add_subcommand_format)
 
     register_ml_experiment_commands(sub, add_subcommand_format)
 
@@ -691,6 +697,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "value-connectors":
         return handle_value_connector_command(args, output_format=output_format, print_payload=print_payload)
+
+    connector_result = handle_connector_command(
+        args, output_format=output_format, print_payload=print_payload,
+    )
+    if connector_result is not None:
+        return connector_result
 
     registry_admin_result = handle_registry_admin_command(
         args,

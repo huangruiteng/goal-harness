@@ -25,6 +25,7 @@ from .value_connectors.catalog_entry import VALUE_CONNECTORS_CATALOG_ENTRY
 from .explore.catalog_entry import EXPLORE_CATALOG_ENTRY
 from .auto_research.catalog_entry import AUTO_RESEARCH_CATALOG_ENTRY
 from .public_safe_outbound.catalog_entry import PUBLIC_SAFE_OUTBOUND_CATALOG_ENTRY
+from .connector_registry.catalog_entry import CONNECTOR_REGISTRY_CATALOG_ENTRY
 from .registry import CapabilityRegistry
 
 CAPABILITY_CATALOG_SCHEMA_VERSION = "loopx_capability_catalog_v0"
@@ -50,6 +51,7 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
     EXPLORE_CATALOG_ENTRY,
     AUTO_RESEARCH_CATALOG_ENTRY,
     PUBLIC_SAFE_OUTBOUND_CATALOG_ENTRY,
+    CONNECTOR_REGISTRY_CATALOG_ENTRY,
 )
 # Preserve the original import surface while routing all reads through the registry.
 CAPABILITIES = BUILTIN_CAPABILITIES
