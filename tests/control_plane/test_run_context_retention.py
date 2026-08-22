@@ -155,6 +155,38 @@ def test_rejected_replan_feedback_survives_compaction_and_semantic_history() -> 
     assert context["latest_replan_ack_feedback_run"] is compacted
 
 
+def test_in_flight_todo_binding_survives_run_compaction() -> None:
+    compacted = compact_run(
+        _run(
+            "2026-08-09T00:07:00Z",
+            todo_id="todo_current001",
+            delivery_outcome="outcome_progress",
+            vision_checkpoint={
+                "schema_version": "vision_checkpoint_v0",
+                "agent_id": AGENT_ID,
+                "required": False,
+                "satisfied": True,
+                "decision": "not_required",
+                "delivery_boundary": "in_flight_continuation",
+                "triggers": [
+                    {
+                        "kind": "in_flight_continuation",
+                        "todo_id": "todo_current001",
+                    }
+                ],
+            },
+        )
+    )
+
+    assert compacted["todo_id"] == "todo_current001"
+    assert compacted["vision_checkpoint"]["delivery_boundary"] == (
+        "in_flight_continuation"
+    )
+    assert compacted["vision_checkpoint"]["triggers"] == [
+        {"kind": "in_flight_continuation", "todo_id": "todo_current001"}
+    ]
+
+
 def test_retirement_prevents_stale_vision_selection() -> None:
     runs = [
         _run(

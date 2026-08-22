@@ -351,6 +351,128 @@ def _strip_heartbeat_workspace_causality(runtime: Path) -> None:
     )
 
 
+def test_in_flight_progress_preserves_todo_across_heartbeat_settlements(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    first_turn_id = "turn-settlement-continuation-1"
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        first_turn_id,
+        "--scan-path",
+        str(project),
+    )
+    assert guard_rc == 0, guard
+    assert guard["selected_todo"]["todo_id"] == TODO_ID
+    assert guard["selected_todo"]["delivery_boundary"] == (
+        "in_flight_continuation"
+    )
+    first_writeback = guard["interaction_contract"]["cli_channel"][
+        "next_cli_actions"
+    ][0]
+    assert "--delivery-boundary in_flight_continuation" in first_writeback
+
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--classification",
+        "validated_progress",
+        "--delivery-batch-scale",
+        "implementation",
+        "--delivery-outcome",
+        "outcome_progress",
+        "--delivery-boundary",
+        "in_flight_continuation",
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        TODO_ID,
+        "--turn-instance-id",
+        first_turn_id,
+        "--no-global-sync",
+        "--suppress-external-sinks",
+    )
+    assert refresh_rc == 0, refresh
+    persisted = json.loads(Path(refresh["json_path"]).read_text(encoding="utf-8"))
+    assert persisted["vision_checkpoint"]["decision"] == "not_required"
+    assert persisted["vision_checkpoint"]["delivery_boundary"] == (
+        "in_flight_continuation"
+    )
+
+    second_guard_rc, second_guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        "turn-settlement-continuation-2",
+        "--scan-path",
+        str(project),
+    )
+    assert second_guard_rc == 0, second_guard
+    assert second_guard["selected_todo"]["todo_id"] == TODO_ID
+    assert second_guard["selected_todo"]["selected_by"] == "in_flight_todo"
+    assert second_guard["delivery_continuity"]["decision"] == "resume_in_flight"
+    writeback = second_guard["interaction_contract"]["cli_channel"][
+        "next_cli_actions"
+    ][0]
+    assert "--delivery-boundary in_flight_continuation" in writeback
+
+    second_refresh_rc, second_refresh = _run_cli(
+        registry_path,
+        runtime,
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--classification",
+        "validated_progress",
+        "--delivery-batch-scale",
+        "implementation",
+        "--delivery-outcome",
+        "outcome_progress",
+        "--delivery-boundary",
+        "in_flight_continuation",
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        TODO_ID,
+        "--turn-instance-id",
+        "turn-settlement-continuation-2",
+        "--no-global-sync",
+        "--suppress-external-sinks",
+    )
+    assert second_refresh_rc == 0, second_refresh
+    persisted_second = json.loads(
+        Path(second_refresh["json_path"]).read_text(encoding="utf-8")
+    )
+    assert persisted_second["vision_checkpoint"] == {
+        "schema_version": "vision_checkpoint_v0",
+        "agent_id": AGENT_ID,
+        "required": False,
+        "satisfied": True,
+        "decision": "not_required",
+        "triggers": [{"kind": "in_flight_continuation", "todo_id": TODO_ID}],
+        "delivery_boundary": "in_flight_continuation",
+    }
+
+
 def test_standard_codex_app_settlement_is_receipted_and_idempotent(
     tmp_path: Path,
 ) -> None:

@@ -92,6 +92,47 @@ def test_real_tool_loop_executes_action_selected_by_real_quota(
     assert "fixture/selected-lane.json" in quota_result["selected_todo"]["text"]
 
 
+def test_model_resumes_in_flight_todo_on_the_next_heartbeat(tmp_path: Path) -> None:
+    fixture = _build_fixture(
+        tmp_path / "oracle",
+        prior_in_flight_progress=True,
+    )
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-002"),
+        "cat fixture/selected-lane.json",
+    ]
+    requests: list[dict[str, Any]] = []
+
+    def transport(**kwargs: Any) -> Mapping[str, Any]:
+        requests.append(json.loads(kwargs["body"]))
+        return _tool_response(
+            f"call-{len(requests)}",
+            commands[len(requests) - 1],
+        )
+
+    receipt = DoubaoSelectedTodoToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="selected-todo-in-flight-continuation-002",
+        fixture_root=tmp_path / "actor",
+        prior_in_flight_progress=True,
+    )
+
+    assert receipt["qualification_passed"] is True, receipt
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "selected_action",
+    ]
+    quota_result = json.loads(requests[1]["messages"][-1]["content"])
+    assert quota_result["selected_todo"]["todo_id"] == "todo_portfolio001"
+    assert quota_result["selected_todo"]["selected_by"] == "in_flight_todo"
+    assert quota_result["delivery_continuity"]["decision"] == "resume_in_flight"
+    assert "--delivery-boundary in_flight_continuation" in (
+        quota_result["interaction_contract"]["cli_channel"]["next_cli_actions"][0]
+    )
+
+
 def test_tool_loop_rejects_selected_action_before_quota(tmp_path: Path) -> None:
     def transport(**_: Any) -> Mapping[str, Any]:
         return _tool_response("call-1", "cat fixture/selected-lane.json")
