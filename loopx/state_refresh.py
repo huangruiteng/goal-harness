@@ -862,6 +862,7 @@ def refresh_state_run(
     next_action: str | None = None,
     delivery_batch_scale: str | None = None,
     delivery_outcome: str | None = None,
+    delivery_boundary: str | None = None,
     delivery_workspace_path: Path | None = None,
     todo_id: str | None = None,
     turn_instance_id: str | None = None,
@@ -1162,9 +1163,7 @@ def refresh_state_run(
             ).get("agent_todos"),
             agent_id=normalized_agent_id or None,
             dry_run=dry_run,
-            selected_todo_id=(
-                settlement_identity.todo_id if settlement_identity else None
-            ),
+            selected_todo_id=(settlement_identity.todo_id if settlement_identity else None),
             newest_first_runs=newest_first_runs,
         )
         validated_repair_delta_kinds = list(
@@ -1212,6 +1211,10 @@ def refresh_state_run(
         vision_unchanged_reason=normalized_vision_unchanged_reason,
         delivery_outcome=normalized_delivery_outcome,
         active_state_next_action_update=active_state_next_action_update,
+        delivery_boundary=delivery_boundary,
+        todo_id=(settlement_identity.todo_id if settlement_identity else None),
+        completion_todo_id=completion_todo_id,
+        autonomous_replan_recorded=effective_autonomous_replan_recorded,
     )
     delivery_workspace = None
     workspace_requirement = str(

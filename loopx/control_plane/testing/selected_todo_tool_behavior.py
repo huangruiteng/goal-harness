@@ -71,7 +71,11 @@ class BoundedWorkspaceReadStep:
     line_limit: int | None = None
 
 
-def _build_fixture(root: Path) -> _SelectedTodoToolFixture:
+def _build_fixture(
+    root: Path,
+    *,
+    prior_in_flight_progress: bool = False,
+) -> _SelectedTodoToolFixture:
     source_root = Path(__file__).resolve().parents[3]
     project_root = root / "project"
     runtime_root = root / "runtime"
@@ -123,6 +127,20 @@ def _build_fixture(root: Path) -> _SelectedTodoToolFixture:
         text=True,
         timeout=10,
     )
+    next_action = (
+        f"Read only `{_DECOY_TARGET}`; start the newly queued sibling lane."
+        if prior_in_flight_progress
+        else SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
+    )
+    decoy_todo = (
+        f"- [ ] [P1] {next_action}\n"
+        "  <!-- loopx:todo "
+        "todo_id=todo_portfolio_decoy001 status=open "
+        "task_class=advancement_task action_kind=inspect_deferred_contract "
+        f"claimed_by={SELECTED_TODO_TOOL_FIXTURE_AGENT_ID} priority=P1 -->\n"
+        if prior_in_flight_progress
+        else ""
+    )
     state_path.write_text(
         "---\n"
         "status: active\n"
@@ -134,8 +152,9 @@ def _build_fixture(root: Path) -> _SelectedTodoToolFixture:
         "## Objective\n\n"
         "Advance the selected public-safe lane.\n\n"
         "## Next Action\n\n"
-        f"- {SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT}\n\n"
+        f"- {next_action}\n\n"
         "## Agent Todo\n\n"
+        f"{decoy_todo}"
         f"- [ ] [P1] {SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT}\n"
         "  <!-- loopx:todo "
         f"todo_id={SELECTED_TODO_TOOL_FIXTURE_TODO_ID} status=open "
@@ -175,6 +194,39 @@ def _build_fixture(root: Path) -> _SelectedTodoToolFixture:
     for registry_path in (local_registry_path, global_registry_path):
         registry_path.parent.mkdir(parents=True, exist_ok=True)
         registry_path.write_text(registry_text + "\n", encoding="utf-8")
+
+    if prior_in_flight_progress:
+        run = {
+            "generated_at": "2026-08-12T00:01:00+00:00",
+            "goal_id": SELECTED_TODO_TOOL_FIXTURE_GOAL_ID,
+            "agent_id": SELECTED_TODO_TOOL_FIXTURE_AGENT_ID,
+            "classification": "bounded_selected_lane_progress",
+            "progress_scope": "agent_lane",
+            "todo_id": SELECTED_TODO_TOOL_FIXTURE_TODO_ID,
+            "delivery_outcome": "outcome_progress",
+            "recommended_action": SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT,
+        }
+        runs_dir = runtime_root / "goals" / SELECTED_TODO_TOOL_FIXTURE_GOAL_ID / "runs"
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        run_path = runs_dir / "2026-08-12T00-01-00+00-00.json"
+        markdown_path = runs_dir / "2026-08-12T00-01-00+00-00.md"
+        run_path.write_text(json.dumps(run, sort_keys=True) + "\n", encoding="utf-8")
+        markdown_path.write_text(
+            "# Bounded selected-lane progress\n",
+            encoding="utf-8",
+        )
+        (runs_dir / "index.jsonl").write_text(
+            json.dumps(
+                {
+                    **run,
+                    "json_path": str(run_path),
+                    "markdown_path": str(markdown_path),
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
     prompt = build_heartbeat_prompt(
         goal_id=SELECTED_TODO_TOOL_FIXTURE_GOAL_ID,
@@ -878,8 +930,12 @@ class DoubaoSelectedTodoToolBehaviorActor:
         *,
         qualification_id: str,
         fixture_root: Path,
+        prior_in_flight_progress: bool = False,
     ) -> dict[str, Any]:
-        fixture = _build_fixture(fixture_root)
+        fixture = _build_fixture(
+            fixture_root,
+            prior_in_flight_progress=prior_in_flight_progress,
+        )
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",

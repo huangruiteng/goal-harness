@@ -56,6 +56,7 @@ VISION_CHECKPOINT_COMPACT_FIELDS = (
     "required",
     "satisfied",
     "decision",
+    "delivery_boundary",
     "agent_vision_state",
     "unchanged_reason",
     "missing_baseline",
@@ -63,6 +64,7 @@ VISION_CHECKPOINT_COMPACT_FIELDS = (
 VISION_CHECKPOINT_TRIGGER_FIELDS = (
     "kind",
     "delivery_outcome",
+    "todo_id",
 )
 QUOTA_MONITOR_TARGET_COMPACT_FIELDS = (
     "schema_version",
@@ -85,6 +87,7 @@ RUN_BASE_COMPACT_FIELDS = (
     "agent_id",
     "agent_lane",
     "progress_scope",
+    "todo_id",
     "progress_observation",
     "delivery_batch_scale",
     "delivery_outcome",

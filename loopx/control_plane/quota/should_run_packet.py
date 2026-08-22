@@ -24,6 +24,7 @@ from ..agents.agent_scope import (
     _agent_scope_no_candidate_frontier,
     _attach_agent_identity_contracts,
 )
+from ..agents.capability_gate import missing_required_capabilities
 from ..goals.goal_frontier import (
     AUTONOMOUS_REPLAN_REQUIRED_MODE,
 )
@@ -77,10 +78,17 @@ from ..scheduler.state import (
     CODEX_APP_SURFACE,
     load_scheduler_state,
 )
+from ..turn_driver.delivery_continuity import (
+    evaluate_delivery_boundary,
+    evaluate_delivery_continuity,
+)
 from ..runtime.decision_freshness import decision_freshness_warning as _decision_freshness_warning
 from ..runtime.promotion_readiness import promotion_readiness_warning as _promotion_readiness_warning
 from ..todos.contract import (
     normalize_todo_claimed_by,
+)
+from ..todos.projection import (
+    todo_item_is_actionable_open as projection_todo_item_is_actionable_open,
 )
 from ..todos.quota_summary import (
     compact_quota_todo_summary_for_payload,
@@ -479,6 +487,76 @@ def _attach_quota_supporting_projections(
         agent_command=item.get("agent_command") if should_run else None,
     )
 
+
+def _delivery_preemptions_for_route(
+    prepared: _QuotaDecisionPreparation,
+    *,
+    due_monitor_attempt: bool,
+    receipt_bound_replan_decision: bool,
+    external_evidence_observation: dict[str, Any] | None,
+    normal_delivery_allowed: bool,
+    replan_decision_allowed: bool,
+    self_repair_allowed: bool,
+    capability_repair_allowed: bool,
+    workspace_repair_allowed: bool,
+) -> list[str]:
+    preemptions: list[str] = []
+    if prepared.receipt_bound_todo_id or receipt_bound_replan_decision:
+        preemptions.append("heartbeat_receipt")
+    if (
+        due_monitor_attempt
+        or prepared.inbox_reply_due
+        or task_orchestration_contract_is_actionable(
+            prepared.task_orchestration_contract
+        )
+        or prepared.capability_monitor_fallback
+        or external_evidence_observation
+    ):
+        preemptions.append("blocking_work_lane")
+    if replan_decision_allowed:
+        preemptions.append("autonomous_replan")
+    if (
+        self_repair_allowed
+        or capability_repair_allowed
+        or workspace_repair_allowed
+        or prepared.automation_prompt_upgrade_required
+    ):
+        preemptions.append("control_repair")
+    if not normal_delivery_allowed:
+        preemptions.append("delivery_not_allowed")
+    return preemptions
+
+
+def _delivery_continuity_for_route(
+    prepared: _QuotaDecisionPreparation,
+    *,
+    preemptions: list[str],
+) -> dict[str, Any] | None:
+    anchor = prepared.delivery_continuity_anchor
+    if not isinstance(anchor, dict):
+        return None
+
+    continuity_todo = prepared.delivery_continuity_todo
+    return evaluate_delivery_continuity(
+        agent_id=str((prepared.agent_identity or {}).get("agent_id") or ""),
+        previous_todo_id=anchor.get("todo_id"),
+        previous_delivery_outcome=anchor.get("delivery_outcome"),
+        current_todo=continuity_todo,
+        actionable=bool(
+            isinstance(continuity_todo, dict)
+            and projection_todo_item_is_actionable_open(continuity_todo)
+        ),
+        capability_ready=bool(
+            isinstance(continuity_todo, dict)
+            and not missing_required_capabilities(
+                continuity_todo,
+                available_capabilities=prepared.effective_available_capabilities,
+            )
+        ),
+        preemptions=preemptions,
+    )
+
+
 @dataclass(slots=True)
 class _QuotaDecisionRoute:
     normal_delivery_allowed: bool
@@ -506,6 +584,7 @@ class _QuotaDecisionRoute:
     next_action_warning: dict[str, Any] | None
     goal_route_hint: dict[str, Any] | None
     payload_work_lane_contract: dict[str, Any] | None
+    delivery_continuity: dict[str, Any] | None
 
 
 def _resolve_quota_should_run_route(
@@ -674,6 +753,21 @@ def _resolve_quota_should_run_route(
     due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(
         prepared.work_lane_contract
     )
+    delivery_preemptions = _delivery_preemptions_for_route(
+        prepared,
+        due_monitor_attempt=due_monitor_attempt,
+        receipt_bound_replan_decision=receipt_bound_replan_decision,
+        external_evidence_observation=external_evidence_observation,
+        normal_delivery_allowed=normal_delivery_allowed,
+        replan_decision_allowed=replan_decision_allowed,
+        self_repair_allowed=self_repair_allowed,
+        capability_repair_allowed=capability_repair_allowed,
+        workspace_repair_allowed=workspace_repair_allowed,
+    )
+    delivery_continuity = _delivery_continuity_for_route(
+        prepared,
+        preemptions=delivery_preemptions,
+    )
     agent_lane_next_action = prepared.receipt_bound_agent_next_action
     if (
         agent_lane_next_action is None
@@ -690,6 +784,7 @@ def _resolve_quota_should_run_route(
             capability_gate=prepared.capability_gate,
             scoped_user_gate_fallback=prepared.scoped_user_gate_fallback,
             receipt_bound_todo_id=prepared.receipt_bound_todo_id,
+            delivery_continuity=delivery_continuity,
             active_next_action=(
                 item.get("active_state_next_action")
                 or (
@@ -704,6 +799,25 @@ def _resolve_quota_should_run_route(
         # decision. A newly runnable Todo remains visible in summaries, but it
         # cannot become the selected settlement target in the same packet.
         agent_lane_next_action = None
+    if isinstance(agent_lane_next_action, dict):
+        boundary = evaluate_delivery_boundary(
+            agent_id=str((prepared.agent_identity or {}).get("agent_id") or ""),
+            current_todo=agent_lane_next_action,
+            actionable=projection_todo_item_is_actionable_open(
+                agent_lane_next_action
+            ),
+            capability_ready=not missing_required_capabilities(
+                agent_lane_next_action,
+                available_capabilities=prepared.effective_available_capabilities,
+            ),
+            preemptions=delivery_preemptions,
+        )
+        if boundary["delivery_boundary"] == "in_flight_continuation":
+            agent_lane_next_action = {
+                **agent_lane_next_action,
+                "delivery_boundary": boundary["delivery_boundary"],
+                "delivery_boundary_reason": boundary["reason"],
+            }
     agent_scope_frontier = None
     agent_lane_frontier_hint = None
     if not replan_decision_allowed:
@@ -847,6 +961,7 @@ def _resolve_quota_should_run_route(
         next_action_warning=next_action_warning,
         goal_route_hint=goal_route_hint,
         payload_work_lane_contract=payload_work_lane_contract,
+        delivery_continuity=delivery_continuity,
     )
 
 
@@ -998,6 +1113,7 @@ def _build_quota_should_run_payload(
     _attach_truthy_fields(
         payload,
         agent_lane_next_action=route.agent_lane_next_action,
+        delivery_continuity=route.delivery_continuity,
     )
     selected_todo_projection = (
         None

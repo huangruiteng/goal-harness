@@ -269,6 +269,15 @@ def register_project_lifecycle_commands(
         help="Optional explicit outcome-floor signal for this refresh run.",
     )
     refresh_state_parser.add_argument(
+        "--delivery-boundary",
+        choices=("in_flight_continuation", "semantic_closeout"),
+        help=(
+            "Typed semantic boundary for vision checkpointing. Defaults to "
+            "semantic_closeout; in_flight_continuation is valid only for an "
+            "open agent-bound Todo reporting outcome_progress."
+        ),
+    )
+    refresh_state_parser.add_argument(
         "--delivery-workspace-path",
         help=(
             "Local git worktree that produced this accountable delivery. Use when "
@@ -649,6 +658,7 @@ def handle_project_lifecycle_command(
                 next_action=args.next_action,
                 delivery_batch_scale=args.delivery_batch_scale,
                 delivery_outcome=args.delivery_outcome,
+                delivery_boundary=args.delivery_boundary,
                 delivery_workspace_path=(
                     Path(args.delivery_workspace_path).expanduser()
                     if args.delivery_workspace_path

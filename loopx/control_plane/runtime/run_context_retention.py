@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from ..work_items.delivery_outcome import MATERIAL_DELIVERY_OUTCOMES
+
 GOAL_SEMANTIC_HISTORY_SCHEMA_VERSION = "goal_semantic_history_v0"
 SEMANTIC_CONTEXT_RUN_FIELDS = (
     "latest_agent_vision_run",
@@ -52,11 +54,6 @@ OWNER_CORRECTION_RUN_PAYLOAD_FIELDS = (
     "classification",
     "human_reward",
 )
-MATERIAL_DELIVERY_OUTCOMES = {
-    "outcome_gap",
-    "outcome_progress",
-    "primary_goal_outcome",
-}
 OUTCOME_VISION_CHECKPOINT_TRIGGER_KINDS = {
     "autonomous_replan_recorded",
     "material_delivery_outcome",

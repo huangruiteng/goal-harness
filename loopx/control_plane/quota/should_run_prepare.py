@@ -42,6 +42,7 @@ from ..quota.projection_repair import (
 from ..quota.recent_runs import (
     build_monitor_debt_arbitration as _build_monitor_debt_arbitration,
     goal_latest_runs as _goal_latest_runs,
+    latest_accountable_agent_delivery as _latest_accountable_agent_delivery,
 )
 from ..quota.selected_todo_projection import (
     selected_todo_projection as _selected_todo_projection,
@@ -64,6 +65,7 @@ from ..todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,
     normalize_todo_claimed_by,
+    normalize_todo_id,
     normalize_todo_replan_obligation_id,
     normalize_todo_status,
 )
@@ -141,6 +143,8 @@ class _QuotaDecisionPreparation:
     codex_app_current_rrule: Any
     codex_app_automation_id: Any
     resolved_scheduler_context: SchedulerExecutionContextResolution
+    delivery_continuity_anchor: dict[str, Any] | None
+    delivery_continuity_todo: dict[str, Any] | None
 
 
 def _preserve_receipt_bound_replan_obligation(
@@ -481,6 +485,26 @@ def _prepare_quota_should_run_item(
         recovery_allowed = False
         reason = str(quota["reason"])
     boundary_agent_id = normalize_todo_claimed_by((agent_identity or {}).get("agent_id"))
+    delivery_continuity_anchor = (
+        _latest_accountable_agent_delivery(
+            status_payload,
+            goal_id=safe_goal_id,
+            agent_id=boundary_agent_id,
+        )
+        if boundary_agent_id
+        else None
+    )
+    continuity_todo_id = normalize_todo_id(
+        (delivery_continuity_anchor or {}).get("todo_id")
+    )
+    delivery_continuity_todo = next(
+        (
+            candidate
+            for candidate in agent_todo_source_items
+            if normalize_todo_id(candidate.get("todo_id")) == continuity_todo_id
+        ),
+        None,
+    )
     reward_memory_experiment_status = _resolve_reward_memory_experiment_from_status(
         status_payload,
         goal_id=safe_goal_id,
@@ -751,4 +775,6 @@ def _prepare_quota_should_run_item(
         codex_app_current_rrule=codex_app_current_rrule,
         codex_app_automation_id=codex_app_automation_id,
         resolved_scheduler_context=resolved_scheduler_context,
+        delivery_continuity_anchor=delivery_continuity_anchor,
+        delivery_continuity_todo=delivery_continuity_todo,
     )

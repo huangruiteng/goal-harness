@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..todos.contract import normalize_todo_claimed_by
+from ..todos.contract import normalize_todo_claimed_by, normalize_todo_id
+from ..work_items.delivery_outcome import MATERIAL_DELIVERY_OUTCOMES
 from .monitor_poll import QUOTA_MONITOR_POLL_CLASSIFICATION
 
 
@@ -140,6 +141,42 @@ def goal_latest_runs(status_payload: dict[str, Any], *, goal_id: str) -> list[di
         return []
     runs = goal.get("latest_runs") if isinstance(goal.get("latest_runs"), list) else []
     return [run for run in runs if isinstance(run, dict)]
+
+
+def latest_accountable_agent_delivery(
+    status_payload: dict[str, Any],
+    *,
+    goal_id: str,
+    agent_id: str,
+    scan_limit: int = 12,
+) -> dict[str, Any] | None:
+    """Return the latest same-agent delivery anchor, ignoring controller ACKs.
+
+    A newer same-agent work event without a typed Todo binding intentionally
+    breaks continuity. Peer-agent events do not steal this agent's lane.
+    """
+
+    safe_agent_id = normalize_todo_claimed_by(agent_id)
+    if not safe_agent_id:
+        return None
+    for run in goal_latest_runs(status_payload, goal_id=goal_id)[: max(1, scan_limit)]:
+        if _run_is_controller_bookkeeping(run):
+            continue
+        run_agent_id = normalize_todo_claimed_by(run.get("agent_id"))
+        if run_agent_id and run_agent_id != safe_agent_id:
+            continue
+        if run_agent_id != safe_agent_id:
+            continue
+        todo_id = normalize_todo_id(run.get("todo_id"))
+        delivery_outcome = str(run.get("delivery_outcome") or "").strip()
+        if not todo_id or delivery_outcome not in MATERIAL_DELIVERY_OUTCOMES:
+            return None
+        return {
+            "todo_id": todo_id,
+            "delivery_outcome": delivery_outcome,
+            "generated_at": run.get("generated_at"),
+        }
+    return None
 
 
 def recent_external_monitor_observation_unchanged(

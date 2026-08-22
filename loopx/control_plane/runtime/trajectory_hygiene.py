@@ -5,19 +5,14 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
+from ..work_items.delivery_outcome import MATERIAL_DELIVERY_OUTCOMES
+
 
 TRAJECTORY_HYGIENE_SCHEMA_VERSION = "trajectory_hygiene_summary_v0"
 CONTROLLER_CLASSIFICATION_PREFIXES = ("quota_",)
 CONTROLLER_CLASSIFICATIONS = {
     "state_refreshed",
 }
-MATERIAL_DELIVERY_OUTCOMES = {
-    "outcome_gap",
-    "outcome_progress",
-    "primary_goal_outcome",
-}
-
-
 def _ratio(numerator: int, denominator: int) -> float:
     if denominator <= 0:
         return 0.0

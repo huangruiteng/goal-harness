@@ -62,6 +62,11 @@ import {
   loadSchedulerState,
   writeSchedulerState,
 } from "./scheduler/state_store.ts";
+import { buildVisionCheckpoint } from "./goals/vision_checkpoint.ts";
+import {
+  evaluateDeliveryBoundary,
+  evaluateDeliveryContinuity,
+} from "./turn_driver/delivery_continuity.ts";
 
 type EffectRuntimeHandler = (params: JsonObject) => unknown | Promise<unknown>;
 
@@ -277,6 +282,9 @@ export function createEffectRuntimeHandlers(
     ["scheduler.state.evaluate", evaluateSchedulerStateOperation],
     ["scheduler.state.load", loadSchedulerState],
     ["scheduler.state.write", writeSchedulerState],
+    ["turn.delivery_boundary.evaluate", evaluateDeliveryBoundary],
+    ["turn.delivery_continuity.evaluate", evaluateDeliveryContinuity],
+    ["goal.vision_checkpoint.evaluate", buildVisionCheckpoint],
     [
       "quota.delivery_workspace_causality.evaluate",
       evaluateDeliveryWorkspaceCausality,

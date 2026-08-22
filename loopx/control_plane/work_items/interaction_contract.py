@@ -615,6 +615,12 @@ def _turn_scoped_cli_settlement_plan(
         scoped_cli_args=scoped_cli_args,
         lifecycle_actor_args=f" --agent-id {shlex.quote(agent_id)}",
         turn_instance_id=turn_instance_id,
+        delivery_boundary=(
+            str(selected_todo.get("delivery_boundary"))
+            if selected_todo.get("delivery_boundary")
+            == "in_flight_continuation"
+            else None
+        ),
     )
     return plan.as_dict() if plan is not None else None
 

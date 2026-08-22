@@ -32,6 +32,7 @@ _SOURCE_FILES = (
     "effect_runtime_handlers.ts",
     "effect_runtime_io.ts",
     "effect_runtime_server.ts",
+    "goals/vision_checkpoint.ts",
     "quota/settlement_workspace_causality.ts",
     "scheduler/state_store.ts",
     "scheduler/state_transition_rules.ts",
@@ -40,6 +41,8 @@ _SOURCE_FILES = (
     "todos/next_action.ts",
     "turn_driver/turn_journal.ts",
     "turn_driver/turn_journal_effects.ts",
+    "turn_driver/delivery_continuity.ts",
+    "work_items/delivery_outcome.ts",
     "turn_transaction_contract.json",
 )
 

@@ -380,6 +380,7 @@ def build_agent_lane_next_action(
     active_next_action: Any = None,
     scoped_user_gate_fallback: dict[str, Any] | None = None,
     receipt_bound_todo_id: str | None = None,
+    delivery_continuity: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(agent_identity, dict):
         return None
@@ -470,6 +471,12 @@ def build_agent_lane_next_action(
 
     preferred_todo_ids = _todo_ids_from_action(active_next_action)
     receipt_todo_id = normalize_todo_id(receipt_bound_todo_id)
+    in_flight_todo_id = (
+        normalize_todo_id(delivery_continuity.get("todo_id"))
+        if isinstance(delivery_continuity, dict)
+        and delivery_continuity.get("decision") == "resume_in_flight"
+        else None
+    )
     active_next_action_items = (
         agent_todo_summary.get("active_next_action_executable_items")
         if isinstance(agent_todo_summary.get("active_next_action_executable_items"), list)
@@ -511,6 +518,10 @@ def build_agent_lane_next_action(
                 if receipt_todo_id
                 and normalize_todo_id(candidate.get("todo_id")) == receipt_todo_id
                 else 1,
+                0
+                if in_flight_todo_id
+                and normalize_todo_id(candidate.get("todo_id")) == in_flight_todo_id
+                else 1,
                 _agent_lane_candidate_sort_key(
                     candidate,
                     agent_id=agent_id,
@@ -523,7 +534,10 @@ def build_agent_lane_next_action(
             claimed_by = agent_scope_item_claimed_by(raw_item)
             todo_id = str(raw_item.get("todo_id") or "").strip()
             selected_by = (
-                "active_next_action_todo"
+                "in_flight_todo"
+                if in_flight_todo_id
+                and normalize_todo_id(todo_id) == in_flight_todo_id
+                else "active_next_action_todo"
                 if todo_id and todo_id in preferred_todo_ids
                 else "current_agent_claimed_todo"
                 if claimed_by == agent_id
@@ -535,6 +549,12 @@ def build_agent_lane_next_action(
             if receipt_todo_id and normalize_todo_id(todo_id) == receipt_todo_id:
                 payload["selection_binding"] = "heartbeat_receipt"
             lineage_source = source
+            if selected_by == "in_flight_todo":
+                lineage_source = "delivery_continuity.latest_accountable_delivery"
+                payload["selection_reason"] = delivery_continuity.get("reason")
+                payload["delivery_boundary"] = delivery_continuity.get(
+                    "delivery_boundary"
+                )
             if (
                 source == "capability_gate.runnable_candidates"
                 and selected_by == "active_next_action_todo"
@@ -563,7 +583,11 @@ def build_agent_lane_next_action(
                     "confidence": (
                         "selected"
                         if selected_by
-                        in {"active_next_action_todo", "current_agent_claimed_todo"}
+                        in {
+                            "in_flight_todo",
+                            "active_next_action_todo",
+                            "current_agent_claimed_todo",
+                        }
                         else "candidate"
                     ),
                     "preserves_goal_next_action": True,
@@ -583,12 +607,14 @@ def selected_action_with_agent_lane(
     if agent_lane_next_action.get("source") not in {
         "capability_gate.runnable_candidates",
         "agent_todo_summary.active_next_action_executable_items",
+        "delivery_continuity.latest_accountable_delivery",
     }:
         return selected_action
     selected_by = agent_lane_next_action.get("selected_by")
     confidence = agent_lane_next_action.get("confidence")
     if selected_by not in {
         "active_next_action_todo",
+        "in_flight_todo",
         "current_agent_claimed_todo",
         "unclaimed_todo",
     }:

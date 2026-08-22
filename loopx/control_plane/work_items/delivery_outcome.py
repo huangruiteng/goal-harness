@@ -29,6 +29,13 @@ DELIVERY_TURN_KIND_CHOICES = tuple(kind.value for kind in DeliveryTurnKind)
 DELIVERY_OUTCOME_UNKNOWN = "unknown"
 DELIVERY_OUTCOME_NOT_CONFIGURED = "not_configured"
 
+MATERIAL_DELIVERY_OUTCOMES = frozenset(
+    {
+        DeliveryOutcome.OUTCOME_GAP,
+        DeliveryOutcome.OUTCOME_PROGRESS,
+        DeliveryOutcome.PRIMARY_GOAL_OUTCOME,
+    }
+)
 ACCOUNTABLE_DELIVERY_OUTCOMES = frozenset(
     {
         DeliveryOutcome.OUTCOME_PROGRESS,

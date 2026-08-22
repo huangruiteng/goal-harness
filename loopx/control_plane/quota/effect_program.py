@@ -56,6 +56,7 @@ def build_codex_app_settlement_plan(
     scoped_cli_args: str,
     lifecycle_actor_args: str,
     turn_instance_id_ref: str = "${LOOPX_TURN:?}",
+    delivery_boundary: str | None = None,
 ) -> SettlementPlan:
     return build_turn_scoped_cli_settlement_plan(
         goal_id=goal_id,
@@ -65,6 +66,7 @@ def build_codex_app_settlement_plan(
         scoped_cli_args=scoped_cli_args,
         lifecycle_actor_args=lifecycle_actor_args,
         turn_instance_id=turn_instance_id_ref,
+        delivery_boundary=delivery_boundary,
     )
 
 
@@ -77,6 +79,7 @@ def build_turn_scoped_cli_settlement_plan(
     scoped_cli_args: str,
     lifecycle_actor_args: str,
     turn_instance_id: str,
+    delivery_boundary: str | None = None,
 ) -> SettlementPlan:
     if bool(todo_id) == bool(replan_obligation_id):
         raise ValueError(
@@ -97,6 +100,11 @@ def build_turn_scoped_cli_settlement_plan(
         else f" --replan-obligation-id {shlex.quote(str(replan_obligation_id))}"
     )
     turn_arg = f" --turn-instance-id {quoted_turn}"
+    boundary_arg = (
+        " --delivery-boundary in_flight_continuation"
+        if delivery_boundary == "in_flight_continuation"
+        else ""
+    )
     terminal_closeout = (
         f"loopx todo complete --goal-id {shlex.quote(goal_id)}{binding_arg}"
         f"{lifecycle_actor_args}{turn_arg} --evidence '<validated evidence>'"
@@ -105,7 +113,8 @@ def build_turn_scoped_cli_settlement_plan(
     writeback = (
         f"loopx refresh-state --goal-id {shlex.quote(goal_id)} "
         "--classification <validated_progress> --delivery-batch-scale <scale> "
-        f"--delivery-outcome <outcome>{binding_arg}{turn_arg}{scoped_cli_args}"
+        f"--delivery-outcome <outcome>{boundary_arg}{binding_arg}{turn_arg}"
+        f"{scoped_cli_args}"
     )
     spend = (
         f"loopx quota spend-slot --goal-id {shlex.quote(goal_id)} --slots 1 "
