@@ -126,6 +126,48 @@ def _board_payload(
     )
 
 
+def _reconcile_experiment_board(
+    args: argparse.Namespace,
+    *,
+    ledger_path: Path,
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    source_rows = [
+        row
+        for source_path in args.source_ledger
+        for row in read_benchmark_experiment_board_rows(source_path)
+    ]
+    reconciled_rows, reconciliation = preview_benchmark_experiment_board_reconcile(
+        rows,
+        source_rows,
+    )
+    if not args.execute:
+        return reconciled_rows, {
+            **reconciliation,
+            "status": "preview_reconciled",
+            "write_performed": False,
+            "row_count": len(reconciled_rows),
+            "path_recorded": False,
+            "dry_run": True,
+        }
+
+    existing_by_key = {_row_key(row): row for row in rows}
+    for row in reconciled_rows:
+        if existing_by_key.get(_row_key(row)) != row:
+            upsert_benchmark_experiment_board_row(ledger_path, row)
+    written_rows = read_benchmark_experiment_board_rows(ledger_path)
+    return written_rows, {
+        **reconciliation,
+        "status": "reconciled",
+        "write_performed": bool(
+            reconciliation["inserted"] or reconciliation["updated"]
+        ),
+        "row_count": len(written_rows),
+        "path_recorded": False,
+        "dry_run": False,
+    }
+
+
 def handle_benchmark_experiment_board_command(
     args: argparse.Namespace,
     *,
@@ -166,41 +208,11 @@ def handle_benchmark_experiment_board_command(
                     "dry_run": True,
                 }
         elif args.benchmark_command == "experiment-board-reconcile":
-            source_rows = [
-                row
-                for source_path in args.source_ledger
-                for row in read_benchmark_experiment_board_rows(source_path)
-            ]
-            reconciled_rows, reconciliation = (
-                preview_benchmark_experiment_board_reconcile(rows, source_rows)
+            rows, write = _reconcile_experiment_board(
+                args,
+                ledger_path=ledger_path,
+                rows=rows,
             )
-            if args.execute:
-                existing_by_key = {_row_key(row): row for row in rows}
-                for row in reconciled_rows:
-                    key = _row_key(row)
-                    if existing_by_key.get(key) != row:
-                        upsert_benchmark_experiment_board_row(ledger_path, row)
-                rows = read_benchmark_experiment_board_rows(ledger_path)
-                write = {
-                    **reconciliation,
-                    "status": "reconciled",
-                    "write_performed": bool(
-                        reconciliation["inserted"] or reconciliation["updated"]
-                    ),
-                    "row_count": len(rows),
-                    "path_recorded": False,
-                    "dry_run": False,
-                }
-            else:
-                rows = reconciled_rows
-                write = {
-                    **reconciliation,
-                    "status": "preview_reconciled",
-                    "write_performed": False,
-                    "row_count": len(rows),
-                    "path_recorded": False,
-                    "dry_run": True,
-                }
         payload = _board_payload(
             rows=rows,
             benchmark_id=args.benchmark_id,

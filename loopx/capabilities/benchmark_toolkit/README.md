@@ -446,7 +446,9 @@ Without `--execute`, the command previews the reconciled board. Reconciliation i
 idempotent and monotonic: newer legal lifecycle transitions advance a stable run,
 late non-terminal rows cannot reopen a terminal run, and conflicting terminal
 states fail closed. Receipts report only compact row counts and never record source
-paths.
+paths. The command validates the complete candidate set before its first write;
+executed batches are replay-safe, while providers remain responsible for retrying a
+batch that is interrupted before its receipt is returned.
 
 ## Post-run case insight monitor
 

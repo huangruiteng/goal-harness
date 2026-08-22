@@ -455,6 +455,42 @@ def _benchmark_experiment_board_observed_at(payload: Mapping[str, Any]) -> datet
     return datetime.fromisoformat(str(payload["observed_at"]))
 
 
+def _advance_reconciled_benchmark_experiment_board_row(
+    selected: dict[str, Any],
+    candidate: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    if selected == candidate:
+        return selected, False
+
+    selected_status = str(selected["status"])
+    candidate_status = str(candidate["status"])
+    if (
+        selected_status in _TERMINAL_RUN_STATUSES
+        and candidate_status in _TERMINAL_RUN_STATUSES
+        and candidate_status != selected_status
+    ):
+        raise ValueError(
+            "benchmark experiment board sources contain conflicting terminal states"
+        )
+
+    selected_at = _benchmark_experiment_board_observed_at(selected)
+    candidate_at = _benchmark_experiment_board_observed_at(candidate)
+    if candidate_at == selected_at:
+        raise ValueError(
+            "benchmark experiment board sources contain ambiguous rows at "
+            "the same observed_at timestamp"
+        )
+    if candidate_at < selected_at:
+        return selected, True
+    if selected_status in _TERMINAL_RUN_STATUSES:
+        if candidate_status in _TERMINAL_RUN_STATUSES:
+            return candidate, False
+        return selected, True
+    if candidate_status not in _RUN_STATUS_TRANSITIONS[selected_status]:
+        return selected, True
+    return candidate, False
+
+
 def _select_reconciled_benchmark_experiment_board_row(
     current: dict[str, Any] | None,
     candidates: list[dict[str, Any]],
@@ -466,37 +502,11 @@ def _select_reconciled_benchmark_experiment_board_row(
         if selected is None:
             selected = candidate
             continue
-        if selected == candidate:
-            continue
-
-        selected_at = _benchmark_experiment_board_observed_at(selected)
-        candidate_at = _benchmark_experiment_board_observed_at(candidate)
-        selected_status = str(selected["status"])
-        candidate_status = str(candidate["status"])
-
-        if candidate_at == selected_at:
-            raise ValueError(
-                "benchmark experiment board sources contain ambiguous rows at "
-                "the same observed_at timestamp"
-            )
-        if candidate_at < selected_at:
-            stale_skipped += 1
-            continue
-        if selected_status in _TERMINAL_RUN_STATUSES:
-            if candidate_status in _TERMINAL_RUN_STATUSES:
-                if candidate_status != selected_status:
-                    raise ValueError(
-                        "benchmark experiment board sources contain conflicting "
-                        "terminal states"
-                    )
-                selected = candidate
-                continue
-            stale_skipped += 1
-            continue
-        if candidate_status not in _RUN_STATUS_TRANSITIONS[selected_status]:
-            stale_skipped += 1
-            continue
-        selected = candidate
+        selected, skipped = _advance_reconciled_benchmark_experiment_board_row(
+            selected,
+            candidate,
+        )
+        stale_skipped += int(skipped)
 
     if selected is None:
         raise ValueError("benchmark experiment board reconcile requires source rows")

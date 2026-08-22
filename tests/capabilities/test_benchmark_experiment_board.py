@@ -373,6 +373,20 @@ def test_reconcile_rejects_conflicting_terminal_sources() -> None:
         )
 
 
+def test_reconcile_rejects_older_terminal_conflict_with_canonical_row() -> None:
+    canonical = _baseline(observed_at="2026-08-18T00:40:00+00:00")
+    older_runner_invalid = _running_baseline(
+        status="runner_invalid",
+        observed_at="2026-08-18T00:30:00+00:00",
+    )
+
+    with pytest.raises(ValueError, match="conflicting terminal states"):
+        preview_benchmark_experiment_board_reconcile(
+            [canonical],
+            [older_runner_invalid],
+        )
+
+
 def test_cli_previews_then_writes_and_reads_board(tmp_path: Path) -> None:
     row_path = tmp_path / "row.json"
     row_path.write_text(json.dumps(_baseline()), encoding="utf-8")
