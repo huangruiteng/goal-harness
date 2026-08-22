@@ -8,6 +8,33 @@ from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
 
 TODO_COMPLETION_FENCE_REQUEST_SCHEMA = "loopx_todo_completion_fence_request_v0"
 TODO_COMPLETION_FENCE_RESULT_SCHEMA = "loopx_todo_completion_fence_result_v0"
+TODO_COMPLETION_IDENTITY_REQUEST_SCHEMA = "loopx_todo_completion_identity_request_v0"
+TODO_COMPLETION_IDENTITY_RESULT_SCHEMA = "loopx_todo_completion_identity_v0"
+
+
+def local_todo_completion_identity(*, goal_id: str, todo_id: str) -> str:
+    """Return the TS-owned stable identity for an unscoped completion."""
+
+    try:
+        result = effect_runtime_result(
+            "todo.completion_identity.project",
+            {
+                "schema_version": TODO_COMPLETION_IDENTITY_REQUEST_SCHEMA,
+                "goal_id": goal_id,
+                "todo_id": todo_id,
+            },
+        )
+    except EffectRuntimeRejected as exc:
+        raise ValueError(str(exc)) from None
+    if not (
+        isinstance(result, Mapping)
+        and result.get("schema_version") == TODO_COMPLETION_IDENTITY_RESULT_SCHEMA
+        and result.get("identity_source") == "unscoped_completion"
+        and isinstance(result.get("completion_identity_key"), str)
+        and str(result["completion_identity_key"]).startswith("local_completion_")
+    ):
+        raise RuntimeError("TypeScript Todo completion identity result shape mismatch")
+    return str(result["completion_identity_key"])
 
 
 def _json_successor_value(value: Any) -> Any:
@@ -22,6 +49,9 @@ def evaluate_todo_completion_fence(
     projection_source: str,
     completion_turn_key: str | None,
     no_followup: bool,
+    goal_id: str | None = None,
+    todo_id: str | None = None,
+    completion_identity_source: str | None = None,
 ) -> dict[str, Any]:
     """Ask the TypeScript Todo owner for the canonical replay-fence decision."""
 
@@ -51,6 +81,9 @@ def evaluate_todo_completion_fence(
                 },
                 "requested_no_followup": no_followup,
                 "requested_completion_turn_key": completion_turn_key,
+                "requested_completion_identity_source": completion_identity_source,
+                "goal_id": goal_id,
+                "todo_id": todo_id,
             },
         )
     except EffectRuntimeRejected as exc:
@@ -78,6 +111,7 @@ def completed_todo_replay(
     goal_id: str,
     todo_id: str,
     completion_turn_key: str | None,
+    completion_identity_source: str | None,
     no_followup: bool,
     handoff_mode: str,
     mutation_authority: dict[str, Any],
@@ -104,6 +138,9 @@ def completed_todo_replay(
         projection_source="materialized",
         completion_turn_key=completion_turn_key,
         no_followup=no_followup,
+        goal_id=goal_id,
+        todo_id=todo_id,
+        completion_identity_source=completion_identity_source,
     )
 
     # Event-projected deferred rows must pass through the event writer so the

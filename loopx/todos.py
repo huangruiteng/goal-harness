@@ -73,7 +73,10 @@ from .control_plane.todos.completion_policy import (
     linked_successors_from_state,
     resolve_completion_policy,
 )
-from .control_plane.todos.completion_fence import completed_todo_replay
+from .control_plane.todos.completion_fence import (
+    completed_todo_replay,
+    local_todo_completion_identity,
+)
 from .control_plane.todos import completion_validation as completion_validation_module
 from .control_plane.todos.event_writeback import (
     complete_event_projected_goal_todo,
@@ -1649,6 +1652,7 @@ def complete_goal_todo(
     decision_outcome: str | None = None,
     evidence: str | None = None,
     completion_turn_key: str | None = None,
+    completion_identity_source: str | None = None,
     task_lease_idempotency_key: str | None = None,
     task_lease_expected_version: int | None = None,
     note: str | None = None,
@@ -1697,6 +1701,7 @@ def complete_goal_todo(
         dry_run=dry_run,
         no_followup=no_followup,
         completion_turn_key=completion_turn_key,
+        completion_identity_source=completion_identity_source,
     )
     validation_failure = validation_gate.get("failure")
     if validation_failure is not None:
@@ -1739,6 +1744,15 @@ def complete_goal_todo(
             raise ValueError(
                 f"todo_id {normalized_todo_id!r} was not found in active user or agent todos"
             )
+        if (
+            completion_turn_key is None
+            and str(completion_todo.get("status") or "") != TODO_STATUS_DONE
+        ):
+            completion_turn_key = local_todo_completion_identity(
+                goal_id=goal_id,
+                todo_id=str(completion_todo.get("todo_id") or todo_id),
+            )
+            completion_identity_source = "unscoped_completion"
         decision_target = None
         target_todo_id = normalize_todo_id(completion_todo.get("unblocks_todo_id"))
         if target_todo_id:
@@ -1769,6 +1783,7 @@ def complete_goal_todo(
             goal_id=goal_id,
             todo_id=todo_id,
             completion_turn_key=completion_turn_key, no_followup=no_followup,
+            completion_identity_source=completion_identity_source,
             handoff_mode=completion_handoff["handoff_mode"],
             mutation_authority=mutation_authority,
             state_file=str(resolved_state_file),
@@ -1785,7 +1800,12 @@ def complete_goal_todo(
                 todo=completion_todo,
                 actor_agent_id=agent_id or claimed_by,
                 idempotency_key=(
-                    task_lease_idempotency_key or completion_turn_key
+                    task_lease_idempotency_key
+                    or (
+                        completion_turn_key
+                        if completion_identity_source != "unscoped_completion"
+                        else None
+                    )
                 ),
                 expected_version=task_lease_expected_version,
                 require_active_when_key_supplied=(
@@ -1809,6 +1829,7 @@ def complete_goal_todo(
                     completion_todo.get("successor_todo_ids")
                 )
             ),
+            completion_identity_source=completion_identity_source,
         )
         linked_successors = linked_successors_from_state(
             lines=lines,
@@ -1844,6 +1865,7 @@ def complete_goal_todo(
                     context=event_context,
                     evidence=evidence,
                     completion_turn_key=completion_turn_key,
+                    completion_identity_source=completion_identity_source,
                     note=note,
                     no_followup=no_followup,
                     successor_todo_ids=normalized_successor_todo_ids,
