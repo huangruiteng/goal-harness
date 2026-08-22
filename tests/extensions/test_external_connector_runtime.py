@@ -149,6 +149,14 @@ def test_status_projection_omits_private_source_and_cursor_references() -> None:
 
 
 def test_ack_fails_closed_until_effect_and_response_are_verified() -> None:
+    with pytest.raises(TypeError, match="proof fields must be booleans"):
+        build_external_event_response_receipt(
+            event_id="event-alpha",
+            external_write_performed="yes",  # type: ignore[arg-type]
+            verification_performed=True,
+            response_verified=True,
+        )
+
     missing_effect = decide_external_event_ack(
         event_id="event-alpha",
         effect_receipt=None,

@@ -111,12 +111,17 @@ def build_external_event_response_receipt(
 ) -> dict[str, Any]:
     """Normalize provider proof into one event-bound response receipt."""
 
+    proof = {
+        "external_write_performed": external_write_performed,
+        "verification_performed": verification_performed,
+        "response_verified": response_verified,
+    }
+    if any(not isinstance(value, bool) for value in proof.values()):
+        raise TypeError("external response proof fields must be booleans")
     return {
         "schema_version": RESPONSE_RECEIPT_SCHEMA_VERSION,
         "event_ref": external_event_ref(event_id),
-        "external_write_performed": bool(external_write_performed),
-        "verification_performed": bool(verification_performed),
-        "response_verified": bool(response_verified),
+        **proof,
         "private_event_id_captured": False,
         "private_response_content_captured": False,
     }
