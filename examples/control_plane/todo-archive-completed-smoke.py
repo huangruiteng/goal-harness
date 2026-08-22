@@ -13,8 +13,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.control_plane.todos.completed_archive import completed_todo_archive_warning
-from loopx.status import parse_active_state_todos
+from loopx.control_plane.todos.completed_archive import (  # noqa: E402
+    completed_todo_archive_warning,
+    completed_todo_count,
+)
+from loopx.status import parse_active_state_todos  # noqa: E402
 
 GOAL_ID = "todo-archive-completed-goal"
 
@@ -199,10 +202,7 @@ def main() -> int:
         assert status_after["ok"] is True, status_after
         assert status_after["contract_errors"] == [], status_after
 
-        done_before_completion = (
-            parsed_after["agent_todos"]["done_count"]
-            - parsed_after["agent_todos"]["deferred_count"]
-        )
+        done_before_completion = completed_todo_count(parsed_after["agent_todos"])
         lineage_source_text = "Complete work whose successor lineage must survive archiving."
         lineage_successor_text = "Continue the public archive interplay validation."
         lineage_source = run_cli(

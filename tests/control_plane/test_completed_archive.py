@@ -3,6 +3,7 @@ from __future__ import annotations
 from loopx.control_plane.todos.completed_archive import (
     archive_completed_todo_lines,
     completed_todo_archive_warning,
+    completed_todo_count,
 )
 from loopx.status import parse_active_state_todos
 
@@ -26,6 +27,7 @@ def test_completed_archive_keeps_deferred_todo_active() -> None:
 
     assert parsed["done_count"] == 2
     assert parsed["deferred_count"] == 1
+    assert completed_todo_count(parsed) == 1
     warning = completed_todo_archive_warning(parsed, max_active_done_todos=0)
     assert warning is not None
     assert warning["active_done_count"] == 1
@@ -42,3 +44,10 @@ def test_completed_archive_keeps_deferred_todo_active() -> None:
     )
     assert deferred["status"] == "deferred"
     assert deferred["archive_state"] == "active"
+
+
+def test_completed_todo_count_fails_closed_for_invalid_summary_counts() -> None:
+    assert completed_todo_count(None) == 0
+    assert completed_todo_count({"done_count": 1}) == 0
+    assert completed_todo_count({"done_count": "invalid", "deferred_count": 1}) == 0
+    assert completed_todo_count({"done_count": 1, "deferred_count": 2}) == 0
