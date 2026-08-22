@@ -142,7 +142,10 @@ def _capability_values(values: Sequence[str]) -> list[str]:
     return sorted(normalized)
 
 
-def _normalized_binding(binding: Mapping[str, Any]) -> dict[str, Any]:
+def normalize_external_connector_binding(
+    binding: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Revalidate an owner-local Connector binding at a caller boundary."""
     if binding.get("schema_version") != CONNECTOR_SCHEMA_VERSION:
         raise ValueError("external connector binding schema is invalid")
     return build_external_connector_binding(
@@ -273,7 +276,7 @@ def build_external_connector_binding(
 def project_external_connector_status(binding: Mapping[str, Any]) -> dict[str, Any]:
     """Return a content-free status projection without owner-local references."""
 
-    normalized = _normalized_binding(binding)
+    normalized = normalize_external_connector_binding(binding)
     return {
         "schema_version": "agent_external_connector_status_v0",
         "goal_ref": normalized["goal_ref"],
@@ -425,7 +428,7 @@ def _binding_paths(
     project: str | Path,
     binding: Mapping[str, Any],
 ) -> tuple[dict[str, Any], Path, Path]:
-    normalized = _normalized_binding(binding)
+    normalized = normalize_external_connector_binding(binding)
     if normalized["ingress_policy"] != ExternalIngressPolicy.ASYNC_INBOX.value:
         raise ValueError("external connector inbox runtime requires async_inbox")
     inbox_ref = str(normalized.get("inbox_ref") or "")
