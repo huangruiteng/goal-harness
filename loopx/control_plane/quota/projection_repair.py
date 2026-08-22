@@ -175,14 +175,16 @@ def build_boundary_projection_repair_hint(
             continue
         if todo_item_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
             continue
-        required = normalize_required_write_scopes(item.get("required_write_scopes"))
-        if required:
-            selected = item
-            break
+        selected = item
+        break
     if not selected:
         return None
 
-    required_scopes = normalize_required_write_scopes(selected.get("required_write_scopes"))
+    required_scopes = normalize_required_write_scopes(
+        selected.get("required_write_scopes")
+    )
+    if not required_scopes:
+        return None
     boundary = goal_boundary if isinstance(goal_boundary, dict) else {}
     allowed_scopes = normalize_required_write_scopes(boundary.get("write_scope"))
     missing_scopes = [

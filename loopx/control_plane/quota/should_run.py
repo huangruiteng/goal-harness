@@ -12,12 +12,15 @@ from ..agents.agent_scope import (
 from ..agents.identity import (
     build_quota_agent_identity,
 )
+from ..agents.workspace_guard import build_agent_workspace_guard
 from ..quota.goal_boundary import (
     registry_goal_by_id as _registry_goal_by_id,
 )
 from ..quota.decision_summary import (
     quota_plan_items as _quota_plan_items,
 )
+from ..quota.projection_repair import build_boundary_projection_repair_hint
+from ..quota.selected_todo_projection import selected_todo_projection
 from ..quota.states import (
     AutomaticTurnPauseCause,
     automatic_turn_pause_cause,
@@ -35,16 +38,69 @@ from ..work_items.interaction_contract import (
 )
 
 from .should_run_packet import (
+    _QuotaDecisionRoute,
     _build_quota_should_run_payload,
     _execution_obligation,
     _resolve_quota_should_run_route,
     _scheduler_hint,
 )
-from .should_run_prepare import _prepare_quota_should_run_item
+from .should_run_prepare import (
+    _QuotaDecisionPreparation,
+    _prepare_quota_should_run_item,
+)
 
 
 QUOTA_PAUSED_MODE = "quota_paused"
 GOAL_STOPPED_MODE = "goal_stopped"
+
+
+def _apply_selected_todo_guards(
+    prepared: _QuotaDecisionPreparation,
+    route: _QuotaDecisionRoute,
+) -> _QuotaDecisionRoute:
+    """Bind workspace and boundary guards to the exact projected Todo.
+
+    Delivery continuity and agent steering can reorder runnable candidates.  These
+    guards therefore run after the delivery route has selected a Todo, then freeze
+    that selection while the policy route is recomputed with any resulting repair.
+    """
+
+    selected_todo = selected_todo_projection(
+        agent_lane_next_action=route.agent_lane_next_action,
+        work_lane_contract=route.payload_work_lane_contract,
+        agent_scope_frontier=route.agent_scope_frontier,
+    )
+    workspace_guard = None
+    if not prepared.inbox_reply_due:
+        workspace_guard = build_agent_workspace_guard(
+            prepared.item,
+            prepared.agent_identity,
+            agent_todo_summary=prepared.agent_todo_summary,
+            selected_todo=selected_todo,
+        )
+    boundary_projection_repair = build_boundary_projection_repair_hint(
+        prepared.goal_boundary,
+        prepared.agent_todo_summary,
+        candidate_should_run=bool(route.should_run),
+        capability_gate=prepared.capability_gate,
+        selected_todo=selected_todo,
+    )
+    if not workspace_guard and not boundary_projection_repair:
+        return route
+
+    prepared.workspace_guard = workspace_guard
+    if isinstance(route.agent_lane_next_action, dict):
+        prepared.guarded_agent_lane_next_action = route.agent_lane_next_action
+    if boundary_projection_repair:
+        prepared.boundary_projection_repair = boundary_projection_repair
+        prepared.stall_self_repair = boundary_projection_repair
+        prepared.self_repair_allowed = True
+        prepared.normal_delivery_allowed = False
+        prepared.recovery_allowed = False
+        prepared.reason = str(
+            boundary_projection_repair.get("reason") or prepared.reason
+        )
+    return _resolve_quota_should_run_route(prepared)
 
 
 def build_quota_paused_should_run_payload(
@@ -233,9 +289,11 @@ def build_quota_should_run(
             receipt_bound_todo_id=receipt_bound_todo_id,
             receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
         )
+        route = _resolve_quota_should_run_route(prepared)
+        route = _apply_selected_todo_guards(prepared, route)
         return _build_quota_should_run_payload(
             prepared,
-            _resolve_quota_should_run_route(prepared),
+            route,
             turn_instance_id=turn_instance_id,
         )
     if health_item:

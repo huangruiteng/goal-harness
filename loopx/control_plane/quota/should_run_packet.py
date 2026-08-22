@@ -534,6 +534,9 @@ def _resolve_agent_lane_delivery_route(
 ) -> dict[str, Any] | None:
     """Project candidates once, then let TypeScript own their delivery route."""
 
+    if isinstance(prepared.guarded_agent_lane_next_action, dict):
+        return prepared.guarded_agent_lane_next_action
+
     item = prepared.item
     fallback = prepared.receipt_bound_agent_next_action
     if (

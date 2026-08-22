@@ -22,7 +22,6 @@ from ..agents.identity import (
     build_identity_aware_prompt_upgrade,
     build_quota_agent_identity,
 )
-from ..agents.workspace_guard import build_agent_workspace_guard
 from ..goals.goal_frontier import (
     build_goal_frontier_projection_context_from_status,
 )
@@ -35,7 +34,6 @@ from ..quota.policy_constants import (
     MONITOR_DUE_ITEM_LIMIT,
 )
 from ..quota.projection_repair import (
-    build_boundary_projection_repair_hint,
     build_state_projection_gap,
     build_state_projection_gap_repair_hint,
 )
@@ -43,9 +41,6 @@ from ..quota.recent_runs import (
     build_monitor_debt_arbitration as _build_monitor_debt_arbitration,
     goal_latest_runs as _goal_latest_runs,
     latest_accountable_agent_delivery as _latest_accountable_agent_delivery,
-)
-from ..quota.selected_todo_projection import (
-    selected_todo_projection as _selected_todo_projection,
 )
 from ..quota.stall_repair import (
     apply_stall_repair_delivery_guard,
@@ -132,6 +127,7 @@ class _QuotaDecisionPreparation:
     scoped_user_gate_fallback: dict[str, Any] | None
     inbox_reply_due: bool
     workspace_guard: dict[str, Any] | None
+    guarded_agent_lane_next_action: dict[str, Any] | None
     agent_frontier_id: str | None
     registered_agent_ids: list[str]
     replan_obligation: dict[str, Any] | None
@@ -647,20 +643,11 @@ def _prepare_quota_should_run_item(
             )
             if isinstance(preserved_work_lane, dict):
                 work_lane_contract = preserved_work_lane
-    work_lane_selected_todo = _selected_todo_projection(
-        agent_lane_next_action=receipt_bound_agent_next_action,
-        work_lane_contract=work_lane_contract,
-    )
     if inbox_reply_due:
         task_orchestration_contract = capability_gate = capability_monitor_contract = None
         capability_monitor_fallback = scoped_user_gate_fallback = workspace_guard = None
     else:
-        workspace_guard = build_agent_workspace_guard(
-            item,
-            agent_identity,
-            agent_todo_summary=agent_todo_summary,
-            selected_todo=work_lane_selected_todo,
-        )
+        workspace_guard = None
     agent_frontier_id = (
         normalize_todo_claimed_by(agent_identity.get("agent_id"))
         if isinstance(agent_identity, dict)
@@ -712,21 +699,7 @@ def _prepare_quota_should_run_item(
         normal_delivery_allowed = False
         recovery_allowed = False
         reason = str(projection_gap_repair.get("reason") or reason)
-    boundary_projection_repair = build_boundary_projection_repair_hint(
-        goal_boundary,
-        agent_todo_summary,
-        candidate_should_run=bool(
-            normal_delivery_allowed or recovery_allowed or self_repair_allowed
-        ),
-        capability_gate=capability_gate,
-        selected_todo=work_lane_selected_todo,
-    )
-    if boundary_projection_repair:
-        stall_self_repair = boundary_projection_repair
-        self_repair_allowed = True
-        normal_delivery_allowed = False
-        recovery_allowed = False
-        reason = str(boundary_projection_repair.get("reason") or reason)
+    boundary_projection_repair = None
     return _QuotaDecisionPreparation(
         status_payload=status_payload,
         safe_goal_id=safe_goal_id,
@@ -764,6 +737,7 @@ def _prepare_quota_should_run_item(
         scoped_user_gate_fallback=scoped_user_gate_fallback,
         inbox_reply_due=inbox_reply_due,
         workspace_guard=workspace_guard,
+        guarded_agent_lane_next_action=None,
         agent_frontier_id=agent_frontier_id,
         registered_agent_ids=registered_agent_ids,
         replan_obligation=replan_obligation,
