@@ -214,6 +214,14 @@ authority 的 writeback、spend 与 terminal provider 的机械 adapter。因此
 Quota、host-adapter 与 task-lease caller 迁到各自的 coarse transaction 后，即可删除
 剩余细粒度 settlement facade。
 
+Quota delivery routing 是下一笔 bounded payoff cutover。TypeScript 通过一次请求拥有
+continuity 与 fallback 的选择，以及 selected Todo 的 settlement boundary。Python 仍
+准备正常 fallback candidate，并把 typed result 投影成 legacy quota packet，但不再
+组合两条 leaf decision。In-flight 路径的跨 runtime 调用从两次降为一次；无 anchor
+与 preempted 路径保持一次。Quota route 与 CLI caller 进入 native TypeScript
+transaction 后，Python facade 即可退出。Vision checkpointing 属于不同的
+refresh/writeback 生命周期阶段，因此继续作为独立 transaction。
+
 ### Stage 3 — CLI 与 App 汇合
 
 交付 native TS CLI，并在进程内 import kernel。只保留一个自动选择的 authority
