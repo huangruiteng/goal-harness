@@ -15,6 +15,7 @@ from ..control_plane.quota.cli_projection import (
 from ..control_plane.quota.error_codes import (
     HeartbeatReceiptIdentityConflictError,
     QuotaCommandValidationError,
+    QuotaIdentityPreconditionError,
     quota_error_code,
 )
 from ..control_plane.quota.heartbeat_receipt import (
@@ -393,6 +394,17 @@ def _quota_failure_payload(
         **verbose_debug,
         **lock_timeout_fields,
     }
+    if isinstance(error, QuotaIdentityPreconditionError):
+        payload.update(
+            {
+                "reason": str(error),
+                "status": "quota_identity_precondition_failed",
+                "identity_precondition": error.precondition.value,
+                "recommended_action": error.recommended_action,
+            }
+        )
+        if error.agent_id is not None:
+            payload["agent_id"] = error.agent_id
     if lock_timeout_fields:
         payload["recommended_action"] = "inspect the lock holder before retrying"
     if command == "monitor-poll":

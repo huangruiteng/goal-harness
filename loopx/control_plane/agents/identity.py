@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from ...agent_registry import agent_profile_for_goal, registered_agent_ids_for_goal
+from ..quota.error_codes import (
+    QuotaIdentityPrecondition,
+    QuotaIdentityPreconditionError,
+)
 from ..todos.contract import normalize_todo_claimed_by
 from .legacy_migration import (
     legacy_agent_hierarchy_present,
@@ -25,19 +29,21 @@ def build_quota_agent_identity(
 ) -> dict[str, Any] | None:
     normalized_agent_id = normalize_todo_claimed_by(agent_id) if agent_id else None
     if agent_id and not normalized_agent_id:
-        raise ValueError("agent_id must be a public-safe registered agent id")
+        raise QuotaIdentityPreconditionError(
+            QuotaIdentityPrecondition.PUBLIC_SAFE_AGENT_ID
+        )
     registered_agents = quota_registered_agents(goal)
     if not normalized_agent_id:
         return None
     if not registered_agents:
-        raise ValueError(
-            "quota should-run --agent-id requires coordination.registered_agents; "
-            "register this agent identity first"
+        raise QuotaIdentityPreconditionError(
+            QuotaIdentityPrecondition.REGISTERED_AGENT_ROSTER_PRESENT,
+            agent_id=normalized_agent_id,
         )
     if normalized_agent_id not in registered_agents:
-        raise ValueError(
-            f"agent_id={normalized_agent_id!r} is not registered; "
-            f"registered_agents={', '.join(registered_agents)}"
+        raise QuotaIdentityPreconditionError(
+            QuotaIdentityPrecondition.REQUESTED_AGENT_REGISTERED,
+            agent_id=normalized_agent_id,
         )
     runtime_model = agent_runtime_model_for_goal(goal)
     identity = {
