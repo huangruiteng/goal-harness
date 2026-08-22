@@ -20,17 +20,17 @@ PACKAGE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
         ),
         "checks": [
             {
-                "command": "python3 examples/canary/dsh-loopx-plugin-validation-smoke.py --phase quality",
+                "command": "python3 examples/canary/dsh-loopx-plugin-validation.py --phase quality",
                 "tier": "default",
                 "reason": "runs package typecheck and unit/integration tests without external services",
             },
             {
-                "command": "python3 examples/canary/dsh-loopx-plugin-validation-smoke.py --phase package",
+                "command": "python3 examples/canary/dsh-loopx-plugin-validation.py --phase package",
                 "tier": "default",
                 "reason": "builds the plugin and checks packed artifact plus isolated DSH profile install/remove lifecycle",
             },
             {
-                "command": "python3 examples/canary/dsh-loopx-plugin-validation-smoke.py --phase runtime",
+                "command": "python3 examples/canary/dsh-loopx-plugin-validation.py --phase runtime",
                 "tier": "default",
                 "reason": (
                     "runs the real DSH runtime smoke; requires local process spawn and "

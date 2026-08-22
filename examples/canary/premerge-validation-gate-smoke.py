@@ -182,9 +182,9 @@ def assert_dsh_plugin_change_selects_complete_package_validation() -> None:
     assert classification["manual_holds"] == [], payload
     commands = commands_from(payload["risk_profile_run"])
     assert commands[:3] == [
-        "python3 examples/canary/dsh-loopx-plugin-validation-smoke.py --phase quality",
-        "python3 examples/canary/dsh-loopx-plugin-validation-smoke.py --phase package",
-        "python3 examples/canary/dsh-loopx-plugin-validation-smoke.py --phase runtime",
+        "python3 examples/canary/dsh-loopx-plugin-validation.py --phase quality",
+        "python3 examples/canary/dsh-loopx-plugin-validation.py --phase package",
+        "python3 examples/canary/dsh-loopx-plugin-validation.py --phase runtime",
     ], payload
     reasons = [
         str(check.get("reason") or "")

@@ -74,6 +74,7 @@ next_real_step = "Keep explicit enablement bounded."
         "value-connectors",
         "explore",
         "auto-research",
+        "public-safe-outbound",
     ]
     assert all(item["provider_id"] == "loopx-core" for item in baseline["capabilities"])
     value_summary = next(
