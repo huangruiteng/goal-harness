@@ -71,3 +71,28 @@ exact authority, gate, revision, idempotency, and readback contract.
 The declarative capability and permission surface is maintained in
 [`extension.toml`](extension.toml). Provider readiness never grants a new
 permission or silently enables an external write.
+
+## 创建 LoopX 机器人（推荐权限集）
+
+每个新的 LoopX 企业自建应用（例如 Goal Channel 的发送 bot）应一次性申请
+推荐权限集，而不是边用边补。清单见
+[`bot_scopes.py`](bot_scopes.py)（`RECOMMENDED_BOT_SCOPES`），按用途分三档：
+
+- 核心（Goal Channel / reviewer / kanban）：`im:message`、`im:chat:read`、
+  `im:chat:create`、`im:chat:update`、`im:chat.members:read`、
+  `im:chat.members:write_only`、`contact:user.base:readonly`、
+  `contact:contact.base:readonly`、`application:application:self_manage`、
+  `application:bot.basic_info:read`
+- 收件箱（事件订阅收消息，敏感需审核）：`im:message.group_msg`、
+  `im:message.p2p_msg:readonly`
+- 交互/文档 sink：`cardkit:card:read/write`、`docs:document.comment:read/create/delete`
+
+拿到 App ID（`cli_xxx`）后，可在开发者后台一键批量申请：
+
+```text
+https://open.larkoffice.com/page/scope-apply?clientID=<app_id>&scopes=<scope1%2Cscope2...>
+```
+
+（`recommended_bot_scope_apply_url(app_id)` 会拼出完整 URL。）随后用
+`lark-cli config init --app-id <app_id> --app-secret-stdin --name <profile> --brand lark`
+注册 bot profile，再走 `loopx goal-channel setup`。敏感 scope 需企业管理员审核。
