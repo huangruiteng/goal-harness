@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from unittest import mock
+from types import SimpleNamespace
 
 import pytest
 
+from loopx.chat_ssh_source_api import SshSourceRequestMixin
 from loopx.control_plane.status.ssh_tunnel import ensure_ssh_source
 
 
@@ -88,3 +90,53 @@ def test_ensure_ssh_source_rejects_invalid_port() -> None:
             ensure_ssh_source("ark-devbox", 22)
         with pytest.raises(ValueError, match="local tunnel port"):
             ensure_ssh_source("ark-devbox", "8877")
+
+
+class _SshSourceHandler(SshSourceRequestMixin):
+    def __init__(self, *, host: str = "127.0.0.1") -> None:
+        self.server = SimpleNamespace(server_address=(host, 8767), ssh_config_path=None)
+        self.errors: list[tuple[str, int]] = []
+        self.payloads: list[dict[str, object]] = []
+
+    def _read_json(self) -> dict[str, object]:
+        return {"host_alias": "ark-devbox", "local_port": 8877}
+
+    def _require_loopback_origin(self) -> bool:
+        return True
+
+    def _send_error(self, message: str, **kwargs: object) -> None:
+        self.errors.append((message, int(kwargs.get("status") or 400)))
+
+    def _send_json(
+        self, payload: dict[str, object], *, status: int = 200
+    ) -> None:
+        self.payloads.append(payload)
+
+
+def test_ssh_source_request_mixin_delegates_validated_loopback_request() -> None:
+    handler = _SshSourceHandler()
+    receipt = {"ok": True, "status_url": "http://127.0.0.1:8877/status.json"}
+
+    with mock.patch(
+        "loopx.chat_ssh_source_api.ensure_ssh_source", return_value=receipt
+    ) as ensure:
+        handler._ssh_source_ensure()
+
+    ensure.assert_called_once_with(
+        "ark-devbox", 8877, ssh_config_path=None
+    )
+    assert handler.payloads == [receipt]
+    assert handler.errors == []
+
+
+def test_ssh_source_request_mixin_rejects_non_loopback_server() -> None:
+    handler = _SshSourceHandler(host="0.0.0.0")
+
+    with mock.patch("loopx.chat_ssh_source_api.ensure_ssh_source") as ensure:
+        handler._ssh_source_ensure()
+
+    ensure.assert_not_called()
+    assert handler.payloads == []
+    assert handler.errors == [
+        ("SSH source management requires a loopback LoopX Chat server.", 403)
+    ]
