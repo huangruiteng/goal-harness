@@ -29,7 +29,7 @@ context 或新增一条控制面规则的开发者。
 | [第 8 讲：证据、Refresh 与 Self-Repair](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/) | material progress、replan、repair delta | 第 6 章后 |
 | [第 9 讲：如何给 Control Plane 增加一条规则](/loopx/docs/development/control-plane-course/09-engineering-a-control-plane-rule/) | invariant、ordered rules、schema、smoke | 第 10 至 13 章后 |
 | [第 10 讲：Agent 自主写代码时的分层质量门禁](/loopx/docs/development/control-plane-course/10-autonomous-agent-quality-gates/) | 确定性测试、canary、模型行为、release gate | 第 13 章后 |
-| [第 11 讲：扩展层、Explore 与领域产品](/loopx/docs/development/control-plane-course/11-extension-layer/) | 默认关闭的 Graph/Harness、领域产品 | 第 14 至 16 章后 |
+| [第 11 讲：扩展层、Governed Execution、Explore 与领域产品](/loopx/docs/development/control-plane-course/11-extension-layer/) | 外部 effect 的可恢复结算、默认关闭的 Graph/Harness 与领域产品 | 第 14 至 16 章后 |
 
 ## 与 Effect Interpreter RFC 的关系
 

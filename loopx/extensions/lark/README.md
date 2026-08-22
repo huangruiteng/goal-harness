@@ -57,6 +57,36 @@ private chat, app, group, Base, document, or Miaoda target remains in ignored
 local configuration. External writes still require the owning capability's
 exact authority, gate, revision, idempotency, and readback contract.
 
+## Document-comment Connector provider
+
+`document_comment_provider.py` adapts one owner-configured Lark document to the
+provider-neutral Agent external Connector runtime. It delegates authentication
+and API calls to `lark-cli`, probes the exact comment read/create scopes, and
+turns one bounded comment or nested-reply page into owner-local inbox events.
+The adapter requires `lark-cli` 1.0.69 or newer for `drive +list-comments`;
+older binaries fail closed and must be upgraded before the Connector is ready.
+The provider supports configured-source and incremental capture. It rejects
+`addressed_only` until a caller supplies an explicit mention-identity contract;
+it never guesses that every document comment addressed the Agent.
+
+Lark comment pagination has separate cursors for comment cards and replies.
+The adapter persists both phases in the private Connector cursor and restarts a
+completed scan from the first comment page, relying on stable hashed event ids
+and the generic inbox for deduplication. A response-capable binding must also
+configure an owner-local reply receipt store. Reply creation writes a pending
+receipt, reads the exact reply back, then marks the receipt verified; only that
+verified receipt lets the generic runtime ACK the event. Solved and
+whole-document comment cards are skipped for source-thread response bindings
+because the provider does not permit replies to them.
+
+Document URLs, `lark-cli` profiles, provider cursors, comment/reply ids, raw
+payloads, and reply receipts remain owner-local. Public status reports only
+permission readiness, operation counts, inbox health, and content-free failure
+codes. The required provider scopes are
+`docs:document.comment:read` for history/readback and
+`docs:document.comment:create` for replies; enabling the extension does not
+grant either scope or publish an app.
+
 ## Ownership boundary
 
 - The extension owns Lark authentication checks, provider dispatch, bounded

@@ -119,6 +119,28 @@ does not advance the cursor until an event-bound response receipt and provider
 readback succeed. Concrete provider adapters supply the page reader and response
 writer; LoopX does not own their credentials or raw payloads.
 
+The bundled Lark extension supplies the first concrete document-comment
+adapter through `lark-cli`. Its owner-local target binds a safe Connector source
+reference to a private document URL, profile, and bot or user identity. The
+adapter probes exact comment read/create scopes, paginates comment cards and
+nested replies with a restart-safe private cursor, and maps stable reply ids to
+hashed Connector event ids. A completed scan restarts from the first comment
+page so new replies on older cards remain discoverable; the generic inbox
+deduplicates already captured or acknowledged events. Because Lark does not
+expose provider idempotency for reply creation, the adapter requires an
+owner-local receipt store: it records intent before the write, recovers a reply
+by its opaque idempotency marker after a crash, records the returned reply id
+before readback, and reuses that receipt on retry. The comment-list shortcut
+requires `lark-cli` 1.0.69 or newer. Public status and provider receipts omit
+document URLs, profiles, raw ids, cursor values, bodies, and subprocess output.
+
+The Lark adapter intentionally rejects `addressed_only`. Correct mention
+filtering needs an explicit provider identity contract, and treating every
+comment on a configured document as an Agent mention would silently weaken the
+generic capture policy. Configured-source and incremental bindings remain
+supported. Source-thread response bindings also filter solved and whole-
+document comment cards, which the Lark reply API does not allow replying to.
+
 `Provider` is an implementation role. When it implements a LoopX capability,
 it is registered under that capability; a standalone extension provider may
 instead expose only its own bounded command. A provider may be built into LoopX
