@@ -34,38 +34,6 @@ pins an updated source. The caller owns the freshness and authority of the obser
 reference value. This capability performs no fetch, provider API call, checkout,
 install, process launch, score write, or submission.
 
-## Runtime closeout continuity
-
-A terminal result is not sufficient evidence that the process closing a run uses
-the same runtime artifact and attempt generation admitted at launch. Before writing
-a terminal score, compare the runner-owned SHA-256 bindings and its typed event-
-window qualification:
-
-```bash
-loopx benchmark runtime-continuity \
-  --launch-runtime-digest "$LAUNCH_RUNTIME_DIGEST" \
-  --closeout-runtime-digest "$CLOSEOUT_RUNTIME_DIGEST" \
-  --launch-generation-digest "$LAUNCH_GENERATION_DIGEST" \
-  --closeout-generation-digest "$CLOSEOUT_GENERATION_DIGEST" \
-  --event-window-state qualified \
-  --require-qualified \
-  --format json
-```
-
-The gate allows a closeout only when both content-addressed bindings match and the
-provider has qualified the required events within that run's launch-to-terminal
-window. A generation mismatch is routed back to its launch generation; a runtime
-artifact mismatch is rejected; missing, ambiguous, or out-of-window evidence stays
-unqualified. The compact receipt exposes equality, typed reason codes, and route
-guidance, but never the digests, run identity, event payloads, or paths. A false
-`closeout_write_allowed` is a machine-enforced obligation when callers use
-`--require-qualified`; `recommended_transition` remains provider guidance.
-
-The runner remains responsible for creating immutable artifacts and generations,
-classifying the event window from its private evidence, applying the route guidance,
-and writing the terminal row. This reducer reads no files and grants no
-runner, verifier, scoring, upload, or submission authority.
-
 ## Native Codex Goal runtime
 
 Benchmark adapters that use the Codex app-server Goal API should import
@@ -372,6 +340,38 @@ match count, and a SHA-256 selector digest; it excludes the raw container identi
 and label values. The helper grants no Docker or runner authority. Callers that need
 a privileged wrapper must supply their own `command_runner` and keep that authority
 outside the receipt.
+
+### Runtime closeout continuity
+
+A terminal result is not sufficient evidence that the process closing a run uses
+the same runtime artifact and attempt generation admitted at launch. Before writing
+a terminal score, compare the runner-owned SHA-256 bindings and its typed event-
+window qualification:
+
+```bash
+loopx benchmark runtime-continuity \
+  --launch-runtime-digest "$LAUNCH_RUNTIME_DIGEST" \
+  --closeout-runtime-digest "$CLOSEOUT_RUNTIME_DIGEST" \
+  --launch-generation-digest "$LAUNCH_GENERATION_DIGEST" \
+  --closeout-generation-digest "$CLOSEOUT_GENERATION_DIGEST" \
+  --event-window-state qualified \
+  --require-qualified \
+  --format json
+```
+
+The gate allows a closeout only when both content-addressed bindings match and the
+provider has qualified the required events within that run's launch-to-terminal
+window. A generation mismatch is routed back to its launch generation; a runtime
+artifact mismatch is rejected; missing, ambiguous, or out-of-window evidence stays
+unqualified. The compact receipt exposes equality, typed reason codes, and route
+guidance, but never the digests, run identity, event payloads, or paths. A false
+`closeout_write_allowed` is a machine-enforced obligation when callers use
+`--require-qualified`; `recommended_transition` remains provider guidance.
+
+The runner remains responsible for creating immutable artifacts and generations,
+classifying the event window from its private evidence, applying the route guidance,
+and writing the terminal row. This reducer reads no files and grants no runner,
+verifier, scoring, upload, or submission authority.
 
 Benchmark-specific private roots can be added without committing them through an
 ignored `benchmark_integrity_policy_v0` file:
