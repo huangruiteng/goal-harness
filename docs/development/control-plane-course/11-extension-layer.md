@@ -4,8 +4,8 @@
 > 它复用同一份 goal、todo、quota、scheduler、evidence 与 handoff contract，不创建第二个
 > kernel。
 
-建议时长：130 分钟。扩展地图 30 分钟、Explore 30 分钟、Single-Agent Auto ML 25 分钟、
-Multi-agent/Auto Research 30 分钟、实验 15 分钟。
+建议时长：150 分钟。扩展地图与 governed external execution 50 分钟、Explore 30 分钟、
+Single-Agent Auto ML 25 分钟、Multi-agent/Auto Research 30 分钟、实验 15 分钟。
 
 一小时专题[长程任务如何收敛](topic-long-horizon-convergence.md)从“如何退出局部循环”解释
 Graph、Harness 与 Kernel 的关系；本讲继续展开它们的扩展边界和产品组合方式。
@@ -21,6 +21,7 @@ Graph、Harness 与 Kernel 的关系；本讲继续展开它们的扩展边界�
 5. 判断 supervisor、multi-subagent、reward memory、connector 各自扩展哪个边界。
 6. 区分 Provider 的运行责任与 Extension 的交付生命周期。
 7. 用 Single-Agent Auto ML 解释 Explore Graph、Harness、Domain Pack 与 Kernel 怎样组合。
+8. 用 governed external execution 解释外部 effect 怎样安全 start、reconcile、writeback 和 spend。
 
 本讲采用分层阅读：所有开发者先读 Extension Contract、分层原则和 Feature Catalog；
 做探索产品再读 Graph/Harness 与 Single-Agent Auto ML；做 multi-agent 产品再读 Generic
@@ -133,6 +134,201 @@ Kernel 提出通用规则并接受第 7、8 讲的语义与质量门禁。
 State 只保存可重放的 compact facts；外部 sink 只消费 public-safe projection。
 `examples/issue-fix-feasibility-smoke.py` 与
 `tests/test_ml_experiment_volc_packet.py` 是这条分层的代表性回归入口。
+
+## Governed External Execution：把外部副作用变成可恢复事务
+
+外部 capability 最危险的时刻，不是 API 明确返回失败，而是调用方不知道它到底有没有成功：
+
+```text
+provider 已经创建任务
+  -> 本地进程在保存结果前崩溃
+  -> Agent 只看到“本轮失败”
+  -> 盲目重试又创建一个任务
+  -> Goal state、外部事实和 quota 从此分叉
+```
+
+`capability invoke` 可以直接执行 read-only operation，因为它不会产生需要结算的物质效果。
+`external_write` 则必须进入 governed external execution。它不是给 provider 套一层普通 retry，
+而是把一次外部写入拆成两段可重放事务：
+
+```text
+Goal-bound capability + exact provider revision
+  -> selected Todo + quota should-run
+  -> start(turn_instance_id, provider input)
+       1. derive one settlement identity
+       2. validate Todo contract and authority
+       3. write mode-0600 journal
+       4. dispatch provider with effect_id as idempotency key
+       5. persist running or terminal effect receipt
+  -> ready_to_settle
+  -> reconcile(invocation_id)
+       6. poll the same provider run when still running
+       7. validate the terminal receipt
+       8. durable writeback of the receipt digest
+       9. spend exactly one quota slot
+  -> committed
+```
+
+这条路径复用了 Kernel 的 selected-Todo admission、Turn transaction、settlement driver 与 quota，
+所以外置仓库提供的领域 capability 不需要再复制一套 lifecycle。Extension/Provider 仍拥有远端
+调用、异步 job 和 domain result；LoopX 拥有“谁被允许执行哪一个 effect、如何恢复、何时才算
+结算完成”。
+
+### Goal capability 与 material Turn 分别回答什么
+
+Goal enablement 与 Turn admission 不是二选一，而是两层不同粒度的授权：
+
+| 层 | 回答的问题 | 不代表什么 |
+| --- | --- | --- |
+| Goal binding | 这个 Goal 可使用哪个 capability、provider revision 和 operation profile？ | 不代表任意消息都可执行外部写入 |
+| Todo contract | 当前 operation 能否服务 selected Todo 的 `action_kind` 与 `target_key`？ | 不代表 Todo 已经 runnable |
+| Turn admission | 这个 Agent 是否可在这个 `turn_instance_id` 下执行一次 material attempt？ | 不扩大 Goal capability 或远端权限 |
+| Provider auth | 外部服务是否接受这次具体调用？ | 不替代 LoopX writeback 与 quota settlement |
+
+因此 capability 以 Goal 为单位保持可用，真正可能产生副作用的 attempt 再以 Turn 为单位获得稳定
+事务身份。普通解释、观察和 readback 不必伪装成 material Turn；它们继续走 read-only capability，
+不写 LoopX state，也不消耗 governed Turn quota。
+
+### 五个身份把三本账对齐
+
+一次 governed execution 不依赖“这段文本看起来像同一件事”，而是显式绑定：
+
+```text
+goal_id
+agent_id
+todo_id
+turn_instance_id
+effect_id
+```
+
+`effect_id` 来自 Turn settlement identity，并成为 provider lifecycle request 的稳定
+`idempotency_key`。Capability binding、provider revision、request digest 与 `invocation_id` 又把
+“调用了谁、调用什么输入”固定下来。它们共同连接三本账：
+
+| Ledger | 保存什么 | 用来恢复什么 |
+| --- | --- | --- |
+| Governed journal | exact request、binding、phase、provider result、writeback/spend receipt | 本地进程中断后的事务 phase |
+| Provider effect receipt | external ref、terminal status、evidence digest、idempotency key | 外部 effect 是否已提交 |
+| Goal state + quota ledger | receipt digest、Todo/evidence transition、quota spend | LoopX 的 canonical lifecycle 与 accounting |
+
+三本账不能互相冒充。HTTP 200 只证明服务响应；provider receipt 才证明远端 effect；receipt digest
+成功写回后，LoopX 才允许 spend。Dashboard 或聊天摘要只是 projection，也不能替代其中任一本账。
+
+### 为什么 `start` 与 `reconcile` 必须分开
+
+同步函数常把“发请求、拿响应、写状态、扣 quota”塞进一次调用。这在网络和本地状态之间制造了
+一个无法原子提交的窗口。Governed API 接受这个现实，并把窗口变成显式状态：
+
+| Journal 状态 | 已知事实 | 合法下一步 |
+| --- | --- | --- |
+| 无 journal | Governed path 尚未 dispatch provider | 修复 preflight 后可用同一 Turn identity 重试 |
+| `starting` | intent 已持久化；provider effect 可能已发生 | 用同一 idempotency key replay，不得生成新 identity |
+| `running` | provider 已接受异步工作，但没有 terminal receipt | `reconcile` 同一 invocation，不得 spend |
+| `ready_to_settle` | terminal effect receipt 已验证并持久化 | 只执行 writeback / spend settlement，不得重发 effect |
+| `settlement_failed` | provider effect 已知；部分本地 phase 可能已提交 | 从 journal checkpoint 恢复剩余 phase |
+| `committed` | writeback 与 quota receipt 均已提交 | replay 返回同一结果，不产生新 effect |
+
+“无 journal”与“`starting` journal”尤其不能混淆。前者说明 provider dispatch 尚未从 governed API
+发生；后者只说明 provider result 还没被本地保存，远端可能已经成功。正因为 intent 在 dispatch
+前先落盘，恢复逻辑才知道应该复用原 effect identity，而不是猜测是否需要创建第二次调用。
+
+### Exactly-once 的准确边界
+
+Governed external execution 提供两种不同强度的保证：
+
+1. **外部 invocation 是 idempotent replay。** LoopX 对同一 settlement effect 固定 request digest
+   与 idempotency key；provider 必须让重复 start/reconcile 回到同一外部 effect。
+2. **LoopX settlement 是 exactly once。** Writeback 与 quota spend 按有序 phase checkpoint；如果
+   spend 首次失败，下一次 reconcile 只重试 spend，不重复已成功的 writeback。
+
+它不可能单方面保证任意第三方网络服务“物理上只收到一次请求”。如果 provider 忽略
+idempotency key，或者无法 read back 同一个 external ref，LoopX 会 fail closed，不能把这种服务
+宣传成 exactly-once external effect。
+
+同一个 `turn_instance_id` 也只能拥有一个 exact request。若调用方换了 operation 或 input，却想
+借用原 Turn receipt，request digest mismatch 会在 provider dispatch 前失败。这防止“重试”暗中
+变成另一项工作。
+
+### 一个脱敏的长 Session 回放
+
+设想一个远端 assistant service 支持图片输入和 resumable Session。我们要验证它既能理解第一轮
+图片，又能在第二轮纯文本请求中引用上一轮上下文：
+
+```text
+Turn A (material)
+  -> start: image + text + existing/new session reference
+  -> provider terminal receipt
+  -> reconcile: receipt writeback + one quota spend
+  -> read-only observe: response marker appears in Session event stream
+
+Turn B (material, same external Session, new Turn identity)
+  -> start: text-only follow-up
+  -> provider terminal receipt
+  -> reconcile: second receipt writeback + one quota spend
+  -> read-only observe: second marker appears and references prior context
+
+Independent evidence refresh
+  -> correlate Session readback, request trace, runtime revision and typed metadata receipt
+  -> only then promote “resumable multimodal context works” from hypothesis to evidence
+```
+
+这里“同一 Session”不意味着复用同一 Turn。Session 拥有远端对话连续性；每个 material attempt
+仍有自己的 Turn/effect identity、receipt 和 quota settlement。Read-only observe 则负责验证后置
+条件，不为了凑治理形式额外扣一次 quota。
+
+这条链路的威力在于，最终结论不是“Agent 说它测过”，而是四种独立证据可以互相校验：
+
+- governed journal 证明哪一个 exact request 被允许并执行；
+- Session readback 证明用户可见事件确实出现；
+- trace/runtime evidence 证明请求经过哪个实际运行版本；
+- typed domain receipt 证明被测能力对应哪个结构化配置或 metadata 决策。
+
+任何一层冲突都应保持 `Unknown` 或让 Todo 继续 open，而不是用一个成功 marker 覆盖其余证据。
+
+### API 组合而不是万能 Executor
+
+Host adapter 的核心控制流可以压成下面的伪代码：
+
+```python
+started = start_governed_external_capability(
+    goal_id=goal_id,
+    agent_id=agent_id,
+    todo_id=todo_id,
+    turn_instance_id=turn_instance_id,
+    capability_id=capability_id,
+    operation=operation,
+    provider_input=bounded_input,
+    admission=quota_admission,
+    execute=True,
+)
+
+settled = reconcile_governed_external_capability(
+    invocation_id=started["invocation_id"],
+    writeback=durably_record_effect_receipt_digest,
+    spend=spend_one_exact_turn_slot,
+)
+```
+
+真实 adapter 还应在 `running` 时按 provider follow-up contract 继续 reconcile，并通过 read-only
+operation 验证 postcondition。LoopX 不理解图片、部署、issue 或文档评论等垂域 payload；它只验证
+bounded request、binding、authority、receipt 和 settlement。领域逻辑因此可以留在外部仓库，
+同时仍让 LoopX state 成为任务 lifecycle 的 ground truth。
+
+### 审查 governed adapter 的失败矩阵
+
+| 故障 | 错误做法 | 正确恢复 |
+| --- | --- | --- |
+| Binding/permission/Todo contract 在 dispatch 前失败 | 换一个随机 Turn 重试 | 修复配置，确认无 journal，再复用原稳定 identity |
+| Provider timeout，journal 为 `starting` | 假设失败并创建新 job | 用相同 idempotency key replay，并 read back external ref |
+| Provider 返回 `running` | 提前完成 Todo 或 spend | 保存 follow-up，继续 reconcile |
+| Receipt 已有，writeback 失败 | 重发 provider operation | 只重试 settlement |
+| Writeback 成功，spend 失败 | 再写一遍 Goal state | 从 checkpoint 只重试 spend |
+| Receipt/readback/trace 冲突 | 选一个看起来成功的证据 | 保持 Todo open，刷新证据或 self-repair adapter |
+| 相同 Turn 携带不同 request digest | 把它当普通 retry | fail closed，创建新的合法 Todo/Turn identity |
+
+因此，governed execution 的核心不是“所有调用都经过 LoopX”这一句口号，而是让每个 material
+external effect 都能回答：它属于哪个 Goal/Todo/Turn、provider 是否真的提交、LoopX 是否已写回、
+quota 是否只结算一次，以及崩溃后下一步究竟是 retry provider 还是只 reconcile ledger。
 
 ## 先读 Feature Catalog
 
@@ -951,7 +1147,9 @@ configure preview
   -> optional authorized sink + readback
 ```
 
-如果一个扩展绕过中间任一步，尤其是直接从 private source 启 worker、直接由 graph edge 改 todo、或由 planner 自己 claim，说明它已经开始复制 control plane。
+如果一个扩展绕过中间任一步，尤其是直接从 private source 启 worker、直接由 graph edge 改 todo、或由 planner 自己 claim，说明它已经开始复制 control plane。若这条路径包含
+`external_write`，还要在 provider effect 与 compact result event 之间插入 governed journal、
+terminal effect receipt、durable writeback 和 quota settlement。
 
 ### 断点与检查问题
 
@@ -978,6 +1176,10 @@ kernel 代码、supervisor 为什么不能借扩展层获得 durable leader auth
 8. `loopx/capabilities/auto_research/README.md`
 9. `loopx/capabilities/auto_research/preset.py`
 10. `docs/reference/protocols/peer-supervisor-v0.md`
+11. `loopx/extensions/governed_capability_execution.py`
+12. `loopx/control_plane/governed_capability.ts`
+13. `loopx/control_plane/turn_driver/settlement.py`
+14. `docs/reference/extensions.md`
 
 ## 代表性 Smoke
 
@@ -988,6 +1190,7 @@ kernel 代码、supervisor 为什么不能借扩展层获得 durable leader auth
 - `examples/auto-research-layered-e2e-acceptance-smoke.py`
 - `examples/control_plane/peer-supervisor-smoke.py`
 - `examples/showcase-catalog-smoke.py`
+- `tests/extensions/test_governed_capability_execution.py`
 
 ## 最终设计检查表
 
@@ -1001,8 +1204,10 @@ kernel 代码、supervisor 为什么不能借扩展层获得 durable leader auth
 6. Gate 是否只有一个 canonical source？
 7. Planner 是否被误写成 executor？
 8. External effect 是否有 capability + authority + receipt？
-9. Evidence 是否 compact、可追溯、符合 public/private boundary？
-10. Focused smoke 是否证明 shipped behavior，而不是临时字段？
+9. Material provider 是否以稳定 idempotency key replay，并把 start 与 reconcile 分开？
+10. Receipt digest 是否在 quota spend 前 durable writeback？
+11. Evidence 是否 compact、可追溯、符合 public/private boundary？
+12. Focused smoke 是否证明 shipped behavior，而不是临时字段？
 
 ## 课程结束后的能力标准
 
@@ -1010,4 +1215,6 @@ kernel 代码、supervisor 为什么不能借扩展层获得 durable leader auth
 
 1. 从 `$loopx <task>` 追到 registry、todo、quota、interaction contract、scheduler、refresh 和 spend；
 2. 遇到卡住或矛盾状态时，判断是执行失败、projection gap、host drift 还是缺少用户 authority；
-3. 为一个扩展写出 source、projection、decision、effect、receipt、validation 的完整边界，并知道什么时候不该实现。
+3. 为一个扩展写出 source、projection、decision、effect、receipt、validation 的完整边界，并知道什么时候不该实现；
+4. 遇到 material external effect 中断时，能根据 journal phase 判断应 replay provider、继续
+   reconcile，还是只恢复 writeback/quota settlement。

@@ -139,7 +139,7 @@ receipt、projection、replan 与 self-repair；随后再进入下面的代码�
 | [第 8 讲](08-evidence-refresh-and-self-repair.md) | 证据、Refresh 与 Self-Repair | 什么算 material progress，何时必须 replan，连续无推进如何形成可验证 repair delta？ |
 | [第 9 讲](09-engineering-a-control-plane-rule.md) | 如何给 Control Plane 增加一条规则 | 如何从 invariant、ordered rules、schema、projection 到 smoke 完成一次可审计变更？ |
 | [第 10 讲](10-autonomous-agent-quality-gates.md) | Agent 自主写代码时的分层质量门禁 | 如何按风险选择确定性测试、canary、模型行为验证与 release gate，既保护质量又不阻断普通迭代？ |
-| [第 11 讲](11-extension-layer.md) | 扩展层、Explore 与领域产品 | 默认关闭的 Graph/Harness、Single-Agent Auto ML、Auto Research 和 Supervisor 如何复用 kernel？ |
+| [第 11 讲](11-extension-layer.md) | 扩展层、Governed Execution、Explore 与领域产品 | 外部 effect 如何安全 start/reconcile/settle，Graph/Harness、Auto ML、Auto Research 和 Supervisor 又如何复用 kernel？ |
 
 ## 建议学习方式
 
@@ -150,7 +150,7 @@ receipt、projection、replan 与 self-repair；随后再进入下面的代码�
 3 到 11 的顺序进行。第 2 讲架构导论从 Issue-Fix、Single-Agent Auto ML 与 Auto Research
 推导共同架构，第 3 讲运行端到端路径，第 4 到 8 讲拆开状态、工作图、决策、host 和证据，
 第 9 讲把这些知识收束成工程变更方法，第 10 讲建立自主交付的质量门禁，第 11 讲再系统
-讨论扩展层。
+讨论扩展层及 material external effect 的可恢复执行。
 
 只准备开发 Capability Pack 的读者，可以先读 2、4、6、8、11，再按改动涉及的 Kernel
 边界补读 5、7、9、10。准备修改 Kernel 的读者应按完整顺序阅读，因为 quota、scheduler、
@@ -175,6 +175,7 @@ todo 和 evidence 的局部规则会在同一轮组合生效。
 | Explore Graph + Harness + resource capacity + provider receipt | 已验证 finding 怎样影响候选组合但不直接 launch；资源释放和 exact task readback 怎样重新打开合法 frontier？ | 第 2、3、4、5、6、9 讲 |
 | guided hot path + deterministic oracle + actual-default model qualification | 缩短 agent-facing packet 时，如何同时证明字段合同、状态语义和真实模型行为没有漂移？ | 第 4、7、8 讲 |
 | benchmark postcondition + committed Turn + runner readiness | 结果通过为什么不能替代因果归因与控制面回执；测试替身怎样避免改写 meaningful operation 语义？ | 第 6、8 讲 |
+| external write + Turn journal + provider receipt + settlement checkpoint | 远端效果不确定时为何不能盲目 retry；什么时候应 replay provider，什么时候只能恢复 writeback 或 spend？ | 第 6、8、11 讲 |
 
 这些组合不是额外功能清单，而是同一状态图的交叉切面。课程中的 case、decision table 和 smoke 应尽量覆盖交叉项，而不是为每个名词各写一个孤立 happy path。
 

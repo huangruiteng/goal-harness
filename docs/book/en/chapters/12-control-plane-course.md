@@ -34,7 +34,7 @@ two copies of the full course:
 | [Lesson 8: Evidence, refresh, self-repair](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/) | Material progress, replan, repair delta | After Chapter 6 |
 | [Lesson 9: Add a control-plane rule](/loopx/docs/development/control-plane-course/09-engineering-a-control-plane-rule/) | Invariants, ordered rules, schemas, smokes | After Chapters 10-13 |
 | [Lesson 10: Layered quality gates](/loopx/docs/development/control-plane-course/10-autonomous-agent-quality-gates/) | Deterministic tests, canaries, model behavior, release gates | After Chapter 13 |
-| [Lesson 11: Extensions and domain products](/loopx/docs/development/control-plane-course/11-extension-layer/) | Explore, Graph/Harness, domain products | After Chapters 14-16 |
+| [Lesson 11: Extensions, governed execution, and domain products](/loopx/docs/development/control-plane-course/11-extension-layer/) | Recoverable external-effect settlement, Explore, Graph/Harness, and domain products | After Chapters 14-16 |
 
 ## Relationship to the Effect Interpreter RFC
 
