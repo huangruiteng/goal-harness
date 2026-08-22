@@ -325,6 +325,68 @@ def test_dead_startup_lock_is_reclaimed_without_waiting_for_age_timeout(
     effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
 
 
+def test_runtime_ready_budget_starts_after_start_lock_acquisition(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    fingerprint = "f" * 64
+    info_path = runtime_dir / "runtime.json"
+    lock = runtime_dir / f"start-{fingerprint[:16]}.lock"
+    lock.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    clock = {"monotonic": 0.0}
+    ready_info = {
+        "schema_version": effect_runtime.EFFECT_RUNTIME_INFO_SCHEMA_VERSION,
+        "fingerprint": fingerprint,
+        "pid": os.getpid(),
+        "host": "127.0.0.1",
+        "port": 1,
+        "token": "fixture-token",
+    }
+
+    def sleep(seconds: float) -> None:
+        clock["monotonic"] += seconds
+        lock.unlink(missing_ok=True)
+
+    def read_info(_path: Path, *, fingerprint: str):
+        assert fingerprint == "f" * 64
+        return ready_info if clock["monotonic"] >= 1.5 else None
+
+    class _RunningProcess:
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            raise AssertionError("the runtime still has a fresh ready budget")
+
+    monkeypatch.setattr(effect_runtime, "_read_info", read_info)
+    monkeypatch.setattr(effect_runtime, "_node_executable", lambda: "node")
+    monkeypatch.setattr(
+        effect_runtime.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: _RunningProcess(),
+    )
+    monkeypatch.setattr(effect_runtime, "STARTUP_LOCK_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(effect_runtime, "STARTUP_READY_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(effect_runtime, "STARTUP_POLL_SECONDS", 0.75)
+    monkeypatch.setattr(
+        effect_runtime,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: clock["monotonic"],
+            sleep=sleep,
+            time=time.time,
+        ),
+    )
+
+    assert effect_runtime._start_runtime(
+        fingerprint=fingerprint,
+        info_path=info_path,
+    ) == ready_info
+    assert clock["monotonic"] == 1.5
+
+
 def test_early_runtime_exit_surfaces_stable_startup_diagnostic(
     tmp_path: Path,
     monkeypatch,

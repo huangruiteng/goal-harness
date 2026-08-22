@@ -25,6 +25,9 @@ MINIMUM_NODE_VERSION = (22, 6, 0)
 MINIMUM_NODE_VERSION_TEXT = ".".join(str(part) for part in MINIMUM_NODE_VERSION)
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
+STARTUP_LOCK_TIMEOUT_SECONDS = 15.0
+STARTUP_READY_TIMEOUT_SECONDS = 15.0
+STARTUP_POLL_SECONDS = 0.025
 _NODE_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 _SOURCE_FILES = (
     "effect_program.ts",
@@ -262,9 +265,9 @@ def _start_runtime(*, fingerprint: str, info_path: Path) -> dict[str, Any]:
     except OSError:
         pass
     lock = runtime_dir / f"start-{fingerprint[:16]}.lock"
-    deadline = time.monotonic() + 5.0
+    lock_deadline = time.monotonic() + STARTUP_LOCK_TIMEOUT_SECONDS
     acquired = False
-    while time.monotonic() < deadline:
+    while time.monotonic() < lock_deadline:
         try:
             descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             with os.fdopen(descriptor, "w", encoding="utf-8") as lock_file:
@@ -289,8 +292,11 @@ def _start_runtime(*, fingerprint: str, info_path: Path) -> dict[str, Any]:
                     lock.unlink(missing_ok=True)
             except OSError:
                 pass
-            time.sleep(0.025)
+            time.sleep(STARTUP_POLL_SECONDS)
     if not acquired:
+        existing = _read_info(info_path, fingerprint=fingerprint)
+        if existing is not None:
+            return existing
         raise EffectRuntimeStartupError(
             "TypeScript Effect runtime startup lock timed out",
             diagnostic_code="startup_lock_timeout",
@@ -326,7 +332,8 @@ def _start_runtime(*, fingerprint: str, info_path: Path) -> dict[str, Any]:
                 "TypeScript Effect runtime process could not be launched",
                 diagnostic_code="runtime_launch_failed",
             ) from exc
-        while time.monotonic() < deadline:
+        ready_deadline = time.monotonic() + STARTUP_READY_TIMEOUT_SECONDS
+        while time.monotonic() < ready_deadline:
             info = _read_info(info_path, fingerprint=fingerprint)
             if info is not None:
                 return info
@@ -337,7 +344,7 @@ def _start_runtime(*, fingerprint: str, info_path: Path) -> dict[str, Any]:
                     f"(exit_code={exit_code})",
                     diagnostic_code="runtime_exited_before_ready",
                 )
-            time.sleep(0.025)
+            time.sleep(STARTUP_POLL_SECONDS)
         if process.poll() is None:
             process.terminate()
         raise EffectRuntimeStartupError(
