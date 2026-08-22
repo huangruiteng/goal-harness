@@ -16,9 +16,10 @@
 ## 0. 用一个例子说明决策
 
 迁移期间，Python `loopx` CLI 向 LoopX 托管的 TypeScript runtime 发送一笔
-粗粒度 typed transaction。例如，一次 Turn settlement request 携带完整的当前
-状态和 callback receipts；TypeScript 完成验证、reduction、已迁内部 effect 的持久化，
-并返回一个 typed result。Python 只把结果投影为旧 CLI shape，不再串行调用一组
+粗粒度 typed transaction。例如，Turn settlement 先由 TypeScript 验证 journal，
+并授权仍由 Python 承载的 provider；Python checkpoint 这些外部结果后，再由
+TypeScript 完成最终 reduction 并返回 typed result。没有待执行 provider 的 replay
+只需一次 reduction。Python 只把结果投影为旧 CLI shape，不再串行调用一组
 TypeScript leaf helper，也不保留平行的 enum 和 reducer。
 
 同一 PR 必须删除被它替代的 Python 语义路径。仅新增 TypeScript module 不等于取得
@@ -157,9 +158,11 @@ enum、dataclass 或源文件。
    implementation-specific test；
 3. 让 Python 只保留 transport、legacy response projection，以及仍属于外部
    authority 的显式 adapter；
-4. 对该控制面 transaction 最多进行一次跨 runtime request/response。Model call、
-   human gate 或第三方 mutation 会开启一笔新的、带 receipt 的 transaction，而不是
-   隐式 callback tunnel；
+4. 不允许 leaf-level bridge chatter。Effect provider 已迁入 TypeScript，或没有待执行
+   provider 的 replay，只使用一次 request/response。真实 provider 仍在 Python 时，
+   最多使用两次：一次 fail-closed preflight 授权具名 effect，一次基于已 checkpoint
+   outcome 的最终 reduction。Model call、human gate 或第三方 mutation 会开启一笔
+   新的、带 receipt 的 transaction，而不是隐式 callback tunnel；
 5. 写明 Python facade 与 bridge operation 的精确删除条件。
 
 Domain invariant 仍归各自 bounded owner。“更粗粒度”不等于建立一个万能控制面
@@ -202,19 +205,14 @@ implementation fixture。只有旧 authority 仍可执行，或 versioned compat
 window 仍需 differential proof 时才保留 characterization corpus；引入时必须记录
 删除触发条件。
 
-当前实现状态：Stage 1 已交付。Stage 2 已为 Todo completion fence/state、quota
-workspace causality 与 scheduler transition rule 交付 bounded TypeScript owner。
-Delivery continuity 与 vision checkpointing 是下一个 domain-local slice：TypeScript
-先判定获准执行的 open advancement Todo 应使用哪种 settlement boundary，再判断一次
-accountable `outcome_progress` 是否让同一个 Todo 在下一次 heartbeat 保持被选中，
-并把 refresh 归约为 intermediate continuation 或 semantic closeout。Python 只把
-status、Todo 与 CLI fact 适配到 typed handler，不复制 transition。
-
-该 slice 明确不扩展 Effect Program。Effect Program 拥有一次 settlement 内部的
-ordered execution 与 receipt；跨 heartbeat 的 Todo selection 和 vision-checkpoint
-timing 属于 domain-local reducer/ACK 语义：它们消费上一次 durable receipt、当前
-Todo fact 与 typed preemption，并返回唯一 selection/boundary decision。它们可以
-复用同一个 runtime 与 handler registry，但不因此成为 generic Effect Program step。
+当前实现状态：Stage 1 与 bounded Stage 2A proof 已交付。首个 Stage 2B cutover 是
+完整的 Turn settlement/commit transaction。TypeScript 拥有 preflight authorization、
+ordered-prefix 与 replay validation、provider failure classification、receipt
+construction、terminal closeout joining 和 canonical result。Python 只是仍属外部
+authority 的 writeback、spend 与 terminal provider 的机械 adapter。因此新工作使用
+两次 coarse reduction，完成态 replay 使用一次，替换此前的 multi-helper bridge。
+Quota、host-adapter 与 task-lease caller 迁到各自的 coarse transaction 后，即可删除
+剩余细粒度 settlement facade。
 
 ### Stage 3 — CLI 与 App 汇合
 
@@ -238,7 +236,7 @@ receipt**：
 | Canonical owner | Cutover 前后分别由谁拥有；不得存在模糊双 authority |
 | 删除的旧语义代码 | 删除的 Python rule、细粒度 API、enum/dataclass 与 implementation-only adapter 的产品 LOC |
 | 新增的 bridge 代码 | 仅为 Python↔TS transport 或 compatibility 新增的产品 LOC |
-| 跨 runtime 调用 | Happy path 与 recovery path 在变更前后的 request/response 次数；目标 transaction 必须是一进一出 |
+| 跨 runtime 调用 | Happy path 与 recovery path 在变更前后的 request/response 次数；effect 已由 TS 拥有或没有待执行 provider 时目标为一次，否则真实 Python provider 尚存期间最多一次 preflight 加一次最终 reduction |
 | 产品代码净增减 | 产品 LOC 的新增减去删除；与 test、fixture、generated file 和 docs 分开报告 |
 | 迁移 scaffolding | 新增、保留或删除的 characterization/parity helper，以及具体删除触发条件 |
 | Facade 退出 | 本次已删除，或列出精确剩余 caller/compatibility contract 和删除条件 |

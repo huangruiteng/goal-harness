@@ -17,11 +17,13 @@
 ## 0. Decision in one example
 
 During migration, the Python `loopx` CLI sends one coarse typed transaction to
-a LoopX-managed TypeScript runtime. For example, a Turn settlement request
-contains the complete current state and callback receipts; TypeScript validates,
-reduces, persists migrated internal effects, and returns one typed result.
-Python translates that result into the legacy CLI shape. It does not call a
-series of TypeScript leaf helpers or retain parallel enums and reducers.
+a LoopX-managed TypeScript runtime. For example, Turn settlement first asks
+TypeScript to validate the journal and authorize any still-Python providers;
+after Python checkpoints those external outcomes, TypeScript performs the final
+reduction and returns one typed result. A replay with no pending provider needs
+only the reduction call. Python translates the result into the legacy CLI shape.
+It does not call a series of TypeScript leaf helpers or retain parallel enums
+and reducers.
 
 The same PR must delete the Python semantic path it replaces. A new TypeScript
 module is not migration progress by itself: the payoff is fewer semantic
@@ -179,9 +181,13 @@ A transaction cutover must:
    enums/dataclasses, and implementation-specific tests;
 3. leave Python as transport, legacy response projection, and explicit adapter
    for still-external authorities only;
-4. use at most one cross-runtime request/response for that control-plane
-   transaction. A model call, human gate, or third-party mutation starts a new
-   receipt-bearing transaction rather than an implicit callback tunnel;
+4. avoid leaf-level bridge chatter. A transaction whose effect providers have
+   migrated to TypeScript, or a replay with no pending provider, uses one
+   request/response. While a real provider remains in Python, use at most two:
+   one fail-closed preflight that authorizes named effects and one final
+   reduction over their checkpointed outcomes. A model call, human gate, or
+   third-party mutation starts a new receipt-bearing transaction rather than an
+   implicit callback tunnel;
 5. name the exact condition under which its Python facade and bridge operation
    can be removed.
 
@@ -229,22 +235,16 @@ one durable end-to-end adapter contract. Retain a characterization corpus only
 while an old authority remains executable or a versioned compatibility window
 requires differential proof; record its deletion trigger when introduced.
 
-Current implementation status: Stage 1 is shipped. Stage 2 has shipped bounded
-TypeScript owners for Todo completion fences/state, quota workspace causality,
-and scheduler transition rules. Delivery continuity and vision checkpointing
-are the next domain-local slice: TypeScript classifies an admitted open
-advancement Todo's settlement boundary, decides whether an accountable
-`outcome_progress` keeps that same Todo selected on the next heartbeat, and
-reduces the refresh to an intermediate continuation or semantic closeout.
-Python adapts status, Todo, and CLI facts to the typed handler; it does not
-reproduce the transition.
-
-This slice deliberately does not extend Effect Program. Effect Program owns
-ordered execution and receipts inside one settlement. Cross-heartbeat Todo
-selection and vision-checkpoint timing are domain-local reducer/ACK semantics:
-they consume the previous durable receipt, current Todo facts, and typed
-preemptions, then return one selection/boundary decision. They may use the same
-runtime and handler registry without becoming generic Effect Program steps.
+Current implementation status: Stage 1 and the bounded Stage 2A proofs are
+shipped. The first Stage 2B cutover is the complete Turn settlement/commit
+transaction. TypeScript owns preflight authorization, ordered-prefix and replay
+validation, provider failure classification, receipt construction, terminal
+closeout joining, and the canonical result. Python is a mechanical adapter for
+the still-external writeback, spend, and terminal providers. New work therefore
+uses two coarse reductions and a completed replay uses one, replacing the prior
+multi-helper bridge. The remaining fine-grained settlement facade can be
+deleted after quota, host-adapter, and task-lease callers move to their own
+coarse transactions.
 
 ### Stage 3 — CLI and App convergence
 
@@ -270,7 +270,7 @@ description and validation comment:
 | Canonical owner | Owner before and after the cutover; no ambiguous dual authority |
 | Legacy semantic code deleted | Product LOC of replaced Python rules, fine-grained APIs, enums/dataclasses, and implementation-only adapters removed |
 | Bridge code added | Product LOC added solely for Python↔TS transport or compatibility |
-| Cross-runtime calls | Happy-path and recovery-path request/response counts before and after; the target transaction must be one request and one response |
+| Cross-runtime calls | Happy-path and recovery-path request/response counts before and after; target one request/response when effects are TS-owned or no provider is pending, otherwise at most one preflight plus one final reduction while a real Python provider remains |
 | Product-code net change | Added minus deleted product LOC, reported separately from tests, fixtures, generated files, and docs |
 | Migration scaffolding | Characterization/parity helpers added, retained, or deleted, with a concrete removal trigger |
 | Facade exit | Facade deleted now, or the exact remaining caller/compatibility contract and deletion condition |
