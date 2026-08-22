@@ -501,6 +501,26 @@ Full post-run analysis stays in private `benchmark_case_insight_v0` storage. The
 board records only its compact status or handle, so reading the board cannot widen
 the solving agent's evidence boundary.
 
+Providers may keep separate public-safe ledgers for independent runner queues. Fold
+those shards into the canonical project board before agent readback:
+
+```bash
+loopx benchmark experiment-board-reconcile \
+  --goal-id <goal-id> \
+  --source-ledger <provider-a.jsonl> \
+  --source-ledger <provider-b.jsonl> \
+  --execute \
+  --format json
+```
+
+Without `--execute`, the command previews the reconciled board. Reconciliation is
+idempotent and monotonic: newer legal lifecycle transitions advance a stable run,
+late non-terminal rows cannot reopen a terminal run, and conflicting terminal
+states fail closed. Receipts report only compact row counts and never record source
+paths. The command validates the complete candidate set before its first write;
+executed batches are replay-safe, while providers remain responsible for retrying a
+batch that is interrupted before its receipt is returned.
+
 ## Post-run case insight monitor
 
 Benchmark startup should create one `continuous_monitor` todo that owns both the

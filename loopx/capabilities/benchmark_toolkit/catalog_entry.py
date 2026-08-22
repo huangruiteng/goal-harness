@@ -97,6 +97,21 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "command": (
+                "loopx benchmark experiment-board-reconcile --goal-id <goal-id> "
+                "--source-ledger <provider-board.jsonl> --execute --format json"
+            ),
+            "purpose": (
+                "Monotonically fold one or more provider-owned public-safe board "
+                "shards into the canonical project experiment board; omit --execute "
+                "for a no-write preview."
+            ),
+            "write_boundary": (
+                "explicit project-local canonical board write; source paths are "
+                "never recorded and conflicting terminal states fail closed"
+            ),
+        },
+        {
+            "command": (
                 "loopx benchmark concurrency-configure --goal-id <goal-id> "
                 "--max-active-cases <n> --target-active-cases <n> "
                 "--max-baseline-cases <n> --max-test-cases <n> "
@@ -176,8 +191,10 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     "agent_usage": {
         "benchmark_start_hint": (
             "At benchmark start, read the experiment board and concurrency envelope "
-            "before selecting or launching a case; update the stable board row and "
-            "capacity reservation at every material run transition."
+            "before selecting or launching a case; update the same stable board row "
+            "and capacity reservation at every material run transition. "
+            "Providers that keep separate board shards reconcile them "
+            "into the canonical board before agent readback."
         ),
         "required_sequence": [
             "read_experiment_board_before_launch_or_case_selection",
@@ -204,6 +221,10 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "write": (
                 "loopx benchmark experiment-board-upsert --goal-id <goal-id> "
                 "--row-json <compact-row.json> --execute --format json"
+            ),
+            "reconcile": (
+                "loopx benchmark experiment-board-reconcile --goal-id <goal-id> "
+                "--source-ledger <provider-board.jsonl> --execute --format json"
             ),
         },
         "concurrency_commands": {

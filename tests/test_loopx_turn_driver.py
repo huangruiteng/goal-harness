@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import loopx.cli_commands.turn as turn_command
 from loopx.cli import main as cli_main
 from loopx.control_plane.quota.turn_envelope import build_turn_envelope
 from loopx.control_plane.turn_driver import (
@@ -1428,6 +1429,106 @@ def _turn_journal(runtime: Path) -> dict[str, object]:
     return json.loads(journal_path.read_text(encoding="utf-8"))
 
 
+def test_turn_run_once_cli_repairs_committed_quota_spend_after_receipt_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project, runtime, registry = _write_live_fixture(tmp_path)
+    host_project = tmp_path / "isolated-host-workspace"
+    host_project.mkdir()
+    host_script, validation_script = _completion_host_and_validation_scripts()
+    argv = _turn_run_once_completion_argv(
+        host_project,
+        runtime,
+        registry,
+        host_script,
+        validation_script,
+    )
+    append_rollout_event = turn_command.append_cli_rollout_event
+
+    def crash_before_quota_receipt(
+        payload: dict[str, object],
+        **kwargs: object,
+    ) -> dict[str, object]:
+        if kwargs.get("event_kind") == "quota_spend":
+            raise OSError("injected crash before quota receipt")
+        return append_rollout_event(payload, **kwargs)
+
+    monkeypatch.setattr(
+        turn_command,
+        "append_cli_rollout_event",
+        crash_before_quota_receipt,
+    )
+    first_output = io.StringIO()
+    with contextlib.redirect_stdout(first_output):
+        first_exit_code = cli_main(argv)
+    first = json.loads(first_output.getvalue())
+
+    assert first_exit_code == 1, first
+    assert first["error"] == "injected crash before quota receipt"
+    interrupted = _turn_journal(runtime)
+    turn_key = interrupted["turn_key"]
+    effect_id = interrupted["plan"]["transaction"]["settlement_plan"][
+        "identity"
+    ]["effect_id"]
+    assert interrupted["effect_attempts"] == {
+        "quota_spend": {
+            "status": "prepared",
+            "effect_ref": f"{effect_id}#quota_spend",
+        }
+    }
+    index_path = runtime / "goals" / "loopx-turn-fixture" / "runs" / "index.jsonl"
+    rows = [
+        json.loads(line)
+        for line in index_path.read_text(encoding="utf-8").splitlines()
+    ]
+    quota_rows = [row for row in rows if row.get("classification") == "quota_slot_spent"]
+    assert len(quota_rows) == 1
+    assert quota_rows[0]["effect_ref"] == f"{effect_id}#quota_spend"
+    assert quota_rows[0]["agent_id"] == "codex-fixture"
+
+    monkeypatch.setattr(
+        turn_command,
+        "append_cli_rollout_event",
+        append_rollout_event,
+    )
+    resumed_output = io.StringIO()
+    with contextlib.redirect_stdout(resumed_output):
+        resumed_exit_code = cli_main(
+            [
+                *argv[:-1],
+                "--resume-turn-key",
+                turn_key,
+                "--execute",
+            ]
+        )
+    resumed = json.loads(resumed_output.getvalue())
+
+    assert resumed_exit_code == 0, resumed
+    assert resumed["status"] == "committed"
+    replayed_rows = [
+        json.loads(line)
+        for line in index_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert sum(
+        row.get("classification") == "quota_slot_spent"
+        for row in replayed_rows
+    ) == 1
+    events_path = (
+        runtime / "goals" / "loopx-turn-fixture" / "rollout-event-log.jsonl"
+    )
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(
+        event.get("event_kind") == "quota_spend"
+        and event.get("run_id") == turn_key
+        and event.get("status") == "receipt_repaired"
+        for event in events
+    )
+
+
 def test_turn_run_once_cli_projects_declared_successor_continuation(
     tmp_path: Path,
 ) -> None:
@@ -1494,6 +1595,135 @@ def test_turn_run_once_cli_projects_durable_no_followup_continuation(
         "todo_id": "todo_fixture0001",
         "continuation": "no_followup",
     }
+
+
+@pytest.mark.parametrize(
+    "durable_completion_turn_key",
+    [None, "sha256:different-turn"],
+    ids=["missing-turn-key", "different-turn-key"],
+)
+def test_turn_run_once_cli_terminal_recovery_rejects_unowned_completion(
+    tmp_path: Path,
+    durable_completion_turn_key: str | None,
+) -> None:
+    project, runtime, registry = _write_live_fixture(
+        tmp_path,
+        todo_metadata_extra="no_followup=true",
+    )
+    host_project = tmp_path / "isolated-host-workspace"
+    host_project.mkdir()
+    host_script, validation_script = _completion_host_and_validation_scripts()
+    argv = _turn_run_once_completion_argv(
+        host_project,
+        runtime,
+        registry,
+        host_script,
+        validation_script,
+    )
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(argv)
+    payload = json.loads(output.getvalue())
+    assert exit_code == 0, payload
+
+    turn_key = payload["resume_turn_key"]
+    state_path = (
+        project
+        / ".codex"
+        / "goals"
+        / "loopx-turn-fixture"
+        / "ACTIVE_GOAL_STATE.md"
+    )
+    state = state_path.read_text(encoding="utf-8")
+    current_turn_field = f" completion_turn_key={turn_key}"
+    assert current_turn_field in state
+    replacement = (
+        ""
+        if durable_completion_turn_key is None
+        else f" completion_turn_key={durable_completion_turn_key}"
+    )
+    state_path.write_text(
+        state.replace(current_turn_field, replacement),
+        encoding="utf-8",
+    )
+
+    event_path = (
+        runtime / "goals" / "loopx-turn-fixture" / "rollout-event-log.jsonl"
+    )
+    events = [
+        json.loads(line)
+        for line in event_path.read_text(encoding="utf-8").splitlines()
+    ]
+    events_without_terminal = [
+        event
+        for event in events
+        if not (
+            event.get("event_kind") == "todo_complete"
+            and event.get("run_id") == turn_key
+        )
+    ]
+    assert len(events_without_terminal) == len(events) - 1
+    event_path.write_text(
+        "".join(json.dumps(event) + "\n" for event in events_without_terminal),
+        encoding="utf-8",
+    )
+
+    journal_path = next(
+        (runtime / "goals" / "loopx-turn-fixture" / "turns").glob("*.json")
+    )
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    identity = journal["plan"]["transaction"]["settlement_plan"]["identity"]
+    journal["status"] = "in_progress"
+    journal["completed_phases"] = [
+        "host_execute",
+        "typed_result",
+        "validation",
+        "durable_writeback",
+        "quota_spend",
+    ]
+    journal["effect_attempts"] = {
+        "terminal_closeout": {
+            "status": "prepared",
+            "effect_ref": f"{identity['effect_id']}#terminal_closeout",
+        }
+    }
+    for key in (
+        "terminal_closeout",
+        "settlement_result",
+        "scheduler",
+        "receipt",
+        "reason",
+    ):
+        journal.pop(key, None)
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+
+    resumed_output = io.StringIO()
+    with contextlib.redirect_stdout(resumed_output):
+        resumed_exit_code = cli_main(
+            [
+                *argv[:-1],
+                "--resume-turn-key",
+                turn_key,
+                "--execute",
+            ]
+        )
+    resumed = json.loads(resumed_output.getvalue())
+
+    assert resumed_exit_code == 1, resumed
+    assert resumed["settlement_result"]["failure"] == {
+        "kind": "effect_outcome_unknown",
+        "step_kind": "terminal_closeout",
+        "reason": "closeout readback failed",
+    }
+    recovered_events = [
+        json.loads(line)
+        for line in event_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert not any(
+        event.get("event_kind") == "todo_complete"
+        and event.get("run_id") == turn_key
+        for event in recovered_events
+    )
 
 
 def test_turn_run_once_cli_fails_closed_on_dangling_declared_successor(

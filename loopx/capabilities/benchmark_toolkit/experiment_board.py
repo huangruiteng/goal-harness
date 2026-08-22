@@ -24,6 +24,7 @@ _RUN_STATUS_TRANSITIONS = {
     "runner_invalid": {"runner_invalid"},
     "cancelled": {"cancelled"},
 }
+_TERMINAL_RUN_STATUSES = {"completed", "runner_invalid", "cancelled"}
 _CLAIM_SCOPES = {"matched_study", "diagnostic_only", "inventory_only"}
 _TREATMENT_FIDELITY = {"qualified", "failed", "pending", "not_applicable"}
 _INSIGHT_STATUSES = {"pending", "complete", "not_required"}
@@ -436,6 +437,134 @@ def upsert_benchmark_experiment_board_row(
         "row": row,
         "write": write,
     }
+
+
+def _benchmark_experiment_board_row_key_tuple(
+    payload: Mapping[str, Any],
+) -> tuple[str, str, str, str]:
+    key = benchmark_experiment_board_row_key(payload)
+    return (
+        key["benchmark_id"],
+        key["study_id"],
+        key["case_id"],
+        key["run_id"],
+    )
+
+
+def _benchmark_experiment_board_observed_at(payload: Mapping[str, Any]) -> datetime:
+    return datetime.fromisoformat(str(payload["observed_at"]))
+
+
+def _advance_reconciled_benchmark_experiment_board_row(
+    selected: dict[str, Any],
+    candidate: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    if selected == candidate:
+        return selected, False
+
+    selected_status = str(selected["status"])
+    candidate_status = str(candidate["status"])
+    if (
+        selected_status in _TERMINAL_RUN_STATUSES
+        and candidate_status in _TERMINAL_RUN_STATUSES
+        and candidate_status != selected_status
+    ):
+        raise ValueError(
+            "benchmark experiment board sources contain conflicting terminal states"
+        )
+
+    selected_at = _benchmark_experiment_board_observed_at(selected)
+    candidate_at = _benchmark_experiment_board_observed_at(candidate)
+    if candidate_at == selected_at:
+        raise ValueError(
+            "benchmark experiment board sources contain ambiguous rows at "
+            "the same observed_at timestamp"
+        )
+    if candidate_at < selected_at:
+        return selected, True
+    if selected_status in _TERMINAL_RUN_STATUSES:
+        if candidate_status in _TERMINAL_RUN_STATUSES:
+            return candidate, False
+        return selected, True
+    if candidate_status not in _RUN_STATUS_TRANSITIONS[selected_status]:
+        return selected, True
+    return candidate, False
+
+
+def _select_reconciled_benchmark_experiment_board_row(
+    current: dict[str, Any] | None,
+    candidates: list[dict[str, Any]],
+) -> tuple[dict[str, Any], int]:
+    ordered = sorted(candidates, key=_benchmark_experiment_board_observed_at)
+    selected = current
+    stale_skipped = 0
+    for candidate in ordered:
+        if selected is None:
+            selected = candidate
+            continue
+        selected, skipped = _advance_reconciled_benchmark_experiment_board_row(
+            selected,
+            candidate,
+        )
+        stale_skipped += int(skipped)
+
+    if selected is None:
+        raise ValueError("benchmark experiment board reconcile requires source rows")
+    return selected, stale_skipped
+
+
+def preview_benchmark_experiment_board_reconcile(
+    rows: Iterable[Mapping[str, Any]],
+    source_rows: Iterable[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Fold provider-owned board shards into one monotonic canonical projection."""
+
+    normalized_rows = [
+        normalize_benchmark_experiment_board_row(dict(row)) for row in rows
+    ]
+    normalized_sources = [
+        normalize_benchmark_experiment_board_row(dict(row)) for row in source_rows
+    ]
+    if not normalized_sources:
+        raise ValueError("benchmark experiment board reconcile requires source rows")
+
+    existing_by_key = {
+        _benchmark_experiment_board_row_key_tuple(row): row for row in normalized_rows
+    }
+    candidates_by_key: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    for row in normalized_sources:
+        candidates_by_key.setdefault(
+            _benchmark_experiment_board_row_key_tuple(row), []
+        ).append(row)
+
+    result_by_key = dict(existing_by_key)
+    counts = {
+        "source_row_count": len(normalized_sources),
+        "candidate_run_count": len(candidates_by_key),
+        "inserted": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "stale_skipped": 0,
+    }
+    for key, candidates in candidates_by_key.items():
+        current = existing_by_key.get(key)
+        selected, stale_skipped = _select_reconciled_benchmark_experiment_board_row(
+            current, candidates
+        )
+        counts["stale_skipped"] += stale_skipped
+        result_by_key[key] = selected
+        if current is None:
+            counts["inserted"] += 1
+        elif current == selected:
+            counts["unchanged"] += 1
+        else:
+            counts["updated"] += 1
+
+    ordered_keys = [
+        _benchmark_experiment_board_row_key_tuple(row) for row in normalized_rows
+    ]
+    ordered_keys.extend(key for key in candidates_by_key if key not in existing_by_key)
+    return [result_by_key[key] for key in ordered_keys], counts
 
 
 def _metric_delta(

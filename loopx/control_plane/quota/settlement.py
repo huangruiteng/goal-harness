@@ -54,6 +54,7 @@ __all__ = [
     "SettlementStepKind",
     "build_codex_app_settlement_plan",
     "build_turn_scoped_cli_settlement_plan",
+    "find_quota_spend_run_by_effect_ref",
     "find_settlement_spend_run",
     "find_settlement_step_event",
     "find_settlement_writeback",
@@ -444,6 +445,25 @@ def find_settlement_spend_run(
         if normalize_todo_claimed_by(run.get("agent_id")) != identity.agent_id:
             continue
         return run
+    return None
+
+
+def find_quota_spend_run_by_effect_ref(
+    runtime_root: Path,
+    *,
+    goal_id: str,
+    effect_ref: str,
+) -> dict[str, Any] | None:
+    """Return the durable quota run for one provider-owned effect attempt."""
+
+    normalized_effect_ref = str(effect_ref or "").strip()
+    if not normalized_effect_ref:
+        return None
+    for run in reversed(_run_index_records(runtime_root, goal_id)):
+        if str(run.get("classification") or "") != "quota_slot_spent":
+            continue
+        if str(run.get("effect_ref") or "") == normalized_effect_ref:
+            return run
     return None
 
 

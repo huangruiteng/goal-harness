@@ -11,6 +11,7 @@ from loopx.capabilities.benchmark_toolkit import (
     build_benchmark_experiment_board,
     default_benchmark_experiment_board_path,
     normalize_benchmark_experiment_board_row,
+    preview_benchmark_experiment_board_reconcile,
     read_benchmark_experiment_board_rows,
     render_benchmark_experiment_board_markdown,
     upsert_benchmark_experiment_board_row,
@@ -100,6 +101,21 @@ def _baseline(**overrides: object) -> dict[str, object]:
         observed_at="2026-08-18T00:00:00+00:00",
         f2p=0,
         fidelity="not_applicable",
+    )
+    payload.update(overrides)
+    return payload
+
+
+def _running_baseline(**overrides: object) -> dict[str, object]:
+    payload = _baseline(
+        status="running",
+        metrics={},
+        countability={
+            "integrity_qualified": False,
+            "official_result_present": False,
+            "score_countable": False,
+        },
+        insight={"status": "pending"},
     )
     payload.update(overrides)
     return payload
@@ -304,6 +320,73 @@ def test_upsert_rejects_stale_transition_after_terminal_state(tmp_path: Path) ->
     assert rows[0]["status"] == "completed"
 
 
+def test_reconcile_promotes_terminal_and_skips_late_nonterminal_source() -> None:
+    canonical = _running_baseline(observed_at="2026-08-18T00:10:00+00:00")
+    source_running = _running_baseline(
+        observed_at="2026-08-18T00:20:00+00:00",
+        arm_id="provider-running",
+    )
+    source_terminal = _baseline(
+        observed_at="2026-08-18T00:30:00+00:00",
+        arm_id="provider-terminal",
+    )
+    stale_late_running = _running_baseline(
+        observed_at="2026-08-18T00:40:00+00:00",
+        arm_id="stale-provider",
+    )
+
+    rows, receipt = preview_benchmark_experiment_board_reconcile(
+        [canonical],
+        [stale_late_running, source_terminal, source_running],
+    )
+
+    assert rows == [normalize_benchmark_experiment_board_row(source_terminal)]
+    assert receipt == {
+        "source_row_count": 3,
+        "candidate_run_count": 1,
+        "inserted": 0,
+        "updated": 1,
+        "unchanged": 0,
+        "stale_skipped": 1,
+    }
+
+    repeated, repeated_receipt = preview_benchmark_experiment_board_reconcile(
+        rows,
+        [stale_late_running, source_terminal, source_running],
+    )
+    assert repeated == rows
+    assert repeated_receipt["unchanged"] == 1
+    assert repeated_receipt["stale_skipped"] == 2
+
+
+def test_reconcile_rejects_conflicting_terminal_sources() -> None:
+    completed = _baseline(observed_at="2026-08-18T00:30:00+00:00")
+    runner_invalid = _running_baseline(
+        status="runner_invalid",
+        observed_at="2026-08-18T00:40:00+00:00",
+    )
+
+    with pytest.raises(ValueError, match="conflicting terminal states"):
+        preview_benchmark_experiment_board_reconcile(
+            [],
+            [completed, runner_invalid],
+        )
+
+
+def test_reconcile_rejects_older_terminal_conflict_with_canonical_row() -> None:
+    canonical = _baseline(observed_at="2026-08-18T00:40:00+00:00")
+    older_runner_invalid = _running_baseline(
+        status="runner_invalid",
+        observed_at="2026-08-18T00:30:00+00:00",
+    )
+
+    with pytest.raises(ValueError, match="conflicting terminal states"):
+        preview_benchmark_experiment_board_reconcile(
+            [canonical],
+            [older_runner_invalid],
+        )
+
+
 def test_cli_previews_then_writes_and_reads_board(tmp_path: Path) -> None:
     row_path = tmp_path / "row.json"
     row_path.write_text(json.dumps(_baseline()), encoding="utf-8")
@@ -371,6 +454,66 @@ def test_cli_previews_then_writes_and_reads_board(tmp_path: Path) -> None:
     assert shown_payload["agent_guidance"]["next_action"] == (
         "close_running_rows_or_review_matched_comparisons"
     )
+
+
+def test_cli_reconciles_provider_ledgers_without_recording_paths(
+    tmp_path: Path,
+) -> None:
+    source_running = tmp_path / "provider-a.jsonl"
+    source_terminal = tmp_path / "provider-b.jsonl"
+    upsert_benchmark_experiment_board_row(
+        source_running,
+        _running_baseline(observed_at="2026-08-18T00:10:00+00:00"),
+    )
+    upsert_benchmark_experiment_board_row(
+        source_terminal,
+        _baseline(observed_at="2026-08-18T00:20:00+00:00"),
+    )
+    command = [
+        str(REPO_ROOT / "scripts/loopx"),
+        "benchmark",
+        "experiment-board-reconcile",
+        "--goal-id",
+        "fixture-goal",
+        "--project",
+        str(tmp_path),
+        "--source-ledger",
+        str(source_running),
+        "--source-ledger",
+        str(source_terminal),
+        "--format",
+        "json",
+    ]
+    ledger = default_benchmark_experiment_board_path(
+        project=tmp_path, goal_id="fixture-goal"
+    )
+
+    preview = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    preview_payload = json.loads(preview.stdout)
+    assert preview_payload["summary"]["run_count"] == 1
+    assert preview_payload["write"]["status"] == "preview_reconciled"
+    assert preview_payload["write"]["inserted"] == 1
+    assert not ledger.exists()
+
+    executed = subprocess.run(
+        [*command, "--execute"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    executed_payload = json.loads(executed.stdout)
+    assert executed_payload["write"]["status"] == "reconciled"
+    assert executed_payload["write"]["write_performed"] is True
+    assert executed_payload["runs"][0]["status"] == "completed"
+    assert str(tmp_path) not in executed.stdout
+    assert read_benchmark_experiment_board_rows(ledger)[0]["status"] == "completed"
 
 
 def test_cli_omitted_project_routes_board_to_registered_goal_repo(
@@ -464,5 +607,6 @@ def test_capability_show_teaches_agents_to_use_the_board() -> None:
     )
     assert "experiment-board-show" in usage["board_commands"]["read"]
     assert "experiment-board-upsert" in usage["board_commands"]["write"]
+    assert "experiment-board-reconcile" in usage["board_commands"]["reconcile"]
     assert "## Agent Usage" in rendered
     assert "read_experiment_board_before_launch_or_case_selection" in rendered
