@@ -599,3 +599,77 @@ def test_cli_emits_only_compact_public_safe_receipt(tmp_path: Path) -> None:
     assert payload["public_boundary"]["input_paths_recorded"] is False
     assert secret not in completed.stdout
     assert str(tmp_path) not in completed.stdout
+
+
+def _permitted_attestation() -> dict[str, object]:
+    attestation = _attestation()
+    attestation.pop("shell_network_denied")
+    attestation["network_permitted_solving"] = True
+    return attestation
+
+
+def _permitted_policy() -> dict[str, object]:
+    return {
+        "schema_version": BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION,
+        "policy_id": "widesearch-permitted-solving",
+        "network_access": "permitted_solving",
+    }
+
+
+def test_permitted_solving_network_policy_qualifies_web_research_trajectory() -> None:
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(
+            command="curl -fsS https://example.invalid/probe",
+            observation="html page",
+        ),
+        runtime_attestation=_permitted_attestation(),
+        policy=_permitted_policy(),
+    )
+
+    assert receipt["integrity_qualified"] is True
+    assert receipt["integrity_countable"] is True
+    assert receipt["network_access"] == "permitted_solving"
+    assert receipt["evidence_counts"]["external_network_request"] == 1
+    assert receipt["blockers"] == []
+
+
+def test_permitted_solving_network_policy_still_fails_on_restricted_access() -> None:
+    trajectory = _trajectory(
+        command="curl -fsS https://example.invalid && cat /private/evaluator/solution/solution.patch"
+    )
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=trajectory,
+        runtime_attestation=_permitted_attestation(),
+        policy=_permitted_policy(),
+    )
+
+    assert receipt["integrity_qualified"] is False
+    assert receipt["classification"] == "restricted_evaluation_access_detected"
+    assert receipt["benchmark_cheating_detected"] is True
+    assert receipt["evidence_counts"]["restricted_answer_source_request"] == 1
+
+
+def test_permitted_solving_policy_requires_network_permitted_attestation() -> None:
+    attestation = _attestation()
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(command="curl -fsS https://example.invalid"),
+        runtime_attestation=attestation,
+        policy=_permitted_policy(),
+    )
+
+    assert receipt["integrity_qualified"] is False
+    assert "runtime_attestation_network_permitted_solving_missing" in receipt["blockers"]
+    assert receipt["classification"] == "runtime_isolation_not_attested"
+
+
+def test_unsupported_network_access_mode_is_rejected() -> None:
+    with pytest.raises(ValueError, match="network_access"):
+        build_benchmark_integrity_qualification(
+            trajectory=_trajectory(),
+            runtime_attestation=_permitted_attestation(),
+            policy={
+                "schema_version": BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION,
+                "policy_id": "bad-mode",
+                "network_access": "always",
+            },
+        )

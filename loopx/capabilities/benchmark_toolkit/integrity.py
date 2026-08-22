@@ -45,6 +45,26 @@ REQUIRED_RUNTIME_ATTESTATIONS = (
     "official_feedback_blinded",
 )
 
+NETWORK_ACCESS_MODES = ("denied", "permitted_solving")
+DEFAULT_NETWORK_ACCESS = "denied"
+# Web-research benchmarks legitimately open network to the solving agent. The
+# runner attests that network access was bounded to the solving phase and that
+# evaluator/answer/verifier resources stayed denied.
+NETWORK_PERMITTED_SOLVING_ATTESTATION = "network_permitted_solving"
+_COMMON_RUNTIME_ATTESTATIONS = (
+    "agent_phase_isolated",
+    "evaluator_sources_denied",
+    "other_trials_denied",
+    "controller_state_denied",
+    "host_escape_denied",
+    "provider_credential_shell_excluded",
+    "case_local_control_state",
+    "canonical_control_state_root",
+    "independent_verifier",
+    "verifier_started_after_agent",
+    "official_feedback_blinded",
+)
+
 _DEFAULT_DENIED_ARGUMENT_MARKERS: dict[str, tuple[str, ...]] = {
     "restricted_answer_source_request": (
         "/solution/solution.patch",
@@ -152,11 +172,32 @@ def _marker_present(text: str, marker: str) -> bool:
     )
 
 
+def required_runtime_attestations(network_access: str) -> tuple[str, ...]:
+    """Return the runner attestations required for one network access mode.
+
+    ``denied`` (default) requires ``shell_network_denied`` for offline coding
+    benchmarks. ``permitted_solving`` is for web-research benchmarks: the shell
+    may use the network during the solving phase, but the runner must attest
+    ``network_permitted_solving`` instead and every restricted-resource denial
+    still applies.
+    """
+
+    mode = network_access if network_access in NETWORK_ACCESS_MODES else DEFAULT_NETWORK_ACCESS
+    if mode == "permitted_solving":
+        return (*_COMMON_RUNTIME_ATTESTATIONS, NETWORK_PERMITTED_SOLVING_ATTESTATION)
+    return (*_COMMON_RUNTIME_ATTESTATIONS, "shell_network_denied")
+
+
 def _validated_policy(
     policy: Mapping[str, Any] | None,
-) -> tuple[str, bool, dict[str, tuple[str, ...]]]:
+) -> tuple[str, bool, dict[str, tuple[str, ...]], str]:
     if policy is None:
-        return "default", False, dict(_DEFAULT_DENIED_ARGUMENT_MARKERS)
+        return (
+            "default",
+            False,
+            dict(_DEFAULT_DENIED_ARGUMENT_MARKERS),
+            DEFAULT_NETWORK_ACCESS,
+        )
     if policy.get("schema_version") != BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION:
         raise ValueError("benchmark_integrity_policy_schema_mismatch")
     raw_policy_id = policy.get("policy_id")
@@ -166,6 +207,9 @@ def _validated_policy(
     )
     if not policy_id:
         raise ValueError("benchmark_integrity_policy_id_missing")
+    raw_network_access = str(policy.get("network_access") or DEFAULT_NETWORK_ACCESS).strip()
+    if raw_network_access not in NETWORK_ACCESS_MODES:
+        raise ValueError("benchmark_integrity_policy_network_access_unsupported")
     markers = dict(_DEFAULT_DENIED_ARGUMENT_MARKERS)
     custom = policy.get("denied_argument_markers")
     if custom is not None and not isinstance(custom, Mapping):
@@ -184,7 +228,7 @@ def _validated_policy(
                 normalized.append(text)
         if normalized:
             markers[category] = (*markers.get(category, ()), *normalized)
-    return policy_id, policy_id_path_like, markers
+    return policy_id, policy_id_path_like, markers, raw_network_access
 
 
 def _sensitive_value_present(text: str, sensitive_values: tuple[str, ...]) -> bool:
@@ -207,7 +251,7 @@ def build_benchmark_integrity_qualification(
     absence of a suspicious tool call cannot prove that isolation existed.
     """
 
-    policy_id, policy_id_path_like, markers = _validated_policy(policy)
+    policy_id, policy_id_path_like, markers, network_access = _validated_policy(policy)
     secrets = tuple(
         value
         for value in dict.fromkeys(str(item) for item in sensitive_values)
@@ -316,7 +360,7 @@ def build_benchmark_integrity_qualification(
         attestation_failures.append("runtime_attestation_schema_mismatch")
     if runtime_attestation.get("authority") != "runner":
         attestation_failures.append("runtime_attestation_authority_not_runner")
-    for field in REQUIRED_RUNTIME_ATTESTATIONS:
+    for field in required_runtime_attestations(network_access):
         if runtime_attestation.get(field) is not True:
             attestation_failures.append(f"runtime_attestation_{field}_missing")
 
@@ -324,7 +368,15 @@ def build_benchmark_integrity_qualification(
         category: int(evidence_counts.get(category, 0))
         for category in INTEGRITY_EVIDENCE_CATEGORIES
     }
-    policy_failures = [category for category, count in counts.items() if count]
+    policy_failures = [
+        category
+        for category, count in counts.items()
+        if count
+        and not (
+            network_access == "permitted_solving"
+            and category == "external_network_request"
+        )
+    ]
     blockers = [*structural_failures, *attestation_failures, *policy_failures]
     cheating_detected = any(counts[category] for category in _CHEATING_CATEGORIES)
     qualified = not blockers
@@ -357,9 +409,10 @@ def build_benchmark_integrity_qualification(
         "blockers": blockers,
         "evidence_counts": counts,
         "evidence": evidence,
+        "network_access": network_access,
         "runtime_attestation_checks": {
             field: runtime_attestation.get(field) is True
-            for field in REQUIRED_RUNTIME_ATTESTATIONS
+            for field in required_runtime_attestations(network_access)
         },
         "audit_coverage": {
             "trajectory_schema_version": _safe_label(schema_version, limit=40),

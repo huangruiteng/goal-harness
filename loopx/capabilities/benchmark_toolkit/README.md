@@ -252,6 +252,30 @@ Restricted evaluation or cross-trial access is classified as cheating. Missing
 isolation proof or a credential leak still makes the run uncountable, but LoopX does
 not relabel that absence of proof as confirmed answer cheating.
 
+### Network access policy
+
+Offline coding benchmarks run with `network_access: "denied"` (the default): shell
+network use is a policy violation and the runner must attest
+`shell_network_denied: true`. Web-research benchmarks legitimately need network
+during the solving phase. A custom policy may declare
+`"network_access": "permitted_solving"`; the runner then attests
+`network_permitted_solving: true` instead of `shell_network_denied`, and
+`external_network_request` evidence is recorded but does not fail the run. The
+restricted-resource denials (answer, hidden tests, verifier, other trials,
+controller state, host escape, credentials) remain fail-closed in both modes:
+
+```json
+{
+  "schema_version": "benchmark_integrity_policy_v0",
+  "policy_id": "widesearch-permitted-solving",
+  "network_access": "permitted_solving"
+}
+```
+
+`network_access` is validated to `denied` or `permitted_solving`; any other value is
+rejected. The qualification receipt exposes the resolved `network_access` and the
+attestation checks that actually applied to that mode.
+
 ## Runner attestation
 
 The attestation is a compact runner-owned JSON object, not an agent assertion:
