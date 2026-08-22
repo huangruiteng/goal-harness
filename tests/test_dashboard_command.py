@@ -128,7 +128,7 @@ def test_macos_launchagent_passes_discovered_lark_cli_without_login_shell() -> N
     assert "--lark-cli-bin" in script
     assert "resolve_lark_cli_command" in script
     assert "<string>-lc</string>" not in script
-    assert script.count("<string>-c</string>") == 3
+    assert script.count("<string>-c</string>") == 2
 
 
 def test_dashboard_command_runs_the_dashboard_launcher(
