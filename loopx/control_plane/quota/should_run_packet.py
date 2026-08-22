@@ -574,6 +574,8 @@ def _resolve_agent_lane_delivery_route(
 
     continuity_todo = prepared.delivery_continuity_todo
     delivery_anchor = prepared.delivery_continuity_anchor
+    if not isinstance(delivery_anchor, dict) and fallback is None:
+        return None
     delivery_route = evaluate_delivery_route(
         agent_id=delivery_agent_id,
         previous_todo_id=(

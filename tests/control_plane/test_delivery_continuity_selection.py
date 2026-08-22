@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from loopx.control_plane.quota.should_run import build_quota_should_run
 from loopx.control_plane.testing.quota_fixtures import (
     quota_status_payload,
@@ -113,3 +115,33 @@ def test_same_turn_receipt_still_outranks_cross_heartbeat_continuity() -> None:
     )
     assert packet["selected_todo"].get("selected_by") != "in_flight_todo"
     assert "delivery_continuity" not in packet
+
+
+def test_empty_agent_lane_does_not_call_delivery_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_route(**_kwargs):
+        pytest.fail("an empty projected candidate set must not cross the runtime")
+
+    monkeypatch.setattr(
+        "loopx.control_plane.quota.should_run_packet.evaluate_delivery_route",
+        unexpected_route,
+    )
+    packet = build_quota_should_run(
+        quota_status_payload(
+            goal_id=GOAL_ID,
+            status="active",
+            agent_todo_items=[],
+            recommended_action="Wait for new work.",
+            coordination={
+                "agent_model": "peer_v1",
+                "registered_agents": [AGENT_ID],
+            },
+            claim_scope_agent_id=AGENT_ID,
+        ),
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+
+    assert "selected_todo" not in packet
+    assert "agent_lane_next_action" not in packet
