@@ -78,10 +78,7 @@ from ..scheduler.state import (
     CODEX_APP_SURFACE,
     load_scheduler_state,
 )
-from ..turn_driver.delivery_continuity import (
-    evaluate_delivery_boundary,
-    evaluate_delivery_continuity,
-)
+from ..turn_driver.delivery_continuity import evaluate_delivery_route
 from ..runtime.decision_freshness import decision_freshness_warning as _decision_freshness_warning
 from ..runtime.promotion_readiness import promotion_readiness_warning as _promotion_readiness_warning
 from ..todos.contract import (
@@ -114,6 +111,7 @@ from ..work_items.work_lane import (
 )
 
 from .should_run_prepare import _QuotaDecisionPreparation
+
 
 def _compact_autonomous_candidate_context(
     value: Any,
@@ -527,34 +525,139 @@ def _delivery_preemptions_for_route(
     return preemptions
 
 
-def _delivery_continuity_for_route(
+def _resolve_agent_lane_delivery_route(
     prepared: _QuotaDecisionPreparation,
     *,
-    preemptions: list[str],
+    due_monitor_attempt: bool,
+    receipt_bound_replan_decision: bool,
+    delivery_preemptions: list[str],
 ) -> dict[str, Any] | None:
-    anchor = prepared.delivery_continuity_anchor
-    if not isinstance(anchor, dict):
-        return None
+    """Project candidates once, then let TypeScript own their delivery route."""
+
+    item = prepared.item
+    fallback = prepared.receipt_bound_agent_next_action
+    if (
+        fallback is None
+        and not due_monitor_attempt
+        and not prepared.inbox_reply_due
+        and not task_orchestration_contract_is_actionable(
+            prepared.task_orchestration_contract
+        )
+        and not prepared.capability_monitor_fallback
+    ):
+        fallback = build_agent_lane_next_action(
+            agent_identity=prepared.agent_identity,
+            agent_todo_summary=prepared.agent_todo_summary,
+            capability_gate=prepared.capability_gate,
+            scoped_user_gate_fallback=prepared.scoped_user_gate_fallback,
+            receipt_bound_todo_id=prepared.receipt_bound_todo_id,
+            active_next_action=(
+                item.get("active_state_next_action")
+                or (
+                    item.get("project_asset", {}).get("next_action")
+                    if isinstance(item.get("project_asset"), dict)
+                    else None
+                )
+            ),
+        )
+    if receipt_bound_replan_decision:
+        # The replan obligation is the immutable settlement authority for this
+        # decision. A newly runnable Todo remains visible in summaries, but it
+        # cannot become the selected settlement target in the same packet.
+        fallback = None
+
+    delivery_agent_id = normalize_todo_claimed_by(
+        (prepared.agent_identity or {}).get("agent_id")
+    )
+    if not delivery_agent_id:
+        return fallback
 
     continuity_todo = prepared.delivery_continuity_todo
-    return evaluate_delivery_continuity(
-        agent_id=str((prepared.agent_identity or {}).get("agent_id") or ""),
-        previous_todo_id=anchor.get("todo_id"),
-        previous_delivery_outcome=anchor.get("delivery_outcome"),
-        current_todo=continuity_todo,
-        actionable=bool(
+    delivery_anchor = prepared.delivery_continuity_anchor
+    delivery_route = evaluate_delivery_route(
+        agent_id=delivery_agent_id,
+        previous_todo_id=(
+            delivery_anchor.get("todo_id")
+            if isinstance(delivery_anchor, dict)
+            else None
+        ),
+        previous_delivery_outcome=(
+            delivery_anchor.get("delivery_outcome")
+            if isinstance(delivery_anchor, dict)
+            else None
+        ),
+        continuity_todo=continuity_todo,
+        continuity_actionable=bool(
             isinstance(continuity_todo, dict)
             and projection_todo_item_is_actionable_open(continuity_todo)
         ),
-        capability_ready=bool(
+        continuity_capability_ready=bool(
             isinstance(continuity_todo, dict)
             and not missing_required_capabilities(
                 continuity_todo,
                 available_capabilities=prepared.effective_available_capabilities,
             )
         ),
-        preemptions=preemptions,
+        fallback_todo=fallback,
+        fallback_actionable=bool(
+            isinstance(fallback, dict)
+            and projection_todo_item_is_actionable_open(fallback)
+        ),
+        fallback_capability_ready=bool(
+            isinstance(fallback, dict)
+            and not missing_required_capabilities(
+                fallback,
+                available_capabilities=prepared.effective_available_capabilities,
+            )
+        ),
+        preemptions=delivery_preemptions,
     )
+
+    selection = delivery_route["selection"]
+    if selection == "continuity":
+        delivery_continuity = delivery_route.get("continuity") or {}
+        selected_action = build_agent_lane_next_action(
+            agent_identity=prepared.agent_identity,
+            agent_todo_summary=prepared.agent_todo_summary,
+            capability_gate=prepared.capability_gate,
+            scoped_user_gate_fallback=prepared.scoped_user_gate_fallback,
+            receipt_bound_todo_id=prepared.receipt_bound_todo_id,
+            selected_todo_override={
+                "todo_id": delivery_continuity.get("todo_id"),
+                "selected_by": "in_flight_todo",
+                "source": "delivery_continuity.latest_accountable_delivery",
+                "selection_reason": delivery_continuity.get("reason"),
+            },
+            active_next_action=(
+                item.get("active_state_next_action")
+                or (
+                    item.get("project_asset", {}).get("next_action")
+                    if isinstance(item.get("project_asset"), dict)
+                    else None
+                )
+            ),
+        )
+        if not isinstance(selected_action, dict):
+            raise RuntimeError(
+                "TypeScript selected delivery continuity without a "
+                "projectable Todo candidate"
+            )
+    elif selection == "fallback":
+        selected_action = fallback
+    else:
+        selected_action = None
+
+    boundary = delivery_route.get("boundary")
+    if (
+        isinstance(selected_action, dict)
+        and isinstance(boundary, dict)
+        and boundary["delivery_boundary"] == "in_flight_continuation"
+    ):
+        return {
+            **selected_action,
+            "delivery_boundary": boundary["delivery_boundary"],
+        }
+    return selected_action
 
 
 @dataclass(slots=True)
@@ -584,7 +687,6 @@ class _QuotaDecisionRoute:
     next_action_warning: dict[str, Any] | None
     goal_route_hint: dict[str, Any] | None
     payload_work_lane_contract: dict[str, Any] | None
-    delivery_continuity: dict[str, Any] | None
 
 
 def _resolve_quota_should_run_route(
@@ -764,59 +866,12 @@ def _resolve_quota_should_run_route(
         capability_repair_allowed=capability_repair_allowed,
         workspace_repair_allowed=workspace_repair_allowed,
     )
-    delivery_continuity = _delivery_continuity_for_route(
+    agent_lane_next_action = _resolve_agent_lane_delivery_route(
         prepared,
-        preemptions=delivery_preemptions,
+        due_monitor_attempt=due_monitor_attempt,
+        receipt_bound_replan_decision=receipt_bound_replan_decision,
+        delivery_preemptions=delivery_preemptions,
     )
-    agent_lane_next_action = prepared.receipt_bound_agent_next_action
-    if (
-        agent_lane_next_action is None
-        and not due_monitor_attempt
-        and not prepared.inbox_reply_due
-        and not task_orchestration_contract_is_actionable(
-            prepared.task_orchestration_contract
-        )
-        and not prepared.capability_monitor_fallback
-    ):
-        agent_lane_next_action = build_agent_lane_next_action(
-            agent_identity=prepared.agent_identity,
-            agent_todo_summary=prepared.agent_todo_summary,
-            capability_gate=prepared.capability_gate,
-            scoped_user_gate_fallback=prepared.scoped_user_gate_fallback,
-            receipt_bound_todo_id=prepared.receipt_bound_todo_id,
-            delivery_continuity=delivery_continuity,
-            active_next_action=(
-                item.get("active_state_next_action")
-                or (
-                    item.get("project_asset", {}).get("next_action")
-                    if isinstance(item.get("project_asset"), dict)
-                    else None
-                )
-            ),
-        )
-    if receipt_bound_replan_decision:
-        # The replan obligation is the immutable settlement authority for this
-        # decision. A newly runnable Todo remains visible in summaries, but it
-        # cannot become the selected settlement target in the same packet.
-        agent_lane_next_action = None
-    if isinstance(agent_lane_next_action, dict):
-        boundary = evaluate_delivery_boundary(
-            agent_id=str((prepared.agent_identity or {}).get("agent_id") or ""),
-            current_todo=agent_lane_next_action,
-            actionable=projection_todo_item_is_actionable_open(
-                agent_lane_next_action
-            ),
-            capability_ready=not missing_required_capabilities(
-                agent_lane_next_action,
-                available_capabilities=prepared.effective_available_capabilities,
-            ),
-            preemptions=delivery_preemptions,
-        )
-        if boundary["delivery_boundary"] == "in_flight_continuation":
-            agent_lane_next_action = {
-                **agent_lane_next_action,
-                "delivery_boundary": boundary["delivery_boundary"],
-            }
     agent_scope_frontier = None
     agent_lane_frontier_hint = None
     if not replan_decision_allowed:
@@ -960,7 +1015,6 @@ def _resolve_quota_should_run_route(
         next_action_warning=next_action_warning,
         goal_route_hint=goal_route_hint,
         payload_work_lane_contract=payload_work_lane_contract,
-        delivery_continuity=delivery_continuity,
     )
 
 

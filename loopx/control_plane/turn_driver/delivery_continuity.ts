@@ -1,17 +1,24 @@
 import type { JsonObject } from "../effect_program.ts";
 import {
+  optionalNonEmptyString,
+  requireBoolean,
+  requireJsonObject,
+  requireNonEmptyString,
+  requireStringLiteral,
+} from "../runtime_decode.ts";
+import {
   decodeOptionalMaterialDeliveryOutcome,
   type MaterialDeliveryOutcome,
 } from "../work_items/delivery_outcome.ts";
 
-export const DELIVERY_CONTINUITY_REQUEST_SCHEMA =
-  "loopx_delivery_continuity_request_v0";
 export const DELIVERY_CONTINUITY_RESULT_SCHEMA =
   "loopx_delivery_continuity_result_v0";
-export const DELIVERY_BOUNDARY_REQUEST_SCHEMA =
-  "loopx_delivery_boundary_request_v0";
 export const DELIVERY_BOUNDARY_RESULT_SCHEMA =
   "loopx_delivery_boundary_result_v0";
+export const DELIVERY_ROUTING_REQUEST_SCHEMA =
+  "loopx_delivery_routing_request_v0";
+export const DELIVERY_ROUTING_RESULT_SCHEMA =
+  "loopx_delivery_routing_result_v0";
 
 export const DELIVERY_BOUNDARIES = [
   "in_flight_continuation",
@@ -31,6 +38,7 @@ export type DeliveryContinuityPreemption =
   (typeof DELIVERY_CONTINUITY_PREEMPTIONS)[number];
 
 type TodoStatus = "open" | "done" | "blocked" | "deferred";
+const TODO_STATUSES = ["open", "done", "blocked", "deferred"] as const;
 
 export interface DeliveryContinuityTodo {
   todo_id: string;
@@ -41,8 +49,7 @@ export interface DeliveryContinuityTodo {
   capability_ready: boolean;
 }
 
-export interface DeliveryContinuityRequest {
-  schema_version: typeof DELIVERY_CONTINUITY_REQUEST_SCHEMA;
+interface DeliveryContinuityFacts {
   agent_id: string;
   previous_todo_id: string | null;
   previous_delivery_outcome: MaterialDeliveryOutcome | null;
@@ -76,8 +83,7 @@ export type DeliveryContinuityResult = JsonObject & {
   delivery_boundary: DeliveryBoundary;
 };
 
-interface DeliveryBoundaryRequest {
-  schema_version: typeof DELIVERY_BOUNDARY_REQUEST_SCHEMA;
+interface DeliveryBoundaryFacts {
   agent_id: string;
   current_todo: DeliveryContinuityTodo | null;
   preemptions: readonly DeliveryContinuityPreemption[];
@@ -100,40 +106,32 @@ export type DeliveryBoundaryResult = JsonObject & {
   todo_id: string | null;
 };
 
-function requiredObject(value: unknown, label: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as JsonObject;
+export type DeliveryRoutingSelection = "continuity" | "fallback" | "none";
+
+interface DeliveryRoutingRequest {
+  schema_version: typeof DELIVERY_ROUTING_REQUEST_SCHEMA;
+  agent_id: string;
+  previous_todo_id: string | null;
+  previous_delivery_outcome: MaterialDeliveryOutcome | null;
+  continuity_todo: DeliveryContinuityTodo | null;
+  fallback_todo: DeliveryContinuityTodo | null;
+  preemptions: readonly DeliveryContinuityPreemption[];
 }
 
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value.trim();
-}
+export type DeliveryRoutingResult = JsonObject & {
+  schema_version: typeof DELIVERY_ROUTING_RESULT_SCHEMA;
+  selection: DeliveryRoutingSelection;
+  continuity: DeliveryContinuityResult | null;
+  boundary: DeliveryBoundaryResult | null;
+};
 
-function optionalString(value: unknown, label: string): string | null {
-  if (value === null || value === undefined || value === "") return null;
-  return requiredString(value, label);
-}
-
-function requiredBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new Error(`${label} must be a boolean`);
-  }
-  return value;
-}
-
-function todoStatus(value: unknown): TodoStatus {
-  if (
-    value === "open" || value === "done" || value === "blocked" ||
-    value === "deferred"
-  ) {
-    return value;
-  }
-  throw new Error("current_todo.status is unsupported");
+function todoStatus(value: unknown, label: string): TodoStatus {
+  return requireStringLiteral(
+    value,
+    TODO_STATUSES,
+    label,
+    `${label} is unsupported`,
+  );
 }
 
 function preemptions(value: unknown): DeliveryContinuityPreemption[] {
@@ -154,55 +152,22 @@ function preemptions(value: unknown): DeliveryContinuityPreemption[] {
   return result;
 }
 
-function currentTodo(value: unknown): DeliveryContinuityTodo | null {
-  if (value === null || value === undefined) return null;
-  const todo = requiredObject(value, "current_todo");
-  return {
-    todo_id: requiredString(todo.todo_id, "current_todo.todo_id"),
-    status: todoStatus(todo.status),
-    task_class: requiredString(todo.task_class, "current_todo.task_class"),
-    claimed_by: optionalString(todo.claimed_by, "current_todo.claimed_by"),
-    actionable: requiredBoolean(todo.actionable, "current_todo.actionable"),
-    capability_ready: requiredBoolean(
-      todo.capability_ready,
-      "current_todo.capability_ready",
-    ),
-  };
-}
-
-export function decodeDeliveryContinuityRequest(
+function currentTodo(
   value: unknown,
-): DeliveryContinuityRequest {
-  const request = requiredObject(value, "turn.delivery_continuity params");
-  if (request.schema_version !== DELIVERY_CONTINUITY_REQUEST_SCHEMA) {
-    throw new Error("Delivery continuity request schema mismatch");
-  }
+  label = "current_todo",
+): DeliveryContinuityTodo | null {
+  if (value === null || value === undefined) return null;
+  const todo = requireJsonObject(value, label);
   return {
-    schema_version: DELIVERY_CONTINUITY_REQUEST_SCHEMA,
-    agent_id: requiredString(request.agent_id, "agent_id"),
-    previous_todo_id: optionalString(
-      request.previous_todo_id,
-      "previous_todo_id",
+    todo_id: requireNonEmptyString(todo.todo_id, `${label}.todo_id`),
+    status: todoStatus(todo.status, `${label}.status`),
+    task_class: requireNonEmptyString(todo.task_class, `${label}.task_class`),
+    claimed_by: optionalNonEmptyString(todo.claimed_by, `${label}.claimed_by`),
+    actionable: requireBoolean(todo.actionable, `${label}.actionable`),
+    capability_ready: requireBoolean(
+      todo.capability_ready,
+      `${label}.capability_ready`,
     ),
-    previous_delivery_outcome: decodeOptionalMaterialDeliveryOutcome(
-      request.previous_delivery_outcome,
-      "previous_delivery_outcome",
-    ),
-    current_todo: currentTodo(request.current_todo),
-    preemptions: preemptions(request.preemptions),
-  };
-}
-
-function decodeDeliveryBoundaryRequest(value: unknown): DeliveryBoundaryRequest {
-  const request = requiredObject(value, "turn.delivery_boundary params");
-  if (request.schema_version !== DELIVERY_BOUNDARY_REQUEST_SCHEMA) {
-    throw new Error("Delivery boundary request schema mismatch");
-  }
-  return {
-    schema_version: DELIVERY_BOUNDARY_REQUEST_SCHEMA,
-    agent_id: requiredString(request.agent_id, "agent_id"),
-    current_todo: currentTodo(request.current_todo),
-    preemptions: preemptions(request.preemptions),
   };
 }
 
@@ -222,10 +187,9 @@ function result(
   };
 }
 
-export function evaluateDeliveryContinuity(
-  value: unknown,
+function resolveDeliveryContinuity(
+  request: DeliveryContinuityFacts,
 ): DeliveryContinuityResult {
-  const request = decodeDeliveryContinuityRequest(value);
   const todoId = request.previous_todo_id;
   const preemption = request.preemptions[0];
   if (preemption !== undefined) {
@@ -287,8 +251,9 @@ function boundaryResult(
   };
 }
 
-export function evaluateDeliveryBoundary(value: unknown): DeliveryBoundaryResult {
-  const request = decodeDeliveryBoundaryRequest(value);
+function resolveDeliveryBoundary(
+  request: DeliveryBoundaryFacts,
+): DeliveryBoundaryResult {
   const todo = request.current_todo;
   const todoId = todo?.todo_id ?? null;
   const preemption = request.preemptions[0];
@@ -322,4 +287,64 @@ export function evaluateDeliveryBoundary(value: unknown): DeliveryBoundaryResult
     "open_advancement_todo",
     todoId,
   );
+}
+
+function decodeDeliveryRoutingRequest(value: unknown): DeliveryRoutingRequest {
+  const request = requireJsonObject(value, "turn.delivery_route params");
+  if (request.schema_version !== DELIVERY_ROUTING_REQUEST_SCHEMA) {
+    throw new Error("Delivery routing request schema mismatch");
+  }
+  return {
+    schema_version: DELIVERY_ROUTING_REQUEST_SCHEMA,
+    agent_id: requireNonEmptyString(request.agent_id, "agent_id"),
+    previous_todo_id: optionalNonEmptyString(
+      request.previous_todo_id,
+      "previous_todo_id",
+    ),
+    previous_delivery_outcome: decodeOptionalMaterialDeliveryOutcome(
+      request.previous_delivery_outcome,
+      "previous_delivery_outcome",
+    ),
+    continuity_todo: currentTodo(request.continuity_todo, "continuity_todo"),
+    fallback_todo: currentTodo(request.fallback_todo, "fallback_todo"),
+    preemptions: preemptions(request.preemptions),
+  };
+}
+
+/** Resolve one quota delivery route behind one runtime request/response. */
+export function evaluateDeliveryRoute(value: unknown): DeliveryRoutingResult {
+  const request = decodeDeliveryRoutingRequest(value);
+  const continuity = request.previous_todo_id === null
+    ? null
+    : resolveDeliveryContinuity({
+      agent_id: request.agent_id,
+      previous_todo_id: request.previous_todo_id,
+      previous_delivery_outcome: request.previous_delivery_outcome,
+      current_todo: request.continuity_todo,
+      preemptions: request.preemptions,
+    });
+  const selection: DeliveryRoutingSelection =
+    continuity?.decision === "resume_in_flight"
+      ? "continuity"
+      : request.fallback_todo === null
+      ? "none"
+      : "fallback";
+  const selectedTodo = selection === "continuity"
+    ? request.continuity_todo
+    : selection === "fallback"
+    ? request.fallback_todo
+    : null;
+  const boundary = selectedTodo === null
+    ? null
+    : resolveDeliveryBoundary({
+      agent_id: request.agent_id,
+      current_todo: selectedTodo,
+      preemptions: request.preemptions,
+    });
+  return {
+    schema_version: DELIVERY_ROUTING_RESULT_SCHEMA,
+    selection,
+    continuity,
+    boundary,
+  };
 }

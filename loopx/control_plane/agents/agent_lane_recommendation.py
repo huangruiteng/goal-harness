@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ..todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
@@ -28,8 +29,7 @@ from .capability_gate import (
     missing_required_capabilities,
 )
 
-
-PublicSafeText = Callable[..., Optional[str]]
+PublicSafeText = Callable[..., str | None]
 ActionAlignment = Callable[[Any, Any], bool]
 TimestampParser = Callable[[Any], Any]
 AGENT_LANE_NEXT_ACTION_SCHEMA_VERSION = "agent_lane_next_action_v0"
@@ -380,7 +380,7 @@ def build_agent_lane_next_action(
     active_next_action: Any = None,
     scoped_user_gate_fallback: dict[str, Any] | None = None,
     receipt_bound_todo_id: str | None = None,
-    delivery_continuity: dict[str, Any] | None = None,
+    selected_todo_override: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(agent_identity, dict):
         return None
@@ -471,10 +471,9 @@ def build_agent_lane_next_action(
 
     preferred_todo_ids = _todo_ids_from_action(active_next_action)
     receipt_todo_id = normalize_todo_id(receipt_bound_todo_id)
-    in_flight_todo_id = (
-        normalize_todo_id(delivery_continuity.get("todo_id"))
-        if isinstance(delivery_continuity, dict)
-        and delivery_continuity.get("decision") == "resume_in_flight"
+    override_todo_id = (
+        normalize_todo_id(selected_todo_override.get("todo_id"))
+        if isinstance(selected_todo_override, dict)
         else None
     )
     active_next_action_items = (
@@ -519,8 +518,8 @@ def build_agent_lane_next_action(
                 and normalize_todo_id(candidate.get("todo_id")) == receipt_todo_id
                 else 1,
                 0
-                if in_flight_todo_id
-                and normalize_todo_id(candidate.get("todo_id")) == in_flight_todo_id
+                if override_todo_id
+                and normalize_todo_id(candidate.get("todo_id")) == override_todo_id
                 else 1,
                 _agent_lane_candidate_sort_key(
                     candidate,
@@ -533,10 +532,13 @@ def build_agent_lane_next_action(
             text = protocol_action_text(raw_item.get("text"), limit=500)
             claimed_by = agent_scope_item_claimed_by(raw_item)
             todo_id = str(raw_item.get("todo_id") or "").strip()
+            override_selected = bool(
+                override_todo_id
+                and normalize_todo_id(todo_id) == override_todo_id
+            )
             selected_by = (
-                "in_flight_todo"
-                if in_flight_todo_id
-                and normalize_todo_id(todo_id) == in_flight_todo_id
+                str(selected_todo_override.get("selected_by") or "selected_todo_override")
+                if override_selected and isinstance(selected_todo_override, dict)
                 else "active_next_action_todo"
                 if todo_id and todo_id in preferred_todo_ids
                 else "current_agent_claimed_todo"
@@ -549,12 +551,14 @@ def build_agent_lane_next_action(
             if receipt_todo_id and normalize_todo_id(todo_id) == receipt_todo_id:
                 payload["selection_binding"] = "heartbeat_receipt"
             lineage_source = source
-            if selected_by == "in_flight_todo":
-                lineage_source = "delivery_continuity.latest_accountable_delivery"
-                payload["selection_reason"] = delivery_continuity.get("reason")
-                payload["delivery_boundary"] = delivery_continuity.get(
-                    "delivery_boundary"
+            if override_selected and isinstance(selected_todo_override, dict):
+                lineage_source = str(
+                    selected_todo_override.get("source") or lineage_source
                 )
+                if selected_todo_override.get("selection_reason") is not None:
+                    payload["selection_reason"] = selected_todo_override[
+                        "selection_reason"
+                    ]
             if (
                 source == "capability_gate.runnable_candidates"
                 and selected_by == "active_next_action_todo"

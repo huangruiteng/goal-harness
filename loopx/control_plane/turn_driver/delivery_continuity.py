@@ -12,11 +12,10 @@ from ..todos.contract import (
 )
 from ..todos.projection import todo_item_task_class
 
-
-DELIVERY_CONTINUITY_REQUEST_SCHEMA = "loopx_delivery_continuity_request_v0"
 DELIVERY_CONTINUITY_RESULT_SCHEMA = "loopx_delivery_continuity_result_v0"
-DELIVERY_BOUNDARY_REQUEST_SCHEMA = "loopx_delivery_boundary_request_v0"
 DELIVERY_BOUNDARY_RESULT_SCHEMA = "loopx_delivery_boundary_result_v0"
+DELIVERY_ROUTING_REQUEST_SCHEMA = "loopx_delivery_routing_request_v0"
+DELIVERY_ROUTING_RESULT_SCHEMA = "loopx_delivery_routing_result_v0"
 DELIVERY_BOUNDARY_IN_FLIGHT = "in_flight_continuation"
 DELIVERY_BOUNDARY_SEMANTIC_CLOSEOUT = "semantic_closeout"
 DELIVERY_BOUNDARY_VALUES = (
@@ -35,6 +34,19 @@ DELIVERY_CONTINUITY_PREEMPTIONS = {
     "control_repair",
     "delivery_not_allowed",
 }
+DELIVERY_CONTINUITY_REASONS = {
+    *DELIVERY_CONTINUITY_PREEMPTIONS,
+    "no_previous_todo",
+    "previous_delivery_not_progress",
+    "current_todo_missing",
+    "todo_identity_changed",
+    "todo_not_open",
+    "todo_not_advancement",
+    "todo_not_actionable",
+    "todo_capability_blocked",
+    "todo_claimed_by_other_agent",
+    "same_open_todo_after_progress",
+}
 DELIVERY_BOUNDARY_REASONS = {
     *DELIVERY_CONTINUITY_PREEMPTIONS,
     "no_selected_todo",
@@ -45,6 +57,7 @@ DELIVERY_BOUNDARY_REASONS = {
     "todo_claimed_by_other_agent",
     "open_advancement_todo",
 }
+DELIVERY_ROUTING_SELECTIONS = {"continuity", "fallback", "none"}
 
 
 def normalize_delivery_boundary(value: Any) -> str:
@@ -84,92 +97,115 @@ def _normalize_preemptions(preemptions: Sequence[str]) -> list[str]:
     return normalized
 
 
-def evaluate_delivery_continuity(
+def _valid_continuity_result(value: Any) -> bool:
+    return bool(
+        isinstance(value, Mapping)
+        and value.get("schema_version") == DELIVERY_CONTINUITY_RESULT_SCHEMA
+        and value.get("decision") in DELIVERY_CONTINUITY_DECISIONS
+        and value.get("reason") in DELIVERY_CONTINUITY_REASONS
+        and value.get("delivery_boundary") in DELIVERY_BOUNDARY_VALUES
+        and (value.get("todo_id") is None or isinstance(value.get("todo_id"), str))
+    )
+
+
+def _valid_boundary_result(value: Any) -> bool:
+    return bool(
+        isinstance(value, Mapping)
+        and value.get("schema_version") == DELIVERY_BOUNDARY_RESULT_SCHEMA
+        and value.get("delivery_boundary") in DELIVERY_BOUNDARY_VALUES
+        and value.get("reason") in DELIVERY_BOUNDARY_REASONS
+        and (value.get("todo_id") is None or isinstance(value.get("todo_id"), str))
+    )
+
+
+def evaluate_delivery_route(
     *,
     agent_id: str,
     previous_todo_id: str | None,
     previous_delivery_outcome: str | None,
-    current_todo: Mapping[str, Any] | None,
-    actionable: bool,
-    capability_ready: bool,
+    continuity_todo: Mapping[str, Any] | None,
+    continuity_actionable: bool,
+    continuity_capability_ready: bool,
+    fallback_todo: Mapping[str, Any] | None,
+    fallback_actionable: bool,
+    fallback_capability_ready: bool,
     preemptions: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Ask the TypeScript Turn owner whether one open Todo remains in flight."""
+    """Resolve continuity selection and settlement boundary in one TS request."""
 
     safe_agent_id = normalize_todo_claimed_by(agent_id)
     if not safe_agent_id:
-        raise ValueError("delivery continuity requires a valid agent_id")
-    normalized_preemptions = _normalize_preemptions(preemptions)
-    todo_payload = _delivery_todo_payload(
-        current_todo,
-        actionable=actionable,
-        capability_ready=capability_ready,
+        raise ValueError("delivery routing requires a valid agent_id")
+    continuity_payload = _delivery_todo_payload(
+        continuity_todo,
+        actionable=continuity_actionable,
+        capability_ready=continuity_capability_ready,
+    )
+    fallback_payload = _delivery_todo_payload(
+        fallback_todo,
+        actionable=fallback_actionable,
+        capability_ready=fallback_capability_ready,
     )
     try:
         result = effect_runtime_result(
-            "turn.delivery_continuity.evaluate",
+            "turn.delivery_route.evaluate",
             {
-                "schema_version": DELIVERY_CONTINUITY_REQUEST_SCHEMA,
+                "schema_version": DELIVERY_ROUTING_REQUEST_SCHEMA,
                 "agent_id": safe_agent_id,
                 "previous_todo_id": normalize_todo_id(previous_todo_id),
                 "previous_delivery_outcome": (
                     str(previous_delivery_outcome or "").strip() or None
                 ),
-                "current_todo": todo_payload,
-                "preemptions": normalized_preemptions,
-            },
-        )
-    except EffectRuntimeRejected as exc:
-        raise ValueError(str(exc)) from None
-    if not isinstance(result, Mapping):
-        raise RuntimeError("TypeScript delivery continuity result must be an object")
-    if (
-        result.get("schema_version") != DELIVERY_CONTINUITY_RESULT_SCHEMA
-        or result.get("decision") not in DELIVERY_CONTINUITY_DECISIONS
-        or not isinstance(result.get("reason"), str)
-        or result.get("delivery_boundary") not in DELIVERY_BOUNDARY_VALUES
-        or not (result.get("todo_id") is None or isinstance(result.get("todo_id"), str))
-    ):
-        raise RuntimeError("TypeScript delivery continuity result shape mismatch")
-    return dict(result)
-
-
-def evaluate_delivery_boundary(
-    *,
-    agent_id: str,
-    current_todo: Mapping[str, Any] | None,
-    actionable: bool,
-    capability_ready: bool,
-    preemptions: Sequence[str] = (),
-) -> dict[str, Any]:
-    """Ask the TypeScript Turn owner how this selected Todo should settle."""
-
-    safe_agent_id = normalize_todo_claimed_by(agent_id)
-    if not safe_agent_id:
-        raise ValueError("delivery boundary requires a valid agent_id")
-    try:
-        result = effect_runtime_result(
-            "turn.delivery_boundary.evaluate",
-            {
-                "schema_version": DELIVERY_BOUNDARY_REQUEST_SCHEMA,
-                "agent_id": safe_agent_id,
-                "current_todo": _delivery_todo_payload(
-                    current_todo,
-                    actionable=actionable,
-                    capability_ready=capability_ready,
-                ),
+                "continuity_todo": continuity_payload,
+                "fallback_todo": fallback_payload,
                 "preemptions": _normalize_preemptions(preemptions),
             },
         )
     except EffectRuntimeRejected as exc:
         raise ValueError(str(exc)) from None
     if not isinstance(result, Mapping):
-        raise RuntimeError("TypeScript delivery boundary result must be an object")
+        raise TypeError("TypeScript delivery routing result must be an object")
+    continuity = result.get("continuity")
+    boundary = result.get("boundary")
+    selection = result.get("selection")
+    continuity_expected = normalize_todo_id(previous_todo_id) is not None
+    selected_todo_id = (
+        (continuity_payload or {}).get("todo_id")
+        if selection == "continuity"
+        else (fallback_payload or {}).get("todo_id")
+        if selection == "fallback"
+        else None
+    )
     if (
-        result.get("schema_version") != DELIVERY_BOUNDARY_RESULT_SCHEMA
-        or result.get("delivery_boundary") not in DELIVERY_BOUNDARY_VALUES
-        or result.get("reason") not in DELIVERY_BOUNDARY_REASONS
-        or not (result.get("todo_id") is None or isinstance(result.get("todo_id"), str))
+        result.get("schema_version") != DELIVERY_ROUTING_RESULT_SCHEMA
+        or selection not in DELIVERY_ROUTING_SELECTIONS
+        or not (continuity is None or _valid_continuity_result(continuity))
+        or not (boundary is None or _valid_boundary_result(boundary))
+        or continuity_expected != isinstance(continuity, Mapping)
+        or (
+            selection == "continuity"
+            and (
+                continuity_payload is None
+                or continuity is None
+                or continuity.get("decision") != "resume_in_flight"
+                or continuity.get("todo_id") != selected_todo_id
+                or not isinstance(boundary, Mapping)
+                or boundary.get("delivery_boundary")
+                != continuity.get("delivery_boundary")
+            )
+        )
+        or (
+            isinstance(continuity, Mapping)
+            and continuity.get("decision") == "resume_in_flight"
+            and selection != "continuity"
+        )
+        or (selection == "fallback" and fallback_payload is None)
+        or (selection == "none" and boundary is not None)
+        or (selection != "none" and boundary is None)
+        or (
+            isinstance(boundary, Mapping)
+            and boundary.get("todo_id") != selected_todo_id
+        )
     ):
-        raise RuntimeError("TypeScript delivery boundary result shape mismatch")
+        raise RuntimeError("TypeScript delivery routing result shape mismatch")
     return dict(result)

@@ -59,8 +59,7 @@ import {
 } from "./scheduler/state_store.ts";
 import { buildVisionCheckpoint } from "./goals/vision_checkpoint.ts";
 import {
-  evaluateDeliveryBoundary,
-  evaluateDeliveryContinuity,
+  evaluateDeliveryRoute,
 } from "./turn_driver/delivery_continuity.ts";
 import { reduceTurnSettlementTransaction } from "./turn_driver/settlement.ts";
 import {
@@ -264,8 +263,7 @@ export function createEffectRuntimeHandlers(
     ["scheduler.state.evaluate", evaluateSchedulerStateOperation],
     ["scheduler.state.load", loadSchedulerState],
     ["scheduler.state.write", writeSchedulerState],
-    ["turn.delivery_boundary.evaluate", evaluateDeliveryBoundary],
-    ["turn.delivery_continuity.evaluate", evaluateDeliveryContinuity],
+    ["turn.delivery_route.evaluate", evaluateDeliveryRoute],
     ["goal.vision_checkpoint.evaluate", buildVisionCheckpoint],
     [
       "quota.delivery_workspace_causality.evaluate",
