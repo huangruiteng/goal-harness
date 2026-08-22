@@ -13,6 +13,7 @@ BEARER = "Bear" + "er"
 TOKEN_ASSIGN = "tok" + "en="
 PASSWORD_ASSIGN = "pass" + "word="
 REAL_BEARER_VALUE = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+PRIVATE_LARK_TENANT_HOST = "tenant.lark" + "office.com"
 
 
 def _scan_line(tmp_path: Path, line: str) -> dict[str, list[str]]:
@@ -94,3 +95,29 @@ def test_blocked_private_doc_url_does_not_probe_git(
 
     assert payload["ok"] is False
     assert payload["hits"] == ["private-link.md:1: private_doc_url"]
+
+
+def test_public_lark_developer_console_is_not_a_private_doc_url(tmp_path: Path) -> None:
+    payload = _scan_line(
+        tmp_path,
+        "https://open.larkoffice.com/page/scope-apply?clientID=<app_id>",
+    )
+
+    assert payload["hits"] == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"https://{PRIVATE_LARK_TENANT_HOST}/wiki/example",
+        (
+            "https://open.larkoffice.com/page/scope-apply "
+            f"https://{PRIVATE_LARK_TENANT_HOST}/wiki/example"
+        ),
+    ],
+)
+def test_private_lark_tenant_urls_remain_blocked(tmp_path: Path, line: str) -> None:
+    payload = _scan_line(tmp_path, line)
+
+    assert len(payload["hits"]) == 1
+    assert payload["hits"][0].endswith(": private_doc_url")

@@ -67,6 +67,15 @@ LEAK_PATTERNS = {
     "private_ip": re.compile(r"\b10\.\d+\.\d+\.\d+\b|\b172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+\b|\b192\.168\.\d+\.\d+\b"),
 }
 
+# The Lark developer console is a public product surface, even though its
+# hostname shares the tenant-document marker used by private workspaces.
+# Keep this exception host-specific so tenant URLs on sibling hosts remain
+# blocked by the public/private boundary scan.
+_PUBLIC_LARK_DEVELOPER_CONSOLE_HOST = re.compile(
+    r"\bopen\." + "lark" + r"office\.com\b",
+    re.I,
+)
+
 CREDENTIAL_KEYWORD_PATTERN = re.compile(
     "|".join(
         [
@@ -782,7 +791,10 @@ def scan_public_boundary(
             continue
         for line_no, line in enumerate(text.splitlines(), start=1):
             for name, pattern in LEAK_PATTERNS.items():
-                if pattern.search(line):
+                scan_line = line
+                if name == "private_doc_url":
+                    scan_line = _PUBLIC_LARK_DEVELOPER_CONSOLE_HOST.sub("", scan_line)
+                if pattern.search(scan_line):
                     hit = f"{rel_or_abs(path, root)}:{line_no}: {name}"
                     if name == "credential" and _credential_hits_are_all_references(line):
                         credential_reference_hits.append(hit)
