@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { StatusSource } from "../../data/status-source-catalog";
 import {
   configuredSshTunnelDraft,
+  ensureSshSource,
   fetchConfiguredSshHosts,
   type ConfiguredSshHost,
 } from "../../data/ssh-host-catalog";
@@ -30,6 +31,7 @@ export function StatusSourceSwitcher({
   sources,
 }: StatusSourceControl) {
   const [adding, setAdding] = useState(false);
+  const [ensuring, setEnsuring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addMode, setAddMode] = useState<"configured" | "manual">("configured");
   const [configuredHosts, setConfiguredHosts] = useState<ConfiguredSshHost[]>([]);
@@ -95,12 +97,22 @@ export function StatusSourceSwitcher({
     closeForm();
   }
 
-  function submitConfigured() {
+  async function submitConfigured() {
     if ("error" in configuredDraft) {
       setError(configuredDraft.error ?? "SSH 来源参数无效。");
       return;
     }
+    setEnsuring(true);
+    setError(null);
+    try {
+      await ensureSshSource(hostAlias, localPort);
+    } catch (caught) {
+      setEnsuring(false);
+      setError(caught instanceof Error ? caught.message : "无法建立 SSH 隧道来源。");
+      return;
+    }
     const result = onAdd({ label: configuredDraft.label, statusUrl: configuredDraft.statusUrl });
+    setEnsuring(false);
     if (result.error) {
       setError(result.error);
       return;
@@ -215,7 +227,7 @@ export function StatusSourceSwitcher({
               </div>
               {configuredHostsError ? <p className="is-error">{configuredHostsError}</p> : null}
               <p>已读取全部显式 Host（含 Include）；通配规则不会作为具体来源。先运行命令，LoopX 不读取密钥或配置细节。</p>
-              <button className="personal-status-source-add" disabled={"error" in configuredDraft} onClick={submitConfigured} type="button">添加只读来源</button>
+              <button className="personal-status-source-add" disabled={"error" in configuredDraft || ensuring} onClick={() => void submitConfigured()} type="button">{ensuring ? "正在建立隧道…" : "添加只读来源"}</button>
             </>
           ) : (
             <>

@@ -28,6 +28,7 @@ from .control_plane.status.ssh_host_catalog import (
     SSH_HOST_CATALOG_PATH,
     ssh_host_catalog_payload,
 )
+from .control_plane.status.ssh_tunnel import ensure_ssh_source
 from .chat_lark_api import (
     LarkChatRequestMixin,
     build_goal_repository_contexts as build_goal_repository_contexts,
@@ -100,6 +101,7 @@ CHAT_LARK_CHATS_PATH = "/api/chat/lark/chats"
 CHAT_LARK_CONNECTIONS_PATH = "/api/chat/lark/connections"
 CHAT_ACTIONS_PATH = "/api/actions"
 CHAT_ACTION_PREVIEW_PATH = f"{CHAT_ACTIONS_PATH}/preview"
+SSH_SOURCE_ENSURE_PATH = "/api/ssh-source/ensure"
 
 
 def chat_cors_response_headers(origin: str | None) -> dict[str, str]:
@@ -499,6 +501,29 @@ class ChatRequestHandler(
         self._send_json(
             ssh_host_catalog_payload(getattr(self.server, "ssh_config_path", None))
         )
+
+    def _ssh_source_ensure(self) -> None:
+        if not is_loopback_host(str(self.server.server_address[0])):
+            self._send_error(
+                "SSH source management requires a loopback LoopX Chat server.",
+                status=403,
+            )
+            return
+        if not self._require_loopback_origin():
+            return
+        try:
+            body = self._read_json()
+            alias = str(body.get("host_alias") or "")
+            local_port = body.get("local_port")
+            result = ensure_ssh_source(
+                alias,
+                local_port,
+                ssh_config_path=getattr(self.server, "ssh_config_path", None),
+            )
+        except (ValueError, TypeError) as exc:
+            self._send_error(str(exc), status=400)
+            return
+        self._send_json(result)
 
     def _registry_and_goal(self, goal_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
         registry = load_registry(self.server.registry_path)
@@ -1358,6 +1383,7 @@ class ChatRequestHandler(
             CHAT_GOAL_CHANNEL_CONFIGURE_PATH: self._goal_channel_configure,
             CHAT_LARK_APP_SETUPS_PATH: self._lark_setup_start,
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connect,
+            SSH_SOURCE_ENSURE_PATH: self._ssh_source_ensure,
         }
         if path in post_dispatch:
             return post_dispatch[path]()

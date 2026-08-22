@@ -52,3 +52,34 @@ export function configuredSshTunnelDraft(hostAlias: string, localPortValue: stri
     statusUrl: `http://127.0.0.1:${localPort}/status.json`,
   } as const;
 }
+
+
+export const defaultSshSourceEnsureUrl = "/api/ssh-source/ensure";
+
+export type EnsureSshSourceResult = {
+  ok: true;
+  status_url: string;
+  tunnel_required: boolean;
+  remote_started: boolean;
+};
+
+export async function ensureSshSource(
+  hostAlias: string,
+  localPort: string | number,
+): Promise<EnsureSshSourceResult> {
+  const response = await fetch(defaultSshSourceEnsureUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ host_alias: hostAlias, local_port: Number(localPort) }),
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | (EnsureSshSourceResult & { error?: string })
+    | null;
+  if (!response.ok) {
+    throw new Error(payload?.error ?? "无法建立 SSH 隧道来源。");
+  }
+  if (!payload?.ok) {
+    throw new Error("无法建立 SSH 隧道来源。");
+  }
+  return payload;
+}
