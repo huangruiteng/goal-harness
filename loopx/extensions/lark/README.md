@@ -63,6 +63,8 @@ exact authority, gate, revision, idempotency, and readback contract.
 provider-neutral Agent external Connector runtime. It delegates authentication
 and API calls to `lark-cli`, probes the exact comment read/create scopes, and
 turns one bounded comment or nested-reply page into owner-local inbox events.
+The adapter requires `lark-cli` 1.0.69 or newer for `drive +list-comments`;
+older binaries fail closed and must be upgraded before the Connector is ready.
 The provider supports configured-source and incremental capture. It rejects
 `addressed_only` until a caller supplies an explicit mention-identity contract;
 it never guesses that every document comment addressed the Agent.

@@ -128,9 +128,11 @@ hashed Connector event ids. A completed scan restarts from the first comment
 page so new replies on older cards remain discoverable; the generic inbox
 deduplicates already captured or acknowledged events. Because Lark does not
 expose provider idempotency for reply creation, the adapter requires an
-owner-local receipt store: it records the returned reply id before readback and
-reuses that receipt on retry. Public status and provider receipts omit document
-URLs, profiles, raw ids, cursor values, bodies, and subprocess output.
+owner-local receipt store: it records intent before the write, recovers a reply
+by its opaque idempotency marker after a crash, records the returned reply id
+before readback, and reuses that receipt on retry. The comment-list shortcut
+requires `lark-cli` 1.0.69 or newer. Public status and provider receipts omit
+document URLs, profiles, raw ids, cursor values, bodies, and subprocess output.
 
 The Lark adapter intentionally rejects `addressed_only`. Correct mention
 filtering needs an explicit provider identity contract, and treating every

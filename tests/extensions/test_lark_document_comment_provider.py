@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from loopx.extensions.external_connector_runtime import (
 from loopx.extensions.lark.document_comment_provider import (
     LARK_DOCUMENT_COMMENT_CREATE_SCOPE,
     LARK_DOCUMENT_COMMENT_READ_SCOPE,
+    LARK_DOCUMENT_COMMENT_REPLY_STORE_SCHEMA,
     LarkCliDocumentCommentProvider,
     LarkDocumentCommentProviderError,
     LarkDocumentCommentTarget,
@@ -112,7 +114,7 @@ def _comment_page(*, whole: bool = False) -> dict[str, Any]:
     }
 
 
-def _reply_page(text: str) -> dict[str, Any]:
+def _reply_page(text: str, *, extra: object | None = None) -> dict[str, Any]:
     return {
         "ok": True,
         "identity": "bot",
@@ -121,6 +123,7 @@ def _reply_page(text: str) -> dict[str, Any]:
                 {
                     "reply_id": "reply-agent-alpha",
                     "create_time": 1_787_377_500,
+                    "extra": extra,
                     "content": {
                         "elements": [
                             {
@@ -222,6 +225,23 @@ def test_lark_provider_filters_unreplyable_comment_cards(tmp_path: Path) -> None
     assert page["next_cursor"].startswith("lark-comment-v0.")
 
 
+def test_lark_provider_rejects_boolean_comment_timestamp(tmp_path: Path) -> None:
+    payload = _comment_page()
+    payload["data"]["items"][0]["reply_list"]["replies"][0]["create_time"] = True
+    provider = LarkCliDocumentCommentProvider(
+        target=_target(),
+        reply_store=tmp_path / "reply-receipts.json",
+        runner=lambda *_: _completed(payload),
+    )
+
+    try:
+        provider.page_reader(_connector(), None, 100)
+    except LarkDocumentCommentProviderError as error:
+        assert error.code == "comment_timestamp_invalid"
+    else:
+        raise AssertionError("boolean timestamps must fail closed")
+
+
 def test_lark_document_comment_callsite_runs_read_effect_reply_readback_ack(
     tmp_path: Path,
 ) -> None:
@@ -262,7 +282,9 @@ def test_lark_document_comment_callsite_runs_read_effect_reply_readback_ack(
         ):
             call_order.append("provider_reply")
             payload = json.loads(command[command.index("--data") + 1])
-            assert payload["extra"].startswith("sha256:")
+            assert json.loads(payload["extra"])["loopx_idempotency_key"].startswith(
+                "sha256:"
+            )
             assert payload["content"]["elements"][0]["text_run"]["text"] == (
                 created_reply_text
             )
@@ -315,6 +337,7 @@ def test_lark_document_comment_callsite_runs_read_effect_reply_readback_ack(
         binding=registration["connector"],
         limit=1,
     )["items"][0]
+    assert event["addressed"] is False
     call_order.append("durable_effect")
     settlement = reply_and_settle_document_comment_event(
         project=str(tmp_path),
@@ -363,9 +386,87 @@ def test_lark_document_comment_callsite_runs_read_effect_reply_readback_ack(
         created_reply_text,
         idempotency_key,
     )
+    assert second["idempotency_key"] == idempotency_key
     assert second["readback_verified"] is True
     assert call_order.count("provider_reply") == 1
     assert call_order.count("provider_readback") == 2
+
+
+def test_lark_response_writer_recovers_create_before_receipt_crash(
+    tmp_path: Path,
+) -> None:
+    idempotency_key = "sha256:" + "a" * 64
+    reply_text = "Recovered reply."
+    reply_store = tmp_path / "reply-receipts.json"
+    reply_store.write_text(
+        json.dumps(
+            {
+                "schema_version": LARK_DOCUMENT_COMMENT_REPLY_STORE_SCHEMA,
+                "entries": {
+                    idempotency_key: {
+                        "source_ref": "document-alpha",
+                        "file_token": "document-alpha",
+                        "file_type": "docx",
+                        "comment_id": "comment-alpha",
+                        "text_digest": "sha256:"
+                        + hashlib.sha256(reply_text.encode()).hexdigest(),
+                        "status": "creating",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[list[str]] = []
+
+    def runner(args, _cwd, _timeout):
+        command = list(args)
+        calls.append(command)
+        if "+list-comments" in command:
+            return _completed(_comment_page())
+        assert "file.comment.replys" in command
+        assert command[command.index("file.comment.replys") + 1] == "list"
+        return _completed(
+            _reply_page(
+                reply_text,
+                extra=json.dumps({"loopx_idempotency_key": idempotency_key}),
+            )
+        )
+
+    provider = LarkCliDocumentCommentProvider(
+        target=_target(),
+        reply_store=reply_store,
+        runner=runner,
+    )
+    event = {
+        "reply_chain_ref": next(
+            item["reply_chain_ref"]
+            for item in provider.page_reader(
+                _connector(),
+                None,
+                1,
+            ).get("events", [])
+        )
+    }
+    receipt = provider.response_writer(
+        _connector(),
+        event,
+        reply_text,
+        idempotency_key,
+    )
+
+    assert receipt["idempotency_key"] == idempotency_key
+    assert not any(
+        "file.comment.replys" in command
+        and command[command.index("file.comment.replys") + 1] == "create"
+        for command in calls
+    )
+    assert (
+        json.loads(reply_store.read_text(encoding="utf-8"))["entries"][idempotency_key][
+            "status"
+        ]
+        == "verified"
+    )
 
 
 def test_lark_provider_rejects_connector_target_mismatch(tmp_path: Path) -> None:

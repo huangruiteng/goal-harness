@@ -15,7 +15,7 @@ import html
 import json
 import re
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -220,8 +220,10 @@ def _encode_cursor(value: Mapping[str, Any]) -> str:
 
 
 def _epoch_rfc3339(value: object) -> str:
+    if isinstance(value, bool):
+        raise LarkDocumentCommentProviderError("comment_timestamp_invalid")
     try:
-        numeric = int(value)
+        numeric = int(str(value))
     except (TypeError, ValueError) as exc:
         raise LarkDocumentCommentProviderError("comment_timestamp_invalid") from exc
     if numeric > 10_000_000_000:
@@ -263,6 +265,24 @@ def _reply_text(reply: Mapping[str, Any], *, quote: str | None = None) -> str:
     if not text or len(text) > 20_000:
         raise LarkDocumentCommentProviderError("comment_content_invalid")
     return text
+
+
+def _reply_idempotency_key(reply: Mapping[str, Any]) -> str:
+    extra = reply.get("extra")
+    if isinstance(extra, Mapping):
+        return str(extra.get("loopx_idempotency_key") or "").strip()
+    normalized = str(extra or "").strip()
+    if not normalized.startswith("{"):
+        return normalized
+    try:
+        payload = json.loads(normalized)
+    except json.JSONDecodeError:
+        return ""
+    return (
+        str(payload.get("loopx_idempotency_key") or "").strip()
+        if isinstance(payload, Mapping)
+        else ""
+    )
 
 
 def _event_id(source_ref: str, comment_id: str, reply_id: str) -> str:
@@ -465,10 +485,12 @@ class LarkCliDocumentCommentProvider:
             raise LarkDocumentCommentProviderError(
                 "lark_document_comment_permission_probe_invalid"
             )
-        return evaluate_external_connector_permissions(
-            requirements=requirements,
-            granted_scopes={self._provider_identity: granted},
-            published=published,
+        return dict(
+            evaluate_external_connector_permissions(
+                requirements=requirements,
+                granted_scopes={self._provider_identity: granted},
+                published=published,
+            )
         )
 
     def _validate_connector(self, connector: Mapping[str, Any]) -> dict[str, Any]:
@@ -483,7 +505,7 @@ class LarkCliDocumentCommentProvider:
             raise LarkDocumentCommentProviderError("connector_provider_kind_mismatch")
         if normalized["source_ref"] != self._source_ref:
             raise LarkDocumentCommentProviderError("connector_source_ref_mismatch")
-        return normalized
+        return dict(normalized)
 
     def _known_reply_ids(self) -> set[str]:
         if self._reply_store is None or not self._reply_store.is_file():
@@ -517,7 +539,7 @@ class LarkCliDocumentCommentProvider:
                     event_id=_event_id(self._source_ref, comment_id, reply_id),
                     content=content,
                     occurred_at=_epoch_rfc3339(reply.get("create_time")),
-                    addressed=True,
+                    addressed=False,
                     event_cursor=reply_id,
                     anchor_ref=comment_id,
                     reply_chain_ref=_reply_chain(
@@ -637,11 +659,13 @@ class LarkCliDocumentCommentProvider:
                 "cycle": cycle if outer_has_more else cycle + 1,
                 "page_token": outer_next or None,
             }
-        return build_external_connector_provider_page(
-            events=events,
-            expected_cursor=expected_cursor,
-            next_cursor=_encode_cursor(next_state),
-            has_more=has_more,
+        return dict(
+            build_external_connector_provider_page(
+                events=events,
+                expected_cursor=expected_cursor,
+                next_cursor=_encode_cursor(next_state),
+                has_more=has_more,
+            )
         )
 
     def _reply_page(
@@ -719,11 +743,13 @@ class LarkCliDocumentCommentProvider:
                 else int(state["cycle"]) + 1,
                 "page_token": outer_page_token or None,
             }
-        return build_external_connector_provider_page(
-            events=events,
-            expected_cursor=expected_cursor,
-            next_cursor=_encode_cursor(next_state),
-            has_more=reply_has_more or bool(state.get("outer_page_token")),
+        return dict(
+            build_external_connector_provider_page(
+                events=events,
+                expected_cursor=expected_cursor,
+                next_cursor=_encode_cursor(next_state),
+                has_more=reply_has_more or bool(state.get("outer_page_token")),
+            )
         )
 
     def page_reader(
@@ -775,15 +801,13 @@ class LarkCliDocumentCommentProvider:
             raise LarkDocumentCommentProviderError("reply_store_required")
         write_private_json_atomic(self._reply_store, store)
 
-    def _reply_readback(
+    def _reply_pages(
         self,
         *,
         file_token: str,
         file_type: str,
         comment_id: str,
-        reply_id: str,
-        expected_text: str,
-    ) -> bool:
+    ) -> Iterator[list[Mapping[str, Any]]]:
         page_token = ""
         for _page in range(MAX_PROVIDER_PAGES):
             args = [
@@ -814,15 +838,56 @@ class LarkCliDocumentCommentProvider:
                 not isinstance(item, Mapping) for item in items
             ):
                 raise LarkDocumentCommentProviderError("comment_reply_readback_invalid")
-            for item in items:
-                if str(item.get("reply_id") or "") == reply_id:
-                    return _reply_text(item) == expected_text
+            yield items
             if data.get("has_more") is not True:
-                return False
+                return
             page_token = str(data.get("page_token") or "").strip()
             if not page_token:
                 raise LarkDocumentCommentProviderError("comment_reply_cursor_missing")
         raise LarkDocumentCommentProviderError("comment_reply_readback_page_limit")
+
+    def _reply_readback(
+        self,
+        *,
+        file_token: str,
+        file_type: str,
+        comment_id: str,
+        reply_id: str,
+        expected_text: str,
+    ) -> bool:
+        for items in self._reply_pages(
+            file_token=file_token,
+            file_type=file_type,
+            comment_id=comment_id,
+        ):
+            for item in items:
+                if str(item.get("reply_id") or "") == reply_id:
+                    return _reply_text(item) == expected_text
+        return False
+
+    def _recover_reply_id(
+        self,
+        *,
+        file_token: str,
+        file_type: str,
+        comment_id: str,
+        idempotency_key: str,
+        expected_text: str,
+    ) -> str | None:
+        for items in self._reply_pages(
+            file_token=file_token,
+            file_type=file_type,
+            comment_id=comment_id,
+        ):
+            for item in items:
+                if _reply_idempotency_key(item) != idempotency_key:
+                    continue
+                if _reply_text(item) != expected_text:
+                    raise LarkDocumentCommentProviderError(
+                        "reply_receipt_digest_mismatch"
+                    )
+                return _safe_token(item.get("reply_id"), field="reply_id")
+        return None
 
     def response_writer(
         self,
@@ -865,11 +930,45 @@ class LarkCliDocumentCommentProvider:
             entries = {str(key): value for key, value in dict(store["entries"]).items()}
             existing = entries.get(idempotency_key)
             if isinstance(existing, Mapping):
-                if existing.get("text_digest") != text_digest:
+                binding = {
+                    "source_ref": self._source_ref,
+                    "file_token": file_token,
+                    "file_type": file_type,
+                    "comment_id": comment_id,
+                    "text_digest": text_digest,
+                }
+                if any(
+                    existing.get(field) != value for field, value in binding.items()
+                ):
                     raise LarkDocumentCommentProviderError(
                         "reply_receipt_digest_mismatch"
                     )
-                reply_id = _safe_token(existing.get("reply_id"), field="reply_id")
+                reply_id = (
+                    _safe_token(existing.get("reply_id"), field="reply_id")
+                    if existing.get("reply_id")
+                    else self._recover_reply_id(
+                        file_token=file_token,
+                        file_type=file_type,
+                        comment_id=comment_id,
+                        idempotency_key=idempotency_key,
+                        expected_text=normalized_text,
+                    )
+                )
+                if reply_id is None:
+                    raise LarkDocumentCommentProviderError(
+                        "comment_reply_recovery_pending"
+                    )
+                entries[idempotency_key] = {
+                    **dict(existing),
+                    "reply_id": reply_id,
+                    "status": "pending_readback",
+                }
+                self._write_reply_store(
+                    {
+                        "schema_version": LARK_DOCUMENT_COMMENT_REPLY_STORE_SCHEMA,
+                        "entries": entries,
+                    }
+                )
                 verified = self._reply_readback(
                     file_token=file_token,
                     file_type=file_type,
@@ -883,6 +982,20 @@ class LarkCliDocumentCommentProvider:
                     )
             else:
                 escaped_text = normalized_text.replace("<", "&lt;").replace(">", "&gt;")
+                entries[idempotency_key] = {
+                    "source_ref": self._source_ref,
+                    "file_token": file_token,
+                    "file_type": file_type,
+                    "comment_id": comment_id,
+                    "text_digest": text_digest,
+                    "status": "creating",
+                }
+                self._write_reply_store(
+                    {
+                        "schema_version": LARK_DOCUMENT_COMMENT_REPLY_STORE_SCHEMA,
+                        "entries": entries,
+                    }
+                )
                 data = self._data(
                     self._call(
                         [
@@ -906,7 +1019,10 @@ class LarkCliDocumentCommentProvider:
                                             }
                                         ]
                                     },
-                                    "extra": idempotency_key,
+                                    "extra": json.dumps(
+                                        {"loopx_idempotency_key": idempotency_key},
+                                        separators=(",", ":"),
+                                    ),
                                 },
                                 separators=(",", ":"),
                             ),
@@ -921,12 +1037,8 @@ class LarkCliDocumentCommentProvider:
                 )
                 reply_id = _safe_token(data.get("reply_id"), field="reply_id")
                 entries[idempotency_key] = {
-                    "source_ref": self._source_ref,
-                    "file_token": file_token,
-                    "file_type": file_type,
-                    "comment_id": comment_id,
+                    **dict(entries[idempotency_key]),
                     "reply_id": reply_id,
-                    "text_digest": text_digest,
                     "status": "pending_readback",
                 }
                 self._write_reply_store(
@@ -960,6 +1072,9 @@ class LarkCliDocumentCommentProvider:
             "external_write_performed": True,
             "verification_performed": True,
             "readback_verified": True,
+            # The generic provider call site validates this opaque key before it
+            # reduces the provider receipt to the public-safe response receipt.
+            "idempotency_key": idempotency_key,
             "idempotency_key_digest": "sha256:"
             + hashlib.sha256(idempotency_key.encode()).hexdigest(),
             "private_provider_payload_captured": False,
