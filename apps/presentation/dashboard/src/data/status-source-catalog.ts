@@ -159,3 +159,15 @@ export function projectedStatusSourceForUrl(catalog: StatusSourceCatalog, status
     statusUrl: statusUrl.trim(),
   };
 }
+
+export function activeStatusSourceForUrl(
+  catalog: StatusSourceCatalog,
+  requestedStatusUrl: string | null,
+  loadedStatusUrl: string,
+  baseHref: string,
+): StatusSource {
+  // The active source follows the user's in-flight selection so a slow or
+  // failed switch does not make the switcher appear to bounce back to the
+  // previously loaded source.
+  return projectedStatusSourceForUrl(catalog, requestedStatusUrl ?? loadedStatusUrl, baseHref);
+}

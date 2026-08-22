@@ -73,6 +73,7 @@ import {
   defaultLocalStatusSourceUrl,
   loadStatusSourceCatalog,
   localStatusSource,
+  activeStatusSourceForUrl,
   projectedStatusSourceForUrl,
   removeStatusSource,
   saveStatusSourceCatalog,
@@ -2432,8 +2433,10 @@ export function DashboardPage() {
     : "";
   const activeStatusRequestUrl = requestedStatusUrl ?? routeStatusRequestUrl;
   const loadedStatusUrl = source.kind === "url" ? source.label : defaultGlobalStatusUrl;
-  const activeStatusSource: StatusSource = projectedStatusSourceForUrl(
+  const requestFailed = Boolean(loadError && requestedStatusUrl);
+  const activeStatusSource: StatusSource = activeStatusSourceForUrl(
     statusSourceCatalog,
+    requestedStatusUrl,
     loadedStatusUrl,
     window.location.href,
   );
@@ -2506,13 +2509,11 @@ export function DashboardPage() {
     activeSource: activeStatusSource,
     connectionState: isLoading
       ? "loading"
-      : loadError && requestedStatusUrl === loadedStatusUrl
+      : requestFailed
         ? "error"
         : "connected",
-    errorMessage: loadError
-      ? requestedStatusUrl === loadedStatusUrl
-        ? loadError
-        : `未切换到 ${requestedStatusUrl ?? "所选来源"}：${loadError}`
+    errorMessage: requestFailed
+      ? `未切换到 ${requestedStatusUrl ?? "所选来源"}：${loadError}`
       : null,
     onAdd: (input) => {
       const result = addSshTunnelStatusSource(statusSourceCatalog, input, window.location.href);

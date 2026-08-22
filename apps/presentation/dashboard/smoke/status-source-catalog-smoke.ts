@@ -1,4 +1,5 @@
 import {
+  activeStatusSourceForUrl,
   addSshTunnelStatusSource,
   emptyStatusSourceCatalog,
   loadStatusSourceCatalog,
@@ -88,6 +89,10 @@ const withoutTunnel = removeStatusSource(restored, restored.sources[1].id);
 equal(withoutTunnel.sources.length, 2, "removing one tunnel preserves the other named source");
 assert(withoutTunnel.sources.some((source) => source.label === "Remote build host"), "the second SSH source remains selectable");
 deepEqual(removeStatusSource(withoutTunnel, localStatusSource.id).sources, withoutTunnel.sources, "the built-in local source cannot be removed");
+
+equal(activeStatusSourceForUrl(initial, null, localStatusSource.statusUrl, baseHref).id, "local", "idle defaults to the local source");
+equal(activeStatusSourceForUrl(added.catalog, added.source.statusUrl, localStatusSource.statusUrl, baseHref).id, added.source.id, "an in-flight selection wins over the previously loaded local source");
+equal(activeStatusSourceForUrl(added.catalog, null, added.source.statusUrl, baseHref).id, added.source.id, "with no in-flight request the loaded source is active");
 
 const configuredHosts = parseConfiguredSshHostCatalog({
   ok: true,
