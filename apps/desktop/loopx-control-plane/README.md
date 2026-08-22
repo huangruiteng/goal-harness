@@ -1,4 +1,4 @@
-# Loopx Desktop
+# LoopX Desktop
 
 This directory contains the experimental Tauri shell for the LoopX personal
 Agent workspace. It reuses the existing React dashboard and LoopX HTTP
@@ -21,7 +21,7 @@ The shell:
 
 1. verifies or starts `loopx serve-status` on `127.0.0.1:8766`;
 2. verifies or starts `loopx chat` on `127.0.0.1:8767`;
-3. serves the compiled dashboard from a random loopback port;
+3. loads the versioned LoopX Chat workspace from the local Chat service;
 4. opens the existing personal workspace in one native window;
 5. terminates only the service process groups it started when the window exits.
 
@@ -33,9 +33,9 @@ accepted. A service left running by an older installation is reported as stale
 with a restart instruction instead of silently handling current control-plane
 writes with old code.
 
-The WebView can navigate only inside its own loopback asset origin. Dashboard
-requests to the status and Chat services remain restricted to loopback CORS and
-the existing preview/apply authority boundary.
+The WebView is pinned to the loopback Chat origin served by the installed
+LoopX release. Dashboard requests to the status and Chat services remain
+restricted to loopback CORS and the existing preview/apply authority boundary.
 
 ## Coexistence With `loopx dashboard`
 

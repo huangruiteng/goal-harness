@@ -16,14 +16,13 @@ fn show_main_window(app: &AppHandle) {
 }
 
 pub fn run() {
-    let asset_port =
-        portpicker::pick_unused_port().expect("no free loopback port for desktop assets");
-    #[cfg(not(dev))]
-    let asset_origin = format!("http://127.0.0.1:{asset_port}");
+    // Release builds load the versioned LoopX Chat workspace that ships inside
+    // the installed `loopx` release, so `loopx update` refreshes the frontend
+    // and backend together instead of reusing a separately built asset bundle.
     #[cfg(dev)]
     let web_origin = "http://127.0.0.1:5173".to_string();
     #[cfg(not(dev))]
-    let web_origin = asset_origin.clone();
+    let web_origin = "http://127.0.0.1:8767/chat/".to_string();
     let services = Arc::new(Mutex::new(None::<ServiceSet>));
     let services_for_setup = Arc::clone(&services);
     let navigation_origin: Url = web_origin.parse().expect("valid desktop origin");
@@ -35,24 +34,19 @@ pub fn run() {
                 .callback(|app, _args, _cwd| show_main_window(app))
                 .build(),
         )
-        .plugin(
-            tauri_plugin_localhost::Builder::new(asset_port)
-                .host("127.0.0.1")
-                .build(),
-        )
         .setup(move |app| {
             let started = ServiceSet::start()?;
             *services_for_setup.lock().expect("service state lock") = Some(started);
 
             let origin: Url = web_origin.parse()?;
             app.add_capability(
-                CapabilityBuilder::new("desktop-localhost")
+                CapabilityBuilder::new("desktop-loopx-chat")
                     .remote(origin.to_string())
                     .window("main"),
             )?;
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(origin))
-                .title("Loopx")
+                .title("LoopX")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(960.0, 640.0)
                 .on_navigation(move |url| url.origin() == navigation_origin.origin())
