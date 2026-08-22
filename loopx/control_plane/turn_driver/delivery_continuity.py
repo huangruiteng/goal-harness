@@ -136,10 +136,15 @@ def evaluate_delivery_route(
     safe_agent_id = normalize_todo_claimed_by(agent_id)
     if not safe_agent_id:
         raise ValueError("delivery routing requires a valid agent_id")
-    continuity_payload = _delivery_todo_payload(
-        continuity_todo,
-        actionable=continuity_actionable,
-        capability_ready=continuity_capability_ready,
+    safe_previous_todo_id = normalize_todo_id(previous_todo_id)
+    continuity_payload = (
+        _delivery_todo_payload(
+            continuity_todo,
+            actionable=continuity_actionable,
+            capability_ready=continuity_capability_ready,
+        )
+        if safe_previous_todo_id
+        else None
     )
     fallback_payload = _delivery_todo_payload(
         fallback_todo,
@@ -152,7 +157,7 @@ def evaluate_delivery_route(
             {
                 "schema_version": DELIVERY_ROUTING_REQUEST_SCHEMA,
                 "agent_id": safe_agent_id,
-                "previous_todo_id": normalize_todo_id(previous_todo_id),
+                "previous_todo_id": safe_previous_todo_id,
                 "previous_delivery_outcome": (
                     str(previous_delivery_outcome or "").strip() or None
                 ),
@@ -168,7 +173,7 @@ def evaluate_delivery_route(
     continuity = result.get("continuity")
     boundary = result.get("boundary")
     selection = result.get("selection")
-    continuity_expected = normalize_todo_id(previous_todo_id) is not None
+    continuity_expected = safe_previous_todo_id is not None
     selected_todo_id = (
         (continuity_payload or {}).get("todo_id")
         if selection == "continuity"

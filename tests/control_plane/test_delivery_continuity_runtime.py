@@ -146,3 +146,30 @@ def test_python_facade_preserves_typed_rejection(monkeypatch) -> None:
             fallback_actionable=False,
             fallback_capability_ready=False,
         )
+
+
+def test_python_facade_ignores_unreachable_continuity_without_anchor(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def call(_method: str, params: dict[str, object]) -> dict[str, object]:
+        captured.update(params)
+        return _route_result(selection="none", continuity=None, boundary=None)
+
+    monkeypatch.setattr(delivery_continuity, "effect_runtime_result", call)
+    result = delivery_continuity.evaluate_delivery_route(
+        agent_id="codex-main",
+        previous_todo_id=None,
+        previous_delivery_outcome=None,
+        continuity_todo={"todo_id": "legacy-short-id"},
+        continuity_actionable=True,
+        continuity_capability_ready=True,
+        fallback_todo=None,
+        fallback_actionable=False,
+        fallback_capability_ready=False,
+    )
+
+    assert result["selection"] == "none"
+    assert captured["previous_todo_id"] is None
+    assert captured["continuity_todo"] is None
