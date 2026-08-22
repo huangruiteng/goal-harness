@@ -2,8 +2,7 @@
 
 把 LoopX 消费方（含 finance）会用到的各类 **public connector** 统一管理起来：
 哪些**已支持**、哪些**待支持/被卡**，它们属于哪一层（L0-L5，对齐 finance
-research 的 [docs/16 信源蓝图](../../../finance_research/docs/16-connector-blueprint.md)），
-以及伴随真实使用**演化出的价值优先级**。
+research 的 docs/16 信源蓝图），以及伴随真实使用**演化出的价值优先级**。
 
 ## 分层（docs/16）
 
