@@ -985,6 +985,24 @@ def test_todo_complete_then_refresh_cli_projects_direct_settlement(
         ),
         encoding="utf-8",
     )
+    assert cli_main(
+        [
+            "--registry",
+            str(registry_path),
+            "--format",
+            "json",
+            "todo",
+            "list",
+            "--goal-id",
+            GOAL_ID,
+            "--completion-identity-key",
+            "local_completion_00000000000000000000000000000000",
+        ]
+    ) == 1
+    unsupported_identity = json.loads(capsys.readouterr().out)
+    assert unsupported_identity["error"] == (
+        "--completion-identity-key is supported only by todo complete reentry"
+    )
     todos = [
         add_goal_todo(
             registry_path=registry_path,

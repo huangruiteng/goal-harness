@@ -104,10 +104,6 @@ export function localTodoCompletionIdentity(
   return `local_completion_${digest.slice(0, 32)}`;
 }
 
-export function isLocalTodoCompletionIdentity(value: string): boolean {
-  return /^local_completion_[0-9a-f]{32}$/.test(value);
-}
-
 export function projectTodoCompletionIdentity(value: unknown): JsonObject {
   const request = requiredObject(value, "todo.completion_identity params");
   if (request.schema_version !== TODO_COMPLETION_IDENTITY_REQUEST_SCHEMA) {

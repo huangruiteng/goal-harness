@@ -131,6 +131,30 @@ test("Todo lifecycle reentry rejects untyped succession triggers", () => {
   );
 });
 
+test("local-shaped turn identities remain turn-scoped unless exactly derived", () => {
+  const projection = projectTodoLifecycleSettlementReentry({
+    schema_version: TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
+    goal_id: "goal-example",
+    triggers: [{
+      kind: "completed_advancement_without_successor",
+      todo_id: "todo_333333333333",
+      completion_turn_key: "local_completion_00000000000000000000000000000000",
+    }],
+    lifecycle_actor_args: [],
+    quota_scoped_args: [],
+  });
+
+  assert.equal(
+    (projection.triggers as Record<string, unknown>[])[0]
+      ?.completion_identity_source,
+    "turn_settlement",
+  );
+  assert.match(
+    (projection.next_cli_actions as string[])[0] ?? "",
+    /--turn-instance-id local_completion_0{32}/,
+  );
+});
+
 test("Todo lifecycle reentry shell-quotes projected identities", () => {
   const projection = projectTodoLifecycleSettlementReentry({
     schema_version: TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,

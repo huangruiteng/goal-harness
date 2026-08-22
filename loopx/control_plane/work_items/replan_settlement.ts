@@ -5,7 +5,6 @@ import {
   requireNonEmptyString,
 } from "../runtime_decode.ts";
 import {
-  isLocalTodoCompletionIdentity,
   localTodoCompletionIdentity,
 } from "../todos/completion_fence.ts";
 
@@ -63,16 +62,15 @@ export function projectTodoLifecycleSettlementReentry(value: unknown): JsonObjec
     (trigger) => {
       const todoId = String(trigger.todo_id);
       const persistedKey = trigger.completion_turn_key;
+      const localIdentityKey = localTodoCompletionIdentity(goalId, todoId);
       const completionIdentityKey = typeof persistedKey === "string"
         ? persistedKey
-        : localTodoCompletionIdentity(goalId, todoId);
+        : localIdentityKey;
       return {
         kind: trigger.kind,
         todo_id: todoId,
         completion_turn_key: completionIdentityKey,
-        completion_identity_source: isLocalTodoCompletionIdentity(
-            completionIdentityKey,
-          )
+        completion_identity_source: completionIdentityKey === localIdentityKey
           ? "unscoped_completion"
           : "turn_settlement",
       };
