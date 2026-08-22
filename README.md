@@ -652,6 +652,8 @@ deeper documents and versioned protocols.
 - [Authors and Contributors](docs/project/authors.md)
 - [Project History](docs/project/history.md)
 - [Name and Marks](docs/project/trademarks.md)
+- [Brand Guide](docs/project/brand-guide.md): product position, voice, claims, and visual direction
+- [ADOPTERS](ADOPTERS.md): voluntary self-attested adoption directory
 - [Ecosystem Adoption](docs/community/ecosystem-adoption.md) - integrations,
   sampling, and derivatives we observe and track
 

@@ -362,6 +362,8 @@ def main() -> int:
             "docs/project/authors.md",
             "docs/project/history.md",
             "docs/project/trademarks.md",
+            "docs/project/brand-guide.md",
+            "ADOPTERS.md",
         ],
     }
     navigation_contracts_zh = {
@@ -372,7 +374,9 @@ def main() -> int:
         "查看结果与证据": navigation_contracts["Inspect Outcomes"],
         "项目与社区": [
             "docs/project/technical-directions.zh-CN.md",
-            *navigation_contracts["Project and Community"][1:],
+            *navigation_contracts["Project and Community"][1:7],
+            "docs/project/brand-guide.zh-CN.md",
+            "ADOPTERS.md",
         ],
     }
     for readme, contracts in (
@@ -436,8 +440,12 @@ def main() -> int:
         "docs/product/runtimes/codex-cli/codex-cli-tui-loop.md",
         "docs/project/technical-directions.md",
         "docs/project/technical-directions.zh-CN.md",
+        "docs/project/brand-guide.md",
+        "docs/project/brand-guide.zh-CN.md",
     ]:
         assert (REPO_ROOT / path).is_file(), path
+
+    assert (REPO_ROOT / "ADOPTERS.md").is_file()
 
     developer_index = read("docs/development/README.md")
     quality_guide = read("docs/development/testing-and-quality.md")

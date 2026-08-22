@@ -583,6 +583,8 @@ LoopX 当前有三个活跃战略计划和一个架构与研究孵化器。这�
 - [Authors and Contributors](docs/project/authors.md)
 - [Project History](docs/project/history.md)
 - [Name and Marks](docs/project/trademarks.md)
+- [品牌指南](docs/project/brand-guide.zh-CN.md)：产品定位、语气、证据标签和视觉方向
+- [ADOPTERS](ADOPTERS.md)：项目与用户自愿维护的采用目录
 - [生态采用清单](docs/community/ecosystem-adoption.zh-CN.md) - 我们观察并持续追踪的
   真实集成、采样借鉴与衍生周边
 
