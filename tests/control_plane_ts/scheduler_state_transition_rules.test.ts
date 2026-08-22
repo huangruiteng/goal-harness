@@ -86,3 +86,86 @@ test("transition decisions do not mutate caller input", () => {
   evaluateSchedulerStateTransition(request);
   assert.deepEqual(request, before);
 });
+
+function backoffRequest(extra: Record<string, unknown> = {}) {
+  return {
+    schema_version: SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,
+    operation: "backoff",
+    progression_minutes: [15, 30, 60],
+    scheduler_state: {},
+    reset_token: "reset-token",
+    identity_signature: "identity-signature",
+    advance_same_identity: true,
+    current_time: "2026-01-01T12:10:00Z",
+    observed_host_rrule: "",
+    cadence_class: "monitor_wait",
+    stale_tolerance_minutes: 5,
+    ...extra,
+  };
+}
+
+test("coarse backoff transition owns cadence, retention, and host decision", () => {
+  const settled = evaluateSchedulerStateTransition(backoffRequest({
+    scheduler_state: {
+      progression_index: 1,
+      last_applied_rrule: "FREQ=MINUTELY;INTERVAL=30",
+      reset_token: "reset-token",
+      identity_signature: "identity-signature",
+      updated_at: "2026-01-01T12:00:00Z",
+    },
+    observed_host_rrule: "RRULE:FREQ=MINUTELY;INTERVAL=30",
+  }));
+  assert.equal(settled.current_index, 1);
+  assert.equal(settled.cadence_transition, "hold_until_interval");
+  assert.equal(settled.current_rrule, "FREQ=MINUTELY;INTERVAL=30");
+  assert.equal(settled.host_transition, "settled");
+  assert.equal(settled.current_rrule_already_applied, true);
+
+  const failedPair = evaluateSchedulerStateTransition(backoffRequest({
+    scheduler_state: {
+      progression_index: 0,
+      last_applied_rrule: "FREQ=MINUTELY;INTERVAL=60",
+      reset_token: "reset-token",
+      identity_signature: "identity-signature",
+      updated_at: "2026-01-01T12:00:00Z",
+      host_update_failures: [{
+        schema_version: "scheduler_host_update_failure_v0",
+        target_rrule: "FREQ=MINUTELY;INTERVAL=15",
+        observed_host_rrule: "FREQ=MINUTELY;INTERVAL=60",
+        failure_kind: "timeout",
+        failure_count: 1,
+        failed_at: "2026-01-01T11:30:00Z",
+      }],
+    },
+    observed_host_rrule: "FREQ=MINUTELY;INTERVAL=60",
+  }));
+  assert.equal(failedPair.current_index, 0);
+  assert.equal(failedPair.cadence_transition, "retry_unacknowledged_failure");
+  assert.equal(failedPair.host_transition, "recorded_failure_suppressed");
+  assert.equal(failedPair.repeated_failed_pair, true);
+  assert.equal(
+    (failedPair.recorded_host_failure as Record<string, unknown>).failure_count,
+    1,
+  );
+});
+
+test("coarse backoff boundary rejects malformed state facts", () => {
+  assert.throws(
+    () => evaluateSchedulerStateTransition(backoffRequest({
+      progression_minutes: [15, 0],
+    })),
+    /positive integers/,
+  );
+  assert.throws(
+    () => evaluateSchedulerStateTransition(backoffRequest({
+      scheduler_state: [],
+    })),
+    /scheduler_state must be an object/,
+  );
+  assert.throws(
+    () => evaluateSchedulerStateTransition(backoffRequest({
+      stale_tolerance_minutes: -1,
+    })),
+    /must not be negative/,
+  );
+});

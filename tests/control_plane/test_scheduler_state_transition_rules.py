@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from loopx.control_plane.scheduler.state import rrule_for_minutes
@@ -7,6 +9,7 @@ from loopx.control_plane.scheduler import state_transition_rules
 from loopx.control_plane.scheduler.state_transition_rules import (
     SchedulerCadenceTransition,
     SchedulerHostTransition,
+    decide_scheduler_backoff_state,
     decide_scheduler_cadence_transition,
     decide_scheduler_host_transition,
 )
@@ -273,6 +276,32 @@ def test_unrelated_failure_order_does_not_change_host_transition() -> None:
     }
 
     assert transitions == {SchedulerHostTransition.SETTLED}
+
+
+def test_scheduler_backoff_facade_returns_one_coarse_typed_decision() -> None:
+    scheduler_state = {
+        **_scheduler_state(),
+        "updated_at": "2026-01-01T12:00:00Z",
+    }
+
+    decision = decide_scheduler_backoff_state(
+        [15, 30, 60],
+        scheduler_state=scheduler_state,
+        reset_token=RESET_TOKEN,
+        identity_signature=IDENTITY_SIGNATURE,
+        advance_same_identity=True,
+        current_time=datetime(2026, 1, 1, 12, 10, tzinfo=timezone.utc),
+        observed_host_rrule=TARGET_30,
+        cadence_class="monitor_wait",
+        stale_tolerance_minutes=5,
+    )
+
+    assert decision.cadence.current_index == 1
+    assert decision.cadence.transition == SchedulerCadenceTransition.HOLD_UNTIL_INTERVAL
+    assert decision.host.transition == SchedulerHostTransition.SETTLED
+    assert decision.current_interval_minutes == 30
+    assert decision.current_rrule == TARGET_30
+    assert decision.current_rrule_already_applied is True
 
 
 def test_python_facade_sends_normalized_typed_facts(monkeypatch) -> None:
