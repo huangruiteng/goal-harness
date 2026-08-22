@@ -88,7 +88,7 @@ export async function withFileMutationLock<T>(
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       await reclaimStaleMutationLock(lockPath);
       if (Date.now() >= deadline) {
-        throw new Error("Turn journal mutation lock timed out");
+        throw new Error("Effect runtime mutation lock timed out");
       }
       await new Promise((resolve) => setTimeout(resolve, MUTATION_LOCK_POLL_MS));
     }
