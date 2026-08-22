@@ -55,7 +55,7 @@ export function GoalTasksView({
     && conversation.slice(latestUserIndex + 1).some((item) => item.message.role === "assistant" && item.message.pending);
 
   return (
-    <div className="personal-task-kanban">
+    <>
       {latestUserMessage ? (
         <section aria-label="最近对话与 Task 状态" className="personal-task-chat-receipt">
           <span className="personal-task-chat-icon"><MessageSquareText size={18} /></span>
@@ -73,6 +73,7 @@ export function GoalTasksView({
           </footer>
         </section>
       ) : null}
+      <div className="personal-task-kanban">
       <section className="personal-object-list">
         <header>
           <strong><i className="personal-kanban-dot tone-attention" />待确认</strong>
@@ -147,11 +148,12 @@ export function GoalTasksView({
         ))}
         {!doneAgentTodos.length ? <p className="personal-task-empty">还没有完成的任务。</p> : null}
       </section>
+      </div>
       {isEmpty ? (
-        <p className="personal-task-empty" style={{ gridColumn: "1 / -1", border: 0, textAlign: "left" }}>
+        <p className="personal-task-empty">
           这个 Goal 还没有任务。用下面的输入框描述下一步，LoopX 会先展示待确认操作。
         </p>
       ) : null}
-    </div>
+    </>
   );
 }

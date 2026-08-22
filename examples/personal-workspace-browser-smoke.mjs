@@ -489,7 +489,7 @@ async function installApi(page) {
 async function main() {
   const { chromium } = loadPlaywright();
   await mkdir(outputDir, { recursive: true });
-  const results = new Map(Array.from({ length: 19 }, (_, index) => [index + 1, { status: "UNTESTED", note: "" }]));
+  const results = new Map(Array.from({ length: 20 }, (_, index) => [index + 1, { status: "UNTESTED", note: "" }]));
   const observations = [];
   const pass = (criterion, note) => results.set(criterion, { status: "PASS", note });
   const fail = (criterion, note) => results.set(criterion, { status: "FAIL", note });
@@ -727,6 +727,56 @@ async function main() {
     const goalNavigation = page.getByRole("navigation", { name: "Goal 视图" });
     const defaultTasksTab = goalNavigation.getByRole("button", { name: "Tasks" });
     if (await defaultTasksTab.getAttribute("aria-current") !== "page") throw new Error("Selecting a Goal did not prioritize its Tasks view");
+    const readBoardGeometry = async () => {
+      const kanban = page.locator(".personal-task-kanban");
+      await kanban.waitFor({ state: "visible" });
+      const kanbanBox = await kanban.boundingBox();
+      const columns = await page.locator(".personal-task-kanban > .personal-object-list").evaluateAll((els) =>
+        els.map((el) => { const rect = el.getBoundingClientRect(); return { left: rect.left, right: rect.right, width: rect.width }; })
+      );
+      return { kanbanBox, columns };
+    };
+    const assertBoardGeometry = (label, geometry) => {
+      if (!geometry.kanbanBox || geometry.columns.length !== 4) {
+        throw new Error(`${label}: expected 4 kanban columns, got ${geometry.columns?.length}`);
+      }
+      const kanbanRight = geometry.kanbanBox.x + geometry.kanbanBox.width;
+      if (Math.abs(geometry.columns[3].right - kanbanRight) > 2) {
+        throw new Error(`${label}: kanban columns do not fill the board (lastRight=${geometry.columns[3].right}, boardRight=${kanbanRight})`);
+      }
+      if (new Set(geometry.columns.map((column) => Math.round(column.width))).size !== 1) {
+        throw new Error(`${label}: kanban columns are not equal width: ${JSON.stringify(geometry.columns)}`);
+      }
+    };
+    const selectFirstGoal = async () => {
+      await page.locator(".personal-goal-link").first().click();
+      await page.locator(".personal-task-kanban").waitFor({ state: "visible" });
+    };
+    const populatedGeometry = await readBoardGeometry();
+    assertBoardGeometry("populated board", populatedGeometry);
+    await page.locator(".personal-goal-link", { hasText: "Product Release" }).first().click();
+    await page.locator(".personal-task-kanban").waitFor({ state: "visible" });
+    const emptyGeometry = await readBoardGeometry();
+    assertBoardGeometry("empty board", emptyGeometry);
+    if (Math.abs(emptyGeometry.kanbanBox.width - populatedGeometry.kanbanBox.width) > 2) {
+      throw new Error(`Empty board width ${emptyGeometry.kanbanBox.width} differs from populated ${populatedGeometry.kanbanBox.width}`);
+    }
+    const desktopViewport = page.viewportSize();
+    await page.setViewportSize({ width: 2048, height: 1200 });
+    await page.waitForTimeout(200);
+    await selectFirstGoal();
+    const populatedWide = await readBoardGeometry();
+    assertBoardGeometry("populated board (wide)", populatedWide);
+    await page.locator(".personal-goal-link", { hasText: "Product Release" }).first().click();
+    await page.locator(".personal-task-kanban").waitFor({ state: "visible" });
+    const emptyWide = await readBoardGeometry();
+    assertBoardGeometry("empty board (wide)", emptyWide);
+    if (Math.abs(emptyWide.kanbanBox.width - populatedWide.kanbanBox.width) > 2) {
+      throw new Error(`Empty board width (wide) ${emptyWide.kanbanBox.width} differs from populated ${populatedWide.kanbanBox.width}`);
+    }
+    await page.setViewportSize(desktopViewport);
+    await page.waitForTimeout(200);
+    await selectFirstGoal();
     await page.locator(".personal-object-list").first().waitFor({ state: "visible" });
     await page.getByRole("button", { name: "Goal 详情" }).click();
     await page.getByText("Repository", { exact: true }).waitFor({ state: "visible" });
@@ -1219,6 +1269,7 @@ async function main() {
     if (workerCards !== 0) throw new Error(`Redundant Agent worker strip is still visible: ${workerCards}`);
     if (!(await page.locator(".personal-digest-card").isVisible().catch(() => false))) throw new Error("Morning digest card did not render on the manager home");
     pass(17, "Manager home keeps the morning digest while omitting the redundant Agent worker strip.");
+    pass(20, "Empty and populated Tasks boards keep identical width and four equal columns at desktop and wide desktop viewports.");
     const report = { criteria: Object.fromEntries(results), observations };
     await writeFile(resolve(outputDir, "acceptance-results.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
     console.log(`personal-workspace-browser-smoke: ok\npreview=${url}\nscreenshot=${resolve(outputDir, "desktop-first-screen.png")}`);

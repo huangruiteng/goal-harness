@@ -452,7 +452,7 @@
 
 /* Kanban layout for the goal Tasks tab: columns are task states. */
 .personal-task-kanban { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 12px; align-items: start; }
-.personal-task-chat-receipt { grid-column: 1 / -1; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 12px; border: 1px solid #d8e2f8; border-radius: 10px; background: #f8faff; box-shadow: 0 1px 3px rgb(47 102 233 / 4%); }
+.personal-task-chat-receipt { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 12px; border: 1px solid #d8e2f8; border-radius: 10px; background: #f8faff; box-shadow: 0 1px 3px rgb(47 102 233 / 4%); }
 .personal-task-chat-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--pw-blue-soft); color: var(--pw-blue-ink); }
 .personal-task-chat-receipt > div { min-width: 0; }
 .personal-task-chat-receipt header { display: flex; align-items: center; gap: 8px; }
