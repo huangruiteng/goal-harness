@@ -10,6 +10,10 @@ projects. This page is a factual, public-safe inventory of what we observe.
 > are refreshed by a weekly scan; see
 > [Maintenance](#maintenance) below.
 
+For voluntary, self-attested project and user entries, see the repository's
+[`ADOPTERS.md`](../../ADOPTERS.md) directory. This observed inventory and that
+directory intentionally use different evidence boundaries.
+
 ## 1. Integrations
 
 Projects that call LoopX CLI/contracts in real flows, or adopted LoopX as a
