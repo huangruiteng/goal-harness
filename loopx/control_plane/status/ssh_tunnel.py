@@ -138,3 +138,37 @@ def ensure_ssh_source(
         "tunnel_required": tunnel_required,
         "remote_started": remote_started,
     }
+
+
+SSH_SOURCE_ENSURE_PATH = "/api/ssh-source/ensure"
+
+
+def _is_loopback_host(host: str) -> bool:
+    return host in {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+
+class SshSourceChatRequestMixin:
+    """Loopback Chat endpoint that auto-establishes an SSH-tunneled source."""
+
+    def _ssh_source_ensure(self) -> None:
+        if not _is_loopback_host(str(self.server.server_address[0])):
+            self._send_error(
+                "SSH source management requires a loopback LoopX Chat server.",
+                status=403,
+            )
+            return
+        if not self._require_loopback_origin():
+            return
+        try:
+            body = self._read_json()
+            alias = str(body.get("host_alias") or "")
+            local_port = body.get("local_port")
+            result = ensure_ssh_source(
+                alias,
+                local_port,
+                ssh_config_path=getattr(self.server, "ssh_config_path", None),
+            )
+        except (ValueError, TypeError) as exc:
+            self._send_error(str(exc), status=400)
+            return
+        self._send_json(result)

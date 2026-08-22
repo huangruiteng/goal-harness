@@ -60,14 +60,6 @@ REVIEWED_MAINTAINABILITY_EXCEPTIONS: dict[str, dict[str, Any]] = {
         "Keep internal consumers on canonical modules and shrink exports as callers migrate.",
         metric_ceilings={"package_reexport_count": 117, "source_module_count": 50},
     ),
-    "module_metric_budget:loopx/chat_server.py": _exception(
-        "chat_server hosts the loopback Chat API surface; the SSH source ensure "
-        "endpoint (auto SSH tunnel + remote serve-status on source switch) grew it "
-        "past its reviewed ceiling.",
-        "Extract the SSH-source ensure endpoint handler into a dedicated module and "
-        "trim chat_server below its 1513-line reviewed ceiling in a focused follow-up.",
-        metric_ceilings={"lines": 1535, "any_count": 26, "dict_any_count": 0},
-    ),
 }
 
 
