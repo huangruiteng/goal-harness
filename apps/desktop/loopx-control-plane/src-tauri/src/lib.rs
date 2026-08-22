@@ -35,7 +35,24 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
-            let started = ServiceSet::start()?;
+            let started = match ServiceSet::start() {
+                Ok(services) => services,
+                Err(error) => {
+                    // Soft gate: surface a service/runtime mismatch as a clear
+                    // owner-facing reminder instead of panicking the shell.
+                    let message = format!(
+                        "LoopX 检测到正在运行的服务来自不同的安装版本，已停止本次启动。\n\n详情：{error}\n\n请先退出旧的 loopx dashboard 或 LoopX App，再重新打开 LoopX。"
+                    );
+                    let _ = rfd::MessageDialog::new()
+                        .set_title("LoopX")
+                        .set_description(&message)
+                        .set_level(rfd::MessageLevel::Warning)
+                        .show();
+                    eprintln!("LoopX service error: {error}");
+                    app.handle().exit(1);
+                    return Ok(());
+                }
+            };
             *services_for_setup.lock().expect("service state lock") = Some(started);
 
             let origin: Url = web_origin.parse()?;
