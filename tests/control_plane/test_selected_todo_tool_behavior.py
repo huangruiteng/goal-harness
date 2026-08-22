@@ -127,7 +127,7 @@ def test_model_resumes_in_flight_todo_on_the_next_heartbeat(tmp_path: Path) -> N
     quota_result = json.loads(requests[1]["messages"][-1]["content"])
     assert quota_result["selected_todo"]["todo_id"] == "todo_portfolio001"
     assert quota_result["selected_todo"]["selected_by"] == "in_flight_todo"
-    assert quota_result["agent_lane_next_action"]["delivery_boundary"] == (
+    assert quota_result["selected_todo"]["delivery_boundary"] == (
         "in_flight_continuation"
     )
     assert "--delivery-boundary in_flight_continuation" in (

@@ -68,9 +68,10 @@ def test_same_open_todo_survives_cross_heartbeat_queue_reordering() -> None:
     assert packet["agent_lane_next_action"]["selection_reason"] == (
         "same_open_todo_after_progress"
     )
-    assert packet["agent_lane_next_action"]["delivery_boundary"] == (
+    assert packet["selected_todo"]["delivery_boundary"] == (
         "in_flight_continuation"
     )
+    assert "delivery_boundary" not in packet["agent_lane_next_action"]
     assert "delivery_continuity" not in packet
 
 

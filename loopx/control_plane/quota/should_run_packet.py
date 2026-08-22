@@ -1109,9 +1109,19 @@ def _build_quota_should_run_payload(
         payload=payload,
         agent_identity=prepared.agent_identity,
     )
+    public_agent_lane_next_action = route.agent_lane_next_action
+    if (
+        isinstance(public_agent_lane_next_action, dict)
+        and "delivery_boundary" in public_agent_lane_next_action
+    ):
+        public_agent_lane_next_action = {
+            key: value
+            for key, value in public_agent_lane_next_action.items()
+            if key != "delivery_boundary"
+        }
     _attach_truthy_fields(
         payload,
-        agent_lane_next_action=route.agent_lane_next_action,
+        agent_lane_next_action=public_agent_lane_next_action,
     )
     selected_todo_projection = (
         None

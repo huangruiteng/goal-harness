@@ -373,7 +373,7 @@ def test_in_flight_progress_preserves_todo_across_heartbeat_settlements(
     )
     assert guard_rc == 0, guard
     assert guard["selected_todo"]["todo_id"] == TODO_ID
-    assert guard["agent_lane_next_action"]["delivery_boundary"] == (
+    assert guard["selected_todo"]["delivery_boundary"] == (
         "in_flight_continuation"
     )
     first_writeback = guard["interaction_contract"]["cli_channel"][
@@ -429,7 +429,7 @@ def test_in_flight_progress_preserves_todo_across_heartbeat_settlements(
     assert second_guard_rc == 0, second_guard
     assert second_guard["selected_todo"]["todo_id"] == TODO_ID
     assert second_guard["selected_todo"]["selected_by"] == "in_flight_todo"
-    assert second_guard["agent_lane_next_action"]["delivery_boundary"] == (
+    assert second_guard["selected_todo"]["delivery_boundary"] == (
         "in_flight_continuation"
     )
     writeback = second_guard["interaction_contract"]["cli_channel"][

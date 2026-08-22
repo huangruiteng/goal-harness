@@ -658,7 +658,7 @@ def handle_project_lifecycle_command(
                 next_action=args.next_action,
                 delivery_batch_scale=args.delivery_batch_scale,
                 delivery_outcome=args.delivery_outcome,
-                delivery_boundary=args.delivery_boundary,
+                delivery_boundary=getattr(args, "delivery_boundary", None),
                 delivery_workspace_path=(
                     Path(args.delivery_workspace_path).expanduser()
                     if args.delivery_workspace_path
