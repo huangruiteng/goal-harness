@@ -1,4 +1,12 @@
 import type { JsonObject } from "../effect_program.ts";
+import {
+  normalizeSchedulerHostUpdateFailures,
+  normalizeSchedulerRrule,
+  retainedSchedulerHostUpdateFailures,
+  rruleForMinutes,
+  schedulerRruleIntervalMinutes,
+  schedulerTimestampMilliseconds,
+} from "./state_store.ts";
 
 export const SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA =
   "loopx_scheduler_state_transition_request_v0";
@@ -25,6 +33,50 @@ export const SCHEDULER_HOST_TRANSITIONS = [
 export type SchedulerHostTransition =
   (typeof SCHEDULER_HOST_TRANSITIONS)[number];
 
+export interface SchedulerCadenceTransitionResult extends JsonObject {
+  schema_version: typeof SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA;
+  operation: "cadence";
+  current_index: number;
+  state_status: "missing" | "reset_required" | "same_identity";
+  transition: SchedulerCadenceTransition;
+  current_cadence_acknowledged: boolean;
+}
+
+export interface SchedulerHostTransitionResult extends JsonObject {
+  schema_version: typeof SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA;
+  operation: "host";
+  transition: SchedulerHostTransition;
+  current_target_has_failure: boolean;
+  repeated_failed_pair: boolean;
+}
+
+export interface SchedulerBackoffTransitionResult extends JsonObject {
+  schema_version: typeof SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA;
+  operation: "backoff";
+  current_index: number;
+  current_interval_minutes: number;
+  current_rrule: string;
+  last_applied_rrule: string;
+  observed_host_rrule: string;
+  effective_host_rrule: string;
+  state_status: "missing" | "reset_required" | "same_identity";
+  cadence_transition: SchedulerCadenceTransition;
+  current_cadence_acknowledged: boolean;
+  all_host_update_failures: JsonObject[];
+  host_update_failures: JsonObject[];
+  recorded_host_failure: JsonObject | null;
+  current_rrule_already_applied: boolean;
+  scheduler_state_acknowledges_current_rrule: boolean;
+  host_transition: SchedulerHostTransition;
+  current_target_has_failure: boolean;
+  repeated_failed_pair: boolean;
+}
+
+export type SchedulerStateTransitionResult =
+  | SchedulerCadenceTransitionResult
+  | SchedulerHostTransitionResult
+  | SchedulerBackoffTransitionResult;
+
 function requiredObject(value: unknown, label: string): JsonObject {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
@@ -46,6 +98,19 @@ function requiredInteger(value: unknown, label: string): number {
   return value;
 }
 
+function requiredPositiveIntegerList(value: unknown, label: string): number[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((item) =>
+      typeof item !== "number" || !Number.isInteger(item) || item <= 0
+    )
+  ) {
+    throw new Error(`${label} must be a non-empty array of positive integers`);
+  }
+  return [...value] as number[];
+}
+
 function requiredString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`${label} must be a non-empty string`);
@@ -61,7 +126,7 @@ function requestObject(value: unknown): JsonObject {
   return request;
 }
 
-function evaluateCadence(request: JsonObject): JsonObject {
+function evaluateCadence(request: JsonObject): SchedulerCadenceTransitionResult {
   const progressionSize = requiredInteger(
     request.progression_size,
     "progression_size",
@@ -121,7 +186,7 @@ function evaluateCadence(request: JsonObject): JsonObject {
   };
 }
 
-function evaluateHost(request: JsonObject): JsonObject {
+function evaluateHost(request: JsonObject): SchedulerHostTransitionResult {
   const stateStatus = requiredString(request.state_status, "state_status");
   const currentTargetHasFailure = requiredBoolean(
     request.current_target_has_failure,
@@ -160,9 +225,193 @@ function evaluateHost(request: JsonObject): JsonObject {
   };
 }
 
-export function evaluateSchedulerStateTransition(value: unknown): JsonObject {
+function schedulerAppliedIndex(
+  progressionMinutes: readonly number[],
+  schedulerState: JsonObject,
+): number {
+  const value = schedulerState.progression_index;
+  return typeof value === "number" &&
+      Number.isInteger(value) &&
+      value >= 0 &&
+      value < progressionMinutes.length
+    ? value
+    : -1;
+}
+
+function schedulerProgressionIntervalElapsed(
+  schedulerState: JsonObject,
+  currentTime: string,
+): boolean {
+  const updatedAt = schedulerTimestampMilliseconds(schedulerState.updated_at);
+  const current = schedulerTimestampMilliseconds(currentTime);
+  const appliedInterval = schedulerRruleIntervalMinutes(
+    schedulerState.last_applied_rrule,
+  );
+  if (updatedAt === null || current === null || appliedInterval === null) {
+    return true;
+  }
+  return current >= updatedAt + appliedInterval * 60_000;
+}
+
+function monitorRruleAppliedWithinStaleTolerance(
+  cadenceClass: string,
+  lastAppliedRrule: string,
+  currentRrule: string,
+  toleranceMinutes: number,
+): boolean {
+  if (cadenceClass !== "monitor_wait") return false;
+  const appliedMinutes = schedulerRruleIntervalMinutes(lastAppliedRrule);
+  const currentMinutes = schedulerRruleIntervalMinutes(currentRrule);
+  return appliedMinutes !== null &&
+    currentMinutes !== null &&
+    appliedMinutes >= currentMinutes &&
+    appliedMinutes - currentMinutes <= toleranceMinutes;
+}
+
+function evaluateBackoff(request: JsonObject): SchedulerBackoffTransitionResult {
+  const progressionMinutes = requiredPositiveIntegerList(
+    request.progression_minutes,
+    "progression_minutes",
+  );
+  const schedulerState = requiredObject(
+    request.scheduler_state,
+    "scheduler_state",
+  );
+  const resetToken = requiredString(request.reset_token, "reset_token");
+  const identitySignature = requiredString(
+    request.identity_signature,
+    "identity_signature",
+  );
+  const currentTime = requiredString(request.current_time, "current_time");
+  const cadenceClass = requiredString(request.cadence_class, "cadence_class");
+  const staleToleranceMinutes = requiredInteger(
+    request.stale_tolerance_minutes,
+    "stale_tolerance_minutes",
+  );
+  if (staleToleranceMinutes < 0) {
+    throw new Error("stale_tolerance_minutes must not be negative");
+  }
+
+  const allHostUpdateFailures = retainedSchedulerHostUpdateFailures(
+    normalizeSchedulerHostUpdateFailures(
+      schedulerState.host_update_failures,
+      schedulerState.host_update_failure,
+    ),
+    currentTime,
+  );
+  const appliedIndex = schedulerAppliedIndex(
+    progressionMinutes,
+    schedulerState,
+  );
+  const appliedTargetRrule = appliedIndex >= 0
+    ? rruleForMinutes(progressionMinutes[appliedIndex])
+    : "";
+  const lastAppliedRrule = typeof schedulerState.last_applied_rrule === "string"
+    ? schedulerState.last_applied_rrule.trim()
+    : "";
+  const currentCadenceAcknowledged = Boolean(appliedTargetRrule) &&
+    normalizeSchedulerRrule(lastAppliedRrule) === appliedTargetRrule;
+  const cadence = evaluateCadence({
+    progression_size: progressionMinutes.length,
+    state_present: Object.keys(schedulerState).length > 0,
+    identity_matches: Object.keys(schedulerState).length > 0 &&
+      schedulerState.reset_token === resetToken &&
+      schedulerState.identity_signature === identitySignature,
+    applied_index: appliedIndex,
+    current_cadence_acknowledged: currentCadenceAcknowledged,
+    advance_same_identity: requiredBoolean(
+      request.advance_same_identity,
+      "advance_same_identity",
+    ),
+    applied_interval_elapsed: schedulerProgressionIntervalElapsed(
+      schedulerState,
+      currentTime,
+    ),
+    has_host_update_failures: allHostUpdateFailures.length > 0,
+  });
+  const currentIndex = cadence.current_index;
+  const currentInterval = progressionMinutes[currentIndex];
+  const currentRrule = rruleForMinutes(currentInterval);
+  const observedHostRrule = normalizeSchedulerRrule(
+    request.observed_host_rrule,
+  );
+  const effectiveHostRrule = observedHostRrule || lastAppliedRrule;
+  const hostUpdateFailures = retainedSchedulerHostUpdateFailures(
+    allHostUpdateFailures,
+    currentTime,
+    effectiveHostRrule,
+  );
+  const recordedHostFailure = [...hostUpdateFailures].reverse().find((failure) =>
+    normalizeSchedulerRrule(failure.target_rrule) === currentRrule
+  ) ?? hostUpdateFailures.at(-1) ?? null;
+  let currentRruleAlreadyApplied = effectiveHostRrule === currentRrule;
+  if (
+    !currentRruleAlreadyApplied &&
+    !observedHostRrule &&
+    cadence.state_status === "same_identity"
+  ) {
+    currentRruleAlreadyApplied = monitorRruleAppliedWithinStaleTolerance(
+      cadenceClass,
+      effectiveHostRrule,
+      currentRrule,
+      staleToleranceMinutes,
+    );
+  }
+  const schedulerStateAcknowledgesCurrentRrule =
+    cadence.state_status === "same_identity" &&
+    normalizeSchedulerRrule(lastAppliedRrule) === currentRrule;
+  const currentTargetHasFailure = allHostUpdateFailures.some((failure) =>
+    normalizeSchedulerRrule(failure.target_rrule) === currentRrule
+  );
+  const failedTargetRrule = normalizeSchedulerRrule(
+    recordedHostFailure?.target_rrule,
+  );
+  const failedObservedHostRrule = normalizeSchedulerRrule(
+    recordedHostFailure?.observed_host_rrule,
+  );
+  const repeatedFailedPair = Boolean(
+    failedTargetRrule === currentRrule &&
+      failedObservedHostRrule === effectiveHostRrule,
+  );
+  const host = evaluateHost({
+    state_status: cadence.state_status,
+    observed_host_rrule_present: Boolean(observedHostRrule),
+    current_rrule_already_applied: currentRruleAlreadyApplied,
+    scheduler_state_acknowledges_current_rrule:
+      schedulerStateAcknowledgesCurrentRrule,
+    current_target_has_failure: currentTargetHasFailure,
+    repeated_failed_pair: repeatedFailedPair,
+  });
+  return {
+    schema_version: SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA,
+    operation: "backoff",
+    current_index: currentIndex,
+    current_interval_minutes: currentInterval,
+    current_rrule: currentRrule,
+    last_applied_rrule: lastAppliedRrule,
+    observed_host_rrule: observedHostRrule,
+    effective_host_rrule: effectiveHostRrule,
+    state_status: cadence.state_status,
+    cadence_transition: cadence.transition,
+    current_cadence_acknowledged: currentCadenceAcknowledged,
+    all_host_update_failures: allHostUpdateFailures,
+    host_update_failures: hostUpdateFailures,
+    recorded_host_failure: recordedHostFailure,
+    current_rrule_already_applied: currentRruleAlreadyApplied,
+    scheduler_state_acknowledges_current_rrule:
+      schedulerStateAcknowledgesCurrentRrule,
+    host_transition: host.transition,
+    current_target_has_failure: currentTargetHasFailure,
+    repeated_failed_pair: repeatedFailedPair,
+  };
+}
+
+export function evaluateSchedulerStateTransition(
+  value: unknown,
+): SchedulerStateTransitionResult {
   const request = requestObject(value);
   if (request.operation === "cadence") return evaluateCadence(request);
   if (request.operation === "host") return evaluateHost(request);
+  if (request.operation === "backoff") return evaluateBackoff(request);
   throw new Error("Scheduler state transition operation is unsupported");
 }

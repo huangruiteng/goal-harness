@@ -33,6 +33,7 @@ _SOURCE_FILES = (
     "effect_runtime_io.ts",
     "effect_runtime_server.ts",
     "quota/settlement_workspace_causality.ts",
+    "scheduler/state_store.ts",
     "scheduler/state_transition_rules.ts",
     "todos/completion_fence.ts",
     "todos/completion_state.ts",

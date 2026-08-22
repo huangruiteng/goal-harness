@@ -5,7 +5,7 @@ import json
 import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from ..runtime.time import now_utc, utc_isoformat
@@ -34,16 +34,11 @@ from .monitor_wait import (
 from .state import (
     CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
     CODEX_APP_SURFACE,
-    normalize_scheduler_host_update_failures,
     normalize_scheduler_rrule,
-    retained_scheduler_host_update_failures,
     rrule_for_minutes,
     scheduler_rrule_interval_minutes,
 )
-from .state_transition_rules import (
-    decide_scheduler_cadence_transition,
-    decide_scheduler_host_transition,
-)
+from .state_transition_rules import decide_scheduler_backoff_state
 from .time import parse_scheduler_timestamp
 
 SCHEDULER_HINT_SCHEMA_VERSION = "scheduler_hint_v0"
@@ -199,24 +194,6 @@ def _build_scheduler_stop_hint(
     )
 
 
-def _scheduler_progression_interval_elapsed(
-    scheduler_state: Mapping[str, Any],
-    *,
-    current_time: datetime,
-) -> bool:
-    """Advance only after the applied host cadence has had one real interval."""
-
-    updated_at = parse_scheduler_timestamp(scheduler_state.get("updated_at"))
-    applied_interval = scheduler_rrule_interval_minutes(
-        scheduler_state.get("last_applied_rrule")
-    )
-    if updated_at is None or applied_interval is None:
-        # Legacy or partial state has no trustworthy settlement clock. Preserve
-        # the historical progression behavior instead of pinning it forever.
-        return True
-    return current_time >= updated_at + timedelta(minutes=applied_interval)
-
-
 def _user_gate_notification_cooldown(
     *,
     cadence_class: str,
@@ -260,26 +237,6 @@ def _user_gate_notification_cooldown(
             "human-gate reminder window"
         ),
     }
-
-
-def _monitor_rrule_applied_within_stale_tolerance(
-    *,
-    cadence_class: str,
-    last_applied_rrule: str,
-    current_rrule: str,
-) -> bool:
-    if cadence_class != "monitor_wait":
-        return False
-    applied_minutes = scheduler_rrule_interval_minutes(last_applied_rrule)
-    current_minutes = scheduler_rrule_interval_minutes(current_rrule)
-    if applied_minutes is None or current_minutes is None:
-        return False
-    if applied_minutes < current_minutes:
-        return False
-    return (
-        applied_minutes - current_minutes
-        <= scheduler_ack.SCHEDULER_ACK_STALE_HINT_TOLERANCE_MINUTES
-    )
 
 
 def build_codex_app_scheduler_ack_hint(
@@ -642,73 +599,31 @@ class _SchedulerHintBuilder:
         }
         scheduler_state = _dict_or_empty(self.codex_app_scheduler_state)
         scheduler_now = now_utc()
-        all_host_update_failures = retained_scheduler_host_update_failures(
-            normalize_scheduler_host_update_failures(
-                scheduler_state.get("host_update_failures"),
-                legacy_failure=scheduler_state.get("host_update_failure"),
-            ),
-            reference_time=scheduler_now,
-        )
-        cadence_decision = decide_scheduler_cadence_transition(
+        backoff_decision = decide_scheduler_backoff_state(
             codex_cadence_progression,
             scheduler_state=scheduler_state,
             reset_token=reset_token,
             identity_signature=identity_signature,
             advance_same_identity=advance_same_identity,
-            applied_interval_elapsed=_scheduler_progression_interval_elapsed(
-                scheduler_state,
-                current_time=scheduler_now,
+            current_time=scheduler_now,
+            observed_host_rrule=self.codex_app_current_rrule,
+            cadence_class=cadence_class,
+            stale_tolerance_minutes=(
+                scheduler_ack.SCHEDULER_ACK_STALE_HINT_TOLERANCE_MINUTES
             ),
-            has_host_update_failures=bool(all_host_update_failures),
         )
+        cadence_decision = backoff_decision.cadence
+        host_decision = backoff_decision.host
         current_index = cadence_decision.current_index
         state_status = cadence_decision.state_status
-        current_interval = codex_cadence_progression[current_index]
-        current_rrule = rrule_for_minutes(current_interval)
-        last_applied_rrule = str(
-            scheduler_state.get("last_applied_rrule") or ""
-        ).strip()
-        observed_host_rrule = normalize_scheduler_rrule(self.codex_app_current_rrule)
-        effective_host_rrule = observed_host_rrule or last_applied_rrule
-        host_update_failures = retained_scheduler_host_update_failures(
-            all_host_update_failures,
-            reference_time=scheduler_now,
-            observed_host_rrule=effective_host_rrule,
-        )
-        recorded_host_failure = next(
-            (
-                failure
-                for failure in reversed(host_update_failures)
-                if normalize_scheduler_rrule(failure.get("target_rrule"))
-                == current_rrule
-            ),
-            host_update_failures[-1] if host_update_failures else None,
-        )
-        current_rrule_already_applied = effective_host_rrule == current_rrule
-        if (
-            not current_rrule_already_applied
-            and not observed_host_rrule
-            and state_status == "same_identity"
-        ):
-            current_rrule_already_applied = (
-                _monitor_rrule_applied_within_stale_tolerance(
-                    cadence_class=cadence_class,
-                    last_applied_rrule=effective_host_rrule,
-                    current_rrule=current_rrule,
-                )
-            )
-        host_decision = decide_scheduler_host_transition(
-            state_status=state_status,
-            observed_host_rrule=observed_host_rrule,
-            effective_host_rrule=effective_host_rrule,
-            current_rrule=current_rrule,
-            current_rrule_already_applied=current_rrule_already_applied,
-            scheduler_state_acknowledges_current_rrule=(
-                state_status == "same_identity"
-                and normalize_scheduler_rrule(last_applied_rrule) == current_rrule
-            ),
-            all_host_update_failures=all_host_update_failures,
-            recorded_host_failure=recorded_host_failure,
+        current_interval = backoff_decision.current_interval_minutes
+        current_rrule = backoff_decision.current_rrule
+        observed_host_rrule = backoff_decision.observed_host_rrule
+        effective_host_rrule = backoff_decision.effective_host_rrule
+        host_update_failures = list(backoff_decision.host_update_failures)
+        recorded_host_failure = backoff_decision.recorded_host_failure
+        current_rrule_already_applied = (
+            backoff_decision.current_rrule_already_applied
         )
         apply_needed = host_decision.apply_needed
         ack_needed = host_decision.ack_needed

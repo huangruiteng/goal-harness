@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -154,6 +155,136 @@ class SchedulerHostDecision:
             SchedulerHostTransition.APPLY_REQUIRED,
             SchedulerHostTransition.HOST_MATCH_ACK_REQUIRED,
         }
+
+
+@dataclass(frozen=True)
+class SchedulerBackoffDecision:
+    cadence: SchedulerCadenceDecision
+    host: SchedulerHostDecision
+    current_interval_minutes: int
+    current_rrule: str
+    last_applied_rrule: str
+    observed_host_rrule: str
+    effective_host_rrule: str
+    all_host_update_failures: tuple[dict[str, Any], ...]
+    host_update_failures: tuple[dict[str, Any], ...]
+    recorded_host_failure: dict[str, Any] | None
+    current_rrule_already_applied: bool
+    scheduler_state_acknowledges_current_rrule: bool
+
+
+def _object_tuple(value: Any, *, label: str) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise RuntimeError(f"TypeScript {label} must be an object list")
+    return tuple(dict(item) for item in value)
+
+
+def decide_scheduler_backoff_state(
+    progression_minutes: Sequence[int],
+    *,
+    scheduler_state: Mapping[str, Any],
+    reset_token: str,
+    identity_signature: str,
+    advance_same_identity: bool,
+    current_time: datetime | str,
+    observed_host_rrule: Any,
+    cadence_class: str,
+    stale_tolerance_minutes: int,
+) -> SchedulerBackoffDecision:
+    """Evaluate one complete scheduler backoff slice in the TS owner."""
+
+    result = _runtime_result(
+        {
+            "schema_version": SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,
+            "operation": "backoff",
+            "progression_minutes": list(progression_minutes),
+            "scheduler_state": dict(scheduler_state),
+            "reset_token": reset_token,
+            "identity_signature": identity_signature,
+            "advance_same_identity": advance_same_identity,
+            "current_time": (
+                current_time.isoformat()
+                if isinstance(current_time, datetime)
+                else current_time
+            ),
+            "observed_host_rrule": observed_host_rrule,
+            "cadence_class": cadence_class,
+            "stale_tolerance_minutes": stale_tolerance_minutes,
+        }
+    )
+    current_index = result.get("current_index")
+    current_interval = result.get("current_interval_minutes")
+    state_status = result.get("state_status")
+    cadence_transition = result.get("cadence_transition")
+    cadence_acknowledged = result.get("current_cadence_acknowledged")
+    host_transition = result.get("host_transition")
+    target_has_failure = result.get("current_target_has_failure")
+    repeated_failed_pair = result.get("repeated_failed_pair")
+    current_rrule_applied = result.get("current_rrule_already_applied")
+    state_acknowledges_rrule = result.get(
+        "scheduler_state_acknowledges_current_rrule"
+    )
+    string_fields = {
+        key: result.get(key)
+        for key in (
+            "current_rrule",
+            "last_applied_rrule",
+            "observed_host_rrule",
+            "effective_host_rrule",
+        )
+    }
+    recorded_failure = result.get("recorded_host_failure")
+    if (
+        result.get("operation") != "backoff"
+        or isinstance(current_index, bool)
+        or not isinstance(current_index, int)
+        or isinstance(current_interval, bool)
+        or not isinstance(current_interval, int)
+        or not isinstance(state_status, str)
+        or cadence_transition not in {item.value for item in SchedulerCadenceTransition}
+        or not isinstance(cadence_acknowledged, bool)
+        or host_transition not in {item.value for item in SchedulerHostTransition}
+        or not isinstance(target_has_failure, bool)
+        or not isinstance(repeated_failed_pair, bool)
+        or not isinstance(current_rrule_applied, bool)
+        or not isinstance(state_acknowledges_rrule, bool)
+        or any(not isinstance(value, str) for value in string_fields.values())
+        or (recorded_failure is not None and not isinstance(recorded_failure, dict))
+    ):
+        raise RuntimeError("TypeScript scheduler backoff result shape mismatch")
+    cadence = SchedulerCadenceDecision(
+        current_index=current_index,
+        state_status=state_status,
+        transition=SchedulerCadenceTransition(str(cadence_transition)),
+        current_cadence_acknowledged=cadence_acknowledged,
+    )
+    host = SchedulerHostDecision(
+        transition=SchedulerHostTransition(str(host_transition)),
+        current_target_has_failure=target_has_failure,
+        repeated_failed_pair=repeated_failed_pair,
+    )
+    return SchedulerBackoffDecision(
+        cadence=cadence,
+        host=host,
+        current_interval_minutes=current_interval,
+        current_rrule=string_fields["current_rrule"],
+        last_applied_rrule=string_fields["last_applied_rrule"],
+        observed_host_rrule=string_fields["observed_host_rrule"],
+        effective_host_rrule=string_fields["effective_host_rrule"],
+        all_host_update_failures=_object_tuple(
+            result.get("all_host_update_failures"),
+            label="scheduler all-host failure cache",
+        ),
+        host_update_failures=_object_tuple(
+            result.get("host_update_failures"),
+            label="scheduler host failure cache",
+        ),
+        recorded_host_failure=(
+            dict(recorded_failure) if isinstance(recorded_failure, dict) else None
+        ),
+        current_rrule_already_applied=current_rrule_applied,
+        scheduler_state_acknowledges_current_rrule=state_acknowledges_rrule,
+    )
 
 
 def decide_scheduler_host_transition(
