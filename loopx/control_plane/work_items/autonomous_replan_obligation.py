@@ -18,6 +18,9 @@ from ..todos.deferred_resume import (
     todo_summary_monitor_blocked_resume_items,
 )
 from .progress_observation import typed_progress_repeat_trigger
+from .replan_settlement import (
+    project_todo_lifecycle_settlement_reentry as project_todo_lifecycle_reentry_effect,
+)
 
 
 PublicSafeText = Callable[..., str | None]
@@ -75,6 +78,37 @@ def todo_lifecycle_settlement_obligation(
     return obligation
 
 
+def project_todo_lifecycle_settlement_reentry(
+    payload: Mapping[str, Any],
+    *,
+    goal_id: str,
+    lifecycle_actor_args: str,
+    scoped_cli_args: str,
+) -> dict[str, Any] | None:
+    """Adapt a lifecycle obligation to the TS-owned reentry projection."""
+
+    obligation = todo_lifecycle_settlement_obligation(payload)
+    if obligation is None:
+        return None
+    triggers = [
+        {
+            key: item.get(key)
+            for key in ("kind", "todo_id", "completion_turn_key")
+            if item.get(key) is not None
+        }
+        for item in obligation.get("triggers") or []
+        if isinstance(item, Mapping)
+        and item.get("kind") == "completed_advancement_without_successor"
+        and normalize_todo_id(item.get("todo_id"))
+    ]
+    return project_todo_lifecycle_reentry_effect(
+        goal_id=goal_id,
+        triggers=triggers,
+        lifecycle_actor_args=shlex.split(lifecycle_actor_args),
+        quota_scoped_args=shlex.split(scoped_cli_args),
+    )
+
+
 def build_autonomous_replan_cli_actions(
     payload: Mapping[str, Any],
     *,
@@ -85,47 +119,14 @@ def build_autonomous_replan_cli_actions(
     settlement_chain_ready: bool,
     lifecycle_actor_args: str = "",
 ) -> list[str]:
-    obligation = todo_lifecycle_settlement_obligation(payload)
-    if obligation is not None:
-        triggers = [
-            item
-            for item in obligation.get("triggers") or []
-            if isinstance(item, Mapping)
-            and item.get("kind") == "completed_advancement_without_successor"
-            and normalize_todo_id(item.get("todo_id"))
-        ]
-        actions: list[str] = []
-        for trigger in triggers[:3]:
-            todo_id = normalize_todo_id(trigger.get("todo_id"))
-            if todo_id is None:
-                continue
-            completion_turn_key = str(
-                trigger.get("completion_turn_key") or ""
-            ).strip()
-            completion_turn_arg = (
-                f" --turn-instance-id {shlex.quote(completion_turn_key)}"
-                if completion_turn_key
-                else ""
-            )
-            actions.append(
-                "when no real successor remains for completed Todo "
-                f"{todo_id}: loopx todo complete --goal-id {goal_id} "
-                f"--todo-id {todo_id}{completion_turn_arg}{lifecycle_actor_args} "
-                "--no-follow-up --note '<public-safe no-follow-up rationale>'"
-            )
-        actions.extend(
-            [
-                (
-                    "otherwise link or create one real runnable successor for the "
-                    "exact completed Todo; do not create lifecycle-only filler"
-                ),
-                (
-                    f"loopx --format json quota should-run --goal-id {goal_id}"
-                    f"{scoped_cli_args}"
-                ),
-            ]
-        )
-        return actions
+    lifecycle_reentry = project_todo_lifecycle_settlement_reentry(
+        payload,
+        goal_id=goal_id,
+        lifecycle_actor_args=lifecycle_actor_args,
+        scoped_cli_args=scoped_cli_args,
+    )
+    if lifecycle_reentry is not None:
+        return list(lifecycle_reentry["next_cli_actions"])
     packet = (
         payload.get("replan_action_packet")
         if isinstance(payload.get("replan_action_packet"), Mapping)

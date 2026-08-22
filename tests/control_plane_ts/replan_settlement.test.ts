@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   projectReplanSettlementContract,
+  projectTodoLifecycleSettlementReentry,
   REPLAN_SETTLEMENT_REQUEST_SCHEMA,
+  TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
 } from "../../loopx/control_plane/work_items/replan_settlement.ts";
 
 function request(overrides: Record<string, unknown> = {}) {
@@ -61,5 +63,67 @@ test("typed projection rejects a missing semantic obligation", () => {
       }),
     ),
     /semantic_replan_obligation_id must be a non-empty string/,
+  );
+});
+
+test("Todo lifecycle reentry preserves exact completion identities", () => {
+  assert.deepEqual(
+    projectTodoLifecycleSettlementReentry({
+      schema_version: TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
+      goal_id: "goal-example",
+      triggers: [
+        {
+          kind: "completed_advancement_without_successor",
+          todo_id: "todo_111111111111",
+          completion_turn_key: "turn-implement",
+        },
+        {
+          kind: "completed_advancement_without_successor",
+          todo_id: "todo_222222222222",
+        },
+      ],
+      lifecycle_actor_args: ["--agent-id", "current-agent"],
+      quota_scoped_args: [
+        "--agent-id",
+        "current-agent",
+        "--available-capability",
+        "shell",
+      ],
+    }),
+    {
+      schema_version: "todo_lifecycle_settlement_reentry_v0",
+      resolution_mode: "todo_lifecycle_settlement",
+      triggers: [
+        {
+          kind: "completed_advancement_without_successor",
+          todo_id: "todo_111111111111",
+          completion_turn_key: "turn-implement",
+        },
+        {
+          kind: "completed_advancement_without_successor",
+          todo_id: "todo_222222222222",
+          completion_turn_key: null,
+        },
+      ],
+      next_cli_actions: [
+        "when no real successor remains for completed Todo todo_111111111111: loopx todo complete --goal-id goal-example --todo-id todo_111111111111 --turn-instance-id turn-implement --agent-id current-agent --no-follow-up --note '<public-safe no-follow-up rationale>'",
+        "when no real successor remains for completed Todo todo_222222222222: loopx todo complete --goal-id goal-example --todo-id todo_222222222222 --agent-id current-agent --no-follow-up --note '<public-safe no-follow-up rationale>'",
+        "otherwise link or create one real runnable successor for the exact completed Todo; do not create lifecycle-only filler",
+        "loopx --format json quota should-run --goal-id goal-example --agent-id current-agent --available-capability shell",
+      ],
+    },
+  );
+});
+
+test("Todo lifecycle reentry rejects untyped succession triggers", () => {
+  assert.throws(
+    () => projectTodoLifecycleSettlementReentry({
+      schema_version: TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
+      goal_id: "goal-example",
+      triggers: [{ kind: "vision_acceptance_gap", todo_id: "todo_1" }],
+      lifecycle_actor_args: [],
+      quota_scoped_args: [],
+    }),
+    /kind is unsupported/,
   );
 });

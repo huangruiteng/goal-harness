@@ -9,6 +9,58 @@ from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
 
 REPLAN_SETTLEMENT_REQUEST_SCHEMA = "loopx_replan_settlement_request_v0"
 REPLAN_SETTLEMENT_CONTRACT_SCHEMA = "replan_settlement_contract_v0"
+TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA = "loopx_todo_lifecycle_reentry_request_v0"
+TODO_LIFECYCLE_REENTRY_SCHEMA = "todo_lifecycle_settlement_reentry_v0"
+
+
+def project_todo_lifecycle_settlement_reentry(
+    *,
+    goal_id: str,
+    triggers: list[dict[str, Any]],
+    lifecycle_actor_args: list[str],
+    quota_scoped_args: list[str],
+) -> dict[str, Any]:
+    """Return TS-owned exact actions for a terminal Todo succession gap."""
+
+    try:
+        result = effect_runtime_result(
+            "work_item.replan_settlement.reentry",
+            {
+                "schema_version": TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
+                "goal_id": goal_id,
+                "triggers": triggers,
+                "lifecycle_actor_args": lifecycle_actor_args,
+                "quota_scoped_args": quota_scoped_args,
+            },
+        )
+    except EffectRuntimeRejected as exc:
+        raise ValueError(str(exc)) from None
+    if not isinstance(result, Mapping):
+        raise RuntimeError("TypeScript Todo lifecycle reentry result must be an object")
+    projected_triggers = result.get("triggers")
+    next_cli_actions = result.get("next_cli_actions")
+    if (
+        result.get("schema_version") != TODO_LIFECYCLE_REENTRY_SCHEMA
+        or result.get("resolution_mode") != "todo_lifecycle_settlement"
+        or not isinstance(projected_triggers, list)
+        or not projected_triggers
+        or any(
+            not isinstance(trigger, Mapping)
+            or trigger.get("kind") != "completed_advancement_without_successor"
+            or not isinstance(trigger.get("todo_id"), str)
+            or not trigger.get("todo_id")
+            or (
+                trigger.get("completion_turn_key") is not None
+                and not isinstance(trigger.get("completion_turn_key"), str)
+            )
+            for trigger in projected_triggers
+        )
+        or not isinstance(next_cli_actions, list)
+        or not next_cli_actions
+        or any(not isinstance(action, str) or not action for action in next_cli_actions)
+    ):
+        raise RuntimeError("TypeScript Todo lifecycle reentry result shape mismatch")
+    return dict(result)
 
 
 def project_replan_settlement_contract(

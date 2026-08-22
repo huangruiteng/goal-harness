@@ -501,6 +501,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "evidence",
         "reason",
         "completed_at",
+        "completion_turn_key",
         "updated_at",
         "superseded_by",
         "completion_validation_required",
