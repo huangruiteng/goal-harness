@@ -171,13 +171,13 @@ def test_resolve_agent_thread_cli_failure_is_bounded_and_path_free(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from loopx.cli_commands import registry_admin
+    from loopx.cli_commands import registry_admin_thread_resolution
 
     def fail_resolution(**_kwargs: object) -> dict[str, object]:
         raise OSError(f"private registry failure at {tmp_path}")
 
     monkeypatch.setattr(
-        registry_admin,
+        registry_admin_thread_resolution,
         "resolve_registry_thread_agent_binding",
         fail_resolution,
     )

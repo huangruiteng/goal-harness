@@ -14,6 +14,9 @@ CLI = ROOT / "loopx" / "cli.py"
 MODULE = ROOT / "loopx" / "cli_commands" / "registry_admin.py"
 CONFIGURE_MODULE = ROOT / "loopx" / "cli_commands" / "registry_admin_configure.py"
 AUTHORITY_MODULE = ROOT / "loopx" / "cli_commands" / "registry_authority.py"
+THREAD_RESOLUTION_MODULE = (
+    ROOT / "loopx" / "cli_commands" / "registry_admin_thread_resolution.py"
+)
 INIT = ROOT / "loopx" / "cli_commands" / "__init__.py"
 GOAL_ID = "registry-admin-smoke"
 
@@ -138,8 +141,15 @@ def main() -> None:
     module_source = MODULE.read_text(encoding="utf-8")
     configure_source = CONFIGURE_MODULE.read_text(encoding="utf-8")
     authority_source = AUTHORITY_MODULE.read_text(encoding="utf-8")
+    thread_resolution_source = THREAD_RESOLUTION_MODULE.read_text(encoding="utf-8")
     registry_admin_family_source = (
-        module_source + "\n" + configure_source + "\n" + authority_source
+        module_source
+        + "\n"
+        + configure_source
+        + "\n"
+        + authority_source
+        + "\n"
+        + thread_resolution_source
     )
     init_source = INIT.read_text(encoding="utf-8")
 
@@ -199,6 +209,14 @@ def main() -> None:
         require(marker in authority_source, f"registry authority module missing {marker}")
     for marker in ("register_registry_authority_commands", "handle_registry_authority_command"):
         require(marker in module_source, f"registry admin module should delegate authority commands through {marker}")
+    for marker in (
+        "register_registry_thread_resolution_command",
+        "handle_registry_thread_resolution_command",
+    ):
+        require(
+            marker in module_source,
+            f"registry admin module should delegate thread resolution through {marker}",
+        )
     for marker in (
         "register_configure_goal_command",
         'subparsers.add_parser(\n        "configure-goal"',
