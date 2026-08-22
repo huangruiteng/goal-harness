@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from loopx.control_plane.turn_driver import executor as turn_executor
 from loopx.control_plane.turn_driver import (
     LOOPX_TURN_RESULT_SCHEMA_VERSION,
     build_loopx_turn_plan,
@@ -241,9 +242,13 @@ def _callbacks(calls: dict[str, int]):
 
 
 def _journal(runtime_root: Path) -> dict[str, object]:
-    journal_paths = list(
-        (runtime_root / "goals" / "fixture-goal" / "turns").glob("*.json")
-    )
+    journal_paths = [
+        path
+        for path in (runtime_root / "goals" / "fixture-goal" / "turns").glob(
+            "*.json"
+        )
+        if not path.name.endswith(".lock.holder.json")
+    ]
     assert len(journal_paths) == 1
     return json.loads(journal_paths[0].read_text(encoding="utf-8"))
 
@@ -486,6 +491,53 @@ def test_run_once_commits_once_and_replays_without_duplicate_effects(tmp_path: P
     assert not any(replay["effects"].values())
     assert count_path.read_text(encoding="utf-8") == "1"
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
+
+
+def test_provider_can_commit_before_its_journal_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _plan()
+    calls = {"writeback": 0, "spend": 0, "scheduler": 0}
+    writeback, spend, scheduler = _callbacks(calls)
+    write_journal = turn_executor._write_journal
+
+    def fail_before_writeback_checkpoint(
+        path: Path,
+        journal: Mapping[str, object],
+    ) -> None:
+        if "writeback" in journal and "quota_spend" not in journal:
+            raise RuntimeError("injected crash before writeback checkpoint")
+        write_journal(path, journal)
+
+    monkeypatch.setattr(
+        turn_executor,
+        "_write_journal",
+        fail_before_writeback_checkpoint,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="injected crash before writeback checkpoint",
+    ):
+        run_loopx_turn_once(
+            plan,
+            host_runner=lambda _request: _host_result(plan),
+            project=tmp_path,
+            runtime_root=tmp_path / "runtime",
+            goal_id="fixture-goal",
+            timeout_seconds=5,
+            execute=True,
+            task_validator=_passing_validator,
+            writeback=writeback,
+            spend=spend,
+            scheduler=scheduler,
+        )
+
+    journal = _journal(tmp_path / "runtime")
+    assert calls == {"writeback": 1, "spend": 0, "scheduler": 0}
+    assert journal["completed_phases"] == list(TRANSACTION_PHASES[:3])
+    assert "writeback" not in journal
 
 
 def test_run_once_legacy_plan_without_settlement_plan_is_upgraded(
