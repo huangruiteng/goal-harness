@@ -13,7 +13,6 @@ from ...authority import validate_public_safe_text
 from ...file_lock import LockAcquireTimeoutError, exclusive_file_lock
 from ...runtime import validate_goal_id_path_segment
 from ..effect_program import (
-    SettlementResult,
     SettlementStepKind,
     interpret_turn_result_packet,
     settlement_result_payload,
@@ -31,7 +30,6 @@ from .session_recovery import (
 from .settlement import (
     completion_writeback_outcome,
     execute_turn_driver_settlement,
-    execute_verified_turn_terminal_closeout,
     terminal_closeout_requirement,
 )
 from .transaction import (
@@ -1186,6 +1184,44 @@ def _typed_settlement_stage(
         journal["completed_phases"] = list(phases)
         _write_journal(journal_path, journal)
 
+    terminal_effect = None
+    terminal_checkpoint = None
+    if terminal_closeout_required:
+        assert terminal_closeout is not None
+
+        def verified_terminal_effect() -> Mapping[str, Any]:
+            callback_payload = terminal_closeout(result)
+            outcome = completion_writeback_outcome(callback_payload, plan=plan)
+            if outcome is None or outcome.get("continuation") != "no_followup":
+                return {
+                    "ok": False,
+                    "appended": False,
+                    "reason": (
+                        "terminal closeout adapter did not durably record the "
+                        "selected Todo as no_followup"
+                    ),
+                }
+            return {**callback_payload, "completion": outcome}
+
+        def checkpoint_terminal(payload: Mapping[str, Any]) -> None:
+            compact = {
+                **_compact_callback(payload),
+                **(
+                    {"completion": payload["completion"]}
+                    if isinstance(payload.get("completion"), Mapping)
+                    else {}
+                ),
+            }
+            journal["terminal_closeout"] = compact
+            journal["writeback"] = {
+                **_mapping(journal.get("writeback")),
+                "completion": compact.get("completion"),
+            }
+            _write_journal(journal_path, journal)
+
+        terminal_effect = verified_terminal_effect
+        terminal_checkpoint = checkpoint_terminal
+
     settlement_result = execute_turn_driver_settlement(
         transaction_plan,
         transaction_phases=TRANSACTION_PHASES,
@@ -1204,44 +1240,15 @@ def _typed_settlement_stage(
         spend=spend,
         checkpoint=checkpoint,
         committed_effect_id=_journal_committed_effect_id(journal),
+        terminal_closeout_required=terminal_closeout_required,
+        terminal_closeout_payload=(
+            journal.get("terminal_closeout")
+            if isinstance(journal.get("terminal_closeout"), Mapping)
+            else None
+        ),
+        terminal_closeout=terminal_effect,
+        terminal_checkpoint=terminal_checkpoint,
     )
-    settlement_state = settlement_result.value
-    if settlement_result.failure is None and terminal_closeout_required:
-        assert terminal_closeout is not None
-
-        def terminal_checkpoint(payload: Mapping[str, Any]) -> None:
-            compact = {
-                **_compact_callback(payload),
-                **(
-                    {"completion": payload["completion"]}
-                    if isinstance(payload.get("completion"), Mapping)
-                    else {}
-                ),
-            }
-            journal["terminal_closeout"] = compact
-            journal["writeback"] = {
-                **_mapping(journal.get("writeback")),
-                "completion": compact.get("completion"),
-            }
-            _write_journal(journal_path, journal)
-
-        terminal_result = execute_verified_turn_terminal_closeout(
-            transaction_plan,
-            plan=plan,
-            committed_payload=(
-                journal.get("terminal_closeout")
-                if isinstance(journal.get("terminal_closeout"), Mapping)
-                else None
-            ),
-            closeout=lambda: terminal_closeout(result),
-            checkpoint=terminal_checkpoint,
-            committed_effect_id=_journal_committed_effect_id(journal),
-        )
-        settlement_result = SettlementResult(
-            value=settlement_state if terminal_result.failure is None else None,
-            receipts=(*settlement_result.receipts, *terminal_result.receipts),
-            failure=terminal_result.failure,
-        )
 
     journal["settlement_result"] = settlement_result_payload(settlement_result)
     if settlement_result.failure is not None:

@@ -46,6 +46,7 @@ _SOURCE_FILES = (
     "turn_driver/turn_journal.ts",
     "turn_driver/turn_journal_effects.ts",
     "turn_driver/delivery_continuity.ts",
+    "turn_driver/settlement.ts",
     "work_items/delivery_outcome.ts",
     "turn_transaction_contract.json",
 )

@@ -1,19 +1,13 @@
 import {
-  commitStepPayload,
   effectIdsMatch,
   effectProgramFromOrderedSteps,
-  requireMatchingEffectId,
   interpretQuotaShouldRunPacket,
   interpretTurnResultPacket,
-  seedCommittedSteps,
   settlementBindGate,
   settlementBindReduce,
   settlementReceipt,
-  isCommittedPayload,
   settlementIdentity,
   settlementIdentityPayload,
-  settlementIdentityFromPlan,
-  settlementNextAction,
   settlementPlanPayload,
   settlementResultPayload,
   SETTLEMENT_FAILURE_KINDS,
@@ -68,6 +62,7 @@ import {
   evaluateDeliveryBoundary,
   evaluateDeliveryContinuity,
 } from "./turn_driver/delivery_continuity.ts";
+import { reduceTurnSettlementTransaction } from "./turn_driver/settlement.ts";
 
 type EffectRuntimeHandler = (params: JsonObject) => unknown | Promise<unknown>;
 
@@ -233,25 +228,6 @@ function turnJournalInspectionRequest(
   };
 }
 
-function settlementStepKinds(value: unknown, label: string): SettlementStepKind[] {
-  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
-  return value.map((step, index) =>
-    settlementStepKind(step, `${label}[${index}]`)
-  );
-}
-
-function missingFailureKinds(value: unknown): Partial<
-  Record<SettlementStepKind, SettlementFailureKind>
-> {
-  const source = requiredObject(value, "missing_failure_kinds");
-  const decoded: Partial<Record<SettlementStepKind, SettlementFailureKind>> = {};
-  for (const [step, kind] of Object.entries(source)) {
-    decoded[settlementStepKind(step, "missing_failure_kinds key")] =
-      settlementFailureKind(kind, `missing_failure_kinds.${step}`);
-  }
-  return decoded;
-}
-
 export function createEffectRuntimeHandlers(
   context: EffectRuntimeHandlerContext,
 ): ReadonlyMap<string, EffectRuntimeHandler> {
@@ -359,16 +335,6 @@ export function createEffectRuntimeHandlers(
         return { identity, payload: settlementIdentityPayload(identity) };
       },
     ],
-    ["settlement.identity_from_plan", settlementIdentityFromPlan],
-    [
-      "settlement.match_effect",
-      (params) => requireMatchingEffectId(
-        typeof params.committed_effect_id === "string"
-          ? params.committed_effect_id
-          : null,
-        requiredString(params.expected_effect_id, "expected_effect_id"),
-      ),
-    ],
     [
       "settlement.effect_ids_match",
       (params) => effectIdsMatch(
@@ -386,7 +352,6 @@ export function createEffectRuntimeHandlers(
         typeof params.source_ref === "string" ? params.source_ref : undefined,
       ),
     ],
-    ["settlement.is_committed_payload", (params) => isCommittedPayload(params.payload)],
     [
       "settlement.bind_gate",
       (params) => settlementBindGate(settlementResultInput(params.result, "result")),
@@ -408,58 +373,7 @@ export function createEffectRuntimeHandlers(
         settlementResultInput(params.result, "result"),
       ),
     ],
-    [
-      "settlement.seed",
-      (params) => seedCommittedSteps({
-        identity: settlementIdentityInput(params.identity),
-        ordered_steps: settlementStepKinds(params.ordered_steps, "ordered_steps"),
-        committed_payloads: asObject(params.committed_payloads),
-        completed_phases: Array.isArray(params.completed_phases)
-          ? stringArray(params.completed_phases, "completed_phases")
-          : null,
-        transaction_phases: Array.isArray(params.transaction_phases)
-          ? stringArray(params.transaction_phases, "transaction_phases")
-          : null,
-        require_validation: params.require_validation !== false,
-        missing_failure_kinds: missingFailureKinds(params.missing_failure_kinds),
-        source_ref_prefix: typeof params.source_ref_prefix === "string"
-          ? params.source_ref_prefix
-          : undefined,
-      }),
-    ],
-    [
-      "settlement.next_action",
-      (params) => settlementNextAction({
-        identity: settlementIdentityInput(params.identity),
-        ordered_steps: settlementStepKinds(params.ordered_steps, "ordered_steps"),
-        committed_payloads: asObject(params.committed_payloads),
-        completed_phases: Array.isArray(params.completed_phases)
-          ? stringArray(params.completed_phases, "completed_phases")
-          : null,
-        transaction_phases: Array.isArray(params.transaction_phases)
-          ? stringArray(params.transaction_phases, "transaction_phases")
-          : null,
-        require_validation: params.require_validation !== false,
-        missing_failure_kinds: missingFailureKinds(params.missing_failure_kinds),
-        source_ref_prefix: typeof params.source_ref_prefix === "string"
-          ? params.source_ref_prefix
-          : undefined,
-      }),
-    ],
-    [
-      "settlement.commit_reduction",
-      (params) => commitStepPayload({
-        identity: settlementIdentityInput(params.identity),
-        step_kind: settlementStepKind(params.step_kind, "step_kind"),
-        transaction_phases: Array.isArray(params.transaction_phases)
-          ? stringArray(params.transaction_phases, "transaction_phases")
-          : [],
-        payload: params.payload,
-        source_ref_prefix: typeof params.source_ref_prefix === "string"
-          ? params.source_ref_prefix
-          : undefined,
-      }),
-    ],
+    ["turn.settlement.reduce", reduceTurnSettlementTransaction],
   ]);
 }
 

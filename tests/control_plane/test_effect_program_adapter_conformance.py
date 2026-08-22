@@ -24,7 +24,6 @@ from loopx.control_plane.quota.settlement import (
 from loopx.control_plane.turn_driver.settlement import (
     TurnSettlementState,
     execute_turn_driver_settlement,
-    execute_turn_terminal_closeout,
 )
 from loopx.control_plane.turn_driver.transaction import (
     TRANSACTION_PHASES,
@@ -259,7 +258,7 @@ def _run_turn_adapter(_runtime_root: Path, scenario: str) -> AdapterObservation:
             }
         return {"ok": True, "appended": True}
 
-    base_result: SettlementResult[TurnSettlementState] = execute_turn_driver_settlement(
+    result: SettlementResult[TurnSettlementState] = execute_turn_driver_settlement(
         runtime_plan,
         transaction_phases=TRANSACTION_PHASES,
         completed_phases=TRANSACTION_PHASES[:3],
@@ -268,21 +267,10 @@ def _run_turn_adapter(_runtime_root: Path, scenario: str) -> AdapterObservation:
         writeback=lambda: effect(SettlementStepKind.DURABLE_WRITEBACK),
         spend=lambda: effect(SettlementStepKind.QUOTA_SPEND),
         checkpoint=lambda _step, _payload, _phases: None,
+        terminal_closeout_required=True,
+        terminal_closeout=lambda: effect(SettlementStepKind.TERMINAL_CLOSEOUT),
+        terminal_checkpoint=lambda _payload: None,
     )
-    if base_result.failure is not None:
-        result = base_result
-    else:
-        terminal_result = execute_turn_terminal_closeout(
-            runtime_plan,
-            committed_payload=None,
-            closeout=lambda: effect(SettlementStepKind.TERMINAL_CLOSEOUT),
-            checkpoint=lambda _payload: None,
-        )
-        result = SettlementResult(
-            value=base_result.value if terminal_result.failure is None else None,
-            receipts=(*base_result.receipts, *terminal_result.receipts),
-            failure=terminal_result.failure,
-        )
     return AdapterObservation(result, tuple(calls), settlement_plan)
 
 

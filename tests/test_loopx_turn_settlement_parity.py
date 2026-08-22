@@ -28,6 +28,7 @@ output.
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
 from loopx.control_plane.effect_program import (
     SettlementFailureKind,
@@ -36,6 +37,7 @@ from loopx.control_plane.effect_program import (
 from loopx.control_plane.turn_driver import build_loopx_turn_plan
 from loopx.control_plane.turn_driver.executor import _journal_committed_effect_id
 from loopx.control_plane.turn_driver.settlement import execute_turn_driver_settlement
+import loopx.control_plane.turn_driver.settlement as turn_settlement
 from loopx.control_plane.turn_driver.transaction import TRANSACTION_PHASES
 
 COMMITTED_PHASES = list(TRANSACTION_PHASES[:5])  # host_execute .. quota_spend
@@ -211,3 +213,57 @@ def test_journal_committed_effect_id_is_none_for_legacy_journal() -> None:
     journal: dict[str, Any] = {"plan": {"transaction": legacy_transaction}}
 
     assert _journal_committed_effect_id(journal) is None
+
+
+def test_new_turn_settlement_uses_preflight_and_final_runtime_requests() -> None:
+    plan = _plan(todo_id="todo_fixture0002")
+    transaction = plan["transaction"]
+    assert isinstance(transaction, dict)
+    calls: list[str] = []
+    original = turn_settlement.effect_runtime_result
+
+    def observed(method: str, params: dict[str, Any]) -> Any:
+        calls.append(method)
+        return original(method, params)
+
+    with patch.object(turn_settlement, "effect_runtime_result", observed):
+        result = execute_turn_driver_settlement(
+            transaction,
+            transaction_phases=TRANSACTION_PHASES,
+            completed_phases=TRANSACTION_PHASES[:3],
+            writeback_payload=None,
+            quota_spend_payload=None,
+            writeback=lambda: dict(COMMITTED_PAYLOAD),
+            spend=lambda: dict(COMMITTED_PAYLOAD),
+            checkpoint=lambda _step, _payload, _phases: None,
+        )
+
+    assert result.failure is None
+    assert calls == ["turn.settlement.reduce", "turn.settlement.reduce"]
+
+
+def test_replayed_turn_settlement_uses_one_runtime_request() -> None:
+    plan = _plan(todo_id="todo_fixture0002")
+    transaction = plan["transaction"]
+    assert isinstance(transaction, dict)
+    calls: list[str] = []
+    original = turn_settlement.effect_runtime_result
+
+    def observed(method: str, params: dict[str, Any]) -> Any:
+        calls.append(method)
+        return original(method, params)
+
+    with patch.object(turn_settlement, "effect_runtime_result", observed):
+        result = execute_turn_driver_settlement(
+            transaction,
+            transaction_phases=TRANSACTION_PHASES,
+            completed_phases=COMMITTED_PHASES,
+            writeback_payload=dict(COMMITTED_PAYLOAD),
+            quota_spend_payload=dict(COMMITTED_PAYLOAD),
+            writeback=lambda: (_ for _ in ()).throw(AssertionError("writeback ran")),
+            spend=lambda: (_ for _ in ()).throw(AssertionError("spend ran")),
+            checkpoint=lambda _step, _payload, _phases: None,
+        )
+
+    assert result.failure is None
+    assert calls == ["turn.settlement.reduce"]

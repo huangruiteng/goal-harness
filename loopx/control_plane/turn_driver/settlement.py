@@ -10,13 +10,8 @@ from ..effect_program import (
     SettlementResult,
     SettlementStepKind,
 )
-from ..settlement_driver import (
-    commit_step_effect,
-    require_matching_effect_id,
-    seed_committed_steps,
-    settlement_next_action,
-    settlement_identity_from_plan,
-)
+from ..effect_runtime import effect_runtime_result
+from ..settlement_driver import decode_settlement_result
 from .driver import selected_turn_todo
 from .transaction import (
     LoopXTurnResultKind,
@@ -41,18 +36,8 @@ class TurnSettlementState:
     quota_spend: Mapping[str, Any] | None = None
 
 
-SETTLEMENT_STEPS = (
-    SettlementStepKind.VALIDATION,
-    SettlementStepKind.DURABLE_WRITEBACK,
-    SettlementStepKind.QUOTA_SPEND,
-)
-
-TERMINAL_SETTLEMENT_STEPS = (
-    SettlementStepKind.VALIDATION.value,
-    SettlementStepKind.DURABLE_WRITEBACK.value,
-    SettlementStepKind.QUOTA_SPEND.value,
-    SettlementStepKind.TERMINAL_CLOSEOUT.value,
-)
+TURN_SETTLEMENT_TRANSACTION_SCHEMA_VERSION = "loopx_turn_settlement_transaction_v0"
+TURN_SETTLEMENT_REDUCTION_SCHEMA_VERSION = "loopx_turn_settlement_reduction_v0"
 
 
 def completion_writeback_outcome(
@@ -90,7 +75,9 @@ def terminal_closeout_requirement(
     stored_terminal = journal.get("terminal_closeout")
     stored_writeback = journal.get("writeback")
     terminal_payload = stored_terminal if isinstance(stored_terminal, Mapping) else {}
-    writeback_payload = stored_writeback if isinstance(stored_writeback, Mapping) else {}
+    writeback_payload = (
+        stored_writeback if isinstance(stored_writeback, Mapping) else {}
+    )
     observed_completion = terminal_payload.get("completion") or writeback_payload.get(
         "completion"
     )
@@ -98,9 +85,7 @@ def terminal_closeout_requirement(
         if not isinstance(observed_completion, Mapping):
             observed_completion = completion_intent(result)
         envelope = plan.get("turn_envelope")
-        selected = (
-            selected_turn_todo(envelope) if isinstance(envelope, Mapping) else {}
-        )
+        selected = selected_turn_todo(envelope) if isinstance(envelope, Mapping) else {}
         outcome = require_loopx_turn_completion_outcome(
             observed_completion,
             expected_todo_id=str(selected.get("todo_id") or ""),
@@ -121,202 +106,138 @@ def execute_turn_driver_settlement(
     spend: TurnEffect,
     checkpoint: TurnSettlementCheckpoint,
     committed_effect_id: str | None = None,
+    terminal_closeout_required: bool = False,
+    terminal_closeout_payload: Mapping[str, Any] | None = None,
+    terminal_closeout: TurnEffect | None = None,
+    terminal_checkpoint: TerminalCloseoutCheckpoint | None = None,
 ) -> SettlementResult[TurnSettlementState]:
-    """Bind validation -> writeback -> spend for the isolated Turn adapter.
+    """Run external effect providers and reduce one complete Turn settlement.
 
-    ``committed_effect_id`` is the settlement effect id under which an
-    existing journal committed its receipts. When a journal is present, a
-    caller must prove that the committed receipts belong to the current plan's
-    settlement identity; otherwise a key/owner-mismatched replay would
-    re-attribute the committed validation/writeback/spend receipts to a
-    different effect while skipping its effects. A ``None`` provenance
-    keeps legacy plans and direct callers that have no journal readback
-    unchanged.
+    TypeScript first validates identity, replay, and the committed journal
+    prefix, then authorizes the still-Python providers in order. Python invokes
+    and checkpoints those opaque outcomes before a final TypeScript reduction
+    owns failure classification, receipts, and the canonical result. A replay
+    with no pending provider completes in the first reduction.
     """
-
-    identity_result = settlement_identity_from_plan(transaction_plan)
-    if identity_result.failure is not None:
-        return SettlementResult.failed(
-            kind=identity_result.failure.kind,
-            step_kind=identity_result.failure.step_kind,
-            reason=identity_result.failure.reason,
-            receipts=identity_result.receipts,
-            details=identity_result.failure.details,
-        )
-    identity = identity_result.value
-    assert identity is not None
-    matched = require_matching_effect_id(committed_effect_id, identity.effect_id)
-    if matched.failure is not None:
-        return SettlementResult.failed(
-            kind=matched.failure.kind,
-            step_kind=matched.failure.step_kind,
-            reason=matched.failure.reason,
-        )
     phases = tuple(str(phase) for phase in completed_phases)
-    committed_payloads: dict[SettlementStepKind, Mapping[str, Any] | None] = {
-        SettlementStepKind.VALIDATION: {},
-        SettlementStepKind.DURABLE_WRITEBACK: writeback_payload,
-        SettlementStepKind.QUOTA_SPEND: quota_spend_payload,
-    }
-    state = TurnSettlementState(
-        completed_phases=phases,
-        writeback=writeback_payload,
-        quota_spend=quota_spend_payload,
-    )
-    callbacks = {
-        SettlementStepKind.DURABLE_WRITEBACK: writeback,
-        SettlementStepKind.QUOTA_SPEND: spend,
-    }
-    while True:
-        decision, step_kind, seeded = settlement_next_action(
-            identity,
-            ordered_steps=SETTLEMENT_STEPS,
-            committed_payloads=committed_payloads,
-            completed_phases=state.completed_phases,
-            transaction_phases=transaction_phases,
-            require_validation=True,
-            source_ref_prefix="turn_journal",
-        )
-        if seeded.failure is not None:
-            return SettlementResult.failed(
-                kind=seeded.failure.kind,
-                step_kind=seeded.failure.step_kind,
-                reason=seeded.failure.reason,
-                receipts=seeded.receipts,
-            )
-        if decision == "complete":
-            return SettlementResult.pure(state, receipts=seeded.receipts)
-        if decision != "execute" or step_kind not in callbacks:
-            raise RuntimeError("typed settlement selected an unsupported callback")
-        step_result = commit_step_effect(
-            identity,
-            step_kind=step_kind,
-            transaction_phases=transaction_phases,
-            effect=callbacks[step_kind],
-            checkpoint=checkpoint,
-        )
-        if step_result.failure is not None:
-            return SettlementResult.failed(
-                kind=step_result.failure.kind,
-                step_kind=step_result.failure.step_kind,
-                reason=step_result.failure.reason,
-                receipts=seeded.receipts,
-            )
-        phase_index = transaction_phases.index(step_kind.value)
-        completed = tuple(transaction_phases[: phase_index + 1])
-        committed_payloads[step_kind] = step_result.value
-        state = TurnSettlementState(
-            completed_phases=completed,
-            writeback=(
-                step_result.value
-                if step_kind is SettlementStepKind.DURABLE_WRITEBACK
-                else state.writeback
-            ),
-            quota_spend=(
-                step_result.value
-                if step_kind is SettlementStepKind.QUOTA_SPEND
-                else state.quota_spend
-            ),
-        )
+    writeback_value = writeback_payload
+    spend_value = quota_spend_payload
+    terminal_value = terminal_closeout_payload
+    failed_attempt: tuple[SettlementStepKind, Mapping[str, Any]] | None = None
 
+    def committed(payload: Mapping[str, Any]) -> bool:
+        # This transport guard only prevents a later provider from running
+        # after an earlier provider rejected. TS remains authoritative for the
+        # typed failure kind, receipt chain, and final settlement result.
+        return payload.get("ok") is True and payload.get("appended") is True
 
-def execute_turn_terminal_closeout(
-    transaction_plan: Mapping[str, Any],
-    *,
-    committed_payload: Mapping[str, Any] | None,
-    closeout: TurnEffect,
-    checkpoint: TerminalCloseoutCheckpoint,
-    committed_effect_id: str | None = None,
-) -> SettlementResult[Mapping[str, Any]]:
-    """Commit or replay the terminal closeout after durable spend.
-
-    Terminal no-follow-up is intentionally outside the base writeback/spend
-    driver because ordinary progress has no closeout effect.  The typed plan
-    still owns its order and identity; this helper adds the matching receipt
-    without weakening the Turn transaction's journal-prefix contract.
-    """
-
-    identity_result = settlement_identity_from_plan(transaction_plan)
-    if identity_result.failure is not None:
-        return SettlementResult.failed(
-            kind=identity_result.failure.kind,
-            step_kind=identity_result.failure.step_kind,
-            reason=identity_result.failure.reason,
-            receipts=identity_result.receipts,
-            details=identity_result.failure.details,
-        )
-    identity = identity_result.value
-    assert identity is not None
-    matched = require_matching_effect_id(committed_effect_id, identity.effect_id)
-    if matched.failure is not None:
-        return SettlementResult.failed(
-            kind=matched.failure.kind,
-            step_kind=matched.failure.step_kind,
-            reason=matched.failure.reason,
-        )
-    if committed_payload is not None:
-        seeded = seed_committed_steps(
-            identity,
-            ordered_steps=(SettlementStepKind.TERMINAL_CLOSEOUT,),
-            committed_payloads={
-                SettlementStepKind.TERMINAL_CLOSEOUT: committed_payload,
-            },
-            completed_phases=(SettlementStepKind.TERMINAL_CLOSEOUT.value,),
-            transaction_phases=(SettlementStepKind.TERMINAL_CLOSEOUT.value,),
-            require_validation=False,
-            source_ref_prefix="turn_journal",
-        )
-        if seeded.failure is not None:
-            return SettlementResult.failed(
-                kind=seeded.failure.kind,
-                step_kind=seeded.failure.step_kind,
-                reason=seeded.failure.reason,
-                receipts=seeded.receipts,
-            )
-        return SettlementResult.pure(
-            committed_payload,
-            receipts=seeded.receipts,
-        )
-
-    result: SettlementResult[Mapping[str, Any]] = commit_step_effect(
-        identity,
-        step_kind=SettlementStepKind.TERMINAL_CLOSEOUT,
-        transaction_phases=TERMINAL_SETTLEMENT_STEPS,
-        effect=closeout,
-        checkpoint=lambda _step, payload, _phases: checkpoint(payload),
-    )
-    return result
-
-
-def execute_verified_turn_terminal_closeout(
-    transaction_plan: Mapping[str, Any],
-    *,
-    plan: Mapping[str, Any],
-    committed_payload: Mapping[str, Any] | None,
-    closeout: TurnEffect,
-    checkpoint: TerminalCloseoutCheckpoint,
-    committed_effect_id: str | None = None,
-) -> SettlementResult[Mapping[str, Any]]:
-    """Commit a terminal effect only when it durably proves no-followup."""
-
-    def verified_closeout() -> Mapping[str, Any]:
-        callback_payload = closeout()
-        outcome = completion_writeback_outcome(callback_payload, plan=plan)
-        if outcome is None or outcome.get("continuation") != "no_followup":
-            return {
-                "ok": False,
-                "appended": False,
-                "reason": (
-                    "terminal closeout adapter did not durably record the "
-                    "selected Todo as no_followup"
+    def reduce() -> Mapping[str, Any]:
+        payload = effect_runtime_result(
+            "turn.settlement.reduce",
+            {
+                "schema_version": TURN_SETTLEMENT_TRANSACTION_SCHEMA_VERSION,
+                "transaction_plan": dict(transaction_plan),
+                "transaction_phases": list(transaction_phases),
+                "completed_phases": list(phases),
+                "committed_effect_id": committed_effect_id,
+                "writeback_payload": (
+                    dict(writeback_value)
+                    if isinstance(writeback_value, Mapping)
+                    else None
                 ),
-            }
-        return {**callback_payload, "completion": outcome}
+                "quota_spend_payload": (
+                    dict(spend_value) if isinstance(spend_value, Mapping) else None
+                ),
+                "terminal_closeout_required": terminal_closeout_required,
+                "terminal_closeout_payload": (
+                    dict(terminal_value)
+                    if isinstance(terminal_value, Mapping)
+                    else None
+                ),
+                "failed_provider_attempt": (
+                    {
+                        "step_kind": failed_attempt[0].value,
+                        "payload": dict(failed_attempt[1]),
+                    }
+                    if failed_attempt is not None
+                    else None
+                ),
+            },
+        )
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("schema_version") != TURN_SETTLEMENT_REDUCTION_SCHEMA_VERSION
+        ):
+            raise RuntimeError("TypeScript Turn settlement reduction shape mismatch")
+        return payload
 
-    return execute_turn_terminal_closeout(
-        transaction_plan,
-        committed_payload=committed_payload,
-        closeout=verified_closeout,
-        checkpoint=checkpoint,
-        committed_effect_id=committed_effect_id,
+    reduction = reduce()
+    decision = str(reduction.get("decision") or "")
+    if decision == "execute":
+        provider_effects = reduction.get("provider_effects")
+        if not isinstance(provider_effects, list) or not provider_effects:
+            raise RuntimeError("TypeScript Turn settlement provider plan is empty")
+        providers = {
+            SettlementStepKind.DURABLE_WRITEBACK: writeback,
+            SettlementStepKind.QUOTA_SPEND: spend,
+        }
+        for raw_effect in provider_effects:
+            if not isinstance(raw_effect, Mapping):
+                raise RuntimeError("TypeScript Turn settlement provider shape mismatch")
+            step_kind = SettlementStepKind(str(raw_effect.get("step_kind") or ""))
+            raw_phases = raw_effect.get("completed_phases")
+            if not isinstance(raw_phases, list):
+                raise RuntimeError("TypeScript Turn settlement phases shape mismatch")
+            authorized_phases = tuple(str(phase) for phase in raw_phases)
+            if step_kind is SettlementStepKind.TERMINAL_CLOSEOUT:
+                if terminal_closeout is None or terminal_checkpoint is None:
+                    raise ValueError(
+                        "terminal closeout requires an effect provider and checkpoint"
+                    )
+                observed = dict(terminal_closeout())
+                if committed(observed):
+                    terminal_value = observed
+                    terminal_checkpoint(observed)
+                else:
+                    failed_attempt = (step_kind, observed)
+                    break
+                continue
+
+            observed = dict(providers[step_kind]())
+            if not committed(observed):
+                failed_attempt = (step_kind, observed)
+                break
+            phases = authorized_phases
+            checkpoint(step_kind, observed, phases)
+            if step_kind is SettlementStepKind.DURABLE_WRITEBACK:
+                writeback_value = observed
+            else:
+                spend_value = observed
+        reduction = reduce()
+        decision = str(reduction.get("decision") or "")
+
+    if decision not in {"complete", "failed"}:
+        raise RuntimeError("TypeScript Turn settlement did not reach an outcome")
+
+    def decode_state(value: Any) -> TurnSettlementState:
+        if not isinstance(value, Mapping):
+            raise RuntimeError("TypeScript Turn settlement state shape mismatch")
+        completed = value.get("completed_phases")
+        if not isinstance(completed, list):
+            raise RuntimeError("TypeScript Turn settlement phases shape mismatch")
+        raw_writeback = value.get("writeback")
+        raw_spend = value.get("quota_spend")
+        return TurnSettlementState(
+            completed_phases=tuple(str(phase) for phase in completed),
+            writeback=(
+                dict(raw_writeback) if isinstance(raw_writeback, Mapping) else None
+            ),
+            quota_spend=(dict(raw_spend) if isinstance(raw_spend, Mapping) else None),
+        )
+
+    projection = reduction.get("settlement_result")
+    return decode_settlement_result(
+        reduction.get("result"),
+        value_decoder=decode_state,
+        projection_payload=(projection if isinstance(projection, Mapping) else None),
     )

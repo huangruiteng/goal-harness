@@ -301,6 +301,11 @@ class SettlementResult(Generic[T]):
     value: T | None
     receipts: tuple[SettlementReceipt, ...] = ()
     failure: SettlementFailure | None = None
+    _runtime_payload: Mapping[str, Any] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     @classmethod
     def pure(
@@ -407,6 +412,8 @@ class SettlementPlan:
 
 
 def settlement_result_payload(result: SettlementResult[Any]) -> dict[str, Any]:
+    if result._runtime_payload is not None:
+        return dict(result._runtime_payload)
     payload = effect_runtime_result(
         "settlement.result_payload",
         {"result": _runtime_result(result)},
