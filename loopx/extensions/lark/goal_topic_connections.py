@@ -22,6 +22,16 @@ from ...control_plane.goals.configure_goal_service import (
 )
 from ...control_plane.runtime.public_safety import public_safe_compact_text
 from ...control_plane.todos.contract import normalize_todo_claimed_by
+from ..external_connector_runtime import (
+    ExternalCapturePolicy,
+    ExternalConnectorCapability,
+    ExternalConnectorLifecycle,
+    ExternalIngressPolicy,
+    ExternalResponsePolicy,
+    ExternalSourceKind,
+    build_external_connector_binding,
+    project_external_connector_status,
+)
 from .goal_channel_contracts import (
     binding_for_goal,
     goal_from_registry,
@@ -110,7 +120,7 @@ def normalize_lark_topic_event_rejection_reason(value: Any) -> str | None:
 
 
 def _routing_value(
-    enum_type: type[CaptureScope] | type[IngressMode] | type[ReplyMode],
+    enum_type: type[CaptureScope | IngressMode | ReplyMode],
     value: Any,
     *,
     default: str,
@@ -590,6 +600,47 @@ def connect_lark_goal_topic(
             external_write_performed=True,
         )
 
+    connector_binding: dict[str, Any] | None = None
+    if normalized_agent_id and ingress_mode != IngressMode.DIRECT_SESSION.value:
+        if inbox_config is not None:
+            connector_inbox_ref = inbox_config[1]
+            connector_cursor_ref = (
+                f"{inbox_config[2]['inbox_dir']}/processed.json"
+            )
+        else:
+            connector_inbox_ref = None
+            runtime_digest = hashlib.sha256(
+                f"{profile}\0{safe_chat_id}\0{root_message_id}".encode()
+            ).hexdigest()[:20]
+            connector_cursor_ref = (
+                ".loopx/inbox/lark-goal-topics/"
+                f"{runtime_digest}/processed.json"
+            )
+        connector_binding = build_external_connector_binding(
+            goal_ref=goal_id,
+            agent_ref=normalized_agent_id,
+            provider_kind="lark",
+            source_kind=ExternalSourceKind.GROUP_MESSAGE.value,
+            source_ref=safe_chat_id,
+            capture_policy=(
+                ExternalCapturePolicy.CONFIGURED_SOURCE_ALL.value
+                if effective_capture_scope == CaptureScope.CONFIGURED_CHAT_ALL.value
+                else ExternalCapturePolicy.ADDRESSED_ONLY.value
+            ),
+            ingress_policy=ExternalIngressPolicy(ingress_mode).value,
+            response_policy=ExternalResponsePolicy.TOPIC_REPLY.value,
+            cursor_ref=connector_cursor_ref,
+            lifecycle=ExternalConnectorLifecycle.CONNECTED.value,
+            capabilities=[
+                ExternalConnectorCapability.REALTIME_RECEIVE.value,
+                ExternalConnectorCapability.RESPONSE_WRITE.value,
+                ExternalConnectorCapability.RESPONSE_READBACK.value,
+                ExternalConnectorCapability.ACKNOWLEDGE.value,
+            ],
+            session_ref=normalized_session_id or None,
+            inbox_ref=connector_inbox_ref,
+        )
+
     inbox_config_ref: str | None = None
     if inbox_config is not None:
         inbox_config_ref = inbox_config[1]
@@ -651,6 +702,7 @@ def connect_lark_goal_topic(
                     else {}
                 ),
             },
+            **({"connector": connector_binding} if connector_binding else {}),
             "automation": dict(existing.get("automation") or {}),
             "receipts": receipts,
         },
@@ -676,6 +728,15 @@ def connect_lark_goal_topic(
             "reply_mode": reply_mode,
             "agent_id": normalized_agent_id,
             **({"session_id": normalized_session_id} if normalized_session_id else {}),
+            **(
+                {
+                    "connector_status": project_external_connector_status(
+                        connector_binding
+                    )
+                }
+                if connector_binding
+                else {}
+            ),
         },
     )
 
@@ -793,6 +854,8 @@ def list_lark_connections(
         )
         topic = binding.get("topic") if isinstance(binding.get("topic"), Mapping) else {}
         routing = binding.get("routing") if isinstance(binding.get("routing"), Mapping) else {}
+        connector: Mapping[str, Any] | None = None
+        connector_status: dict[str, Any] | None = None
         try:
             capture_scope = _routing_value(
                 CaptureScope,
@@ -817,6 +880,19 @@ def list_lark_connections(
                 default=ReplyMode.TOPIC_REPLY.value,
                 field="reply_mode",
             )
+            raw_connector = binding.get("connector")
+            if raw_connector is not None:
+                if not isinstance(raw_connector, Mapping):
+                    raise ValueError("connector binding must be an object")
+                connector = raw_connector
+                connector_status = project_external_connector_status(connector)
+                if (
+                    connector_status["goal_ref"] != goal_id
+                    or connector_status["agent_ref"]
+                    != str(binding.get("agent_id") or "")
+                    or connector_status["ingress_policy"] != ingress_mode
+                ):
+                    raise ValueError("connector binding does not match the Lark route")
         except ValueError:
             capture_scope = CaptureScope.ADDRESSED_ONLY.value
             ingress_mode = IngressMode.DIRECT_SESSION.value
@@ -845,6 +921,11 @@ def list_lark_connections(
                 "capture_scope": capture_scope,
                 "ingress_mode": ingress_mode,
                 "reply_mode": reply_mode,
+                **(
+                    {"connector_status": connector_status}
+                    if connector_status is not None
+                    else {}
+                ),
                 "target_ref": target_ref,
                 "topic_name": public_safe_compact_text(topic.get("name") or goal_objective(goal), limit=120),
                 "topic_setup_required": not bool(topic.get("root_message_id") or legacy_root),
@@ -1009,6 +1090,18 @@ def decide_lark_topic_event(
                 default=ReplyMode.TOPIC_REPLY.value,
                 field="reply_mode",
             )
+            connector = binding.get("connector")
+            if connector is not None:
+                if not isinstance(connector, Mapping):
+                    raise ValueError("connector binding must be an object")
+                connector_status = project_external_connector_status(connector)
+                if (
+                    connector_status["goal_ref"] != goal_id
+                    or connector_status["agent_ref"]
+                    != str(binding.get("agent_id") or "")
+                    or connector_status["ingress_policy"] != ingress_mode
+                ):
+                    raise ValueError("connector binding does not match the Lark route")
         except ValueError:
             return {
                 "matched": False,
@@ -1039,6 +1132,16 @@ def decide_lark_topic_event(
                     "capture_scope": capture_scope,
                     "ingress_mode": ingress_mode,
                     "inbox_config_ref": str(routing.get("inbox_config_ref") or ""),
+                    **(
+                        {"connector": dict(connector)}
+                        if isinstance(connector, Mapping)
+                        else {}
+                    ),
+                    **(
+                        {"event_id": str(event.get("event_id") or message_id)}
+                        if isinstance(connector, Mapping)
+                        else {}
+                    ),
                 }
             )
         return {

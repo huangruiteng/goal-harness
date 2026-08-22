@@ -265,6 +265,24 @@ def test_session_ingress_modes_require_and_persist_exact_session(
     assert binding["agent_id"] == "agent-alpha"
     assert binding["session_id"] == "session-alpha"
     assert binding["routing"]["ingress_mode"] == ingress_mode
+    assert binding["connector"]["schema_version"] == "agent_external_connector_v0"
+    assert binding["connector"]["agent_ref"] == "agent-alpha"
+    assert binding["connector"]["source_kind"] == "group_message"
+    assert binding["connector"]["ingress_policy"] == ingress_mode
+    assert binding["connector"]["session_ref"] == "session-alpha"
+    assert binding["connector"]["cursor_ref"].endswith("/processed.json")
+    assert "source_ref" not in connected["details"]["connector_status"]
+    assert "cursor_ref" not in connected["details"]["connector_status"]
+    rows = list_lark_connections(
+        registry=registry,
+        target_path=tmp_path / "targets.json",
+        binding_paths={"goal-alpha": tmp_path / "binding.json"},
+        runner=_runner({}),
+        cli_bin="fake-lark",
+    )
+    assert rows[0]["connector_status"]["source_kind"] == "group_message"
+    assert "source_ref" not in rows[0]["connector_status"]
+    assert "cursor_ref" not in rows[0]["connector_status"]
 
 
 def test_async_inbox_registration_failure_preserves_verified_write_receipt(

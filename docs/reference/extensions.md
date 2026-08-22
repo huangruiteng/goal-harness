@@ -40,6 +40,44 @@ Agent -> Capability -> Provider -> external system
 Provider readback -> Capability transition proposal -> LoopX Kernel
 ```
 
+### Agent-scoped external event connectors
+
+`loopx.extensions.external_connector_runtime` defines the provider-neutral
+binding shared by interactive group messages and document-comment streams. It
+keeps source and cursor references owner-local while exposing a content-free
+status projection with source kind, capture policy, ingress policy, response
+policy, lifecycle, and declared operations.
+
+The contract separates three independent decisions:
+
+- capture: addressed events, all events from one configured source, or an
+  incremental source stream;
+- ingress: live steering, the same session's ordered queue, or an Agent-scoped
+  asynchronous inbox; and
+- response: no response, source-thread response, topic response, or a
+  configured mirror.
+
+Live steering and session queue bindings require one exact Agent session;
+asynchronous inbox bindings require one owner-local inbox. History catch-up
+requires a cursor reference. A response-capable provider must declare both
+write and readback support.
+
+Acknowledgement is a separate fail-closed decision. LoopX permits ACK and
+cursor advancement only after a committed durable effect (including an
+explicit no-follow-up effect) and, when a response is required, verified
+provider readback. For an ordered working-session delivery, the completed and
+persisted session Turn is the minimum effect receipt; an asynchronous inbox
+requires its own accepted writeback or explicit no-follow-up receipt. Raw event
+bodies, author identities, source references, cursor values, and provider
+payloads do not enter the status projection.
+
+The Agent-bound Lark Goal Topic path is the first caller. Legacy Goal-only
+bindings remain readable, while new live, queued, and asynchronous Agent
+bindings persist the generic Connector contract alongside their
+provider-specific routing data. This runtime contract is not itself a new
+capability registry entry; providers advertise stable caller outcomes through
+their existing extension and capability surfaces.
+
 `Provider` is an implementation role. When it implements a LoopX capability,
 it is registered under that capability; a standalone extension provider may
 instead expose only its own bounded command. A provider may be built into LoopX

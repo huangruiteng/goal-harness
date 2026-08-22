@@ -178,6 +178,129 @@ def test_mention_uses_existing_inbox_reply_and_ack_path(tmp_path: Path) -> None:
     assert projection["processed_count"] == 1
 
 
+def _connect_agent_session_topic(
+    *, tmp_path: Path, state: dict[str, Any]
+) -> tuple[Path, Path]:
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    connected = connect_lark_goal_topic(
+        registry={
+            "goals": [
+                {
+                    "id": "goal-alpha",
+                    "repo": str(tmp_path),
+                    "objective": "Alpha delivery",
+                    "coordination": {"registered_agents": ["agent-alpha"]},
+                }
+            ]
+        },
+        goal_id="goal-alpha",
+        agent_id="agent-alpha",
+        session_id="session-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id="oc_public_fixture",
+        chat_name="Product group",
+        ingress_mode="session_queue",
+        runner=_connection_runner(state),
+        cli_bin="fake-lark",
+    )
+    assert connected["ok"] is True
+    return target_path, binding_path
+
+
+def test_agent_session_topic_does_not_reply_or_ack_without_durable_effect(
+    tmp_path: Path,
+) -> None:
+    from loopx.extensions.lark.goal_topic_runtime import process_lark_goal_topic_event
+
+    state: dict[str, Any] = {}
+    target_path, binding_path = _connect_agent_session_topic(
+        tmp_path=tmp_path,
+        state=state,
+    )
+
+    result = process_lark_goal_topic_event(
+        target_payload=read_goal_channel_targets(target_path),
+        binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
+        event={
+            "event_id": "evt_missing_effect",
+            "message_id": "om_missing_effect",
+            "chat_id": "oc_public_fixture",
+            "root_id": "om_topic_alpha",
+            "content": "@linkmacbot please continue",
+        },
+        runtime_root=tmp_path / "runtime",
+        answer=lambda _route, _text: "work completed",
+        reply_runner=_reply_runner(state),
+    )
+
+    assert result["ok"] is False, result
+    assert result["status"] == "durable_effect_required"
+    assert result["ack_decision"]["ack_allowed"] is False
+    assert not any("+messages-reply" in call for call in state.get("calls", []))
+    projection = inspect_lark_event_inbox(
+        project=tmp_path / "runtime",
+        config_path=Path(result["inbox_config_ref"]),
+    )
+    assert projection["pending_count"] == 1
+    assert projection["processed_count"] == 0
+
+
+def test_agent_session_topic_acks_after_effect_and_verified_reply(
+    tmp_path: Path,
+) -> None:
+    from loopx.extensions.external_connector_runtime import (
+        EFFECT_RECEIPT_SCHEMA_VERSION,
+    )
+    from loopx.extensions.lark.goal_topic_runtime import process_lark_goal_topic_event
+
+    state: dict[str, Any] = {}
+    target_path, binding_path = _connect_agent_session_topic(
+        tmp_path=tmp_path,
+        state=state,
+    )
+
+    def answer(route: dict[str, Any], _text: str) -> dict[str, Any]:
+        assert route["event_id"] == "evt_effect_committed"
+        return {
+            "response_text": "work completed",
+            "effect_receipt": {
+                "schema_version": EFFECT_RECEIPT_SCHEMA_VERSION,
+                "event_id": route["event_id"],
+                "effect_id": "effect-committed",
+                "effect_kind": "todo_update",
+                "status": "committed",
+            },
+        }
+
+    result = process_lark_goal_topic_event(
+        target_payload=read_goal_channel_targets(target_path),
+        binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
+        event={
+            "event_id": "evt_effect_committed",
+            "message_id": "om_effect_committed",
+            "chat_id": "oc_public_fixture",
+            "root_id": "om_topic_alpha",
+            "content": "@linkmacbot please continue",
+        },
+        runtime_root=tmp_path / "runtime",
+        answer=answer,
+        reply_runner=_reply_runner(state),
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "replied_and_acknowledged", result
+    assert state["reply_text"] == "work completed"
+    projection = inspect_lark_event_inbox(
+        project=tmp_path / "runtime",
+        config_path=Path(result["inbox_config_ref"]),
+    )
+    assert projection["pending_count"] == 0
+    assert projection["processed_count"] == 1
+
+
 def test_agent_scoped_async_inbox_queues_without_chat_reply_or_ack(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
@@ -226,6 +349,12 @@ def test_agent_scoped_async_inbox_queues_without_chat_reply_or_ack(
     assert binding["agent_id"] == "agent-alpha"
     assert binding["routing"]["capture_scope"] == "addressed_only"
     assert binding["routing"]["ingress_mode"] == "async_inbox"
+    assert binding["connector"]["schema_version"] == "agent_external_connector_v0"
+    assert binding["connector"]["agent_ref"] == "agent-alpha"
+    assert binding["connector"]["source_kind"] == "group_message"
+    assert binding["connector"]["ingress_policy"] == "async_inbox"
+    assert binding["connector"]["inbox_ref"] == binding["routing"]["inbox_config_ref"]
+    assert binding["connector"]["cursor_ref"].endswith("/processed.json")
     config_ref = Path(binding["routing"]["inbox_config_ref"])
     assert (tmp_path / config_ref).is_file()
     config_payload = json.loads((tmp_path / config_ref).read_text(encoding="utf-8"))

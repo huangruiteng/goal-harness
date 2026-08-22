@@ -12,6 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..external_connector_runtime import (
+    EFFECT_RECEIPT_SCHEMA_VERSION,
+    ExternalEffectKind,
+    ExternalResponsePolicy,
+    decide_external_event_ack,
+)
 from .event_inbox import (
     MESSAGE_ID_PATTERN,
     acknowledge_lark_event_inbox,
@@ -26,7 +32,7 @@ from .goal_topic_connections import (
 )
 from .inbox_reply import CommandRunner, reply_lark_event_inbox
 
-Answer = Callable[[Mapping[str, Any], str], str]
+Answer = Callable[[Mapping[str, Any], str], str | Mapping[str, Any]]
 SnapshotProvider = Callable[[], Mapping[str, Any]]
 ProfilePoller = Callable[[str, threading.Event], None]
 SimpleRunner = Callable[[list[str]], Mapping[str, Any]]
@@ -484,19 +490,38 @@ class LarkGoalTopicRuntimeService:
                 restart_count=restart_count,
             )
             try:
-                def answer(route: Mapping[str, Any], text: str) -> str:
+                def answer(
+                    route: Mapping[str, Any], text: str
+                ) -> Mapping[str, Any]:
                     snapshot = self.snapshot_provider()
                     contexts = snapshot.get("goal_contexts")
                     contexts = contexts if isinstance(contexts, Mapping) else {}
                     context = contexts.get(str(route.get("goal_id") or ""))
                     context = context if isinstance(context, Mapping) else {}
-                    return answer_lark_goal_topic(
+                    response_text = answer_lark_goal_topic(
                         route=route,
                         text=text,
                         work_dir=str(context.get("work_dir") or self.runtime_root),
                         objective=str(context.get("objective") or route.get("goal_id") or ""),
                         runtime_controller=self.runtime_controller,
                     )
+                    return {
+                        "response_text": response_text,
+                        "effect_receipt": {
+                            "schema_version": EFFECT_RECEIPT_SCHEMA_VERSION,
+                            "event_id": str(
+                                route.get("event_id") or route.get("message_id") or ""
+                            ),
+                            "effect_id": "session-turn-"
+                            + _opaque_digest(
+                                route.get("session_id"),
+                                route.get("message_id"),
+                                route.get("topic_root_message_id"),
+                            ),
+                            "effect_kind": ExternalEffectKind.WORKING_SESSION_TURN.value,
+                            "status": "committed",
+                        },
+                    }
 
                 result = stream_lark_goal_topic_profile(
                     profile=profile,
@@ -824,7 +849,20 @@ def process_lark_goal_topic_event(
             "agent_id": route.get("agent_id"),
             "inbox_config_ref": config_ref,
         }
-    reply_text = " ".join(str(answer(route, canonical["content"]) or "").split())[:1200]
+    answer_result = answer(route, canonical["content"])
+    connector = route.get("connector")
+    connector = connector if isinstance(connector, Mapping) else None
+    effect_receipt: Mapping[str, Any] | None = None
+    if isinstance(answer_result, Mapping):
+        reply_text = " ".join(
+            str(answer_result.get("response_text") or "").split()
+        )[:1200]
+        candidate_receipt = answer_result.get("effect_receipt")
+        effect_receipt = (
+            candidate_receipt if isinstance(candidate_receipt, Mapping) else None
+        )
+    else:
+        reply_text = " ".join(str(answer_result or "").split())[:1200]
     if not reply_text:
         return {
             "ok": False,
@@ -832,6 +870,20 @@ def process_lark_goal_topic_event(
             "goal_id": route["goal_id"],
             "inbox_config_ref": config_ref,
         }
+    if connector is not None:
+        effect_decision = decide_external_event_ack(
+            event_id=canonical["event_id"],
+            effect_receipt=effect_receipt,
+            response_policy=ExternalResponsePolicy.NO_RESPONSE.value,
+        )
+        if not effect_decision["effect_ready"]:
+            return {
+                "ok": False,
+                "status": "durable_effect_required",
+                "goal_id": route["goal_id"],
+                "inbox_config_ref": config_ref,
+                "ack_decision": effect_decision,
+            }
     reply = reply_lark_event_inbox(
         project=root,
         config_path=config_path,
@@ -848,6 +900,21 @@ def process_lark_goal_topic_event(
             "blocker": reply.get("blocker"),
             "inbox_config_ref": config_ref,
         }
+    if connector is not None:
+        ack_decision = decide_external_event_ack(
+            event_id=canonical["event_id"],
+            effect_receipt=effect_receipt,
+            response_policy=str(connector.get("response_policy") or ""),
+            response_receipt=reply,
+        )
+        if not ack_decision["ack_allowed"]:
+            return {
+                "ok": False,
+                "status": str(ack_decision["reason"]),
+                "goal_id": route["goal_id"],
+                "inbox_config_ref": config_ref,
+                "ack_decision": ack_decision,
+            }
     acknowledge_lark_event_inbox(
         project=root,
         config_path=config_path,
