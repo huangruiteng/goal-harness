@@ -246,7 +246,8 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "Admission-ledger occupancy is not liveness. A healthy active run "
                 "requires a resolved exact-job receipt and a live exact runner owner; "
                 "terminal or lost-owner observations require provider reconciliation "
-                "before slot release."
+                "before slot release. These are provider obligations; the reducer "
+                "classifies facts but performs no monitor, write, or release effect."
             ),
             "trajectory_basis": (
                 "solver_trajectory_phase_without_hidden_evaluator_feedback"

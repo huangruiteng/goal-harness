@@ -490,6 +490,11 @@ solver-trajectory slice, even when no case became terminal. This readback is for
 campaign supervision and insight discovery only; it must not expose hidden
 evaluator evidence to the solving arm.
 
+This is a provider obligation, not an effect performed by the reducer: the
+runtime-observation command only returns a typed classification and recommended
+transition. The provider remains responsible for the monitor cycle, trajectory
+readback, terminal write, reconciliation, and slot release.
+
 Use this analyst hint:
 
 > After the solver has stopped and scoring is complete, read the task, real

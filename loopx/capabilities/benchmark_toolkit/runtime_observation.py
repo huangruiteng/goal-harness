@@ -53,6 +53,12 @@ def _coerce_enum(value: str | Enum, enum_type: type[Enum], *, field: str) -> Enu
         raise ValueError(f"invalid_{field}") from exc
 
 
+def _require_bool(value: bool, *, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError(f"{field}_must_be_boolean")
+    return value
+
+
 def build_benchmark_runtime_observation(
     *,
     admission_active: bool,
@@ -68,6 +74,15 @@ def build_benchmark_runtime_observation(
     run identity, process argument, path, or raw error.
     """
 
+    admitted = _require_bool(admission_active, field="admission_active")
+    terminal = _require_bool(
+        terminal_result_present,
+        field="terminal_result_present",
+    )
+    fatal_error = _require_bool(
+        typed_fatal_runner_error,
+        field="typed_fatal_runner_error",
+    )
     receipt = _coerce_enum(
         job_receipt_state,
         BenchmarkJobReceiptState,
@@ -79,22 +94,22 @@ def build_benchmark_runtime_observation(
         field="runner_owner_state",
     )
 
-    if not admission_active:
+    if not admitted:
         classification = BenchmarkRuntimeClassification.NOT_ADMITTED
         transition = BenchmarkRuntimeTransition.NONE
         reconciliation_required = False
-    elif terminal_result_present:
-        classification = BenchmarkRuntimeClassification.TERMINAL_PENDING_RECONCILE
-        transition = BenchmarkRuntimeTransition.WRITE_TERMINAL_THEN_RELEASE
-        reconciliation_required = True
-    elif typed_fatal_runner_error:
-        classification = BenchmarkRuntimeClassification.RUNNER_INVALID_PENDING_RECONCILE
-        transition = BenchmarkRuntimeTransition.WRITE_RUNNER_INVALID_THEN_RELEASE
-        reconciliation_required = True
     elif receipt is not BenchmarkJobReceiptState.RESOLVED:
         classification = BenchmarkRuntimeClassification.RUNTIME_AUTHORITY_UNRESOLVED
         transition = BenchmarkRuntimeTransition.REPAIR_RUNTIME_AUTHORITY
         reconciliation_required = False
+    elif terminal:
+        classification = BenchmarkRuntimeClassification.TERMINAL_PENDING_RECONCILE
+        transition = BenchmarkRuntimeTransition.WRITE_TERMINAL_THEN_RELEASE
+        reconciliation_required = True
+    elif fatal_error:
+        classification = BenchmarkRuntimeClassification.RUNNER_INVALID_PENDING_RECONCILE
+        transition = BenchmarkRuntimeTransition.WRITE_RUNNER_INVALID_THEN_RELEASE
+        reconciliation_required = True
     elif owner is BenchmarkRunnerOwnerState.ALIVE:
         classification = BenchmarkRuntimeClassification.RUNNING_QUALIFIED
         transition = BenchmarkRuntimeTransition.NONE
@@ -113,11 +128,11 @@ def build_benchmark_runtime_observation(
         "schema_version": BENCHMARK_RUNTIME_OBSERVATION_SCHEMA_VERSION,
         "classification": classification.value,
         "healthy_active": healthy_active,
-        "admission_active": bool(admission_active),
+        "admission_active": admitted,
         "job_receipt_state": receipt.value,
         "runner_owner_state": owner.value,
-        "terminal_result_present": bool(terminal_result_present),
-        "typed_fatal_runner_error": bool(typed_fatal_runner_error),
+        "terminal_result_present": terminal,
+        "typed_fatal_runner_error": fatal_error,
         "ledger_occupancy_sufficient": False,
         "exact_runtime_authority_required": True,
         "reconciliation_required": reconciliation_required,

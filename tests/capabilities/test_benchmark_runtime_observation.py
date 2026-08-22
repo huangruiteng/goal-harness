@@ -75,6 +75,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
                 "admission_active": True,
                 "job_receipt_state": "missing",
                 "runner_owner_state": "alive",
+                "terminal_result_present": True,
+            },
+            "runtime_authority_unresolved",
+            False,
+            False,
+            "repair_runtime_authority",
+        ),
+        (
+            {
+                "admission_active": True,
+                "job_receipt_state": "ambiguous",
+                "runner_owner_state": "alive",
+                "typed_fatal_runner_error": True,
             },
             "runtime_authority_unresolved",
             False,
@@ -154,6 +167,29 @@ def test_runtime_observation_rejects_unknown_typed_states() -> None:
             job_receipt_state="guessed",
             runner_owner_state="alive",
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("admission_active", "false"),
+        ("terminal_result_present", 1),
+        ("typed_fatal_runner_error", "true"),
+    ],
+)
+def test_runtime_observation_rejects_non_boolean_facts(
+    field: str,
+    value: object,
+) -> None:
+    facts: dict[str, object] = {
+        "admission_active": True,
+        "job_receipt_state": "resolved",
+        "runner_owner_state": "alive",
+    }
+    facts[field] = value
+
+    with pytest.raises(TypeError, match=rf"^{field}_must_be_boolean$"):
+        build_benchmark_runtime_observation(**facts)
 
 
 def test_runtime_observation_cli_can_fail_closed() -> None:
