@@ -97,6 +97,25 @@ are stored as content-free error codes. The public inbox projection exposes
 only pending count, oldest age, failure count, and freshness; event ids, bodies,
 anchors, reply chains, source references, and cursor values remain owner-local.
 
+`loopx.extensions.external_connector_provider` adds the fail-closed provider
+call boundary for document comments. A document-comment registration must
+reference material that was registered separately; the comment stream remains
+`external_input_only` and cannot promote itself to project authority. Exact
+provider identities, scopes, publication requirements, and official HTTPS
+repair URLs stay in owner-local permission guidance. Status exposes only
+content-free readiness and operation counts. Guidance must match the exact
+requirements persisted with the Connector, and those requirements must cover
+history capture plus response write and readback when the response policy needs
+them.
+
+The provider call sequence is permission evaluation, bounded page read,
+durable inbox capture, Agent effect, provider response with readback, then ACK.
+The runtime does not call the page reader until the registered permissions are
+ready, does not call the response writer before a committed effect receipt, and
+does not advance the cursor until response readback succeeds. Concrete provider
+adapters supply the page reader and response writer; LoopX does not own their
+credentials or raw payloads.
+
 `Provider` is an implementation role. When it implements a LoopX capability,
 it is registered under that capability; a standalone extension provider may
 instead expose only its own bounded command. A provider may be built into LoopX
