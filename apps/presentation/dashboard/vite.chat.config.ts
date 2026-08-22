@@ -31,6 +31,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), emitSharedPwaAssets()],
   build: {
     outDir: resolve(import.meta.dirname, "../../../loopx/web/chat"),
-    emptyOutDir: true,
+    // Keep prior hashed assets: a running dashboard or an in-flight page may
+    // still reference an older index.html; deleting old files turns a stale
+    // page into a white screen. index.html always points at the newest hashes.
+    emptyOutDir: false,
   },
 });
