@@ -1,0 +1,10 @@
+# Verifier image (separate environment; the agent never sees this image).
+# WORKDIR /app must exist so pier can `docker compose cp` the answer artifact
+# into the verifier container.
+FROM python:3.11-slim
+WORKDIR /app
+RUN pip install --no-cache-dir dateparser==1.2.2
+COPY test.sh /tests/test.sh
+COPY widesearch_evaluator.py /tests/widesearch_evaluator.py
+COPY <GOLD_CSV> /tests/gold.csv
+RUN chmod +x /tests/test.sh

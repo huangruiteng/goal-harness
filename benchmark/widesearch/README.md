@@ -47,6 +47,38 @@ uv run --python 3.12 --with dateparser==1.2.2 \
 模型凭据：`ARK_OPENAI_BASE_URL` / `ARK_OPENAI_API_KEY` / `ARK_OPENAI_MODEL`
 （本地可从 cc-switch `volcengine-ark-deepseek` 读取）。
 
+## Hosted Responses API 兼容（重要）
+
+本地 `codex app-server` 默认会发送 `multi_agent_v1` 动态工具命名空间；部分
+hosted Responses 端点会拒绝 `namespace` 工具类型（`unknown tool type:
+namespace`）。runner 已默认带 `-c features.multi_agent=false` 保持工具面最小且
+provider-neutral，同时保留 goal 工具。部分端点还会拒绝 web_search 的
+`external_web_access` 字段，可用 `--disable-web-search` 关闭原生 web_search
+工具（agent 改用 shell 联网，配合真沙盒网络策略）。
+
+## 真沙盒（pier/colima）跑法
+
+`benchmark/widesearch/pier/` 提供可复用的 pier 任务模板（task.toml、agent
+image、verifier image、verifier test.sh、job.yaml）。要点：
+
+- **workspace/jobs_dir 必须放 `$HOME` 下**：colima 不 bind-mount macOS 的
+  `/tmp`，verifier 目录挂到 `/logs/verifier` 会静默失败，导致 reward 永远回
+  不到宿主。
+- **verifier 镜像需 `WORKDIR /app`**：pier 用 `docker compose cp` 把答案放
+  进 verifier 容器，`/app` 必须存在。
+- **verifier 的 reward.json 必须纯数值**：pier 的 `VerifierResult` 只收
+  `dict[str, float | int]`，字符串 detail 字段会触发校验错误。提交前可用：
+
+  ```bash
+  loopx benchmark verify-verifier-reward /path/to/reward.json --require-valid
+  ```
+
+  或用 Python API `verify_verifier_reward_json`。
+- **gold 只给 verifier**：evaluator 在 separate verifier 环境运行，agent 镜像
+  里不含 gold。
+- **agent 镜像 `/bin/sh` 需是 bash**：pier 用 `set -o pipefail` 执行 agent
+  setup，Debian 默认 dash 不支持（`ln -sf /usr/bin/bash /bin/sh`）。
+
 ## 测试
 
 ```bash

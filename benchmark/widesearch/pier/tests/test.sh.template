@@ -1,0 +1,58 @@
+#!/bin/bash
+# WideSearch verifier: runs the official evaluator against the sealed answer.
+# Writes reward.json with numeric-only values (pier VerifierResult contract).
+set -uo pipefail
+mkdir -p /logs/verifier
+log() { echo "[verifier] $*"; }
+ANSWER=/app/final_answer.md
+GOLD=/tests/gold.csv
+TASK=/tests/task.json
+if [ ! -f "$ANSWER" ]; then
+  echo -1 > /logs/verifier/reward.txt
+  log "final_answer.md missing"
+  exit 0
+fi
+python3 - /tests/evaluator.py <<'PYEOF'
+import json, sys
+answer = sys.argv[1]
+task = {
+  "schema_version": "vebench.widesearch.task.v1",
+  "case_id": "ws_en_001",
+  "evaluation": {
+    "unique_columns": ["subject", "university"],
+    "required": ["subject","university","qsworlduniversityrankingsbysubject2025","qsworlduniversityrankings2025","timeshighereducationworlduniversityrankings2025","homepage","applicationdeadline","applicationfee"],
+    "eval_pipeline": {
+      "subject": {"preprocess": ["norm_str"], "metric": ["in_match"]},
+      "university": {"preprocess": ["norm_str"], "metric": ["in_match"]},
+      "qsworlduniversityrankingsbysubject2025": {"preprocess": ["norm_str"], "metric": ["in_match"]},
+      "qsworlduniversityrankings2025": {"preprocess": ["norm_str"], "metric": ["in_match"]},
+      "timeshighereducationworlduniversityrankings2025": {"preprocess": ["norm_str"], "metric": ["in_match"]},
+      "homepage": {"preprocess": ["norm_str"], "metric": ["in_match"]},
+      "applicationdeadline": {"preprocess": ["norm_str"], "metric": ["llm_judge"], "criterion": "Approximately the same semantics as the reference."},
+      "applicationfee": {"preprocess": ["norm_str"], "metric": ["llm_judge"], "criterion": "Approximately the same semantics as the reference."}
+    }
+  }
+}
+json.dump(task, open("/tests/task.json","w"), ensure_ascii=False)
+PYEOF
+log "running evaluator"
+python3 /tests/evaluator.py \
+  --task "$TASK" --gold "$GOLD" --answer "$ANSWER" \
+  --case-id ws_en_001 --benchmark-id widesearch > /tmp/result.json 2>/tmp/result.err
+rc=$?
+if [ $rc -ne 0 ]; then
+  echo -1 > /logs/verifier/reward.txt
+  log "evaluator failed rc=$rc"
+  exit 0
+fi
+python3 - <<'PYEOF'
+import json
+r = json.load(open("/tmp/result.json"))
+score = float(r.get("score", 0.0))
+# Numeric-only reward payload (pier VerifierResult requires all-numeric values).
+json.dump(
+    {"reward": score, "score": score, "success_rate": r.get("metrics", {}).get("success_rate")},
+    open("/logs/verifier/reward.json", "w"),
+)
+PYEOF
+log "reward written"

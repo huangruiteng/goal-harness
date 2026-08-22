@@ -1,0 +1,8 @@
+# Agent image for the WideSearch pier sandbox.
+# Replace <BASE_IMAGE> with an image that ships codex + loopx + python3.
+# The /bin/sh -> bash link is required because pier runs agent setup with
+# `set -o pipefail`, which dash (Debian's default /bin/sh) does not support.
+FROM <BASE_IMAGE>
+RUN ln -sf /usr/bin/bash /bin/sh
+WORKDIR /app
+CMD ["/bin/bash"]

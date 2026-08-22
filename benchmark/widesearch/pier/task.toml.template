@@ -1,0 +1,38 @@
+schema_version = "1.1"
+artifacts = ["/app/final_answer.md"]
+
+[task]
+name = "widesearch/<CASE_ID>"
+description = "Web research table task."
+
+[metadata]
+task_id = "<CASE_ID>"
+display_title = "Web research table"
+category = "research"
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800.0
+
+# LLM judge for the evaluator's free-text columns; inject via the pier job.
+[verifier.env]
+JUDGE_BASE_URL = "<JUDGE_BASE_URL>"
+JUDGE_MODEL = "<JUDGE_MODEL>"
+
+[verifier.environment]
+build_timeout_sec = 1800.0
+cpus = 2
+memory_mb = 4096
+allow_internet = true
+
+[agent]
+timeout_sec = 5400.0
+
+[environment]
+build_timeout_sec = 1800.0
+docker_image = "<AGENT_IMAGE>"
+os = "linux"
+cpus = 2
+memory_mb = 8192
+gpus = 0
+allow_internet = true

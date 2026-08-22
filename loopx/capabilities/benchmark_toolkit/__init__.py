@@ -36,6 +36,11 @@ from .integrity import (
     REQUIRED_RUNTIME_ATTESTATIONS,
     build_benchmark_integrity_qualification,
 )
+from .reward_contract import (
+    REWARD_CONTRACT_SCHEMA_VERSION,
+    verify_verifier_reward_file,
+    verify_verifier_reward_json,
+)
 from .native_codex_goal import (
     NativeGoalConfig,
     NativeGoalDeadlineExceeded,
@@ -179,6 +184,8 @@ __all__ = [
     "refresh_native_goal_status",
     "render_benchmark_experiment_board_markdown",
     "render_native_codex_goal_prompt",
+    "verify_verifier_reward_file",
+    "verify_verifier_reward_json",
     "run_native_goal_process",
     "run_native_goal_process_until_terminal",
     "run_native_goal_turn",

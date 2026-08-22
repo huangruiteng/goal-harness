@@ -17,6 +17,7 @@ from ..capabilities.benchmark_toolkit import (
     compact_benchmark_source_revision_fence_receipt,
     filter_public_benchmark_artifact_paths,
     inspect_benchmark_source_revision_fence,
+    verify_verifier_reward_file,
 )
 
 PrintPayload = Callable[
@@ -30,6 +31,7 @@ BENCHMARK_TOOLKIT_COMMANDS = {
     "classify-artifacts",
     "integrity-qualification",
     "source-revision-fence",
+    "verify-verifier-reward",
 }
 
 
@@ -137,6 +139,14 @@ def register_benchmark_boundary_commands(
     integrity_parser.add_argument("--sensitive-value-env", action="append", default=[])
     integrity_parser.add_argument("--require-qualified", action="store_true")
 
+    reward_parser = benchmark_subparsers.add_parser(
+        "verify-verifier-reward",
+        help="Validate a verifier reward.json against the numeric-only contract.",
+    )
+    add_subcommand_format(reward_parser)
+    reward_parser.add_argument("reward_json", help="Path to a verifier reward.json.")
+    reward_parser.add_argument("--require-valid", action="store_true")
+
 
 def _invalid_integrity_input() -> dict[str, object]:
     return {
@@ -156,6 +166,16 @@ def _invalid_integrity_input() -> dict[str, object]:
             "sensitive_values_recorded": False,
         },
     }
+
+
+def _render_reward_contract(payload: dict[str, object]) -> str:
+    return (
+        "# Verifier Reward Contract\n\n"
+        f"- Valid: `{payload.get('valid')}`\n"
+        f"- Reason: `{payload.get('reason_code')}`\n"
+        f"- Entries: `{payload.get('entry_count')}`\n"
+        f"- Invalid keys: `{','.join(payload.get('invalid_keys') or [])}`\n"
+    )
 
 
 def _invalid_source_revision_fence_input() -> dict[str, object]:
@@ -210,6 +230,13 @@ def handle_benchmark_boundary_command(
             payload = _invalid_source_revision_fence_input()
         print_payload(payload, output_format(args), _render_source_revision_fence)
         return 1 if args.require_admitted and not payload.get("admitted") else 0
+
+    if args.benchmark_command == "verify-verifier-reward":
+        if args.reward_json == "-":
+            raise ValueError("verify-verifier-reward requires a file path")
+        payload = verify_verifier_reward_file(args.reward_json)
+        print_payload(payload, output_format(args), _render_reward_contract)
+        return 1 if args.require_valid and not payload.get("valid") else 0
 
     try:
         trajectory = _read_json_object(args.trajectory_json, "--trajectory-json")

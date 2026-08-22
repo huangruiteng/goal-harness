@@ -39,6 +39,31 @@ def _objective(case_id: str, workspace: Path, instruction: str, treatment: bool)
     )
 
 
+def _app_server_command(*, codex_bin: str, enable_web_search: bool) -> list[str]:
+    """Build the app-server Goal command with hosted Responses API compatibility.
+
+    The codex app-server emits a ``multi_agent_v1`` dynamic-tool namespace by
+    default; some hosted Responses endpoints reject ``namespace`` tool types.
+    Disabling the multi-agent feature keeps the Goal tool surface minimal and
+    provider-neutral while preserving the goal tools (get/create/update_goal)
+    that the benchmark needs. Web search is toggled independently because some
+    hosted endpoints also reject the ``external_web_access`` web_search field.
+    """
+
+    command = [
+        codex_bin,
+        "app-server",
+        "--listen",
+        "stdio://",
+        "--enable",
+        "goals",
+        "-c",
+        "features.multi_agent=false",
+    ]
+    command += ["-c", "tools.web_search=true" if enable_web_search else "tools.web_search=false"]
+    return command
+
+
 def _native_goal_modules():
     sys.path.insert(0, str(REPO_ROOT))
     from loopx.capabilities.benchmark_toolkit.native_codex_goal import (  # noqa: PLC0415
@@ -56,6 +81,7 @@ def run_case(
     arm: str,
     data_root: Path,
     timeout_sec: int,
+    enable_web_search: bool = True,
 ) -> dict:
     raw = data_root / "widesearch.jsonl"
     gold_dir = data_root / "gold"
@@ -81,16 +107,10 @@ def run_case(
     turn = run_native(
         config,
         codex_bin=os.environ.get("CODEX_BIN", "codex"),
-        process_command=[
-            os.environ.get("CODEX_BIN", "codex"),
-            "app-server",
-            "--listen",
-            "stdio://",
-            "--enable",
-            "goals",
-            "-c",
-            "tools.web_search=true",
-        ],
+        process_command=_app_server_command(
+            codex_bin=os.environ.get("CODEX_BIN", "codex"),
+            enable_web_search=enable_web_search,
+        ),
         process_env={**os.environ},
         process_cwd=str(workspace),
         goal_timeout_sec=timeout_sec,
@@ -115,12 +135,21 @@ def main() -> int:
     p.add_argument("--case", default="ws_en_001")
     p.add_argument("--data-root", type=Path, required=True)
     p.add_argument("--timeout-sec", type=int, default=7200)
+    p.add_argument(
+        "--disable-web-search",
+        action="store_true",
+        help=(
+            "Disable the native web_search tool in the app-server Goal config "
+            "(some hosted Responses endpoints reject its external_web_access field)."
+        ),
+    )
     args = p.parse_args()
     outcome = run_case(
         case_id=args.case,
         arm=args.arm,
         data_root=args.data_root,
         timeout_sec=args.timeout_sec,
+        enable_web_search=not args.disable_web_search,
     )
     print(json.dumps(outcome, ensure_ascii=False, sort_keys=True))
     return 0 if outcome["status"] == "completed" else 2

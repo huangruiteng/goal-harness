@@ -88,6 +88,20 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "write_boundary": "path classification only; no file reads or writes",
         },
         {
+            "command": (
+                "loopx benchmark verify-verifier-reward <reward.json> "
+                "--require-valid --format json"
+            ),
+            "purpose": (
+                "Validate a verifier reward.json against the numeric-only "
+                "verifier reward contract (pier VerifierResult compatible)."
+            ),
+            "write_boundary": (
+                "read-only local reward file; emits stable counts, labels, and "
+                "reason codes only, never raw reward values"
+            ),
+        },
+        {
             "command": "loopx capability show benchmark-toolkit --format json",
             "purpose": (
                 "Read the post-run analyst hint and benchmark_case_insight_v0 "

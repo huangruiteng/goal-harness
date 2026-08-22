@@ -1,0 +1,44 @@
+# Pier job for the WideSearch real-sandbox path.
+# - Keep jobs_dir / datasets under $HOME: colima does not bind-mount macOS
+#   /tmp, so verifier bind mounts of /logs/verifier silently fail there.
+# - Inject model credentials through the environment; do not bake secrets into
+#   the job file. For countable runs the agent image should reach the model
+#   through a local gateway so the key is not shell-readable in the container.
+job_name: widesearch-<RUN_LABEL>
+jobs_dir: <JOBS_DIR_UNDER_HOME>
+n_attempts: 1
+n_concurrent_trials: 1
+quiet: false
+debug: true
+environment:
+  type: docker
+agents:
+  - name: codex
+    model_name: <MODEL_NAME>
+    kwargs:
+      command_model_name: <MODEL_NAME>
+      config_toml: |
+        model = "<MODEL_NAME>"
+        model_provider = "custom"
+        sandbox_mode = "danger-full-access"
+        approval_policy = "never"
+        [model_providers.custom]
+        name = "hosted-responses"
+        base_url = "<MODEL_BASE_URL>"
+        env_key = "OPENAI_API_KEY"
+        wire_api = "responses"
+        [tools]
+        web_search = true
+    env:
+      OPENAI_BASE_URL: "<MODEL_BASE_URL>"
+      OPENAI_API_KEY: "<INJECT_VIA_RUNTIME_ENV>"
+datasets:
+  - path: <DATASET_ROOT_UNDER_HOME>
+    task_names: ["<CASE_ID>"]
+artifacts:
+  - /app/final_answer.md
+verifier:
+  env:
+    JUDGE_BASE_URL: "<JUDGE_BASE_URL>"
+    JUDGE_MODEL: "<JUDGE_MODEL>"
+    JUDGE_API_KEY: "<INJECT_VIA_RUNTIME_ENV>"
