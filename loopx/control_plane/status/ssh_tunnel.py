@@ -36,7 +36,7 @@ _REMOTE_BOOTSTRAP = (
 )
 
 
-def _loopback_status_ok(port: int, *, timeout: float = 2.0) -> bool:
+def _loopback_status_ok(port: int, *, timeout: float = 8.0) -> bool:
     try:
         with urllib.request.urlopen(
             f"http://127.0.0.1:{port}/status.json", timeout=timeout
