@@ -816,7 +816,6 @@ def _resolve_quota_should_run_route(
             agent_lane_next_action = {
                 **agent_lane_next_action,
                 "delivery_boundary": boundary["delivery_boundary"],
-                "delivery_boundary_reason": boundary["reason"],
             }
     agent_scope_frontier = None
     agent_lane_frontier_hint = None
@@ -1113,7 +1112,6 @@ def _build_quota_should_run_payload(
     _attach_truthy_fields(
         payload,
         agent_lane_next_action=route.agent_lane_next_action,
-        delivery_continuity=route.delivery_continuity,
     )
     selected_todo_projection = (
         None

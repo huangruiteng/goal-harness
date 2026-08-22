@@ -38,7 +38,6 @@ SELECTED_TODO_AGENT_FIELDS = (
     "selection_binding",
     "selection_reason",
     "delivery_boundary",
-    "delivery_boundary_reason",
 )
 WORK_LANE_SELECTED_TODO_ITEM_FIELDS = (
     "monitor_due_items",

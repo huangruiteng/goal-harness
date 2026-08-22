@@ -179,6 +179,11 @@ def compact_vision_checkpoint(checkpoint: Any) -> dict[str, Any] | None:
         for field in VISION_CHECKPOINT_COMPACT_FIELDS
         if field in checkpoint
     }
+    # semantic_closeout is the long-standing default. Preserve the explicit
+    # field only for the non-default in-flight boundary that callers must carry
+    # across heartbeat settlements.
+    if compact.get("delivery_boundary") == "semantic_closeout":
+        compact.pop("delivery_boundary")
     triggers: list[dict[str, Any]] = []
     raw_triggers = checkpoint.get("triggers")
     if isinstance(raw_triggers, list):

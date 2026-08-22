@@ -429,7 +429,9 @@ def test_in_flight_progress_preserves_todo_across_heartbeat_settlements(
     assert second_guard_rc == 0, second_guard
     assert second_guard["selected_todo"]["todo_id"] == TODO_ID
     assert second_guard["selected_todo"]["selected_by"] == "in_flight_todo"
-    assert second_guard["delivery_continuity"]["decision"] == "resume_in_flight"
+    assert second_guard["selected_todo"]["delivery_boundary"] == (
+        "in_flight_continuation"
+    )
     writeback = second_guard["interaction_contract"]["cli_channel"][
         "next_cli_actions"
     ][0]

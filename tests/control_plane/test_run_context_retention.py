@@ -187,6 +187,25 @@ def test_in_flight_todo_binding_survives_run_compaction() -> None:
     ]
 
 
+def test_default_delivery_boundary_is_implicit_after_run_compaction() -> None:
+    compacted = compact_run(
+        _run(
+            "2026-08-09T00:07:00Z",
+            delivery_outcome="outcome_progress",
+            vision_checkpoint={
+                "schema_version": "vision_checkpoint_v0",
+                "agent_id": AGENT_ID,
+                "required": True,
+                "satisfied": True,
+                "decision": "satisfied",
+                "delivery_boundary": "semantic_closeout",
+            },
+        )
+    )
+
+    assert "delivery_boundary" not in compacted["vision_checkpoint"]
+
+
 def test_retirement_prevents_stale_vision_selection() -> None:
     runs = [
         _run(

@@ -68,13 +68,10 @@ def test_same_open_todo_survives_cross_heartbeat_queue_reordering() -> None:
     assert packet["agent_lane_next_action"]["selection_reason"] == (
         "same_open_todo_after_progress"
     )
-    assert packet["delivery_continuity"] == {
-        "schema_version": "loopx_delivery_continuity_result_v0",
-        "decision": "resume_in_flight",
-        "reason": "same_open_todo_after_progress",
-        "todo_id": CURRENT_TODO_ID,
-        "delivery_boundary": "in_flight_continuation",
-    }
+    assert packet["selected_todo"]["delivery_boundary"] == (
+        "in_flight_continuation"
+    )
+    assert "delivery_continuity" not in packet
 
 
 def test_outcome_gap_releases_normal_queue_selection() -> None:
@@ -85,8 +82,8 @@ def test_outcome_gap_releases_normal_queue_selection() -> None:
     )
 
     assert packet["selected_todo"]["todo_id"] == QUEUE_HEAD_TODO_ID
-    assert packet["delivery_continuity"]["decision"] == "release_for_reselection"
-    assert packet["delivery_continuity"]["reason"] == ("previous_delivery_not_progress")
+    assert packet["selected_todo"].get("selected_by") != "in_flight_todo"
+    assert "delivery_continuity" not in packet
 
 
 def test_closed_or_blocked_todo_releases_normal_queue_selection() -> None:
@@ -97,10 +94,8 @@ def test_closed_or_blocked_todo_releases_normal_queue_selection() -> None:
     )
 
     assert packet["selected_todo"]["todo_id"] == QUEUE_HEAD_TODO_ID
-    assert packet["delivery_continuity"]["reason"] in {
-        "todo_not_open",
-        "todo_not_actionable",
-    }
+    assert packet["selected_todo"].get("selected_by") != "in_flight_todo"
+    assert "delivery_continuity" not in packet
 
 
 def test_same_turn_receipt_still_outranks_cross_heartbeat_continuity() -> None:
@@ -115,5 +110,5 @@ def test_same_turn_receipt_still_outranks_cross_heartbeat_continuity() -> None:
     assert packet["agent_lane_next_action"]["selection_binding"] == (
         "heartbeat_receipt"
     )
-    assert packet["delivery_continuity"]["decision"] == "preempt"
-    assert packet["delivery_continuity"]["reason"] == "heartbeat_receipt"
+    assert packet["selected_todo"].get("selected_by") != "in_flight_todo"
+    assert "delivery_continuity" not in packet
