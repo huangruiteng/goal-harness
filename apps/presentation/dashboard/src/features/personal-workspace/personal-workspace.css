@@ -45,7 +45,7 @@
 .personal-status-source > header button, .personal-status-source-meta button, .personal-status-source-form header button { display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--pw-muted); cursor: pointer; }
 .personal-status-source > header button:hover, .personal-status-source-meta button:hover, .personal-status-source-form header button:hover { background: #fff; color: var(--pw-text); box-shadow: 0 1px 3px rgb(30 28 20 / 10%); }
 .personal-status-source-select { display: grid; grid-template-columns: 18px minmax(0, 1fr) 14px; align-items: center; gap: 7px; min-height: 38px; padding: 0 10px; border: 1px solid var(--pw-line-strong); border-radius: 10px; background: #fff; color: var(--pw-muted); }
-.personal-status-source-select select { width: 100%; border: 0; outline: 0; background: transparent; color: var(--pw-text); font: 600 12.5px/1.2 inherit; appearance: none; }
+.personal-status-source-select select { width: 100%; border: 0; outline: 0; background: transparent; color: var(--pw-text); font: 600 11.5px/1.2 inherit; appearance: none; }
 .personal-status-source-meta { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 0 3px; color: var(--pw-muted); font-size: 10.5px; }
 .personal-status-source-meta > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .personal-status-source-meta > span i { width: 6px; height: 6px; border-radius: 50%; background: #3fbf82; }

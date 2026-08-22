@@ -163,6 +163,13 @@ async function installApi(page) {
       status: 200,
     });
   });
+  await page.route("http://127.0.0.1:8877/status.json", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: require(resolve(repoRoot, "examples/status.example.json")),
+      status: 200,
+    });
+  });
   await page.route("**/api/chat/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -1162,7 +1169,13 @@ async function main() {
     await remote.getByLabel("本地转发 URL").fill("http://127.0.0.1:8976/status.json");
     await remote.getByRole("button", { name: "添加只读来源" }).click();
     const remoteSourceSelect = remote.getByLabel("选择控制面来源");
-    if (await remoteSourceSelect.locator("option").count() !== 3) throw new Error("Multiple SSH tunnel sources were not retained in the source catalog");
+    // 3 saved sources (本机 + remote-lab + Remote build host) plus the
+    // quick-add optgroup exposing the remaining configured host (remote-build).
+    if (await remoteSourceSelect.locator("option").count() !== 4) throw new Error("Multiple SSH tunnel sources were not retained in the source catalog");
+    if (await remoteSourceSelect.locator("optgroup").count() !== 1) throw new Error("Configured SSH Host quick-add group is missing");
+    await remoteSourceSelect.selectOption({ label: "remote-build" });
+    await remote.locator(".personal-read-only-source", { hasText: "remote-build" }).waitFor({ state: "visible", timeout: 10_000 });
+    pass(21, "Quick-add configured SSH host from the control-plane source dropdown.");
     await remoteSourceSelect.selectOption({ label: "remote-lab" });
     await remote.locator(".personal-read-only-source", { hasText: "remote-lab" }).waitFor({ state: "visible", timeout: 10_000 });
     await remote.locator(".personal-channel-composer").waitFor({ state: "detached", timeout: 3_000 });

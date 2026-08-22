@@ -1,5 +1,5 @@
 import { ChevronDown, Copy, Plus, RotateCw, Server, Trash2, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { StatusSource } from "../../data/status-source-catalog";
 import {
@@ -40,12 +40,17 @@ export function StatusSourceSwitcher({
   const [label, setLabel] = useState("");
   const [localPort, setLocalPort] = useState("8876");
   const [statusUrl, setStatusUrl] = useState("");
+  const quickAddPrefix = "configured:";
   const configuredDraft = useMemo(() => {
     if (!configuredHosts.some((host) => host.alias === hostAlias)) {
       return { error: "请选择已配置的 SSH Host。" } as const;
     }
     return configuredSshTunnelDraft(hostAlias, localPort);
   }, [configuredHosts, hostAlias, localPort]);
+
+  useEffect(() => {
+    void loadConfiguredHosts();
+  }, []);
 
   async function loadConfiguredHosts() {
     setConfiguredHostsLoading(true);
@@ -103,6 +108,36 @@ export function StatusSourceSwitcher({
     closeForm();
   }
 
+  function quickAddConfiguredHost(alias: string) {
+    const usedPorts = new Set(
+      sources
+        .filter((source) => source.kind === "ssh_tunnel")
+        .map((source) => {
+          try {
+            return new URL(source.statusUrl).port;
+          } catch {
+            return "";
+          }
+        }),
+    );
+    let freePort = "8876";
+    for (let port = 8876; port < 8876 + 100; port += 1) {
+      if (!usedPorts.has(String(port))) {
+        freePort = String(port);
+        break;
+      }
+    }
+    const draft = configuredSshTunnelDraft(alias, freePort);
+    if ("error" in draft) {
+      setError(draft.error ?? "SSH 来源参数无效。");
+      return;
+    }
+    const result = onAdd({ label: draft.label, statusUrl: draft.statusUrl });
+    if (result.error) setError(result.error);
+    else setError(null);
+    setLocalPort(freePort);
+  }
+
   async function copyTunnelCommand() {
     if ("error" in configuredDraft) {
       setError(configuredDraft.error ?? "SSH 来源参数无效。");
@@ -125,8 +160,26 @@ export function StatusSourceSwitcher({
       </header>
       <label className="personal-status-source-select">
         <Server size={15} />
-        <select aria-label="选择控制面来源" onChange={(event) => onSelect(event.target.value)} value={activeSource.id}>
+        <select
+          aria-label="选择控制面来源"
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value.startsWith(quickAddPrefix)) {
+              quickAddConfiguredHost(value.slice(quickAddPrefix.length));
+              return;
+            }
+            onSelect(value);
+          }}
+          value={activeSource.id}
+        >
           {sources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
+          {configuredHosts.length > 0 ? (
+            <optgroup label={`已配置 SSH Host · ${configuredHosts.length}（点击快速添加）`}>
+              {configuredHosts
+                .filter((host) => !sources.some((source) => source.label === host.alias))
+                .map((host) => <option key={`${quickAddPrefix}${host.alias}`} value={`${quickAddPrefix}${host.alias}`}>{host.alias}</option>)}
+            </optgroup>
+          ) : null}
         </select>
         <ChevronDown aria-hidden size={13} />
       </label>
