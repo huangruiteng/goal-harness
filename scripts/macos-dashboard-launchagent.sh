@@ -76,14 +76,14 @@ require_macos() {
 }
 
 resolve_status_command() {
-  if [[ -x "$bin_dir/loopx-canary" ]]; then
-    printf '%s\n' "$bin_dir/loopx-canary"
-  elif [[ -x "$bin_dir/loopx" ]]; then
+  if [[ -x "$bin_dir/loopx" ]]; then
     printf '%s\n' "$bin_dir/loopx"
-  elif command -v loopx-canary >/dev/null 2>&1; then
-    command -v loopx-canary
+  elif [[ -x "$bin_dir/loopx-canary" ]]; then
+    printf '%s\n' "$bin_dir/loopx-canary"
   elif command -v loopx >/dev/null 2>&1; then
     command -v loopx
+  elif command -v loopx-canary >/dev/null 2>&1; then
+    command -v loopx-canary
   else
     echo "loopx is not installed; run scripts/install-local.sh first." >&2
     exit 1
@@ -99,6 +99,15 @@ resolve_python_command() {
     echo "python3 is not on PATH; install Python 3 or add it to PATH." >&2
     exit 1
   fi
+}
+
+resolve_loopx_python() {
+  local python_command
+  if python_command="$(bash "$repo_root/scripts/loopx-python.sh" 2>/dev/null)"; then
+    printf '%s\n' "$python_command"
+    return 0
+  fi
+  resolve_python_command
 }
 
 resolve_optional_command() {
@@ -168,7 +177,7 @@ write_plists() {
   local status_command python_command codex_command claude_command lark_cli_command
   local path_prefix command_path command_dir status_shell chat_shell dashboard_shell control_plane_write_arg lark_cli_arg
   status_command="$(resolve_status_command)"
-  python_command="$(resolve_python_command)"
+  python_command="$(resolve_loopx_python)"
   codex_command="$(resolve_optional_command codex)"
   claude_command="$(resolve_optional_command claude)"
   lark_cli_command="$(resolve_lark_cli_command "$python_command" 2>/dev/null || true)"
@@ -191,8 +200,8 @@ write_plists() {
   if [[ -n "$lark_cli_command" ]]; then
     lark_cli_arg=" --lark-cli-bin $(shell_quote "$lark_cli_command")"
   fi
-  status_shell="export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") serve-status --global-registry --host $(shell_quote "$host") --port $(shell_quote "$status_port") --limit $(shell_quote "$status_limit")$control_plane_write_arg"
-  chat_shell="export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") chat --global-registry --host $(shell_quote "$host") --port $(shell_quote "$chat_port") --codex-bin $(shell_quote "$codex_command") --claude-bin $(shell_quote "$claude_command")$lark_cli_arg --no-open"
+  status_shell="export LOOPX_PYTHON=$(shell_quote "$python_command"); export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") serve-status --global-registry --host $(shell_quote "$host") --port $(shell_quote "$status_port") --limit $(shell_quote "$status_limit")$control_plane_write_arg"
+  chat_shell="export LOOPX_PYTHON=$(shell_quote "$python_command"); export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") chat --global-registry --host $(shell_quote "$host") --port $(shell_quote "$chat_port") --codex-bin $(shell_quote "$codex_command") --claude-bin $(shell_quote "$claude_command")$lark_cli_arg --no-open"
   dashboard_shell="export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$python_command") -m http.server $(shell_quote "$dashboard_port") --bind $(shell_quote "$host") --directory $(shell_quote "$dashboard_dist_dir")"
 
   mkdir -p "$launch_agents_dir" "$logs_dir"

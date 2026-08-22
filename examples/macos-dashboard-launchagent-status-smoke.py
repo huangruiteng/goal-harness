@@ -70,6 +70,11 @@ def main() -> int:
             "exit 2\n",
         )
         write_executable(
+            fake_bin / "loopx",
+            "#!/usr/bin/env bash\n"
+            "echo loopx \"$@\"\n",
+        )
+        write_executable(
             fake_bin / "loopx-canary",
             "#!/usr/bin/env bash\n"
             "echo loopx-canary \"$@\"\n",
@@ -112,6 +117,10 @@ def main() -> int:
         assert " chat --global-registry " in default_chat_plist, default_chat_plist
         assert "--port 8767" in default_chat_plist, default_chat_plist
         assert "--no-open" in default_chat_plist, default_chat_plist
+        assert "export LOOPX_PYTHON=" in default_plist, default_plist
+        assert "export LOOPX_PYTHON=" in default_chat_plist, default_chat_plist
+        assert "/loopx --registry" in default_plist, default_plist
+        assert "/loopx-canary" not in default_plist, default_plist
 
         run_script(
             fake_bin,
