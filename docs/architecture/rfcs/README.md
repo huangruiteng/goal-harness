@@ -66,8 +66,9 @@ promote a proposal beyond that status.
   without making retrieval, model judgment, or a global evaluator authoritative.
 - [TypeScript Control-Plane Migration v0](typescript-control-plane-migration-v0.md)
   ([中文版](typescript-control-plane-migration-v0.zh-CN.md)): use a
-  contract-first, parity-gated, block-by-block process; Python remains
-  canonical during the transition.
+  contract-first, parity-gated Strangler Fig process; the shipped TypeScript
+  runtime owns migrated semantics, and the active phase cuts over complete
+  transactions while retiring Python facades and migration scaffolding.
 
 ## Draft Integration Proposals
 

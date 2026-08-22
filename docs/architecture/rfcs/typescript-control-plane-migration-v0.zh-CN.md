@@ -1,9 +1,9 @@
 # RFC：LoopX 控制面 TypeScript 渐进迁移方向 v0
 
-- Status：Draft，首个 bounded cutover 等待维护者评审
+- Status：Accepted，transaction-payoff 阶段进行中
 - Proposed by：LoopX maintainers
 - Date：2026-08-15
-- Last revised：2026-08-21
+- Last revised：2026-08-22
 - Scope：LoopX 控制面核心从 Python 到 TypeScript 的增量、replacement-first
   迁移；不长期维护两份语义实现
 - Tracking issue：[#3225](https://github.com/huangruiteng/loopx/issues/3225)
@@ -16,9 +16,14 @@
 ## 0. 用一个例子说明决策
 
 迁移期间，Python `loopx` CLI 向 LoopX 托管的 TypeScript runtime 发送一笔
-粗粒度 typed transaction。已迁移的 TypeScript 模块拥有规则和已经迁移的
-LoopX 内部 effect；Python 只保留 transport 与 legacy callback adapter。同一
-PR 会删除被替代的 Python 规则和只验证旧实现的测试。
+粗粒度 typed transaction。例如，一次 Turn settlement request 携带完整的当前
+状态和 callback receipts；TypeScript 完成验证、reduction、已迁内部 effect 的持久化，
+并返回一个 typed result。Python 只把结果投影为旧 CLI shape，不再串行调用一组
+TypeScript leaf helper，也不保留平行的 enum 和 reducer。
+
+同一 PR 必须删除被它替代的 Python 语义路径。仅新增 TypeScript module 不等于取得
+迁移进展；真正的兑现是语义 owner 更少、跨 runtime round trip 更少，并且 facade
+有可信的删除条件。
 
 CLI 自身迁到 TypeScript 后，CLI-only 使用方式会在进程内直接 import 同一份
 kernel，Python 到 TypeScript 的桥随之删除。当 App、CLI、scheduler 或多个
@@ -28,9 +33,10 @@ server。
 
 ## 1. 问题
 
-LoopX 已有 TypeScript host 与 dashboard 表面，但权威控制面规则在 Python。
-一次性重写风险过高，长期保留双实现则更差：每次修 bug 都要改两份，parity
-会从迁移工具变成永久产品能力。
+LoopX 已有 TypeScript host 与 dashboard 表面。Effect Program、Turn-journal effect、
+若干 Todo/quota decision 和 scheduler state 已有 TypeScript owner，但大量 CLI
+composition 与兼容表面仍在 Python。一次性重写风险过高；然而继续逐个翻译 leaf
+helper 会留下 chatty bridge 和重复 DTO 知识：代码位置变了，产品并没有简化。
 
 因此，中间迁移节点必须同时满足：
 
@@ -39,7 +45,9 @@ LoopX 已有 TypeScript host 与 dashboard 表面，但权威控制面规则在 
 - 可以迁移真实副作用，而不只迁纯投影；
 - 基于 pinned 迁移前基线和独立定义的不变量验证正确性；
 - 每次 cutover 都测量 latency、packaging、upgrade、rollback 与 crash recovery；
-- 每个 PR 都是完整、可评审的 replacement slice。
+- 每个 PR 都是完整、可评审的 replacement slice；
+- 迁移经济性必须改善：旧语义代码和临时 scaffolding 的退出速度要快于 bridge
+  代码的累积速度。
 
 ## 2. 架构决策
 
@@ -115,52 +123,84 @@ validator、负向边界覆盖和移除 owner。只要 public、持久化、RPC 
 输入仍通过未经验证的断言进入已迁 domain 的 semantic core，该 domain 就不能
 通过 promotion gate。TypeScript 补充运行时验证，而不是替代它。
 
-## 3. 为什么先迁 Effect Program
+## 3. 当前基线与阶段转换
 
-Effect Program 是已经连接 ordered step、identity、short-circuit failure、replay、
-receipt 与 settlement 的底层合同。先迁它，后续 todo、quota、scheduler 和 gate
-就能共用一套 typed execution language，而不是各自发明跨语言合同。
+Effect Program 先迁，是因为它连接 ordered step、identity、short-circuit failure、
+replay、receipt 与 settlement。这个架构选择已经落地，不再是假设。
 
-这不意味着把所有状态机塞进一个通用 protocol。Domain transition invariant
-仍属于 domain owner。只有真实 caller 能切换、且 PR 能删除相应 Python 知识时，
-才迁一个状态族。
+### 3.1 已交付基线
+
+| 切片 | 已交付的 TypeScript 权威能力 | 剩余迁移债务 |
+| --- | --- | --- |
+| Effect runtime 与 Turn journal（[#3416](https://github.com/huangruiteng/loopx/pull/3416)） | Effect algebra、settlement rule、runtime lifecycle、typed Turn-journal interpretation 与 durable checkpoint effect | Python settlement facade 仍暴露细粒度调用，并重复 DTO/enum shape |
+| Todo、quota 与 scheduler 证明切片（[#3431](https://github.com/huangruiteng/loopx/pull/3431)–[#3434](https://github.com/huangruiteng/loopx/pull/3434)） | Completion fence/state、workspace causality 与 scheduler transition 各有一个 TS rule owner | 切口大多仍是 leaf-shaped；Python 继续组合多个产品 transaction |
+| Scheduler durable state（[#3440](https://github.com/huangruiteng/loopx/pull/3440)） | State normalization、persistence、replay 与一笔粗粒度 transition 由 TS 拥有 | Python compatibility path 仍承担跨 runtime transport 税 |
+| Runtime decoder（[#3443](https://github.com/huangruiteng/loopx/pull/3443)） | 稳定 primitive decoding 进入一个很小的共享模块；domain decoder 仍留在本地 | 没有理由建设更大的 schema framework |
+
+这些切片已经证明 correctness、packaging、Windows lifecycle、crash recovery、真实
+TS-owned write 和可接受的 warm primitive-call latency。它们也暴露了迁移边界：
+逐 leaf 翻译会先增加 TypeScript、facade、parity fixture 与 bridge traffic，尚未删除
+足够多的 Python composition。
+
+### 3.2 兑现阶段决策
+
+迁移因此进入 **transaction-payoff 阶段**。后续 leaf migration 默认拒绝；只有它
+能在同一 PR 或明确的紧邻 bounded follow-up 中直接解锁完整 transaction cutover
+与删除时才例外。进展单位改为 operator 可感知的 transaction，而不是 helper、
+enum、dataclass 或源文件。
+
+一笔 transaction cutover 必须：
+
+1. 把 validation、state transition、已迁 internal effect 和 result construction
+   放到一个 domain-owned TS request/response boundary 后；
+2. 删除被替代的 Python rule composition、细粒度 API、重复 enum/dataclass 和
+   implementation-specific test；
+3. 让 Python 只保留 transport、legacy response projection，以及仍属于外部
+   authority 的显式 adapter；
+4. 对该控制面 transaction 最多进行一次跨 runtime request/response。Model call、
+   human gate 或第三方 mutation 会开启一笔新的、带 receipt 的 transaction，而不是
+   隐式 callback tunnel；
+5. 写明 Python facade 与 bridge operation 的精确删除条件。
+
+Domain invariant 仍归各自 bounded owner。“更粗粒度”不等于建立一个万能控制面
+command 或 mega-reducer。
 
 ## 4. 迁移顺序
 
-### Stage 0 — 固定行为与 authority
+### Stage 0 — 固定行为与 authority（已完成；每笔 transaction 重复执行）
 
-对选中的 slice 记录：
+每个选中的 transaction 都要记录权威 schema、经独立 review 的合法/非法
+transition、生产 caller 与 side effect、matched latency/install baseline，以及
+rollback/state-compatibility boundary。Characterization fixture 是临时迁移证据，
+不是永久 specification。
 
-- 权威 schema 和经过独立 review 的合法/非法 transition；
-- pinned-base characterization fixtures；
-- 生产 caller 与 side effects；
-- latency 与 package/install 基线；
-- rollback boundary 与 state compatibility。
+### Stage 1 — Effect Program 与 managed runtime 基础（已交付）
 
-### Stage 1 — Effect Program cutover
+TypeScript Effect algebra、settlement 语义、Turn-journal interpretation、durable
+checkpoint effect、runtime lifecycle、packaging、upgrade fingerprint 与 boundary
+decoder 基础都已进入 `main`。从清理角度看，这一阶段尚未完全结束：Python 的
+细粒度 settlement surface 是兑现阶段的首要目标。
 
-把 Effect algebra 与 normal-Turn settlement 语义迁到 TypeScript：ordered
-program、settlement identity、bind/short-circuit、replay、receipt construction、
-next-action selection 和 commit reduction。增加第一个 native internal effect——
-atomic Turn-journal checkpoint——证明 runtime 不只拥有纯投影。
+### Stage 2A — Bounded rule-owner 证明（已交付；不再复制该模式）
 
-Python caller 使用 managed runtime，只保留 DTO conversion 和未迁外部 callback。
-Parity 与 invariant coverage 成立后，删除 Python 语义实现及其 implementation-
-specific tests。
+Todo completion、quota workspace causality、scheduler transition 与 scheduler
+durable state 已证明 Python caller 可以安全切换到唯一 TS semantic owner。它们的
+characterization 与 facade layer 是合适的迁移证据，但继续在更多 domain 平铺相同
+leaf pattern 会增加总复杂度。
 
-### Stage 2 — Domain slices
+### Stage 2B — 完整 transaction cutover（进行中）
 
-一次迁一个 bounded owner，按重复知识与 runtime 价值选，不按文件大小选。候选
-顺序是：
+按删除杠杆与 runtime traffic 选切口，而不是按翻译难度选。首个候选是完整的 Turn
+settlement/commit transaction，因为当前 Python settlement surface 会组合多次 TS
+调用，并保留重复 settlement type。后续候选是完整 Todo completion、quota
+spend/settlement 与 scheduler heartbeat/state transaction；只有当每个 PR 能删除
+既有 facade，或使它物质变薄时才选择。
 
-1. todo lifecycle 与 completion fence；
-2. quota settlement/spend reducer 与 typed receipt；
-3. scheduler/monitor state transition，host mutation 仍保持 delegated；
-4. gate、capability resolution 与 status projection；
-5. event-store writer 与 multi-client authority。
-
-测试跟随规则一起迁。仓库不会先把整套 Python 测试改写成 TypeScript，因为
-没有迁移 owner 的 TS 测试要么间接调用 Python，要么复制实现假设。
+每完成一笔 transaction，就用 native TS semantic/invariant test 加一个持久的
+end-to-end adapter contract，替换 migration-only characterization worker 与 Python
+implementation fixture。只有旧 authority 仍可执行，或 versioned compatibility
+window 仍需 differential proof 时才保留 characterization corpus；引入时必须记录
+删除触发条件。
 
 ### Stage 3 — CLI 与 App 汇合
 
@@ -174,29 +214,33 @@ daemon。所有生产 caller 不再需要 Python bridge 后，删除 bridge 与�
 决定可选 daemon 使用普通 Node entry point 还是 LoopX 自建 single executable。
 不要静默依赖非官方第三方 Node wheel。
 
-## 5. 首个 bounded PR 合同
+## 5. 兑现阶段 PR 合同
 
-第一个 PR 是一个有意收敛的完整 vertical replacement：
+后续每个迁移 PR 都要在描述与 validation comment 中附一份 **migration economics
+receipt**：
 
-- TypeScript 完整拥有现有生产 caller 使用的 Effect Program 与 settlement 语义；
-- 一个 managed、idle-exiting loopback runtime，transport 与 typed handler
-  registry 分离；
-- 对已迁 authority input 使用集中式 runtime decoder；首个 slice 不允许
-  `as unknown as T` 或 `as never` 断言跨过 RPC 边界；
-- TS-owned Turn-journal interpretation 与 atomic checkpoint write；
-- Python compatibility facade 切到 TS owner，并删除被替代的 Python rule code
-  与 obsolete tests；
-- Node readiness 与可行动的 doctor 输出；
-- 自动恢复 stale PID 与 abandoned startup lock，提供稳定、public-safe 的启动
-  diagnostic code，并让 CLI 与 App 消费同一个 lifecycle health projection，
-  不另建第二套健康模型；
-- wheel/sdist 包含、clean-environment probe、Windows coverage、crash restart、
-  idempotent retry 与 upgrade fingerprint；
-- pinned-base characterization、native TS invariant tests、Python caller regressions
-  与 end-to-end latency evidence。
+| 字段 | 必需证据 |
+| --- | --- |
+| Canonical owner | Cutover 前后分别由谁拥有；不得存在模糊双 authority |
+| 删除的旧语义代码 | 删除的 Python rule、细粒度 API、enum/dataclass 与 implementation-only adapter 的产品 LOC |
+| 新增的 bridge 代码 | 仅为 Python↔TS transport 或 compatibility 新增的产品 LOC |
+| 跨 runtime 调用 | Happy path 与 recovery path 在变更前后的 request/response 次数；目标 transaction 必须是一进一出 |
+| 产品代码净增减 | 产品 LOC 的新增减去删除；与 test、fixture、generated file 和 docs 分开报告 |
+| 迁移 scaffolding | 新增、保留或删除的 characterization/parity helper，以及具体删除触发条件 |
+| Facade 退出 | 本次已删除，或列出精确剩余 caller/compatibility contract 和删除条件 |
+| 正确性与性能 | 与变更 transaction 相关的 invariant、负例、matched end-to-end baseline、packaging、crash/retry 与 host coverage |
 
-它**不**迁完整 CLI，不迁 todo/quota/scheduler domain，不发布 release，也不授权
-第二个 PR。完成后停在 owner review gate。
+LOC 以最终 merge-base diff 为准，并把 production code 与 test、fixture、generated
+file、docs 分开分类。搬移代码按删除加新增计算；bridge LOC 必须列出那些唯一职责是
+跨 runtime transport 或 compatibility 的函数。Round trip 要在一条具名 public
+happy path 及其 retry/recovery path 上实测，不能由 handler 数量推断。
+
+只搬动代码、只新增 handler，或扩大 bridge 却不删除 authority 的 PR 不能通过这一
+阶段。一笔 cohesive transaction 可以暂时净增代码，但 receipt 必须说明 bridge
+为何有界，以及下一次哪项删除会兑现收益；这个例外不能被串成无限 leaf migration。
+
+稳定 primitive decoder 可以复用现有的小型 runtime decoder module。Domain decoder
+仍留在各自 bounded context；本 RFC 不授权 generic schema framework。
 
 ## 6. 正确性与性能门禁
 
@@ -218,21 +262,25 @@ daemon。所有生产 caller 不再需要 Python bridge 后，删除 bridge 与�
 - wheel 与 sdist 安装到全新环境后，从打包文件执行 deep semantic probe。
 
 Characterization output 是证据，不是 specification。Pinned 行为若与独立 review 的
-invariant 冲突，PR 必须披露，并把行为变更单独批准。
+invariant 冲突，PR 必须披露，并把行为变更单独批准。旧 authority 删除后，promotion
+还要求删除只服务这次实现对比的 characterization machinery；当 fixture 表达 public
+或 persisted compatibility contract 时，可以保留为持久 regression test。
 
 ### 性能
 
-Cold startup 与 steady-state 分开测量。第一个 PR 必须报告：
+Cold startup 与 steady-state 分开测量。每笔 transaction cutover 必须报告：
 
 - managed runtime cold-start p50/p95；
 - warm typed request p50/p95；
-- representative settlement transaction p50/p95；
+- representative complete transaction p50/p95 与跨 runtime round trip 次数；
 - 相比 pinned Python baseline 的完整 CLI p50/p95；
 - idle 后和 bounded request burst 下的 daemon 内存。
 
-默认验收目标是 warm internal transition p95 低于 2 ms，完整 CLI 不出现物质
-回退（p95 超过 5% 或出现无法解释的 25 ms 额外开销）。不达标是 owner review
-gate，不能静默放宽 benchmark。
+默认验收目标仍是 warm、non-durable internal transition p95 低于 2 ms，完整 CLI
+不出现物质回退（p95 超过 5% 或出现无法解释的 25 ms 额外开销）。Durable
+transaction 要和 matched durability baseline 比较，而不是套用 2 ms kernel budget。
+不达标，或用更快的 microbenchmark 隐藏 tail regression，都是 owner review gate，
+不能静默放宽。
 
 ## 7. 安装、升级与回滚
 
@@ -259,9 +307,12 @@ Rollback 恢复上一版本 artifact 与 fingerprint。在单独通过 state-sch
 - 不 big-bang 重写 CLI。
 - 不以 dual-write production semantic state 作为迁移策略。
 - 不只凭 microbenchmark 声称性能。
-- 首个 PR 的正确性、性能、packaging 与 maintainability evidence 未通过 owner
-  review 前，不开始下一 slice。
+- 不因 bridge 已存在就继续平铺迁更多 leaf helper。
+- 除非存在具名 public import、persisted wire contract 或未迁 caller，不保留重复的
+  Python enum/dataclass。
+- 不为已经不存在的实现永久保留 characterization harness。
 
 如果 bridge 需要用户手动管理、已迁规则仍有 Python 语义 owner、handler boundary
-变得 chatty，或首个 slice 只能靠削弱既有行为才能通过 parity/recovery/performance
-门禁，就停止或 replan。
+变得 chatty、连续两个 PR 增加 bridge/scaffolding 却没有退出 facade，或一笔
+transaction 只能靠削弱既有行为才能通过 invariant/recovery/performance 门禁，
+就停止或 replan。

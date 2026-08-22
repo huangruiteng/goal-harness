@@ -1,9 +1,9 @@
 # RFC: TypeScript Control-Plane Migration Direction v0
 
-- Status: Draft, first bounded cutover under maintainer review
+- Status: Accepted, transaction-payoff phase in progress
 - Proposed by: LoopX maintainers
 - Date: 2026-08-15
-- Last revised: 2026-08-21
+- Last revised: 2026-08-22
 - Scope: an incremental, replacement-first migration of the LoopX control-plane
   core from Python to TypeScript without maintaining two semantic
   implementations
@@ -17,10 +17,16 @@
 ## 0. Decision in one example
 
 During migration, the Python `loopx` CLI sends one coarse typed transaction to
-a LoopX-managed TypeScript runtime. The migrated TypeScript module owns the
-rule and any migrated internal LoopX effect; Python is only a transport and
-legacy-callback adapter. The replaced Python rule and its implementation-only
-tests are deleted in the same PR.
+a LoopX-managed TypeScript runtime. For example, a Turn settlement request
+contains the complete current state and callback receipts; TypeScript validates,
+reduces, persists migrated internal effects, and returns one typed result.
+Python translates that result into the legacy CLI shape. It does not call a
+series of TypeScript leaf helpers or retain parallel enums and reducers.
+
+The same PR must delete the Python semantic path it replaces. A new TypeScript
+module is not migration progress by itself: the payoff is fewer semantic
+owners, fewer cross-runtime round trips, and a facade with a credible deletion
+condition.
 
 After the CLI itself migrates to TypeScript, CLI-only use imports the same
 kernel in-process and the Python-to-TypeScript bridge disappears. When the App,
@@ -30,10 +36,12 @@ forms, not one server per control-plane family.
 
 ## 1. Problem
 
-LoopX already has TypeScript host and dashboard surfaces, but its canonical
-control-plane rules live in Python. A big-bang rewrite is too risky, while a
-long-lived dual implementation would be worse: every bug fix would need to be
-made twice and parity would become a permanent product feature.
+LoopX already has TypeScript host and dashboard surfaces. The Effect Program,
+Turn-journal effects, several Todo/quota decisions, and scheduler state now
+have TypeScript owners, while much of the CLI composition and compatibility
+surface remains in Python. A big-bang rewrite is too risky, but continuing to
+translate leaf helpers would leave a chatty bridge and duplicate DTO knowledge:
+code would move without simplifying the product.
 
 The migration therefore needs intermediate states that satisfy all of these
 constraints:
@@ -45,7 +53,9 @@ constraints:
   independently stated invariants;
 - latency, packaging, upgrade, rollback, and crash recovery are measured at
   every cutover;
-- each PR is a complete, reviewable replacement slice.
+- each PR is a complete, reviewable replacement slice;
+- migration economics improve: old semantic code and temporary scaffolding
+  leave faster than bridge code accumulates.
 
 ## 2. Architecture decision
 
@@ -132,57 +142,92 @@ while public, persisted, RPC, or extension input still reaches its semantic
 core through an unvalidated assertion. TypeScript complements runtime
 validation; it does not replace it.
 
-## 3. Why Effect Program moves first
+## 3. Current baseline and phase transition
 
-Effect Program is the bottom contract that already joins ordered steps,
-identity, short-circuit failure, replay, receipts, and settlement. Migrating it
-first gives later todo, quota, scheduler, and gate work one typed execution
-language instead of independently inventing cross-language contracts.
+Effect Program moved first because it joins ordered steps, identity,
+short-circuit failure, replay, receipts, and settlement. That architectural
+choice is now implemented rather than hypothetical.
 
-This is not permission to move every state machine into one generic protocol.
-Domain transition invariants stay with their domain owner. A family migrates
-only when a real caller can switch and the PR deletes corresponding Python
-knowledge.
+### 3.1 Shipped baseline
+
+| Slice | Canonical TypeScript ownership now shipped | Remaining migration debt |
+| --- | --- | --- |
+| Effect runtime and Turn journal ([#3416](https://github.com/huangruiteng/loopx/pull/3416)) | Effect algebra, settlement rules, runtime lifecycle, typed Turn-journal interpretation, and durable checkpoint effects | Python settlement facades still expose fine-grained calls and duplicate DTO/enum shapes |
+| Todo, quota, and scheduler proof slices ([#3431](https://github.com/huangruiteng/loopx/pull/3431)–[#3434](https://github.com/huangruiteng/loopx/pull/3434)) | Completion fence/state, workspace causality, and scheduler transitions each have one TS rule owner | The cuts are mostly leaf-shaped; Python still composes several product transactions |
+| Scheduler durable state ([#3440](https://github.com/huangruiteng/loopx/pull/3440)) | State normalization, persistence, replay, and one coarse transition are TS-owned | The Python compatibility path still pays a cross-runtime transport tax |
+| Runtime decoders ([#3443](https://github.com/huangruiteng/loopx/pull/3443)) | Stable primitive decoding has one small shared module; domain decoders remain local | No larger schema framework is justified |
+
+These slices proved correctness, packaging, Windows lifecycle, crash recovery,
+real TS-owned writes, and acceptable warm primitive-call latency. They also
+revealed the migration boundary: leaf-by-leaf translation grows TypeScript,
+facades, parity fixtures, and bridge traffic before enough Python composition
+can be deleted.
+
+### 3.2 Payoff-phase decision
+
+The migration therefore enters a **transaction-payoff phase**. New leaf
+migrations are rejected unless they directly unlock a complete transaction
+cutover and deletion in the same PR or the immediately stated bounded follow-up.
+The unit of progress is now an operator-visible transaction, not a helper,
+enum, dataclass, or source file.
+
+A transaction cutover must:
+
+1. move validation, state transition, migrated internal effects, and result
+   construction behind one domain-owned TS request/response boundary;
+2. delete the replaced Python rule composition, fine-grained API, duplicate
+   enums/dataclasses, and implementation-specific tests;
+3. leave Python as transport, legacy response projection, and explicit adapter
+   for still-external authorities only;
+4. use at most one cross-runtime request/response for that control-plane
+   transaction. A model call, human gate, or third-party mutation starts a new
+   receipt-bearing transaction rather than an implicit callback tunnel;
+5. name the exact condition under which its Python facade and bridge operation
+   can be removed.
+
+Domain invariants remain with their bounded owner. “Coarser” does not mean one
+universal control-plane command or one mega-reducer.
 
 ## 4. Migration sequence
 
-### Stage 0 — Pin behavior and authority
+### Stage 0 — Pin behavior and authority (complete, repeated per transaction)
 
-For the selected slice, record:
+For each selected transaction, record authoritative schemas and independently
+reviewed legal/illegal transitions, production callers and side effects,
+matched latency/install baselines, and rollback/state-compatibility boundaries.
+Characterization fixtures are temporary migration evidence, not permanent
+specification.
 
-- authoritative schemas and independently reviewed legal/illegal transitions;
-- pinned-base characterization fixtures;
-- production callers and side effects;
-- latency and package/install baseline;
-- rollback boundary and state compatibility.
+### Stage 1 — Effect Program and managed runtime foundation (shipped)
 
-### Stage 1 — Effect Program cutover
+The TypeScript Effect algebra, settlement semantics, Turn-journal
+interpretation, durable checkpoint effect, runtime lifecycle, packaging,
+upgrade fingerprint, and boundary decoder foundation are on `main`. This stage
+is not complete from a cleanup perspective: its Python fine-grained settlement
+surface remains a primary target for the payoff phase.
 
-Move the Effect algebra and normal-Turn settlement semantics to TypeScript:
-ordered programs, settlement identity, bind/short-circuit behavior, replay,
-receipt construction, next-action selection, and commit reduction. Add one
-native internal effect—atomic Turn-journal checkpointing—to prove that the
-runtime owns more than pure projection.
+### Stage 2A — Bounded rule-owner proofs (shipped; do not repeat as a pattern)
 
-Python callers use the managed runtime and retain only DTO conversion plus
-unmigrated external callbacks. Delete the Python semantic implementation and
-its implementation-specific tests after parity and invariant coverage exist.
+Todo completion, quota workspace causality, scheduler transitions, and
+scheduler durable state established that a Python caller can safely switch to
+a single TS semantic owner. Their characterization and facade layers were
+appropriate migration evidence, but copying the same leaf pattern across more
+domains would now increase total complexity.
 
-### Stage 2 — Domain slices
+### Stage 2B — Complete transaction cutovers (active)
 
-Migrate one bounded owner at a time, selected by duplicate-knowledge and
-runtime value rather than file size. Candidate order is:
+Select by deletion leverage and runtime traffic, not by ease of translation.
+The first candidate is the complete Turn settlement/commit transaction because
+the current Python settlement surface composes several TS calls and retains
+duplicate settlement types. Subsequent candidates are complete Todo completion,
+quota spend/settlement, and scheduler heartbeat/state transactions, chosen only
+when each PR can retire an existing facade or materially shrink it.
 
-1. todo lifecycle and completion fence;
-2. quota settlement/spend reducers and typed receipts;
-3. scheduler/monitor state transitions while host mutation remains delegated;
-4. gates, capability resolution, and status projections;
-5. event-store writer and multi-client authority.
-
-Each slice moves its tests with the rule. The repository does not first rewrite
-the entire Python test suite into TypeScript, because tests without a migrated
-owner would either call Python indirectly or duplicate implementation
-assumptions.
+For each completed transaction, replace migration-only characterization workers
+and Python implementation fixtures with native TS semantic/invariant tests plus
+one durable end-to-end adapter contract. Retain a characterization corpus only
+while an old authority remains executable or a versioned compatibility window
+requires differential proof; record its deletion trigger when introduced.
 
 ### Stage 3 — CLI and App convergence
 
@@ -198,30 +243,37 @@ runtime requirement, and decide whether the optional daemon ships as a normal
 Node entry point or a LoopX-built single executable. Do not silently depend on
 an unofficial third-party Node wheel.
 
-## 5. First bounded PR contract
+## 5. Payoff-phase PR contract
 
-The first PR is intentionally one coherent vertical replacement:
+Every later migration PR includes a **migration economics receipt** in its
+description and validation comment:
 
-- complete TS ownership of the existing Effect Program and settlement
-  semantics used by production callers;
-- one managed, idle-exiting loopback runtime with transport separated from a
-  typed handler registry;
-- centralized runtime decoders for migrated authority inputs; the first slice
-  carries no `as unknown as T` or `as never` assertion across its RPC boundary;
-- TS-owned Turn-journal interpretation and atomic checkpoint write;
-- Python compatibility facades switched to the TS owner, with replaced Python
-  rule code and obsolete tests deleted;
-- Node readiness and actionable doctor output;
-- automatic stale-PID and abandoned-start-lock recovery, stable public-safe
-  startup diagnostic codes, and one lifecycle health projection consumable by
-  CLI and App surfaces without a second health model;
-- wheel and sdist inclusion, clean-environment probes, Windows coverage, crash
-  restart, idempotent retry, and upgrade fingerprinting;
-- pinned-base characterization, native TS invariant tests, Python caller
-  regressions, and end-to-end latency evidence.
+| Field | Required evidence |
+| --- | --- |
+| Canonical owner | Owner before and after the cutover; no ambiguous dual authority |
+| Legacy semantic code deleted | Product LOC of replaced Python rules, fine-grained APIs, enums/dataclasses, and implementation-only adapters removed |
+| Bridge code added | Product LOC added solely for Python↔TS transport or compatibility |
+| Cross-runtime calls | Happy-path and recovery-path request/response counts before and after; the target transaction must be one request and one response |
+| Product-code net change | Added minus deleted product LOC, reported separately from tests, fixtures, generated files, and docs |
+| Migration scaffolding | Characterization/parity helpers added, retained, or deleted, with a concrete removal trigger |
+| Facade exit | Facade deleted now, or the exact remaining caller/compatibility contract and deletion condition |
+| Correctness and performance | Invariants, negative cases, matched end-to-end baseline, packaging, crash/retry, and host coverage relevant to the changed transaction |
 
-It does **not** migrate the full CLI, todo/quota/scheduler domains, publish a
-release, or authorize a second PR. It stops at an owner review gate.
+LOC uses the final merge-base diff and classifies production code separately
+from tests, fixtures, generated files, and docs. Moved code counts as deletion
+plus addition; bridge LOC must name the functions whose only purpose is
+cross-runtime transport or compatibility. Round trips are counted on one named
+public happy path and its retry/recovery path, not inferred from handler count.
+
+A PR that only relocates code, adds a handler, or increases bridge surface
+without deleting authority does not pass this phase. A temporary net increase
+may be accepted for one cohesive transaction only when the receipt shows why
+the bridge is bounded and which next deletion realizes the gain. That exception
+cannot be chained across open-ended leaf migrations.
+
+Stable primitive decoders may be shared through the existing small runtime
+decoder module. Domain decoders stay in their bounded contexts; this RFC does
+not authorize a generic schema framework.
 
 ## 6. Correctness and performance gates
 
@@ -246,23 +298,28 @@ release, or authorize a second PR. It stops at an owner review gate.
 
 Characterization output is evidence, not specification. If a pinned behavior
 contradicts an independently reviewed invariant, the PR must disclose and
-separately approve the behavior change.
+separately approve the behavior change. Once the old authority is removed,
+promotion also requires deleting characterization machinery that serves only
+that implementation comparison; durable regression fixtures may remain when
+they express a public or persisted compatibility contract.
 
 ### Performance
 
-Measure cold startup separately from steady-state execution. The first PR must
-report:
+Measure cold startup separately from steady-state execution. Every transaction
+cutover reports:
 
 - managed runtime cold-start p50/p95;
 - warm typed request p50/p95;
-- representative settlement transaction p50/p95;
+- representative complete transaction p50/p95 and cross-runtime round trips;
 - full CLI p50/p95 versus the pinned Python baseline;
 - daemon memory after idle and under a bounded request burst.
 
-The default acceptance target is warm internal transitions below 2 ms p95 and
-no material full-CLI regression (greater than 5% or an unexplained 25 ms
-additive p95). A miss is an owner review gate, not a benchmark that may be
-silently relaxed.
+The default acceptance target remains warm, non-durable internal transitions
+below 2 ms p95 and no material full-CLI regression (greater than 5% or an
+unexplained 25 ms additive p95). Durable transactions are compared with a
+matched durability baseline rather than the 2 ms kernel budget. A miss, or a
+tail regression hidden by a faster microbenchmark, is an owner review gate and
+cannot be silently relaxed.
 
 ## 7. Install, upgrade, and rollback
 
@@ -293,10 +350,14 @@ cutover.
 - No big-bang CLI rewrite.
 - No dual-write of production semantic state as a migration strategy.
 - No performance claim from microbenchmarks alone.
-- No later slice starts until the first PR's owner review accepts correctness,
-  performance, packaging, and maintainability evidence.
+- No more flat migration of leaf helpers merely because the bridge exists.
+- No duplicate Python enum/dataclass retained without a named public import,
+  persisted wire contract, or unmigrated caller.
+- No permanent characterization harness for an implementation that no longer
+  exists.
 
 Stop or replan if the bridge becomes user-managed, a migrated rule still has a
-Python semantic owner, the handler boundary becomes chatty, or the first slice
-cannot meet its parity/recovery/performance gates without weakening existing
+Python semantic owner, the handler boundary becomes chatty, two consecutive PRs
+increase bridge/scaffolding without retiring a facade, or a transaction cannot
+meet its invariant/recovery/performance gates without weakening existing
 behavior.
