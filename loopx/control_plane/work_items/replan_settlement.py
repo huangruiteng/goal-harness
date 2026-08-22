@@ -39,6 +39,14 @@ def project_todo_lifecycle_settlement_reentry(
         raise RuntimeError("TypeScript Todo lifecycle reentry result must be an object")
     projected_triggers = result.get("triggers")
     next_cli_actions = result.get("next_cli_actions")
+    expected_triggers = [
+        {
+            "kind": trigger.get("kind"),
+            "todo_id": trigger.get("todo_id"),
+            "completion_turn_key": trigger.get("completion_turn_key") or None,
+        }
+        for trigger in triggers[:3]
+    ]
     if (
         result.get("schema_version") != TODO_LIFECYCLE_REENTRY_SCHEMA
         or result.get("resolution_mode") != "todo_lifecycle_settlement"
@@ -55,6 +63,7 @@ def project_todo_lifecycle_settlement_reentry(
             )
             for trigger in projected_triggers
         )
+        or [dict(trigger) for trigger in projected_triggers] != expected_triggers
         or not isinstance(next_cli_actions, list)
         or not next_cli_actions
         or any(not isinstance(action, str) or not action for action in next_cli_actions)

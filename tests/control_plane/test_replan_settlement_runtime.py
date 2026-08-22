@@ -140,6 +140,15 @@ def test_python_facade_projects_todo_lifecycle_reentry_request(monkeypatch) -> N
         {},
         _reentry(resolution_mode="semantic_replan"),
         _reentry(triggers=[]),
+        _reentry(
+            triggers=[
+                {
+                    "kind": "completed_advancement_without_successor",
+                    "todo_id": "todo_other001",
+                    "completion_turn_key": "turn-current001",
+                }
+            ]
+        ),
         _reentry(next_cli_actions=[]),
     ],
 )

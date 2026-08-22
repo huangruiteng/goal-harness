@@ -127,3 +127,28 @@ test("Todo lifecycle reentry rejects untyped succession triggers", () => {
     /kind is unsupported/,
   );
 });
+
+test("Todo lifecycle reentry shell-quotes projected identities", () => {
+  const projection = projectTodoLifecycleSettlementReentry({
+    schema_version: TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
+    goal_id: "goal with space",
+    triggers: [
+      {
+        kind: "completed_advancement_without_successor",
+        todo_id: "todo_1",
+        completion_turn_key: "turn'quoted",
+      },
+    ],
+    lifecycle_actor_args: ["--agent-id", "agent with space"],
+    quota_scoped_args: ["--agent-id", "agent with space"],
+  });
+
+  assert.equal(
+    (projection.next_cli_actions as string[])[0],
+    "when no real successor remains for completed Todo todo_1: loopx todo complete --goal-id 'goal with space' --todo-id todo_1 --turn-instance-id 'turn'\"'\"'quoted' --agent-id 'agent with space' --no-follow-up --note '<public-safe no-follow-up rationale>'",
+  );
+  assert.equal(
+    (projection.next_cli_actions as string[]).at(-1),
+    "loopx --format json quota should-run --goal-id 'goal with space' --agent-id 'agent with space'",
+  );
+});
