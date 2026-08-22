@@ -1,5 +1,11 @@
 import type { JsonObject } from "../effect_program.ts";
 import {
+  requireBoolean as requiredBoolean,
+  requireInteger as requiredInteger,
+  requireJsonObject as requiredObject,
+  requireNonEmptyString as requiredString,
+} from "../runtime_decode.ts";
+import {
   normalizeSchedulerHostUpdateFailures,
   normalizeSchedulerRrule,
   retainedSchedulerHostUpdateFailures,
@@ -77,27 +83,6 @@ export type SchedulerStateTransitionResult =
   | SchedulerHostTransitionResult
   | SchedulerBackoffTransitionResult;
 
-function requiredObject(value: unknown, label: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as JsonObject;
-}
-
-function requiredBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new Error(`${label} must be a boolean`);
-  }
-  return value;
-}
-
-function requiredInteger(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value)) {
-    throw new Error(`${label} must be an integer`);
-  }
-  return value;
-}
-
 function requiredPositiveIntegerList(value: unknown, label: string): number[] {
   if (
     !Array.isArray(value) ||
@@ -109,13 +94,6 @@ function requiredPositiveIntegerList(value: unknown, label: string): number[] {
     throw new Error(`${label} must be a non-empty array of positive integers`);
   }
   return [...value] as number[];
-}
-
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
 }
 
 function requestObject(value: unknown): JsonObject {

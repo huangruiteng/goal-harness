@@ -1,4 +1,9 @@
 import type { JsonObject } from "../effect_program.ts";
+import {
+  requireBoolean as requiredBoolean,
+  requireJsonObject as requiredObject,
+  requireStringArray as stringArray,
+} from "../runtime_decode.ts";
 
 export const TODO_COMPLETION_STATE_REQUEST_SCHEMA =
   "loopx_todo_completion_state_request_v0";
@@ -29,20 +34,6 @@ export interface TodoCompletionStateResult extends JsonObject {
   recovery: TodoCompletionRecovery | null;
 }
 
-function requiredObject(value: unknown, label: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as JsonObject;
-}
-
-function requiredBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new Error(`${label} must be a boolean`);
-  }
-  return value;
-}
-
 function optionalBoolean(value: unknown, label: string): boolean | null {
   if (value === null || value === undefined) return null;
   return requiredBoolean(value, label);
@@ -54,13 +45,6 @@ function optionalString(value: unknown, label: string): string | null {
     throw new Error(`${label} must be a string or null`);
   }
   return value;
-}
-
-function stringArray(value: unknown, label: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new Error(`${label} must be an array of strings`);
-  }
-  return [...value];
 }
 
 function requestObject(value: unknown, operation: string): JsonObject {

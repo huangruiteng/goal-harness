@@ -8,6 +8,13 @@ import {
   atomicWriteJson,
   withFileMutationLock,
 } from "../effect_runtime_io.ts";
+import {
+  assertNever,
+  jsonObject,
+  requireJsonObject as requiredObject,
+  requireNonEmptyString as requiredString,
+  requireStringLiteral,
+} from "../runtime_decode.ts";
 
 export const SCHEDULER_STATE_SCHEMA_VERSION = "loopx_scheduler_state_v0";
 export const SCHEDULER_HOST_UPDATE_FAILURE_SCHEMA_VERSION =
@@ -28,17 +35,20 @@ export const CODEX_APP_SURFACE = "codex_app";
 const HOST_UPDATE_FAILURE_CACHE_LIMIT = 4;
 const HOST_UPDATE_FAILURE_TTL_MS = 24 * 60 * 60 * 1_000;
 
+export const SCHEDULER_STATE_OPERATIONS = [
+  "rrule_for_minutes",
+  "normalize_rrule",
+  "rrule_interval_minutes",
+  "normalize_failure",
+  "normalize_failures",
+  "retain_failures",
+  "merge_failure",
+  "normalize_state",
+  "build_state",
+  "state_path",
+] as const;
 export type SchedulerStateOperation =
-  | "rrule_for_minutes"
-  | "normalize_rrule"
-  | "rrule_interval_minutes"
-  | "normalize_failure"
-  | "normalize_failures"
-  | "retain_failures"
-  | "merge_failure"
-  | "normalize_state"
-  | "build_state"
-  | "state_path";
+  (typeof SCHEDULER_STATE_OPERATIONS)[number];
 
 export interface SchedulerScope {
   goalId: string;
@@ -71,25 +81,6 @@ export type SchedulerStateWriteResult = SchedulerStateWriteResultBase & (
   | { written: true; replayed: false }
   | { written: false; replayed: true }
 );
-
-function asObject(value: unknown): JsonObject | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as JsonObject)
-    : null;
-}
-
-function requiredObject(value: unknown, label: string): JsonObject {
-  const result = asObject(value);
-  if (!result) throw new Error(`${label} must be an object`);
-  return result;
-}
-
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
-}
 
 function pythonTruthy(value: unknown): boolean {
   if (value === null || value === undefined || value === false) return false;
@@ -158,7 +149,7 @@ export function schedulerRruleIntervalMinutes(value: unknown): number | null {
 export function normalizeSchedulerHostUpdateFailure(
   value: unknown,
 ): JsonObject | null {
-  const input = asObject(value);
+  const input = jsonObject(value);
   if (
     !input ||
     stringOrEmpty(input.schema_version) !==
@@ -277,7 +268,7 @@ export function normalizeSchedulerState(
   value: unknown,
   scope: SchedulerScope,
 ): JsonObject | null {
-  const state = asObject(value);
+  const state = jsonObject(value);
   if (!state) return null;
   const expected: JsonObject = {
     schema_version: SCHEDULER_STATE_SCHEMA_VERSION,
@@ -396,10 +387,12 @@ export function evaluateSchedulerStateOperation(
   value: unknown,
 ): SchedulerStateOperationResult {
   const request = operationRequest(value);
-  const operation = requiredString(
+  const operation = requireStringLiteral(
     request.operation,
+    SCHEDULER_STATE_OPERATIONS,
     "scheduler.state operation",
-  ) as SchedulerStateOperation;
+    "Scheduler state operation is unsupported",
+  );
   let result: unknown;
   switch (operation) {
     case "rrule_for_minutes":
@@ -447,7 +440,7 @@ export function evaluateSchedulerStateOperation(
       );
       break;
     default:
-      throw new Error("Scheduler state operation is unsupported");
+      return assertNever(operation, "Scheduler state operation is unsupported");
   }
   return {
     schema_version: SCHEDULER_STATE_OPERATION_RESULT_SCHEMA,

@@ -7,6 +7,7 @@ import {
   dispatchEffectRuntimeMethod,
 } from "./effect_runtime_handlers.ts";
 import { atomicWriteJson } from "./effect_runtime_io.ts";
+import { requireNonEmptyString as requiredString } from "./runtime_decode.ts";
 
 const REQUEST_SCHEMA = "loopx_effect_runtime_request_v0";
 const RESPONSE_SCHEMA = "loopx_effect_runtime_response_v0";
@@ -27,13 +28,6 @@ function asObject(value: unknown): JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonObject)
     : {};
-}
-
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
 }
 
 function parseArg(name: string): string {

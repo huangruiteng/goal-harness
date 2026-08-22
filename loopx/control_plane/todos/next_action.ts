@@ -1,4 +1,10 @@
 import type { JsonObject } from "../effect_program.ts";
+import {
+  optionalNonEmptyString as optionalString,
+  requireJsonObject as requiredObject,
+  requireNonEmptyString as requiredString,
+  requireStringArray as stringArray,
+} from "../runtime_decode.ts";
 
 export const TODO_NEXT_ACTION_REQUEST_SCHEMA =
   "loopx_todo_next_action_transition_v1";
@@ -66,25 +72,6 @@ export interface TodoNextActionResult extends JsonObject {
   next_action?: string | null;
 }
 
-function requiredObject(value: unknown, label: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as JsonObject;
-}
-
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
-}
-
-function optionalString(value: unknown, label: string): string | null {
-  if (value === null || value === undefined || value === "") return null;
-  return requiredString(value, label);
-}
-
 function nullableTodoPriority(
   value: unknown,
   label: string,
@@ -103,13 +90,6 @@ function normalizedTodoId(value: unknown, label: string): string {
     throw new Error(`${label} must be a valid todo_id`);
   }
   return candidate;
-}
-
-function stringArray(value: unknown, label: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new Error(`${label} must be an array of strings`);
-  }
-  return [...value];
 }
 
 function todoSnapshot(value: unknown, index: number): TodoNextActionSnapshot {

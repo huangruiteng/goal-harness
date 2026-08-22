@@ -29,6 +29,13 @@ import {
   type SettlementStepKind,
 } from "./effect_program.ts";
 import {
+  optionalNonEmptyString as optionalString,
+  requireJsonObject as requiredObject,
+  requireNonEmptyString as requiredString,
+  requireStringArray as stringArray,
+  requireStringLiteral,
+} from "./runtime_decode.ts";
+import {
   governedCapabilitySettlementStatus,
   validateGovernedCapabilityAdmission,
   validateGovernedCapabilityResult,
@@ -69,49 +76,25 @@ function asObject(value: unknown): JsonObject {
     : {};
 }
 
-function requiredObject(value: unknown, label: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as JsonObject;
-}
-
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
-}
-
-function optionalString(value: unknown, label: string): string | null {
-  if (value === null || value === undefined || value === "") return null;
-  return requiredString(value, label);
-}
-
-function stringArray(value: unknown, label: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new Error(`${label} must be an array of strings`);
-  }
-  return [...value];
-}
-
 function settlementStepKind(value: unknown, label: string): SettlementStepKind {
-  const candidate = requiredString(value, label);
-  if (!SETTLEMENT_STEP_KINDS.includes(candidate as SettlementStepKind)) {
-    throw new Error(`${label} has an unsupported settlement step kind`);
-  }
-  return candidate as SettlementStepKind;
+  return requireStringLiteral(
+    value,
+    SETTLEMENT_STEP_KINDS,
+    label,
+    `${label} has an unsupported settlement step kind`,
+  );
 }
 
 function settlementFailureKind(
   value: unknown,
   label: string,
 ): SettlementFailureKind {
-  const candidate = requiredString(value, label);
-  if (!SETTLEMENT_FAILURE_KINDS.includes(candidate as SettlementFailureKind)) {
-    throw new Error(`${label} has an unsupported settlement failure kind`);
-  }
-  return candidate as SettlementFailureKind;
+  return requireStringLiteral(
+    value,
+    SETTLEMENT_FAILURE_KINDS,
+    label,
+    `${label} has an unsupported settlement failure kind`,
+  );
 }
 
 function settlementIdentityInput(

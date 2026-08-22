@@ -1,4 +1,5 @@
 import type { JsonObject } from "./effect_program.ts";
+import { requireNonEmptyString as requiredString } from "./runtime_decode.ts";
 
 export const EXTERNAL_EFFECT_RECEIPT_SCHEMA_VERSION =
   "loopx_external_effect_receipt_v0";
@@ -29,13 +30,6 @@ function requiredObject(value: unknown, label: string): JsonObject {
     throw new Error(`${label} must be an object`);
   }
   return { ...(value as JsonObject) };
-}
-
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
 }
 
 function boundedArray(value: unknown, label: string): unknown[] {

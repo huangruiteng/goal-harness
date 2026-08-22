@@ -1,5 +1,9 @@
 import type { JsonObject } from "../effect_program.ts";
 import {
+  requireBoolean as requiredBoolean,
+  requireJsonObject as requiredObject,
+} from "../runtime_decode.ts";
+import {
   normalizeTodoCompletionContinuation,
   normalizeTodoNoFollowup,
   type TodoCompletionContinuation,
@@ -52,20 +56,6 @@ export type TodoCompletionFenceResult =
       terminal_before_request: true;
       completion_continuation: TodoCompletionContinuation | null;
     });
-
-function requiredObject(value: unknown, label: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as JsonObject;
-}
-
-function requiredBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new Error(`${label} must be a boolean`);
-  }
-  return value;
-}
 
 function optionalOpaqueString(value: unknown, label: string): string | null {
   if (value === null || value === undefined || value === "") return null;

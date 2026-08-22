@@ -1,3 +1,5 @@
+import { isStringLiteral } from "./runtime_decode.ts";
+
 export const SETTLEMENT_IDENTITY_SCHEMA_VERSION =
   "quota_settlement_identity_v0";
 export const SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION =
@@ -207,18 +209,18 @@ function stringArray(value: unknown): string[] {
 
 function requireStepKind(value: unknown): SettlementStepKind {
   const rendered = pythonString(value);
-  if (!SETTLEMENT_STEP_KINDS.includes(rendered as SettlementStepKind)) {
+  if (!isStringLiteral(rendered, SETTLEMENT_STEP_KINDS)) {
     throw new Error(`unsupported settlement step kind: ${rendered}`);
   }
-  return rendered as SettlementStepKind;
+  return rendered;
 }
 
 function requireFailureKind(value: unknown): SettlementFailureKind {
   const rendered = pythonString(value);
-  if (!SETTLEMENT_FAILURE_KINDS.includes(rendered as SettlementFailureKind)) {
+  if (!isStringLiteral(rendered, SETTLEMENT_FAILURE_KINDS)) {
     throw new Error(`unsupported settlement failure kind: ${rendered}`);
   }
-  return rendered as SettlementFailureKind;
+  return rendered;
 }
 
 export function effectProgramFromOrderedSteps(

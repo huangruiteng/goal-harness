@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { requireJsonObject as requiredObject } from "../runtime_decode.ts";
 
 export const DELIVERY_WORKSPACE_CAUSALITY_SCHEMA_VERSION =
   "delivery_workspace_causality_v0";
@@ -29,13 +30,6 @@ type DeliveryWorkspaceCausalityOperation =
   | "normalize"
   | "event_fields"
   | "from_event";
-
-function requiredObject(value: unknown, label: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as JsonObject;
-}
 
 function optionalObject(value: unknown, label: string): JsonObject | null {
   if (value === null || value === undefined) return null;

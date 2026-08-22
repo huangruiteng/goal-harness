@@ -117,6 +117,13 @@ test("typed boundary rejects malformed requests and illegal state", () => {
   assert.throws(
     () => evaluateSchedulerStateOperation({
       schema_version: SCHEDULER_STATE_OPERATION_REQUEST_SCHEMA,
+      operation: "delete_state",
+    }),
+    /Scheduler state operation is unsupported/,
+  );
+  assert.throws(
+    () => evaluateSchedulerStateOperation({
+      schema_version: SCHEDULER_STATE_OPERATION_REQUEST_SCHEMA,
       operation: "build_state",
       goal_id: scope.goalId,
       agent_id: scope.agentId,
