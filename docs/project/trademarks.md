@@ -1,7 +1,9 @@
 # LoopX Name And Marks
 
 This is lightweight community guidance for using the LoopX name, logos, and
-other project identifiers. It is not legal advice.
+other project identifiers. For practical examples aimed at open-source
+projects and commercial products, see the [Brand Guide For External Use](brand-guide.md).
+This page is not legal advice.
 
 The repository does not claim that `LoopX` or its logos are registered
 trademarks in any jurisdiction, and this document does not determine a legal
