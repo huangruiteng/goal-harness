@@ -208,7 +208,6 @@ def test_restart_managed_loopx_services_restarts_only_loopx_launchagents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("loopx.self_update.sys.platform", "darwin")
-    monkeypatch.setattr("loopx.self_update.os.getuid", lambda: 501)
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     agents = tmp_path / "Library" / "LaunchAgents"
     agents.mkdir(parents=True)
