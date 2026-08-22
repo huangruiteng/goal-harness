@@ -17,7 +17,7 @@ from ..control_plane.quota.heartbeat_receipt import (
 from ..control_plane.quota.settlement import (
     SettlementIdentity,
     SettlementStepKind,
-    find_settlement_spend_run,
+    find_quota_spend_run_by_effect_ref,
     find_settlement_step_event,
     find_settlement_writeback,
 )
@@ -868,18 +868,26 @@ def handle_turn_command(
                     workspace_path=delivery_workspace_path,
                     available_capabilities=args.available_capabilities,
                     operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+                    effect_ref=effect_ref,
                 )
                 if spent.get("ok") and (
                     spent.get("appended")
                     or spent.get("idempotent_replay")
                     or spent.get("receipt_repair_required")
                 ):
-                    append_settlement_event(
-                        spent,
+                    event = find_settlement_step_event(
+                        runtime_root,
+                        settlement_identity,
                         event_kind="quota_spend",
-                        status="appended",
-                        details={"command": "turn run-once"},
                     )
+                    if event is None:
+                        append_settlement_event(
+                            spent,
+                            event_kind="quota_spend",
+                            status="appended",
+                            details={"command": "turn run-once"},
+                        )
+                    return {**spent, "appended": True, "effect_ref": effect_ref}
                 return spent
 
             def completion_readback() -> dict[str, object] | None:
@@ -987,29 +995,38 @@ def handle_turn_command(
             def spend_resolver(effect_ref: str) -> dict[str, object]:
                 try:
                     require_effect_ref(effect_ref, SettlementStepKind.QUOTA_SPEND)
-                    run = find_settlement_spend_run(runtime_root, settlement_identity)
+                    run = find_quota_spend_run_by_effect_ref(
+                        runtime_root,
+                        goal_id=settlement_identity.goal_id,
+                        effect_ref=effect_ref,
+                    )
                     event = find_settlement_step_event(
                         runtime_root,
                         settlement_identity,
                         event_kind="quota_spend",
                     )
-                    if event is not None:
+                    if run is None and event is None:
+                        return {"kind": "absent"}
+                    if run is None:
                         return {
-                            "kind": "committed",
-                            "payload": {
-                                "ok": True,
-                                "appended": True,
-                                "effect_ref": effect_ref,
-                                "mode": "spend-slot",
-                            },
+                            "kind": "unknown",
+                            "reason": "quota receipt has no durable spend run",
                         }
+                    if event is None:
+                        append_settlement_event(
+                            run,
+                            event_kind="quota_spend",
+                            status="receipt_repaired",
+                            details={"command": "turn recovery probe"},
+                        )
                     return {
-                        "kind": "unknown",
-                        "reason": (
-                            "quota outcome has no identity-bound receipt"
-                            if run is None
-                            else "quota run cannot be bound to this effect"
-                        ),
+                        "kind": "committed",
+                        "payload": {
+                            "ok": True,
+                            "appended": True,
+                            "effect_ref": effect_ref,
+                            "mode": "spend-slot",
+                        },
                     }
                 except (OSError, ValueError):
                     return {"kind": "unknown", "reason": "quota readback failed"}

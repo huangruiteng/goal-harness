@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import loopx.cli_commands.turn as turn_command
 from loopx.cli import main as cli_main
 from loopx.control_plane.quota.turn_envelope import build_turn_envelope
 from loopx.control_plane.turn_driver import (
@@ -1426,6 +1427,106 @@ def _turn_journal(runtime: Path) -> dict[str, object]:
         (runtime / "goals" / "loopx-turn-fixture" / "turns").glob("*.json")
     )
     return json.loads(journal_path.read_text(encoding="utf-8"))
+
+
+def test_turn_run_once_cli_repairs_committed_quota_spend_after_receipt_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project, runtime, registry = _write_live_fixture(tmp_path)
+    host_project = tmp_path / "isolated-host-workspace"
+    host_project.mkdir()
+    host_script, validation_script = _completion_host_and_validation_scripts()
+    argv = _turn_run_once_completion_argv(
+        host_project,
+        runtime,
+        registry,
+        host_script,
+        validation_script,
+    )
+    append_rollout_event = turn_command.append_cli_rollout_event
+
+    def crash_before_quota_receipt(
+        payload: dict[str, object],
+        **kwargs: object,
+    ) -> dict[str, object]:
+        if kwargs.get("event_kind") == "quota_spend":
+            raise OSError("injected crash before quota receipt")
+        return append_rollout_event(payload, **kwargs)
+
+    monkeypatch.setattr(
+        turn_command,
+        "append_cli_rollout_event",
+        crash_before_quota_receipt,
+    )
+    first_output = io.StringIO()
+    with contextlib.redirect_stdout(first_output):
+        first_exit_code = cli_main(argv)
+    first = json.loads(first_output.getvalue())
+
+    assert first_exit_code == 1, first
+    assert first["error"] == "injected crash before quota receipt"
+    interrupted = _turn_journal(runtime)
+    turn_key = interrupted["turn_key"]
+    effect_id = interrupted["plan"]["transaction"]["settlement_plan"][
+        "identity"
+    ]["effect_id"]
+    assert interrupted["effect_attempts"] == {
+        "quota_spend": {
+            "status": "prepared",
+            "effect_ref": f"{effect_id}#quota_spend",
+        }
+    }
+    index_path = runtime / "goals" / "loopx-turn-fixture" / "runs" / "index.jsonl"
+    rows = [
+        json.loads(line)
+        for line in index_path.read_text(encoding="utf-8").splitlines()
+    ]
+    quota_rows = [row for row in rows if row.get("classification") == "quota_slot_spent"]
+    assert len(quota_rows) == 1
+    assert quota_rows[0]["effect_ref"] == f"{effect_id}#quota_spend"
+    assert quota_rows[0]["agent_id"] == "codex-fixture"
+
+    monkeypatch.setattr(
+        turn_command,
+        "append_cli_rollout_event",
+        append_rollout_event,
+    )
+    resumed_output = io.StringIO()
+    with contextlib.redirect_stdout(resumed_output):
+        resumed_exit_code = cli_main(
+            [
+                *argv[:-1],
+                "--resume-turn-key",
+                turn_key,
+                "--execute",
+            ]
+        )
+    resumed = json.loads(resumed_output.getvalue())
+
+    assert resumed_exit_code == 0, resumed
+    assert resumed["status"] == "committed"
+    replayed_rows = [
+        json.loads(line)
+        for line in index_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert sum(
+        row.get("classification") == "quota_slot_spent"
+        for row in replayed_rows
+    ) == 1
+    events_path = (
+        runtime / "goals" / "loopx-turn-fixture" / "rollout-event-log.jsonl"
+    )
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(
+        event.get("event_kind") == "quota_spend"
+        and event.get("run_id") == turn_key
+        and event.get("status") == "receipt_repaired"
+        for event in events
+    )
 
 
 def test_turn_run_once_cli_projects_declared_successor_continuation(

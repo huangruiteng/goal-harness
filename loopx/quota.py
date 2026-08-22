@@ -39,6 +39,7 @@ from .control_plane.quota.scheduler_ack import (
     record_quota_scheduler_ack_for_decision,
 )
 from .control_plane.quota.settlement import (
+    find_quota_spend_run_by_effect_ref,
     find_settlement_spend_run,
     infer_persisted_heartbeat_settlement_identity,
     require_settlement_spend,
@@ -858,6 +859,7 @@ def build_quota_slot_preview(
     todo_id: str | None = None,
     replan_obligation_id: str | None = None,
     turn_instance_id: str | None = None,
+    effect_ref: str | None = None,
     source: str = DEFAULT_SLOT_SPEND_SOURCE,
 ) -> dict[str, Any]:
     safe_goal_id = str(goal_id or "").strip()
@@ -867,7 +869,7 @@ def build_quota_slot_preview(
         agent_id=agent_id,
         available_capabilities=available_capabilities, operator_inbox_urgency_projector=operator_inbox_urgency_projector,
     )
-    return build_quota_slot_preview_for_decision(
+    preview = build_quota_slot_preview_for_decision(
         status_payload,
         goal_id=safe_goal_id,
         slots=slots,
@@ -887,6 +889,9 @@ def build_quota_slot_preview(
         turn_instance_id=turn_instance_id,
         source=source,
     )
+    if not effect_ref:
+        return preview
+    return {**preview, "effect_ref": str(effect_ref).strip()}
 
 
 
@@ -1121,8 +1126,62 @@ def spend_quota_slot(
     todo_id: str | None = None,
     replan_obligation_id: str | None = None,
     turn_instance_id: str | None = None,
+    effect_ref: str | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
+    normalized_effect_ref = str(effect_ref or "").strip()
+    raw_runtime_root = status_payload.get("runtime_root")
+    if effect_ref is not None and not normalized_effect_ref:
+        return {
+            "ok": False,
+            "mode": "spend-slot",
+            "dry_run": not execute,
+            "appended": False,
+            "goal_id": safe_goal_id,
+            "reason": "effect_ref must be a non-empty string when provided",
+        }
+    if normalized_effect_ref:
+        if not raw_runtime_root:
+            return {
+                "ok": False,
+                "mode": "spend-slot",
+                "dry_run": not execute,
+                "appended": False,
+                "goal_id": safe_goal_id,
+                "effect_ref": normalized_effect_ref,
+                "reason": "effect-bound quota spend requires runtime_root",
+            }
+        prior_effect_run = find_quota_spend_run_by_effect_ref(
+            Path(str(raw_runtime_root)).expanduser(),
+            goal_id=safe_goal_id,
+            effect_ref=normalized_effect_ref,
+        )
+        if prior_effect_run is not None:
+            prior_agent_id = normalize_todo_claimed_by(
+                prior_effect_run.get("agent_id")
+            )
+            requested_agent_id = normalize_todo_claimed_by(agent_id)
+            if requested_agent_id and prior_agent_id != requested_agent_id:
+                return {
+                    "ok": False,
+                    "mode": "spend-slot",
+                    "dry_run": not execute,
+                    "appended": False,
+                    "goal_id": safe_goal_id,
+                    "effect_ref": normalized_effect_ref,
+                    "reason": "effect_ref already belongs to a different agent",
+                }
+            return {
+                "ok": True,
+                "mode": "spend-slot",
+                "dry_run": not execute,
+                "appended": False,
+                "idempotent_replay": True,
+                "goal_id": safe_goal_id,
+                "agent_id": prior_agent_id or None,
+                "effect_ref": normalized_effect_ref,
+                "reason": "quota spend replayed for the same provider effect",
+            }
     if turn_instance_id and source != DEFAULT_SLOT_SPEND_SOURCE:
         return {
             "ok": False,
@@ -1132,7 +1191,6 @@ def spend_quota_slot(
             "goal_id": safe_goal_id,
             "reason": "turn-scoped settlement is valid only for heartbeat spend",
         }
-    raw_runtime_root = status_payload.get("runtime_root")
     if (
         not turn_instance_id
         and source == DEFAULT_SLOT_SPEND_SOURCE
@@ -1240,6 +1298,7 @@ def spend_quota_slot(
         todo_id=todo_id,
         replan_obligation_id=replan_obligation_id,
         turn_instance_id=turn_instance_id,
+        effect_ref=normalized_effect_ref or None,
         source=source,
     )
     if not preview.get("ok"):

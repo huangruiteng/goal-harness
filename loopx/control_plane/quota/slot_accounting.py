@@ -793,6 +793,7 @@ def build_quota_slot_spend_event(
             "replan_obligation_id": preview.get("replan_obligation_id"),
             "turn_instance_id": preview.get("turn_instance_id"),
             "settlement_identity": preview.get("settlement_identity"),
+            "effect_ref": preview.get("effect_ref"),
             "slots": slots,
             "reason_summary": (
                 f"{slots} automatic agent slot(s) completed under an eligible quota guard"
@@ -834,6 +835,8 @@ def build_quota_slot_spend_event(
     if safe_agent_id:
         record["agent_id"] = safe_agent_id
         record["quota_event"]["agent_id"] = safe_agent_id
+    if preview.get("effect_ref"):
+        record["effect_ref"] = preview["effect_ref"]
     if preview.get("turn_instance_id"):
         record["turn_instance_id"] = preview["turn_instance_id"]
         if preview.get("todo_id"):
@@ -1114,6 +1117,7 @@ def record_quota_slot_spend_from_preview(
     if record.get("agent_id"):
         index_record["agent_id"] = record["agent_id"]
     for field in (
+        "effect_ref",
         "turn_instance_id",
         "todo_id",
         "replan_obligation_id",
