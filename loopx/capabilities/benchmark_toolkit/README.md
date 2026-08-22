@@ -371,13 +371,15 @@ A countable experiment uses the toolkit in this order:
 5. Upsert the planned or running row, then launch one frozen case/arm; do not expose
    evaluator sources or official feedback.
 6. Capture ATIF tool evidence and a runner-owned runtime attestation.
-7. Run `integrity-qualification`; stop on any blocker.
-8. Run the independent verifier only after the agent phase.
-9. Reduce the official result through the benchmark-owned scoring path.
-10. Upsert terminal score, countability, effort, treatment fidelity, and insight
+7. During active monitoring, classify exact-job runtime evidence; do not infer
+   liveness from an occupied admission slot.
+8. Run `integrity-qualification`; stop on any blocker.
+9. Run the independent verifier only after the agent phase.
+10. Reduce the official result through the benchmark-owned scoring path.
+11. Upsert terminal score, countability, effort, treatment fidelity, and insight
     status; release its reservation; then read the matched-comparison projection.
-11. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
-   comparison claim.
+12. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
+    comparison claim.
 
 Integrity qualification is necessary but not sufficient for a score claim. It does
 not establish task correctness, official score authority, experiment parity, or a
@@ -434,8 +436,9 @@ Configuration, admission, and release are project-local, locked, and atomic.
 Below target, status reports the exact gap, a preferred arm group, and
 `next_action=backfill_to_target`. `active_counts` is an admission ledger, not
 runtime proof. On each launch, terminal or runner-invalid transition, and a bounded
-periodic cadence, compare reservations with exact runner liveness, release only
-confirmed terminal or invalid runs, then backfill the reported gap.
+periodic cadence, pass exact-job receipt and runner-owner facts through
+`runtime-observation`. Apply its typed terminal or runner-invalid transition before
+releasing that reservation, then backfill the reported gap.
 
 Every participant must resolve the same goal repository and envelope file on a
 filesystem that supports LoopX's inter-process lock and atomic replacement. Separate
@@ -530,6 +533,36 @@ solver's trajectory phase. A clean worktree or a high raw log-error count alone 
 not evidence that a run is stuck. The provider-owned classifier may mark a run
 stalled only when committed and uncommitted progress are both absent and either the
 trajectory is stale or typed fatal runner evidence is present.
+
+Admission-ledger occupancy is not process liveness. On each bounded active review,
+the provider should reduce compact facts through:
+
+```bash
+loopx benchmark runtime-observation \
+  --admission-active \
+  --job-receipt-state resolved \
+  --runner-owner-state alive \
+  --require-healthy \
+  --format json
+```
+
+Only a resolved exact-job receipt plus a live exact runner owner is healthy active.
+A terminal result, typed fatal runner error, or exact owner missing after the
+provider's startup grace produces a reconciliation transition; the provider must
+write the terminal classification before releasing its slot. Missing or ambiguous
+runtime authority fails closed. The reducer performs no process discovery, writes,
+or slot release, and its receipt contains no run identity, process arguments, raw
+error, or path.
+
+Every due active-campaign monitor cycle must also advance at least one bounded
+solver-trajectory slice, even when no case became terminal. This readback is for
+campaign supervision and insight discovery only; it must not expose hidden
+evaluator evidence to the solving arm.
+
+This is a provider obligation, not an effect performed by the reducer: the
+runtime-observation command only returns a typed classification and recommended
+transition. The provider remains responsible for the monitor cycle, trajectory
+readback, terminal write, reconciliation, and slot release.
 
 Use this analyst hint:
 

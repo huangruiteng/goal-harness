@@ -125,7 +125,8 @@ def test_status_hints_backfill_to_target_without_weakening_hard_cap(
         "required_on_transition_or_cadence": True,
         "reason_code": "admission_ledger_is_not_runtime_liveness",
         "active_count_source": "admission_ledger",
-        "authoritative_observation": "benchmark_runner_liveness",
+        "authoritative_observation": "benchmark_runtime_observation_v0",
+        "observation_command": "loopx benchmark runtime-observation --help",
         "triggers": [
             "launch_receipt",
             "terminal_transition",
@@ -133,9 +134,10 @@ def test_status_hints_backfill_to_target_without_weakening_hard_cap(
             "periodic_liveness_check",
         ],
         "instruction": (
-            "Compare active_runs with exact runner or process liveness. Release only "
-            "runs confirmed terminal or runner-invalid, then read concurrency-status "
-            "and backfill any reported gap."
+            "Classify exact-job receipts and runner-owner liveness through "
+            "runtime-observation. Apply its typed terminal or runner-invalid transition "
+            "before releasing that run, then read concurrency-status and backfill any "
+            "reported gap."
         ),
     }
     assert initial["next_action"] == "backfill_to_target"

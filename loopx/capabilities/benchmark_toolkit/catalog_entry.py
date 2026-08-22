@@ -68,6 +68,21 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "command": (
+                "loopx benchmark runtime-observation --admission-active "
+                "--job-receipt-state resolved --runner-owner-state alive "
+                "--require-healthy --format json"
+            ),
+            "purpose": (
+                "Classify exact-job runtime evidence without treating an active "
+                "admission-ledger row as proof of process liveness."
+            ),
+            "write_boundary": (
+                "read-only compact provider facts; caller owns discovery, startup "
+                "grace, terminal writes, reconciliation, and slot release"
+            ),
+        },
+        {
+            "command": (
                 "loopx benchmark experiment-board-upsert --goal-id <goal-id> "
                 "--row-json <compact-row.json> --execute --format json"
             ),
@@ -172,6 +187,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "qualify_source_revision_before_each_new_run_admission",
             "atomically_admit_case_slot_before_runner_launch",
             "upsert_preregistered_or_running_row_when_a_run_starts",
+            "classify_exact_runtime_observation_during_active_monitor_cycles",
             "upsert_terminal_score_countability_effort_and_insight_status",
             "release_case_slot_after_terminal_or_runner_invalid_transition",
             "read_matched_comparisons_before_selecting_the_next_arm",
@@ -230,11 +246,12 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "action_kind": "benchmark_concurrency_occupancy_monitor",
             "trigger": "launch_terminal_invalid_or_periodic_liveness_transition",
             "text": (
-                "Compare exact runner liveness with the concurrency envelope on "
-                "each launch, terminal or runner-invalid transition and a bounded "
-                "cadence. Release only confirmed terminal or invalid reservations; "
-                "then read concurrency-status and, when launch authority already "
-                "exists, admit and start up to missing_cases without exceeding caps."
+                "Classify exact-job receipt and runner-owner facts through the typed "
+                "runtime observation on each launch, terminal or runner-invalid "
+                "transition and a bounded cadence. Apply its terminal or runner-invalid "
+                "transition before releasing that reservation; then read "
+                "concurrency-status and, when launch authority already exists, admit "
+                "and start up to missing_cases without exceeding caps."
             ),
         },
         "authority_boundary": (
@@ -262,9 +279,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             },
             "text": (
                 "On each material scored-case transition and bounded active-campaign "
-                "review, refresh the public-safe aggregate score and coverage summary, "
-                "report material changes to the user, and after solver termination "
-                "read the complete private evaluation evidence and write one "
+                "review, validate exact-job runtime authority and advance at least one "
+                "bounded solver-trajectory slice even when no case became terminal; "
+                "refresh the public-safe aggregate score and coverage summary, report "
+                "material changes to the user, and after solver termination read the "
+                "complete private evaluation evidence and write one "
                 "benchmark_case_insight_v0."
             ),
         },
@@ -301,9 +320,20 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "current_worktree_status",
             ],
             "runtime_basis": [
+                "active_admission_ledger",
+                "exact_job_runtime_receipt",
+                "exact_runner_owner_liveness_after_startup_grace",
+                "terminal_result_presence",
                 "goal_state_and_event_freshness",
                 "typed_runner_error_category",
             ],
+            "runtime_contract": (
+                "Admission-ledger occupancy is not liveness. A healthy active run "
+                "requires a resolved exact-job receipt and a live exact runner owner; "
+                "terminal or lost-owner observations require provider reconciliation "
+                "before slot release. These are provider obligations; the reducer "
+                "classifies facts but performs no monitor, write, or release effect."
+            ),
             "trajectory_basis": (
                 "solver_trajectory_phase_without_hidden_evaluator_feedback"
             ),
@@ -412,6 +442,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
         },
         {
+            "schema_version": "benchmark_runtime_observation_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.runtime_observation",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
             "schema_version": "benchmark_exact_container_binding_v0",
             "module": "loopx.capabilities.benchmark_toolkit.container_binding",
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
@@ -442,13 +477,15 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         "Raw trajectories are private local inputs to integrity qualification and are never copied into receipts, ledgers, docs, or PR artifacts.",
         "A clean trajectory scan is not isolation proof: runner-owned permission and verifier-order attestations are mandatory and fail closed when absent.",
         "Concurrent Docker runs must bind runtime evidence to one exact job-owned container; image-only discovery is not sufficient.",
+        "Admission-ledger occupancy never proves runner liveness; active health requires a resolved exact-job receipt and a live exact runner owner after startup grace.",
         "Integrity qualification establishes countability eligibility only; an independent official result and matched experiment contract are still required.",
         "Post-run analyst access never widens the solving agent's evidence boundary or grants feedback reuse in another scored run.",
         "Concurrency reservations are not runtime liveness: runners must reconcile exact processes before release or backfill.",
         "The experiment board is a compact projection, not a score authority: benchmark-family runners and scoring adapters remain outside the active capability.",
     ],
     "next_real_step": (
-        "Use the board and concurrency envelope before launch and after each scored "
-        "case while keeping solver integrity separate from private analysis."
+        "Use the board and concurrency envelope before launch, classify exact runtime "
+        "during active monitor cycles, and after each scored case advance one bounded "
+        "trajectory review while keeping solver integrity separate from private analysis."
     ),
 }
