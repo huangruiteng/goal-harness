@@ -94,6 +94,13 @@ def test_config_rejects_role_caps_outside_total() -> None:
             max_active_cases=4,
             target_active_cases=5,
         )
+    with pytest.raises(ValueError, match="combined baseline and test capacity"):
+        build_benchmark_concurrency_config(
+            max_active_cases=8,
+            target_active_cases=7,
+            max_baseline_cases=3,
+            max_test_cases=3,
+        )
 
 
 def test_status_hints_backfill_to_target_without_weakening_hard_cap(

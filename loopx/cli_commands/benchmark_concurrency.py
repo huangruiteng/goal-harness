@@ -155,7 +155,7 @@ def handle_benchmark_concurrency_command(
             )
         payload["goal_id"] = args.goal_id
         payload["path_recorded"] = False
-    except (OSError, TimeoutError, UnicodeError, TypeError, ValueError):
+    except (OSError, TypeError, ValueError):
         args.benchmark_concurrency_parser.error(
             "invalid benchmark concurrency envelope input"
         )

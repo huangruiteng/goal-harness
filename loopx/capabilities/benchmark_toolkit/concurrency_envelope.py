@@ -109,6 +109,13 @@ def normalize_benchmark_concurrency_config(value: Mapping[str, Any]) -> dict[str
         raise ValueError("reserved_test_cases cannot exceed max_test_cases")
     if config["reserved_test_cases"] > total:
         raise ValueError("reserved_test_cases cannot exceed max_active_cases")
+    if (
+        config["target_active_cases"]
+        > config["max_baseline_cases"] + config["max_test_cases"]
+    ):
+        raise ValueError(
+            "target_active_cases cannot exceed combined baseline and test capacity"
+        )
     return config
 
 
@@ -274,6 +281,12 @@ def build_benchmark_concurrency_status(
             "and backfill any reported gap."
         ),
     }
+    if overcommitted:
+        next_action = "release_terminal_runs"
+    elif underfilled:
+        next_action = "backfill_to_target"
+    else:
+        next_action = "admit_before_launch"
     return {
         "ok": not overcommitted,
         "schema_version": BENCHMARK_CONCURRENCY_ENVELOPE_SCHEMA_VERSION,
@@ -294,13 +307,7 @@ def build_benchmark_concurrency_status(
         "runtime_reconciliation_hint": runtime_reconciliation_hint,
         "overcommitted": overcommitted,
         "active_runs": normalized["active_runs"],
-        "next_action": (
-            "release_terminal_runs"
-            if overcommitted
-            else "backfill_to_target"
-            if underfilled
-            else "admit_before_launch"
-        ),
+        "next_action": next_action,
         "path_recorded": False,
     }
 

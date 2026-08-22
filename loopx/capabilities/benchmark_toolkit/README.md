@@ -437,6 +437,12 @@ runtime proof. On each launch, terminal or runner-invalid transition, and a boun
 periodic cadence, compare reservations with exact runner liveness, release only
 confirmed terminal or invalid runs, then backfill the reported gap.
 
+Every participant must resolve the same goal repository and envelope file on a
+filesystem that supports LoopX's inter-process lock and atomic replacement. Separate
+checkouts or host-local copies do not share capacity; this envelope is not a
+distributed semaphore. A multi-host campaign must route admission through one
+shared authority instead of configuring one envelope per host.
+
 At campaign startup, create the capability packet's
 `concurrency_occupancy.monitor_todo_template` as one goal-scoped
 `continuous_monitor` todo. This preserves the obligation to notice and fill safe
