@@ -16,6 +16,7 @@ from loopx.extensions.external_connector_runtime import (
     ExternalSourceKind,
     build_external_connector_binding,
     build_external_connector_event,
+    build_external_event_response_receipt,
     capture_external_connector_events,
     decide_external_event_ack,
     drain_external_connector_inbox,
@@ -152,11 +153,12 @@ def test_ack_fails_closed_until_effect_and_response_are_verified() -> None:
         event_id="event-alpha",
         effect_receipt=None,
         response_policy=ExternalResponsePolicy.SOURCE_THREAD.value,
-        response_receipt={
-            "external_write_performed": True,
-            "verification_performed": True,
-            "response_verified": True,
-        },
+        response_receipt=build_external_event_response_receipt(
+            event_id="event-alpha",
+            external_write_performed=True,
+            verification_performed=True,
+            response_verified=True,
+        ),
     )
     assert missing_effect["ack_allowed"] is False
     assert missing_effect["reason"] == "durable_effect_required"
@@ -172,10 +174,12 @@ def test_ack_fails_closed_until_effect_and_response_are_verified() -> None:
         event_id="event-alpha",
         effect_receipt=effect_receipt,
         response_policy=ExternalResponsePolicy.SOURCE_THREAD.value,
-        response_receipt={
-            "external_write_performed": True,
-            "verification_performed": False,
-        },
+        response_receipt=build_external_event_response_receipt(
+            event_id="event-alpha",
+            external_write_performed=True,
+            verification_performed=False,
+            response_verified=False,
+        ),
     )
     assert missing_readback["ack_allowed"] is False
     assert missing_readback["reason"] == "verified_response_required"
@@ -184,14 +188,29 @@ def test_ack_fails_closed_until_effect_and_response_are_verified() -> None:
         event_id="event-alpha",
         effect_receipt=effect_receipt,
         response_policy=ExternalResponsePolicy.SOURCE_THREAD.value,
-        response_receipt={
-            "external_write_performed": True,
-            "verification_performed": True,
-            "reply_verified": True,
-        },
+        response_receipt=build_external_event_response_receipt(
+            event_id="event-alpha",
+            external_write_performed=True,
+            verification_performed=True,
+            response_verified=True,
+        ),
     )
     assert ready["ack_allowed"] is True
     assert ready["reason"] == "ready"
+
+    replayed_response = decide_external_event_ack(
+        event_id="event-alpha",
+        effect_receipt=effect_receipt,
+        response_policy=ExternalResponsePolicy.SOURCE_THREAD.value,
+        response_receipt=build_external_event_response_receipt(
+            event_id="event-other",
+            external_write_performed=True,
+            verification_performed=True,
+            response_verified=True,
+        ),
+    )
+    assert replayed_response["ack_allowed"] is False
+    assert replayed_response["reason"] == "verified_response_required"
 
 
 def test_no_response_connector_still_requires_durable_effect() -> None:
@@ -256,12 +275,13 @@ def _effect(event_id: str) -> dict[str, object]:
     }
 
 
-def _response() -> dict[str, object]:
-    return {
-        "external_write_performed": True,
-        "verification_performed": True,
-        "readback_verified": True,
-    }
+def _response(event_id: str) -> dict[str, object]:
+    return build_external_event_response_receipt(
+        event_id=event_id,
+        external_write_performed=True,
+        verification_performed=True,
+        response_verified=True,
+    )
 
 
 def test_incremental_document_comment_inbox_advances_cursor_after_last_ack(
@@ -299,7 +319,7 @@ def test_incremental_document_comment_inbox_advances_cursor_after_last_ack(
         binding=binding,
         event_id="event-one",
         effect_receipt=None,
-        response_receipt=_response(),
+        response_receipt=_response("event-one"),
         execute=True,
     )
     assert missing_effect["status"] == "durable_effect_required"
@@ -309,22 +329,26 @@ def test_incremental_document_comment_inbox_advances_cursor_after_last_ack(
         binding=binding,
         event_id="event-one",
         effect_receipt=_effect("event-one"),
-        response_receipt=_response(),
+        response_receipt=_response("event-one"),
         execute=True,
     )
     assert first["status"] == "acknowledged"
     assert first["cursor_advanced"] is False
+    assert first["private_event_deleted"] is True
 
     second = settle_external_connector_event(
         project=tmp_path,
         binding=binding,
         event_id="event-two",
         effect_receipt=_effect("event-two"),
-        response_receipt=_response(),
+        response_receipt=_response("event-two"),
         execute=True,
     )
     assert second["status"] == "acknowledged"
     assert second["cursor_advanced"] is True
+    assert second["private_event_deleted"] is True
+    events_root = tmp_path / ".loopx/inbox/document-comments/events"
+    assert list(events_root.glob("*.json")) == []
 
     next_page = capture_external_connector_events(
         project=tmp_path,
@@ -365,7 +389,7 @@ def test_external_connector_settlement_is_strictly_ordered(tmp_path: Path) -> No
         binding=binding,
         event_id="event-two",
         effect_receipt=_effect("event-two"),
-        response_receipt=_response(),
+        response_receipt=_response("event-two"),
         execute=True,
     )
 
@@ -487,7 +511,7 @@ def test_replayed_acknowledged_page_can_advance_cursor(tmp_path: Path) -> None:
         binding=binding,
         event_id="event-one",
         effect_receipt=_effect("event-one"),
-        response_receipt=_response(),
+        response_receipt=_response("event-one"),
         execute=True,
     )
 

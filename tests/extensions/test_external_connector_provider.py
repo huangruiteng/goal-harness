@@ -278,6 +278,39 @@ def test_document_comment_provider_callsite_runs_effect_response_ack_order(
     assert capture["accepted_count"] == 1
     assert capture["external_read_performed"] is True
 
+    def mismatched_writer(
+        connector: dict[str, Any],
+        event: dict[str, Any],
+        text: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        call_order.append("mismatched_provider_response")
+        return {
+            "idempotency_key": "sha256:receipt-for-a-different-event",
+            "external_write_performed": True,
+            "verification_performed": True,
+            "readback_verified": True,
+        }
+
+    with pytest.raises(ValueError, match="bind the requested idempotency_key"):
+        reply_and_settle_document_comment_event(
+            project=str(tmp_path),
+            registration=registration,
+            permission_guidance=guidance,
+            event_id="event-alpha",
+            effect_receipt=_effect(),
+            reply_text="A mismatched receipt cannot acknowledge this event.",
+            response_writer=mismatched_writer,
+            execute=True,
+        )
+    assert (
+        inspect_external_connector_inbox(
+            project=tmp_path,
+            binding=registration["connector"],
+        )["pending_count"]
+        == 1
+    )
+
     def writer(
         connector: dict[str, Any],
         event: dict[str, Any],
@@ -291,6 +324,7 @@ def test_document_comment_provider_callsite_runs_effect_response_ack_order(
         assert text == "Accepted after durable writeback."
         assert idempotency_key.startswith("sha256:")
         return {
+            "idempotency_key": idempotency_key,
             "external_write_performed": True,
             "verification_performed": True,
             "readback_verified": True,
@@ -315,6 +349,7 @@ def test_document_comment_provider_callsite_runs_effect_response_ack_order(
     assert settlement["cursor_advanced"] is True
     assert call_order == [
         "provider_read",
+        "mismatched_provider_response",
         "durable_effect_committed",
         "provider_response",
     ]
@@ -377,6 +412,7 @@ def test_provider_response_is_not_called_before_durable_effect(
     ) -> dict[str, Any]:
         writes.append(idempotency_key)
         return {
+            "idempotency_key": idempotency_key,
             "external_write_performed": True,
             "verification_performed": True,
             "readback_verified": True,

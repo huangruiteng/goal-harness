@@ -23,6 +23,7 @@ from ..file_lock import exclusive_file_lock
 CONNECTOR_SCHEMA_VERSION = "agent_external_connector_v0"
 ACK_DECISION_SCHEMA_VERSION = "agent_external_event_ack_decision_v0"
 EFFECT_RECEIPT_SCHEMA_VERSION = "agent_external_event_effect_receipt_v0"
+RESPONSE_RECEIPT_SCHEMA_VERSION = "agent_external_event_response_receipt_v0"
 EVENT_SCHEMA_VERSION = "agent_external_connector_event_v0"
 CURSOR_STATE_SCHEMA_VERSION = "agent_external_connector_cursor_v0"
 INBOX_STATUS_SCHEMA_VERSION = "agent_external_connector_inbox_status_v0"
@@ -92,6 +93,33 @@ def _safe_token(value: Any, *, field: str) -> str:
     if not SAFE_TOKEN_PATTERN.fullmatch(normalized):
         raise ValueError(f"{field} must be an opaque public-safe token")
     return normalized
+
+
+def external_event_ref(event_id: str) -> str:
+    """Return the content-free identity used to bind public-safe receipts."""
+
+    event = _safe_token(event_id, field="event_id")
+    return f"sha256:{hashlib.sha256(event.encode('utf-8')).hexdigest()[:24]}"
+
+
+def build_external_event_response_receipt(
+    *,
+    event_id: str,
+    external_write_performed: bool,
+    verification_performed: bool,
+    response_verified: bool,
+) -> dict[str, Any]:
+    """Normalize provider proof into one event-bound response receipt."""
+
+    return {
+        "schema_version": RESPONSE_RECEIPT_SCHEMA_VERSION,
+        "event_ref": external_event_ref(event_id),
+        "external_write_performed": bool(external_write_performed),
+        "verification_performed": bool(verification_performed),
+        "response_verified": bool(response_verified),
+        "private_event_id_captured": False,
+        "private_response_content_captured": False,
+    }
 
 
 def _owner_local_ref(value: Any, *, field: str) -> str:
@@ -325,13 +353,12 @@ def decide_external_event_ack(
         not response_required
         or (
             isinstance(response_receipt, Mapping)
+            and response_receipt.get("schema_version")
+            == RESPONSE_RECEIPT_SCHEMA_VERSION
+            and response_receipt.get("event_ref") == external_event_ref(event)
             and response_receipt.get("external_write_performed") is True
             and response_receipt.get("verification_performed") is True
-            and (
-                response_receipt.get("response_verified") is True
-                or response_receipt.get("reply_verified") is True
-                or response_receipt.get("readback_verified") is True
-            )
+            and response_receipt.get("response_verified") is True
         )
     )
     ack_allowed = effect_ready and response_ready
@@ -556,10 +583,6 @@ def _stored_events(inbox: Path) -> list[dict[str, Any]]:
     return events
 
 
-def _event_ref(event_id: str) -> str:
-    return f"sha256:{hashlib.sha256(event_id.encode('utf-8')).hexdigest()[:24]}"
-
-
 def capture_external_connector_events(
     *,
     project: str | Path,
@@ -608,14 +631,17 @@ def capture_external_connector_events(
             }
         existing = _stored_events(inbox)
         existing_ids = {str(item["event_id"]) for item in existing}
+        acknowledged = set(state["acknowledged_event_ids"])
         accepted: list[dict[str, Any]] = []
         duplicate_ids: set[str] = set()
         filtered_count = 0
         duplicate_count = 0
         for event in canonical:
             event_id = str(event["event_id"])
-            if event_id in existing_ids or any(
-                str(item["event_id"]) == event_id for item in accepted
+            if (
+                event_id in acknowledged
+                or event_id in existing_ids
+                or any(str(item["event_id"]) == event_id for item in accepted)
             ):
                 duplicate_count += 1
                 duplicate_ids.add(event_id)
@@ -629,7 +655,6 @@ def capture_external_connector_events(
                 continue
             accepted.append(event)
 
-        acknowledged = set(state["acknowledged_event_ids"])
         current_pending_count = sum(
             str(item["event_id"]) not in acknowledged for item in existing
         )
@@ -853,13 +878,19 @@ def settle_external_connector_event(
         state = _load_cursor_state(cursor_path)
         acknowledged = set(state["acknowledged_event_ids"])
         if event in acknowledged:
+            private_event_deleted = False
+            if execute:
+                event_path = _event_path(inbox, event)
+                private_event_deleted = event_path.is_file()
+                event_path.unlink(missing_ok=True)
             return {
                 "ok": True,
                 "schema_version": "agent_external_connector_settlement_v0",
                 "status": "already_acknowledged",
                 "execute": execute,
-                "event_ref": _event_ref(event),
+                "event_ref": external_event_ref(event),
                 "cursor_advanced": False,
+                "private_event_deleted": private_event_deleted,
                 "private_event_id_captured": False,
                 "private_cursor_value_captured": False,
             }
@@ -877,7 +908,7 @@ def settle_external_connector_event(
                 "schema_version": "agent_external_connector_settlement_v0",
                 "status": "ordered_event_required",
                 "execute": execute,
-                "event_ref": _event_ref(event),
+                "event_ref": external_event_ref(event),
                 "cursor_advanced": False,
                 "private_event_id_captured": False,
                 "private_cursor_value_captured": False,
@@ -894,7 +925,7 @@ def settle_external_connector_event(
                 "schema_version": "agent_external_connector_settlement_v0",
                 "status": ack_decision["reason"],
                 "execute": execute,
-                "event_ref": _event_ref(event),
+                "event_ref": external_event_ref(event),
                 "cursor_advanced": False,
                 "ack_decision": ack_decision,
                 "private_event_id_captured": False,
@@ -912,13 +943,19 @@ def settle_external_connector_event(
         }
         if execute:
             _write_private_json_atomic(cursor_path, updated_state)
+            event_path = _event_path(inbox, event)
+            private_event_deleted = event_path.is_file()
+            event_path.unlink(missing_ok=True)
+        else:
+            private_event_deleted = False
         return {
             "ok": True,
             "schema_version": "agent_external_connector_settlement_v0",
             "status": "acknowledged" if execute else "preview_ready",
             "execute": execute,
-            "event_ref": _event_ref(event),
+            "event_ref": external_event_ref(event),
             "cursor_advanced": cursor_advanced,
+            "private_event_deleted": private_event_deleted,
             "effect_kind": str((effect_receipt or {}).get("effect_kind") or ""),
             "private_event_id_captured": False,
             "private_cursor_value_captured": False,

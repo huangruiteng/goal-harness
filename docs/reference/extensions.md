@@ -92,10 +92,13 @@ The bound Agent drains pending events in that order. Settlement rejects an
 out-of-order event and calls the common ACK decision, so a missing durable
 effect or required provider readback leaves both the event and cursor pending.
 Only a successful settlement records the event as acknowledged, and only the
-last accepted event from a captured page advances its cursor. Provider failures
-are stored as content-free error codes. The public inbox projection exposes
-only pending count, oldest age, failure count, and freshness; event ids, bodies,
-anchors, reply chains, source references, and cursor values remain owner-local.
+last accepted event from a captured page advances its cursor. After that state
+is durably committed, the processed private event body is removed; its
+content-free identity remains available for replay deduplication. Provider
+failures are stored as content-free error codes. The public inbox projection
+exposes only pending count, oldest age, failure count, and freshness; event ids,
+bodies, anchors, reply chains, source references, and cursor values remain
+owner-local.
 
 `loopx.extensions.external_connector_provider` adds the fail-closed provider
 call boundary for document comments. A document-comment registration must
@@ -112,9 +115,9 @@ The provider call sequence is permission evaluation, bounded page read,
 durable inbox capture, Agent effect, provider response with readback, then ACK.
 The runtime does not call the page reader until the registered permissions are
 ready, does not call the response writer before a committed effect receipt, and
-does not advance the cursor until response readback succeeds. Concrete provider
-adapters supply the page reader and response writer; LoopX does not own their
-credentials or raw payloads.
+does not advance the cursor until an event-bound response receipt and provider
+readback succeed. Concrete provider adapters supply the page reader and response
+writer; LoopX does not own their credentials or raw payloads.
 
 `Provider` is an implementation role. When it implements a LoopX capability,
 it is registered under that capability; a standalone extension provider may

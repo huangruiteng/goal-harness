@@ -20,6 +20,7 @@ from .external_connector_runtime import (
     ExternalConnectorCapability,
     ExternalResponsePolicy,
     ExternalSourceKind,
+    build_external_event_response_receipt,
     capture_external_connector_events,
     decide_external_event_ack,
     drain_external_connector_inbox,
@@ -637,6 +638,22 @@ def reply_and_settle_document_comment_event(
         )
         if not isinstance(response_receipt, Mapping):
             raise TypeError("response_writer must return a response receipt")
+        if response_receipt.get("idempotency_key") != idempotency_key:
+            raise ValueError("response receipt must bind the requested idempotency_key")
+        response_receipt = build_external_event_response_receipt(
+            event_id=event_id,
+            external_write_performed=(
+                response_receipt.get("external_write_performed") is True
+            ),
+            verification_performed=(
+                response_receipt.get("verification_performed") is True
+            ),
+            response_verified=(
+                response_receipt.get("response_verified") is True
+                or response_receipt.get("reply_verified") is True
+                or response_receipt.get("readback_verified") is True
+            ),
+        )
     settlement = settle_external_connector_event(
         project=project,
         binding=connector,
@@ -655,11 +672,7 @@ def reply_and_settle_document_comment_event(
         "response_readback_verified": bool(
             response_receipt
             and response_receipt.get("verification_performed") is True
-            and (
-                response_receipt.get("response_verified") is True
-                or response_receipt.get("reply_verified") is True
-                or response_receipt.get("readback_verified") is True
-            )
+            and response_receipt.get("response_verified") is True
         ),
         "private_provider_payload_captured": False,
     }

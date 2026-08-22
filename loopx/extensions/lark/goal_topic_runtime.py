@@ -16,6 +16,7 @@ from ..external_connector_runtime import (
     EFFECT_RECEIPT_SCHEMA_VERSION,
     ExternalEffectKind,
     ExternalResponsePolicy,
+    build_external_event_response_receipt,
     decide_external_event_ack,
 )
 from .event_inbox import (
@@ -152,13 +153,17 @@ def _topic_roots_for_target(
             or str(binding.get("target_ref") or "") != target_ref
         ):
             continue
-        topic = binding.get("topic") if isinstance(binding.get("topic"), Mapping) else {}
+        topic = (
+            binding.get("topic") if isinstance(binding.get("topic"), Mapping) else {}
+        )
         channel = (
             binding.get("channel")
             if isinstance(binding.get("channel"), Mapping)
             else {}
         )
-        root_id = str(topic.get("root_message_id") or channel.get("pinned_message_id") or "")
+        root_id = str(
+            topic.get("root_message_id") or channel.get("pinned_message_id") or ""
+        )
         if MESSAGE_ID_PATTERN.fullmatch(root_id):
             roots.append(root_id)
     return roots
@@ -215,7 +220,12 @@ def poll_lark_goal_topic_profile_once(
         ]
     )
     if int(result.get("returncode") or 0) != 0:
-        return {"ok": False, "status": "consume_failed", "event_count": 0, "replied_count": 0}
+        return {
+            "ok": False,
+            "status": "consume_failed",
+            "event_count": 0,
+            "replied_count": 0,
+        }
 
     target_payload = snapshot.get("target_payload")
     target_payload = target_payload if isinstance(target_payload, Mapping) else {}
@@ -276,9 +286,7 @@ def poll_lark_goal_topic_profile_once(
             event_reasons.append(None)
             continue
         event_statuses.append(str(event_result.get("status") or "unknown"))
-        event_reasons.append(
-            str(event_result.get("reason") or "") or None
-        )
+        event_reasons.append(str(event_result.get("reason") or "") or None)
         replied_count += int(event_result.get("status") == "replied_and_acknowledged")
     return {
         "ok": True,
@@ -490,9 +498,8 @@ class LarkGoalTopicRuntimeService:
                 restart_count=restart_count,
             )
             try:
-                def answer(
-                    route: Mapping[str, Any], text: str
-                ) -> Mapping[str, Any]:
+
+                def answer(route: Mapping[str, Any], text: str) -> Mapping[str, Any]:
                     snapshot = self.snapshot_provider()
                     contexts = snapshot.get("goal_contexts")
                     contexts = contexts if isinstance(contexts, Mapping) else {}
@@ -502,7 +509,9 @@ class LarkGoalTopicRuntimeService:
                         route=route,
                         text=text,
                         work_dir=str(context.get("work_dir") or self.runtime_root),
-                        objective=str(context.get("objective") or route.get("goal_id") or ""),
+                        objective=str(
+                            context.get("objective") or route.get("goal_id") or ""
+                        ),
                         runtime_controller=self.runtime_controller,
                     )
                     return {
@@ -529,7 +538,9 @@ class LarkGoalTopicRuntimeService:
                     stop=stop,
                     runtime_root=self.runtime_root,
                     answer=answer,
-                    health_sink=lambda update: self._update_health(profile, **dict(update)),
+                    health_sink=lambda update: self._update_health(
+                        profile, **dict(update)
+                    ),
                 )
                 if stop.is_set():
                     break
@@ -663,7 +674,9 @@ def answer_lark_goal_topic(
             or session.get("channel_id") != f"goal.{goal_id}"
             or session.get("status") == "closed"
         ):
-            raise RuntimeError("bound Agent session is unavailable or no longer matches")
+            raise RuntimeError(
+                "bound Agent session is unavailable or no longer matches"
+            )
         if ingress_mode == "live_steering":
             turn, _created = runtime_controller.steer_active_turn(
                 session_id=session_id,
@@ -710,7 +723,9 @@ def answer_lark_goal_topic(
     if completed.get("status") != "completed":
         raise RuntimeError(str(completed.get("error") or "Lark Goal Topic turn failed"))
     response = completed.get("response")
-    reply_text = str(response.get("message") or "") if isinstance(response, Mapping) else ""
+    reply_text = (
+        str(response.get("message") or "") if isinstance(response, Mapping) else ""
+    )
     if not reply_text.strip():
         raise RuntimeError("Lark Goal Topic turn returned no message")
     return reply_text
@@ -726,8 +741,12 @@ def _inbox_config(
     target = goal_channel_target_for_name(target_payload, target_ref)
     if target is None:
         raise ValueError("the routed Lark target is unavailable")
-    channel = target.get("channel") if isinstance(target.get("channel"), Mapping) else {}
-    identity = target.get("identity") if isinstance(target.get("identity"), Mapping) else {}
+    channel = (
+        target.get("channel") if isinstance(target.get("channel"), Mapping) else {}
+    )
+    identity = (
+        target.get("identity") if isinstance(target.get("identity"), Mapping) else {}
+    )
     chat_id = str(channel.get("chat_id") or "")
     profile = str(route.get("app_ref") or "")
     bot_display_name = str(identity.get("bot_display_name") or profile)
@@ -817,7 +836,9 @@ def process_lark_goal_topic_event(
         "content": str(event.get("content") or ""),
         "root_id": str(event.get("root_id") or ""),
         "parent_id": str(event.get("parent_id") or ""),
-        "mentions": event.get("mentions") if isinstance(event.get("mentions"), list) else [],
+        "mentions": event.get("mentions")
+        if isinstance(event.get("mentions"), list)
+        else [],
         "reply_context_verified": event.get("reply_context_verified") is True,
         "reply_to_bot": event.get("reply_to_bot") is True,
     }
@@ -854,9 +875,9 @@ def process_lark_goal_topic_event(
     connector = connector if isinstance(connector, Mapping) else None
     effect_receipt: Mapping[str, Any] | None = None
     if isinstance(answer_result, Mapping):
-        reply_text = " ".join(
-            str(answer_result.get("response_text") or "").split()
-        )[:1200]
+        reply_text = " ".join(str(answer_result.get("response_text") or "").split())[
+            :1200
+        ]
         candidate_receipt = answer_result.get("effect_receipt")
         effect_receipt = (
             candidate_receipt if isinstance(candidate_receipt, Mapping) else None
@@ -905,7 +926,14 @@ def process_lark_goal_topic_event(
             event_id=canonical["event_id"],
             effect_receipt=effect_receipt,
             response_policy=str(connector.get("response_policy") or ""),
-            response_receipt=reply,
+            response_receipt=build_external_event_response_receipt(
+                event_id=canonical["event_id"],
+                external_write_performed=(
+                    reply.get("external_write_performed") is True
+                ),
+                verification_performed=(reply.get("verification_performed") is True),
+                response_verified=reply.get("reply_verified") is True,
+            ),
         )
         if not ack_decision["ack_allowed"]:
             return {
