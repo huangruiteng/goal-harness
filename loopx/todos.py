@@ -75,7 +75,7 @@ from .control_plane.todos.completion_policy import (
 )
 from .control_plane.todos.completion_fence import (
     completed_todo_replay,
-    local_todo_completion_identity,
+    resolve_todo_completion_identity,
 )
 from .control_plane.todos import completion_validation as completion_validation_module
 from .control_plane.todos.event_writeback import (
@@ -109,6 +109,7 @@ from .control_plane.todos.text import (
 )
 from .control_plane.todos.unblock_resume import (
     apply_completed_user_todo_lifecycle,
+    completion_decision_target,
     require_completion_decision_outcome,
 )
 from .control_plane.todos.write_policy import (
@@ -1744,29 +1745,14 @@ def complete_goal_todo(
             raise ValueError(
                 f"todo_id {normalized_todo_id!r} was not found in active user or agent todos"
             )
-        if (
-            completion_turn_key is None
-            and str(completion_todo.get("status") or "") != TODO_STATUS_DONE
-        ):
-            completion_turn_key = local_todo_completion_identity(
-                goal_id=goal_id,
-                todo_id=str(completion_todo.get("todo_id") or todo_id),
-            )
-            completion_identity_source = "unscoped_completion"
-        decision_target = None
-        target_todo_id = normalize_todo_id(completion_todo.get("unblocks_todo_id"))
-        if target_todo_id:
-            target_match = find_todo_block(
-                lines,
-                todo_id=target_todo_id,
-                role="agent",
-            )
-            if target_match:
-                target_role, _target_section, _target_start, _target_end, target_block = (
-                    target_match
-                )
-                decision_target = dict(target_block)
-                decision_target["role"] = target_role
+        completion_turn_key, completion_identity_source = resolve_todo_completion_identity(
+            todo=completion_todo,
+            goal_id=goal_id,
+            todo_id=str(completion_todo.get("todo_id") or todo_id),
+            completion_turn_key=completion_turn_key,
+            completion_identity_source=completion_identity_source,
+        )
+        decision_target = completion_decision_target(lines, completion_todo)
         mutation_authority = authorize_todo_lifecycle_mutation(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -1799,14 +1785,9 @@ def complete_goal_todo(
                 todo_id=todo_id,
                 todo=completion_todo,
                 actor_agent_id=agent_id or claimed_by,
-                idempotency_key=(
-                    task_lease_idempotency_key
-                    or (
-                        completion_turn_key
-                        if completion_identity_source != "unscoped_completion"
-                        else None
-                    )
-                ),
+                idempotency_key=(task_lease_idempotency_key or completion_turn_key)
+                if completion_identity_source != "unscoped_completion"
+                else task_lease_idempotency_key,
                 expected_version=task_lease_expected_version,
                 require_active_when_key_supplied=(
                     task_lease_idempotency_key is not None

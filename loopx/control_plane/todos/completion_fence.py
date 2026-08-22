@@ -37,6 +37,24 @@ def local_todo_completion_identity(*, goal_id: str, todo_id: str) -> str:
     return str(result["completion_identity_key"])
 
 
+def resolve_todo_completion_identity(
+    *,
+    todo: Mapping[str, Any],
+    goal_id: str,
+    todo_id: str,
+    completion_turn_key: str | None,
+    completion_identity_source: str | None,
+) -> tuple[str | None, str | None]:
+    """Bind an unscoped open completion to its stable local identity."""
+
+    if completion_turn_key is not None or str(todo.get("status") or "") == "done":
+        return completion_turn_key, completion_identity_source
+    return (
+        local_todo_completion_identity(goal_id=goal_id, todo_id=todo_id),
+        "unscoped_completion",
+    )
+
+
 def _json_successor_value(value: Any) -> Any:
     if isinstance(value, (tuple, set)):
         return list(value)
