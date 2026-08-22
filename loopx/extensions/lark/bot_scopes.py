@@ -1,11 +1,10 @@
 """Recommended Lark (Feishu) API scope bundle for a LoopX project bot.
 
 Each new LoopX Lark bot (e.g. a Goal Channel sender) should apply this bundle
-once instead of adding scopes reactively. The bundle is derived from two real
-bots: ``Ark-Flow LoopX`` (slash-command / card / docs-comment sink) and
-``LoopX 管家`` (Goal Channel + event inbox + kanban). ``core`` covers Goal
-Channel, reviewer notification and kanban; ``inbox`` adds message ingestion;
-``sink`` adds interactive cards and docs comments.
+once instead of adding scopes reactively. The bundle is derived from production
+Goal Channel, event-inbox, kanban, slash-command, card and docs-comment use.
+``core`` covers Goal Channel, reviewer notification and kanban; ``inbox`` adds
+message ingestion; ``sink`` adds interactive cards and docs comments.
 """
 
 from __future__ import annotations
