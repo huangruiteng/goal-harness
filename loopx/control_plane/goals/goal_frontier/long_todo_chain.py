@@ -133,11 +133,10 @@ class LongTodoChainObservation:
     threshold: int
     agent_id: str | None
     frontier_revision: str | None
-    frontier_updated_at: str | None
     frontier_revision_complete: bool
 
     def to_trigger(self) -> dict[str, Any]:
-        return {
+        trigger: dict[str, Any] = {
             "trigger_count": self.trigger_count,
             "count_kind": self.count_kind,
             "selectable_open_count": self.selectable_open_count,
@@ -148,10 +147,10 @@ class LongTodoChainObservation:
             "unclaimed_advancement_count": self.unclaimed_advancement_count,
             "threshold": self.threshold,
             "agent_id": self.agent_id,
-            "frontier_revision": self.frontier_revision,
-            "frontier_updated_at": self.frontier_updated_at,
-            "frontier_revision_complete": self.frontier_revision_complete,
         }
+        if self.frontier_revision_complete and self.frontier_revision:
+            trigger["frontier_revision"] = self.frontier_revision
+        return trigger
 
 
 @dataclass(frozen=True)
@@ -160,22 +159,25 @@ class LongTodoChainAckDecision:
     rearmed_after_obligation_id: str | None = None
 
 
-def long_todo_chain_trigger_checkpoint_for_source(
+def long_todo_chain_source_checkpoint(
     source_items: list[dict[str, Any]],
     *,
     agent_id: str | None,
-) -> dict[str, str] | None:
-    """Return the post-transition checkpoint for an exact Todo source."""
+) -> tuple[dict[str, str], str] | None:
+    """Return the revision and ordering fence for an exact Todo source."""
 
-    frontier_revision, _, revision_complete = (
+    frontier_revision, frontier_updated_at, revision_complete = (
         _selectable_advancement_frontier_revision(source_items, agent_id=agent_id)
     )
-    if not revision_complete or not frontier_revision:
+    if not revision_complete or not frontier_revision or not frontier_updated_at:
         return None
-    return {
-        "kind": LONG_TODO_CHAIN_TRIGGER,
-        "frontier_revision": frontier_revision,
-    }
+    return (
+        {
+            "kind": LONG_TODO_CHAIN_TRIGGER,
+            "frontier_revision": frontier_revision,
+        },
+        frontier_updated_at,
+    )
 
 
 def observe_long_todo_chain(
@@ -222,7 +224,7 @@ def observe_long_todo_chain(
         count_kind = "selectable_open_todos"
     if threshold is None:
         return None
-    frontier_revision, frontier_updated_at, revision_complete = (
+    frontier_revision, _, revision_complete = (
         _selectable_advancement_frontier_revision(
             agent_todo_source_items,
             agent_id=agent_id,
@@ -238,7 +240,6 @@ def observe_long_todo_chain(
         threshold=threshold,
         agent_id=agent_id,
         frontier_revision=frontier_revision,
-        frontier_updated_at=frontier_updated_at,
         frontier_revision_complete=revision_complete,
     )
 
@@ -290,24 +291,13 @@ def classify_long_todo_chain_ack(
 
 
 def long_todo_chain_transition_is_fresh(
-    obligation: dict[str, Any],
     *,
+    frontier_updated_at: Any,
     transition_generated_at: Any,
 ) -> bool:
-    """Fence a successor Todo that cannot yet persist trigger checkpoints."""
+    """Fence a successor Todo against the authoritative source revision."""
 
-    long_chain_trigger = next(
-        (
-            trigger
-            for trigger in obligation.get("triggers") or []
-            if isinstance(trigger, dict)
-            and trigger.get("kind") == LONG_TODO_CHAIN_TRIGGER
-        ),
-        None,
-    )
-    if long_chain_trigger is None:
-        return True
-    frontier_time = parse_timestamp(long_chain_trigger.get("frontier_updated_at"))
+    frontier_time = parse_timestamp(frontier_updated_at)
     transition_time = parse_timestamp(transition_generated_at)
     if frontier_time is None or transition_time is None:
         return False

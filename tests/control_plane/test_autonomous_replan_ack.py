@@ -163,7 +163,6 @@ def test_long_chain_trigger_checkpoint_survives_ack_compaction() -> None:
                 {
                     "kind": "long_todo_chain",
                     "frontier_revision": frontier_revision,
-                    "frontier_revision_complete": True,
                 }
             ],
         },

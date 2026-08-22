@@ -413,11 +413,7 @@ def replan_obligation_trigger_checkpoints(
             continue
         kind = str(trigger.get("kind") or "").strip()
         frontier_revision = str(trigger.get("frontier_revision") or "").strip()
-        if (
-            not kind
-            or not frontier_revision
-            or trigger.get("frontier_revision_complete") is not True
-        ):
+        if not kind or not frontier_revision:
             continue
         checkpoints.append(
             {
