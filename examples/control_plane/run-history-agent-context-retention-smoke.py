@@ -133,6 +133,13 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
                     "schema_version": "autonomous_replan_ack_v0",
                     "recorded": True,
                     "source": "fixture",
+                    "semantic_delta": {
+                        "schema_version": "replan_semantic_delta_v0",
+                        "accepted": True,
+                        "outcomes": ["new_runnable_successor"],
+                        "satisfying_outcomes": ["new_runnable_successor"],
+                        "obligation_id": "replan-fixture-retained-ack",
+                    },
                     "delta_contract": {
                         "schema_version": "repair_delta_contract_v0",
                         "required": True,
