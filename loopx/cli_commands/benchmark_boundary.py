@@ -10,12 +10,17 @@ from pathlib import Path
 
 from ..capabilities.benchmark_toolkit import (
     BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
+    BENCHMARK_RUNTIME_CONTINUITY_SCHEMA_VERSION,
     BENCHMARK_SOURCE_REVISION_FENCE_SCHEMA_VERSION,
+    BenchmarkEventWindowState,
     BenchmarkJobReceiptState,
     BenchmarkRunnerOwnerState,
+    BenchmarkRuntimeContinuityClassification,
+    BenchmarkRuntimeContinuityTransition,
     BenchmarkSourceRevisionFenceError,
     build_benchmark_candidate_source_boundary,
     build_benchmark_integrity_qualification,
+    build_benchmark_runtime_continuity,
     build_benchmark_runtime_observation,
     compact_benchmark_source_revision_fence_receipt,
     filter_public_benchmark_artifact_paths,
@@ -33,6 +38,7 @@ BENCHMARK_TOOLKIT_COMMANDS = {
     "candidate-source-boundary",
     "classify-artifacts",
     "integrity-qualification",
+    "runtime-continuity",
     "runtime-observation",
     "source-revision-fence",
     "verify-verifier-reward",
@@ -112,6 +118,16 @@ def _render_runtime_observation(payload: dict[str, object]) -> str:
     )
 
 
+def _render_runtime_continuity(payload: dict[str, object]) -> str:
+    return (
+        "# Benchmark Runtime Continuity\n\n"
+        f"- Classification: `{payload.get('classification')}`\n"
+        f"- Qualified: `{payload.get('qualified')}`\n"
+        f"- Closeout write allowed: `{payload.get('closeout_write_allowed')}`\n"
+        f"- Recommended transition: `{payload.get('recommended_transition')}`\n"
+    )
+
+
 def register_benchmark_boundary_commands(
     benchmark_subparsers: argparse._SubParsersAction,
     add_subcommand_format: Callable[[argparse.ArgumentParser], None],
@@ -162,6 +178,22 @@ def register_benchmark_boundary_commands(
     runtime_parser.add_argument("--terminal-result-present", action="store_true")
     runtime_parser.add_argument("--typed-fatal-runner-error", action="store_true")
     runtime_parser.add_argument("--require-healthy", action="store_true")
+
+    continuity_parser = benchmark_subparsers.add_parser(
+        "runtime-continuity",
+        help="Require launch and closeout runtime evidence to remain continuous.",
+    )
+    add_subcommand_format(continuity_parser)
+    continuity_parser.add_argument("--launch-runtime-digest", required=True)
+    continuity_parser.add_argument("--closeout-runtime-digest", required=True)
+    continuity_parser.add_argument("--launch-generation-digest", required=True)
+    continuity_parser.add_argument("--closeout-generation-digest", required=True)
+    continuity_parser.add_argument(
+        "--event-window-state",
+        choices=[item.value for item in BenchmarkEventWindowState],
+        required=True,
+    )
+    continuity_parser.add_argument("--require-qualified", action="store_true")
 
     integrity_parser = benchmark_subparsers.add_parser(
         "integrity-qualification",
@@ -228,6 +260,30 @@ def _invalid_source_revision_fence_input() -> dict[str, object]:
     }
 
 
+def _invalid_runtime_continuity_input() -> dict[str, object]:
+    return {
+        "schema_version": BENCHMARK_RUNTIME_CONTINUITY_SCHEMA_VERSION,
+        "classification": BenchmarkRuntimeContinuityClassification.INPUT_INVALID.value,
+        "qualified": False,
+        "closeout_write_allowed": False,
+        "runtime_artifact_matches": False,
+        "generation_matches": False,
+        "event_window_state": "invalid",
+        "event_window_qualified": False,
+        "recommended_transition": (
+            BenchmarkRuntimeContinuityTransition.REPAIR_CONTINUITY_EVIDENCE.value
+        ),
+        "public_boundary": {
+            "runtime_artifact_digest_recorded": False,
+            "generation_digest_recorded": False,
+            "event_payload_recorded": False,
+            "run_identity_recorded": False,
+            "path_recorded": False,
+        },
+        "write_performed": False,
+    }
+
+
 def handle_benchmark_boundary_command(
     args: argparse.Namespace,
     *,
@@ -276,6 +332,20 @@ def handle_benchmark_boundary_command(
         )
         print_payload(payload, output_format(args), _render_runtime_observation)
         return 1 if args.require_healthy and not payload.get("healthy_active") else 0
+
+    if args.benchmark_command == "runtime-continuity":
+        try:
+            payload = build_benchmark_runtime_continuity(
+                launch_runtime_digest=args.launch_runtime_digest,
+                closeout_runtime_digest=args.closeout_runtime_digest,
+                launch_generation_digest=args.launch_generation_digest,
+                closeout_generation_digest=args.closeout_generation_digest,
+                event_window_state=args.event_window_state,
+            )
+        except (TypeError, ValueError):
+            payload = _invalid_runtime_continuity_input()
+        print_payload(payload, output_format(args), _render_runtime_continuity)
+        return 1 if args.require_qualified and not payload.get("qualified") else 0
 
     if args.benchmark_command == "verify-verifier-reward":
         if args.reward_json == "-":

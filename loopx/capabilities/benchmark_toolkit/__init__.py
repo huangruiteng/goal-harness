@@ -116,6 +116,13 @@ from .run_permissions import (
     compact_run_permission_policy_for_quota,
     validate_run_permission_policy,
 )
+from .runtime_continuity import (
+    BENCHMARK_RUNTIME_CONTINUITY_SCHEMA_VERSION,
+    BenchmarkEventWindowState,
+    BenchmarkRuntimeContinuityClassification,
+    BenchmarkRuntimeContinuityTransition,
+    build_benchmark_runtime_continuity,
+)
 from .runtime_observation import (
     BENCHMARK_RUNTIME_OBSERVATION_SCHEMA_VERSION,
     BenchmarkJobReceiptState,
@@ -142,6 +149,7 @@ __all__ = [
     "BENCHMARK_EXPERIMENT_BOARD_SCHEMA_VERSION",
     "BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION",
     "BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION",
+    "BENCHMARK_RUNTIME_CONTINUITY_SCHEMA_VERSION",
     "BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION",
     "BENCHMARK_RUNTIME_OBSERVATION_SCHEMA_VERSION",
     "BENCHMARK_SOURCE_REVISION_FENCE_SCHEMA_VERSION",
@@ -157,9 +165,12 @@ __all__ = [
     "REWARD_CONTRACT_SCHEMA_VERSION",
     "RUN_PERMISSION_POLICY_SCHEMA_VERSION",
     "RUN_PERMISSION_QUOTA_PROJECTION_SCHEMA_VERSION",
+    "BenchmarkEventWindowState",
     "BenchmarkJobReceiptState",
     "BenchmarkRunnerOwnerState",
     "BenchmarkRuntimeClassification",
+    "BenchmarkRuntimeContinuityClassification",
+    "BenchmarkRuntimeContinuityTransition",
     "BenchmarkRuntimeTransition",
     "BenchmarkSourceRevisionFence",
     "BenchmarkSourceRevisionFenceError",
@@ -190,6 +201,7 @@ __all__ = [
     "build_benchmark_concurrency_status",
     "build_benchmark_experiment_board",
     "build_benchmark_integrity_qualification",
+    "build_benchmark_runtime_continuity",
     "build_benchmark_runtime_observation",
     "build_native_codex_isolation_envelope",
     "build_native_goal_public_trajectory_summary",
