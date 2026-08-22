@@ -86,6 +86,9 @@ def test_real_tool_loop_executes_action_selected_by_real_quota(
     assert first["tool_choice"] == "auto"
     assert "response_format" not in first
     assert "todo_portfolio001" not in first["messages"][1]["content"]
+    assert (
+        "execute exact interaction_contract.cli_channel.next_cli_actions[0]"
+    ) in first["messages"][1]["content"]
 
     quota_result = json.loads(requests[2]["messages"][-1]["content"])
     assert quota_result["selected_todo"]["todo_id"] == "todo_portfolio001"

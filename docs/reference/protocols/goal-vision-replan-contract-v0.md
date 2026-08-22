@@ -193,7 +193,10 @@ than `outcome_progress`. Its checkpoint has `decision=not_required`,
 `required=false`, and a typed
 `in_flight_continuation` trigger carrying the Todo id. The next quota decision
 can therefore preserve causal ownership without manufacturing another vision
-decision merely because the scheduler woke up.
+decision merely because the scheduler woke up. Agents must start from
+`interaction_contract.cli_channel.next_cli_actions[0]` and preserve its
+projected boundary and identity flags; reconstructing a generic
+`semantic_closeout` command discards that continuity contract.
 
 Omitting `--delivery-boundary` remains strict `semantic_closeout`. Todo
 completion, `outcome_gap`, `primary_goal_outcome`, durable route changes,
@@ -209,7 +212,8 @@ Valid checkpoint decisions are:
 - `unchanged_with_reason`: an already persisted current per-agent vision still
   applies, with a compact public-safe reason. A reason cannot create the first
   vision baseline; without one, the checkpoint remains `missing_required` and
-  requires `write_vision_patch`;
+  requires `write_vision_patch`. TypeScript binds the decision to that vision's
+  exact `generated_at` revision through `continuity_basis`;
 - `missing_required`: the turn was material but did not make a per-agent vision
   decision; and
 - `not_required`: no material closeout trigger was present, including a valid
@@ -224,8 +228,8 @@ For the same `agent_id`, a newer satisfied checkpoint with `patched` or
 `missing_required` checkpoints; `not_required` does not.
 
 A satisfied checkpoint is protocol-complete, but a material closeout also has
-to qualify its relationship to the final outcome. For an open vision, the same
-refresh must name the active `acceptance_summary`, attach public-safe
+to qualify its relationship to the final outcome. A patched checkpoint must
+name the active `acceptance_summary`, attach public-safe
 `goal_path_delta_v0.evidence_refs`, and record one of these decisions:
 
 - `continue` or `no_change` when the new evidence supports the final-outcome
@@ -233,6 +237,13 @@ refresh must name the active `acceptance_summary`, attach public-safe
 - `replan` when the evidence contradicts or leaves the path open. The typed
   path outcome is itself the vision decision; it does not rely on a legacy
   autonomous-replan ACK flag.
+
+An `unchanged_with_reason` checkpoint may reuse that evidence-linked path only
+when its typed `continuity_basis` matches the exact current vision revision and
+the persisted path already carries the acceptance claim, evidence refs, and a
+legal path outcome. A missing or mismatched basis, an evidence-free prior path,
+or a newly missing checkpoint opens a new outcome gap. This closes the accepted
+revision without suppressing a later material vision/checkpoint change.
 
 An older path delta, an unchanged-with-reason decision, or an unrelated
 runnable todo does not qualify the material closeout. Quota projects
