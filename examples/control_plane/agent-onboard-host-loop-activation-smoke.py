@@ -575,6 +575,7 @@ def main() -> int:
             "loopx-pr-program",
             "loopx-pr-review",
             "loopx-doc-registry",
+            "loopx-benchmark",
             "loopx-self-repair",
         }, delivery
         assert delivery["delivery_options"] == [

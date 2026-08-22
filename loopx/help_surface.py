@@ -242,6 +242,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "command": "loopx extension",
                 "purpose": "Inspect and manage doctor-verified subprocess extension activations.",
             },
+            {
+                "command": "loopx connector",
+                "purpose": "List, register, rank, and record usage for public connector providers.",
+            },
             {"command": "loopx issue-fix", "purpose": "Build public-safe issue or PR fix workflow packets."},
             {
                 "command": "loopx review-batch",

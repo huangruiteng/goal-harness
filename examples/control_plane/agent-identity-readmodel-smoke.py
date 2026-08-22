@@ -20,6 +20,10 @@ from loopx.control_plane.agents.runtime_model import (  # noqa: E402
     peer_work_key,
     select_peer_for_work,
 )
+from loopx.control_plane.quota.error_codes import (  # noqa: E402
+    QuotaIdentityPrecondition,
+    QuotaIdentityPreconditionError,
+)
 
 
 AGENTS = ["codex-alpha", "codex-beta", "codex-reviewer"]
@@ -153,8 +157,14 @@ def assert_assignment_is_deterministic() -> None:
 def assert_errors_are_actionable() -> None:
     try:
         build_quota_agent_identity(peer_goal(), agent_id="codex-missing")
-    except ValueError as exc:
-        assert "registered_agents=" in str(exc), exc
+    except QuotaIdentityPreconditionError as exc:
+        assert (
+            exc.precondition
+            is QuotaIdentityPrecondition.REQUESTED_AGENT_REGISTERED
+        ), exc
+        assert exc.error_code == "quota_agent_not_registered", exc
+        assert exc.agent_id == "codex-missing", exc
+        assert "selected registry" in exc.recommended_action, exc
     else:
         raise AssertionError("unregistered agent should fail")
 
