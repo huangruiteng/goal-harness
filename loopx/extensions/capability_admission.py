@@ -677,3 +677,91 @@ def invoke_external_capability(
             "provider_invoked": True,
         },
     }
+
+
+GOAL_ENABLED_CAPABILITIES_FIELD = "enabled_capabilities"
+GOAL_ENABLED_CAPABILITY_RECEIPT_SCHEMA_VERSION = (
+    "loopx_goal_enabled_capability_receipt_v0"
+)
+
+
+def set_goal_enabled_capability(
+    *,
+    registry_path: str | Path,
+    goal_id: str,
+    capability_id: str,
+    enabled: bool,
+    execute: bool = False,
+) -> dict[str, Any]:
+    """Add or remove one builtin capability id on the Goal's enabled list.
+
+    Builtin capabilities are catalog-visible and always implemented, but a Goal
+    opts into the capability-driven skill lifecycle only when the capability id
+    appears in its ``enabled_capabilities``. Enable installs the capability's
+    gated host skills; disable removes them.
+    """
+
+    path = Path(registry_path).expanduser()
+
+    def prepare(registry: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        goal = find_registry_goal(registry, str(goal_id))
+        if goal is None:
+            raise ValueError(f"LoopX registry does not contain Goal `{goal_id}`")
+        raw = goal.get(GOAL_ENABLED_CAPABILITIES_FIELD)
+        current = [str(item) for item in raw] if isinstance(raw, list) else []
+        next_values = [item for item in current if item != capability_id]
+        changed = capability_id in current
+        if enabled:
+            next_values = sorted({*next_values, capability_id})
+            changed = capability_id not in current
+        updated_goal = {
+            **goal,
+            GOAL_ENABLED_CAPABILITIES_FIELD: next_values,
+        }
+        return changed, updated_goal
+
+    def commit(registry: dict[str, Any]) -> dict[str, Any]:
+        changed, updated_goal = prepare(registry)
+        receipt: dict[str, Any] = {
+            "ok": True,
+            "schema_version": GOAL_ENABLED_CAPABILITY_RECEIPT_SCHEMA_VERSION,
+            "status": "ready" if not execute else "no_change" if not changed else "written",
+            "dry_run": not execute,
+            "executed": execute,
+            "changed": changed,
+            "written": False,
+            "registry": str(path),
+            "goal_id": str(goal_id),
+            "capability_id": str(capability_id),
+            "enabled": bool(enabled),
+            "enabled_capabilities": updated_goal.get(GOAL_ENABLED_CAPABILITIES_FIELD),
+        }
+        if not (execute and changed):
+            return receipt, updated_goal
+        goals = registry.get("goals")
+        if not isinstance(goals, list):
+            raise ValueError("LoopX registry goals must be a list")
+        registry["goals"] = [
+            updated_goal
+            if isinstance(item, Mapping) and item.get("id") == str(goal_id)
+            else item
+            for item in goals
+        ]
+        atomic_write_json(path, registry, preserve_mode=True)
+        receipt["written"] = True
+        receipt["status"] = "written"
+        return receipt, updated_goal
+
+    if execute:
+        with exclusive_file_lock(path, operation="set_goal_enabled_capability"):
+            if not path.is_file():
+                raise ValueError(f"LoopX registry does not exist: {path}")
+            registry = load_registry(path)
+            receipt, _ = commit(registry)
+            return receipt
+    else:
+        if not path.is_file():
+            raise ValueError(f"LoopX registry does not exist: {path}")
+        registry = load_registry(path)
+        receipt, _ = commit(registry)
+        return receipt

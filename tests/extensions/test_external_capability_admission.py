@@ -709,3 +709,42 @@ def test_capability_bind_cli_resolves_registry_runtime_root(
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "written"
+
+
+def test_set_goal_enabled_capability_round_trip(tmp_path):
+    from loopx.extensions.capability_admission import set_goal_enabled_capability
+    from loopx.history import load_registry
+
+    reg = {
+        "schema_version": "0.1",
+        "goals": [{"id": "g1", "status": "active", "repo": str(tmp_path / "proj")}],
+    }
+    (tmp_path / "proj").mkdir()
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(json.dumps(reg))
+
+    preview = set_goal_enabled_capability(
+        registry_path=registry_path, goal_id="g1", capability_id="benchmark-toolkit", enabled=True, execute=False
+    )
+    assert preview["changed"] is True
+    assert preview["dry_run"] is True
+    assert "benchmark-toolkit" not in load_registry(registry_path)["goals"][0].get("enabled_capabilities", [])
+
+    enabled = set_goal_enabled_capability(
+        registry_path=registry_path, goal_id="g1", capability_id="benchmark-toolkit", enabled=True, execute=True
+    )
+    assert enabled["changed"] is True
+    assert enabled["written"] is True
+    assert load_registry(registry_path)["goals"][0]["enabled_capabilities"] == ["benchmark-toolkit"]
+
+    unchanged = set_goal_enabled_capability(
+        registry_path=registry_path, goal_id="g1", capability_id="benchmark-toolkit", enabled=True, execute=True
+    )
+    assert unchanged["changed"] is False
+    assert unchanged["status"] == "no_change"
+
+    disabled = set_goal_enabled_capability(
+        registry_path=registry_path, goal_id="g1", capability_id="benchmark-toolkit", enabled=False, execute=True
+    )
+    assert disabled["changed"] is True
+    assert load_registry(registry_path)["goals"][0]["enabled_capabilities"] == []
