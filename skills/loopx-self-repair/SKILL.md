@@ -120,7 +120,13 @@ close the required checkpoint with `--vision-unchanged-reason` instead of
 writing a fake patch. If a material `refresh-state` lacks both a patch and an
 unchanged/no-follow-up decision, LoopX should preserve a per-agent
 `vision_checkpoint_v0` with `decision=missing_required` so the same agent's
-next quota check can enter replan.
+next quota check can enter replan. A scheduler wake alone is not a material
+vision boundary: when quota explicitly projects a normally admitted open
+advancement Todo as `delivery_boundary=in_flight_continuation`, use the
+projected settlement command and do not invent a vision patch. The next
+heartbeat keeps that same Todo selected only after accountable
+`outcome_progress`; Todo completion, blocker/gap, durable Next Action change,
+replan, or terminal closeout must return to the strict semantic checkpoint.
 
 ## Evidence Discipline
 

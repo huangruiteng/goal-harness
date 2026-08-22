@@ -158,8 +158,8 @@ the research direction.
 |---|---|
 | Effect | The [Agent Loop Effect Interpreter RFC](./agent-loop-effect-interpreter-v0.md) defines typed effect request, interpretation, observation, and settlement semantics. |
 | Turn | The [LoopX Turn protocol](../../reference/protocols/loopx-turn-v0.md) governs decide -> execute -> validate -> commit and keeps scheduler handoff outside settlement. |
-| Delivery | Execution profiles distinguish standard and fine-grained Todo contracts; fine-grained mode uses a coherent-slice turn budget and evidence-sensitive successor creation. |
-| Continuation | The Turn Loop Controller consumes a validated receipt plus a fresh decision and returns one typed disposition. |
+| Delivery | Execution profiles distinguish standard and fine-grained Todo contracts; fine-grained mode uses a coherent-slice turn budget and evidence-sensitive successor creation. Every admitted heartbeat still performs full durable settlement. |
+| Continuation | In addition to same-Turn controller dispositions, a typed delivery-continuity reducer can preserve the latest accountable `outcome_progress` Todo across heartbeat wakes while that same Todo remains open, actionable, capability-ready, and owned by the same agent. |
 | Progress | Typed progress observations, repeat detection, semantic replan closure, and evidence projections can distinguish material delta from maintenance. |
 | Research | The [Research Exploration Control Plane RFC](./research-exploration-control-plane-v0.md) defines an optional typed knowledge frontier and composition experiments. |
 | Authority | Goal vision, user gates, permission policy, and peer/supervisor boundaries remain separate from execution and scheduling. |
@@ -252,6 +252,25 @@ inside its safety ceiling.
 fails in a way that requires a new hypothesis; a replan obligation opens; a
 user or permission gate appears; or further work would make the evidence and
 writeback stale.
+
+A scheduler wake is not a delivery closeout. A normally admitted open
+advancement Todo starts with an `in_flight_continuation` settlement boundary;
+after an accountable `outcome_progress`, the next heartbeat also resumes that
+same Todo ahead of a newly reordered sibling while the postcondition, claim,
+capability readiness, and authority facts remain stable. A heartbeat receipt,
+blocking work lane, autonomous replan, control repair, delivery denial,
+`outcome_gap`, Todo completion/blocking, or claim transfer ends that continuity
+and returns selection to the ordinary typed frontier.
+
+Continuation does not create a lighter settlement class. Each heartbeat still
+validates, durably writes back, and spends quota under the existing accountable
+settlement contract. The additive `in_flight_continuation` boundary changes
+only vision-checkpoint timing: intermediate progress on the same Todo records a
+typed continuation checkpoint without demanding a fresh vision decision.
+Completion, durable Next Action changes, replan, gaps, and terminal outcomes
+remain `semantic_closeout` boundaries and retain the strict vision contract.
+Multi-slice bursts and redundant scheduler-ACK suppression remain separate
+experiments; they are not implied by sticky Todo selection.
 
 Todo granularity should be defined by **decision stability**, not line count,
 file count, command count, or elapsed minutes:

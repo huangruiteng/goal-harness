@@ -142,8 +142,8 @@ bounded delivery slice。它必须诚实终止于以下之一：
 |---|---|
 | Effect | [Agent Loop Effect Interpreter RFC](./agent-loop-effect-interpreter-v0.zh-CN.md) 已定义 typed effect request、interpretation、observation 与 settlement 语义。 |
 | Turn | [LoopX Turn protocol](../../reference/protocols/loopx-turn-v0.md) 管理 decide -> execute -> validate -> commit，并把 scheduler handoff 留在 settlement 外。 |
-| Delivery | Execution profile 已区分 standard 与 fine-grained Todo contract；fine-grained mode 使用 coherent-slice turn budget，并基于 fresh evidence 创建 successor。 |
-| Continuation | Turn Loop Controller 消费 validated receipt 与 fresh decision，返回一个 typed disposition。 |
+| Delivery | Execution profile 已区分 standard 与 fine-grained Todo contract；fine-grained mode 使用 coherent-slice turn budget，并基于 fresh evidence 创建 successor。每个获准 heartbeat 仍执行完整 durable settlement。 |
+| Continuation | 除同一 Turn 的 controller disposition 外，typed delivery-continuity reducer 可在 heartbeat wake 之间保留最近一次 accountable `outcome_progress` Todo，前提是同一 Todo 仍 open、actionable、capability-ready，且仍由同一 agent 拥有。 |
 | Progress | Typed progress observation、repeat detection、semantic replan closure 与 evidence projection 能区分 material delta 和 maintenance。 |
 | Research | [研究型探索控制面 RFC](./research-exploration-control-plane-v0.zh-CN.md) 定义了可选的 typed knowledge frontier 与 composition experiment。 |
 | Authority | Goal vision、user gate、permission policy 与 peer/supervisor boundary 和 execution、scheduler 保持分离。 |
@@ -231,6 +231,23 @@ chain 仍在 safety ceiling 内。
 **停止条件：**postcondition 已满足；evidence 改变方向；validation failure 要求
 新 hypothesis；replan obligation 打开；出现 user/permission gate；继续工作会
 使 evidence 和 writeback 过时。
+
+Scheduler wake 不是 delivery closeout。正常获准执行的 open advancement Todo 从
+`in_flight_continuation` settlement boundary 开始；一次 accountable
+`outcome_progress` 后，只要 postcondition、claim、capability readiness 与 authority
+fact 保持稳定，下一次 heartbeat 也会优先恢复同一个 Todo，而不是因 queue reorder
+切换到新 sibling。Heartbeat receipt、blocking work lane、autonomous replan、control
+repair、delivery denial、`outcome_gap`、Todo completion/blocking 或 claim transfer
+都会结束 continuity，并把 selection 交回普通 typed frontier。
+
+Continuation 不会创建更轻的 settlement class。每个 heartbeat 仍按现有 accountable
+settlement contract 完成 validation、durable writeback 与 quota spend。新增的
+`in_flight_continuation` boundary 只改变 vision-checkpoint timing：同一 Todo 的
+中间进展记录 typed continuation checkpoint，不要求新的 vision decision。
+Completion、durable Next Action 变化、replan、gap 与 terminal outcome 仍属于
+`semantic_closeout` boundary，并保持严格 vision contract。Multi-slice burst 与
+redundant scheduler-ACK suppression 仍是独立实验；sticky Todo selection 不隐含
+这些能力。
 
 Todo 粒度应由**决策稳定性**定义，而不是 line count、file count、command count
 或 elapsed minute：

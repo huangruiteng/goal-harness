@@ -68,7 +68,9 @@ promote a proposal beyond that status.
   ([中文版](typescript-control-plane-migration-v0.zh-CN.md)): use a
   contract-first, parity-gated Strangler Fig process; the shipped TypeScript
   runtime owns migrated semantics, and the active phase cuts over complete
-  transactions while retiring Python facades and migration scaffolding.
+  transactions while retiring Python facades and migration scaffolding;
+  delivery and vision ACK decisions remain domain-local reducers rather than
+  generic Effect Program steps.
 
 ## Draft Integration Proposals
 

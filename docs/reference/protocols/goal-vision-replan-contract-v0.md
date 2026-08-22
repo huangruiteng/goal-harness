@@ -151,10 +151,10 @@ memory or owner reminders.
 
 ## Vision Checkpoint
 
-`refresh-state` is the normal closeout boundary for a LoopX turn. When a turn
-records a material delivery outcome or updates the durable `## Next Action`,
-it emits a per-agent
-`vision_checkpoint_v0`:
+`refresh-state` always emits a per-agent `vision_checkpoint_v0`, and defaults
+to the `semantic_closeout` delivery boundary. A material delivery outcome or a
+durable `## Next Action` update at that boundary requires an explicit vision
+decision:
 
 ```json
 {
@@ -163,10 +163,44 @@ it emits a per-agent
   "required": true,
   "satisfied": false,
   "decision": "missing_required",
-  "triggers": [{"kind": "material_delivery_outcome"}],
-  "required_resolution": ["write_agent_vision_patch", "record_unchanged_reason"]
+  "delivery_boundary": "semantic_closeout",
+  "triggers": [
+    {"kind": "material_delivery_outcome", "delivery_outcome": "outcome_progress"}
+  ],
+  "required_resolution": ["write_vision_patch", "record_unchanged_reason"]
 }
 ```
+
+One explicit exception exists for in-flight delivery. When quota admits an
+open advancement Todo for normal delivery, its settlement guidance may add the
+boundary below. After a resulting `delivery_outcome=outcome_progress`, the next
+heartbeat separately prefers that same Todo while its typed facts stay valid:
+
+```bash
+loopx refresh-state \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --todo-id <selected-open-todo-id> \
+  --delivery-outcome outcome_progress \
+  --delivery-boundary in_flight_continuation \
+  ...
+```
+
+This boundary is valid only for the selected agent-bound or unclaimed open
+advancement Todo while it is still in flight. It rejects Todo completion, a
+durable Next Action update, autonomous replan writeback, and any outcome other
+than `outcome_progress`. Its checkpoint has `decision=not_required`,
+`required=false`, and a typed
+`in_flight_continuation` trigger carrying the Todo id. The next quota decision
+can therefore preserve causal ownership without manufacturing another vision
+decision merely because the scheduler woke up.
+
+Omitting `--delivery-boundary` remains strict `semantic_closeout`. Todo
+completion, `outcome_gap`, `primary_goal_outcome`, durable route changes,
+replan, and terminal/no-follow-up decisions must use that boundary. This is a
+vision/Todo domain transition, not a lighter Effect Program or settlement:
+validation, durable writeback, receipts, and quota accounting still run on
+every heartbeat.
 
 Valid checkpoint decisions are:
 
@@ -178,7 +212,8 @@ Valid checkpoint decisions are:
   requires `write_vision_patch`;
 - `missing_required`: the turn was material but did not make a per-agent vision
   decision; and
-- `not_required`: no material closeout trigger was present.
+- `not_required`: no material closeout trigger was present, including a valid
+  typed in-flight continuation.
 
 `missing_required` is not a chat reminder. Status keeps it in compact run
 history, quota filters it by current `agent_id`, and goal-frontier projection

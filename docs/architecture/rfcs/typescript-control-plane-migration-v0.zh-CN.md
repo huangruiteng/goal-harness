@@ -202,6 +202,20 @@ implementation fixture。只有旧 authority 仍可执行，或 versioned compat
 window 仍需 differential proof 时才保留 characterization corpus；引入时必须记录
 删除触发条件。
 
+当前实现状态：Stage 1 已交付。Stage 2 已为 Todo completion fence/state、quota
+workspace causality 与 scheduler transition rule 交付 bounded TypeScript owner。
+Delivery continuity 与 vision checkpointing 是下一个 domain-local slice：TypeScript
+先判定获准执行的 open advancement Todo 应使用哪种 settlement boundary，再判断一次
+accountable `outcome_progress` 是否让同一个 Todo 在下一次 heartbeat 保持被选中，
+并把 refresh 归约为 intermediate continuation 或 semantic closeout。Python 只把
+status、Todo 与 CLI fact 适配到 typed handler，不复制 transition。
+
+该 slice 明确不扩展 Effect Program。Effect Program 拥有一次 settlement 内部的
+ordered execution 与 receipt；跨 heartbeat 的 Todo selection 和 vision-checkpoint
+timing 属于 domain-local reducer/ACK 语义：它们消费上一次 durable receipt、当前
+Todo fact 与 typed preemption，并返回唯一 selection/boundary decision。它们可以
+复用同一个 runtime 与 handler registry，但不因此成为 generic Effect Program step。
+
 ### Stage 3 — CLI 与 App 汇合
 
 交付 native TS CLI，并在进程内 import kernel。只保留一个自动选择的 authority

@@ -229,6 +229,23 @@ one durable end-to-end adapter contract. Retain a characterization corpus only
 while an old authority remains executable or a versioned compatibility window
 requires differential proof; record its deletion trigger when introduced.
 
+Current implementation status: Stage 1 is shipped. Stage 2 has shipped bounded
+TypeScript owners for Todo completion fences/state, quota workspace causality,
+and scheduler transition rules. Delivery continuity and vision checkpointing
+are the next domain-local slice: TypeScript classifies an admitted open
+advancement Todo's settlement boundary, decides whether an accountable
+`outcome_progress` keeps that same Todo selected on the next heartbeat, and
+reduces the refresh to an intermediate continuation or semantic closeout.
+Python adapts status, Todo, and CLI facts to the typed handler; it does not
+reproduce the transition.
+
+This slice deliberately does not extend Effect Program. Effect Program owns
+ordered execution and receipts inside one settlement. Cross-heartbeat Todo
+selection and vision-checkpoint timing are domain-local reducer/ACK semantics:
+they consume the previous durable receipt, current Todo facts, and typed
+preemptions, then return one selection/boundary decision. They may use the same
+runtime and handler registry without becoming generic Effect Program steps.
+
 ### Stage 3 — CLI and App convergence
 
 Ship a native TS CLI that imports the kernel in-process. Keep one automatically
