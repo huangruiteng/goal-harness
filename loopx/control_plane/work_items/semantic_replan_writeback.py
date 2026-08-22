@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shlex
+from collections.abc import Mapping
 from typing import Any
 
 from ...agent_registry import registered_agent_ids_for_goal
@@ -20,8 +22,92 @@ from ..todos.quota_summary import (
     select_quota_todo_summary,
 )
 from ..todos.succession_warning import todo_succession_gap_items
+from .autonomous_replan_obligation import (
+    build_autonomous_replan_cli_actions,
+    project_todo_lifecycle_settlement_reentry,
+)
 from .progress_observation import semantic_delta_from_writeback
 from .work_lane_context import build_work_lane_context_contract
+
+
+REPLAN_WRITEBACK_REJECTION_SCHEMA_VERSION = "replan_writeback_rejection_v0"
+
+
+class ReplanWritebackRejected(ValueError):
+    """A strict writeback rejection with its actionable obligation attached."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        obligation: Mapping[str, Any],
+        semantic_delta: Mapping[str, Any] | None,
+    ) -> None:
+        super().__init__(message)
+        self.obligation = dict(obligation)
+        self.semantic_delta = dict(semantic_delta or {})
+
+
+def project_replan_writeback_rejection(
+    rejection: ReplanWritebackRejected,
+    *,
+    goal_id: str,
+    agent_id: str | None,
+) -> dict[str, Any]:
+    """Project exact recovery actions without weakening the writeback gate."""
+
+    safe_agent_id = str(agent_id or "").strip()
+    scoped_cli_args = (
+        f" --agent-id {shlex.quote(safe_agent_id)}" if safe_agent_id else ""
+    )
+    obligation = rejection.obligation
+    compact_triggers = [
+        {
+            key: trigger.get(key)
+            for key in ("kind", "todo_id", "completion_turn_key")
+            if trigger.get(key) is not None
+        }
+        for trigger in obligation.get("triggers") or []
+        if isinstance(trigger, Mapping)
+    ]
+    lifecycle_reentry = project_todo_lifecycle_settlement_reentry(
+        obligation,
+        goal_id=goal_id,
+        lifecycle_actor_args=scoped_cli_args,
+        scoped_cli_args=scoped_cli_args,
+    )
+    triggers = (
+        lifecycle_reentry["triggers"]
+        if lifecycle_reentry is not None
+        else compact_triggers
+    )
+    next_cli_actions = (
+        lifecycle_reentry["next_cli_actions"]
+        if lifecycle_reentry is not None
+        else build_autonomous_replan_cli_actions(
+            obligation,
+            goal_id=goal_id,
+            settlement_args="",
+            scoped_cli_args=scoped_cli_args,
+            quota_spend_action="",
+            settlement_chain_ready=False,
+            lifecycle_actor_args=scoped_cli_args,
+        )
+    )
+    return {
+        "schema_version": REPLAN_WRITEBACK_REJECTION_SCHEMA_VERSION,
+        "required": True,
+        "host_action": (
+            "settle_todo_lifecycle"
+            if lifecycle_reentry is not None
+            else "write_typed_semantic_delta"
+        ),
+        "obligation_id": obligation.get("obligation_id"),
+        "resolution_mode": obligation.get("resolution_mode"),
+        "reason_code": rejection.semantic_delta.get("reason_code"),
+        "triggers": triggers,
+        "next_cli_actions": next_cli_actions,
+    }
 
 
 def _obligation_was_created_by_current_completion(
@@ -242,11 +328,19 @@ def enforce_open_replan_writeback(
     if isinstance(semantic_delta, dict) and semantic_delta.get("accepted") is True:
         return semantic_delta
     if isinstance(semantic_delta, dict) and semantic_delta.get("reason_code"):
-        raise ValueError(str(semantic_delta.get("reason") or "invalid replan writeback"))
-    raise ValueError(
-        "an open autonomous replan obligation requires a typed semantic delta; "
-        "this writeback does not change an accepted surface, hypothesis, probe "
-        "family, concrete blocker, coverage-backed terminal, or required vision "
-        "outcome. Host-projected replan context is authoritative; write a typed "
-        "progress observation or a fresh evidence-linked vision path outcome."
+        raise ReplanWritebackRejected(
+            str(semantic_delta.get("reason") or "invalid replan writeback"),
+            obligation=obligation,
+            semantic_delta=semantic_delta,
+        )
+    raise ReplanWritebackRejected(
+        (
+            "an open autonomous replan obligation requires a typed semantic delta; "
+            "this writeback does not change an accepted surface, hypothesis, probe "
+            "family, concrete blocker, coverage-backed terminal, or required vision "
+            "outcome. Host-projected replan context is authoritative; write a typed "
+            "progress observation or a fresh evidence-linked vision path outcome."
+        ),
+        obligation=obligation,
+        semantic_delta=semantic_delta,
     )

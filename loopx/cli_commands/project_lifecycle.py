@@ -25,6 +25,10 @@ from ..control_plane.work_items.delivery_batch_scale import (
 )
 from ..control_plane.work_items.delivery_outcome import DELIVERY_OUTCOME_CHOICES
 from ..control_plane.work_items.progress_observation import ProgressResultClass
+from ..control_plane.work_items.semantic_replan_writeback import (
+    ReplanWritebackRejected,
+    project_replan_writeback_rejection,
+)
 from ..extensions.lark.goal_channel_lifecycle import (
     goal_channel_gate_sync_failure,
     sync_human_gate_after_refresh,
@@ -694,6 +698,16 @@ def handle_project_lifecycle_command(
                 "dry_run": bool(args.dry_run),
                 "error": str(exc),
             }
+            if isinstance(exc, ReplanWritebackRejected):
+                transition = project_replan_writeback_rejection(
+                    exc,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                )
+                payload["replan_transition"] = transition
+                payload["error"] += " Required transition: " + "; ".join(
+                    transition["next_cli_actions"]
+                )
         projected_capabilities = runtime_capabilities_for_cli_projection(
             args.available_capabilities
         )

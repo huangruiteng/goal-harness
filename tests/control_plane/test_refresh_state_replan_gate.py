@@ -8,17 +8,21 @@ from pathlib import Path
 
 import pytest
 
+from loopx.cli import main as cli_main
 from loopx.control_plane.status.autonomous_replan_projection import (
     AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD,
 )
 from loopx.control_plane.work_items.semantic_replan_writeback import (
+    ReplanWritebackRejected,
     _obligation_was_created_by_current_completion,
     qualify_replan_writeback,
+    project_replan_writeback_rejection,
 )
 from loopx.state_refresh import (
     enforce_open_replan_writeback,
     refresh_state_run,
 )
+from loopx.todos import add_goal_todo
 
 GOAL_ID = "replan-gate-fixture"
 AGENT_ID = "codex-replan-gate-agent"
@@ -896,6 +900,156 @@ def test_semantic_no_followup_cannot_replace_todo_lifecycle_settlement() -> None
             },
             agent_vision=_terminal_no_followup_vision(),
         )
+
+
+def test_todo_lifecycle_rejection_projects_exact_direct_settlement() -> None:
+    with pytest.raises(ReplanWritebackRejected) as captured:
+        enforce_open_replan_writeback(
+            newest_first_runs=[],
+            state_text=_completed_advancement_without_successor_state(),
+            agent_id=AGENT_ID,
+            goal_id=GOAL_ID,
+        )
+
+    transition = project_replan_writeback_rejection(
+        captured.value,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+
+    assert transition["resolution_mode"] == "todo_lifecycle_settlement"
+    assert transition["triggers"] == [
+        {
+            "kind": "completed_advancement_without_successor",
+            "todo_id": "todo_unsettled_completion",
+            "completion_turn_key": "turn-unsettled",
+        }
+    ]
+    actions = transition["next_cli_actions"]
+    assert "--todo-id todo_unsettled_completion" in actions[0]
+    assert "--turn-instance-id turn-unsettled" in actions[0]
+    assert "--agent-id codex-replan-gate-agent" in actions[0]
+    assert all("refresh-state" not in action for action in actions)
+    assert all("spend-slot" not in action for action in actions)
+
+
+def test_todo_complete_then_refresh_cli_projects_direct_settlement(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    state = project / "ACTIVE_GOAL_STATE.md"
+    state.write_text(
+        "\n".join(
+            [
+                "---",
+                f"goal_id: {GOAL_ID}",
+                "updated_at: 2026-08-22T00:00:00+00:00",
+                "---",
+                "",
+                "## Agent Todo",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runtime_root = tmp_path / "runtime"
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "common_runtime_root": str(runtime_root),
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": state.name,
+                        "coordination": {
+                            "agent_model": "peer_v1",
+                            "registered_agents": [AGENT_ID],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    todos = [
+        add_goal_todo(
+            registry_path=registry_path,
+            goal_id=GOAL_ID,
+            role="agent",
+            text=f"Complete terminal slice {index}.",
+            task_class="advancement_task",
+            claimed_by=AGENT_ID,
+        )
+        for index in (1, 2)
+    ]
+
+    for todo in todos:
+        assert cli_main(
+            [
+                "--registry",
+                str(registry_path),
+                "--format",
+                "json",
+                "todo",
+                "complete",
+                "--goal-id",
+                GOAL_ID,
+                "--todo-id",
+                str(todo["todo_id"]),
+                "--role",
+                "agent",
+                "--agent-id",
+                AGENT_ID,
+                "--evidence",
+                f"validated terminal slice {todo['todo_id']}",
+            ]
+        ) == 0
+        capsys.readouterr()
+
+    exit_code = cli_main(
+        [
+            "--registry",
+            str(registry_path),
+            "--format",
+            "json",
+            "refresh-state",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
+            "--progress-scope",
+            "agent_lane",
+            "--classification",
+            "terminal_delivery_closeout",
+            "--delivery-batch-scale",
+            "single_surface",
+            "--delivery-outcome",
+            "surface_only",
+            "--no-global-sync",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["ok"] is False
+    transition = payload["replan_transition"]
+    assert transition["resolution_mode"] == "todo_lifecycle_settlement"
+    assert "Required transition:" in payload["error"]
+    projected_ids = {trigger["todo_id"] for trigger in transition["triggers"]}
+    expected_ids = {str(todo["todo_id"]) for todo in todos}
+    assert projected_ids == expected_ids
+    actions = transition["next_cli_actions"]
+    for todo_id in expected_ids:
+        assert any(f"--todo-id {todo_id}" in action for action in actions)
+        assert f"--todo-id {todo_id}" in payload["error"]
+    assert all("refresh-state" not in action for action in actions)
+    assert all("spend-slot" not in action for action in actions)
 
 
 def test_persisted_semantic_no_followup_ack_cannot_retire_todo_gap() -> None:
