@@ -34,6 +34,38 @@ pins an updated source. The caller owns the freshness and authority of the obser
 reference value. This capability performs no fetch, provider API call, checkout,
 install, process launch, score write, or submission.
 
+## Runtime closeout continuity
+
+A terminal result is not sufficient evidence that the process closing a run uses
+the same runtime artifact and attempt generation admitted at launch. Before writing
+a terminal score, compare the runner-owned SHA-256 bindings and its typed event-
+window qualification:
+
+```bash
+loopx benchmark runtime-continuity \
+  --launch-runtime-digest "$LAUNCH_RUNTIME_DIGEST" \
+  --closeout-runtime-digest "$CLOSEOUT_RUNTIME_DIGEST" \
+  --launch-generation-digest "$LAUNCH_GENERATION_DIGEST" \
+  --closeout-generation-digest "$CLOSEOUT_GENERATION_DIGEST" \
+  --event-window-state qualified \
+  --require-qualified \
+  --format json
+```
+
+The gate allows a closeout only when both content-addressed bindings match and the
+provider has qualified the required events within that run's launch-to-terminal
+window. A generation mismatch is routed back to its launch generation; a runtime
+artifact mismatch is rejected; missing, ambiguous, or out-of-window evidence stays
+unqualified. The compact receipt exposes equality, typed reason codes, and route
+guidance, but never the digests, run identity, event payloads, or paths. A false
+`closeout_write_allowed` is a machine-enforced obligation when callers use
+`--require-qualified`; `recommended_transition` remains provider guidance.
+
+The runner remains responsible for creating immutable artifacts and generations,
+classifying the event window from its private evidence, applying the route guidance,
+and writing the terminal row. This reducer reads no files and grants no
+runner, verifier, scoring, upload, or submission authority.
+
 ## Native Codex Goal runtime
 
 Benchmark adapters that use the Codex app-server Goal API should import
@@ -373,12 +405,14 @@ A countable experiment uses the toolkit in this order:
 6. Capture ATIF tool evidence and a runner-owned runtime attestation.
 7. During active monitoring, classify exact-job runtime evidence; do not infer
    liveness from an occupied admission slot.
-8. Run `integrity-qualification`; stop on any blocker.
-9. Run the independent verifier only after the agent phase.
-10. Reduce the official result through the benchmark-owned scoring path.
-11. Upsert terminal score, countability, effort, treatment fidelity, and insight
+8. Before a terminal write, require runtime continuity between the launch artifact,
+   closeout artifact, launch generation, closeout generation, and event window.
+9. Run `integrity-qualification`; stop on any blocker.
+10. Run the independent verifier only after the agent phase.
+11. Reduce the official result through the benchmark-owned scoring path.
+12. Upsert terminal score, countability, effort, treatment fidelity, and insight
     status; release its reservation; then read the matched-comparison projection.
-12. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
+13. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
     comparison claim.
 
 Integrity qualification is necessary but not sufficient for a score claim. It does

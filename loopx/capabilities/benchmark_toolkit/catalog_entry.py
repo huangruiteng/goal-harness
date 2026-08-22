@@ -83,6 +83,24 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "command": (
+                "loopx benchmark runtime-continuity "
+                "--launch-runtime-digest <sha256> "
+                "--closeout-runtime-digest <sha256> "
+                "--launch-generation-digest <sha256> "
+                "--closeout-generation-digest <sha256> "
+                "--event-window-state <state> --require-qualified --format json"
+            ),
+            "purpose": (
+                "Fail closed unless terminal closeout retains the launch runtime "
+                "artifact, attempt generation, and qualified event window."
+            ),
+            "write_boundary": (
+                "read-only compact provider facts; emits no digest, run identity, "
+                "event payload, or path, and performs no closeout write"
+            ),
+        },
+        {
+            "command": (
                 "loopx benchmark experiment-board-upsert --goal-id <goal-id> "
                 "--row-json <compact-row.json> --execute --format json"
             ),
@@ -205,6 +223,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "atomically_admit_case_slot_before_runner_launch",
             "upsert_preregistered_or_running_row_when_a_run_starts",
             "classify_exact_runtime_observation_during_active_monitor_cycles",
+            "require_runtime_continuity_before_terminal_closeout_write",
             "upsert_terminal_score_countability_effort_and_insight_status",
             "release_case_slot_after_terminal_or_runner_invalid_transition",
             "read_matched_comparisons_before_selecting_the_next_arm",
