@@ -554,6 +554,39 @@ def test_todo_bound_replan_projects_one_settlement_binding_and_full_chain() -> N
     ]
 
 
+def test_unscoped_replan_keeps_compact_guidance_without_settlement_contract() -> None:
+    payload = {
+        **_generic_cli_contract_payload(),
+        "execution_obligation": {
+            "kind": "autonomous_replan_required",
+            "must_attempt_work": True,
+            "delivery_allowed": True,
+        },
+        "replan_action_packet": {
+            "schema_version": "replan_action_packet_v0",
+            "obligation_id": "replan-0000000000000001",
+            "required_outcome": "semantic_delta",
+            "uncovered_frontier": {"required_any_of": ["new_surface"]},
+            "writeback_contract": {},
+            "allowed_terminal": ["blocked"],
+        },
+    }
+
+    contract = build_interaction_contract(
+        payload,
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP
+        ),
+    )
+
+    channel = contract["cli_channel"]
+    assert "settlement_plan" not in channel
+    assert "replan_settlement_contract" not in channel
+    assert len(channel["next_cli_actions"]) == 1
+    assert "--delivery-outcome" not in channel["next_cli_actions"][0]
+    assert "spend-slot" not in channel["next_cli_actions"][0]
+
+
 def test_generic_cli_without_turn_identity_keeps_legacy_unbound_actions() -> None:
     contract = build_interaction_contract(
         _generic_cli_contract_payload(),

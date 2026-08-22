@@ -82,6 +82,7 @@ def build_autonomous_replan_cli_actions(
     settlement_args: str,
     scoped_cli_args: str,
     quota_spend_action: str,
+    settlement_chain_ready: bool,
     lifecycle_actor_args: str = "",
 ) -> list[str]:
     obligation = todo_lifecycle_settlement_obligation(payload)
@@ -151,15 +152,21 @@ def build_autonomous_replan_cli_actions(
         "--progress-probe-kind <probe-kind> "
         "--progress-evidence-id <evidence-id>"
     )
+    delivery_args = (
+        "--delivery-batch-scale single_surface "
+        "--delivery-outcome outcome_progress "
+        if settlement_chain_ready
+        else ""
+    )
     refresh_action = (
         f"loopx --format json refresh-state --goal-id {goal_id} "
         "--progress-scope agent_lane "
         "--classification bounded_replan_progress "
-        "--delivery-batch-scale single_surface "
-        "--delivery-outcome outcome_progress "
-        f"{typed_progress_args}"
+        f"{delivery_args}{typed_progress_args}"
         f"{settlement_args}{scoped_cli_args}"
     )
+    if not settlement_chain_ready:
+        return [refresh_action]
     return [refresh_action, quota_spend_action]
 
 

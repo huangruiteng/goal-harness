@@ -924,6 +924,7 @@ def interaction_next_cli_actions(
             settlement_args=settlement_args,
             scoped_cli_args=scoped_cli_args,
             quota_spend_action=quota_spend_action,
+            settlement_chain_ready=settlement_plan is not None,
             lifecycle_actor_args=lifecycle_actor_args,
         )
     return _terminal_cli_actions(
@@ -1289,7 +1290,7 @@ def _build_interaction_cli_channel(
     }
     if settlement_plan is not None and spend_after_validation:
         channel["settlement_plan"] = settlement_plan
-    if replan_settlement_contract is not None:
+    if settlement_plan is not None and replan_settlement_contract is not None:
         channel["replan_settlement_contract"] = replan_settlement_contract
     if capability_reentry is not None:
         channel["runtime_capability_reentry"] = capability_reentry

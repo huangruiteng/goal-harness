@@ -177,15 +177,17 @@ deliberately split and causally bound:
 - quota and `refresh-state` use the same goal-frontier reducer, while the write
   gate closes only the current obligation with an accepted semantic delta.
 
-The accompanying
-`interaction_contract.cli_channel.replan_settlement_contract` names the one
-causal settlement binding. Its `semantic_obligation.settlement_bound` field is
-`false` when a selected Todo owns the receipt: in that case the typed replan
-delta is written and spent with `--todo-id` only, while the obligation id stays
+When a turn identity makes the settlement chain executable,
+`interaction_contract.cli_channel.replan_settlement_contract` names its one
+causal binding. Its `semantic_obligation.settlement_bound` field is `false`
+when a selected Todo owns the receipt: in that case the typed replan delta is
+written and spent with `--todo-id` only, while the obligation id stays
 available for semantic validation. Combining `--todo-id` and
 `--replan-obligation-id` is never a valid settlement identity. Without a
 selected Todo, the same contract marks the replan obligation as directly bound
-and projects `--replan-obligation-id`.
+and projects `--replan-obligation-id`. An unscoped diagnostic read keeps only
+compact replan guidance; it does not advertise an executable settlement
+contract or quota spend without the missing turn identity.
 
 The agent should then write back one of:
 

@@ -206,6 +206,7 @@ goal-frontier reducer is used by quota and
 `refresh-state`, so a vision/frontier-derived obligation cannot be bypassed by a
 maintenance classification or an ACK for an older obligation.
 
+For a turn-scoped executable settlement,
 `interaction_contract.cli_channel.replan_settlement_contract` keeps that
 semantic obligation separate from the Turn's causal settlement identity. It
 projects exactly one `settlement_binding`. When the quota receipt already owns
@@ -213,7 +214,9 @@ a selected Todo, refresh and spend use only `--todo-id`; the replan obligation
 remains the semantic target discharged by that Todo-bound writeback and must
 not be added as a second settlement flag. A Todo-less replan instead binds the
 obligation directly with `--replan-obligation-id`. Both paths retain the same
-typed semantic-delta validation and ordered refresh-then-spend chain.
+typed semantic-delta validation and ordered refresh-then-spend chain. Reads
+without a turn identity stay compact and do not project an executable
+settlement contract or spend action.
 
 The same guard may include `work_lane_contract`. Schema
 `work_lane_contract_v1` is the compatibility drill-down for monitor versus
