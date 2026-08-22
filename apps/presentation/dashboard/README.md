@@ -228,8 +228,8 @@ normal operator view for all projects connected into the shared registry:
 loopx serve-status --global-registry --port 8766 --limit 80
 ```
 
-On macOS, keep both the status feed and the built dashboard static app running
-after login with the user-level LaunchAgent helper:
+On macOS, keep the status feed and the Chat service running after login with
+the user-level LaunchAgent helper:
 
 ```bash
 ../../scripts/macos-dashboard-launchagent.sh install
@@ -239,7 +239,7 @@ The helper starts:
 
 ```text
 http://127.0.0.1:8766/status.json
-http://127.0.0.1:5174/
+http://127.0.0.1:8767/chat/
 ```
 
 Use `../../scripts/macos-dashboard-launchagent.sh restart|stop|uninstall|status`
@@ -251,10 +251,10 @@ an older daemon. Logs live under `~/Library/Logs/loopx/`.
 The status output path is covered without touching real macOS services by
 `python3 examples/macos-dashboard-launchagent-status-smoke.py`.
 
-Then open the dashboard root:
+Then open the packaged personal workspace:
 
 ```text
-http://127.0.0.1:5174/
+http://127.0.0.1:8767/chat/
 ```
 
 ### Named local and SSH-tunnel sources

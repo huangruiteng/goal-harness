@@ -47,11 +47,8 @@ def main() -> int:
         tmp = Path(raw_tmp)
         fake_bin = tmp / "bin"
         home = tmp / "home"
-        dashboard_dist = tmp / "dashboard-dist"
         fake_bin.mkdir()
         home.mkdir()
-        dashboard_dist.mkdir()
-        (dashboard_dist / "index.html").write_text("<!doctype html><title>LoopX</title>\n", encoding="utf-8")
 
         write_executable(
             fake_bin / "uname",
@@ -91,8 +88,8 @@ def main() -> int:
 
         old_output = run_status(fake_bin, home, schema_version=1)
         assert "- com.loopx.status: loaded" in old_output, old_output
-        assert "- com.loopx.dashboard: loaded" in old_output, old_output
         assert "- com.loopx.chat: loaded" in old_output, old_output
+        assert "- com.loopx.dashboard" not in old_output, old_output
         assert "- status_contract: schema_version=1 producer=loopx status expected>=2" in old_output, old_output
         assert "- control_plane_write_api: disabled" in old_output, old_output
         assert "warning: status feed is using an old contract; run:" in old_output, old_output
@@ -107,8 +104,7 @@ def main() -> int:
         assert "URLs:" in current_output, current_output
         assert "Logs:" in current_output, current_output
 
-        install_env = {"LOOPX_DASHBOARD_DIST_DIR": str(dashboard_dist)}
-        run_script(fake_bin, home, ["install"], schema_version=2, extra_env=install_env)
+        run_script(fake_bin, home, ["install"], schema_version=2)
         status_plist = home / "Library" / "LaunchAgents" / "com.loopx.status.plist"
         chat_plist = home / "Library" / "LaunchAgents" / "com.loopx.chat.plist"
         default_plist = status_plist.read_text(encoding="utf-8")
@@ -121,13 +117,13 @@ def main() -> int:
         assert "export LOOPX_PYTHON=" in default_chat_plist, default_chat_plist
         assert "/loopx --registry" in default_plist, default_plist
         assert "/loopx-canary" not in default_plist, default_plist
+        assert not (home / "Library" / "LaunchAgents" / "com.loopx.dashboard.plist").exists(), "retired dashboard LaunchAgent should not be installed"
 
         run_script(
             fake_bin,
             home,
             ["--enable-control-plane-write-api", "restart"],
             schema_version=2,
-            extra_env=install_env,
         )
         write_plist = status_plist.read_text(encoding="utf-8")
         assert "--enable-control-plane-write-api" in write_plist, write_plist

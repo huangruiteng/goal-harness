@@ -5,9 +5,8 @@
   "identifier": "io.loopx.control-plane",
   "build": {
     "beforeDevCommand": "bash scripts/dashboard.sh dev",
-    "beforeBuildCommand": "bash scripts/dashboard.sh build",
     "devUrl": "http://127.0.0.1:5173",
-    "frontendDist": "../../../presentation/dashboard/dist"
+    "frontendDist": "../static"
   },
   "app": {
     "windows": [],
