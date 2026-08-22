@@ -1,5 +1,8 @@
 # Codex App 多 Provider 本地切换 Runbook
 
+> 配套文档：多 App 并存（GPT 官方版 + DeepSeek 版）的隔离与排障见
+> [Codex 多 App 隔离与运维最佳实践（中文）](codex-multi-app-best-practices.zh-CN.md)。
+
 ## 定位
 
 这是一份面向操作者的本地环境 runbook，不是 LoopX capability。它解决一个具体问题：在同一个 Codex App 前端下，把不同的模型 provider 映射到同一个模型 slug，并保持 session、配置、思考过程和工具能力稳定。

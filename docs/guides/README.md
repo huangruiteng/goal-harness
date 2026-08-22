@@ -14,6 +14,7 @@ Guides are task-oriented paths for people starting or operating LoopX.
 - [Auto-research command path](../../loopx/capabilities/auto_research/README.md)
 - [Multi-agent product recipe](multi-agent-product-recipe.md)
 - [Codex App multi-provider switching](codex-app-provider-switching.md)
+- [Codex 多 App 隔离与运维最佳实践（中文）](codex-multi-app-best-practices.zh-CN.md)
 
 Stable semantics belong in [reference contracts](../reference/README.md);
 product rationale belongs in the [product index](../product/README.md).
