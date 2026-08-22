@@ -2474,8 +2474,8 @@ export function DashboardPage() {
         throw new Error(`HTTP ${response.status} while loading ${trimmed}`);
       }
       const nextPayload = parseStatusPayload(await response.json());
+      if (statusProjectionRevisionRef.current !== projectionRevision) return;
       if (background) {
-        if (statusProjectionRevisionRef.current !== projectionRevision) return;
         setPayload(nextPayload);
         return;
       }
@@ -2491,9 +2491,10 @@ export function DashboardPage() {
       });
       setRequestedStatusUrl(null);
     } catch (error) {
+      if (statusProjectionRevisionRef.current !== projectionRevision) return;
       if (!background) setLoadError(formatStatusError(error));
     } finally {
-      if (!background) setIsLoading(false);
+      if (!background && statusProjectionRevisionRef.current === projectionRevision) setIsLoading(false);
     }
   }
 
@@ -2575,6 +2576,11 @@ export function DashboardPage() {
       if (suppressedStatusUrlRef.current === trimmedStatusUrl) {
         return;
       }
+      // Do not let the route effect hijack an in-flight selection that is
+      // switching to a different source; the user's request wins.
+      if (requestedStatusUrl && requestedStatusUrl !== trimmedStatusUrl) {
+        return;
+      }
       if (source.kind !== "url" || source.label !== trimmedStatusUrl) {
         void loadFromUrl(trimmedStatusUrl);
       }
@@ -2584,10 +2590,13 @@ export function DashboardPage() {
     if (exampleModeRequested) {
       return;
     }
+    if (requestedStatusUrl) {
+      return;
+    }
     if (source.kind === "example") {
       void loadFromUrl(defaultGlobalStatusUrl);
     }
-  }, [exampleModeRequested, search.statusUrl, source.kind, source.label]);
+  }, [exampleModeRequested, requestedStatusUrl, search.statusUrl, source.kind, source.label]);
 
   useEffect(() => {
     if (search.statusUrl && source.kind === "example") {
