@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { once } from "node:events";
 import { rm } from "node:fs/promises";
@@ -65,6 +66,29 @@ export async function launchBrowser(chromium) {
     throw new Error("chrome-headless-shell not found; set LOOPX_CHROME_HEADLESS_SHELL");
   }
   return chromium.launch({ executablePath, headless: true });
+}
+
+export function startViteDashboardServer({ dashboardDir, port }) {
+  const nodeBin = process.env.LOOPX_NODE_BIN || process.execPath;
+  const viteBin = resolve(dashboardDir, "node_modules/vite/bin/vite.js");
+  return spawn(nodeBin, [viteBin, "--host", "127.0.0.1", "--port", String(port), "--strictPort", "--force"], {
+    cwd: dashboardDir,
+    env: { ...process.env },
+    stdio: "ignore",
+  });
+}
+
+export async function waitForHttp(url, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if ((await fetch(url)).ok) return;
+    } catch {
+      // Retry until the bounded deadline.
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+  }
+  throw new Error(`Timed out waiting for ${url}`);
 }
 
 async function stopServer(server) {

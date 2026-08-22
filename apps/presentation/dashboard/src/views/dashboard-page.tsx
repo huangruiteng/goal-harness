@@ -90,6 +90,82 @@ type DataSource =
   | { kind: "file"; label: string }
   | { kind: "url"; label: string };
 
+type StatusRequestFence = {
+  loadedUrl: string | null;
+  projectionRevision: number;
+  requestedUrl: string | null;
+  selectionRevision: number;
+};
+
+type StatusRequest = {
+  background: boolean;
+  projectionRevision: number;
+  selectionRevision: number;
+  url: string;
+};
+
+function reserveStatusSourceSelection(fence: StatusRequestFence, url: string) {
+  fence.selectionRevision += 1;
+  fence.requestedUrl = url;
+  return fence.selectionRevision;
+}
+
+function beginStatusRequest(
+  fence: StatusRequestFence,
+  url: string,
+  options: { background: boolean; selectionRevision?: number },
+): StatusRequest | null {
+  if (options.background) {
+    if (fence.requestedUrl !== null || fence.loadedUrl !== url) return null;
+    return {
+      background: true,
+      projectionRevision: fence.projectionRevision,
+      selectionRevision: fence.selectionRevision,
+      url,
+    };
+  }
+  const selectionRevision = options.selectionRevision ?? fence.selectionRevision + 1;
+  if (options.selectionRevision !== undefined && fence.selectionRevision !== selectionRevision) {
+    return null;
+  }
+  fence.selectionRevision = selectionRevision;
+  fence.projectionRevision += 1;
+  fence.requestedUrl = url;
+  return {
+    background: false,
+    projectionRevision: fence.projectionRevision,
+    selectionRevision,
+    url,
+  };
+}
+
+function statusRequestIsCurrent(fence: StatusRequestFence, request: StatusRequest) {
+  return fence.projectionRevision === request.projectionRevision
+    && fence.selectionRevision === request.selectionRevision;
+}
+
+function statusRequestCanCommit(fence: StatusRequestFence, request: StatusRequest) {
+  return statusRequestIsCurrent(fence, request) && (
+    !request.background
+    || (fence.requestedUrl === null && fence.loadedUrl === request.url)
+  );
+}
+
+function resetStatusRequestFence(fence: StatusRequestFence) {
+  fence.projectionRevision += 1;
+  fence.selectionRevision += 1;
+  fence.requestedUrl = null;
+  fence.loadedUrl = null;
+}
+
+async function fetchStatusPayload(url: string) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} while loading ${url}`);
+  }
+  return parseStatusPayload(await response.json());
+}
+
 type GoalDirectoryRow = {
   goal: RunGoal;
   queueItem?: QueueItem;
@@ -2428,7 +2504,12 @@ export function DashboardPage() {
   );
   const [exampleModeRequested, setExampleModeRequested] = useState(false);
   const suppressedStatusUrlRef = useRef<string | null>(null);
-  const statusProjectionRevisionRef = useRef(0);
+  const statusRequestFenceRef = useRef<StatusRequestFence>({
+    loadedUrl: null,
+    projectionRevision: 0,
+    requestedUrl: search.statusUrl.trim() || null,
+    selectionRevision: 0,
+  });
   const routeStatusRequestUrl = !exampleModeRequested && source.kind === "example"
     ? search.statusUrl.trim()
     : "";
@@ -2452,16 +2533,22 @@ export function DashboardPage() {
     [runHistory.goals, queue.items],
   );
 
-  async function loadFromUrl(url: string, options: { background?: boolean } = {}) {
+  async function loadFromUrl(
+    url: string,
+    options: { background?: boolean; selectionRevision?: number } = {},
+  ) {
     const trimmed = url.trim();
     const background = options.background === true;
-    const projectionRevision = statusProjectionRevisionRef.current;
     if (!trimmed) {
       if (!background) setLoadError("状态地址不能为空");
       return;
     }
+    const request = beginStatusRequest(statusRequestFenceRef.current, trimmed, {
+      background,
+      selectionRevision: options.selectionRevision,
+    });
+    if (!request) return;
     if (!background) {
-      statusProjectionRevisionRef.current += 1;
       suppressedStatusUrlRef.current = null;
       setExampleModeRequested(false);
       setRequestedStatusUrl(trimmed);
@@ -2469,17 +2556,14 @@ export function DashboardPage() {
       setLoadError(null);
     }
     try {
-      const response = await fetch(trimmed, { cache: "no-store" });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} while loading ${trimmed}`);
-      }
-      const nextPayload = parseStatusPayload(await response.json());
-      if (statusProjectionRevisionRef.current !== projectionRevision) return;
+      const nextPayload = await fetchStatusPayload(trimmed);
+      if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
       if (background) {
         setPayload(nextPayload);
         return;
       }
       const nextSource: DataSource = { kind: "url", label: trimmed };
+      statusRequestFenceRef.current.loadedUrl = trimmed;
       setPayload(nextPayload);
       setSource(nextSource);
       setStatusUrl(trimmed);
@@ -2489,13 +2573,43 @@ export function DashboardPage() {
           statusUrl: trimmed,
         }),
       });
+      if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return;
+      statusRequestFenceRef.current.requestedUrl = null;
       setRequestedStatusUrl(null);
     } catch (error) {
-      if (statusProjectionRevisionRef.current !== projectionRevision) return;
+      if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return;
       if (!background) setLoadError(formatStatusError(error));
     } finally {
-      if (!background && statusProjectionRevisionRef.current === projectionRevision) setIsLoading(false);
+      if (!background && statusRequestIsCurrent(statusRequestFenceRef.current, request)) {
+        setIsLoading(false);
+      }
     }
+  }
+
+  function selectStatusSource(nextSource: StatusSource, options: { ensureTunnel?: boolean } = {}) {
+    const selectionRevision = reserveStatusSourceSelection(
+      statusRequestFenceRef.current,
+      nextSource.statusUrl,
+    );
+    suppressedStatusUrlRef.current = null;
+    setExampleModeRequested(false);
+    setRequestedStatusUrl(nextSource.statusUrl);
+    setIsLoading(true);
+    setLoadError(null);
+    void (async () => {
+      if (options.ensureTunnel && nextSource.kind === "ssh_tunnel") {
+        const port = new URL(nextSource.statusUrl, window.location.href).port;
+        if (port) {
+          try {
+            await ensureSshSource(nextSource.label, port);
+          } catch {
+            // The tunnel may already exist; the status fetch reports the authoritative result.
+          }
+        }
+      }
+      if (statusRequestFenceRef.current.selectionRevision !== selectionRevision) return;
+      await loadFromUrl(nextSource.statusUrl, { selectionRevision });
+    })();
   }
 
   function persistStatusSourceCatalog(nextCatalog: typeof statusSourceCatalog) {
@@ -2521,32 +2635,18 @@ export function DashboardPage() {
       const result = addSshTunnelStatusSource(statusSourceCatalog, input, window.location.href);
       if ("error" in result) return { error: result.error };
       persistStatusSourceCatalog(result.catalog);
-      void loadFromUrl(result.source.statusUrl);
+      selectStatusSource(result.source, { ensureTunnel: input.ensureTunnel });
       return {};
     },
     onRemove: (sourceId) => {
       const nextCatalog = removeStatusSource(statusSourceCatalog, sourceId);
       persistStatusSourceCatalog(nextCatalog);
-      if (activeStatusSource.id === sourceId) void loadFromUrl(localStatusSource.statusUrl);
+      if (activeStatusSource.id === sourceId) selectStatusSource(localStatusSource);
     },
     onSelect: (sourceId) => {
       const nextSource = statusSourceCatalog.sources.find((candidate) => candidate.id === sourceId);
       if (!nextSource) return;
-      if (nextSource.kind === "ssh_tunnel") {
-        const port = new URL(nextSource.statusUrl, window.location.href).port;
-        if (port) {
-          void (async () => {
-            try {
-              await ensureSshSource(nextSource.label, port);
-            } catch {
-              // Tunnel may already be established; loading surfaces the real error.
-            }
-            await loadFromUrl(nextSource.statusUrl);
-          })();
-          return;
-        }
-      }
-      void loadFromUrl(nextSource.statusUrl);
+      selectStatusSource(nextSource, { ensureTunnel: nextSource.kind === "ssh_tunnel" });
     },
     sources: activeStatusSource.id === "temporary"
       ? [...statusSourceCatalog.sources, activeStatusSource]
@@ -2554,7 +2654,7 @@ export function DashboardPage() {
   };
 
   function resetToExample() {
-    statusProjectionRevisionRef.current += 1;
+    resetStatusRequestFence(statusRequestFenceRef.current);
     suppressedStatusUrlRef.current = search.statusUrl.trim() || null;
     setExampleModeRequested(true);
     setPayload(exampleStatusPayload);
@@ -2562,6 +2662,7 @@ export function DashboardPage() {
     setStatusUrl("");
     setRequestedStatusUrl(null);
     setLoadError(null);
+    setIsLoading(false);
     void navigate({
       search: (current) => ({
         ...current,
@@ -2651,7 +2752,7 @@ export function DashboardPage() {
     <PersonalGoalHome
       isLoading={isLoading}
       onGoalActivationStateChange={(goalId, activationState) => {
-        statusProjectionRevisionRef.current += 1;
+        statusRequestFenceRef.current.projectionRevision += 1;
         setPayload((current) => withGoalActivationState(current, goalId, activationState));
       }}
       onSelectGoal={selectGoal}

@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 // Focused browser smoke for the personal Agent workspace first screen and interactions.
 
-import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  startViteDashboardServer,
+  waitForHttp,
+} from "./dashboard-browser-smoke-support.mjs";
 
 const require = createRequire(import.meta.url);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,25 +29,6 @@ function loadPlaywright() {
     try { return require(candidate); } catch {}
   }
   throw new Error("Playwright package not found");
-}
-
-function startServer() {
-  const nodeBin = process.env.LOOPX_NODE_BIN || process.execPath;
-  const viteBin = resolve(dashboardDir, "node_modules/vite/bin/vite.js");
-  return spawn(nodeBin, [viteBin, "--host", "127.0.0.1", "--port", String(port), "--strictPort", "--force"], {
-    cwd: dashboardDir,
-    env: { ...process.env },
-    stdio: "ignore",
-  });
-}
-
-async function waitFor(url) {
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    try { if ((await fetch(url)).ok) return; } catch {}
-    await new Promise((resolveWait) => setTimeout(resolveWait, 200));
-  }
-  throw new Error(`Timed out waiting for ${url}`);
 }
 
 async function visibleElementCount(locator) {
@@ -507,11 +491,11 @@ async function main() {
   const observations = [];
   const pass = (criterion, note) => results.set(criterion, { status: "PASS", note });
   const fail = (criterion, note) => results.set(criterion, { status: "FAIL", note });
-  const server = startServer();
+  const server = startViteDashboardServer({ dashboardDir, port });
   let browser;
   try {
     const url = `http://127.0.0.1:${port}/?statusUrl=/status.json`;
-    await waitFor(url);
+    await waitForHttp(url);
     browser = await chromium.launch({ channel: "chrome", headless: true });
     const page = await browser.newPage({ viewport: { width: 1512, height: 982 } });
     const pageErrors = [];
