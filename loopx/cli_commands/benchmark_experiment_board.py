@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from ..capabilities.benchmark_toolkit import (
+    benchmark_experiment_board_row_key,
     build_benchmark_experiment_board,
     default_benchmark_experiment_board_path,
+    preview_benchmark_experiment_board_reconcile,
     preview_benchmark_experiment_board_upsert,
     read_benchmark_experiment_board_rows,
     render_benchmark_experiment_board_markdown,
@@ -23,8 +25,19 @@ OutputFormat = Callable[[argparse.Namespace], str]
 
 BENCHMARK_EXPERIMENT_BOARD_COMMANDS = {
     "experiment-board-show",
+    "experiment-board-reconcile",
     "experiment-board-upsert",
 }
+
+
+def _row_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
+    key = benchmark_experiment_board_row_key(row)
+    return (
+        key["benchmark_id"],
+        key["study_id"],
+        key["case_id"],
+        key["run_id"],
+    )
 
 
 def _read_json_object(path_text: str) -> dict[str, Any]:
@@ -78,6 +91,27 @@ def register_benchmark_experiment_board_commands(
         help="Write project-local domain state. Without this flag, preview only.",
     )
 
+    reconcile_parser = benchmark_subparsers.add_parser(
+        "experiment-board-reconcile",
+        help="Preview or reconcile provider board shards into the canonical board.",
+    )
+    add_subcommand_format(reconcile_parser)
+    _add_board_location_arguments(reconcile_parser)
+    reconcile_parser.add_argument(
+        "--source-ledger",
+        action="append",
+        required=True,
+        help=(
+            "Provider-owned public-safe experiment-board JSONL path. Repeat for "
+            "multiple shards."
+        ),
+    )
+    reconcile_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Write project-local domain state. Without this flag, preview only.",
+    )
+
 
 def _board_payload(
     *,
@@ -126,6 +160,42 @@ def handle_benchmark_experiment_board_command(
                 )
                 write = {
                     "status": f"preview_{preview_status}",
+                    "write_performed": False,
+                    "row_count": len(rows),
+                    "path_recorded": False,
+                    "dry_run": True,
+                }
+        elif args.benchmark_command == "experiment-board-reconcile":
+            source_rows = [
+                row
+                for source_path in args.source_ledger
+                for row in read_benchmark_experiment_board_rows(source_path)
+            ]
+            reconciled_rows, reconciliation = (
+                preview_benchmark_experiment_board_reconcile(rows, source_rows)
+            )
+            if args.execute:
+                existing_by_key = {_row_key(row): row for row in rows}
+                for row in reconciled_rows:
+                    key = _row_key(row)
+                    if existing_by_key.get(key) != row:
+                        upsert_benchmark_experiment_board_row(ledger_path, row)
+                rows = read_benchmark_experiment_board_rows(ledger_path)
+                write = {
+                    **reconciliation,
+                    "status": "reconciled",
+                    "write_performed": bool(
+                        reconciliation["inserted"] or reconciliation["updated"]
+                    ),
+                    "row_count": len(rows),
+                    "path_recorded": False,
+                    "dry_run": False,
+                }
+            else:
+                rows = reconciled_rows
+                write = {
+                    **reconciliation,
+                    "status": "preview_reconciled",
                     "write_performed": False,
                     "row_count": len(rows),
                     "path_recorded": False,

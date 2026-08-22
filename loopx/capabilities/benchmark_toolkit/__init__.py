@@ -23,6 +23,7 @@ from .experiment_board import (
     build_benchmark_experiment_board,
     default_benchmark_experiment_board_path,
     normalize_benchmark_experiment_board_row,
+    preview_benchmark_experiment_board_reconcile,
     preview_benchmark_experiment_board_upsert,
     read_benchmark_experiment_board_rows,
     render_benchmark_experiment_board_markdown,
@@ -35,11 +36,6 @@ from .integrity import (
     INTEGRITY_EVIDENCE_CATEGORIES,
     REQUIRED_RUNTIME_ATTESTATIONS,
     build_benchmark_integrity_qualification,
-)
-from .reward_contract import (
-    REWARD_CONTRACT_SCHEMA_VERSION,
-    verify_verifier_reward_file,
-    verify_verifier_reward_json,
 )
 from .native_codex_goal import (
     NativeGoalConfig,
@@ -91,6 +87,11 @@ from .public_trajectory import (
     PublicTrajectorySummaryError,
     build_native_goal_public_trajectory_summary,
 )
+from .reward_contract import (
+    REWARD_CONTRACT_SCHEMA_VERSION,
+    verify_verifier_reward_file,
+    verify_verifier_reward_json,
+)
 from .run_permissions import (
     DEFAULT_RUN_PERMISSION_ALLOWED_ACTIONS,
     DEFAULT_RUN_PERMISSION_FORBIDDEN_ACTIONS,
@@ -128,6 +129,7 @@ __all__ = [
     "NATIVE_GOAL_LIFECYCLE_SCHEMA_VERSION",
     "PUBLIC_TRAJECTORY_SUMMARY_SCHEMA_VERSION",
     "REQUIRED_RUNTIME_ATTESTATIONS",
+    "REWARD_CONTRACT_SCHEMA_VERSION",
     "RUN_PERMISSION_POLICY_SCHEMA_VERSION",
     "RUN_PERMISSION_QUOTA_PROJECTION_SCHEMA_VERSION",
     "BenchmarkSourceRevisionFence",
@@ -177,6 +179,7 @@ __all__ = [
     "native_codex_profile_environment",
     "normalize_benchmark_experiment_board_row",
     "observe_native_goal_event",
+    "preview_benchmark_experiment_board_reconcile",
     "preview_benchmark_experiment_board_upsert",
     "probe_native_goal_process",
     "read_benchmark_experiment_board_rows",
@@ -184,8 +187,6 @@ __all__ = [
     "refresh_native_goal_status",
     "render_benchmark_experiment_board_markdown",
     "render_native_codex_goal_prompt",
-    "verify_verifier_reward_file",
-    "verify_verifier_reward_json",
     "run_native_goal_process",
     "run_native_goal_process_until_terminal",
     "run_native_goal_turn",
@@ -194,5 +195,7 @@ __all__ = [
     "start_native_goal_turn",
     "upsert_benchmark_experiment_board_row",
     "validate_run_permission_policy",
+    "verify_verifier_reward_file",
+    "verify_verifier_reward_json",
     "wait_native_goal_turn",
 ]
