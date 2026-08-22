@@ -188,7 +188,16 @@ acquire_install_lock() {
     if [[ -f "$install_lock/pid" ]]; then
       owner_pid="$(cat "$install_lock/pid" 2>/dev/null || true)"
     fi
-    if [[ "$owner_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+    if [[ ! "$owner_pid" =~ ^[0-9]+$ ]]; then
+      # A live installer can briefly own the directory before publishing its
+      # PID. Give that handoff a grace period, then reclaim interrupted locks
+      # that never acquired an owner.
+      sleep 1
+      if [[ -f "$install_lock/pid" ]]; then
+        owner_pid="$(cat "$install_lock/pid" 2>/dev/null || true)"
+      fi
+    fi
+    if [[ ! "$owner_pid" =~ ^[0-9]+$ ]] || ! kill -0 "$owner_pid" 2>/dev/null; then
       local stale_lock="$install_lock.stale.$$"
       if mv "$install_lock" "$stale_lock" 2>/dev/null; then
         rm -rf "$stale_lock"

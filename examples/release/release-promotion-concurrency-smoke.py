@@ -50,6 +50,25 @@ def release_path(stdout: str) -> Path:
     raise AssertionError(stdout)
 
 
+def write_lock_test_python(path: Path) -> None:
+    path.write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = \"-\" ] && "
+        "{ [ -z \"${LOOPX_INSTALL_GUARD_FILE:-}\" ] || "
+        "[ \"${LOOPX_INSTALL_GUARD_HELD:-0}\" = \"1\" ]; }; then\n"
+        "  cat >/dev/null\n"
+        "  printf '%s\\n' \"$0\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "case \" $* \" in\n"
+        "  *\" promotion-gate \"*) exit 0 ;;\n"
+        "esac\n"
+        "exec \"$LOOPX_TEST_REAL_PYTHON\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
 def assert_install_waits_for_promotion_guard(root: Path) -> None:
     env = {**install_env(root), "LOOPX_RELEASE_ID": "guarded"}
     releases_dir = Path(env["LOOPX_RELEASES_DIR"])
@@ -101,7 +120,11 @@ def assert_legacy_lock_timeout_preserves_live_owner(root: Path) -> None:
     fast_sleep = fast_bin / "sleep"
     fast_sleep.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     fast_sleep.chmod(0o755)
+    python_wrapper = fast_bin / "python"
+    write_lock_test_python(python_wrapper)
     env["PATH"] = f"{fast_bin}{os.pathsep}{env['PATH']}"
+    env["LOOPX_PYTHON"] = str(python_wrapper)
+    env["LOOPX_TEST_REAL_PYTHON"] = sys.executable
 
     try:
         process = subprocess.run(
@@ -120,6 +143,51 @@ def assert_legacy_lock_timeout_preserves_live_owner(root: Path) -> None:
     finally:
         if legacy_lock.exists():
             shutil.rmtree(legacy_lock)
+
+
+def assert_empty_legacy_lock_is_reaped(root: Path) -> None:
+    env = {**install_env(root), "LOOPX_RELEASE_ID": "empty-lock-recovery"}
+    releases_dir = Path(env["LOOPX_RELEASES_DIR"])
+    legacy_lock = releases_dir / ".install-lock"
+    legacy_lock.mkdir(parents=True)
+
+    fast_bin = root / "empty-lock-fast-bin"
+    fast_bin.mkdir()
+    fast_sleep = fast_bin / "sleep"
+    fast_sleep.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fast_sleep.chmod(0o755)
+    python_wrapper = fast_bin / "python"
+    write_lock_test_python(python_wrapper)
+    env["PATH"] = f"{fast_bin}{os.pathsep}{env['PATH']}"
+    env["LOOPX_PYTHON"] = str(python_wrapper)
+    env["LOOPX_TEST_REAL_PYTHON"] = sys.executable
+
+    process = subprocess.Popen(
+        [str(INSTALL_SCRIPT)],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    acquired = False
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and process.poll() is None:
+            pid_file = legacy_lock / "pid"
+            if pid_file.is_file() and pid_file.read_text(encoding="utf-8").strip() == str(
+                process.pid
+            ):
+                acquired = True
+                break
+            time.sleep(0.05)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        stdout, stderr = process.communicate(timeout=10)
+        if legacy_lock.exists():
+            shutil.rmtree(legacy_lock)
+    assert acquired, (stdout, stderr)
 
 
 def assert_concurrent_release_ids_are_distinct(root: Path) -> None:
@@ -238,6 +306,7 @@ def main() -> int:
         root = Path(tmp)
         assert_install_waits_for_promotion_guard(root)
         assert_legacy_lock_timeout_preserves_live_owner(root)
+        assert_empty_legacy_lock_is_reaped(root)
         assert_concurrent_release_ids_are_distinct(root)
         assert_incomplete_candidate_does_not_replace_default(root)
         assert_resolved_archive_commit_is_recorded(root)
