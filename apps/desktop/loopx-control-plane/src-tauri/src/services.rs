@@ -1,6 +1,8 @@
 use command_group::{CommandGroup, GroupChild};
 use std::{
-    env, fmt, fs,
+    env,
+    ffi::OsStr,
+    fmt, fs,
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
@@ -203,7 +205,10 @@ impl Drop for ServiceSet {
 fn loopx_executable() -> String {
     if let Ok(configured) = env::var("LOOPX_BIN") {
         if !configured.trim().is_empty() {
-            return configured;
+            return resolve_executable_path(&configured, env::var_os("PATH").as_deref())
+                .unwrap_or_else(|| PathBuf::from(configured))
+                .to_string_lossy()
+                .into_owned();
         }
     }
     let mut candidates = vec![
@@ -216,8 +221,33 @@ fn loopx_executable() -> String {
     candidates
         .into_iter()
         .find(|candidate| candidate.is_file())
+        .or_else(|| resolve_executable_path("loopx", env::var_os("PATH").as_deref()))
         .map(|candidate| candidate.to_string_lossy().into_owned())
         .unwrap_or_else(|| "loopx".to_string())
+}
+
+fn resolve_executable_path(executable: &str, search_path: Option<&OsStr>) -> Option<PathBuf> {
+    let requested = PathBuf::from(executable);
+    if requested.components().count() > 1 {
+        return requested.is_file().then_some(requested);
+    }
+    let search_path = search_path?;
+    for directory in env::split_paths(search_path) {
+        let candidate = directory.join(&requested);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        #[cfg(windows)]
+        if requested.extension().is_none() {
+            for extension in ["COM", "EXE", "BAT", "CMD"] {
+                let candidate = directory.join(format!("{executable}.{extension}"));
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn runtime_identity_from_manifest(manifest: &serde_json::Value) -> Option<serde_json::Value> {
@@ -236,7 +266,15 @@ fn runtime_identity_from_manifest(manifest: &serde_json::Value) -> Option<serde_
 }
 
 fn runtime_identity_for_executable(executable: &str) -> Option<serde_json::Value> {
-    let canonical = fs::canonicalize(executable).ok()?;
+    runtime_identity_for_executable_with_path(executable, env::var_os("PATH").as_deref())
+}
+
+fn runtime_identity_for_executable_with_path(
+    executable: &str,
+    search_path: Option<&OsStr>,
+) -> Option<serde_json::Value> {
+    let resolved = resolve_executable_path(executable, search_path)?;
+    let canonical = fs::canonicalize(resolved).ok()?;
     let release_root = canonical.parent()?.parent()?;
     let manifest = fs::read_to_string(Path::new(release_root).join("release.json")).ok()?;
     let payload = serde_json::from_str::<serde_json::Value>(&manifest).ok()?;
@@ -449,6 +487,41 @@ mod tests {
                 "package_version": "0.5.1",
                 "release_id": "20260821T164921Z",
                 "source_revision": "62647e2e299d",
+            }))
+        );
+    }
+
+    #[test]
+    fn path_resolved_loopx_binary_keeps_runtime_fence_enabled() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock must follow the Unix epoch")
+            .as_nanos();
+        let release_root = env::temp_dir().join(format!(
+            "loopx-runtime-identity-{}-{unique}",
+            std::process::id()
+        ));
+        let scripts_dir = release_root.join("scripts");
+        fs::create_dir_all(&scripts_dir).expect("fixture scripts directory");
+        let executable_name = if cfg!(windows) { "loopx.EXE" } else { "loopx" };
+        fs::write(scripts_dir.join(executable_name), b"fixture").expect("fixture loopx executable");
+        fs::write(
+            release_root.join("release.json"),
+            r#"{"release_id":"path-release","package":{"version":"0.5.1"},"source":{"git_commit":"path-revision"}}"#,
+        )
+        .expect("fixture release manifest");
+
+        let identity =
+            runtime_identity_for_executable_with_path("loopx", Some(scripts_dir.as_os_str()));
+        fs::remove_dir_all(&release_root).expect("remove runtime identity fixture");
+
+        assert_eq!(
+            identity,
+            Some(serde_json::json!({
+                "schema_version": "loopx_runtime_identity_v1",
+                "package_version": "0.5.1",
+                "release_id": "path-release",
+                "source_revision": "path-revision",
             }))
         );
     }
