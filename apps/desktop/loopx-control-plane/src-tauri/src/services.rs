@@ -110,11 +110,17 @@ impl OwnedService {
 
 pub struct ServiceSet {
     owned: Vec<OwnedService>,
+    /// True when a stale LoopX service was restarted so the running frontend
+    /// was transparently moved onto the current installed release.
+    pub healed: bool,
 }
 
 impl ServiceSet {
     pub fn start() -> Result<Self, ServiceError> {
-        let mut services = Self { owned: Vec::new() };
+        let mut services = Self {
+            owned: Vec::new(),
+            healed: false,
+        };
         for kind in [ServiceKind::Status, ServiceKind::Chat] {
             if let Err(error) = services.ensure(kind) {
                 services.stop();
@@ -127,7 +133,7 @@ impl ServiceSet {
     fn ensure(&mut self, kind: ServiceKind) -> Result<(), ServiceError> {
         let executable = loopx_executable();
         let expected_runtime_identity = runtime_identity_for_executable(&executable);
-        let mut stale_retries = 0;
+        let stale_deadline = Instant::now() + STARTUP_TIMEOUT;
         loop {
             match probe(kind, expected_runtime_identity.as_ref()) {
                 Probe::Matching => return Ok(()),
@@ -140,21 +146,22 @@ impl ServiceSet {
                 }
                 Probe::Stale => {
                     // Self-heal: the port is owned by a LoopX service from a
-                    // different installed release (for example before a
-                    // `loopx update` restarted it). Terminate that stale
-                    // listener and retry so the current release's service is
-                    // started; unknown (Foreign) processes keep the hard error.
-                    stale_retries += 1;
-                    if stale_retries > 3 {
+                    // different installed release (for example after a
+                    // `loopx update`). Terminate that stale listener and keep
+                    // waiting up to the startup timeout so a LaunchAgent-managed
+                    // service (KeepAlive + throttle) has time to restart on the
+                    // current release; unknown (Foreign) processes keep the
+                    // hard error.
+                    self.healed = true;
+                    terminate_listener(kind.port());
+                    if Instant::now() >= stale_deadline {
                         return Err(ServiceError(format!(
                             "port {} is serving LoopX {} from a different installed runtime and could not be restarted",
                             kind.port(),
                             kind.label()
                         )));
                     }
-                    terminate_listener(kind.port());
-                    thread::sleep(Duration::from_millis(400));
-                    continue;
+                    thread::sleep(Duration::from_millis(200));
                 }
                 Probe::Unavailable => break,
             }
@@ -186,11 +193,9 @@ impl ServiceSet {
                     )));
                 }
                 Probe::Stale => {
-                    return Err(ServiceError(format!(
-                        "LoopX {} startup reached a stale runtime on port {}",
-                        kind.label(),
-                        kind.port()
-                    )));
+                    self.healed = true;
+                    terminate_listener(kind.port());
+                    thread::sleep(Duration::from_millis(200));
                 }
                 Probe::Unavailable => thread::sleep(Duration::from_millis(100)),
             }

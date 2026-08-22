@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Desktop shell capability set",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "notification:default"]
 }

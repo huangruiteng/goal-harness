@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{
     ipc::CapabilityBuilder, AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder,
 };
+use tauri_plugin_notification::NotificationExt;
 
 const APP_IDENTIFIER: &str = "io.loopx.control-plane";
 
@@ -34,6 +35,7 @@ pub fn run() {
                 .callback(|app, _args, _cwd| show_main_window(app))
                 .build(),
         )
+        .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             let started = match ServiceSet::start() {
                 Ok(services) => services,
@@ -53,7 +55,17 @@ pub fn run() {
                     return Ok(());
                 }
             };
+            let healed = started.healed;
             *services_for_setup.lock().expect("service state lock") = Some(started);
+
+            if healed {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("LoopX")
+                    .body("已自动升级到当前 LoopX 版本，服务已重启。")
+                    .show();
+            }
 
             let origin: Url = web_origin.parse()?;
             app.add_capability(
