@@ -78,6 +78,25 @@ provider-specific routing data. This runtime contract is not itself a new
 capability registry entry; providers advertise stable caller outcomes through
 their existing extension and capability surfaces.
 
+For asynchronous sources, the same module provides an owner-local incremental
+inbox runtime. A provider translates a bounded page into
+`agent_external_connector_event_v0` envelopes and calls the capture operation
+with the exact previously committed cursor. Capture deduplicates stable event
+ids, applies the declared addressed/all-source filter, preserves document
+anchors and reply-chain references in private storage, and assigns a restart-
+safe order. The page cursor remains pending until every accepted event from
+that page is settled; a fully filtered page may checkpoint immediately because
+it contains no accepted Agent input.
+
+The bound Agent drains pending events in that order. Settlement rejects an
+out-of-order event and calls the common ACK decision, so a missing durable
+effect or required provider readback leaves both the event and cursor pending.
+Only a successful settlement records the event as acknowledged, and only the
+last accepted event from a captured page advances its cursor. Provider failures
+are stored as content-free error codes. The public inbox projection exposes
+only pending count, oldest age, failure count, and freshness; event ids, bodies,
+anchors, reply chains, source references, and cursor values remain owner-local.
+
 `Provider` is an implementation role. When it implements a LoopX capability,
 it is registered under that capability; a standalone extension provider may
 instead expose only its own bounded command. A provider may be built into LoopX
