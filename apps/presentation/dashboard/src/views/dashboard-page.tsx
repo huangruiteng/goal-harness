@@ -68,6 +68,7 @@ import {
 } from "../features/personal-workspace/personal-workspace-model";
 import { routeWorkspaceInput } from "../features/personal-workspace/personal-workspace-router";
 import type { StatusSourceControl } from "../features/personal-workspace/status-source-switcher";
+import { ensureSshSource } from "../data/ssh-host-catalog";
 import {
   addSshTunnelStatusSource,
   defaultLocalStatusSourceUrl,
@@ -2529,7 +2530,22 @@ export function DashboardPage() {
     },
     onSelect: (sourceId) => {
       const nextSource = statusSourceCatalog.sources.find((candidate) => candidate.id === sourceId);
-      if (nextSource) void loadFromUrl(nextSource.statusUrl);
+      if (!nextSource) return;
+      if (nextSource.kind === "ssh_tunnel") {
+        const port = new URL(nextSource.statusUrl, window.location.href).port;
+        if (port) {
+          void (async () => {
+            try {
+              await ensureSshSource(nextSource.label, port);
+            } catch {
+              // Tunnel may already be established; loading surfaces the real error.
+            }
+            await loadFromUrl(nextSource.statusUrl);
+          })();
+          return;
+        }
+      }
+      void loadFromUrl(nextSource.statusUrl);
     },
     sources: activeStatusSource.id === "temporary"
       ? [...statusSourceCatalog.sources, activeStatusSource]

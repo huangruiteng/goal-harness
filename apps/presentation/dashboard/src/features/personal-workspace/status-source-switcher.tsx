@@ -120,20 +120,17 @@ export function StatusSourceSwitcher({
     closeForm();
   }
 
-  function quickAddConfiguredHost(alias: string) {
-    const usedPorts = new Set(
-      sources
-        .filter((source) => source.kind === "ssh_tunnel")
-        .map((source) => {
-          try {
-            return new URL(source.statusUrl).port;
-          } catch {
-            return "";
-          }
-        }),
-    );
-    let freePort = "8876";
-    for (let port = 8876; port < 8876 + 100; port += 1) {
+  async function quickAddConfiguredHost(alias: string) {
+    const usedPorts = new Set<string>();
+    for (const source of sources) {
+      try {
+        usedPorts.add(new URL(source.statusUrl).port);
+      } catch {
+        // ignore malformed persisted sources
+      }
+    }
+    let freePort = "8877";
+    for (let port = 8877; port < 8877 + 200; port += 1) {
       if (!usedPorts.has(String(port))) {
         freePort = String(port);
         break;
@@ -144,7 +141,17 @@ export function StatusSourceSwitcher({
       setError(draft.error ?? "SSH 来源参数无效。");
       return;
     }
+    setEnsuring(true);
+    setError(null);
+    try {
+      await ensureSshSource(alias, freePort);
+    } catch (caught) {
+      setEnsuring(false);
+      setError(caught instanceof Error ? caught.message : "无法建立 SSH 隧道来源。");
+      return;
+    }
     const result = onAdd({ label: draft.label, statusUrl: draft.statusUrl });
+    setEnsuring(false);
     if (result.error) setError(result.error);
     else setError(null);
     setLocalPort(freePort);
