@@ -43,7 +43,9 @@ from ..coordination.authority_core import (
     DecisionOutcome,
     HandoffMode,
     HandoffModeTransitionCommand,
+    OwnershipGate,
     decide,
+    ownership_gate_requirement,
 )
 from ..goals.active_state_metadata import parse_state_frontmatter
 from .contract import normalize_todo_claimed_by
@@ -148,9 +150,14 @@ def enter_todo_ownership_handoff_gate(
 
     mode = goal_handoff_mode(state_text)
     extras: dict[str, Any] = {"handoff_mode": mode}
-    if not ownership_mutation or mode != HANDOFF_MODE_HARD_LEASE:
+    gate = ownership_gate_requirement(
+        handoff_mode=HandoffMode(mode),
+        ownership_mutation=ownership_mutation,
+        authority_mode=str(mutation_authority.get("mode") or "") or None,
+    )
+    if gate is OwnershipGate.NOT_REQUIRED:
         return extras
-    if mutation_authority.get("mode") == DELEGATED_AUTHORITY_MODE:
+    if gate is OwnershipGate.DELEGATED_OVERRIDE:
         extras["handoff_gate_overridden"] = True
         return extras
     from ..work_items.task_lease import hold_handoff_lease_holder_gate

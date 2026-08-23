@@ -42,7 +42,6 @@ from ..coordination.local_snapshot import (
     todo_snapshot_from_mapping,
 )
 from ..todos.contract import (
-    TODO_TASK_CLASS_USER_GATE,
     normalize_required_write_scopes,
     normalize_todo_claimed_by,
     normalize_todo_excluded_agents,
@@ -360,13 +359,10 @@ def hold_task_lease_mutation_fence(
     handoff = handoff or {}
     handoff_mode = str(handoff.get("handoff_mode") or HANDOFF_MODE_LEGACY)
     handoff_gate_overridden = handoff.get("handoff_gate_overridden") is True
-    auto_acquire_lease = (
-        handoff_mode == HANDOFF_MODE_HARD_LEASE
-        and not handoff_gate_overridden
-        and not require_active_when_key_supplied
-        and str(todo.get("role") or "") == "user"
-        and str(todo.get("task_class") or "") == TODO_TASK_CLASS_USER_GATE
-    )
+    # Caller policy only: auto-acquire may be offered when the caller supplied
+    # no explicit lease credentials. Mode, delegation, role, and task-class
+    # eligibility are decided once, in the core's terminal fence.
+    allow_user_gate_auto_acquire = not require_active_when_key_supplied
     auto_acquired = False
     with exclusive_file_lock(
         lock_target,
@@ -402,7 +398,7 @@ def hold_task_lease_mutation_fence(
                 lease_idempotency_key=requested_key,
                 lease_expected_version=expected_version,
                 delegated_authority=handoff_gate_overridden,
-                allow_user_gate_auto_acquire=auto_acquire_lease,
+                allow_user_gate_auto_acquire=allow_user_gate_auto_acquire,
                 require_active_when_fence_supplied=(
                     require_active_when_key_supplied
                 ),
@@ -429,7 +425,7 @@ def hold_task_lease_mutation_fence(
                     },
                 )
             if transition.code == "handoff_mode_requires_lease":
-                if auto_acquire_lease and not time_active:
+                if transition.lease_fence is LeaseFence.AUTO_ACQUIRE and not time_active:
                     if not normalized_actor:
                         raise TaskLeaseError(
                             "hard_lease handoff mode auto-acquire requires an "

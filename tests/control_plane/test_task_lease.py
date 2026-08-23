@@ -345,3 +345,73 @@ def test_legacy_generation_and_unrelated_ttl_do_not_block_release_or_reacquire(
     )
     assert reacquired["lease"]["version"] == 8
     assert reacquired["lease"]["lease_epoch"] == 2
+
+
+def test_corrupt_lease_version_fields_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hand-corrupted lease records are typed rejections, not silent input.
+
+    Disclosed behavior change of the local-record extraction: an expired
+    record with a negative version was previously accepted (the next acquire
+    kept counting from it), and a non-integer version or replay-fingerprint
+    ``acquire_ttl_seconds`` surfaced as a raw ``ValueError``. Every lease verb
+    now reads these fields through one normalizer that fails closed as
+    ``corrupt_lease``.
+    """
+
+    now = datetime(2026, 7, 13, tzinfo=timezone.utc)
+    monkeypatch.setattr(task_lease, "now_utc", lambda: now)
+    monkeypatch.setattr(task_lease, "require_task_lease_owner_allowed", lambda **_: {})
+    monkeypatch.setattr(task_lease, "active_conflicts", lambda **_: [])
+    runtime_root = tmp_path / "runtime"
+    lease_path = task_lease.task_lease_path(
+        runtime_root=runtime_root,
+        goal_id="goal-a",
+        todo_id="todo_corrupt",
+    )
+
+    def record(version: object, *, ttl: object = 120, expired: bool) -> dict[str, Any]:
+        stamp = now - timedelta(seconds=240)
+        expires = now + (timedelta(seconds=-120) if expired else timedelta(seconds=120))
+        return {
+            "schema_version": "task_lease_v0",
+            "goal_id": "goal-a",
+            "todo_id": "todo_corrupt",
+            "owner": "agent-a",
+            "idempotency_key": "stale-key",
+            "write_scopes": [],
+            "acquire_ttl_seconds": ttl,
+            "version": version,
+            "status": "active",
+            "acquired_at": stamp.isoformat().replace("+00:00", "Z"),
+            "updated_at": stamp.isoformat().replace("+00:00", "Z"),
+            "expires_at": expires.isoformat().replace("+00:00", "Z"),
+        }
+
+    def acquire(key: str = "new-key") -> dict[str, Any]:
+        return acquire_task_lease(
+            registry_path=tmp_path / "registry.json",
+            runtime_root=runtime_root,
+            goal_id="goal-a",
+            todo_id="todo_corrupt",
+            owner="agent-a",
+            idempotency_key=key,
+            ttl_seconds=120,
+        )
+
+    task_lease.write_lease(lease_path, record(-5, expired=True))
+    with pytest.raises(TaskLeaseError) as error:
+        acquire()
+    assert error.value.code == "corrupt_lease"
+
+    task_lease.write_lease(lease_path, record("not-a-version", expired=True))
+    with pytest.raises(TaskLeaseError) as error:
+        acquire()
+    assert error.value.code == "corrupt_lease"
+
+    task_lease.write_lease(lease_path, record(7, ttl="not-a-ttl", expired=False))
+    with pytest.raises(TaskLeaseError) as error:
+        acquire(key="stale-key")
+    assert error.value.code == "corrupt_lease"

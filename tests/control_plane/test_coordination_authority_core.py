@@ -26,6 +26,7 @@ from loopx.control_plane.coordination.authority_core import (
     TodoMutationCommand,
     TodoSnapshot,
     decide,
+    ownership_gate_requirement,
 )
 
 
@@ -747,3 +748,38 @@ def test_core_has_no_storage_or_receipt_version_domain() -> None:
     assert "receipt_index" not in names
     assert "path" not in names
     assert {"version", "lease_epoch"}.issubset(names)
+
+
+@pytest.mark.parametrize(
+    ("handoff_mode", "ownership_mutation", "authority_mode", "expected"),
+    [
+        (HandoffMode.LEGACY, True, "registered_peer_actor", OwnershipGate.NOT_REQUIRED),
+        (HandoffMode.SOFT_CLAIM, True, "registered_peer_actor", OwnershipGate.NOT_REQUIRED),
+        (HandoffMode.HARD_LEASE, False, "registered_peer_actor", OwnershipGate.NOT_REQUIRED),
+        (
+            HandoffMode.HARD_LEASE,
+            True,
+            "delegated_orchestration_override",
+            OwnershipGate.DELEGATED_OVERRIDE,
+        ),
+        (HandoffMode.HARD_LEASE, True, "registered_peer_actor", OwnershipGate.REQUIRE_HOLDER),
+        (HandoffMode.HARD_LEASE, True, "single_agent_compatibility", OwnershipGate.REQUIRE_HOLDER),
+        (HandoffMode.HARD_LEASE, True, None, OwnershipGate.REQUIRE_HOLDER),
+    ],
+)
+def test_ownership_gate_requirement_is_the_single_routing_rule(
+    handoff_mode: HandoffMode,
+    ownership_mutation: bool,
+    authority_mode: str | None,
+    expected: OwnershipGate,
+) -> None:
+    """Writers route the hard-lease holder gate through this one core rule."""
+
+    assert (
+        ownership_gate_requirement(
+            handoff_mode=handoff_mode,
+            ownership_mutation=ownership_mutation,
+            authority_mode=authority_mode,
+        )
+        is expected
+    )

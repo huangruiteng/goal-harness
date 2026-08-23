@@ -600,6 +600,27 @@ def _terminal_decision(
     )
 
 
+def ownership_gate_requirement(
+    *,
+    handoff_mode: HandoffMode,
+    ownership_mutation: bool,
+    authority_mode: str | None,
+) -> OwnershipGate:
+    """Route one claimed_by mutation on an existing todo into the holder gate.
+
+    This is the single owner of the routing rule: only a hard_lease ownership
+    mutation needs the holder gate, and the delegated orchestration override
+    is the one audited door through it. Writers consult this instead of
+    re-deriving the mode/door predicates at the edge.
+    """
+
+    if not ownership_mutation or handoff_mode is not HandoffMode.HARD_LEASE:
+        return OwnershipGate.NOT_REQUIRED
+    if authority_mode == "delegated_orchestration_override":
+        return OwnershipGate.DELEGATED_OVERRIDE
+    return OwnershipGate.REQUIRE_HOLDER
+
+
 def _decide_todo(
     snapshot: CoordinationSnapshot,
     command: TodoMutationCommand,
@@ -608,30 +629,27 @@ def _decide_todo(
     if rejection is not None:
         return _result(DecisionOutcome.REJECTED, rejection)
     assert authority_mode is not None and snapshot.todo is not None
-    ownership_gate = OwnershipGate.NOT_REQUIRED
-    if (
-        command.ownership_mutation
-        and snapshot.handoff_mode is HandoffMode.HARD_LEASE
-    ):
-        if authority_mode == "delegated_orchestration_override":
-            ownership_gate = OwnershipGate.DELEGATED_OVERRIDE
-        else:
-            ownership_gate = OwnershipGate.REQUIRE_HOLDER
-            lease = snapshot.lease
-            if not lease or not lease.present or not lease.active:
-                return _result(
-                    DecisionOutcome.REJECTED,
-                    "handoff_mode_requires_lease",
-                    authority_mode=authority_mode,
-                    ownership_gate=ownership_gate,
-                )
-            if lease.owner != command.actor_agent_id:
-                return _result(
-                    DecisionOutcome.REJECTED,
-                    "handoff_mode_requires_lease",
-                    authority_mode=authority_mode,
-                    ownership_gate=ownership_gate,
-                )
+    ownership_gate = ownership_gate_requirement(
+        handoff_mode=snapshot.handoff_mode,
+        ownership_mutation=command.ownership_mutation,
+        authority_mode=authority_mode,
+    )
+    if ownership_gate is OwnershipGate.REQUIRE_HOLDER:
+        lease = snapshot.lease
+        if not lease or not lease.present or not lease.active:
+            return _result(
+                DecisionOutcome.REJECTED,
+                "handoff_mode_requires_lease",
+                authority_mode=authority_mode,
+                ownership_gate=ownership_gate,
+            )
+        if lease.owner != command.actor_agent_id:
+            return _result(
+                DecisionOutcome.REJECTED,
+                "handoff_mode_requires_lease",
+                authority_mode=authority_mode,
+                ownership_gate=ownership_gate,
+            )
     if command.action in {TodoAction.COMPLETE, TodoAction.SUPERSEDE}:
         return _terminal_decision(
             snapshot,
