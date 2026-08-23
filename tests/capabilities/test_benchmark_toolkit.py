@@ -213,6 +213,25 @@ def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:
     assert "reuse_boundary" in artifact
 
 
+def test_catalog_exposes_typed_treatment_plan_fidelity_contract() -> None:
+    capability = build_capability_detail_packet("benchmark-toolkit")["capability"]
+    usage = capability["agent_usage"]
+
+    assert (
+        "qualify_treatment_plan_roles_from_typed_action_kinds"
+        in usage["required_sequence"]
+    )
+    contract = usage["treatment_plan_fidelity"]
+    assert contract["stable_roles"] == [
+        "technical_work",
+        "independent_validation",
+        "review_refine",
+    ]
+    assert contract["matching"] == "provider_declared_exact_action_kind_tokens"
+    assert "do not infer" in contract["required_boundary"]
+    assert "does not prove" in contract["authority_boundary"]
+
+
 def _attestation() -> dict[str, object]:
     return {
         "schema_version": BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION,
