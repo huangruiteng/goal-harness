@@ -89,6 +89,14 @@ def _api_error_code(payload: Mapping[str, Any]) -> int | None:
     return None
 
 
+def _unavailable_access_scope() -> dict[str, Any]:
+    return {
+        "status": "unavailable",
+        "retryable": True,
+        "reason": "provider_query_failed",
+    }
+
+
 def _default_runner(
     args: Sequence[str],
     cwd: Path | None = None,
@@ -180,44 +188,49 @@ class LarkCliMiaodaProvider:
         app_type: str,
     ) -> dict[str, Any]:
         label = "Miaoda access-scope readback"
-        returncode, payload = _json_payload(
-            self._runner(
-                [
-                    *self._prefix,
-                    "apps",
-                    "+access-scope-get",
-                    "--app-id",
-                    app_id,
-                    "--format",
-                    "json",
-                ],
-                None,
-                120.0,
-            ),
-            label,
-        )
+        try:
+            returncode, payload = _json_payload(
+                self._runner(
+                    [
+                        *self._prefix,
+                        "apps",
+                        "+access-scope-get",
+                        "--app-id",
+                        app_id,
+                        "--format",
+                        "json",
+                    ],
+                    None,
+                    120.0,
+                ),
+                label,
+            )
+        except (OSError, subprocess.TimeoutExpired, TypeError, ValueError):
+            return _unavailable_access_scope()
         if returncode == 0 and payload.get("ok") is True:
-            data = self._data(payload)
-            receipt: dict[str, Any] = {"status": "verified", "retryable": False}
-            access_scope = data.get("access_scope") or data.get("scope")
-            if access_scope is not None:
-                receipt["scope"] = _text(access_scope, "Miaoda access_scope")
-            if data.get("require_login") is not None:
-                if not isinstance(data["require_login"], bool):
+            try:
+                data = self._data(payload)
+                access_scope = _text(
+                    data.get("access_scope") or data.get("scope"),
+                    "Miaoda access_scope",
+                )
+                if not isinstance(data.get("require_login"), bool):
                     raise TypeError("Miaoda require_login must be a boolean")
-                receipt["require_login"] = data["require_login"]
-            return receipt
+            except (TypeError, ValueError):
+                return _unavailable_access_scope()
+            return {
+                "status": "verified",
+                "retryable": False,
+                "scope": access_scope,
+                "require_login": data["require_login"],
+            }
         if _api_error_code(payload) == 40002 and app_type == "html":
             return {
                 "status": "unsupported_by_app_type",
                 "retryable": False,
                 "reason": "creative_html_scope_readback_unavailable",
             }
-        return {
-            "status": "unavailable",
-            "retryable": True,
-            "reason": "provider_query_failed",
-        }
+        return _unavailable_access_scope()
 
     def publish(
         self,

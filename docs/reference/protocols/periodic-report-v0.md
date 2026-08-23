@@ -270,7 +270,9 @@ while other query failures remain retryable `unavailable` evidence; the
 bundled provider marks remote content-digest verification as
 `unavailable` because the provider API does not expose published bytes or a
 digest. App existence, URL equality, and release completion must not be
-promoted to byte-for-byte content proof. The project or host still owns app
+promoted to byte-for-byte content proof. Receipt normalization recomputes exact
+release verification from the requested release id and provider status rather
+than trusting a provider boolean. The project or host still owns app
 selection, authentication, audience policy, and the execute decision.
 
 `loopx periodic-report publish-miaoda` is the concrete CLI for that sink. Its

@@ -273,14 +273,17 @@ published URL, and published state. The sink receipt keeps three evidence
 layers separate:
 
 - `release_readback` proves the exact provider release reached its terminal
-  published state;
+  published state. The capability recomputes this from the requested release id
+  and provider status; a provider-supplied `verified` flag cannot override a
+  mismatch;
 - `access_scope_readback` records the observed scope and login requirement, or
   a typed `unsupported_by_app_type` result when the provider does not expose
   that query for creative HTML apps. Other provider-query failures remain a
   retryable `unavailable` evidence state without erasing a verified release;
 - `content_readback` states whether the remote content digest was verified.
   The bundled provider currently records `unavailable` because the provider
-  API does not expose the published bytes or their digest.
+  API does not expose the published bytes or their digest; no speculative
+  `verified` state is accepted until a provider can supply real digest evidence.
 
 An app id, online URL, or finished release therefore proves delivery lifecycle,
 not byte-for-byte equality with the local artifact.

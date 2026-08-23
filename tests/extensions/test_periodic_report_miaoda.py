@@ -17,6 +17,7 @@ from loopx.capabilities.periodic_report import (
 from loopx.cli import main
 from loopx.extensions.lark.miaoda_report import (
     DELIVERY_INTENT_SCHEMA,
+    LarkCliMiaodaProvider,
     MIAODA_DELIVERY_REQUEST_SCHEMA,
     deliver_periodic_report_to_miaoda,
 )
@@ -132,6 +133,59 @@ def _extension_activation() -> dict[str, Any]:
         "doctor_verified": True,
         "required_permissions": ["lark.miaoda_html.publish"],
     }
+
+
+def _sent_miaoda_delivery_receipt_inputs() -> tuple[
+    dict[str, Any], dict[str, Any], dict[str, Any]
+]:
+    request = _delivery_request()
+    generation = request["generation_bundle"]["generation_receipt"]
+    binding = request["profile"]["sink_bindings"][0]
+    readiness = build_periodic_report_extension_readiness(
+        generation_receipt=generation,
+        sink_bindings=[binding],
+        extension_receipts=[
+            {
+                "extension_id": "loopx-lark",
+                "extension_version": "1.5.0",
+                "protocol": "periodic_report_sink_v0",
+                "status": "ready",
+                "readback_verified": True,
+                "capabilities": [binding["capability"]],
+            }
+        ],
+    )
+    sink_result = _registry(
+        publish=lambda _artifact, app_id, _key: {
+            "app_id": app_id,
+            "online_url": "https://example.test/app/app_example123",
+            "release_id": "release_example123",
+        },
+        readback=lambda app_id, release_id: {
+            "app_id": app_id,
+            "online_url": "https://example.test/app/app_example123",
+            "is_published": True,
+            "release_readback": {
+                "release_id": release_id,
+                "status": "finished",
+                "verified": True,
+            },
+            "access_scope_readback": {
+                "status": "unsupported_by_app_type",
+                "retryable": False,
+                "reason": "creative_html_scope_readback_unavailable",
+            },
+        },
+    ).deliver(
+        "miaoda_html_delivery",
+        request["generation_bundle"]["artifacts"][0],
+        {
+            "execute": True,
+            "idempotency_key": "weak-receipt-test",
+            "app_id": "app_example123",
+        },
+    )
+    return generation, readiness, sink_result
 
 
 def test_miaoda_preview_runs_size_preflight_without_external_effects() -> None:
@@ -451,6 +505,50 @@ def test_hosted_intent_executes_lark_cli_publish_and_exact_readback() -> None:
     ]
 
 
+def test_miaoda_access_scope_protocol_failure_is_retryable_evidence() -> None:
+    def runner(
+        args: Any,
+        _cwd: Any = None,
+        _timeout: Any = None,
+    ) -> dict[str, Any]:
+        command = [str(item) for item in args]
+        if "+access-scope-get" in command:
+            return {"returncode": 1, "stderr": "provider returned no JSON"}
+        if "+release-get" in command:
+            payload = {
+                "ok": True,
+                "data": {"release_id": "release_example", "status": "finished"},
+            }
+        else:
+            payload = {
+                "ok": True,
+                "data": {
+                    "has_more": False,
+                    "items": [
+                        {
+                            "app_id": "app_example123",
+                            "app_type": "html",
+                            "is_published": True,
+                            "online_url": "https://example.test/page/example123",
+                        }
+                    ],
+                },
+            }
+        return {"returncode": 0, "stdout": json.dumps(payload)}
+
+    observed = LarkCliMiaodaProvider(
+        cli_bin="lark-cli",
+        runner=runner,
+    ).readback("app_example123", "release_example")
+
+    assert observed["release_readback"]["verified"] is True
+    assert observed["access_scope_readback"] == {
+        "status": "unavailable",
+        "retryable": True,
+        "reason": "provider_query_failed",
+    }
+
+
 @pytest.mark.parametrize(
     "missing_field",
     ["release_readback", "access_scope_readback", "content_readback"],
@@ -458,58 +556,61 @@ def test_hosted_intent_executes_lark_cli_publish_and_exact_readback() -> None:
 def test_delivery_receipt_rejects_weak_miaoda_success(
     missing_field: str,
 ) -> None:
-    request = _delivery_request()
-    generation = request["generation_bundle"]["generation_receipt"]
-    binding = request["profile"]["sink_bindings"][0]
-    readiness = build_periodic_report_extension_readiness(
-        generation_receipt=generation,
-        sink_bindings=[binding],
-        extension_receipts=[
-            {
-                "extension_id": "loopx-lark",
-                "extension_version": "1.5.0",
-                "protocol": "periodic_report_sink_v0",
-                "status": "ready",
-                "readback_verified": True,
-                "capabilities": [binding["capability"]],
-            }
-        ],
-    )
-    sink_result = deepcopy(
-        _registry(
-            publish=lambda _artifact, app_id, _key: {
-                "app_id": app_id,
-                "online_url": "https://example.test/app/app_example123",
-                "release_id": "release_example123",
-            },
-            readback=lambda app_id, release_id: {
-                "app_id": app_id,
-                "online_url": "https://example.test/app/app_example123",
-                "is_published": True,
-                "release_readback": {
-                    "release_id": release_id,
-                    "status": "finished",
-                    "verified": True,
-                },
-                "access_scope_readback": {
-                    "status": "unsupported_by_app_type",
-                    "retryable": False,
-                    "reason": "creative_html_scope_readback_unavailable",
-                },
-            },
-        ).deliver(
-            "miaoda_html_delivery",
-            request["generation_bundle"]["artifacts"][0],
-            {
-                "execute": True,
-                "idempotency_key": "weak-receipt-test",
-                "app_id": "app_example123",
-            },
-        )
-    )
+    generation, readiness, canonical_result = _sent_miaoda_delivery_receipt_inputs()
+    sink_result = deepcopy(canonical_result)
     sink_result.pop(missing_field)
 
     with pytest.raises(ValueError, match="missing structured readback"):
+        build_periodic_report_delivery_receipt(
+            generation_receipt=generation,
+            readiness_receipt=readiness,
+            sink_results=[sink_result],
+        )
+
+
+@pytest.mark.parametrize(
+    ("invalid_evidence", "error"),
+    [
+        ("release_id", "requires exact release readback"),
+        ("release_status", "requires exact release readback"),
+        ("release_verified", "verified does not match exact release readback"),
+        ("access_scope", "scope is required"),
+        ("content_proof", "content_readback.status is invalid"),
+    ],
+)
+def test_delivery_receipt_rejects_semantically_weak_miaoda_success(
+    invalid_evidence: str,
+    error: str,
+) -> None:
+    generation, readiness, canonical_result = _sent_miaoda_delivery_receipt_inputs()
+    sink_result = deepcopy(canonical_result)
+    if invalid_evidence == "release_id":
+        sink_result["release_readback"] = {
+            "release_id": "release_other",
+            "status": "finished",
+            "verified": False,
+        }
+    elif invalid_evidence == "release_status":
+        sink_result["release_readback"] = {
+            "release_id": sink_result["release_id"],
+            "status": "processing",
+            "verified": False,
+        }
+    elif invalid_evidence == "release_verified":
+        sink_result["release_readback"]["verified"] = False
+    elif invalid_evidence == "access_scope":
+        sink_result["access_scope_readback"] = {
+            "status": "verified",
+            "retryable": False,
+            "require_login": True,
+        }
+    else:
+        sink_result["content_readback"] = {
+            "status": "verified",
+            "digest_verified": True,
+        }
+
+    with pytest.raises(ValueError, match=error):
         build_periodic_report_delivery_receipt(
             generation_receipt=generation,
             readiness_receipt=readiness,

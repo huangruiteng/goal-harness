@@ -298,7 +298,9 @@ def periodic_report_miaoda_html_sink_adapter(
             observed.get("online_url") or observed.get("url") or ""
         ).strip()
         release_readback = _normalize_periodic_report_release_readback(
-            observed.get("release_readback"), "Miaoda release_readback"
+            observed.get("release_readback"),
+            "Miaoda release_readback",
+            expected_release_id=release_id,
         )
         access_scope_readback = _normalize_periodic_report_access_scope_readback(
             observed.get("access_scope_readback"), "Miaoda access_scope_readback"
