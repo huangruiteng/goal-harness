@@ -232,7 +232,13 @@ def main() -> None:
     require("handle_registry_admin_command" in init_source, "__init__ did not export registry admin handler")
 
     for command, options in {
-        "configure-goal": ("--quota-compute", "--registered-agent", "--execute"),
+        "configure-goal": (
+            "--quota-compute",
+            "--registered-agent",
+            "--add-registered-agent",
+            "--remove-registered-agent",
+            "--execute",
+        ),
         "register-agent": ("--agent-id", "--require-new", "--execute"),
         "archive-runtime": ("--archive-root", "--allow-registered", "--execute"),
         "retire-global-goal": ("--goal-id", "--execute"),

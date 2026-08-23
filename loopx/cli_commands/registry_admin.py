@@ -629,6 +629,8 @@ def handle_registry_admin_command(
                 explore_graph_enabled=args.explore_graph_enabled,
                 lark_kanban_heartbeat_sync=args.lark_kanban_heartbeat_sync,
                 registered_agents=args.registered_agents,
+                add_registered_agents=args.add_registered_agents,
+                remove_registered_agents=args.remove_registered_agents,
                 clear_registered_agents=bool(args.clear_registered_agents),
                 peer_task_coordinator=args.peer_task_coordinator,
                 clear_peer_task_coordinator=bool(

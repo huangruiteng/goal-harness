@@ -551,6 +551,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             "heartbeat_prompt_migration": payload.get("heartbeat_prompt_migration"),
             "supervisor_prompt": payload.get("supervisor_prompt"),
             "global_sync": payload.get("global_sync"),
+            "active_lease_owner_warnings": payload.get("active_lease_owner_warnings") or [],
         }
 
     def _handle_configure_goal_dry_run(self) -> None:

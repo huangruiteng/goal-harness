@@ -436,7 +436,10 @@ def configure_goal(
     clear_explore_harness_profile: bool = False,
     explore_graph_enabled: bool | None = None,
     registered_agents: list[str] | None = None,
+    add_registered_agents: list[str] | None = None,
+    remove_registered_agents: list[str] | None = None,
     clear_registered_agents: bool = False,
+    runtime_root_override: str | None = None,
     peer_task_coordinator: str | None = None,
     clear_peer_task_coordinator: bool = False,
     agent_profiles: list[dict[str, Any]] | None = None,
@@ -486,6 +489,16 @@ def configure_goal(
         )
     if clear_registered_agents and registered_agents:
         raise ValueError("--clear-registered-agents cannot be combined with --registered-agent")
+    if clear_registered_agents and (add_registered_agents or remove_registered_agents):
+        raise ValueError(
+            "--clear-registered-agents cannot be combined with "
+            "--add-registered-agent or --remove-registered-agent"
+        )
+    if registered_agents is not None and (add_registered_agents or remove_registered_agents):
+        raise ValueError(
+            "--registered-agent cannot be combined with "
+            "--add-registered-agent or --remove-registered-agent"
+        )
     if clear_peer_task_coordinator and peer_task_coordinator:
         raise ValueError(
             "--clear-peer-task-coordinator cannot be combined with "
@@ -501,7 +514,12 @@ def configure_goal(
         ).strip()
         if not automation_prompt_migration_ack:
             raise ValueError("--ack-automation-prompt-migration requires a migration id")
-        if registered_agents is not None or clear_registered_agents:
+        if (
+            registered_agents is not None
+            or add_registered_agents
+            or remove_registered_agents
+            or clear_registered_agents
+        ):
             raise ValueError(
                 "--ack-automation-prompt-migration cannot change registered agents; "
                 "complete the runtime cutover first, then update the peer set separately"
@@ -587,6 +605,8 @@ def configure_goal(
         if allowed_domains:
             raise ValueError("--multi-subagent-feature off cannot be combined with --allowed-domain")
     registered_agents = _clean_registered_agents(registered_agents)
+    add_registered_agents = _clean_registered_agents(add_registered_agents)
+    remove_registered_agents = _clean_registered_agents(remove_registered_agents)
     if peer_task_coordinator is not None:
         peer_task_coordinator = normalize_todo_claimed_by(peer_task_coordinator)
         if not peer_task_coordinator:
@@ -632,12 +652,30 @@ def configure_goal(
         if isinstance(goal.get("coordination"), dict)
         else {}
     )
-    effective_registered_agents = (
-        []
-        if clear_registered_agents
-        else registered_agents
-        if registered_agents is not None
-        else normalize_registered_agents(existing_coordination.get("registered_agents"))
+    existing_registered_agents = normalize_registered_agents(
+        existing_coordination.get("registered_agents")
+    )
+    if clear_registered_agents:
+        effective_registered_agents = []
+    elif registered_agents is not None:
+        effective_registered_agents = list(registered_agents)
+    else:
+        effective_registered_agents = list(existing_registered_agents)
+        for agent in add_registered_agents or []:
+            if agent not in effective_registered_agents:
+                effective_registered_agents.append(agent)
+        if remove_registered_agents:
+            drop = set(remove_registered_agents)
+            effective_registered_agents = [
+                agent
+                for agent in effective_registered_agents
+                if agent not in drop
+            ]
+    roster_write = bool(
+        clear_registered_agents
+        or registered_agents is not None
+        or add_registered_agents
+        or remove_registered_agents
     )
     if (
         normalized_lark_inbox_agent
@@ -768,6 +806,8 @@ def configure_goal(
     elif execute and legacy_hierarchy_before and not migration_completed_before and (
         agent_model is not None
         or registered_agents is not None
+        or add_registered_agents
+        or remove_registered_agents
         or peer_task_coordinator is not None
         or clear_peer_task_coordinator
         or clear_registered_agents
@@ -978,6 +1018,8 @@ def configure_goal(
     if (
         clear_registered_agents
         or registered_agents is not None
+        or add_registered_agents
+        or remove_registered_agents
         or peer_task_coordinator is not None
         or clear_peer_task_coordinator
         or normalized_agent_profiles
@@ -1006,8 +1048,8 @@ def configure_goal(
             coordination.pop("supervisor", None)
             coordination.pop("todo_lifecycle_authority", None)
             coordination.pop("peer_task_coordination", None)
-        elif registered_agents is not None:
-            coordination["registered_agents"] = registered_agents
+        elif roster_write:
+            coordination["registered_agents"] = effective_registered_agents
             current_peer_task_coordination = (
                 coordination.get("peer_task_coordination")
                 if isinstance(coordination.get("peer_task_coordination"), dict)
@@ -1018,7 +1060,7 @@ def configure_goal(
             )
             if (
                 current_peer_coordinator
-                and current_peer_coordinator not in registered_agents
+                and current_peer_coordinator not in effective_registered_agents
             ):
                 coordination.pop("peer_task_coordination", None)
             existing_profiles = (
@@ -1029,7 +1071,7 @@ def configure_goal(
             retained_profiles = {
                 agent: profile
                 for agent, profile in existing_profiles.items()
-                if agent in registered_agents
+                if agent in effective_registered_agents
             }
             if retained_profiles:
                 coordination["agent_profiles"] = retained_profiles
@@ -1044,9 +1086,9 @@ def configure_goal(
                 {
                     agent: mode
                     for agent, mode in raw_work_modes.items()
-                    if agent in registered_agents
+                    if agent in effective_registered_agents
                 },
-                registered_agents=registered_agents,
+                registered_agents=effective_registered_agents,
             )
             if retained_work_modes:
                 coordination["agent_work_modes"] = retained_work_modes
@@ -1057,13 +1099,13 @@ def configure_goal(
                 for entry in coordination.get("todo_lifecycle_authority") or []
                 if isinstance(entry, Mapping)
                 and normalize_todo_claimed_by(entry.get("agent_id"))
-                in registered_agents
+                in effective_registered_agents
             ]
             if retained_authority:
                 coordination["todo_lifecycle_authority"] = (
                     normalize_todo_lifecycle_authority(
                         retained_authority,
-                        registered_agents=registered_agents,
+                        registered_agents=effective_registered_agents,
                     )
                 )
             else:
@@ -1184,6 +1226,21 @@ def configure_goal(
 
     after = _settings_summary(goal)
     changed_fields = _changed_fields(before, after)
+    dropped_registered_agents = [
+        agent
+        for agent in existing_registered_agents
+        if agent not in set(after.get("registered_agents") or [])
+    ]
+    from .control_plane.work_items.task_lease import (
+        active_lease_owner_roster_warnings,
+    )
+
+    active_lease_owner_warnings = active_lease_owner_roster_warnings(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        dropped_owners=dropped_registered_agents,
+        runtime_root_override=runtime_root_override,
+    )
     dry_run = not execute
     model_changed = bool(
         before.get("legacy_hierarchy_present")
@@ -1233,6 +1290,7 @@ def configure_goal(
         "before": before,
         "after": after,
         "written": bool(execute and changed_fields),
+        "active_lease_owner_warnings": active_lease_owner_warnings,
         "automation_prompt_migration": {
             "migration_id": automation_prompt_migration_ack,
             "status": (
@@ -1293,6 +1351,12 @@ def render_configure_goal_markdown(payload: dict[str, Any]) -> str:
         return "\n".join(lines)
     fields = payload.get("changed_fields") or []
     lines.append(f"- changed_fields: `{', '.join(fields) if fields else 'none'}`")
+    for warning in payload.get("active_lease_owner_warnings") or []:
+        if not isinstance(warning, dict):
+            continue
+        message = warning.get("message") or warning.get("code")
+        if message:
+            lines.append(f"- warning: {message}")
     global_sync = payload.get("global_sync")
     if isinstance(global_sync, dict):
         selected_target = (

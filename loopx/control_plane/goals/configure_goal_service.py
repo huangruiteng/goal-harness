@@ -239,6 +239,7 @@ def configure_goal_with_global_sync(
         registry_path=registry_path,
         goal_id=goal_id,
         execute=False,
+        runtime_root_override=runtime_root_override,
         **configure_options,
     )
     changed = bool(preview.get("changed"))
@@ -264,6 +265,7 @@ def configure_goal_with_global_sync(
             registry_path=registry_path,
             goal_id=goal_id,
             execute=True,
+            runtime_root_override=runtime_root_override,
             **configure_options,
         )
         applied["global_sync"] = preview["global_sync"]
@@ -300,6 +302,7 @@ def configure_goal_with_global_sync(
         registry_path=registry_path,
         goal_id=goal_id,
         execute=True,
+        runtime_root_override=runtime_root_override,
         **configure_options,
     )
     if not applied.get("written"):

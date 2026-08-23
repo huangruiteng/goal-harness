@@ -154,8 +154,33 @@ def register_configure_goal_command(subparsers: argparse._SubParsersAction) -> N
         action="append",
         default=None,
         help=(
-            "Registered public-safe agent id allowed to claim todos and receive scoped "
-            "heartbeat prompts. Repeatable; comma-separated values are also accepted."
+            "Replace coordination.registered_agents with this public-safe agent id "
+            "set. Repeatable; comma-separated values are also accepted. Prefer "
+            "--add-registered-agent / --remove-registered-agent to change the roster "
+            "without a full replace. Dropping an owner who still holds an active "
+            "task lease emits a warning; the lease keeps protecting until release "
+            "or expiry."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--add-registered-agent",
+        dest="add_registered_agents",
+        action="append",
+        default=None,
+        help=(
+            "Add one registered public-safe agent id without replacing the current "
+            "roster. Repeatable; comma-separated values are also accepted."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--remove-registered-agent",
+        dest="remove_registered_agents",
+        action="append",
+        default=None,
+        help=(
+            "Remove one registered agent id without replacing the current roster. "
+            "Repeatable; comma-separated values are also accepted. Active task "
+            "leases held by a removed owner stay in force until release or expiry."
         ),
     )
     configure_goal_parser.add_argument(
