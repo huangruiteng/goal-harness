@@ -235,6 +235,24 @@ receipt = build_benchmark_plan_fidelity_receipt(
 assert receipt["qualified"] is True
 ```
 
+Adapters that do not import the Python API can invoke the same shipped boundary:
+
+```bash
+loopx benchmark plan-fidelity \
+  --action-kind implementation \
+  --action-kind independent_validation \
+  --role-action-kind technical_work=implementation \
+  --role-action-kind independent_validation=independent_validation \
+  --required-role-count technical_work=1 \
+  --required-role-count independent_validation=1 \
+  --require-qualified \
+  --format json
+```
+
+This command is the provider-neutral integration seam for treatment adapters. It
+returns non-zero with a compact receipt when the plan is unqualified or its typed
+contract is invalid, so a runner can stop before recording a qualified closeout.
+
 Matching is exact. A token such as `implementation_detail` does not inherit the
 `implementation` role unless the provider declares it. One token cannot belong to
 two roles, required roles must have an explicit mapping, and invalid contracts fail

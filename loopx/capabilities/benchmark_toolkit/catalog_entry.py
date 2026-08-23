@@ -101,6 +101,26 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "command": (
+                "loopx benchmark plan-fidelity "
+                "--action-kind implementation "
+                "--action-kind independent_validation "
+                "--role-action-kind technical_work=implementation "
+                "--role-action-kind independent_validation=independent_validation "
+                "--required-role-count technical_work=1 "
+                "--required-role-count independent_validation=1 "
+                "--require-qualified --format json"
+            ),
+            "purpose": (
+                "Reduce a provider's exact public-safe Todo action kinds to stable "
+                "treatment-plan roles before closeout."
+            ),
+            "write_boundary": (
+                "read-only typed plan facts; emits semantic counts and blockers, "
+                "never Todo text or raw action-kind values"
+            ),
+        },
+        {
+            "command": (
                 "loopx benchmark experiment-board-upsert --goal-id <goal-id> "
                 "--row-json <compact-row.json> --execute --format json"
             ),

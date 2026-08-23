@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +11,8 @@ from loopx.capabilities.benchmark_toolkit import (
     BenchmarkPlanRole,
     build_benchmark_plan_fidelity_receipt,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _contract() -> dict[BenchmarkPlanRole, list[str]]:
@@ -190,3 +194,98 @@ def test_invalid_plan_contract_inputs_fail_closed(
             role_action_kinds=role_action_kinds,  # type: ignore[arg-type]
             required_role_counts=required_role_counts,  # type: ignore[arg-type]
         )
+
+
+def test_cli_qualifies_real_provider_tokens_without_echoing_them() -> None:
+    private_like_token = "provider-private-work"
+    completed = subprocess.run(
+        [
+            str(REPO_ROOT / "scripts/loopx"),
+            "benchmark",
+            "plan-fidelity",
+            "--action-kind",
+            private_like_token,
+            "--action-kind",
+            "independent_validation",
+            "--role-action-kind",
+            f"technical_work={private_like_token}",
+            "--role-action-kind",
+            "independent_validation=independent_validation",
+            "--required-role-count",
+            "technical_work=1",
+            "--required-role-count",
+            "independent_validation=1",
+            "--require-qualified",
+            "--format",
+            "json",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    receipt = json.loads(completed.stdout)
+    assert receipt["qualified"] is True
+    assert receipt["observed_role_counts"]["technical_work"] == 1
+    assert receipt["observed_role_counts"]["independent_validation"] == 1
+    assert private_like_token not in completed.stdout
+
+
+def test_cli_fails_closed_for_unmapped_near_match() -> None:
+    completed = subprocess.run(
+        [
+            str(REPO_ROOT / "scripts/loopx"),
+            "benchmark",
+            "plan-fidelity",
+            "--action-kind",
+            "implementation_detail",
+            "--role-action-kind",
+            "technical_work=implementation",
+            "--required-role-count",
+            "technical_work=1",
+            "--require-qualified",
+            "--format",
+            "json",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    receipt = json.loads(completed.stdout)
+    assert receipt["classification"] == "required_plan_role_missing"
+    assert receipt["blockers"] == ["required_role_missing:technical_work"]
+    assert "implementation_detail" not in completed.stdout
+
+
+def test_cli_reduces_invalid_mapping_to_public_safe_receipt() -> None:
+    invalid_assignment = "provider-private-assignment"
+    completed = subprocess.run(
+        [
+            str(REPO_ROOT / "scripts/loopx"),
+            "benchmark",
+            "plan-fidelity",
+            "--action-kind",
+            "implementation",
+            "--role-action-kind",
+            invalid_assignment,
+            "--required-role-count",
+            "technical_work=1",
+            "--require-qualified",
+            "--format",
+            "json",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    receipt = json.loads(completed.stdout)
+    assert receipt["classification"] == "plan_fidelity_input_invalid"
+    assert receipt["blockers"] == ["plan_fidelity_input_invalid"]
+    assert invalid_assignment not in completed.stdout

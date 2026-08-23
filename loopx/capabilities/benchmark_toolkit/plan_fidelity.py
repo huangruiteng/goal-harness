@@ -113,7 +113,9 @@ def build_benchmark_plan_fidelity_receipt(
         classified_count += 1
 
     missing_roles = [
-        role for role, minimum in required.items() if counts[role] < minimum
+        role
+        for role in BenchmarkPlanRole
+        if role in required and counts[role] < required[role]
     ]
     qualified = not missing_roles
     return {
