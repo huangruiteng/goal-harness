@@ -40,6 +40,7 @@ def _trigger_request(*candidates: dict[str, object]) -> dict[str, object]:
         },
         "trigger_policy": {
             "enabled_kinds": [
+                "bounded_segment_milestone",
                 "cadence_due",
                 "manual",
                 "material_blocker",
@@ -240,6 +241,119 @@ def test_vision_requires_validated_closure_and_continuation() -> None:
     payload = build_periodic_report_trigger_decision(closed)
     assert payload["eligible"] is True
     assert payload["report_kind"] == "milestone_update"
+
+
+@pytest.mark.parametrize("transition", ["segment_completed", "replan_entered"])
+def test_bounded_segment_with_remaining_todos_triggers_milestone_update(
+    transition: str,
+) -> None:
+    request = _trigger_request(
+        _candidate(
+            "cadence_due",
+            source_ref="scheduler:weekly-window/2026-w29",
+            evidence_digest="sha256:weekly-due",
+            facts={"due": True},
+        ),
+        _candidate(
+            "bounded_segment_milestone",
+            source_ref="segment:2026-w29",
+            evidence_digest=f"sha256:{transition}",
+            facts={
+                "segment_ref": "week-2026-w29",
+                "transition": transition,
+                "delivered_count": 4,
+                "remaining_todo_count": 12,
+                "durable_writeback": True,
+            },
+        ),
+    )
+
+    payload = build_periodic_report_trigger_decision(request)
+    run = build_periodic_report_run(_run_request(payload))
+
+    assert payload["eligible"] is True
+    assert payload["selected_trigger_kind"] == "bounded_segment_milestone"
+    assert payload["report_kind"] == "milestone_update"
+    assert len(payload["coalesced_trigger_ids"]) == 2
+    assert run["trigger_receipt"]["report_kind"] == "milestone_update"
+
+
+@pytest.mark.parametrize(
+    ("transition", "durable_writeback", "reason"),
+    [
+        ("vision_checkpoint", True, "segment_checkpoint_only"),
+        ("replan_entered", False, "segment_writeback_pending"),
+    ],
+)
+def test_bounded_segment_requires_material_transition_and_writeback(
+    transition: str,
+    durable_writeback: bool,
+    reason: str,
+) -> None:
+    payload = build_periodic_report_trigger_decision(
+        _trigger_request(
+            _candidate(
+                "bounded_segment_milestone",
+                source_ref="segment:2026-w29",
+                evidence_digest=f"sha256:{transition}",
+                facts={
+                    "segment_ref": "week-2026-w29",
+                    "transition": transition,
+                    "delivered_count": 4,
+                    "remaining_todo_count": 12,
+                    "durable_writeback": durable_writeback,
+                },
+            )
+        )
+    )
+
+    assert payload["eligible"] is False
+    assert payload["suppressed_triggers"][0]["reason"] == reason
+
+
+@pytest.mark.parametrize(
+    "facts, error",
+    [
+        (
+            {
+                "transition": "segment_completed",
+                "durable_writeback": True,
+            },
+            "segment_ref is required",
+        ),
+        (
+            {
+                "segment_ref": "week-2026-w29",
+                "transition": "unknown_transition",
+                "durable_writeback": True,
+            },
+            "transition is invalid",
+        ),
+        (
+            {
+                "segment_ref": "week-2026-w29",
+                "transition": "segment_completed",
+                "remaining_todo_count": -1,
+                "durable_writeback": True,
+            },
+            "remaining_todo_count must be between",
+        ),
+    ],
+)
+def test_bounded_segment_facts_are_strictly_validated(
+    facts: dict[str, object], error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        build_periodic_report_trigger_decision(
+            _trigger_request(
+                _candidate(
+                    "bounded_segment_milestone",
+                    source_ref="segment:2026-w29",
+                    evidence_digest="sha256:invalid-segment",
+                    facts=facts,
+                )
+            )
+        )
 
 
 def test_urgent_blocker_bypasses_cooldown_and_coalesces_material_decision() -> None:

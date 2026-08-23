@@ -116,6 +116,9 @@ def test_weekly_preset_is_portable_domain_neutral_and_aliasable() -> None:
     assert {
         item["adapter_id"] for item in activation["profile"]["renderer_bindings"]
     } == {"markdown_v0", "html_artifact_v0"}
+    assert "bounded_segment_milestone" in activation["profile"]["trigger_policy"][
+        "enabled_kinds"
+    ]
     serialized = json.dumps(activation, ensure_ascii=False).lower()
     assert "issue_fix" not in serialized and "pull_request" not in serialized
 
