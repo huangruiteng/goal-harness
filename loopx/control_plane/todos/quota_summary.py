@@ -82,6 +82,7 @@ QUOTA_PAYLOAD_ITEM_FIELDS = (
     "excluded_agents",
     "global_gate",
     "unblocks_todo_id",
+    "depends_on_todo_ids",
     "resume_when",
     "resume_condition",
     "resume_ready",

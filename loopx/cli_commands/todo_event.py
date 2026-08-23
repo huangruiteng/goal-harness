@@ -77,6 +77,7 @@ def append_todo_rollout_event(
             "completion_recovery": payload.get("completion_recovery"),
             "mutation_authority": payload.get("mutation_authority"),
             "replan_transition": payload.get("replan_transition"),
+            "dependency_resumes": payload.get("dependency_resumes"),
             "settlement_effect_id": (
                 payload.get("settlement_identity", {}).get("effect_id")
                 if isinstance(payload.get("settlement_identity"), dict)
@@ -96,6 +97,47 @@ def append_todo_rollout_event(
             else None
         ),
     )
+    resumed_dependents = [
+        item
+        for item in (payload.get("dependency_resumes") or [])
+        if isinstance(item, dict) and item.get("state") == "resumed"
+    ]
+    primary_event = payload.get("rollout_event")
+    resume_events: list[dict[str, object]] = []
+    for resume in resumed_dependents:
+        target_todo_id = str(resume.get("target_todo_id") or "").strip() or None
+        append_cli_rollout_event(
+            payload,
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root_arg,
+            event_kind="todo_dependency_resume",
+            agent_id=args.agent_id or args.claimed_by,
+            todo_id=target_todo_id,
+            summary=(
+                "todo dependency resume opened "
+                f"{target_todo_id or 'dependent todo'} after "
+                f"{payload.get('todo_id') or args.todo_id}"
+            ),
+            details={
+                "command": "todo",
+                "todo_command": args.todo_command,
+                "schema_version": resume.get("schema_version"),
+                "source_todo_id": resume.get("source_todo_id"),
+                "target_todo_id": resume.get("target_todo_id"),
+                "target_role": resume.get("target_role"),
+                "previous_status": resume.get("previous_status"),
+                "status": resume.get("status"),
+                "state": resume.get("state"),
+                "changed": bool(resume.get("changed")),
+            },
+        )
+        resume_event = payload.get("rollout_event")
+        if isinstance(resume_event, dict):
+            resume_events.append(resume_event)
+    if primary_event is not None:
+        payload["rollout_event"] = primary_event
+    if resume_events:
+        payload["dependency_resume_events"] = resume_events
     capability_gap_status = str(
         getattr(args, "capability_gap_status", None) or ""
     ).strip()

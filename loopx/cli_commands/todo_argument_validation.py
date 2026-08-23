@@ -45,6 +45,7 @@ TODO_OPTION_FIELDS = (
     ("--global-gate", "global_gate"),
     ("--clear-global-gate", "clear_global_gate"),
     ("--unblocks-todo-id", "unblocks_todo_id"),
+    ("--depends-on-todo-id", "depends_on_todo_ids"),
     ("--successor-todo-id", "successor_todo_ids"),
     ("--resume-when", "resume_when"),
     ("--validation-command", "validation_command"),
@@ -85,7 +86,8 @@ _TODO_UPDATE_MUTABLE_FIELDS = (
     "explore_result_node_refs", "clear_explore_result_node_refs", "decision_scope",
     "required_decision_scopes", "claimed_by", "bound_agent", "goal_bound",
     "blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents",
-    "global_gate", "clear_global_gate", "unblocks_todo_id", "successor_todo_ids",
+    "global_gate", "clear_global_gate", "unblocks_todo_id", "depends_on_todo_ids",
+    "successor_todo_ids",
     "resume_when", "clear_resume_when", "no_follow_up", "monitor_target_key",
     "cadence", "next_due_at", "expires_at", "watch_only", "clear_claim",
 )
@@ -145,6 +147,17 @@ def register_todo_linkage_arguments(
             "For todo add/update, link this todo to the blocked todo it unblocks, "
             "for example todo_ab12cd34ef56. Completing an exactly linked user_gate "
             "also consumes the target required decision scopes covered by that gate."
+        ),
+    )
+    todo_parser.add_argument(
+        "--depends-on-todo-id",
+        dest="depends_on_todo_ids",
+        action="append",
+        help=(
+            "For todo add/update, declare a fan-in dependency this todo waits on. "
+            "Repeat for multiple prerequisites. Completing the last unfinished "
+            "dependency resumes a blocked or deferred waiter unless it is an "
+            "explicit blocker."
         ),
     )
     todo_parser.add_argument(
@@ -350,7 +363,7 @@ def validate_todo_complete_options(args: argparse.Namespace) -> None:
         )
     if args.completion_identity_key and not args.no_follow_up:
         raise ValueError("--completion-identity-key is only valid with --no-follow-up")
-    if any(getattr(args, field) for field in ("task_repository", "bound_agent", "goal_bound", "blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents", "global_gate", "clear_global_gate", "unblocks_todo_id", "resume_when")):
+    if any(getattr(args, field) for field in ("task_repository", "bound_agent", "goal_bound", "blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents", "global_gate", "clear_global_gate", "unblocks_todo_id", "depends_on_todo_ids", "resume_when")):
         raise ValueError("todo complete does not update current todo routing metadata; use todo update first")
     if any(getattr(args, field) for field in ("monitor_target_key", "cadence", "next_due_at", "expires_at")):
         raise ValueError("todo complete does not update target or monitor schedule metadata; use todo update before completion")
@@ -393,7 +406,7 @@ def validate_todo_supersede_options(args: argparse.Namespace) -> None:
     if args.continuation_policy:
         raise ValueError("todo supersede does not update --continuation-policy; use todo update first")
     validate_successor_routing_options(args)
-    if any(getattr(args, field) for field in ("blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents", "global_gate", "clear_global_gate", "unblocks_todo_id", "resume_when")):
+    if any(getattr(args, field) for field in ("blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents", "global_gate", "clear_global_gate", "unblocks_todo_id", "depends_on_todo_ids", "resume_when")):
         raise ValueError("todo supersede does not update current todo routing metadata; use todo update first")
     if args.successor_todo_ids:
         raise ValueError("todo supersede does not support --successor-todo-id; use --next-agent-todo or update the source todo before supersede")

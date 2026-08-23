@@ -1079,14 +1079,14 @@ _TODO_METADATA_FIELD_SCHEMA = (
             "todo_<letters-digits-underscore-hyphen>"
         ),
     ),
-    _TodoMetadataField(
-        "successor_todo_ids",
-        normalize_todo_id_list,
-        encoder=_metadata_csv,
-        invalid_message=(
-            "successor_todo_ids must contain public "
-            "todo_<letters-digits-underscore-hyphen> tokens"
-        ),
+    *(
+        _TodoMetadataField(
+            key, normalize_todo_id_list, encoder=_metadata_csv,
+            invalid_message=(
+                f"{key} must contain public todo_<letters-digits-underscore-hyphen> tokens"
+            ),
+        )
+        for key in ("depends_on_todo_ids", "successor_todo_ids")
     ),
     _TodoMetadataField(
         "completion_continuation",
@@ -1270,7 +1270,7 @@ def format_todo_metadata_line(
     blocks_agent: str | None = None,
     excluded_agents: Any = None,
     global_gate: bool | None = None,
-    unblocks_todo_id: str | None = None,
+    unblocks_todo_id: str | None = None, depends_on_todo_ids: Any = None,
     successor_todo_ids: Any = None,
     completion_continuation: str | None = None,
     completion_recovery: str | None = None,
@@ -1432,7 +1432,7 @@ def metadata_line_for_todo_block(
                 metadata[key] = normalized
             else:
                 metadata.pop(key, None)
-        elif key == "successor_todo_ids":
+        elif key in {"successor_todo_ids", "depends_on_todo_ids"}:
             normalized = normalize_todo_id_list(value)
             if normalized:
                 metadata[key] = normalized

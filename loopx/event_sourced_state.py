@@ -720,6 +720,9 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
     unblocks_todo_id = normalize_todo_id(payload.get("unblocks_todo_id"))
     if unblocks_todo_id:
         todo["unblocks_todo_id"] = unblocks_todo_id
+    depends_on_todo_ids = normalize_todo_id_list(payload.get("depends_on_todo_ids"))
+    if depends_on_todo_ids:
+        todo["depends_on_todo_ids"] = depends_on_todo_ids
     for key in TODO_MONITOR_METADATA_FIELDS:
         if payload.get(key):
             todo[key] = compact_text(payload[key])
@@ -819,6 +822,9 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
             todo["global_gate"] = global_gate
         if update_excluded_agents:
             todo["excluded_agents"] = update_excluded_agents
+        depends_on_todo_ids = normalize_todo_id_list(payload.get("depends_on_todo_ids"))
+        if depends_on_todo_ids:
+            todo["depends_on_todo_ids"] = depends_on_todo_ids
         for key in TODO_MONITOR_METADATA_FIELDS:
             if payload.get(key):
                 todo[key] = compact_text(payload[key])
@@ -971,6 +977,7 @@ def render_todo_markdown(item: dict[str, Any]) -> list[str]:
         excluded_agents=item.get("excluded_agents"),
         global_gate=item.get("global_gate"),
         unblocks_todo_id=item.get("unblocks_todo_id"),
+        depends_on_todo_ids=item.get("depends_on_todo_ids"),
         successor_todo_ids=item.get("successor_todo_ids"),
         completion_continuation=item.get("completion_continuation"),
         completion_recovery=item.get("completion_recovery"),

@@ -189,6 +189,7 @@ def apply_todo_update_to_lines(
     global_gate: bool | None = None,
     clear_global_gate: bool = False,
     unblocks_todo_id: str | None = None,
+    depends_on_todo_ids: list[str] | None = None,
     successor_todo_ids: list[str] | None = None,
     completion_continuation: str | None = None,
     completion_recovery: str | None = None,
@@ -289,6 +290,8 @@ def apply_todo_update_to_lines(
         ("required_decision_scopes", required_decision_scopes),
         ("decision_outcome", decision_outcome),
         ("decision_scope_outcomes", decision_scope_outcomes),
+        ("depends_on_todo_ids", depends_on_todo_ids),
+        ("successor_todo_ids", successor_todo_ids),
     ):
         if value is not None:
             updates[key] = value
@@ -324,8 +327,6 @@ def apply_todo_update_to_lines(
         updates["global_gate"] = global_gate
     if unblocks_todo_id:
         updates["unblocks_todo_id"] = unblocks_todo_id
-    if successor_todo_ids is not None:
-        updates["successor_todo_ids"] = successor_todo_ids
     if clear_resume_when:
         updates["resume_when"] = None
     elif normalized_resume_when:
@@ -410,6 +411,9 @@ def apply_todo_update_to_lines(
         ),
         "unblocks_todo_id": normalize_todo_id(
             effective_metadata.get("unblocks_todo_id")
+        ),
+        "depends_on_todo_ids": normalize_todo_id_list(
+            effective_metadata.get("depends_on_todo_ids")
         ),
         "successor_todo_ids": normalize_todo_id_list(
             effective_metadata.get("successor_todo_ids")

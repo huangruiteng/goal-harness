@@ -107,6 +107,10 @@ from .control_plane.todos.text import (
     inherit_todo_priority,
     normalize_new_todo,
 )
+from .control_plane.todos.dependency_resume import (
+    apply_completed_todo_dependency_resumes,
+    require_depends_on_todo_ids,
+)
 from .control_plane.todos.unblock_resume import (
     apply_completed_user_todo_lifecycle,
     completion_decision_target,
@@ -638,6 +642,7 @@ def add_todo_to_lines(
     excluded_agents: list[str] | None = None,
     global_gate: bool | None = None,
     unblocks_todo_id: str | None = None,
+    depends_on_todo_ids: list[str] | None = None,
     replan_obligation_id: str | None = None,
     resume_when: str | None = None,
     validation_command: str | None = None,
@@ -745,6 +750,7 @@ def add_todo_to_lines(
             excluded_agents=excluded_agents,
             global_gate=global_gate,
             unblocks_todo_id=unblocks_todo_id,
+            depends_on_todo_ids=depends_on_todo_ids,
             replan_obligation_id=replan_obligation_id,
             resume_when=normalized_resume_when,
             validation_command=validation_command,
@@ -833,6 +839,8 @@ def add_todo_to_lines(
             updates["excluded_agents"] = excluded_agents
         if global_gate is not None:
             updates["global_gate"] = global_gate
+        if depends_on_todo_ids is not None:
+            updates["depends_on_todo_ids"] = depends_on_todo_ids
         if replan_obligation_id:
             updates["replan_obligation_id"] = require_replan_successor_rebinding(
                 existing_obligation_id=block.get("replan_obligation_id"),
@@ -899,6 +907,8 @@ def add_todo_to_lines(
         ),
         "global_gate": normalize_todo_global_gate(effective_metadata.get("global_gate")),
         "unblocks_todo_id": normalize_todo_id(effective_metadata.get("unblocks_todo_id")),
+        "depends_on_todo_ids": normalize_todo_id_list(
+            effective_metadata.get("depends_on_todo_ids") or depends_on_todo_ids),
         "replan_obligation_id": normalize_todo_replan_obligation_id(
             effective_metadata.get("replan_obligation_id")
         ),
@@ -942,6 +952,7 @@ def add_goal_todo(
     global_gate: bool = False,
     agent_id: str | None = None,
     unblocks_todo_id: str | None = None,
+    depends_on_todo_ids: list[str] | None = None,
     replan_obligation_id: str | None = None,
     resume_when: str | None = None,
     validation_command: str | None = None,
@@ -1094,6 +1105,7 @@ def add_goal_todo(
         normalized_unblocks_todo_id = normalize_todo_id(unblocks_todo_id) if unblocks_todo_id else None
         if unblocks_todo_id and not normalized_unblocks_todo_id:
             raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
+        normalized_depends_on_todo_ids = require_depends_on_todo_ids(depends_on_todo_ids)
         normalized_resume_when = require_supported_todo_resume_when(resume_when)
         if normalized_status == TODO_STATUS_DEFERRED and not normalized_resume_when:
             raise ValueError("deferred todo add requires --resume-when with a supported condition")
@@ -1144,6 +1156,7 @@ def add_goal_todo(
             excluded_agents=effective_excluded_agents,
             global_gate=True if global_gate else None,
             unblocks_todo_id=normalized_unblocks_todo_id,
+            depends_on_todo_ids=normalized_depends_on_todo_ids or None,
             replan_obligation_id=replan_obligation_id,
             resume_when=normalized_resume_when,
             validation_command=validation_command,
@@ -1196,6 +1209,7 @@ def add_goal_todo(
         "excluded_agents": add_result.get("excluded_agents"),
         "global_gate": add_result.get("global_gate"),
         "unblocks_todo_id": add_result.get("unblocks_todo_id"),
+        "depends_on_todo_ids": add_result.get("depends_on_todo_ids"),
         "replan_obligation_id": add_result.get("replan_obligation_id"),
         "resume_when": add_result.get("resume_when"),
         "target_key": add_result.get("target_key"),
@@ -1266,6 +1280,7 @@ def update_goal_todo(
     global_gate: bool = False, clear_global_gate: bool = False,
     agent_id: str | None = None, authority_reason: str | None = None,
     unblocks_todo_id: str | None = None,
+    depends_on_todo_ids: list[str] | None = None,
     successor_todo_ids: list[str] | None = None,
     resume_when: str | None = None,
     clear_resume_when: bool = False,
@@ -1393,7 +1408,7 @@ def update_goal_todo(
                 required_decision_scopes, blocks_agent, clear_blocks_agent,
                 bound_agent, goal_bound,
                 excluded_agents, clear_excluded_agents, global_gate,
-                clear_global_gate, unblocks_todo_id, successor_todo_ids,
+                clear_global_gate, unblocks_todo_id, depends_on_todo_ids, successor_todo_ids,
                 resume_when, clear_resume_when, no_followup,
             ),
             monitor_metadata=monitor_metadata,
@@ -1532,6 +1547,7 @@ def update_goal_todo(
         normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
         if successor_todo_ids and not normalized_successor_todo_ids:
             raise ValueError("successor_todo_ids must contain public todo_<letters-digits-underscore-hyphen> tokens")
+        normalized_depends_on_todo_ids = require_depends_on_todo_ids(depends_on_todo_ids)
         normalized_resume_when = require_supported_todo_resume_when(resume_when)
         effective_resume_when = (
             None
@@ -1597,6 +1613,7 @@ def update_goal_todo(
             global_gate=True if global_gate else None,
             clear_global_gate=clear_global_gate,
             unblocks_todo_id=normalized_unblocks_todo_id,
+            depends_on_todo_ids=None if depends_on_todo_ids is None else normalized_depends_on_todo_ids,
             successor_todo_ids=normalized_successor_todo_ids if successor_todo_ids is not None else None,
             resume_when=normalized_resume_when,
             clear_resume_when=clear_resume_when,
@@ -1906,6 +1923,10 @@ def complete_goal_todo(
                 apply_update=apply_todo_update_to_lines,
             )
         )
+        dependency_resumes = apply_completed_todo_dependency_resumes(
+            lines, source_todo_id=str(update_result.get("todo_id") or todo_id),
+            updated_at=updated_at, apply_update=apply_todo_update_to_lines,
+        )
         next_unblocks_todo_id = (
             normalize_todo_id(str(update_result.get("todo_id") or todo_id))
             if next_agent_todo
@@ -1991,6 +2012,7 @@ def complete_goal_todo(
             or next_action_changed
             or (unblock_resume or {}).get("changed")
             or (decision_scope_resolution or {}).get("changed")
+            or any(item.get("changed") for item in dependency_resumes)
         )
         new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
         if changed:
@@ -2021,6 +2043,8 @@ def complete_goal_todo(
         result["unblock_resume"] = unblock_resume
     if decision_scope_resolution:
         result["decision_scope_resolution"] = decision_scope_resolution
+    if dependency_resumes:
+        result["dependency_resumes"] = dependency_resumes
     if effective_decision_outcome:
         result["decision_outcome"] = effective_decision_outcome
     result["self_merged"] = effective_self_merged

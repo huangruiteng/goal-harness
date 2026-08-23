@@ -294,6 +294,7 @@ def _append_event_projected_successor(
     blocks_agent: str | None = None,
     excluded_agents: list[str] | None = None,
     unblocks_todo_id: str | None = None,
+    depends_on_todo_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     section = TODO_SECTION_HEADINGS[role]
     summary = fields.get(f"{role}_todos")
@@ -370,6 +371,9 @@ def _append_event_projected_successor(
         payload["excluded_agents"] = normalized_excluded_agents
     if unblocks_todo_id:
         payload["unblocks_todo_id"] = unblocks_todo_id
+    normalized_depends_on_todo_ids = normalize_todo_id_list(depends_on_todo_ids)
+    if normalized_depends_on_todo_ids:
+        payload["depends_on_todo_ids"] = normalized_depends_on_todo_ids
     added_event = make_state_event(
         event_id=_todo_write_event_id(
             goal_id=goal_id,
@@ -428,6 +432,7 @@ def _append_event_projected_successor(
         "blocks_agent": blocks_agent,
         "excluded_agents": normalized_excluded_agents,
         "unblocks_todo_id": unblocks_todo_id,
+        "depends_on_todo_ids": normalized_depends_on_todo_ids,
         "updated_at": updated_at,
         "source": "event_log",
     }

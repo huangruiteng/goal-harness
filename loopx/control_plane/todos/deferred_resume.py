@@ -125,6 +125,7 @@ def _compact_deferred_resume_item(
         "blocks_agent",
         "excluded_agents",
         "unblocks_todo_id",
+        "depends_on_todo_ids",
         "resume_when",
         "resume_condition",
         "resume_ready",

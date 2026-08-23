@@ -428,6 +428,9 @@ def structured_todo_item(
     unblocks_todo_id = normalize_todo_id(item.get("unblocks_todo_id"))
     if unblocks_todo_id:
         normalized["unblocks_todo_id"] = unblocks_todo_id
+    depends_on_todo_ids = normalize_todo_id_list(item.get("depends_on_todo_ids"))
+    if depends_on_todo_ids:
+        normalized["depends_on_todo_ids"] = depends_on_todo_ids
     resume_when = normalize_todo_resume_when(item.get("resume_when"))
     if resume_when:
         normalized["resume_when"] = resume_when
@@ -479,6 +482,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "excluded_agents",
         "global_gate",
         "unblocks_todo_id",
+        "depends_on_todo_ids",
         "resume_when",
         "resume_condition",
         "resume_ready",
