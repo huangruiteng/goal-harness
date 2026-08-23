@@ -3,7 +3,7 @@
 - Status: Accepted, transaction-payoff phase in progress
 - Proposed by: LoopX maintainers
 - Date: 2026-08-15
-- Last revised: 2026-08-22
+- Last revised: 2026-08-23
 - Scope: an incremental, replacement-first migration of the LoopX control-plane
   core from Python to TypeScript without maintaining two semantic
   implementations
@@ -158,6 +158,7 @@ choice is now implemented rather than hypothetical.
 | Todo, quota, and scheduler proof slices ([#3431](https://github.com/huangruiteng/loopx/pull/3431)–[#3434](https://github.com/huangruiteng/loopx/pull/3434)) | Completion fence/state, workspace causality, and scheduler transitions each have one TS rule owner | The cuts are mostly leaf-shaped; Python still composes several product transactions |
 | Scheduler durable state ([#3440](https://github.com/huangruiteng/loopx/pull/3440)) | State normalization, persistence, replay, and one coarse transition are TS-owned | The Python compatibility path still pays a cross-runtime transport tax |
 | Runtime decoders ([#3443](https://github.com/huangruiteng/loopx/pull/3443)) | Stable primitive decoding has one small shared module; domain decoders remain local | No larger schema framework is justified |
+| Transaction payoff ([#3464](https://github.com/huangruiteng/loopx/pull/3464), [#3481](https://github.com/huangruiteng/loopx/pull/3481), and Todo completion) | Turn settlement, quota delivery routing, and Todo completion each cross one coarse TS boundary; the Todo transaction owns identity, replay fencing, validation planning/result reduction, continuation/recovery, and completion metadata | Python still executes explicitly external providers and materializes legacy Markdown/event results; other domains still need their own bounded cutovers |
 
 These slices proved correctness, packaging, Windows lifecycle, crash recovery,
 real TS-owned writes, and acceptable warm primitive-call latency. They also
@@ -223,11 +224,10 @@ domains would now increase total complexity.
 ### Stage 2B — Complete transaction cutovers (active)
 
 Select by deletion leverage and runtime traffic, not by ease of translation.
-The first candidate is the complete Turn settlement/commit transaction because
-the current Python settlement surface composes several TS calls and retains
-duplicate settlement types. Subsequent candidates are complete Todo completion,
-quota spend/settlement, and scheduler heartbeat/state transactions, chosen only
-when each PR can retire an existing facade or materially shrink it.
+The shipped Turn settlement, quota delivery-routing, and Todo-completion
+cutovers establish the pattern. Subsequent candidates are quota
+spend/settlement and scheduler heartbeat/state transactions, chosen only when
+each PR can retire an existing facade or materially shrink it.
 
 For each completed transaction, replace migration-only characterization workers
 and Python implementation fixtures with native TS semantic/invariant tests plus
@@ -235,28 +235,35 @@ one durable end-to-end adapter contract. Retain a characterization corpus only
 while an old authority remains executable or a versioned compatibility window
 requires differential proof; record its deletion trigger when introduced.
 
-Current implementation status: Stage 1 and the bounded Stage 2A proofs are
-shipped. The first Stage 2B cutover is the complete Turn settlement/commit
-transaction. TypeScript owns preflight authorization, ordered-prefix and replay
-validation, provider failure classification, receipt construction, terminal
-closeout joining, and the canonical result. Python is a mechanical adapter for
-the still-external writeback, spend, and terminal providers. New work therefore
-uses two coarse reductions and a completed replay uses one, replacing the prior
-multi-helper bridge. The remaining fine-grained settlement facade can be
-deleted after quota, host-adapter, and task-lease callers move to their own
-coarse transactions.
+Current implementation status: Stage 1, the bounded Stage 2A proofs, and three
+Stage 2B cutovers are shipped:
 
-Quota delivery routing is the next bounded payoff cutover. TypeScript now owns
-continuity-versus-fallback selection and the selected Todo's settlement boundary
-behind one request. Python still prepares the normal fallback candidate and
-projects the typed result into the legacy quota packet, but it no longer composes
-two leaf decisions. The in-flight path moves from two cross-runtime calls to one;
-no-anchor paths with a fallback candidate and preempted paths remain at one,
-while an empty no-anchor candidate set remains at zero through a projection-layer
-short circuit. The Python facade exits when the
-quota route and CLI caller move into the native TypeScript transaction. Vision
-checkpointing remains a separate refresh/writeback transaction because it does
-not share the delivery-selection lifecycle phase.
+- Turn settlement/commit: TypeScript owns preflight authorization,
+  ordered-prefix and replay validation, provider failure classification,
+  receipt construction, terminal closeout joining, and the canonical result.
+  A real Python provider uses two coarse reductions; completed replay uses one.
+- Quota delivery routing: TypeScript owns continuity-versus-fallback selection
+  and the selected Todo's settlement boundary. The in-flight path moved from
+  two cross-runtime calls to one; the empty candidate short circuit remains
+  zero.
+- Todo completion: TypeScript owns completion identity, terminal replay fence,
+  validation declaration/effect planning, validation-receipt reduction,
+  continuation/recovery, and completion metadata in one transaction. A Todo
+  without declared validation, including a replay, uses one reduction. A real
+  caller-approved validation command remains an explicit Python provider
+  between two reductions. A source snapshot is compared after the mutation
+  lock so a receipt for one declaration cannot authorize a changed Todo.
+  Materialized and event-projected writes consume the same typed result.
+
+The Todo cutover removes the Python state-evaluation dataclass, local identity
+projection, replay helper, and public runtime handlers for those implementation
+leaves. The remaining Python Todo facade owns transport, external command
+execution, source compare-and-swap, legacy response projection, and the actual
+Markdown/event write. It exits when those writers and the CLI move into the
+native TS transaction. The remaining fine-grained Turn facade exits after
+quota, host-adapter, and task-lease callers move to their own coarse
+transactions. Vision checkpointing remains a separate refresh/writeback
+transaction because it does not share the delivery-selection lifecycle phase.
 
 ### Stage 3 — CLI and App convergence
 

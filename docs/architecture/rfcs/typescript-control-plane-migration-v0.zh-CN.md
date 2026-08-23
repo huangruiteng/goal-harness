@@ -3,7 +3,7 @@
 - Status：Accepted，transaction-payoff 阶段进行中
 - Proposed by：LoopX maintainers
 - Date：2026-08-15
-- Last revised：2026-08-22
+- Last revised：2026-08-23
 - Scope：LoopX 控制面核心从 Python 到 TypeScript 的增量、replacement-first
   迁移；不长期维护两份语义实现
 - Tracking issue：[#3225](https://github.com/huangruiteng/loopx/issues/3225)
@@ -137,6 +137,7 @@ replay、receipt 与 settlement。这个架构选择已经落地，不再是假�
 | Todo、quota 与 scheduler 证明切片（[#3431](https://github.com/huangruiteng/loopx/pull/3431)–[#3434](https://github.com/huangruiteng/loopx/pull/3434)） | Completion fence/state、workspace causality 与 scheduler transition 各有一个 TS rule owner | 切口大多仍是 leaf-shaped；Python 继续组合多个产品 transaction |
 | Scheduler durable state（[#3440](https://github.com/huangruiteng/loopx/pull/3440)） | State normalization、persistence、replay 与一笔粗粒度 transition 由 TS 拥有 | Python compatibility path 仍承担跨 runtime transport 税 |
 | Runtime decoder（[#3443](https://github.com/huangruiteng/loopx/pull/3443)） | 稳定 primitive decoding 进入一个很小的共享模块；domain decoder 仍留在本地 | 没有理由建设更大的 schema framework |
+| Transaction 兑现（[#3464](https://github.com/huangruiteng/loopx/pull/3464)、[#3481](https://github.com/huangruiteng/loopx/pull/3481) 与 Todo completion） | Turn settlement、quota delivery routing 与 Todo completion 均只跨一个粗粒度 TS boundary；Todo transaction 拥有 identity、replay fence、validation planning/result reduction、continuation/recovery 与 completion metadata | Python 仍执行显式 external provider，并物化 legacy Markdown/event result；其他 domain 仍需各自的 bounded cutover |
 
 这些切片已经证明 correctness、packaging、Windows lifecycle、crash recovery、真实
 TS-owned write 和可接受的 warm primitive-call latency。它们也暴露了迁移边界：
@@ -193,11 +194,10 @@ leaf pattern 会增加总复杂度。
 
 ### Stage 2B — 完整 transaction cutover（进行中）
 
-按删除杠杆与 runtime traffic 选切口，而不是按翻译难度选。首个候选是完整的 Turn
-settlement/commit transaction，因为当前 Python settlement surface 会组合多次 TS
-调用，并保留重复 settlement type。后续候选是完整 Todo completion、quota
-spend/settlement 与 scheduler heartbeat/state transaction；只有当每个 PR 能删除
-既有 facade，或使它物质变薄时才选择。
+按删除杠杆与 runtime traffic 选切口，而不是按翻译难度选。已经交付的 Turn
+settlement、quota delivery routing 与 Todo completion cutover 建立了这一模式。后续
+候选是 quota spend/settlement 与 scheduler heartbeat/state transaction；只有当每个
+PR 能删除既有 facade，或使它物质变薄时才选择。
 
 每完成一笔 transaction，就用 native TS semantic/invariant test 加一个持久的
 end-to-end adapter contract，替换 migration-only characterization worker 与 Python
@@ -205,23 +205,30 @@ implementation fixture。只有旧 authority 仍可执行，或 versioned compat
 window 仍需 differential proof 时才保留 characterization corpus；引入时必须记录
 删除触发条件。
 
-当前实现状态：Stage 1 与 bounded Stage 2A proof 已交付。首个 Stage 2B cutover 是
-完整的 Turn settlement/commit transaction。TypeScript 拥有 preflight authorization、
-ordered-prefix 与 replay validation、provider failure classification、receipt
-construction、terminal closeout joining 和 canonical result。Python 只是仍属外部
-authority 的 writeback、spend 与 terminal provider 的机械 adapter。因此新工作使用
-两次 coarse reduction，完成态 replay 使用一次，替换此前的 multi-helper bridge。
-Quota、host-adapter 与 task-lease caller 迁到各自的 coarse transaction 后，即可删除
-剩余细粒度 settlement facade。
+当前实现状态：Stage 1、bounded Stage 2A proof 与三笔 Stage 2B cutover 已交付：
 
-Quota delivery routing 是下一笔 bounded payoff cutover。TypeScript 通过一次请求拥有
-continuity 与 fallback 的选择，以及 selected Todo 的 settlement boundary。Python 仍
-准备正常 fallback candidate，并把 typed result 投影成 legacy quota packet，但不再
-组合两条 leaf decision。In-flight 路径的跨 runtime 调用从两次降为一次；存在 fallback
-candidate 的无 anchor 路径与 preempted 路径保持一次，而 anchor 和 candidate 均为空时
-由 projection 层短路并保持零次调用。Quota route 与 CLI caller 进入 native TypeScript
-transaction 后，Python facade 即可退出。Vision checkpointing 属于不同的
-refresh/writeback 生命周期阶段，因此继续作为独立 transaction。
+- Turn settlement/commit：TypeScript 拥有 preflight authorization、ordered-prefix
+  与 replay validation、provider failure classification、receipt construction、
+  terminal closeout joining 和 canonical result。真实 Python provider 使用两次
+  coarse reduction；完成态 replay 使用一次。
+- Quota delivery routing：TypeScript 拥有 continuity 与 fallback 的选择，以及
+  selected Todo 的 settlement boundary。In-flight 路径从两次跨 runtime 调用降到
+  一次；空 candidate 的 short circuit 仍为零次。
+- Todo completion：TypeScript 在一笔 transaction 中拥有 completion identity、
+  terminal replay fence、validation declaration/effect planning、validation receipt
+  reduction、continuation/recovery 与 completion metadata。没有声明 validation 的
+  Todo（包括 replay）使用一次 reduction；真实 caller-approved validation command
+  作为显式 Python provider，位于两次 reduction 之间。取得 mutation lock 后会比较
+  source snapshot，确保一份 declaration 的 receipt 不能授权已经变化的 Todo。
+  Materialized 与 event-projected 写入消费同一 typed result。
+
+Todo cutover 删除了 Python state-evaluation dataclass、local identity projection、
+replay helper，以及这些 implementation leaf 的 public runtime handler。剩余 Python
+Todo facade 只拥有 transport、external command execution、source compare-and-swap、
+legacy response projection 与实际 Markdown/event write；当 writer 与 CLI 进入 native
+TS transaction 后即可退出。剩余细粒度 Turn facade 则在 quota、host-adapter 与
+task-lease caller 进入各自 coarse transaction 后退出。Vision checkpointing 属于
+不同的 refresh/writeback 生命周期阶段，因此继续作为独立 transaction。
 
 ### Stage 3 — CLI 与 App 汇合
 
