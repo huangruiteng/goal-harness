@@ -18,6 +18,29 @@ This directory may contain thin examples and practice notes, but it is not
 installed as a second LoopX Python package and does not grant execution or
 publication authority.
 
+## Engineering build map
+
+The canonical engineering plan is [Section 11 of the research
+RFC](../docs/architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md#11-engineering-construction-plan).
+It separates repository readiness from benchmark claims:
+
+- **E0--E1:** typed contracts, public/private boundaries, native runner
+  preflight, and one conformance slice;
+- **E2:** experiment-board lifecycle, concurrency admission, exact runtime
+  observation, continuity, reconciliation, and safe closeout;
+- **E3:** preregistered matched arms, treatment fidelity, integrity,
+  countability, and uncertainty;
+- **E4:** cross-benchmark replication and non-benchmark product qualification.
+
+The active workspace should keep benchmark-family launch, verifier, scoring, and
+failure semantics in adapters while reusable permission, integrity, lifecycle,
+and public-safe projection rules stay in
+[`benchmark-toolkit`](../loopx/capabilities/benchmark_toolkit/README.md).
+Contributors should start with a bounded synthetic fixture or conformance seam;
+live tasks, hidden evaluation, credentials, raw trajectories, submissions, and
+unpublished comparisons remain maintainer-owned. Engineering readiness does not
+by itself establish a C2 uplift claim.
+
 ## Current work
 
 - [`deepswe/README.md`](deepswe/README.md) records the current public-safe
