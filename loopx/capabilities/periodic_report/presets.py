@@ -30,6 +30,7 @@ _WEEKLY_PROGRESS_PROFILE: dict[str, Any] = {
     "trigger_policy": {
         "enabled_kinds": [
             "manual",
+            "bounded_segment_milestone",
             "cadence_due",
             "primary_goal_outcome",
             "vision_closed",

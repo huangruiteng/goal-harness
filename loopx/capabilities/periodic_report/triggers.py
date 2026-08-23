@@ -22,6 +22,7 @@ TRIGGER_REQUEST_SCHEMA = "periodic_report_trigger_request_v0"
 TRIGGER_DECISION_SCHEMA = "periodic_report_trigger_decision_v0"
 
 _REPORTABLE_KINDS = {
+    "bounded_segment_milestone",
     "cadence_due",
     "manual",
     "material_blocker",
@@ -44,9 +45,11 @@ _TRIGGER_PRIORITY = {
     "material_blocker": 70,
     "material_recovery": 60,
     "material_decision": 50,
+    "bounded_segment_milestone": 40,
     "cadence_due": 10,
 }
 _REPORT_KIND = {
+    "bounded_segment_milestone": "milestone_update",
     "cadence_due": "cadence_digest",
     "manual": "manual_update",
     "material_blocker": "exception_update",
@@ -147,6 +150,39 @@ def _materiality(kind: str, facts: Mapping[str, Any], label: str) -> tuple[bool,
             _boolean(facts.get("due"), f"{label}.due"),
             "cadence_due" if facts.get("due") is True else "cadence_not_due",
         )
+    if kind == "bounded_segment_milestone":
+        _reject_unknown_facts(
+            facts,
+            allowed={
+                "delivered_count",
+                "durable_writeback",
+                "remaining_todo_count",
+                "segment_ref",
+                "transition",
+            },
+            label=label,
+        )
+        _token(facts.get("segment_ref"), f"{label}.segment_ref")
+        transition = _token(facts.get("transition"), f"{label}.transition")
+        if transition not in {
+            "replan_entered",
+            "segment_completed",
+            "vision_checkpoint",
+        }:
+            raise ValueError(f"{label}.transition is invalid")
+        _integer(facts.get("delivered_count", 0), f"{label}.delivered_count")
+        _integer(
+            facts.get("remaining_todo_count", 0),
+            f"{label}.remaining_todo_count",
+        )
+        durable_writeback = _boolean(
+            facts.get("durable_writeback"), f"{label}.durable_writeback"
+        )
+        if transition not in {"replan_entered", "segment_completed"}:
+            return False, "segment_checkpoint_only"
+        if not durable_writeback:
+            return False, "segment_writeback_pending"
+        return True, "bounded_segment_advanced"
     if kind == "vision_closed":
         _reject_unknown_facts(
             facts,

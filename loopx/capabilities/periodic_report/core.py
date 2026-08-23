@@ -24,6 +24,7 @@ _REPORT_KINDS = {
     "milestone_update",
 }
 _REPORTABLE_TRIGGER_KINDS = {
+    "bounded_segment_milestone",
     "cadence_due",
     "manual",
     "material_blocker",
