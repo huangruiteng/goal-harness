@@ -159,6 +159,8 @@ candidate facts. The built-in kinds are:
   and a successor is established or the goal is terminal;
 - `primary_goal_outcome`: the primary delivery outcome is validated and has a
   durable writeback;
+- `bounded_segment_milestone`: a named, bounded work segment completed or
+  entered replan and was durably written back, even when open todos remain;
 - `material_decision`: an approved, rejected, or cancelled decision changed
   the execution route and was durably recorded;
 - `material_blocker`: a new or escalated P0 blocker stops the primary path;
@@ -178,6 +180,16 @@ vision closures, and primary-path blockers may bypass it. The output records
 the selected and coalesced ids, every suppression reason, cooldown state, and
 the report kind (`cadence_digest`, `milestone_update`, `exception_update`, or
 `manual_update`).
+
+`bounded_segment_milestone` accepts only `segment_ref`, `transition`,
+`delivered_count`, `remaining_todo_count`, and `durable_writeback` facts.
+`segment_ref` and `transition` are required. Counts are non-negative and
+default to zero when omitted. A `segment_completed` or `replan_entered`
+transition is material only after `durable_writeback=true`;
+`vision_checkpoint` remains non-material. Remaining todos do not suppress an
+otherwise material segment milestone. The trigger has priority 40, between
+`material_decision` and `cadence_due`, maps to `milestone_update`, and obeys
+the normal profile cooldown.
 
 An eligible decision may be embedded as `trigger_receipt` in a
 `periodic_report_run_request_v0`. Its `report_key` and `report_kind` then
