@@ -59,6 +59,7 @@ from ..todos.contract import (
     TODO_STATUS_OPEN,
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,
+    TODO_TASK_CLASS_MONITOR,
     normalize_todo_claimed_by,
     normalize_todo_id,
     normalize_todo_replan_obligation_id,
@@ -66,6 +67,9 @@ from ..todos.contract import (
 )
 from ..todos.projection import (
     todo_item_is_actionable_open as projection_todo_item_is_actionable_open,
+    todo_item_is_due_monitor as projection_todo_item_is_due_monitor,
+    todo_item_is_expired_monitor as projection_todo_item_is_expired_monitor,
+    todo_item_next_due_at as projection_todo_item_next_due_at,
     todo_item_task_class as projection_todo_item_task_class,
 )
 from ..todos.quota_summary import (
@@ -201,12 +205,19 @@ def _blocked_priority_fallback(
             continue
         if _same_todo_identity(item, selected):
             break
-        if _todo_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT:
+        task_class = _todo_task_class(item)
+        future_monitor = bool(
+            task_class == TODO_TASK_CLASS_MONITOR
+            and projection_todo_item_next_due_at(item) is not None
+            and not projection_todo_item_is_expired_monitor(item)
+            and not projection_todo_item_is_due_monitor(item)
+        )
+        if task_class != TODO_TASK_CLASS_ADVANCEMENT and not future_monitor:
             continue
         if item.get("done") is True:
             continue
         status = normalize_todo_status(item.get("status")) or TODO_STATUS_OPEN
-        if status == TODO_STATUS_OPEN:
+        if status == TODO_STATUS_OPEN and not future_monitor:
             continue
         text = str(item.get("text") or "").strip()
         if not text:
@@ -224,7 +235,8 @@ def _blocked_priority_fallback(
         "notify_user": False,
         "requires_user_action": False,
         "reason": (
-            "a higher-priority agent todo is blocked or deferred before the "
+            "a higher-priority agent todo is blocked, deferred, or scheduled "
+            "for a future monitor window before the "
             "selected executable fallback"
         ),
         "blocked_items": blocked_items[:3],

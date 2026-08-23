@@ -32,6 +32,7 @@ export interface EffectObservation<Decision extends string> {
   should_run: boolean;
   effective_action: string;
   recommended_action: string;
+  action_portfolio: JsonObject | null;
   protocol_summary: string | null;
 }
 
@@ -274,6 +275,7 @@ export function interpretQuotaShouldRunPacket(
   const cliChannel = asObject(interaction.cli_channel);
   const gate = asObject(packet.capability_gate);
   const protocol = asObject(packet.protocol_action_packet);
+  const actionPortfolio = asObject(packet.action_portfolio);
   return {
     request: {
       kind: "quota_should_run",
@@ -296,6 +298,8 @@ export function interpretQuotaShouldRunPacket(
       should_run: Boolean(packet.should_run),
       effective_action: truthyString(packet.effective_action),
       recommended_action: truthyString(packet.recommended_action),
+      action_portfolio:
+        Object.keys(actionPortfolio).length > 0 ? actionPortfolio : null,
       protocol_summary: nullableTruthyString(protocol.summary),
     },
     next_effect: {
@@ -354,6 +358,7 @@ export function interpretTurnResultPacket(
       effective_action: truthyString(packet.effective_action) || resultKind,
       recommended_action:
         truthyString(packet.recommended_action) || "settle the turn receipt",
+      action_portfolio: null,
       protocol_summary: nullableTruthyString(packet.summary),
     },
     next_effect: {

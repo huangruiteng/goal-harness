@@ -186,10 +186,26 @@ def test_declared_action_signature_coverage_migration_requires_review() -> None:
     ]
 
 
+def test_action_portfolio_coverage_migration_requires_review() -> None:
+    candidate = _row(
+        action_signature_sha256="portfolio-semantic-signature",
+        action_signature_coverages=["turn_envelope_action_dimensions_v2"],
+    )
+
+    result = compare_cli_output_receipts(_receipt(_row()), _receipt(candidate))
+
+    assert result["ok"] is True
+    assert result["review_required"] is True
+    assert result["rows"][0]["review_signals"] == [
+        "action_signature coverage migrated: "
+        "turn_envelope_action_dimensions_v0 -> turn_envelope_action_dimensions_v2"
+    ]
+
+
 def test_unknown_action_signature_coverage_migration_fails_closed() -> None:
     candidate = _row(
         action_signature_sha256="unknown-semantic-signature",
-        action_signature_coverages=["turn_envelope_action_dimensions_v2"],
+        action_signature_coverages=["turn_envelope_action_dimensions_v3"],
     )
 
     result = compare_cli_output_receipts(_receipt(_row()), _receipt(candidate))

@@ -1159,6 +1159,8 @@ def _build_interaction_agent_channel(
         "quiet_noop_allowed": quiet_noop_allowed,
     }
     channel.update(build_primary_action_projection(payload, mode=mode))
+    if isinstance(payload.get("action_portfolio"), dict):
+        channel["action_portfolio_ref"] = "$.action_portfolio"
     if capability_reentry is not None:
         candidate = capability_reentry["candidates"][0]
         target = candidate["verification_target"]

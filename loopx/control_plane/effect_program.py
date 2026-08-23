@@ -44,6 +44,7 @@ class EffectObservation:
     should_run: bool
     effective_action: str
     recommended_action: str
+    action_portfolio: Mapping[str, Any] | None = None
     protocol_summary: str | None = None
 
 
@@ -479,6 +480,11 @@ def _effect_turn_from_payload(payload: Any) -> EffectTurn:
             should_run=observation.get("should_run") is True,
             effective_action=str(observation.get("effective_action") or ""),
             recommended_action=str(observation.get("recommended_action") or ""),
+            action_portfolio=(
+                dict(observation["action_portfolio"])
+                if isinstance(observation.get("action_portfolio"), Mapping)
+                else None
+            ),
             protocol_summary=(
                 str(observation["protocol_summary"])
                 if observation.get("protocol_summary") is not None
