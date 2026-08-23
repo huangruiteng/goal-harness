@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..capabilities.benchmark_toolkit import (
+    BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION,
     BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
     BENCHMARK_PLAN_FIDELITY_SCHEMA_VERSION,
     BENCHMARK_RUNTIME_CONTINUITY_SCHEMA_VERSION,
@@ -21,10 +22,12 @@ from ..capabilities.benchmark_toolkit import (
     BenchmarkRuntimeContinuityTransition,
     BenchmarkSourceRevisionFenceError,
     build_benchmark_candidate_source_boundary,
+    build_benchmark_four_arm_contract_from_spec,
     build_benchmark_integrity_qualification,
     build_benchmark_plan_fidelity_receipt,
     build_benchmark_runtime_continuity,
     build_benchmark_runtime_observation,
+    compact_benchmark_four_arm_contract,
     compact_benchmark_source_revision_fence_receipt,
     filter_public_benchmark_artifact_paths,
     inspect_benchmark_source_revision_fence,
@@ -42,6 +45,7 @@ BENCHMARK_TOOLKIT_COMMANDS = {
     "classify-artifacts",
     "integrity-qualification",
     "plan-fidelity",
+    "four-arm-contract",
     "runtime-continuity",
     "runtime-observation",
     "source-revision-fence",
@@ -138,6 +142,20 @@ def _parse_required_role_counts(values: list[str]) -> dict[BenchmarkPlanRole, in
     return required
 
 
+def _render_four_arm_contract(payload: dict[str, object]) -> str:
+    parity = payload.get("prompt_parity")
+    parity = parity if isinstance(parity, dict) else {}
+    return (
+        "# Benchmark Four-Arm Contract\n\n"
+        f"- Qualified: `{payload.get('qualified')}`\n"
+        f"- Hint id: `{payload.get('hint_id')}`\n"
+        f"- Plain Goal/LoopX prompt parity: `{parity.get('plain_pair_equal')}`\n"
+        "- Domain-hint Goal/LoopX prompt parity: "
+        f"`{parity.get('domain_hint_pair_equal')}`\n"
+        f"- Prompt text recorded: `{payload.get('prompt_text_recorded')}`\n"
+    )
+
+
 def _render_source_revision_fence(payload: dict[str, object]) -> str:
     return (
         "# Benchmark Source Revision Fence\n\n"
@@ -177,6 +195,23 @@ def register_benchmark_boundary_commands(
     benchmark_subparsers: argparse._SubParsersAction,
     add_subcommand_format: Callable[[argparse.ArgumentParser], None],
 ) -> None:
+    four_arm_parser = benchmark_subparsers.add_parser(
+        "four-arm-contract",
+        help="Qualify a Goal/LoopX by plain/domain-hint factorial contract.",
+    )
+    add_subcommand_format(four_arm_parser)
+    four_arm_parser.add_argument(
+        "--spec-json",
+        required=True,
+        help="benchmark_four_arm_spec_v0 JSON path, or - for stdin.",
+    )
+    four_arm_parser.add_argument(
+        "--include-prompt-text",
+        action="store_true",
+        help="Include runner prompt text; default output contains hashes only.",
+    )
+    four_arm_parser.add_argument("--require-qualified", action="store_true")
+
     artifact_parser = benchmark_subparsers.add_parser(
         "classify-artifacts",
         help="Classify compact benchmark artifact paths without reading files.",
@@ -394,6 +429,25 @@ def handle_benchmark_boundary_command(
         )
         print_payload(payload, output_format(args), _render_candidate_boundary)
         return 1 if args.require_clean and not payload.get("clean") else 0
+
+    if args.benchmark_command == "four-arm-contract":
+        try:
+            spec = _read_json_object(args.spec_json, "--spec-json")
+            contract = build_benchmark_four_arm_contract_from_spec(spec)
+            payload = (
+                contract
+                if args.include_prompt_text
+                else compact_benchmark_four_arm_contract(contract)
+            )
+        except (OSError, UnicodeError, TypeError, ValueError):
+            payload = {
+                "schema_version": BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION,
+                "qualified": False,
+                "reason_code": "four_arm_contract_input_invalid",
+                "prompt_text_recorded": False,
+            }
+        print_payload(payload, output_format(args), _render_four_arm_contract)
+        return 1 if args.require_qualified and not payload.get("qualified") else 0
 
     if args.benchmark_command == "source-revision-fence":
         try:

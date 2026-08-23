@@ -43,6 +43,13 @@ from .experiment_board import (
     render_benchmark_experiment_board_markdown,
     upsert_benchmark_experiment_board_row,
 )
+from .four_arm_contract import (
+    BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION,
+    BENCHMARK_FOUR_ARM_SPEC_SCHEMA_VERSION,
+    build_benchmark_four_arm_contract,
+    build_benchmark_four_arm_contract_from_spec,
+    compact_benchmark_four_arm_contract,
+)
 from .integrity import (
     BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION,
     BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
@@ -152,6 +159,8 @@ __all__ = [
     "BENCHMARK_EXPERIMENT_BOARD_LEDGER_FILENAME",
     "BENCHMARK_EXPERIMENT_BOARD_ROW_SCHEMA_VERSION",
     "BENCHMARK_EXPERIMENT_BOARD_SCHEMA_VERSION",
+    "BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION",
+    "BENCHMARK_FOUR_ARM_SPEC_SCHEMA_VERSION",
     "BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION",
     "BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION",
     "BENCHMARK_PLAN_FIDELITY_SCHEMA_VERSION",
@@ -207,6 +216,8 @@ __all__ = [
     "build_benchmark_concurrency_config",
     "build_benchmark_concurrency_status",
     "build_benchmark_experiment_board",
+    "build_benchmark_four_arm_contract",
+    "build_benchmark_four_arm_contract_from_spec",
     "build_benchmark_integrity_qualification",
     "build_benchmark_plan_fidelity_receipt",
     "build_benchmark_runtime_continuity",
@@ -217,6 +228,7 @@ __all__ = [
     "classify_benchmark_artifact_path",
     "classify_benchmark_candidate_source_path",
     "compact_benchmark_source_revision_fence_receipt",
+    "compact_benchmark_four_arm_contract",
     "compact_docker_container_binding_receipt",
     "compact_native_codex_goal_prompt_receipt",
     "compact_native_codex_profile_receipt",
