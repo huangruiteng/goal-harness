@@ -518,7 +518,11 @@ loopx benchmark four-arm-contract \
   --format json
 ```
 
-The default CLI receipt contains prompt hashes but not prompt text. A trusted local
+The default CLI receipt contains prompt hashes but not prompt text. Its
+`qualified` field covers factor design and within-pair prompt parity only;
+`execution_qualified` remains `false`. The listed runner obligations are requirements,
+not evidence that launch-time parity, input pinning, or board registration occurred.
+A trusted local
 runner may use the Python builder or explicitly pass `--include-prompt-text`. At
 launch it must compare the final task-goal hash with the selected arm, pin every
 non-factor input (case, model, reasoning, deadline, permissions, runner, and scorer),

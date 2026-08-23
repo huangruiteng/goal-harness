@@ -242,14 +242,12 @@ def test_catalog_exposes_four_arm_factorial_start_contract() -> None:
     }
     assert "goal_plain" in study["benchmark_start_hint"]
     assert "loopx_plain" in study["benchmark_start_hint"]
+    assert study["attestations"] == ["attest_domain_hint_independent_of_loopx"]
     assert "keep_loopx_startup_out_of_band" in study["runner_obligations"]
-    assert "match_runtime_task_goal_hash_to_selected_arm" in study[
-        "runner_obligations"
-    ]
+    assert "match_runtime_task_goal_hash_to_selected_arm" in study["runner_obligations"]
     assert "diagnostic-only" in study["historical_boundary"]
     assert any(
-        "four-arm-contract" in command["command"]
-        for command in capability["commands"]
+        "four-arm-contract" in command["command"] for command in capability["commands"]
     )
 
 

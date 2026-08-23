@@ -9,6 +9,14 @@ from typing import Any
 
 BENCHMARK_FOUR_ARM_SPEC_SCHEMA_VERSION = "benchmark_four_arm_spec_v0"
 BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION = "benchmark_four_arm_contract_v0"
+BENCHMARK_FOUR_ARM_QUALIFICATION_SCOPE = "factor_design_and_prompt_parity_only"
+BENCHMARK_FOUR_ARM_ATTESTATIONS = ("attest_domain_hint_independent_of_loopx",)
+BENCHMARK_FOUR_ARM_RUNNER_OBLIGATIONS = (
+    "keep_loopx_startup_out_of_band",
+    "match_runtime_task_goal_hash_to_selected_arm",
+    "pin_all_non_factor_inputs",
+    "register_each_run_on_experiment_board",
+)
 
 _HINT_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 _SPEC_FIELDS = {
@@ -33,6 +41,15 @@ def _prompt_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _required_hint_id(value: Any) -> str:
+    if not isinstance(value, str):
+        raise TypeError("hint_id must be a string")
+    normalized = value.strip()
+    if not _HINT_ID_RE.fullmatch(normalized):
+        raise ValueError("hint_id must be a compact lowercase token")
+    return normalized
+
+
 def build_benchmark_four_arm_contract(
     *,
     base_goal_text: str,
@@ -48,9 +65,7 @@ def build_benchmark_four_arm_contract(
 
     base = _required_text(base_goal_text, field="base_goal_text")
     hint = _required_text(domain_hint, field="domain_hint")
-    normalized_hint_id = str(hint_id or "").strip()
-    if not _HINT_ID_RE.fullmatch(normalized_hint_id):
-        raise ValueError("hint_id must be a compact lowercase token")
+    normalized_hint_id = _required_hint_id(hint_id)
     if domain_hint_independent_of_loopx is not True:
         raise ValueError("domain hint must be attested independent of LoopX")
 
@@ -113,9 +128,25 @@ def build_benchmark_four_arm_contract(
             arm["comparison_anchor_arm_id"] = comparison_anchor_arm_id
         arms.append(arm)
 
+    prompt_parity: dict[str, bool] = {
+        "plain_pair_equal": (
+            arms[0]["task_goal_sha256"] == arms[1]["task_goal_sha256"]
+        ),
+        "domain_hint_pair_equal": (
+            arms[2]["task_goal_sha256"] == arms[3]["task_goal_sha256"]
+        ),
+        "plain_and_domain_hint_distinct": (
+            prompt_hashes["plain"] != prompt_hashes["domain_hint"]
+        ),
+    }
+    if not all(prompt_parity.values()):
+        raise ValueError("four-arm prompt parity failed")
+
     contract = {
         "schema_version": BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION,
         "qualified": True,
+        "qualification_scope": BENCHMARK_FOUR_ARM_QUALIFICATION_SCOPE,
+        "execution_qualified": False,
         "prompt_text_recorded": True,
         "hint_id": normalized_hint_id,
         "factors": {
@@ -123,17 +154,7 @@ def build_benchmark_four_arm_contract(
             "domain_hint": [False, True],
         },
         "arms": arms,
-        "prompt_parity": {
-            "plain_pair_equal": (
-                arms[0]["task_goal_sha256"] == arms[1]["task_goal_sha256"]
-            ),
-            "domain_hint_pair_equal": (
-                arms[2]["task_goal_sha256"] == arms[3]["task_goal_sha256"]
-            ),
-            "plain_and_domain_hint_distinct": (
-                prompt_hashes["plain"] != prompt_hashes["domain_hint"]
-            ),
-        },
+        "prompt_parity": prompt_parity,
         "primary_comparisons": [
             {
                 "effect": "loopx_without_domain_hint",
@@ -152,19 +173,20 @@ def build_benchmark_four_arm_contract(
             },
         ],
         "interaction_contrast": {
-            "left": "loopx_with_domain_hint",
-            "right": "loopx_without_domain_hint",
+            "candidate_effect": {
+                "candidate_arm_id": hinted_loopx_id,
+                "anchor_arm_id": hinted_goal_id,
+            },
+            "anchor_effect": {
+                "candidate_arm_id": "loopx_plain",
+                "anchor_arm_id": "goal_plain",
+            },
         },
-        "runner_obligations": {
-            "loopx_startup_out_of_band": True,
-            "runtime_prompt_hash_must_match_arm": True,
-            "pin_all_non_factor_inputs": True,
-            "register_each_run_on_experiment_board": True,
-            "domain_hint_independence_attested": True,
+        "attestations": {
+            "domain_hint_independent_of_loopx": True,
         },
+        "runner_obligations": list(BENCHMARK_FOUR_ARM_RUNNER_OBLIGATIONS),
     }
-    if not all(contract["prompt_parity"].values()):
-        raise ValueError("four-arm prompt parity failed")
     return contract
 
 
@@ -183,10 +205,14 @@ def build_benchmark_four_arm_contract_from_spec(
     independent = payload.get("domain_hint_independent_of_loopx")
     if not isinstance(independent, bool):
         raise TypeError("domain_hint_independent_of_loopx must be boolean")
+    base_goal_text = _required_text(
+        payload.get("base_goal_text"), field="base_goal_text"
+    )
+    domain_hint = _required_text(payload.get("domain_hint"), field="domain_hint")
     return build_benchmark_four_arm_contract(
-        base_goal_text=payload.get("base_goal_text"),
-        domain_hint=payload.get("domain_hint"),
-        hint_id=str(payload.get("hint_id") or "domain_hint"),
+        base_goal_text=base_goal_text,
+        domain_hint=domain_hint,
+        hint_id=(payload["hint_id"] if "hint_id" in payload else "domain_hint"),
         domain_hint_independent_of_loopx=independent,
     )
 

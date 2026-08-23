@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..capabilities.benchmark_toolkit import (
     BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION,
+    BENCHMARK_FOUR_ARM_QUALIFICATION_SCOPE,
     BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
     BENCHMARK_PLAN_FIDELITY_SCHEMA_VERSION,
     BENCHMARK_RUNTIME_CONTINUITY_SCHEMA_VERSION,
@@ -148,6 +149,8 @@ def _render_four_arm_contract(payload: dict[str, object]) -> str:
     return (
         "# Benchmark Four-Arm Contract\n\n"
         f"- Qualified: `{payload.get('qualified')}`\n"
+        f"- Qualification scope: `{payload.get('qualification_scope')}`\n"
+        f"- Execution qualified: `{payload.get('execution_qualified')}`\n"
         f"- Hint id: `{payload.get('hint_id')}`\n"
         f"- Plain Goal/LoopX prompt parity: `{parity.get('plain_pair_equal')}`\n"
         "- Domain-hint Goal/LoopX prompt parity: "
@@ -439,10 +442,12 @@ def handle_benchmark_boundary_command(
                 if args.include_prompt_text
                 else compact_benchmark_four_arm_contract(contract)
             )
-        except (OSError, UnicodeError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError):
             payload = {
                 "schema_version": BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION,
                 "qualified": False,
+                "qualification_scope": BENCHMARK_FOUR_ARM_QUALIFICATION_SCOPE,
+                "execution_qualified": False,
                 "reason_code": "four_arm_contract_input_invalid",
                 "prompt_text_recorded": False,
             }

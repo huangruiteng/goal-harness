@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from .four_arm_contract import (
+    BENCHMARK_FOUR_ARM_ATTESTATIONS,
+    BENCHMARK_FOUR_ARM_RUNNER_OBLIGATIONS,
+)
+
 BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     "id": "benchmark-toolkit",
     "origin": "builtin",
@@ -50,7 +55,8 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             ),
             "write_boundary": (
                 "read-only local spec; default receipt contains prompt hashes but "
-                "not prompt text and grants no runner or startup authority"
+                "not prompt text, qualifies design only, and grants no runner or "
+                "startup authority"
             ),
         },
         {
@@ -341,13 +347,8 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "loopx": [False, True],
             "domain_hint": [False, True],
         },
-        "runner_obligations": [
-            "attest_domain_hint_independent_of_loopx",
-            "keep_loopx_startup_out_of_band",
-            "match_runtime_task_goal_hash_to_selected_arm",
-            "pin_all_non_factor_inputs",
-            "register_each_run_on_experiment_board",
-        ],
+        "attestations": list(BENCHMARK_FOUR_ARM_ATTESTATIONS),
+        "runner_obligations": list(BENCHMARK_FOUR_ARM_RUNNER_OBLIGATIONS),
         "historical_boundary": (
             "An arm that mixed startup and domain guidance remains diagnostic-only "
             "and cannot be relabeled into the factorial study."

@@ -34,6 +34,8 @@ def test_four_arm_contract_changes_only_the_two_declared_factors() -> None:
 
     assert contract["schema_version"] == BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION
     assert contract["qualified"] is True
+    assert contract["qualification_scope"] == "factor_design_and_prompt_parity_only"
+    assert contract["execution_qualified"] is False
     assert set(arms) == {
         "goal_plain",
         "loopx_plain",
@@ -57,12 +59,24 @@ def test_four_arm_contract_changes_only_the_two_declared_factors() -> None:
     assert arms["loopx_plain"]["comparison_anchor_arm_id"] == "goal_plain"
     assert arms["goal_swe_hint"]["comparison_anchor_arm_id"] == "goal_plain"
     assert arms["loopx_swe_hint"]["comparison_anchor_arm_id"] == "goal_swe_hint"
-    assert contract["runner_obligations"] == {
-        "loopx_startup_out_of_band": True,
-        "runtime_prompt_hash_must_match_arm": True,
-        "pin_all_non_factor_inputs": True,
-        "register_each_run_on_experiment_board": True,
-        "domain_hint_independence_attested": True,
+    assert contract["attestations"] == {
+        "domain_hint_independent_of_loopx": True,
+    }
+    assert contract["runner_obligations"] == [
+        "keep_loopx_startup_out_of_band",
+        "match_runtime_task_goal_hash_to_selected_arm",
+        "pin_all_non_factor_inputs",
+        "register_each_run_on_experiment_board",
+    ]
+    assert contract["interaction_contrast"] == {
+        "candidate_effect": {
+            "candidate_arm_id": "loopx_swe_hint",
+            "anchor_arm_id": "goal_swe_hint",
+        },
+        "anchor_effect": {
+            "candidate_arm_id": "loopx_plain",
+            "anchor_arm_id": "goal_plain",
+        },
     }
 
 
@@ -112,6 +126,20 @@ def test_spec_rejects_unknown_fields() -> None:
         )
 
 
+@pytest.mark.parametrize("invalid_hint_id", [None, 0, False, ""])
+def test_spec_rejects_explicit_invalid_hint_id(invalid_hint_id: object) -> None:
+    with pytest.raises((TypeError, ValueError), match="hint_id"):
+        build_benchmark_four_arm_contract_from_spec(
+            {
+                "schema_version": BENCHMARK_FOUR_ARM_SPEC_SCHEMA_VERSION,
+                "base_goal_text": BASE_GOAL,
+                "domain_hint": DOMAIN_HINT,
+                "hint_id": invalid_hint_id,
+                "domain_hint_independent_of_loopx": True,
+            }
+        )
+
+
 def test_cli_defaults_to_a_prompt_redacted_qualification_receipt(
     tmp_path: Path,
 ) -> None:
@@ -148,6 +176,7 @@ def test_cli_defaults_to_a_prompt_redacted_qualification_receipt(
     payload = json.loads(completed.stdout)
 
     assert payload["qualified"] is True
+    assert payload["execution_qualified"] is False
     assert payload["prompt_text_recorded"] is False
     assert BASE_GOAL not in completed.stdout
     assert DOMAIN_HINT not in completed.stdout
