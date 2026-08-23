@@ -328,6 +328,49 @@ def test_shell_network_flags_do_not_bypass_integrity_scan() -> None:
     assert receipt["evidence_counts"]["external_network_request"] == 1
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -fsS http://127.0.0.1:9090/-/ready",
+        "wget -qO- http://127.0.0.2:8080/status",
+        "curl http://localhost.:3000/health",
+        "git clone http://[::1]:8000/repository.git",
+    ],
+)
+def test_loopback_http_validation_is_not_external_network_access(
+    command: str,
+) -> None:
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(command=command),
+        runtime_attestation=_attestation(),
+    )
+
+    assert receipt["integrity_qualified"] is True
+    assert receipt["evidence_counts"]["external_network_request"] == 0
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl http://localhost.example.invalid/probe",
+        "curl http://localhost@external.example.invalid/probe",
+        r"curl http://localhost\@external.example.invalid/probe",
+        "wget -qO- http://127.0.0.1.example.invalid/status",
+        "curl http://127.0.0.1:9090/health https://example.invalid/probe",
+    ],
+)
+def test_loopback_lookalikes_and_mixed_requests_remain_fail_closed(
+    command: str,
+) -> None:
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(command=command),
+        runtime_attestation=_attestation(),
+    )
+
+    assert receipt["integrity_qualified"] is False
+    assert receipt["evidence_counts"]["external_network_request"] == 1
+
+
 @pytest.mark.parametrize("field", ["benchmark_id", "case_id"])
 def test_path_like_attestation_labels_fail_closed_without_leaking(
     field: str,
