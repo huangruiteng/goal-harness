@@ -267,9 +267,26 @@ already-rendered artifact to a project-owned existing Miaoda HTML app selected
 by the delivery request; it does not
 rebuild the document or choose an audience. Before any external effect it
 checks the single HTML, compressed archive, and uncompressed payload limits.
-After publication it requires exact readback of the same app id, published
-URL, and published state, and records the observed access scope and login
-requirement in the sink receipt.
+After publication it preserves the provider's exact release id and requires
+readback of that release in `finished` state as well as the same app id,
+published URL, and published state. The sink receipt keeps three evidence
+layers separate:
+
+- `release_readback` proves the exact provider release reached its terminal
+  published state. The capability recomputes this from the requested release id
+  and provider status; a provider-supplied `verified` flag cannot override a
+  mismatch;
+- `access_scope_readback` records the observed scope and login requirement, or
+  a typed `unsupported_by_app_type` result when the provider does not expose
+  that query for creative HTML apps. Other provider-query failures remain a
+  retryable `unavailable` evidence state without erasing a verified release;
+- `content_readback` states whether the remote content digest was verified.
+  The bundled provider currently records `unavailable` because the provider
+  API does not expose the published bytes or their digest; no speculative
+  `verified` state is accepted until a provider can supply real digest evidence.
+
+An app id, online URL, or finished release therefore proves delivery lifecycle,
+not byte-for-byte equality with the local artifact.
 
 Projects bind the sink explicitly so report generation remains portable and
 external writes remain disabled by default:
@@ -346,10 +363,13 @@ The command resolves the installed, enabled, doctor-verified `loopx-lark`
 revision and its `lark.miaoda_html.publish` permission. Authentication remains
 inside `lark-cli`; the request accepts no token or credential. The provider
 publishes a temporary `index.html`, reads the exact app back, and sets
-`intent_satisfied=true` only when the same app id, online URL, and published
-state agree. It does not create an app, change the app's audience, or change its
-access scope. Disable or roll back the bundled extension to remove the provider
-without affecting already-generated local artifacts.
+`intent_satisfied=true` only when the same app id and online URL agree and the
+exact release returned by publication reads back as `finished`. Access-scope
+readback is evidence only: an app-type-specific unsupported response is kept as
+a typed boundary instead of being treated as a guessed scope. The command does
+not claim remote content-digest verification, create an app, change the app's
+audience, or change its access scope. Disable or roll back the bundled extension
+to remove the provider without affecting already-generated local artifacts.
 
 ## Default editorial contract
 

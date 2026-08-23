@@ -7,12 +7,14 @@ from typing import Any, Callable, Literal
 from ..quota.turn_envelope import (
     ACTION_SIGNATURE_COVERAGE_V0,
     ACTION_SIGNATURE_COVERAGE_V1,
+    ACTION_SIGNATURE_COVERAGE_V2,
 )
 
 
 CLI_OUTPUT_PROBE_SCHEMA_VERSION = "loopx_cli_output_probe_v0"
 CLI_OUTPUT_FIXTURE_CONTRACT_VERSION = "loopx_cli_output_public_fixture_v0"
 CLI_OUTPUT_DIFFERENTIAL_SCHEMA_VERSION = "loopx_cli_output_differential_v0"
+ACTION_PORTFOLIO_SCHEMA_VERSION_V0 = "quota_action_portfolio_v0"
 
 Metric = Literal["chars", "utf8_bytes", "lines", "compact_payload_chars"]
 
@@ -98,6 +100,16 @@ _GROWTH_ALLOWANCE_BY_POLICY: dict[str, GrowthAllowance] = {
     ),
 }
 
+# action_dimensions_v2 adds the bounded, executable fallback portfolio to the
+# signed hot path.  This allowance applies only while a base row migrates from
+# v0/v1 to v2; once v2 is the baseline, ordinary policy budgets apply again.
+_ACTION_PORTFOLIO_V0_MIGRATION_GROWTH_ALLOWANCE: dict[Metric, int] = {
+    "chars": 1_280,
+    "utf8_bytes": 1_280,
+    "lines": 36,
+    "compact_payload_chars": 896,
+}
+
 
 def _rows_by_id(receipt: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if receipt.get("schema_version") != CLI_OUTPUT_PROBE_SCHEMA_VERSION:
@@ -139,11 +151,34 @@ def _action_signature_migration(
 ) -> str | None:
     base_coverages = base.get("action_signature_coverages")
     candidate_coverages = candidate.get("action_signature_coverages")
-    if base_coverages != [ACTION_SIGNATURE_COVERAGE_V0]:
+    allowed_migrations = {
+        (ACTION_SIGNATURE_COVERAGE_V0, ACTION_SIGNATURE_COVERAGE_V1),
+        (ACTION_SIGNATURE_COVERAGE_V0, ACTION_SIGNATURE_COVERAGE_V2),
+        (ACTION_SIGNATURE_COVERAGE_V1, ACTION_SIGNATURE_COVERAGE_V2),
+    }
+    if not (
+        isinstance(base_coverages, list)
+        and len(base_coverages) == 1
+        and isinstance(candidate_coverages, list)
+        and len(candidate_coverages) == 1
+    ):
         return None
-    if candidate_coverages != [ACTION_SIGNATURE_COVERAGE_V1]:
+    migration = (base_coverages[0], candidate_coverages[0])
+    if migration not in allowed_migrations:
         return None
-    return f"{ACTION_SIGNATURE_COVERAGE_V0} -> {ACTION_SIGNATURE_COVERAGE_V1}"
+    return f"{migration[0]} -> {migration[1]}"
+
+
+def _action_portfolio_schema_migration(
+    base: dict[str, Any], candidate: dict[str, Any]
+) -> str | None:
+    base_versions = base.get("action_portfolio_schema_versions")
+    candidate_versions = candidate.get("action_portfolio_schema_versions")
+    if base_versions == [] and candidate_versions == [
+        ACTION_PORTFOLIO_SCHEMA_VERSION_V0
+    ]:
+        return f"none -> {ACTION_PORTFOLIO_SCHEMA_VERSION_V0}"
+    return None
 
 
 def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
@@ -156,6 +191,35 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
         failures.append("qualification_policy changed")
     if candidate.get("format") != output_format:
         failures.append("format changed")
+
+    base_signature = base.get("action_signature_sha256")
+    signature_changed = bool(
+        base_signature
+        and candidate.get("action_signature_sha256") != base_signature
+    )
+    signature_migration = (
+        _action_signature_migration(base, candidate) if signature_changed else None
+    )
+    base_portfolio_versions = base.get("action_portfolio_schema_versions")
+    candidate_portfolio_versions = candidate.get("action_portfolio_schema_versions")
+    portfolio_schema_changed = base_portfolio_versions != candidate_portfolio_versions
+    portfolio_schema_migration = (
+        _action_portfolio_schema_migration(base, candidate)
+        if portfolio_schema_changed
+        else None
+    )
+    portfolio_growth_migration = bool(
+        output_format == "json"
+        and (
+            portfolio_schema_migration
+            or (
+                signature_migration
+                and signature_migration.endswith(
+                    f" -> {ACTION_SIGNATURE_COVERAGE_V2}"
+                )
+            )
+        )
+    )
 
     deltas: dict[str, int | None] = {}
     allowances: dict[str, int | None] = {}
@@ -173,6 +237,11 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
             metric=metric,
             base=base_value,
         )
+        if portfolio_growth_migration:
+            allowance = max(
+                allowance,
+                _ACTION_PORTFOLIO_V0_MIGRATION_GROWTH_ALLOWANCE[metric],
+            )
         deltas[metric] = delta
         allowances[metric] = allowance
         if delta > allowance:
@@ -195,13 +264,20 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
     base_anchor = base.get("markdown_anchor")
     if base_anchor and candidate.get("markdown_anchor") != base_anchor:
         failures.append("markdown_anchor changed")
-    base_signature = base.get("action_signature_sha256")
-    if base_signature and candidate.get("action_signature_sha256") != base_signature:
-        migration = _action_signature_migration(base, candidate)
-        if migration is None:
+    if signature_changed:
+        if signature_migration is None:
             failures.append("action_signature semantic digest changed")
         else:
-            review_signals.append(f"action_signature coverage migrated: {migration}")
+            review_signals.append(
+                f"action_signature coverage migrated: {signature_migration}"
+            )
+    if portfolio_schema_changed:
+        if portfolio_schema_migration is None:
+            failures.append("action_portfolio schema coverage changed")
+        else:
+            review_signals.append(
+                f"action_portfolio schema migrated: {portfolio_schema_migration}"
+            )
 
     return {
         "row_id": row_id,

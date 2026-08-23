@@ -16,11 +16,23 @@ decision owner or recompute any route.
 The default projection retains:
 
 - `decision`, `should_run`, `effective_action`, and `recommended_action`;
-- selected todo and execution obligation;
+- selected todo, bounded `action_portfolio`, and execution obligation;
 - interaction mode, user channel, and executable agent/CLI actions;
 - scheduler action and autonomous-replan authority;
 - the compact vision decision, trigger kinds, required reads, and judge result;
 - warning kinds, counts, stable identities, and cold-path references.
+
+`action_portfolio` is not diagnostic candidate noise. It is retained in the
+default packet because it carries the executable fallback rule when the
+selected primary becomes unavailable at its real call site. Compaction may
+remove the larger todo/capability candidate lists only after preserving this
+bounded portfolio unchanged.
+
+The `turn_envelope_action_dimensions_v2` base/head migration has a JSON-only,
+bounded growth allowance for this additive portfolio. The allowance applies
+only while a v0/v1 baseline migrates to v2, remains a review signal, and still
+fails above 1,280 characters/bytes, 36 lines, or 896 compact characters. Once
+v2 is the baseline, the ordinary hot-path growth limits apply again.
 
 Repeated vision audits use `$.vision_continuation_audit` as the canonical
 projection. Candidate lists and peer action lists retain counts and point to
@@ -50,6 +62,13 @@ traversal, omitted counts, warning references, deduplication, and peer-route
 shape remain deterministic projection-test responsibilities. The old full
 packet is not retained as a permanent second product contract; paired mode is
 reserved for explicit differential diagnosis.
+
+The portfolio also includes a future-primary scenario: a typed P0 monitor whose
+window is not due remains visible as unavailable higher-priority work while the
+actual-default model must execute the selected ready fallback. This qualifies
+model obedience to the projection; deterministic tests separately cover the
+legacy case where a sticky primary survives and the packet must still expose
+fallback actions.
 
 Live receipts may retain only bounded scenario outcomes and digests. Packets,
 prompts, raw model responses, credentials, and conversations remain outside the

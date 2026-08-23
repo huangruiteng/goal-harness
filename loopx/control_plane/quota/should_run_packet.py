@@ -96,6 +96,7 @@ from ..todos.user_gate import (
     build_user_todo_notification as _build_user_todo_notification,
 )
 from ..todos.write_hint import build_todo_write_hint
+from ..work_items.action_portfolio import build_quota_action_portfolio
 from ..work_items.execution_obligation import build_execution_obligation
 from ..work_items.goal_route_hint import build_goal_route_hint
 from ..work_items.interaction_contract import (
@@ -407,6 +408,7 @@ def _apply_agent_monitor_only_precedence(
         frontier.pop("vision_continuation_audit", None)
     for key in (
         "agent_command",
+        "action_portfolio",
         "agent_lane_frontier_hint",
         "agent_lane_next_action",
         "agent_scope_frontier",
@@ -693,6 +695,29 @@ class _QuotaDecisionRoute:
     next_action_warning: dict[str, Any] | None
     goal_route_hint: dict[str, Any] | None
     payload_work_lane_contract: dict[str, Any] | None
+
+
+def _project_quota_action_portfolio(
+    prepared: _QuotaDecisionPreparation,
+    route: _QuotaDecisionRoute,
+) -> dict[str, Any] | None:
+    if (
+        not route.should_run
+        or not route.normal_delivery_allowed
+        or prepared.receipt_bound_todo_id is not None
+        or route.receipt_bound_replan_decision
+        or prepared.agent_monitor_only
+    ):
+        return None
+    return build_quota_action_portfolio(
+        primary=route.agent_lane_next_action,
+        agent_id=normalize_todo_claimed_by(
+            (prepared.agent_identity or {}).get("agent_id")
+        ),
+        agent_todo_summary=prepared.agent_todo_summary,
+        capability_gate=prepared.capability_gate,
+        blocked_priority_fallback=prepared.blocked_priority_fallback,
+    )
 
 
 def _resolve_quota_should_run_route(
@@ -1220,6 +1245,9 @@ def _build_quota_should_run_payload(
         payload["selected_todo"] = selected_todo_projection
     elif route.receipt_bound_replan_decision:
         payload["selected_todo"] = None
+    action_portfolio = _project_quota_action_portfolio(prepared, route)
+    if action_portfolio is not None:
+        payload["action_portfolio"] = action_portfolio
     _attach_truthy_fields(
         payload,
         agent_lane_frontier_hint=route.agent_lane_frontier_hint,

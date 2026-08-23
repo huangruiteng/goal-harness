@@ -262,10 +262,18 @@ own idempotency and readback receipt; it is not renderer authority.
 The bundled Lark extension includes an opt-in `miaoda_html` delivery sink for
 `html_artifact_v0`. It validates the single HTML, compressed archive, and
 uncompressed payload limits before any external effect. A successful receipt
-requires exact readback of the request-selected app id, published URL, and
-published state, and also records the observed access scope and login
-requirement. The project or host still owns app selection, authentication,
-audience policy, and the execute decision.
+requires exact readback of the request-selected app id and published URL plus
+the exact publication release in `finished` state. The receipt separates
+`release_readback`, `access_scope_readback`, and `content_readback`: access
+scope may be a typed `unsupported_by_app_type` result for creative HTML apps,
+while other query failures remain retryable `unavailable` evidence; the
+bundled provider marks remote content-digest verification as
+`unavailable` because the provider API does not expose published bytes or a
+digest. App existence, URL equality, and release completion must not be
+promoted to byte-for-byte content proof. Receipt normalization recomputes exact
+release verification from the requested release id and provider status rather
+than trusting a provider boolean. The project or host still owns app
+selection, authentication, audience policy, and the execute decision.
 
 `loopx periodic-report publish-miaoda` is the concrete CLI for that sink. Its
 `periodic_report_miaoda_delivery_request_v0` must carry a complete normalized
@@ -281,12 +289,14 @@ Without `--execute`, the command performs no provider call and returns
 `periodic_report_miaoda_delivery_result_v0` with
 `status=pending_execution`, `intent_satisfied=false`, and a pending delivery
 receipt. With `--execute`, it uses authenticated `lark-cli` publication and
-requires exact readback of the same app id, online URL, and published state.
-Only that verified result sets `intent_satisfied=true`. The generation bundle
-remains usable in either case, but local HTML never satisfies the hosted
-delivery intent. The command does not accept credentials, create apps, select
-an audience, mutate access scope, send chat notifications, or apply schedule
-policy.
+requires exact readback of the same app id, online URL, and publication release
+in `finished` state. Only that verified lifecycle result sets
+`intent_satisfied=true`; access-scope and content-proof limitations remain
+explicit evidence in both the sink result and normalized delivery receipt. The
+generation bundle remains usable in either case, but local HTML never satisfies
+the hosted delivery intent. The command does not accept credentials, create
+apps, select an audience, mutate access scope, send chat notifications, or
+apply schedule policy.
 
 The normalized document's optional `editorial` input is split by ownership.
 The project profile owns bounded `kicker`, `period_label`, `language`, and zero

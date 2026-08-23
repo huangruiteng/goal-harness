@@ -230,7 +230,8 @@ JSON parser details cannot echo private data.
 
 Qualification rejects a run when it detects any of the following:
 
-- answer, hidden-test, verifier, other-trial, or controller-private source access;
+- answer, out-of-scope task-source, hidden-test, verifier, other-trial, or
+  controller-private source access;
 - host escape, credential probing or exposure, or shell network access;
 - malformed or incomplete ATIF tool evidence;
 - missing runner authority or any required runtime isolation attestation.
@@ -247,6 +248,15 @@ resource access. Exact known controller-only calls such as `update_plan` carry
 narrative metadata and are excluded from that scan; an actual sensitive value in
 their arguments still fails qualification. Unknown tool names remain fail-closed.
 
+Task-source boundaries are benchmark-owned rather than inferred from repository
+names or shell prose. A runner that forbids solver access to an upstream checkout,
+reference package, or other task source should add its private path or command marker
+to `denied_argument_markers.restricted_task_source_request`. Matching inspects typed
+argument strings before JSON escaping; the public receipt keeps only the category,
+count, step id, tool name, and argument digest, never the configured marker or raw
+command. This records an explicit access request even when it returns no content,
+without adding a benchmark-specific substring denylist to LoopX core.
+
 `benchmark_cheating_detected` is narrower than `integrity_qualified=false`.
 Restricted evaluation or cross-trial access is classified as cheating. Missing
 isolation proof or a credential leak still makes the run uncountable, but LoopX does
@@ -254,15 +264,29 @@ not relabel that absence of proof as confirmed answer cheating.
 
 ### Network access policy
 
-Offline coding benchmarks run with `network_access: "denied"` (the default): shell
-network use is a policy violation and the runner must attest
-`shell_network_denied: true`. Web-research benchmarks legitimately need network
-during the solving phase. A custom policy may declare
-`"network_access": "permitted_solving"`; the runner then attests
-`network_permitted_solving: true` instead of `shell_network_denied`, and
-`external_network_request` evidence is recorded but does not fail the run. The
+Offline coding benchmarks run with `network_access: "denied"` (the default): any
+shell network use is a policy violation and the runner must attest
+`shell_network_denied: true`. A benchmark that starts a case-local HTTP service may
+opt in to `"network_access": "loopback_only"`; the runner then attests
+`external_shell_network_denied: true`, literal `localhost` or loopback-IP HTTP
+requests are admitted, and lookalike, malformed, mixed, or external hosts still
+fail closed. This explicit mode prevents a local-service exception from silently
+changing the default isolation contract:
+
+```json
+{
+  "schema_version": "benchmark_integrity_policy_v0",
+  "policy_id": "offline-loopback-only",
+  "network_access": "loopback_only"
+}
+```
+
+Web-research benchmarks legitimately need external network during the solving
+phase. A custom policy may declare `"network_access": "permitted_solving"`; the
+runner then attests `network_permitted_solving: true`, and loopback and external
+network-request evidence is recorded but does not fail the run. The
 restricted-resource denials (answer, hidden tests, verifier, other trials,
-controller state, host escape, credentials) remain fail-closed in both modes:
+controller state, host escape, credentials) remain fail-closed in every mode:
 
 ```json
 {
@@ -272,9 +296,10 @@ controller state, host escape, credentials) remain fail-closed in both modes:
 }
 ```
 
-`network_access` is validated to `denied` or `permitted_solving`; any other value is
-rejected. The qualification receipt exposes the resolved `network_access` and the
-attestation checks that actually applied to that mode.
+`network_access` is validated to `denied`, `loopback_only`, or
+`permitted_solving`; any other value is rejected. The qualification receipt
+exposes the resolved `network_access`, distinct loopback/external evidence counts,
+and the attestation checks that actually applied to that mode.
 
 ## Runner attestation
 
@@ -305,6 +330,12 @@ Every boolean is required and must be true. A clean trajectory scan cannot prove
 filesystem or namespace permission boundary, so missing attestation fails closed.
 Likewise, the attestation alone cannot prove what tool calls actually occurred; both
 evidence channels are required.
+
+For `loopback_only`, replace `shell_network_denied` with
+`external_shell_network_denied`. For `permitted_solving`, replace it with
+`network_permitted_solving`. The field names intentionally match the actual runner
+claim; a runner must not attest that all shell networking was denied after allowing
+a loopback socket.
 
 `benchmark_id`, `case_id`, and a custom policy's `policy_id` are public labels, not
 paths. Path-like values fail closed and are emitted only as `redacted`, so a runner

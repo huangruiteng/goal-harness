@@ -29,6 +29,7 @@ CONTRACT_CAPSULE_SCHEMA_VERSION = "loopx_contract_capsule_v0"
 ACTION_SIGNATURE_SCHEMA_VERSION = "loopx_action_signature_v0"
 ACTION_SIGNATURE_COVERAGE_V0 = "turn_envelope_action_dimensions_v0"
 ACTION_SIGNATURE_COVERAGE_V1 = "turn_envelope_action_dimensions_v1"
+ACTION_SIGNATURE_COVERAGE_V2 = "turn_envelope_action_dimensions_v2"
 ACTION_SIGNATURE_COVERAGE = ACTION_SIGNATURE_COVERAGE_V0
 ACTIONABLE_WARNING_FIELDS = (
     "state_projection_gap",
@@ -688,6 +689,10 @@ def _action_projection(
             recommended_action=recommended_action,
         ),
     }
+    if effect_turn.observation.action_portfolio is not None:
+        action["action_portfolio"] = dict(
+            effect_turn.observation.action_portfolio
+        )
     user = _user_channel(interaction, payload)
     scheduler = _scheduler(payload, turn=effect_turn)
     next_cli_actions = list(effect_turn.next_effect.cli_actions) or list(
@@ -782,7 +787,11 @@ def turn_envelope_action_signature_document(envelope: Mapping[str, Any]) -> dict
     )
     response_plan = envelope.get("response_plan")
     coverage = (
-        ACTION_SIGNATURE_COVERAGE_V1
+        ACTION_SIGNATURE_COVERAGE_V2
+        if isinstance(
+            _mapping(envelope.get("action")).get("action_portfolio"), Mapping
+        )
+        else ACTION_SIGNATURE_COVERAGE_V1
         if isinstance(response_plan, Mapping)
         else ACTION_SIGNATURE_COVERAGE_V0
     )

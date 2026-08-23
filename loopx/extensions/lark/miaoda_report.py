@@ -54,20 +54,47 @@ def _reject_unknown_fields(
         raise ValueError(f"{label} contains unsupported fields: {', '.join(unknown)}")
 
 
-def _json_response(result: Mapping[str, Any], label: str) -> dict[str, Any]:
+def _json_payload(result: Mapping[str, Any], label: str) -> tuple[int, dict[str, Any]]:
     try:
         returncode = int(result["returncode"])
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"{label} returned an invalid process receipt") from exc
-    if returncode != 0:
-        raise ValueError(f"{label} failed")
+    raw_payload = str(result.get("stdout") or result.get("stderr") or "")
     try:
-        payload = json.loads(str(result.get("stdout") or ""))
+        payload = json.loads(raw_payload)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{label} returned invalid JSON") from exc
-    if not isinstance(payload, Mapping) or payload.get("ok") is not True:
+    if not isinstance(payload, Mapping):
+        raise TypeError(f"{label} returned invalid JSON")
+    return returncode, {str(key): value for key, value in payload.items()}
+
+
+def _json_response(result: Mapping[str, Any], label: str) -> dict[str, Any]:
+    returncode, payload = _json_payload(result, label)
+    if returncode != 0 or payload.get("ok") is not True:
         raise ValueError(f"{label} did not return an ok receipt")
-    return {str(key): value for key, value in payload.items()}
+    return payload
+
+
+def _api_error_code(payload: Mapping[str, Any]) -> int | None:
+    error = payload.get("error")
+    candidates = [payload.get("code")]
+    if isinstance(error, Mapping):
+        candidates.append(error.get("code"))
+    for value in candidates:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _unavailable_access_scope() -> dict[str, Any]:
+    return {
+        "status": "unavailable",
+        "retryable": True,
+        "reason": "provider_query_failed",
+    }
 
 
 def _default_runner(
@@ -154,6 +181,57 @@ class LarkCliMiaodaProvider:
             page_token = _text(data.get("page_token"), "Miaoda page_token")
         raise ValueError("Miaoda app readback could not find the requested app")
 
+    def _read_access_scope(
+        self,
+        app_id: str,
+        *,
+        app_type: str,
+    ) -> dict[str, Any]:
+        label = "Miaoda access-scope readback"
+        try:
+            returncode, payload = _json_payload(
+                self._runner(
+                    [
+                        *self._prefix,
+                        "apps",
+                        "+access-scope-get",
+                        "--app-id",
+                        app_id,
+                        "--format",
+                        "json",
+                    ],
+                    None,
+                    120.0,
+                ),
+                label,
+            )
+        except (OSError, subprocess.TimeoutExpired, TypeError, ValueError):
+            return _unavailable_access_scope()
+        if returncode == 0 and payload.get("ok") is True:
+            try:
+                data = self._data(payload)
+                access_scope = _text(
+                    data.get("access_scope") or data.get("scope"),
+                    "Miaoda access_scope",
+                )
+                if not isinstance(data.get("require_login"), bool):
+                    raise TypeError("Miaoda require_login must be a boolean")
+            except (TypeError, ValueError):
+                return _unavailable_access_scope()
+            return {
+                "status": "verified",
+                "retryable": False,
+                "scope": access_scope,
+                "require_login": data["require_login"],
+            }
+        if _api_error_code(payload) == 40002 and app_type == "html":
+            return {
+                "status": "unsupported_by_app_type",
+                "retryable": False,
+                "reason": "creative_html_scope_readback_unavailable",
+            }
+        return _unavailable_access_scope()
+
     def publish(
         self,
         artifact: Mapping[str, Any],
@@ -179,20 +257,56 @@ class LarkCliMiaodaProvider:
                 cwd=root,
             )
         data = self._data(payload)
+        release_id = _text(data.get("release_id"), "Miaoda publish release_id")
         online_url = str(data.get("online_url") or data.get("url") or "").strip()
         if not online_url:
             online_url = _text(
                 self._list_app(app_id).get("online_url"),
                 "Miaoda publish online_url",
             )
-        return {"app_id": app_id, "online_url": online_url}
+        return {
+            "app_id": app_id,
+            "online_url": online_url,
+            "release_id": release_id,
+        }
 
-    def readback(self, app_id: str) -> dict[str, Any]:
+    def readback(self, app_id: str, release_id: str) -> dict[str, Any]:
         item = self._list_app(app_id)
+        release = self._data(
+            self._call(
+                [
+                    "apps",
+                    "+release-get",
+                    "--app-id",
+                    app_id,
+                    "--release-id",
+                    release_id,
+                    "--format",
+                    "json",
+                ],
+                label="Miaoda release readback",
+            )
+        )
+        observed_release_id = _text(
+            release.get("release_id"), "Miaoda readback release_id"
+        )
+        release_status = _text(release.get("status"), "Miaoda readback release status")
+        app_type = _text(item.get("app_type"), "Miaoda readback app_type")
         return {
             "app_id": _text(item.get("app_id"), "Miaoda readback app_id"),
             "online_url": _text(item.get("online_url"), "Miaoda readback online_url"),
             "is_published": item.get("is_published") is True,
+            "release_readback": {
+                "release_id": observed_release_id,
+                "status": release_status,
+                "verified": (
+                    observed_release_id == release_id and release_status == "finished"
+                ),
+            },
+            "access_scope_readback": self._read_access_scope(
+                app_id,
+                app_type=app_type,
+            ),
         }
 
 

@@ -13,6 +13,7 @@ from loopx.control_plane.testing.cli_output_differential import (
     select_cli_output_base_ref,
 )
 from loopx.control_plane.testing.cli_output_semantics import (
+    action_portfolio_schema_versions,
     action_signature_coverages,
 )
 
@@ -35,6 +36,7 @@ def _row(**overrides: object) -> dict[str, object]:
         "markdown_anchor": "# LoopX Status",
         "action_signature_sha256": "semantic-signature",
         "action_signature_coverages": ["turn_envelope_action_dimensions_v0"],
+        "action_portfolio_schema_versions": [],
     }
     row.update(overrides)
     return row
@@ -105,6 +107,16 @@ def test_measurement_records_semantic_shape_without_runtime_hash_noise() -> None
     assert action_signature_coverages(json.loads(payload("first", "source"))) == [
         "turn_envelope_action_dimensions_v0",
     ]
+    assert action_portfolio_schema_versions(
+        {
+            "action_portfolio": {"schema_version": "quota_action_portfolio_v0"},
+            "nested": {
+                "action_portfolio": {
+                    "schema_version": "quota_action_portfolio_v0"
+                }
+            },
+        }
+    ) == ["quota_action_portfolio_v0"]
 
     with_observability_field = json.loads(payload("third-runtime", "third-source"))
     with_observability_field["action_signature"]["diagnostic_note"] = "new"
@@ -186,10 +198,88 @@ def test_declared_action_signature_coverage_migration_requires_review() -> None:
     ]
 
 
+def test_action_portfolio_coverage_migration_requires_review() -> None:
+    candidate = _row(
+        action_signature_sha256="portfolio-semantic-signature",
+        action_signature_coverages=["turn_envelope_action_dimensions_v2"],
+        chars=41_000,
+        utf8_bytes=41_000,
+        lines=1_030,
+        compact_payload_chars=20_750,
+    )
+
+    result = compare_cli_output_receipts(_receipt(_row()), _receipt(candidate))
+
+    assert result["ok"] is True
+    assert result["review_required"] is True
+    assert result["rows"][0]["allowances"] == {
+        "chars": 1_280,
+        "utf8_bytes": 1_280,
+        "lines": 36,
+        "compact_payload_chars": 896,
+    }
+    assert result["rows"][0]["review_signals"] == [
+        "action_signature coverage migrated: "
+        "turn_envelope_action_dimensions_v0 -> turn_envelope_action_dimensions_v2"
+    ]
+
+
+def test_action_portfolio_migration_still_fails_above_bounded_growth() -> None:
+    candidate = _row(
+        action_signature_sha256="oversized-portfolio-semantic-signature",
+        action_signature_coverages=["turn_envelope_action_dimensions_v2"],
+        chars=41_281,
+    )
+
+    result = compare_cli_output_receipts(_receipt(_row()), _receipt(candidate))
+
+    assert result["ok"] is False
+    assert "chars grew by 1281; allowance is 1280" in (
+        result["rows"][0]["failures"]
+    )
+
+
+def test_quota_action_portfolio_schema_migration_has_same_bounded_budget() -> None:
+    candidate = _row(
+        action_signature_sha256=None,
+        action_signature_coverages=[],
+        action_portfolio_schema_versions=["quota_action_portfolio_v0"],
+        chars=41_000,
+        utf8_bytes=41_000,
+        lines=1_030,
+        compact_payload_chars=20_750,
+    )
+    base = _row(
+        action_signature_sha256=None,
+        action_signature_coverages=[],
+    )
+
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+
+    assert result["ok"] is True
+    assert result["review_required"] is True
+    assert result["rows"][0]["review_signals"] == [
+        "action_portfolio schema migrated: none -> quota_action_portfolio_v0"
+    ]
+
+
+def test_unknown_action_portfolio_schema_migration_fails_closed() -> None:
+    candidate = _row(
+        action_portfolio_schema_versions=["quota_action_portfolio_v1"],
+    )
+
+    result = compare_cli_output_receipts(_receipt(_row()), _receipt(candidate))
+
+    assert result["ok"] is False
+    assert result["rows"][0]["failures"] == [
+        "action_portfolio schema coverage changed"
+    ]
+
+
 def test_unknown_action_signature_coverage_migration_fails_closed() -> None:
     candidate = _row(
         action_signature_sha256="unknown-semantic-signature",
-        action_signature_coverages=["turn_envelope_action_dimensions_v2"],
+        action_signature_coverages=["turn_envelope_action_dimensions_v3"],
     )
 
     result = compare_cli_output_receipts(_receipt(_row()), _receipt(candidate))

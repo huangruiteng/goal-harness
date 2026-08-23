@@ -14,6 +14,8 @@ loopx quota should-run --goal-id <goal-id> --agent-id <agent-id> --turn-envelope
 The default `quota should-run` output remains unchanged. The v0 envelope keeps:
 
 - the selected todo, claim, and effective action;
+- the bounded action portfolio when another admitted action can take over after
+  a primary execution failure;
 - concrete user actions and gate reasons;
 - required reads;
 - write scope, approvals, guards, workspace/capability gates, and stop rule;
@@ -32,9 +34,12 @@ coverage.
 Action-signature coverage is versioned independently from the envelope schema.
 `turn_envelope_action_dimensions_v0` covers the original action projection;
 `turn_envelope_action_dimensions_v1` additionally covers a blocking user
-gate's `response_plan`. Base/head qualification accepts that declared v0-to-v1
-migration as a review signal, while a digest change without a supported
-coverage migration still fails closed.
+gate's `response_plan`; `turn_envelope_action_dimensions_v2` additionally signs
+`action.action_portfolio`. Base/head qualification accepts a declared coverage
+migration as a review signal. Its bounded, JSON-only v2 migration budget applies
+only when a v0/v1 baseline moves to v2; ordinary growth limits resume once v2
+is the baseline. A digest change without a supported coverage migration, or a
+v2 portfolio above that one-version budget, still fails closed.
 
 `protocol_action_packet` remains in the full decision/cold path. The envelope
 reconstructs its ordered semantic fields from `action`, `user`, work-lane,

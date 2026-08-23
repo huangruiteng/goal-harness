@@ -17,17 +17,18 @@ from ....capabilities.periodic_report.adapters import (
 from ....capabilities.periodic_report.audience import (
     build_periodic_report_announcement_plan,
 )
+from ....capabilities.periodic_report.bindings import (
+    _normalize_periodic_report_access_scope_readback,
+    _normalize_periodic_report_release_readback,
+)
 from ....capabilities.periodic_report.core import _reject_raw_keys
 from .message_card import build_lark_markdown_reply_card
-
 
 LarkSendEffect = Callable[[Mapping[str, Any], str], Mapping[str, Any]]
 LarkReadbackEffect = Callable[[str], Mapping[str, Any]]
 LarkRecipientMentionRenderer = Callable[[str], str]
-MiaodaPublishEffect = Callable[
-    [Mapping[str, Any], str, str], Mapping[str, Any]
-]
-MiaodaReadbackEffect = Callable[[str], Mapping[str, Any]]
+MiaodaPublishEffect = Callable[[Mapping[str, Any], str, str], Mapping[str, Any]]
+MiaodaReadbackEffect = Callable[[str, str], Mapping[str, Any]]
 
 MIAODA_HTML_MAX_BYTES = 10 * 1024 * 1024
 MIAODA_ARCHIVE_MAX_BYTES = 20 * 1024 * 1024
@@ -128,9 +129,7 @@ def _miaoda_html_preflight(artifact: Mapping[str, Any]) -> dict[str, Any]:
     }
     exceeded = [name for name, value in sizes.items() if value > limits[name]]
     if exceeded:
-        details = ", ".join(
-            f"{name}={sizes[name]}>{limits[name]}" for name in exceeded
-        )
+        details = ", ".join(f"{name}={sizes[name]}>{limits[name]}" for name in exceeded)
         raise ValueError(f"Miaoda HTML publication size limit exceeded: {details}")
     return {
         "status": "passed",
@@ -290,15 +289,29 @@ def periodic_report_miaoda_html_sink_adapter(
             published.get("online_url") or published.get("url"),
             "Miaoda online_url",
         )
-        observed = dict(readback(app_id))
+        release_id = _required_text(
+            published.get("release_id"), "Miaoda publish release_id"
+        )
+        observed = dict(readback(app_id, release_id))
         observed_app_id = str(observed.get("app_id") or "").strip()
         observed_url = str(
             observed.get("online_url") or observed.get("url") or ""
         ).strip()
+        release_readback = _normalize_periodic_report_release_readback(
+            observed.get("release_readback"),
+            "Miaoda release_readback",
+            expected_release_id=release_id,
+        )
+        access_scope_readback = _normalize_periodic_report_access_scope_readback(
+            observed.get("access_scope_readback"), "Miaoda access_scope_readback"
+        )
         verified = (
             observed.get("is_published") is True
             and observed_app_id == app_id
             and observed_url == online_url
+            and release_readback["release_id"] == release_id
+            and release_readback["status"] == "finished"
+            and release_readback["verified"] is True
         )
         result: dict[str, Any] = {
             **base,
@@ -307,18 +320,22 @@ def periodic_report_miaoda_html_sink_adapter(
             "receipt_ref": online_url,
             "result_id": app_id,
             "online_url": online_url,
+            "release_id": release_id,
+            "release_readback": release_readback,
+            "access_scope_readback": access_scope_readback,
+            "content_readback": {
+                "status": "unavailable",
+                "digest_verified": False,
+                "reason": "provider_does_not_expose_remote_content_digest",
+            },
             "readback_verified": verified,
             "external_writes_performed": True,
         }
-        access_scope = observed.get("access_scope") or observed.get("scope")
+        access_scope = access_scope_readback.get("scope")
         if access_scope is not None:
-            result["access_scope"] = _required_text(
-                access_scope, "Miaoda access_scope"
-            )
-        if observed.get("require_login") is not None:
-            if not isinstance(observed["require_login"], bool):
-                raise ValueError("Miaoda require_login must be a boolean")
-            result["require_login"] = observed["require_login"]
+            result["access_scope"] = _required_text(access_scope, "Miaoda access_scope")
+        if access_scope_readback.get("require_login") is not None:
+            result["require_login"] = access_scope_readback["require_login"]
         return result
 
     adapter = PeriodicReportSinkAdapter(

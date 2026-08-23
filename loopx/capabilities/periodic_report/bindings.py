@@ -13,7 +13,6 @@ from .adapters import (
 )
 from .core import _reject_raw_keys
 
-
 GENERATION_BUNDLE_SCHEMA = "periodic_report_generation_bundle_v0"
 GENERATION_RECEIPT_SCHEMA = "periodic_report_generation_receipt_v0"
 SINK_BINDING_SCHEMA = "periodic_report_sink_binding_v0"
@@ -35,6 +34,12 @@ _READINESS_ITEM_STATUSES = {
     "unknown",
     "unverified",
 }
+_ACCESS_SCOPE_READBACK_STATUSES = {
+    "unavailable",
+    "unsupported_by_app_type",
+    "verified",
+}
+_CONTENT_READBACK_STATUSES = {"unavailable"}
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
@@ -76,6 +81,74 @@ def _boolean(value: object, label: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{label} must be a boolean")
     return value
+
+
+def _normalize_periodic_report_release_readback(
+    value: object,
+    label: str,
+    *,
+    expected_release_id: object,
+) -> dict[str, Any]:
+    receipt = _mapping(value, label)
+    release_id = _text(receipt.get("release_id"), f"{label}.release_id")
+    status = _token(receipt.get("status"), f"{label}.status")
+    expected = _text(expected_release_id, f"{label}.expected_release_id")
+    verified = release_id == expected and status == "finished"
+    if _boolean(receipt.get("verified"), f"{label}.verified") is not verified:
+        raise ValueError(f"{label}.verified does not match exact release readback")
+    normalized = {
+        "release_id": release_id,
+        "status": status,
+        "verified": verified,
+    }
+    if set(receipt) != set(normalized):
+        raise ValueError(f"{label} contains unsupported fields")
+    return normalized
+
+
+def _normalize_periodic_report_access_scope_readback(
+    value: object, label: str
+) -> dict[str, Any]:
+    receipt = _mapping(value, label)
+    status = _token(receipt.get("status"), f"{label}.status")
+    if status not in _ACCESS_SCOPE_READBACK_STATUSES:
+        raise ValueError(f"{label}.status is invalid")
+    retryable = _boolean(receipt.get("retryable"), f"{label}.retryable")
+    if retryable is not (status == "unavailable"):
+        raise ValueError(f"{label}.retryable does not match status")
+    normalized: dict[str, Any] = {"status": status, "retryable": retryable}
+    if status == "verified":
+        normalized["scope"] = _text(receipt.get("scope"), f"{label}.scope")
+        normalized["require_login"] = _boolean(
+            receipt.get("require_login"), f"{label}.require_login"
+        )
+    else:
+        normalized["reason"] = _token(receipt.get("reason"), f"{label}.reason")
+    if set(receipt) != set(normalized):
+        raise ValueError(f"{label} contains unsupported fields")
+    return normalized
+
+
+def _normalize_periodic_report_content_readback(
+    value: object, label: str
+) -> dict[str, Any]:
+    receipt = _mapping(value, label)
+    status = _token(receipt.get("status"), f"{label}.status")
+    if status not in _CONTENT_READBACK_STATUSES:
+        raise ValueError(f"{label}.status is invalid")
+    digest_verified = _boolean(
+        receipt.get("digest_verified"), f"{label}.digest_verified"
+    )
+    if digest_verified is not False:
+        raise ValueError(f"{label}.digest_verified does not match status")
+    normalized: dict[str, Any] = {
+        "status": status,
+        "digest_verified": digest_verified,
+    }
+    normalized["reason"] = _token(receipt.get("reason"), f"{label}.reason")
+    if set(receipt) != set(normalized):
+        raise ValueError(f"{label} contains unsupported fields")
+    return normalized
 
 
 def _canonical_copy(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -599,6 +672,47 @@ def build_periodic_report_delivery_receipt(
             and result.get("idempotency_key")
         ):
             raise ValueError(f"{label} sent result requires exact readback")
+        if result.get("sink_kind") == "miaoda_html":
+            evidence_keys = (
+                "access_scope_readback",
+                "content_readback",
+                "release_readback",
+            )
+            if status == "sent":
+                missing_evidence = sorted(
+                    key for key in evidence_keys if result.get(key) is None
+                )
+                if missing_evidence:
+                    raise ValueError(
+                        f"{label} sent Miaoda result is missing structured readback: "
+                        + ", ".join(missing_evidence)
+                    )
+            if result.get("release_readback") is not None:
+                result["release_readback"] = (
+                    _normalize_periodic_report_release_readback(
+                        result["release_readback"],
+                        f"{label}.release_readback",
+                        expected_release_id=result.get("release_id"),
+                    )
+                )
+            if result.get("access_scope_readback") is not None:
+                result["access_scope_readback"] = (
+                    _normalize_periodic_report_access_scope_readback(
+                        result["access_scope_readback"],
+                        f"{label}.access_scope_readback",
+                    )
+                )
+            if result.get("content_readback") is not None:
+                result["content_readback"] = (
+                    _normalize_periodic_report_content_readback(
+                        result["content_readback"],
+                        f"{label}.content_readback",
+                    )
+                )
+            if status == "sent" and result["release_readback"]["verified"] is not True:
+                raise ValueError(
+                    f"{label} sent Miaoda result requires exact release readback"
+                )
         results_by_identity[sink_identity] = result
 
     sink_receipts: list[dict[str, Any]] = []
@@ -647,6 +761,13 @@ def build_periodic_report_delivery_receipt(
         if sink_result is not None:
             for key in ("idempotency_key", "receipt_ref", "result_id"):
                 if sink_result.get(key):
+                    receipt[key] = sink_result[key]
+            for key in (
+                "release_readback",
+                "access_scope_readback",
+                "content_readback",
+            ):
+                if sink_result.get(key) is not None:
                     receipt[key] = sink_result[key]
         sink_receipts.append(receipt)
     unknown = sorted(set(results_by_identity) - expected_identities)

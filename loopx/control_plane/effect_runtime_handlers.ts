@@ -70,6 +70,7 @@ import {
   projectReplanSettlementContract,
   projectTodoLifecycleSettlementReentry,
 } from "./work_items/replan_settlement.ts";
+import { projectQuotaActionPortfolio } from "./work_items/action_portfolio.ts";
 
 type EffectRuntimeHandler = (params: JsonObject) => unknown | Promise<unknown>;
 
@@ -268,6 +269,7 @@ export function createEffectRuntimeHandlers(
     ["scheduler.state.load", loadSchedulerState],
     ["scheduler.state.write", writeSchedulerState],
     ["turn.delivery_route.evaluate", evaluateDeliveryRoute],
+    ["work_item.action_portfolio.project", projectQuotaActionPortfolio],
     ["goal.vision_checkpoint.evaluate", buildVisionCheckpoint],
     [
       "quota.delivery_workspace_causality.evaluate",

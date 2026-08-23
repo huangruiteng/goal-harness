@@ -84,6 +84,11 @@ def _receipt_row(
             if isinstance(payload, dict)
             else []
         ),
+        "action_portfolio_schema_versions": (
+            semantics.action_portfolio_schema_versions(payload)
+            if isinstance(payload, dict)
+            else []
+        ),
     }
 
 

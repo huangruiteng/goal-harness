@@ -10,6 +10,7 @@ from typing import Any
 
 from ...bootstrap_command_pack import build_start_goal_guided_packet
 from ..quota.cli_projection import compact_quota_should_run_cli_payload
+from ..quota.should_run import build_quota_should_run
 from ..quota.turn_envelope import quota_action_signature_document
 from ..work_items.interaction_contract import build_interaction_contract
 from .control_plane_composition_scenarios import (
@@ -37,6 +38,7 @@ from .selected_todo_tool_behavior import (
     SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT,
     SELECTED_TODO_TOOL_FIXTURE_TODO_ID,
 )
+from .quota_fixtures import quota_status_payload, quota_todo_item
 
 ACTUAL_DEFAULT_MODEL_BEHAVIOR_PORTFOLIO_SCHEMA_VERSION = (
     "actual_default_model_behavior_portfolio_v0"
@@ -127,6 +129,14 @@ _SCENARIOS = (
         "turn",
         None,
         "execute",
+    ),
+    _ScenarioSpec(
+        "turn_future_primary_fallback",
+        "turn",
+        None,
+        "execute",
+        "quota_action_portfolio",
+        ("future_primary", "selected_fallback", "priority_preservation"),
     ),
     _ScenarioSpec(
         "turn_human_gate",
@@ -482,6 +492,48 @@ def _selected_todo_scenario_source() -> dict[str, Any]:
     return payload
 
 
+def _future_primary_fallback_scenario_source() -> dict[str, Any]:
+    future_primary = quota_todo_item(
+        todo_id="todo_future_primary",
+        index=1,
+        priority="P0",
+        title="Poll the primary target at its next due window.",
+        claimed_by=ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_AGENT_ID,
+        task_class="continuous_monitor",
+        action_kind="monitor",
+        target_key="public-fixture-primary",
+        cadence="daily",
+        next_due_at="2099-01-01T00:00:00Z",
+        watch_only=True,
+    )
+    ready_fallback = quota_todo_item(
+        todo_id="todo_ready_fallback",
+        index=2,
+        priority="P1",
+        title="Advance the ready bounded fallback slice.",
+        claimed_by=ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_AGENT_ID,
+    )
+    status = quota_status_payload(
+        goal_id=ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_GOAL_ID,
+        status="active",
+        agent_todo_items=[future_primary, ready_fallback],
+        recommended_action=future_primary["text"],
+        next_action=future_primary["text"],
+        coordination={
+            "agent_model": "peer_v1",
+            "registered_agents": [
+                ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_AGENT_ID
+            ],
+        },
+        claim_scope_agent_id=ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_AGENT_ID,
+    )
+    return build_quota_should_run(
+        status,
+        goal_id=ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_GOAL_ID,
+        agent_id=ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_AGENT_ID,
+    )
+
+
 def _terminal_settlement_scenario_source() -> dict[str, Any]:
     payload = _turn_scenario_source(human_gate=False)
     payload["selected_todo"] = {
@@ -659,6 +711,9 @@ def _build_actual_default_model_behavior_scenario_sources(
                 human_gate=False,
                 continuation_policy="same_agent_non_delivery",
             ),
+            "turn_future_primary_fallback": (
+                _future_primary_fallback_scenario_source()
+            ),
             "turn_human_gate": _turn_scenario_source(human_gate=True),
             "turn_quota_hot_path_compaction_regression": (
                 build_quota_hot_path_compaction_regression_source()
@@ -827,6 +882,29 @@ def _validate_required_vision_replan_scenario(
         raise ValueError("required-vision scenario must remain immediately runnable")
 
 
+def _validate_future_primary_fallback_scenario(
+    source_packet: Mapping[str, Any],
+) -> None:
+    signature = quota_action_signature_document(source_packet)
+    action = dict(signature.get("action") or {})
+    selected = dict(action.get("selected_todo") or {})
+    portfolio = dict(action.get("action_portfolio") or {})
+    primary = dict(portfolio.get("primary") or {})
+    unavailable = list(portfolio.get("unavailable_higher_priority") or [])
+    first_unavailable = dict(unavailable[0]) if unavailable else {}
+    if not (
+        selected.get("todo_id") == "todo_ready_fallback"
+        and primary.get("todo_id") == "todo_ready_fallback"
+        and first_unavailable.get("todo_id") == "todo_future_primary"
+        and first_unavailable.get("availability_reason")
+        == "scheduled_for_future"
+    ):
+        raise ValueError(
+            "future-primary scenario must execute the ready fallback while "
+            "preserving the unavailable higher-priority monitor"
+        )
+
+
 def _scenario_contract(
     spec: _ScenarioSpec,
     source_packet: Mapping[str, Any],
@@ -926,6 +1004,8 @@ def _scenario_contract(
                 raise ValueError(
                     "same-agent scenario must preserve the completing peer"
                 )
+    if spec.scenario_id == "turn_future_primary_fallback":
+        _validate_future_primary_fallback_scenario(source_packet)
     if spec.scenario_id == "turn_human_gate":
         required = {
             "selected_todo_id": None,
