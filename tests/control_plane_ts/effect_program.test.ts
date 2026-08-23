@@ -12,6 +12,7 @@ import {
   settlementIdentity,
   settlementIdentityFromPlan,
   settlementNextAction,
+  receiptBoundMonitorPhase,
   settlementPure,
   settlementResultPayload,
 } from "../../loopx/control_plane/effect_program.ts";
@@ -71,6 +72,45 @@ test("settlement identity makes illegal dual bindings unrepresentable", () => {
         replan_obligation_id: "replan",
       }),
     /cannot bind both/,
+  );
+});
+
+test("receipt-bound monitor settlement phase is derived from typed receipts", () => {
+  assert.equal(
+    receiptBoundMonitorPhase({
+      poll_present: false,
+      material_change: false,
+      durable_writeback_present: false,
+      quota_spend_present: false,
+    }),
+    null,
+  );
+  assert.equal(
+    receiptBoundMonitorPhase({
+      poll_present: true,
+      material_change: false,
+      durable_writeback_present: false,
+      quota_spend_present: false,
+    }),
+    "settled",
+  );
+  assert.equal(
+    receiptBoundMonitorPhase({
+      poll_present: true,
+      material_change: true,
+      durable_writeback_present: true,
+      quota_spend_present: false,
+    }),
+    "settlement_pending",
+  );
+  assert.equal(
+    receiptBoundMonitorPhase({
+      poll_present: true,
+      material_change: true,
+      durable_writeback_present: true,
+      quota_spend_present: true,
+    }),
+    "settled",
   );
 });
 

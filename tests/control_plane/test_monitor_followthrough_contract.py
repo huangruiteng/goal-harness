@@ -557,6 +557,82 @@ def test_same_turn_should_run_settles_polled_monitor_before_successor_reselectio
     assert "do not poll again" in replay["work_lane_contract"]["action"]
     assert replay["heartbeat_receipt"]["status"] == "replayed"
 
+    refresh = run_json_cli(
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--classification",
+        "validated_monitor_transition",
+        "--delivery-batch-scale",
+        "single_surface",
+        "--delivery-outcome",
+        "outcome_progress",
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        admitted["todo_id"],
+        "--turn-instance-id",
+        turn_id,
+        "--delivery-workspace-path",
+        str(Path.cwd()),
+        "--no-global-sync",
+        "--suppress-external-sinks",
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert refresh["settlement_result"]["ok"] is True
+    spend = run_json_cli(
+        "quota",
+        "spend-slot",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        admitted["todo_id"],
+        "--turn-instance-id",
+        turn_id,
+        "--slots",
+        "1",
+        "--source",
+        "heartbeat",
+        "--available-capability",
+        "network",
+        "--available-capability",
+        "external_evidence_poll",
+        "--execute",
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert spend["settlement_result"]["ok"] is True
+
+    settled_replay = run_json_cli(
+        *guard_args,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert settled_replay["selected_todo"]["todo_id"] == admitted["todo_id"]
+    assert settled_replay["agent_lane_next_action"][
+        "receipt_bound_monitor_phase"
+    ] == "settled"
+    assert settled_replay["work_lane_contract"]["obligation"] == (
+        "finish_settled_receipt_bound_monitor_turn"
+    )
+    assert settled_replay["should_run"] is False
+    assert settled_replay["effective_action"] == "heartbeat_settled_skip"
+    assert settled_replay["execution_obligation"]["must_attempt_work"] is False
+    assert settled_replay["heartbeat_recommendation"]["agent_must_attempt"] is False
+    assert settled_replay["interaction_contract"]["mode"] == (
+        "heartbeat_settled_skip"
+    )
+    assert settled_replay["interaction_contract"]["user_channel"]["notify"] == (
+        "DONT_NOTIFY"
+    )
+    assert settled_replay["automation_liveness"]["automation_action"] == (
+        "keep_active_quiet"
+    )
+    assert settled_replay["heartbeat_receipt"]["status"] == "replayed"
+
     next_turn_args = list(guard_args)
     next_turn_args[next_turn_args.index(turn_id)] = "2026-08-21T09:51:02.405Z"
     next_turn = run_json_cli(
@@ -584,6 +660,78 @@ def test_receipt_bound_monitor_replay_requires_an_explicit_phase() -> None:
                 "selection_binding": "heartbeat_receipt",
             },
         )
+
+
+def test_same_turn_unchanged_monitor_poll_is_already_settled(tmp_path: Path) -> None:
+    registry, runtime, _state = _write_fixture(tmp_path)
+    monitor = _add_monitor(
+        registry,
+        text="[P1] Poll an unchanged public release target.",
+        target_key="public-release:unchanged-settlement",
+        next_due_at="2000-01-01T00:00:00+00:00",
+    )
+    turn_id = "2026-08-21T10:48:02.405Z"
+    guard_args = (
+        "quota",
+        "should-run",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--runtime-profile",
+        "generic_cli",
+        "--turn-instance-id",
+        turn_id,
+        "--available-capability",
+        "network",
+        "--available-capability",
+        "external_evidence_poll",
+    )
+    guard = run_json_cli(
+        *guard_args,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert guard["selected_todo"]["todo_id"] == monitor["todo_id"]
+    poll = run_json_cli(
+        "quota",
+        "monitor-poll",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--runtime-profile",
+        "generic_cli",
+        "--turn-instance-id",
+        turn_id,
+        "--available-capability",
+        "network",
+        "--available-capability",
+        "external_evidence_poll",
+        "--todo-id",
+        monitor["todo_id"],
+        "--target-key",
+        "public-release:unchanged-settlement",
+        "--result-hash",
+        "unchanged-settlement",
+        "--execute",
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert poll["material_change"] is False
+
+    replay = run_json_cli(
+        *guard_args,
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+    assert replay["selected_todo"]["todo_id"] == monitor["todo_id"]
+    assert replay["agent_lane_next_action"]["receipt_bound_monitor_phase"] == (
+        "settled"
+    )
+    assert replay["effective_action"] == "heartbeat_settled_skip"
+    assert replay["execution_obligation"]["must_attempt_work"] is False
+    assert replay["heartbeat_recommendation"]["agent_must_attempt"] is False
 
 
 def test_turn_scoped_monitor_poll_requires_committed_receipt(tmp_path: Path) -> None:
