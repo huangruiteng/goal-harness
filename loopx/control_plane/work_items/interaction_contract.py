@@ -822,8 +822,10 @@ def interaction_next_cli_actions(
         ]
     if mode == "heartbeat_settled_skip":
         return [
-            "finish this heartbeat without another poll, writeback, or quota spend; "
-            "the next scheduler trigger must use a fresh turn identity"
+            (
+                "finish this heartbeat without another poll, writeback, or quota spend; "
+                "the next scheduler trigger must use a fresh turn identity"
+            )
         ]
     if mode == "monitor_due":
         return [

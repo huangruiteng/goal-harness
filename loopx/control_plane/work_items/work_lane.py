@@ -140,7 +140,7 @@ def preserve_heartbeat_receipt_bound_work_lane(
         raw_monitor_phase = selected_todo.get("receipt_bound_monitor_phase")
         try:
             if not isinstance(raw_monitor_phase, str):
-                raise ValueError("monitor phase must be a string")
+                raise TypeError("monitor phase must be a string")
             monitor_phase = ReceiptBoundMonitorPhase(raw_monitor_phase)
         except (TypeError, ValueError) as exc:
             raise ValueError(
