@@ -279,11 +279,13 @@ def hold_task_lease_mutation_fence(
     authority door marker. In hard_lease mode (without the door) the fence is
     mandatory: no effective lease is a typed error instead of a silent
     ``{"required": False}``, and a time-active lease whose owner constraint is
-    no longer effective (the legacy self-disarm state) fails loudly instead of
-    letting a keyless completion through. For a user-role ``user_gate``
-    completion that supplies no explicit lease credentials, the fence mints
-    the key itself under the same per-goal lease lock; an existing
-    time-active lease is never displaced.
+    no longer effective for a reason other than roster membership (claim
+    mismatch, excluded owner, or closed todo) fails loudly instead of letting
+    a keyless completion through. Leaving the roster does not self-disarm an
+    otherwise time-active lease. For a user-role ``user_gate`` completion that
+    supplies no explicit lease credentials, the fence mints the key itself
+    under the same per-goal lease lock; an existing time-active lease is
+    never displaced.
     """
 
     normalized_goal_id = normalize_goal_id(goal_id)
@@ -332,7 +334,13 @@ def hold_task_lease_mutation_fence(
                     normalized_goal_id,
                 ),
             )
-            active = constraint.get("effective") is True
+            if constraint.get("effective") is True:
+                active = True
+            elif constraint.get("reason") == "owner_not_registered":
+                # Time-active leases keep fencing completion after a roster drop.
+                active = True
+            else:
+                active = False
 
         if (
             auto_acquire_lease
@@ -837,6 +845,77 @@ def lease_is_active(lease: dict[str, Any] | None, *, at: datetime | None = None)
     return bool(expires_at and expires_at > (at or now_utc()))
 
 
+def list_active_task_leases(
+    *,
+    runtime_root: Path,
+    goal_id: str,
+    at: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Return time-active leases. Roster membership is not a filter."""
+
+    at = at or now_utc()
+    lease_dir = task_lease_dir(runtime_root=runtime_root, goal_id=goal_id)
+    leases: list[dict[str, Any]] = []
+    if not lease_dir.exists():
+        return leases
+    for path in sorted(lease_dir.glob("todo_*.json")):
+        lease = read_lease(path)
+        if not lease_is_active(lease, at=at):
+            continue
+        assert lease is not None
+        leases.append(
+            {
+                "todo_id": lease.get("todo_id"),
+                "owner": lease.get("owner"),
+                "expires_at": lease.get("expires_at"),
+                "version": lease.get("version"),
+                "lease_epoch": lease_epoch(lease),
+                "write_scopes": lease.get("write_scopes") or [],
+                "lease": lease,
+                "lease_path": str(path),
+            }
+        )
+    return leases
+
+
+def active_lease_owner_roster_warnings(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    dropped_owners: list[str],
+    runtime_root_override: str | None = None,
+) -> list[dict[str, Any]]:
+    """Warn when a roster drop would leave an owner holding a time-active lease."""
+
+    if not dropped_owners:
+        return []
+    dropped = set(dropped_owners)
+    runtime_root = runtime_root_from_registry(registry_path, runtime_root_override)
+    warnings: list[dict[str, Any]] = []
+    for item in list_active_task_leases(runtime_root=runtime_root, goal_id=goal_id):
+        owner = normalize_todo_claimed_by(item.get("owner"))
+        if owner not in dropped:
+            continue
+        todo_id = item.get("todo_id")
+        expires_at = item.get("expires_at")
+        warnings.append(
+            {
+                "code": "active_lease_owner_dropped_from_roster",
+                "owner": owner,
+                "todo_id": todo_id,
+                "expires_at": expires_at,
+                "lease_path": item.get("lease_path"),
+                "message": (
+                    f"Dropping registered agent {owner!r} who still holds an "
+                    f"active task lease on {todo_id!r} until {expires_at}. "
+                    "The lease keeps protecting that todo until release or "
+                    "expiry; new acquires still require a registered owner."
+                ),
+            }
+        )
+    return warnings
+
+
 def scope_root(scope: str) -> str:
     value = scope.strip()
     if value in {"*", "**", "./"}:
@@ -916,14 +995,12 @@ def active_conflicts(
     at: datetime,
 ) -> list[dict[str, Any]]:
     conflicts: list[dict[str, Any]] = []
-    registered_agents = registered_agent_ids_from_registry(registry_path, goal_id)
-    lease_dir = task_lease_dir(runtime_root=runtime_root, goal_id=goal_id)
-    if not lease_dir.exists():
-        return conflicts
-    for path in sorted(lease_dir.glob("todo_*.json")):
-        lease = read_lease(path)
-        if not lease_is_active(lease, at=at):
-            continue
+    for item in list_active_task_leases(
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        at=at,
+    ):
+        lease = item["lease"]
         lease_todo_id = normalize_lease_todo_id(lease.get("todo_id"))
         if lease_todo_id == todo_id:
             continue
@@ -935,7 +1012,6 @@ def active_conflicts(
         if task_lease_owner_constraint(
             todo,
             owner=lease.get("owner"),
-            registered_agents=registered_agents,
         ).get("effective") is not True:
             continue
         if write_scopes_overlap(write_scopes, normalize_required_write_scopes(lease.get("write_scopes"))):
@@ -947,7 +1023,7 @@ def active_conflicts(
                     "version": lease.get("version"),
                     "lease_epoch": lease_epoch(lease),
                     "write_scopes": lease.get("write_scopes") or [],
-                    "lease_path": str(path),
+                    "lease_path": item["lease_path"],
                 }
             )
     return conflicts
@@ -1039,7 +1115,7 @@ def acquire_task_lease(
             todo_id=todo_id,
             action="acquire",
         )
-        todo = require_task_lease_owner_allowed(
+        require_task_lease_owner_allowed(
             registry_path=registry_path,
             goal_id=goal_id,
             todo_id=todo_id,
@@ -1047,15 +1123,7 @@ def acquire_task_lease(
         )
         existing = read_lease(lease_path)
         assert_expected_version(existing, expected_version)
-        existing_is_effective = bool(
-            lease_is_active(existing, at=at)
-            and task_lease_owner_constraint(
-                todo,
-                owner=(existing or {}).get("owner"),
-                registered_agents=registered_agent_ids_from_registry(registry_path, goal_id),
-            ).get("effective")
-            is True
-        )
+        existing_is_effective = lease_is_active(existing, at=at)
         if existing_is_effective:
             if (
                 existing.get("owner") == owner
@@ -1380,10 +1448,14 @@ def inspect_task_lease(
                 owner=lease.get("owner"),
                 registered_agents=registered_agent_ids_from_registry(registry_path, goal_id),
             )
-            if executor_constraint.get("effective") is not True:
-                active = False
-            else:
+            if executor_constraint.get("effective") is True:
                 executor_constraint = None
+            elif executor_constraint.get("reason") == "owner_not_registered":
+                # Time-active leases keep protecting after the owner leaves
+                # the roster; inspect still reports the registration gap.
+                pass
+            else:
+                active = False
     handoff_mode = _optional_handoff_mode(registry_path, goal_id)
     return {
         "ok": True,
