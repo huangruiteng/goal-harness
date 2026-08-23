@@ -311,6 +311,7 @@ export function createEffectRuntimeHandlers(
         effect_id: requiredString(params.effect_id, "effect_id"),
         result_schema: requiredString(params.result_schema, "result_schema"),
         effect_class: requiredString(params.effect_class, "effect_class"),
+        transition_contract: params.transition_contract,
       }),
     ],
     [

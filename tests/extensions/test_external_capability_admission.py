@@ -235,6 +235,16 @@ def test_manifest_accepts_external_write_for_the_governed_adapter(
         "action_kinds": ["publish_requirement"],
         "target_key_prefixes": ["requirement:"],
     }
+    operation["transition_contract"] = {
+        "proposal_kinds": [
+            "continuous_monitor_upsert",
+            "continuous_monitor_complete",
+        ],
+        "monitor_key_prefixes": ["fixture:"],
+        "monitor_action_kinds": ["poll_requirement"],
+        "monitor_target_key_prefixes": ["requirement-run:"],
+        "monitor_required_capabilities": ["network"],
+    }
     profile.write_text(json.dumps(payload), encoding="utf-8")
     manifest = _manifest(tmp_path / "extension.toml", provider=provider)
 
@@ -246,6 +256,64 @@ def test_manifest_accepts_external_write_for_the_governed_adapter(
         "action_kinds": ["publish_requirement"],
         "target_key_prefixes": ["requirement:"],
     }
+    assert operation["transition_contract"] == {
+        "proposal_kinds": [
+            "continuous_monitor_upsert",
+            "continuous_monitor_complete",
+        ],
+        "monitor_key_prefixes": ["fixture:"],
+        "monitor_action_kinds": ["poll_requirement"],
+        "monitor_target_key_prefixes": ["requirement-run:"],
+        "monitor_required_capabilities": ["network"],
+    }
+
+
+def test_manifest_rejects_transition_contract_on_read_only_operation(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    profile = _profile(tmp_path / "profile.json")
+    payload = json.loads(profile.read_text(encoding="utf-8"))
+    payload["operations"][0]["transition_contract"] = {
+        "proposal_kinds": ["continuous_monitor_upsert"],
+        "monitor_key_prefixes": ["fixture:"],
+        "monitor_action_kinds": ["poll_requirement"],
+        "monitor_target_key_prefixes": ["requirement-run:"],
+        "monitor_required_capabilities": ["network"],
+    }
+    profile.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="only valid for external_write"):
+        load_extension_manifest(
+            _manifest(tmp_path / "extension.toml", provider=provider)
+        )
+
+
+def test_manifest_rejects_unbounded_transition_contract_authority(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    profile = _profile(tmp_path / "profile.json")
+    payload = json.loads(profile.read_text(encoding="utf-8"))
+    operation = payload["operations"][0]
+    operation["effect_class"] = "external_write"
+    operation["todo_contract"] = {
+        "action_kinds": ["publish_requirement"],
+        "target_key_prefixes": ["requirement:"],
+    }
+    operation["transition_contract"] = {
+        "proposal_kinds": ["arbitrary_todo_write"],
+        "monitor_key_prefixes": ["fixture:"],
+        "monitor_action_kinds": ["poll_requirement"],
+        "monitor_target_key_prefixes": ["requirement-run:"],
+        "monitor_required_capabilities": ["network"],
+    }
+    profile.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="proposal_kinds are invalid"):
+        load_extension_manifest(
+            _manifest(tmp_path / "extension.toml", provider=provider)
+        )
 
 
 def test_manifest_rejects_external_write_without_todo_contract(
