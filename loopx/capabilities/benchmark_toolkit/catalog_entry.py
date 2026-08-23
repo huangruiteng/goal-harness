@@ -40,6 +40,21 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     "commands": [
         {
             "command": (
+                "loopx benchmark four-arm-contract "
+                "--spec-json <four-arm-spec.json> "
+                "--require-qualified --format json"
+            ),
+            "purpose": (
+                "Freeze a Goal/LoopX by plain/domain-hint factorial design and "
+                "prove task-goal prompt parity within each matched pair."
+            ),
+            "write_boundary": (
+                "read-only local spec; default receipt contains prompt hashes but "
+                "not prompt text and grants no runner or startup authority"
+            ),
+        },
+        {
+            "command": (
                 "loopx benchmark source-revision-fence "
                 "--source-checkout <clean-source> "
                 "--expected-revision <pin> "
@@ -236,6 +251,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         ),
         "required_sequence": [
             "read_experiment_board_before_launch_or_case_selection",
+            "qualify_four_arm_contract_when_domain_guidance_is_a_factor",
             "configure_or_read_concurrency_envelope_before_launch",
             "reconcile_admission_ledger_with_real_runner_liveness",
             "backfill_when_concurrency_status_reports_underfilled",
@@ -313,6 +329,29 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "technical correctness, integrity, or score countability."
             ),
         },
+    },
+    "four_arm_study": {
+        "benchmark_start_hint": (
+            "When a benchmark-specific solver hint may affect outcomes, preregister "
+            "goal_plain, loopx_plain, goal_<hint-id>, and loopx_<hint-id>; keep "
+            "guided startup out of the task prompt and require equal prompt hashes "
+            "within each Goal/LoopX pair."
+        ),
+        "factors": {
+            "loopx": [False, True],
+            "domain_hint": [False, True],
+        },
+        "runner_obligations": [
+            "attest_domain_hint_independent_of_loopx",
+            "keep_loopx_startup_out_of_band",
+            "match_runtime_task_goal_hash_to_selected_arm",
+            "pin_all_non_factor_inputs",
+            "register_each_run_on_experiment_board",
+        ],
+        "historical_boundary": (
+            "An arm that mixed startup and domain guidance remains diagnostic-only "
+            "and cannot be relabeled into the factorial study."
+        ),
     },
     "concurrency_occupancy": {
         "benchmark_start_hint": (
@@ -491,6 +530,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     },
     "implemented_protocols": [
         {
+            "schema_version": "benchmark_four_arm_contract_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.four_arm_contract",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
             "schema_version": "benchmark_concurrency_envelope_v0",
             "module": "loopx.capabilities.benchmark_toolkit.concurrency_envelope",
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
@@ -551,6 +595,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     ],
     "docs": ["loopx/capabilities/benchmark_toolkit/README.md"],
     "boundaries": [
+        "The four-arm contract controls prompt parity and factor identity only; providers retain launch, guided-startup, task, model, verifier, and score authority.",
         "The toolkit never grants runner, Docker, model, upload, submission, or publication authority; each effect remains separately gated.",
         "Source revision qualification is read-only and caller-observed: it does not fetch, install, update a checkout, or rewrite an already admitted run.",
         "Raw trajectories are private local inputs to integrity qualification and are never copied into receipts, ledgers, docs, or PR artifacts.",

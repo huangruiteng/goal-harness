@@ -480,29 +480,82 @@ ignored `benchmark_integrity_policy_v0` file:
 The policy values are used only for in-memory matching and are not copied into the
 receipt.
 
+## Four-arm Goal/LoopX studies
+
+When a benchmark-specific solver hint may change outcomes independently of LoopX,
+use a two-by-two study instead of comparing a plain Goal baseline with a hinted
+LoopX treatment:
+
+| Arm | LoopX startup | Domain hint | Experiment-board role and anchor |
+| --- | --- | --- | --- |
+| `goal_plain` | off | off | `baseline` |
+| `loopx_plain` | on | off | `treatment`, anchored to `goal_plain` |
+| `goal_<hint-id>` | off | on | `control`, anchored to `goal_plain` |
+| `loopx_<hint-id>` | on | on | `treatment`, anchored to `goal_<hint-id>` |
+
+The domain hint is benchmark-owned solver guidance. For a software-engineering
+benchmark it may ask the solver to implement, validate, and review; another
+benchmark supplies its own domain-appropriate hint. It must remain independent of
+LoopX. LoopX guided startup is a separate provider-owned action and must never be
+inserted into the task goal text.
+
+Create a local spec and qualify it before preregistering runs:
+
+```json
+{
+  "schema_version": "benchmark_four_arm_spec_v0",
+  "base_goal_text": "Complete the requested benchmark task.",
+  "domain_hint": "Apply the benchmark's declared domain workflow.",
+  "hint_id": "domain_hint",
+  "domain_hint_independent_of_loopx": true
+}
+```
+
+```bash
+loopx benchmark four-arm-contract \
+  --spec-json <four-arm-spec.json> \
+  --require-qualified \
+  --format json
+```
+
+The default CLI receipt contains prompt hashes but not prompt text. A trusted local
+runner may use the Python builder or explicitly pass `--include-prompt-text`. At
+launch it must compare the final task-goal hash with the selected arm, pin every
+non-factor input (case, model, reasoning, deadline, permissions, runner, and scorer),
+and record the arm on the experiment board. The plain Goal/LoopX pair and the hinted
+Goal/LoopX pair must each have identical task-goal hashes. The contract grants no
+runner, model, LoopX-startup, verifier, or scoring authority.
+
+The primary comparisons are LoopX without the hint, the hint without LoopX, and
+LoopX with the hint. The interaction contrast compares the two LoopX effects. A
+historical arm that mixed startup guidance and domain guidance is diagnostic only;
+renaming it does not make it a member of this factorial study.
+
 ## Experiment lifecycle
 
 A countable experiment uses the toolkit in this order:
 
-1. Read the project experiment board before selecting or launching another case.
-2. Read or configure the concurrency envelope, then reconcile its reservations with
+1. When domain guidance is a factor, qualify the four-arm contract and freeze its
+   task-goal hashes before preregistration.
+2. Read the project experiment board before selecting or launching another case.
+3. Read or configure the concurrency envelope, then reconcile its reservations with
    exact runner liveness.
-3. Declare a `run_permission_policy_v0` and preflight the runner boundary.
-4. Atomically admit a case slot immediately before the independently authorized
+4. Declare a `run_permission_policy_v0` and preflight the runner boundary.
+5. Atomically admit a case slot immediately before the independently authorized
    runner launch.
-5. Upsert the planned or running row, then launch one frozen case/arm; do not expose
+6. Upsert the planned or running row, then launch one frozen case/arm; do not expose
    evaluator sources or official feedback.
-6. Capture ATIF tool evidence and a runner-owned runtime attestation.
-7. During active monitoring, classify exact-job runtime evidence; do not infer
+7. Capture ATIF tool evidence and a runner-owned runtime attestation.
+8. During active monitoring, classify exact-job runtime evidence; do not infer
    liveness from an occupied admission slot.
-8. Before a terminal write, require runtime continuity between the launch artifact,
+9. Before a terminal write, require runtime continuity between the launch artifact,
    closeout artifact, launch generation, closeout generation, and event window.
-9. Run `integrity-qualification`; stop on any blocker.
-10. Run the independent verifier only after the agent phase.
-11. Reduce the official result through the benchmark-owned scoring path.
-12. Upsert terminal score, countability, effort, treatment fidelity, and insight
+10. Run `integrity-qualification`; stop on any blocker.
+11. Run the independent verifier only after the agent phase.
+12. Reduce the official result through the benchmark-owned scoring path.
+13. Upsert terminal score, countability, effort, treatment fidelity, and insight
     status; release its reservation; then read the matched-comparison projection.
-13. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
+14. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
     comparison claim.
 
 Integrity qualification is necessary but not sufficient for a score claim. It does

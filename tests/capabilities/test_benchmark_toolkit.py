@@ -232,6 +232,27 @@ def test_catalog_exposes_typed_treatment_plan_fidelity_contract() -> None:
     assert "does not prove" in contract["authority_boundary"]
 
 
+def test_catalog_exposes_four_arm_factorial_start_contract() -> None:
+    capability = build_capability_detail_packet("benchmark-toolkit")["capability"]
+    study = capability["four_arm_study"]
+
+    assert study["factors"] == {
+        "loopx": [False, True],
+        "domain_hint": [False, True],
+    }
+    assert "goal_plain" in study["benchmark_start_hint"]
+    assert "loopx_plain" in study["benchmark_start_hint"]
+    assert "keep_loopx_startup_out_of_band" in study["runner_obligations"]
+    assert "match_runtime_task_goal_hash_to_selected_arm" in study[
+        "runner_obligations"
+    ]
+    assert "diagnostic-only" in study["historical_boundary"]
+    assert any(
+        "four-arm-contract" in command["command"]
+        for command in capability["commands"]
+    )
+
+
 def _attestation() -> dict[str, object]:
     return {
         "schema_version": BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION,
