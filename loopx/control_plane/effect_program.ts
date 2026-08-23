@@ -112,8 +112,8 @@ export interface ReceiptBoundMonitorSettlementState {
 
 export function receiptBoundMonitorPhase(
   state: ReceiptBoundMonitorSettlementState,
-): ReceiptBoundMonitorPhase | null {
-  if (!state.poll_present) return null;
+): ReceiptBoundMonitorPhase {
+  if (!state.poll_present) return "poll_due";
   if (!state.material_change) return "settled";
   return state.durable_writeback_present && state.quota_spend_present
     ? "settled"

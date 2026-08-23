@@ -597,6 +597,11 @@ def handle_turn_command(
                     agent_id=args.agent_id,
                     workspace_path=delivery_workspace_path,
                     available_capabilities=args.available_capabilities,
+                    scheduler_execution_context=(
+                        payload.get("scheduler_execution_context")
+                        if isinstance(payload.get("scheduler_execution_context"), dict)
+                        else None
+                    ),
                     operator_inbox_urgency_projector=operator_inbox_urgency_projector,
                     effect_ref=effect_ref,
                 )

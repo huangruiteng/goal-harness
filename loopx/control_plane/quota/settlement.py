@@ -62,7 +62,7 @@ __all__ = [
     "find_settlement_step_event",
     "find_settlement_writeback",
     "infer_persisted_heartbeat_settlement_identity",
-    "receipt_bound_monitor_settlement_complete",
+    "receipt_bound_monitor_settlement_phase",
     "require_settlement_spend",
     "require_settlement_terminal_closeout",
     "require_settlement_writeback",
@@ -74,20 +74,21 @@ __all__ = [
 ]
 
 
-def receipt_bound_monitor_settlement_complete(
+def receipt_bound_monitor_settlement_phase(
     runtime_root: Path,
     *,
     goal_id: str,
     agent_id: str | None,
     todo_id: str | None,
     turn_instance_id: str | None,
-) -> bool | None:
-    """Resolve whether one receipt-bound monitor turn is fully settled.
+) -> ReceiptBoundMonitorPhase | None:
+    """Resolve the typed phase for one receipt-bound monitor turn.
 
-    ``None`` means the turn has no matching monitor-poll receipt and the caller
-    should preserve the ordinary poll-due selection rules.  An unchanged poll
-    is terminal by itself.  A material poll is terminal only after the exact
+    A missing matching poll remains explicitly ``poll_due`` even when mutable
+    Todo scheduling metadata has moved into the future.  An unchanged poll is
+    terminal by itself.  A material poll is terminal only after the exact
     heartbeat identity has both durable writeback and quota-spend receipts.
+    ``None`` is reserved for an invalid receipt identity or runtime failure.
     """
 
     normalized_agent_id = normalize_todo_claimed_by(agent_id)
@@ -105,19 +106,26 @@ def receipt_bound_monitor_settlement_complete(
         turn_instance_id=normalized_turn_id,
     )
     if not isinstance(poll, Mapping):
-        return None
+        return receipt_bound_monitor_phase(
+            poll_present=False,
+            material_change=False,
+            durable_writeback_present=False,
+            quota_spend_present=False,
+        )
     if normalize_todo_id(poll.get("todo_id")) != normalized_todo_id:
-        return None
+        return receipt_bound_monitor_phase(
+            poll_present=False,
+            material_change=False,
+            durable_writeback_present=False,
+            quota_spend_present=False,
+        )
     material_change = poll.get("material_change") is True
     if not material_change:
-        return (
-            receipt_bound_monitor_phase(
-                poll_present=True,
-                material_change=False,
-                durable_writeback_present=False,
-                quota_spend_present=False,
-            )
-            is ReceiptBoundMonitorPhase.SETTLED
+        return receipt_bound_monitor_phase(
+            poll_present=True,
+            material_change=False,
+            durable_writeback_present=False,
+            quota_spend_present=False,
         )
     identity_result = resolve_heartbeat_settlement_identity(
         runtime_root,
@@ -135,14 +143,11 @@ def receipt_bound_monitor_settlement_complete(
         identity is not None
         and require_settlement_spend(runtime_root, identity).value is not None
     )
-    return (
-        receipt_bound_monitor_phase(
-            poll_present=True,
-            material_change=True,
-            durable_writeback_present=durable_writeback_present,
-            quota_spend_present=quota_spend_present,
-        )
-        is ReceiptBoundMonitorPhase.SETTLED
+    return receipt_bound_monitor_phase(
+        poll_present=True,
+        material_change=True,
+        durable_writeback_present=durable_writeback_present,
+        quota_spend_present=quota_spend_present,
     )
 
 

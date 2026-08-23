@@ -107,6 +107,7 @@ QUOTA_SCHEDULER_COMMANDS = frozenset(
         "scheduler-ack",
         "scheduler-ack-current",
         "scheduler-fail-current",
+        "spend-slot",
     }
 )
 
@@ -747,6 +748,7 @@ def handle_quota_command(
                 source=args.source,
                 agent_id=args.agent_id,
                 available_capabilities=args.available_capabilities,
+                scheduler_execution_context=scheduler_context,
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
                 todo_id=args.todo_id,
                 turn_instance_id=heartbeat_turn_id,

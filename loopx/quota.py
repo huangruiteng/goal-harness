@@ -858,6 +858,9 @@ def build_quota_slot_preview(
     agent_id: str | None = None,
     workspace_path: Path | None = None,
     available_capabilities: Any = None,
+    scheduler_execution_context: (
+        Mapping[str, Any] | SchedulerExecutionContextResolution | None
+    ) = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     todo_id: str | None = None,
     replan_obligation_id: str | None = None,
@@ -870,7 +873,9 @@ def build_quota_slot_preview(
         status_payload,
         goal_id=safe_goal_id,
         agent_id=agent_id,
-        available_capabilities=available_capabilities, operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+        available_capabilities=available_capabilities,
+        scheduler_execution_context=scheduler_execution_context,
+        operator_inbox_urgency_projector=operator_inbox_urgency_projector,
     )
     preview = build_quota_slot_preview_for_decision(
         status_payload,
@@ -883,7 +888,9 @@ def build_quota_slot_preview(
             after_status,
             goal_id=safe_goal_id,
             agent_id=agent_id,
-            available_capabilities=available_capabilities, operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+            available_capabilities=available_capabilities,
+            scheduler_execution_context=scheduler_execution_context,
+            operator_inbox_urgency_projector=operator_inbox_urgency_projector,
         ),
         quota_status_builder=quota_status,
         self_repair_spend_actions=SELF_REPAIR_SPEND_ACTIONS,
@@ -1125,6 +1132,9 @@ def spend_quota_slot(
     agent_id: str | None = None,
     workspace_path: Path | None = None,
     available_capabilities: Any = None,
+    scheduler_execution_context: (
+        Mapping[str, Any] | SchedulerExecutionContextResolution | None
+    ) = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     todo_id: str | None = None,
     replan_obligation_id: str | None = None,
@@ -1297,6 +1307,7 @@ def spend_quota_slot(
         agent_id=agent_id,
         workspace_path=workspace_path,
         available_capabilities=available_capabilities,
+        scheduler_execution_context=scheduler_execution_context,
         operator_inbox_urgency_projector=operator_inbox_urgency_projector,
         todo_id=todo_id,
         replan_obligation_id=replan_obligation_id,

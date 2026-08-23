@@ -83,7 +83,7 @@ test("receipt-bound monitor settlement phase is derived from typed receipts", ()
       durable_writeback_present: false,
       quota_spend_present: false,
     }),
-    null,
+    "poll_due",
   );
   assert.equal(
     receiptBoundMonitorPhase({

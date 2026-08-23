@@ -5,8 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ...quota import build_quota_should_run
-from .effect_program import ReceiptBoundMonitorPhase
-from .settlement import receipt_bound_monitor_settlement_complete
+from .settlement import receipt_bound_monitor_settlement_phase
 from ..scheduler.execution_context import (
     SchedulerExecutionContextResolution,
     resolve_scheduler_execution_context,
@@ -127,21 +126,12 @@ def build_live_quota_should_run_decision(
                 **status_payload,
                 "bounded_research_frontier": dict(frontier),
             }
-    monitor_settlement_complete = receipt_bound_monitor_settlement_complete(
+    receipt_bound_monitor_phase = receipt_bound_monitor_settlement_phase(
         runtime_root,
         goal_id=goal_id,
         agent_id=agent_id,
         todo_id=receipt_bound_todo_id,
         turn_instance_id=turn_instance_id,
-    )
-    receipt_bound_monitor_phase = (
-        ReceiptBoundMonitorPhase.SETTLED
-        if monitor_settlement_complete is True
-        else (
-            ReceiptBoundMonitorPhase.SETTLEMENT_PENDING
-            if monitor_settlement_complete is False
-            else None
-        )
     )
     payload = build_quota_should_run(
         decision_status_payload,
