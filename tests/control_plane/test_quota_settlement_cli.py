@@ -1168,6 +1168,195 @@ def test_todo_bound_autonomous_replan_uses_one_binding_for_refresh_and_spend(
     assert _spend_run_count(runtime) == 1
 
 
+def test_autonomous_replan_semantic_delta_keeps_accountable_receipt_chain(
+    tmp_path: Path,
+) -> None:
+    """Regression for #3528's real Todo-bound replan path.
+
+    A stale repair-delta label does not itself prove a successor, but a fresh
+    typed progress observation can still satisfy the open obligation. The
+    accepted semantic ACK must remain in the accountable refresh/receipt chain
+    instead of being mislabeled as a noop after it discharges the obligation.
+    """
+
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_selected_todo_replan_fixture(project, registry_path)
+    _initialize_git_checkout(project)
+    turn_instance_id = "turn-autonomous-replan-semantic-1"
+
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--scan-path",
+        str(project),
+    )
+    assert guard_rc == 0, guard
+    assert guard["decision"] == "autonomous_replan_required", guard
+    assert guard["selected_todo"]["todo_id"] == SELECTED_REPLAN_TODO_ID
+    obligation_id = guard["replan_action_packet"]["obligation_id"]
+
+    refresh_args = (
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--todo-id",
+        SELECTED_REPLAN_TODO_ID,
+        "--delivery-workspace-path",
+        str(project),
+        "--autonomous-replan-recorded",
+        "--repair-delta-kind",
+        "successor_or_supersede",
+        "--delivery-outcome",
+        "outcome_progress",
+        "--classification",
+        "validated_progress",
+        "--progress-result-class",
+        "advanced",
+        "--progress-surface-id",
+        "surface:periodic-review",
+        "--progress-hypothesis-id",
+        "hypothesis:periodic-review",
+        "--progress-probe-kind",
+        "probe:periodic-review",
+        "--progress-evidence-id",
+        "evidence:periodic-review",
+    )
+    mismatched_args = list(refresh_args)
+    todo_flag_index = mismatched_args.index("--todo-id")
+    mismatched_args[todo_flag_index : todo_flag_index + 2] = [
+        "--replan-obligation-id",
+        obligation_id,
+    ]
+    mismatch_rc, mismatch = _run_cli(
+        registry_path,
+        runtime,
+        *mismatched_args,
+    )
+    assert mismatch_rc == 1, mismatch
+    assert mismatch["ok"] is False
+    assert mismatch["appended"] is False
+    assert "settlement binding does not match" in mismatch["error"]
+
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        *refresh_args,
+    )
+
+    assert refresh_rc == 0, refresh.get("error") or refresh
+    assert refresh["ok"] is True
+    assert refresh["appended"] is True
+    assert refresh["classification"] == "validated_progress"
+    assert refresh["delivery_outcome"] == "outcome_progress"
+    assert refresh["autonomous_replan_recorded"] is True
+    assert refresh["autonomous_replan_ack"]["semantic_delta"]["accepted"] is True
+    assert refresh["settlement_result"]["ok"] is True
+    assert [
+        receipt["step_kind"] for receipt in refresh["settlement_result"]["receipts"]
+    ] == ["validation", "durable_writeback"]
+
+    replay_rc, replay = _run_cli(
+        registry_path,
+        runtime,
+        *refresh_args,
+    )
+    assert replay_rc == 0, replay
+    assert replay["idempotent_replay"] is True
+    assert replay["appended"] is False
+    assert _classification_count(runtime, "validated_progress") == 1
+
+    next_guard_rc, next_guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        "turn-after-autonomous-replan-semantic-1",
+        "--scan-path",
+        str(project),
+    )
+    assert next_guard_rc == 0, next_guard
+    assert next_guard.get("autonomous_replan_obligation") is None
+    assert next_guard.get("decision") != "autonomous_replan_required"
+    assert obligation_id not in json.dumps(next_guard, sort_keys=True)
+
+
+def test_turn_scoped_replan_noop_fails_before_durable_write(tmp_path: Path) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _initialize_git_checkout(project)
+    turn_instance_id = "turn-autonomous-replan-noop-1"
+
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--scan-path",
+        str(project),
+    )
+    assert guard_rc == 0, guard
+    assert guard["selected_todo"]["todo_id"] == TODO_ID
+
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--todo-id",
+        TODO_ID,
+        "--delivery-workspace-path",
+        str(project),
+        "--autonomous-replan-recorded",
+        "--repair-delta-kind",
+        "successor_or_supersede",
+        "--delivery-outcome",
+        "outcome_progress",
+        "--classification",
+        "validated_progress",
+        "--progress-result-class",
+        "advanced",
+        "--progress-evidence-id",
+        "evidence:periodic-review",
+    )
+
+    assert refresh_rc == 1, refresh
+    assert refresh["ok"] is False
+    assert refresh["appended"] is False
+    assert "no accountable semantic delta" in refresh["error"]
+    assert _classification_count(runtime, "validated_progress") == 0
+    assert _classification_count(runtime, "replan_noop") == 0
+
+
 def test_runtime_capability_reentry_preserves_receipt_bound_todo_and_rejects_explicit_conflict(
     tmp_path: Path,
 ) -> None:

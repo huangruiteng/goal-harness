@@ -1151,6 +1151,7 @@ def refresh_state_run(
     repair_delta_contract: dict[str, Any] | None = None
     validated_repair_delta_kinds: list[str] = []
     requested_classification = classification
+    requested_delivery_outcome = normalized_delivery_outcome
     effective_autonomous_replan_recorded = bool(autonomous_replan_recorded)
     if autonomous_replan_recorded:
         repair_delta_contract = build_repair_delta_contract(
@@ -1204,6 +1205,21 @@ def refresh_state_run(
     )
     if replan_semantic_delta:
         effective_autonomous_replan_recorded = True
+        # The semantic gate is authoritative for an open replan obligation.
+        # A repair-delta label may fail to describe the state change while the
+        # same writeback still carries a fresh accepted typed observation. In
+        # that case this is not a noop: preserve the caller's accountable
+        # settlement outcome so the durable run and receipt remain one chain.
+        classification = requested_classification
+        normalized_delivery_outcome = requested_delivery_outcome
+    if (
+        settlement_identity is not None
+        and normalized_delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES
+    ):
+        raise ValueError(
+            "turn-scoped refresh-state produced no accountable semantic delta; "
+            "no state or settlement receipt was written"
+        )
     vision_checkpoint = build_vision_checkpoint(
         agent_id=normalized_agent_id or None,
         agent_vision=agent_vision,
