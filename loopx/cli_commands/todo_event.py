@@ -12,6 +12,7 @@ RolloutEventAppender = Callable[..., dict[str, object]]
 TODO_EVENT_KINDS = {
     "add": "todo_add",
     "claim": "todo_claim",
+    "claim-next": "todo_claim_next",
     "update": "todo_update",
     "complete": "todo_complete",
     "supersede": "todo_supersede",
@@ -37,6 +38,7 @@ def append_todo_rollout_event(
         not payload.get("ok")
         or payload.get("dry_run")
         or (payload.get("idempotent_replay") and not turn_instance_id)
+        or (args.todo_command == "claim-next" and not payload.get("claimed"))
     ):
         return
     append_cli_rollout_event(

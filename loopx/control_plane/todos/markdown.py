@@ -101,6 +101,29 @@ def render_todo_markdown(payload: dict[str, Any]) -> str:
             )
         return "\n".join(lines)
 
+    if payload.get("command") == "claim-next":
+        lines = [
+            "# LoopX Todo Claim Next",
+            "",
+            f"- ok: `{payload.get('ok')}`",
+            f"- claimed: `{payload.get('claimed')}`",
+            f"- dry_run: `{payload.get('dry_run')}`",
+            f"- goal_id: `{payload.get('goal_id')}`",
+            f"- agent_id: `{payload.get('agent_id')}`",
+            f"- todo_id: `{payload.get('todo_id')}`",
+            f"- claimed_by: `{payload.get('claimed_by')}`",
+            f"- task_class: `{payload.get('task_class')}`",
+            f"- state_file: `{payload.get('state_file')}`",
+        ]
+        if payload.get("empty_reason"):
+            lines.append(f"- empty_reason: `{payload.get('empty_reason')}`")
+        if payload.get("error"):
+            lines.append(f"- error: {payload.get('error')}")
+        elif payload.get("todo"):
+            marker = todo_marker_for_status(payload.get("status") or TODO_STATUS_OPEN)
+            lines.extend(["", "## Todo", "", f"- [{marker}] {payload.get('todo')}"])
+        return "\n".join(lines)
+
     lines = [
         "# LoopX Todo",
         "",

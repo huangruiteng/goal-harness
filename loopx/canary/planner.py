@@ -598,6 +598,8 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
         "trigger_hints": (
             "todo lifecycle",
             "todo claim",
+            "todo claim-next",
+            "loopx/control_plane/todos/claim_next.py",
             "todo list",
             "todo complete",
             "todo supersede",

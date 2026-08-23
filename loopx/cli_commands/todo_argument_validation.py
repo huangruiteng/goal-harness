@@ -58,6 +58,7 @@ TODO_OPTION_FIELDS = (
     ("--expires-at", "expires_at"),
     ("--watch-only", "watch_only"),
     ("--clear-claim", "clear_claim"),
+    ("--acquire-lease", "acquire_lease"),
     ("--no-follow-up", "no_follow_up"),
     ("--next-agent-todo", "next_agent_todo"),
     ("--next-user-todo", "next_user_todo"),
@@ -311,6 +312,33 @@ def validate_todo_claim_options(args: argparse.Namespace) -> None:
     )
 
 
+def validate_todo_claim_next_options(args: argparse.Namespace) -> None:
+    if not args.agent_id:
+        raise ValueError("todo claim-next requires --agent-id")
+    if args.claimed_by and args.claimed_by != args.agent_id:
+        raise ValueError(
+            "todo claim-next uses --agent-id as the claimant; --claimed-by must "
+            "match --agent-id when both are provided"
+        )
+    if args.todo_id:
+        raise ValueError(
+            "todo claim-next selects the next todo itself; do not pass --todo-id"
+        )
+    _validate_todo_option_subset(
+        args,
+        {
+            "agent_id",
+            "claimed_by",
+            "task_class",
+            "acquire_lease",
+            "state_file",
+        },
+        "todo claim-next only accepts --agent-id, optional --claimed-by, "
+        "--task-class, --acquire-lease, --project, --state-file, and --dry-run; "
+        "unsupported: ",
+    )
+
+
 def validate_todo_update_options(args: argparse.Namespace) -> None:
     if not args.todo_id:
         raise ValueError("todo update requires --todo-id")
@@ -457,6 +485,7 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
     agent_id_allowed_for_read = args.todo_command == "list"
     agent_id_allowed_for_lifecycle = args.todo_command in {
         "claim",
+        "claim-next",
         "update",
         "complete",
         "supersede",

@@ -15,6 +15,7 @@ from ..control_plane.quota.settlement import (
     resolve_heartbeat_settlement_identity,
     settlement_result_payload,
 )
+from ..control_plane.todos.claim_next import claim_next_goal_todo
 from ..control_plane.todos.handoff_mode import HandoffModeError
 from ..control_plane.todos.markdown import render_todo_markdown
 from ..control_plane.work_items.task_lease import TaskLeaseError
@@ -50,6 +51,7 @@ from .todo_argument_validation import (
     validate_todo_add_options,
     validate_todo_archive_completed_options,
     validate_todo_capture_followups_options,
+    validate_todo_claim_next_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
     validate_todo_list_options,
@@ -163,6 +165,7 @@ def register_todo_command(
             "add",
             "list",
             "claim",
+            "claim-next",
             "update",
             "complete",
             "supersede",
@@ -172,8 +175,9 @@ def register_todo_command(
         ],
         default=None,
         help=(
-            "Use add to append a checkbox todo, claim to soft-claim by registered "
-            "agent id, list to read projected todos, update/complete/supersede to transition by todo_id, or "
+            "Use add to append a checkbox todo, claim to soft-claim a known todo_id, "
+            "claim-next to pick and claim the next runnable todo in one locked call, "
+            "list to read projected todos, update/complete/supersede to transition by todo_id, or "
             "archive-completed to move older completed todos into Completed Work Archive. "
             "Use suggest to generate an agent-facing candidate todo analysis prompt without writing state. "
             "Use capture-followups to record a capped public-safe unclaimed follow-up batch."
@@ -265,7 +269,8 @@ def register_todo_command(
             "For todo add/update, explicitly register the routing lane. Use "
             "advancement_task for executable delivery work; user_gate for blocking "
             "owner/controller decisions; user_action for non-blocking user-visible "
-            "todos; continuous_monitor and blocker are non-executable lanes."
+            "todos; continuous_monitor and blocker are non-executable lanes. For "
+            "claim-next, filter the selected lane; default is advancement_task."
         ),
     )
     todo_parser.add_argument(
@@ -388,7 +393,8 @@ def register_todo_command(
             "For agent todo add/claim/update, assign the soft execution owner to a "
             "registered public-safe agent id such as codex-main-control. This names "
             "the assignment target, not the lifecycle actor; multi-agent lifecycle "
-            "commands still require --agent-id. User todos use --bound-agent or "
+            "commands still require --agent-id. For claim-next it is optional and "
+            "must match --agent-id. User todos use --bound-agent or "
             "--goal-bound instead."
         ),
     )
@@ -513,6 +519,14 @@ def register_todo_command(
         "--clear-claim",
         action="store_true",
         help="For todo update, remove the soft claimed_by owner from the todo.",
+    )
+    todo_parser.add_argument(
+        "--acquire-lease",
+        action="store_true",
+        help=(
+            "For todo claim-next, also acquire an optional hard task lease on "
+            "the claimed todo after the soft claimed_by write."
+        ),
     )
     todo_parser.add_argument(
         "--no-follow-up",
@@ -696,6 +710,19 @@ def handle_todo_command(
                 agent_id=args.agent_id,
                 claim_only=True,
                 **_todo_path_args(args),
+                dry_run=bool(args.dry_run),
+            )
+        elif args.todo_command == "claim-next":
+            validate_todo_claim_next_options(args)
+            payload = claim_next_goal_todo(
+                registry_path=registry_path,
+                goal_id=args.goal_id,
+                agent_id=args.agent_id,
+                claimed_by=args.claimed_by,
+                task_class=args.task_class,
+                acquire_lease=bool(args.acquire_lease),
+                **_todo_path_args(args),
+                runtime_root_arg=runtime_root_arg,
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "update":
