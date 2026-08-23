@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
+import pytest
+
 from loopx.control_plane.quota.should_run import build_quota_should_run
 from loopx.control_plane.testing.quota_fixtures import (
     quota_status_payload,
@@ -10,7 +14,9 @@ GOAL_ID = "boundary-selection-fixture"
 AGENT_ID = "codex-main"
 
 
-def test_boundary_projection_checks_the_selected_todo_only() -> None:
+def test_workspace_and_boundary_guards_check_the_selected_todo_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     research = quota_todo_item(
         todo_id="todo_research001",
         index=1,
@@ -39,6 +45,26 @@ def test_boundary_projection_checks_the_selected_todo_only() -> None:
         },
         claim_scope_agent_id=AGENT_ID,
     )
+    workspace_guard_selected_todo: dict[str, Any] = {}
+
+    def _record_workspace_guard_selection(
+        *args: object,
+        selected_todo: dict[str, Any] | None = None,
+        **kwargs: object,
+    ) -> dict[str, Any] | None:
+        workspace_guard_selected_todo.update(selected_todo or {})
+        if (selected_todo or {}).get("required_write_scopes"):
+            return {
+                "schema_version": "agent_workspace_guard_v1",
+                "reason": "selected writing todo requires an independent worktree",
+                "required_action": "move to the assigned worktree",
+            }
+        return None
+
+    monkeypatch.setattr(
+        "loopx.control_plane.quota.should_run.build_agent_workspace_guard",
+        _record_workspace_guard_selection,
+    )
 
     packet = build_quota_should_run(
         status,
@@ -48,9 +74,11 @@ def test_boundary_projection_checks_the_selected_todo_only() -> None:
     )
 
     assert packet["selected_todo"]["todo_id"] == research["todo_id"]
+    assert workspace_guard_selected_todo["todo_id"] == research["todo_id"]
     assert packet["effective_action"] == "normal_run"
     assert packet["normal_delivery_allowed"] is True
     assert packet["self_repair_allowed"] is False
+    assert "workspace_guard" not in packet
     assert "boundary_projection_gap" not in packet
 
 

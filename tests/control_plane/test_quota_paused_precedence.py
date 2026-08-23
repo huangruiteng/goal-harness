@@ -101,7 +101,9 @@ def _assert_authoritatively_paused(payload: dict) -> None:
         assert lane_key not in payload, f"paused payload leaked lane `{lane_key}`"
     # And nothing nested may contradict the pause with an execution signal.
     contradictions = _find_execution_signals(payload)
-    assert contradictions == [], f"paused payload has execution signals: {contradictions}"
+    assert contradictions == [], (
+        f"paused payload has execution signals: {contradictions}"
+    )
 
 
 def test_paused_quota_preempts_capability_bridge_repair() -> None:
@@ -121,7 +123,7 @@ def test_paused_quota_preempts_workspace_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "loopx.control_plane.quota.should_run_prepare.build_agent_workspace_guard",
+        "loopx.control_plane.quota.should_run.build_agent_workspace_guard",
         lambda *args, **kwargs: {
             "schema_version": "agent_workspace_guard_v1",
             "reason": "workspace fixture requires relocation",
