@@ -29,7 +29,11 @@ rank-bearing `role` field, including null-valued placeholders.
 
 ## Work Ownership
 
-1. An explicit todo `claimed_by` or active task lease wins.
+1. An explicit todo `claimed_by` or active task lease wins. An active task
+   lease keeps protecting its todo until release or expiry even if that owner
+   is later removed from `registered_agents`. New acquires still require a
+   registered owner. Use `configure-goal --add-registered-agent` /
+   `--remove-registered-agent` to change the roster without replacing it.
 2. An unclaimed todo must be claimed or leased before delivery.
 3. An explicitly agent-scoped replan obligation stays with that agent.
 4. An unscoped replan obligation is assigned to exactly one registered peer by
