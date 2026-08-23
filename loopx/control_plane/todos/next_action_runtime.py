@@ -191,7 +191,12 @@ def apply_added_todo_next_action(
 
     changed = bool(add_result["changed"])
     todo_id = str(add_result.get("todo_id") or "")
-    if role != "agent" or not todo_id:
+    if (
+        not changed
+        or role != "agent"
+        or add_result.get("task_class") != "advancement_task"
+        or not todo_id
+    ):
         return changed
     return reconcile_added_todo_next_action(lines, added_todo_id=todo_id) or changed
 

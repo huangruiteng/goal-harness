@@ -354,18 +354,22 @@ function nextOpenAgentTodo(
 
 function replaceNextAction(
   lines: readonly string[],
-  todo: TodoNextActionSnapshot,
+  todo: TodoNextActionSnapshot | null,
 ): string[] | null {
   const bounds = headingBounds(lines, "Next Action");
   if (!bounds) return null;
   const [start, end] = bounds;
+  const replacement = ["## Next Action", ""];
+  if (todo) {
+    replacement.push(
+      `- ${todo.text}`,
+      bindingLine(todo.todo_id),
+      "",
+    );
+  }
   return [
     ...lines.slice(0, start),
-    "## Next Action",
-    "",
-    `- ${todo.text}`,
-    bindingLine(todo.todo_id),
-    "",
+    ...replacement,
     ...lines.slice(end),
   ];
 }
@@ -478,8 +482,9 @@ function settleCompletedTodo(
     };
   }
 
-  const bounds = headingBounds(request.lines, "Next Action");
-  if (!bounds) {
+  const nextTodo = nextOpenAgentTodo(request.agent_todos);
+  const updated = replaceNextAction(request.lines, nextTodo);
+  if (!updated) {
     return {
       ...unchangedResult(
         "settle_completion",
@@ -491,21 +496,6 @@ function settleCompletedTodo(
       match_source: matchSource,
     };
   }
-  const [start, end] = bounds;
-  const nextTodo = nextOpenAgentTodo(request.agent_todos);
-  const replacement = ["## Next Action", ""];
-  if (nextTodo) {
-    replacement.push(
-      `- ${nextTodo.text}`,
-      bindingLine(nextTodo.todo_id),
-      "",
-    );
-  }
-  const updated = [
-    ...request.lines.slice(0, start),
-    ...replacement,
-    ...request.lines.slice(end),
-  ];
   const changed = updated.some((line, index) => line !== request.lines[index]) ||
     updated.length !== request.lines.length;
   return {

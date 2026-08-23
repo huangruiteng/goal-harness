@@ -7,6 +7,7 @@ from loopx.bootstrap import render_state_markdown
 from loopx.control_plane.effect_runtime import MAX_REQUEST_BYTES
 from loopx.control_plane.todos.next_action_runtime import (
     _agent_todo_snapshots,
+    apply_added_todo_next_action,
     reconcile_added_todo_next_action,
 )
 from loopx.control_plane.todos.projection import TODO_MISSING_PRIORITY_RANK, todo_priority_rank
@@ -297,6 +298,38 @@ def test_higher_priority_todo_preserves_multi_entry_operator_route() -> None:
     assert reconcile_added_todo_next_action(lines, added_todo_id="todo_task") is False
     assert "- Preserve this operator-authored route." in lines
     assert "todo_id=todo_startup" in "\n".join(lines)
+
+
+def test_unchanged_and_non_advancement_adds_skip_the_ts_transition(
+    monkeypatch,
+) -> None:
+    def reject_unexpected_transition(*_args, **_kwargs):
+        raise AssertionError("non-candidate Todo addition crossed the TS boundary")
+
+    monkeypatch.setattr(
+        "loopx.control_plane.todos.next_action_runtime.effect_runtime_result",
+        reject_unexpected_transition,
+    )
+    lines = ["## Next Action", "", "- Preserve the existing route.", ""]
+
+    assert apply_added_todo_next_action(
+        lines,
+        role="agent",
+        add_result={
+            "changed": False,
+            "todo_id": "todo_existing",
+            "task_class": "advancement_task",
+        },
+    ) is False
+    assert apply_added_todo_next_action(
+        lines,
+        role="agent",
+        add_result={
+            "changed": True,
+            "todo_id": "todo_monitor",
+            "task_class": "continuous_monitor",
+        },
+    ) is True
 
 
 def test_refresh_record_preserves_a_long_wrapped_next_action_losslessly(
