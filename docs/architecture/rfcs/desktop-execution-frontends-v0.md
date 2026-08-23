@@ -544,6 +544,39 @@ The adapter must therefore validate the Plan route instead of assuming that a
 model supported by a standard Ark endpoint is automatically available through
 the Plan profile. Credentials and raw provider responses remain owner-local.
 
+### Goal-bound external capabilities in both modes
+
+Runtime and provider selection do not define the Agent's complete toolset.
+Attached and managed working sessions must project the same external
+capabilities from the selected Agent's Goal binding. This RFC does not add an
+`external toolkit` runtime object or another capability-pack contract. The
+existing boundaries remain sufficient:
+
+- an extension owns provider packaging, installation, revision, enablement,
+  doctor, and rollback;
+- an external capability owns the caller-outcome contract, operations,
+  permissions, schemas, validation, readback, and receipts; and
+- an optional domain capability pack owns domain policy, state, and projection
+  when those semantics are actually required.
+
+A repository that happens to contain multiple skills, commands, and services
+is only a source distribution. Its owner may keep a source inventory, but each
+executable operation must enter LoopX through an existing extension and
+capability contract. Installing the repository, finding a prompt skill, or
+observing a same-named provider grants no authority. Duplicate providers fail
+closed unless the Goal binding selects one exact ready revision.
+
+Read-only operations may reuse the durable Goal binding without creating work
+truth. A material operation must bind to the current authorized work attempt;
+managed mode uses the governed Turn transaction, while attached mode preserves
+the equivalent host or automation decision and settlement evidence. Neither
+path may let a capability provider mutate Goal or Todo state directly.
+
+Private provider coordinates, credentials, logs, traces, database rows, and
+document content remain owner-local. LoopX durable state keeps only public-safe
+capability and operation identity, provider revision and profile digests,
+bounded evidence references, and admitted receipts.
+
 ## State and identity boundaries
 
 The frontend stores one Agent-scoped working-session binding whose public
@@ -704,6 +737,10 @@ pass the shared conformance suite.
   cross-session delivery;
 - LoopX remains authoritative for Goal/Todo lifecycle in every frontend mode;
 - a read-only exchange creates no task transition or quota spend;
+- both modes expose only the external capability operations admitted by the
+  same Goal binding at an exact provider revision;
+- an external capability material operation cannot bypass the active work-
+  attempt authority, validation, provider readback, or settlement receipt;
 - stale or mismatched identity and capability bindings fail closed; and
 - committed packets contain no credentials, raw transcripts, provider
   payloads, opaque handles, or real local paths.
@@ -783,6 +820,10 @@ pass the shared conformance suite.
 - Making `turn run-once` an eternal scheduler or desktop process supervisor.
 - Building a universal runtime abstraction beyond the behavior required by Pi
   and `dsh`.
+- Vendoring enterprise toolkits, provider coordinates, credentials, or private
+  operating procedures into LoopX core.
+- Treating a toolkit repository, install script, or prompt skill as one
+  implicitly trusted universal capability.
 - Hard-coding a permanent model capability table in LoopX.
 - Treating a standard Ark route and an Ark Agent Plan route as globally
   interchangeable.
@@ -803,6 +844,8 @@ pass the shared conformance suite.
 ## Related surfaces and proposals
 
 - [Runtime connector catalog](../../integrations/runtime-connector-catalog.md)
+- [Domain capability packs](../../product/domain-capability-packs.md)
+- [Extensions](../../reference/extensions.md)
 - [LoopX Turn v0](../../reference/protocols/loopx-turn-v0.md)
 - [DeepSeek Harness connector](../../integrations/deepseek-harness-connector.md)
 - [Pi Goal mode](../../../loopx/pi_goal_mode/README.md)
