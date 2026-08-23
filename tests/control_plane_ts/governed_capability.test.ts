@@ -15,6 +15,39 @@ const authority = {
   effect_class: "external_write",
 } as const;
 
+const transitionContract = {
+  proposal_kinds: [
+    "continuous_monitor_upsert",
+    "continuous_monitor_complete",
+  ],
+  monitor_key_prefixes: ["fixture:"],
+  monitor_action_kinds: ["poll_delivery"],
+  monitor_target_key_prefixes: ["delivery-run:"],
+  monitor_required_capabilities: ["network"],
+};
+
+const monitorUpsert = {
+  schema_version: "loopx_continuous_monitor_proposal_v0",
+  proposal_id: "monitor_upsert_1",
+  kind: "continuous_monitor_upsert",
+  monitor_key: "fixture:delivery-run",
+  text: "Poll the synthetic delivery run.",
+  action_kind: "poll_delivery",
+  target_key: "delivery-run:synthetic-1",
+  cadence: "5m",
+  next_due_at: "2099-01-01T00:05:00+00:00",
+  expires_at: "2099-01-02T00:00:00+00:00",
+  required_capabilities: ["network"],
+};
+
+const monitorComplete = {
+  schema_version: "loopx_continuous_monitor_proposal_v0",
+  proposal_id: "monitor_complete_1",
+  kind: "continuous_monitor_complete",
+  monitor_key: "fixture:delivery-run",
+  evidence: "Synthetic delivery reached a terminal state.",
+};
+
 function result(status: "running" | "succeeded" | "no_change") {
   return {
     schema_version: authority.result_schema,
@@ -110,6 +143,113 @@ test("running providers cannot claim partial effects", () => {
     () => validateGovernedCapabilityResult({ ...authority, value: invalid }),
     /must leave domain_state_mutations empty/,
   );
+});
+
+test("running providers may propose one admitted continuous monitor", () => {
+  const running = result("running");
+  running.transition_proposals = [{ ...monitorUpsert }];
+
+  const validated = validateGovernedCapabilityResult({
+    ...authority,
+    transition_contract: transitionContract,
+    value: running,
+  });
+
+  assert.equal(validated.journal_status, "running");
+  assert.deepEqual(validated.result.transition_proposals, [monitorUpsert]);
+});
+
+test("transition proposals fail closed outside profile authority", () => {
+  const running = result("running");
+  running.transition_proposals = [{ ...monitorUpsert }];
+  assert.throws(
+    () => validateGovernedCapabilityResult({ ...authority, value: running }),
+    /transition_contract must be an object/,
+  );
+
+  const wrongAction = result("running");
+  wrongAction.transition_proposals = [{
+    ...monitorUpsert,
+    action_kind: "deploy_release",
+  }];
+  assert.throws(
+    () => validateGovernedCapabilityResult({
+      ...authority,
+      transition_contract: transitionContract,
+      value: wrongAction,
+    }),
+    /action_kind is not admitted/,
+  );
+
+  const wrongMonitor = result("running");
+  wrongMonitor.transition_proposals = [{
+    ...monitorUpsert,
+    monitor_key: "unrelated:delivery-run",
+  }];
+  assert.throws(
+    () => validateGovernedCapabilityResult({
+      ...authority,
+      transition_contract: transitionContract,
+      value: wrongMonitor,
+    }),
+    /monitor_key is not admitted/,
+  );
+
+  const wrongTarget = result("running");
+  wrongTarget.transition_proposals = [{
+    ...monitorUpsert,
+    target_key: "unrelated:synthetic-1",
+  }];
+  assert.throws(
+    () => validateGovernedCapabilityResult({
+      ...authority,
+      transition_contract: transitionContract,
+      value: wrongTarget,
+    }),
+    /target_key is not admitted/,
+  );
+
+  const wrongCapability = result("running");
+  wrongCapability.transition_proposals = [{
+    ...monitorUpsert,
+    required_capabilities: ["production_access"],
+  }];
+  assert.throws(
+    () => validateGovernedCapabilityResult({
+      ...authority,
+      transition_contract: transitionContract,
+      value: wrongCapability,
+    }),
+    /required_capabilities are not admitted/,
+  );
+});
+
+test("running providers cannot complete a monitor", () => {
+  const running = result("running");
+  running.transition_proposals = [{ ...monitorComplete }];
+
+  assert.throws(
+    () => validateGovernedCapabilityResult({
+      ...authority,
+      transition_contract: transitionContract,
+      value: running,
+    }),
+    /running result may only upsert a monitor/,
+  );
+});
+
+test("successful providers may complete an admitted monitor", () => {
+  const succeeded = result("succeeded");
+  succeeded.transition_proposals = [{ ...monitorComplete }];
+
+  const validated = validateGovernedCapabilityResult({
+    ...authority,
+    transition_contract: transitionContract,
+    value: succeeded,
+  });
+
+  assert.equal(validated.journal_status, "ready_to_settle");
+  assert.deepEqual(validated.result.transition_proposals, [monitorComplete]);
 });
 
 test("terminal effect receipts bind the exact settlement effect", () => {

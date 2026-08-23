@@ -20,8 +20,9 @@ publication authority.
 
 ## Engineering build map
 
-The canonical engineering plan is [Section 11 of the research
-RFC](../docs/architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md#11-engineering-construction-plan).
+The canonical engineering plan is [Section 11 of the English research
+RFC](../docs/architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md#11-engineering-construction-plan)
+and [中文第 11 节](../docs/architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.zh-CN.md#11-工程建设计划).
 It separates repository readiness from benchmark claims:
 
 - **E0--E1:** typed contracts, public/private boundaries, native runner

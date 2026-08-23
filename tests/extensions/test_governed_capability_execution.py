@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import loopx.extensions.governed_capability_execution as governed_execution
 from loopx.control_plane.effect_program import SettlementIdentity
 from loopx.control_plane.effect_runtime import EffectRuntimeRejected
 from loopx.extensions.capability_admission import (
@@ -19,6 +20,7 @@ from loopx.extensions.governed_capability_execution import (
     start_governed_external_capability,
 )
 from loopx.extensions.runtime import install_extension
+from loopx.todos import list_goal_todos
 
 
 def _provider(path: Path, *, call_log: Path) -> Path:
@@ -42,7 +44,19 @@ result = {{
     "observations": [{{"kind": "synthetic-progress", "phase": phase}}],
     "domain_state_mutations": [],
     "domain_transition_receipts": [],
-    "transition_proposals": [],
+    "transition_proposals": [{{
+        "schema_version": "loopx_continuous_monitor_proposal_v0",
+        "proposal_id": "fixture_monitor_upsert_1",
+        "kind": "continuous_monitor_upsert",
+        "monitor_key": "fixture:material-run",
+        "text": "Poll the synthetic material run.",
+        "action_kind": "poll_material_delivery",
+        "target_key": "fixture-run:synthetic-run-1",
+        "cadence": "5m",
+        "next_due_at": "2099-01-01T00:05:00+00:00",
+        "expires_at": "2099-01-02T00:00:00+00:00",
+        "required_capabilities": ["network"],
+    }}],
     "effect_receipt": None,
     "follow_up": {{"kind": "poll", "ref": "synthetic-run-1"}},
 }}
@@ -57,6 +71,13 @@ if phase == "reconcile":
         "external_ref": "synthetic-run-1",
         "evidence_digest": "sha256:synthetic-evidence",
     }}
+    result["transition_proposals"] = [{{
+        "schema_version": "loopx_continuous_monitor_proposal_v0",
+        "proposal_id": "fixture_monitor_complete_1",
+        "kind": "continuous_monitor_complete",
+        "monitor_key": "fixture:material-run",
+        "evidence": "Synthetic provider reached its terminal state.",
+    }}]
 json.dump(result, sys.stdout)
 """,
         encoding="utf-8",
@@ -81,6 +102,16 @@ def _installed_material_extension(tmp_path: Path) -> tuple[Path, Path, Path]:
                         "todo_contract": {
                             "action_kinds": ["fixture_material_delivery"],
                             "target_key_prefixes": ["fixture-material:"],
+                        },
+                        "transition_contract": {
+                            "proposal_kinds": [
+                                "continuous_monitor_upsert",
+                                "continuous_monitor_complete",
+                            ],
+                            "monitor_key_prefixes": ["fixture:"],
+                            "monitor_action_kinds": ["poll_material_delivery"],
+                            "monitor_target_key_prefixes": ["fixture-run:"],
+                            "monitor_required_capabilities": ["network"],
                         },
                         "required_permission": "fixture.delivery.write",
                         "request_schema": "fixture_material_capability_request_v0",
@@ -123,16 +154,26 @@ integration_profile = "profile.json"
     )
     state_file = tmp_path / "extensions.json"
     install_extension(manifest, state_file=state_file, execute=True)
+    active_state = tmp_path / "ACTIVE_GOAL_STATE.md"
+    active_state.write_text(
+        "---\nstatus: active\n---\n\n# Active Goal State\n\n## Agent Todo\n",
+        encoding="utf-8",
+    )
     registry = tmp_path / "registry.json"
     registry.write_text(
         json.dumps(
             {
                 "schema_version": "loopx_registry_v1",
+                "common_runtime_root": str(tmp_path / "runtime"),
                 "goals": [
                     {
                         "id": "fixture-goal",
                         "title": "Fixture Goal",
                         "repo": str(tmp_path),
+                        "state_file": "ACTIVE_GOAL_STATE.md",
+                        "coordination": {
+                            "registered_agents": ["fixture-agent"],
+                        },
                     }
                 ],
             }
@@ -214,10 +255,70 @@ def test_material_start_is_previewable_and_provider_idempotent(tmp_path: Path) -
     assert preview["status"] == "ready"
     assert preview["executed"] is False
     assert started["status"] == "running"
+    assert started["effects"]["loopx_transitions_written"] is True
+    assert started["transition_receipts"][0]["action"] == "created"
     assert replay["invocation_id"] == started["invocation_id"]
+    assert replay["transition_receipts"] == started["transition_receipts"]
     assert call_log.read_text(encoding="utf-8").splitlines() == ["start"]
+    monitors = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
+    assert len(monitors) == 1
+    assert monitors[0]["capability_binding_ref"] == "fixture:material-run"
+    assert monitors[0]["status"] == "open"
     journal = Path(arguments["run_dir"]) / f"{started['invocation_id']}.json"
     assert stat.S_IMODE(journal.stat().st_mode) == 0o600
+
+
+def test_material_start_recovers_monitor_after_pre_receipt_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    arguments = _start_arguments(tmp_path)
+    original_write_journal = governed_execution._write_journal
+    write_count = 0
+
+    def crash_before_transition_receipt(
+        path: Path,
+        payload: Mapping[str, object],
+    ) -> None:
+        nonlocal write_count
+        write_count += 1
+        if write_count == 3:
+            raise RuntimeError("synthetic checkpoint crash")
+        original_write_journal(path, payload)
+
+    monkeypatch.setattr(
+        governed_execution,
+        "_write_journal",
+        crash_before_transition_receipt,
+    )
+    with pytest.raises(RuntimeError, match="synthetic checkpoint crash"):
+        start_governed_external_capability(**arguments, execute=True)
+
+    monkeypatch.setattr(
+        governed_execution,
+        "_write_journal",
+        original_write_journal,
+    )
+    replay = start_governed_external_capability(**arguments, execute=True)
+
+    assert replay["status"] == "running"
+    assert replay["transition_receipts"][0]["action"] in {
+        "unchanged",
+        "updated",
+    }
+    assert (tmp_path / "provider-calls.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == ["start"]
+    monitors = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
+    assert len(monitors) == 1
 
 
 def test_material_operation_remains_unavailable_through_direct_invoke(
@@ -280,15 +381,27 @@ def test_material_reconcile_writes_receipt_before_spending_and_replays(
     assert committed["effects"] == {
         "provider_invoked": True,
         "external_write_observed": True,
+        "loopx_transitions_written": True,
         "loopx_state_written": True,
         "quota_spent": True,
     }
+    assert [item["kind"] for item in committed["transition_receipts"]] == [
+        "continuous_monitor_upsert",
+        "continuous_monitor_complete",
+    ]
     assert calls == ["writeback", "spend"]
     assert replay["status"] == "committed"
     assert calls == ["writeback", "spend"]
     assert (tmp_path / "provider-calls.txt").read_text(
         encoding="utf-8"
     ).splitlines() == ["start", "reconcile"]
+    monitors = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
+    assert len(monitors) == 1
+    assert monitors[0]["status"] == "done"
 
 
 def test_material_start_rejects_a_different_selected_turn(tmp_path: Path) -> None:
@@ -412,6 +525,44 @@ def test_material_settlement_fails_closed_without_effect_receipt_writeback(
     assert failed["ok"] is False
     assert failed["status"] == "settlement_failed"
     assert calls == ["writeback"]
+    assert [item["kind"] for item in failed["transition_receipts"]] == [
+        "continuous_monitor_upsert"
+    ]
+    monitors = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
+    assert len(monitors) == 1
+    assert monitors[0]["status"] == "open"
+
+    def complete_writeback(context: Mapping[str, object]) -> dict[str, object]:
+        calls.append("writeback")
+        return {
+            "ok": True,
+            "appended": True,
+            "settlement_identity": context["settlement_identity"],
+            "effect_receipt_digest": context["effect_receipt_digest"],
+        }
+
+    committed = reconcile_governed_external_capability(
+        run_dir=arguments["run_dir"],
+        invocation_id=str(started["invocation_id"]),
+        writeback=complete_writeback,
+        spend=spend,
+    )
+
+    assert committed["status"] == "committed"
+    assert calls == ["writeback", "writeback", "spend"]
+    assert (tmp_path / "provider-calls.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == ["start", "reconcile"]
+    monitors = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
+    assert monitors[0]["status"] == "done"
 
 
 def test_material_reconcile_rejects_tampered_journal_request(tmp_path: Path) -> None:
@@ -468,6 +619,11 @@ def test_material_reconcile_resumes_at_spend_without_repeating_writeback(
         writeback=writeback,
         spend=spend,
     )
+    monitors_after_failure = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
     second = reconcile_governed_external_capability(
         run_dir=arguments["run_dir"],
         invocation_id=str(started["invocation_id"]),
@@ -476,8 +632,92 @@ def test_material_reconcile_resumes_at_spend_without_repeating_writeback(
     )
 
     assert first["status"] == "settlement_failed"
+    assert monitors_after_failure[0]["status"] == "open"
     assert second["status"] == "committed"
     assert calls == ["writeback", "spend", "spend"]
     assert (tmp_path / "provider-calls.txt").read_text(
         encoding="utf-8"
     ).splitlines() == ["start", "reconcile"]
+
+
+def test_material_reconcile_recovers_completion_after_pre_receipt_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    arguments = _start_arguments(tmp_path)
+    started = start_governed_external_capability(**arguments, execute=True)
+    original_write_journal = governed_execution._write_journal
+    calls: list[str] = []
+    crashed = False
+
+    def writeback(context: Mapping[str, object]) -> dict[str, object]:
+        calls.append("writeback")
+        return {
+            "ok": True,
+            "appended": True,
+            "settlement_identity": context["settlement_identity"],
+            "effect_receipt_digest": context["effect_receipt_digest"],
+        }
+
+    def spend(context: Mapping[str, object]) -> dict[str, object]:
+        calls.append("spend")
+        return {
+            "ok": True,
+            "appended": True,
+            "settlement_identity": context["settlement_identity"],
+        }
+
+    def crash_before_completion_receipt(
+        path: Path,
+        payload: Mapping[str, object],
+    ) -> None:
+        nonlocal crashed
+        raw_receipts = payload.get("transition_receipts")
+        receipts = raw_receipts if isinstance(raw_receipts, list) else []
+        if not crashed and any(
+            isinstance(item, Mapping)
+            and item.get("kind") == "continuous_monitor_complete"
+            for item in receipts
+        ):
+            crashed = True
+            raise RuntimeError("synthetic completion checkpoint crash")
+        original_write_journal(path, payload)
+
+    monkeypatch.setattr(
+        governed_execution,
+        "_write_journal",
+        crash_before_completion_receipt,
+    )
+    with pytest.raises(RuntimeError, match="synthetic completion checkpoint crash"):
+        reconcile_governed_external_capability(
+            run_dir=arguments["run_dir"],
+            invocation_id=str(started["invocation_id"]),
+            writeback=writeback,
+            spend=spend,
+        )
+
+    monkeypatch.setattr(
+        governed_execution,
+        "_write_journal",
+        original_write_journal,
+    )
+    replay = reconcile_governed_external_capability(
+        run_dir=arguments["run_dir"],
+        invocation_id=str(started["invocation_id"]),
+        writeback=writeback,
+        spend=spend,
+    )
+
+    assert replay["status"] == "committed"
+    assert calls == ["writeback", "spend"]
+    assert replay["transition_receipts"][-1]["action"] == "replayed"
+    assert (tmp_path / "provider-calls.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == ["start", "reconcile"]
+    monitors = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
+    assert len(monitors) == 1
+    assert monitors[0]["status"] == "done"

@@ -418,6 +418,28 @@ An external-write operation also declares a typed `todo_contract` beside
 `effect_class`, containing one or more lower-snake `action_kinds` and bounded
 `target_key_prefixes`.
 
+When a long-running provider needs LoopX to keep polling its external job, the
+same operation may declare a `transition_contract`. This is an authority
+allowlist, not a provider-owned Todo schema:
+
+```json
+{
+  "proposal_kinds": [
+    "continuous_monitor_upsert",
+    "continuous_monitor_complete"
+  ],
+  "monitor_key_prefixes": ["example-provider:"],
+  "monitor_action_kinds": ["poll_external_run"],
+  "monitor_target_key_prefixes": ["external-run:"],
+  "monitor_required_capabilities": ["network"]
+}
+```
+
+The profile bounds every monitor identity, action, external target, and
+required capability that the provider may propose. A proposal outside those
+bounds fails before any LoopX state write. The provider receives no registry
+path and never calls Todo APIs directly.
+
 1. obtain `quota should-run` admission for one exact Goal, Agent, Todo, and
    `turn_instance_id`; the selected open Agent Todo's `action_kind` and
    `target_key` must match the operation profile's `todo_contract`, so an
@@ -427,22 +449,41 @@ An external-write operation also declares a typed `todo_contract` beside
    idempotency key;
 3. call `reconcile_governed_external_capability(...)` until the provider returns
    a terminal `loopx_external_effect_receipt_v0`;
-4. supply typed writeback and spend callbacks. LoopX reuses the shared Turn
+4. let the LoopX Kernel materialize admitted monitor upserts through the normal
+   Todo APIs. A `running` result may only create or retarget its bounded
+   continuous monitor, so the recovery entry remains schedulable while the
+   external operation or its settlement is incomplete;
+5. supply typed writeback and spend callbacks. LoopX reuses the shared Turn
    settlement driver, requires the effect receipt digest in durable writeback,
-   and never spends quota before that writeback commits.
+   and never spends quota before that writeback commits;
+6. only after the shared Turn settlement commits, let the Kernel materialize an
+   admitted terminal monitor completion. A failed writeback or spend therefore
+   leaves the monitor open for recovery instead of closing the only retry lane.
 
 The provider may return `running`, so a service-side job can outlive the bounded
 provider process. Start and reconcile are separately replayable from a mode-0600
 journal. Exact provider revision, request digest, Goal binding, settlement
-identity, provider effect receipt, writeback receipt, and quota receipt remain
-attached to the same invocation. A crash after an external effect therefore
-replays with the same idempotency key and reconciles the receipt instead of
-starting an unrelated operation. One settlement effect id owns exactly one
+identity, transition proposal receipts, provider effect receipt, writeback
+receipt, and quota receipt remain attached to the same invocation. Each
+materialized proposal is checkpointed immediately. Monitor upserts belong to
+the pre-settlement phase; monitor completion belongs to the post-settlement
+phase. A crash between either Todo write and its checkpoint recovers by the
+proposal's stable monitor key and completion identity instead of duplicating
+work. A crash after an external
+effect replays with the same idempotency key and reconciles the receipt instead
+of starting an unrelated operation. One settlement effect id owns exactly one
 material invocation: retrying the same request replays it, while attempting a
 different operation or input under the same Turn receipt fails before provider
 dispatch. A new invocation also requires `should_run=true`; an existing journal
 may still be recovered with its exact typed receipt after the runnable decision
 has changed.
+
+Transition proposals are deliberately narrower than arbitrary Goal mutation.
+The first version supports only continuous-monitor upsert and completion. It
+cannot create a general advancement Todo, change a Goal, widen capability
+authority, complete another Agent's work, or reopen a completed monitor. The
+Kernel resolves one exact monitor by its admitted binding key, applies the
+normal ownership and completion rules, and returns a content-bounded receipt.
 
 Goal enablement alone never grants write authority. Creating or updating the
 binding is an explicit Goal configuration change: it uses preview/apply, but it

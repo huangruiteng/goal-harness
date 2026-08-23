@@ -27,6 +27,11 @@ from ..control_plane.turn_driver.transaction import (
     TRANSACTION_PHASES,
     build_loopx_turn_transaction_plan,
 )
+from ..control_plane.work_items.governed_transition_proposal import (
+    GovernedTransitionSettlementPhase,
+    settle_governed_transition_proposals,
+    validate_governed_transition_receipts,
+)
 from ..file_lock import exclusive_file_lock
 from .capability_admission import prepare_external_capability_invocation
 from .runtime import execute_extension_runtime_binding
@@ -119,6 +124,20 @@ def _settlement_identity(transaction_plan: Mapping[str, Any]) -> dict[str, Any]:
     return _mapping(settlement.get("identity"), "settlement identity")
 
 
+def _journal_registry_path(journal: Mapping[str, Any]) -> Path | None:
+    if journal.get("kernel_context") is None:
+        if journal.get("kernel_context_digest") is not None:
+            raise ValueError("governed capability kernel context is invalid")
+        return None
+    context = _mapping(journal.get("kernel_context"), "governed kernel context")
+    if journal.get("kernel_context_digest") != _canonical_digest(context):
+        raise ValueError("governed capability kernel context digest is invalid")
+    registry_path = str(context.get("registry_path") or "")
+    if not registry_path:
+        raise ValueError("governed capability kernel context is incomplete")
+    return Path(registry_path)
+
+
 def _require_admission(
     admission: Mapping[str, Any],
     *,
@@ -170,6 +189,7 @@ def _validated_governed_capability_result(
             "effect_id": effect_id,
             "result_schema": operation.get("result_schema"),
             "effect_class": operation.get("effect_class"),
+            "transition_contract": operation.get("transition_contract"),
         },
     )
     if not isinstance(payload, Mapping):
@@ -215,6 +235,12 @@ def _validate_journal(
     }
     if any(journal.get(key) != value for key, value in expected_top_level.items()):
         raise ValueError("governed capability journal settlement identity is invalid")
+    registry_path = _journal_registry_path(journal)
+    transition_receipts = validate_governed_transition_receipts(
+        journal.get("transition_receipts", [])
+    )
+    if transition_receipts and registry_path is None:
+        raise ValueError("governed transition receipts require Kernel context")
 
     request = _mapping(journal.get("request"), "provider request")
     if request.get("invocation_id") != invocation_id:
@@ -240,6 +266,10 @@ def _validate_journal(
     if provider_result is None:
         if status != "starting":
             raise ValueError("governed capability journal provider state is invalid")
+        if transition_receipts:
+            raise ValueError(
+                "governed capability has transition receipts before provider result"
+            )
         return
     result = _mapping(provider_result, "external capability result")
     validated, provider_status = _validated_governed_capability_result(
@@ -334,14 +364,52 @@ def _public_receipt(journal: Mapping[str, Any], *, dry_run: bool) -> dict[str, A
         "effect_id": journal.get("effect_id"),
         "provider_status": result.get("status"),
         "provider_result_digest": (_canonical_digest(result) if result else None),
+        "transition_receipts": deepcopy(journal.get("transition_receipts", [])),
         "settlement_result": journal.get("settlement_result"),
         "effects": {
             "provider_invoked": bool(provider_result),
             "external_write_observed": bool(result.get("effect_receipt")),
+            "loopx_transitions_written": bool(journal.get("transition_receipts")),
             "loopx_state_written": isinstance(journal.get("writeback"), Mapping),
             "quota_spent": isinstance(journal.get("quota_spend"), Mapping),
         },
     }
+
+
+def _settle_journal_transition_proposals(
+    *,
+    journal: dict[str, Any],
+    path: Path,
+    phase: GovernedTransitionSettlementPhase,
+) -> None:
+    provider_result = _mapping(
+        journal.get("provider_result"), "external capability result"
+    )
+    raw_proposals = provider_result.get("transition_proposals")
+    if not isinstance(raw_proposals, list):
+        raise ValueError("external capability transition_proposals must be an array")
+    if not raw_proposals:
+        return
+    registry_path = _journal_registry_path(journal)
+    if registry_path is None:
+        raise ValueError("governed transition proposals require Kernel context")
+
+    def checkpoint(receipts: list[dict[str, Any]]) -> None:
+        journal["transition_receipts"] = deepcopy(receipts)
+        _write_journal(path, journal)
+
+    journal["transition_receipts"] = settle_governed_transition_proposals(
+        registry_path=registry_path,
+        goal_id=str(journal["goal_id"]),
+        agent_id=str(journal["agent_id"]),
+        effect_id=str(journal["effect_id"]),
+        proposals=[
+            _mapping(item, "governed transition proposal") for item in raw_proposals
+        ],
+        existing_receipts=journal.get("transition_receipts", []),
+        checkpoint=checkpoint,
+        phase=phase,
+    )
 
 
 def start_governed_external_capability(
@@ -405,6 +473,9 @@ def start_governed_external_capability(
     request_digest = _canonical_digest(request)
     binding = _mapping(prepared["binding"], "provider binding")
     invocation_id = str(prepared["invocation_id"])
+    kernel_context = {
+        "registry_path": str(Path(registry_path).expanduser().resolve()),
+    }
     journal: dict[str, Any] = {
         "schema_version": GOVERNED_CAPABILITY_RUN_SCHEMA_VERSION,
         "status": "ready" if not execute else "starting",
@@ -419,8 +490,11 @@ def start_governed_external_capability(
         "todo_id": todo_id,
         "turn_instance_id": turn_instance_id,
         "effect_id": identity["effect_id"],
+        "kernel_context": kernel_context,
+        "kernel_context_digest": _canonical_digest(kernel_context),
         "completed_phases": [],
         "provider_result": None,
+        "transition_receipts": [],
         "writeback": None,
         "quota_spend": None,
         "settlement_result": None,
@@ -439,6 +513,11 @@ def start_governed_external_capability(
             ):
                 raise ValueError("governed capability invocation replay does not match")
             if isinstance(current.get("provider_result"), Mapping):
+                _settle_journal_transition_proposals(
+                    journal=current,
+                    path=path,
+                    phase=GovernedTransitionSettlementPhase.PRE_SETTLEMENT,
+                )
                 return _public_receipt(current, dry_run=False)
             journal = current
         else:
@@ -466,6 +545,11 @@ def start_governed_external_capability(
         journal["provider_result"] = validated
         journal["status"] = journal_status
         _write_journal(path, journal)
+        _settle_journal_transition_proposals(
+            journal=journal,
+            path=path,
+            phase=GovernedTransitionSettlementPhase.PRE_SETTLEMENT,
+        )
         return _public_receipt(journal, dry_run=False)
 
 
@@ -535,8 +619,19 @@ def reconcile_governed_external_capability(
             journal["provider_result"] = provider_result
             journal["status"] = journal_status
             _write_journal(path, journal)
+            _settle_journal_transition_proposals(
+                journal=journal,
+                path=path,
+                phase=GovernedTransitionSettlementPhase.PRE_SETTLEMENT,
+            )
             if provider_result["status"] == "running":
                 return _public_receipt(journal, dry_run=False)
+
+        _settle_journal_transition_proposals(
+            journal=journal,
+            path=path,
+            phase=GovernedTransitionSettlementPhase.PRE_SETTLEMENT,
+        )
 
         effect_receipt = _mapping(
             provider_result.get("effect_receipt"), "external effect receipt"
@@ -548,6 +643,7 @@ def reconcile_governed_external_capability(
             "provider_result_digest": _canonical_digest(provider_result),
             "effect_receipt": effect_receipt,
             "effect_receipt_digest": effect_receipt_digest,
+            "transition_receipts": deepcopy(journal["transition_receipts"]),
         }
 
         def checkpoint(
@@ -615,6 +711,11 @@ def reconcile_governed_external_capability(
             return {**_public_receipt(journal, dry_run=False), "ok": False}
         if settlement_status != "committed":
             raise RuntimeError("TypeScript governed capability status shape mismatch")
+        _settle_journal_transition_proposals(
+            journal=journal,
+            path=path,
+            phase=GovernedTransitionSettlementPhase.POST_SETTLEMENT,
+        )
         journal["status"] = settlement_status
         _write_journal(path, journal)
         return _public_receipt(journal, dry_run=False)

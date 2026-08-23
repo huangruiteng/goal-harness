@@ -24,6 +24,10 @@ _OPERATION_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _TARGET_KEY_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,127}$")
 _PYTHON_MODULE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
 _EXTERNAL_CAPABILITY_EFFECT_CLASSES = {"read_only", "external_write"}
+_EXTERNAL_CAPABILITY_TRANSITION_PROPOSAL_KINDS = {
+    "continuous_monitor_upsert",
+    "continuous_monitor_complete",
+}
 _PYTHON_CALLABLE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*$")
 _SURFACE_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _SURFACE_KIND_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
@@ -344,6 +348,7 @@ def _integration_profile(
             "request_schema",
             "result_schema",
             "todo_contract",
+            "transition_contract",
         }
         unknown_operation_fields = sorted(set(item) - allowed_operation_fields)
         if unknown_operation_fields:
@@ -367,6 +372,7 @@ def _integration_profile(
                 f"{sorted(_EXTERNAL_CAPABILITY_EFFECT_CLASSES)}"
             )
         todo_contract = item.get("todo_contract")
+        transition_contract = item.get("transition_contract")
         if effect_class == "external_write":
             if not isinstance(todo_contract, Mapping):
                 raise ValueError(
@@ -403,16 +409,120 @@ def _integration_profile(
                 )
             ):
                 raise ValueError(
-                    f"{operation_context} todo_contract target_key_prefixes are "
-                    "invalid"
+                    f"{operation_context} todo_contract target_key_prefixes are invalid"
                 )
             todo_contract = {
                 "action_kinds": action_kinds,
                 "target_key_prefixes": target_key_prefixes,
             }
+            if transition_contract is not None:
+                if not isinstance(transition_contract, Mapping):
+                    raise ValueError(
+                        f"{operation_context} transition_contract must be an object"
+                    )
+                transition_context = f"{operation_context} transition_contract"
+                if set(transition_contract) != {
+                    "proposal_kinds",
+                    "monitor_key_prefixes",
+                    "monitor_action_kinds",
+                    "monitor_target_key_prefixes",
+                    "monitor_required_capabilities",
+                }:
+                    raise ValueError(f"{transition_context} fields are invalid")
+                proposal_kinds = _string_list(
+                    transition_contract,
+                    "proposal_kinds",
+                    context=transition_context,
+                )
+                monitor_key_prefixes = _string_list(
+                    transition_contract,
+                    "monitor_key_prefixes",
+                    context=transition_context,
+                )
+                monitor_action_kinds = _string_list(
+                    transition_contract,
+                    "monitor_action_kinds",
+                    context=transition_context,
+                )
+                monitor_target_key_prefixes = _string_list(
+                    transition_contract,
+                    "monitor_target_key_prefixes",
+                    context=transition_context,
+                )
+                monitor_required_capabilities = _string_list(
+                    transition_contract,
+                    "monitor_required_capabilities",
+                    context=transition_context,
+                )
+                if (
+                    not 1 <= len(proposal_kinds) <= 8
+                    or len(proposal_kinds) != len(set(proposal_kinds))
+                    or any(
+                        value not in _EXTERNAL_CAPABILITY_TRANSITION_PROPOSAL_KINDS
+                        for value in proposal_kinds
+                    )
+                ):
+                    raise ValueError(f"{transition_context} proposal_kinds are invalid")
+                if (
+                    not 1 <= len(monitor_key_prefixes) <= 32
+                    or len(monitor_key_prefixes) != len(set(monitor_key_prefixes))
+                    or any(
+                        not _TARGET_KEY_PREFIX_RE.fullmatch(value)
+                        for value in monitor_key_prefixes
+                    )
+                ):
+                    raise ValueError(
+                        f"{transition_context} monitor_key_prefixes are invalid"
+                    )
+                if (
+                    not 1 <= len(monitor_action_kinds) <= 32
+                    or len(monitor_action_kinds) != len(set(monitor_action_kinds))
+                    or any(
+                        not _OPERATION_RE.fullmatch(value)
+                        for value in monitor_action_kinds
+                    )
+                ):
+                    raise ValueError(
+                        f"{transition_context} monitor_action_kinds are invalid"
+                    )
+                if (
+                    not 1 <= len(monitor_target_key_prefixes) <= 32
+                    or len(monitor_target_key_prefixes)
+                    != len(set(monitor_target_key_prefixes))
+                    or any(
+                        not _TARGET_KEY_PREFIX_RE.fullmatch(value)
+                        for value in monitor_target_key_prefixes
+                    )
+                ):
+                    raise ValueError(
+                        f"{transition_context} monitor_target_key_prefixes are invalid"
+                    )
+                if (
+                    not 1 <= len(monitor_required_capabilities) <= 32
+                    or len(monitor_required_capabilities)
+                    != len(set(monitor_required_capabilities))
+                    or any(
+                        not _OPERATION_RE.fullmatch(value)
+                        for value in monitor_required_capabilities
+                    )
+                ):
+                    raise ValueError(
+                        f"{transition_context} monitor_required_capabilities are invalid"
+                    )
+                transition_contract = {
+                    "proposal_kinds": proposal_kinds,
+                    "monitor_key_prefixes": monitor_key_prefixes,
+                    "monitor_action_kinds": monitor_action_kinds,
+                    "monitor_target_key_prefixes": monitor_target_key_prefixes,
+                    "monitor_required_capabilities": monitor_required_capabilities,
+                }
         elif todo_contract is not None:
             raise ValueError(
-                f"{operation_context} todo_contract is only valid for "
+                f"{operation_context} todo_contract is only valid for external_write"
+            )
+        elif transition_contract is not None:
+            raise ValueError(
+                f"{operation_context} transition_contract is only valid for "
                 "external_write"
             )
         permission = _required_string(
@@ -444,6 +554,8 @@ def _integration_profile(
         }
         if todo_contract is not None:
             normalized_operation["todo_contract"] = todo_contract
+        if transition_contract is not None:
+            normalized_operation["transition_contract"] = transition_contract
         normalized_operations.append(normalized_operation)
     normalized = {
         "schema_version": EXTERNAL_CAPABILITY_PROFILE_SCHEMA_VERSION,
