@@ -9,6 +9,7 @@ import {
   settlementIdentity,
   settlementIdentityPayload,
   settlementPlanPayload,
+  receiptBoundMonitorPhase,
   settlementResultPayload,
   SETTLEMENT_FAILURE_KINDS,
   SETTLEMENT_STEP_KINDS,
@@ -348,6 +349,15 @@ export function createEffectRuntimeHandlers(
           : null,
         requiredString(params.expected_effect_id, "expected_effect_id"),
       ),
+    ],
+    [
+      "settlement.receipt_bound_monitor_phase",
+      (params) => receiptBoundMonitorPhase({
+        poll_present: params.poll_present === true,
+        material_change: params.material_change === true,
+        durable_writeback_present: params.durable_writeback_present === true,
+        quota_spend_present: params.quota_spend_present === true,
+      }),
     ],
     [
       "settlement.receipt",

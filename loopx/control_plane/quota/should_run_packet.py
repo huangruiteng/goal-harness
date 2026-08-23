@@ -108,6 +108,7 @@ from ..work_items.interaction_contract import (
 from ..work_items.primary_action import protocol_action_text as _protocol_action_text
 from ..work_items.work_lane import (
     work_lane_contract_is_due_monitor_attempt,
+    work_lane_contract_is_receipt_bound_monitor_settled,
 )
 
 from .should_run_prepare import _QuotaDecisionPreparation
@@ -816,6 +817,28 @@ def _resolve_quota_should_run_route(
         }
         effective_action = "external_evidence_observe"
         reason = "external evidence monitor requires read-only observation before quiet no-op"
+    receipt_bound_monitor_settled = (
+        work_lane_contract_is_receipt_bound_monitor_settled(
+            prepared.work_lane_contract
+        )
+    )
+    if receipt_bound_monitor_settled:
+        normal_delivery_allowed = False
+        recovery_allowed = False
+        self_repair_allowed = False
+        should_run = False
+        effective_action = "heartbeat_settled_skip"
+        reason = (
+            "the receipt-bound monitor poll and required settlement receipts are "
+            "complete for this heartbeat turn; defer successor selection to a new turn"
+        )
+        heartbeat_recommendation = {
+            **heartbeat_recommendation,
+            "recommended_mode": effective_action,
+            "notify": "DONT_NOTIFY",
+            "reason": reason,
+            "spend_policy": "no quota spend for an already-settled heartbeat turn",
+        }
     monitor_quiet_skip = (
         not replan_decision_allowed
         and normal_delivery_allowed
@@ -843,7 +866,9 @@ def _resolve_quota_should_run_route(
         agent_todo_summary=prepared.agent_todo_summary,
         work_lane_contract=prepared.work_lane_contract,
         agent_lane_recommendation=prepared.agent_lane_recommendation,
-        prefer_agent_lane_recommendation=monitor_quiet_skip,
+        prefer_agent_lane_recommendation=(
+            monitor_quiet_skip or receipt_bound_monitor_settled
+        ),
     )
     selected_recommended_action = refine_quota_recommended_action(
         selected_recommended_action,
@@ -879,7 +904,7 @@ def _resolve_quota_should_run_route(
     )
     agent_scope_frontier = None
     agent_lane_frontier_hint = None
-    if not replan_decision_allowed:
+    if not replan_decision_allowed and not receipt_bound_monitor_settled:
         selected_recommended_action = selected_action_with_agent_lane(
             selected_recommended_action,
             agent_lane_next_action=agent_lane_next_action,

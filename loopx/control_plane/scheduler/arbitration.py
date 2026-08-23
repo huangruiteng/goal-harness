@@ -87,6 +87,8 @@ def _classify_disposition(
         return SchedulerDisposition.HUMAN_GATE, "interaction_blocking_user_gate"
     if mode == "monitor_quiet_skip":
         return SchedulerDisposition.MONITOR_WAIT, "interaction_monitor_quiet_wait"
+    if mode == "heartbeat_settled_skip":
+        return SchedulerDisposition.QUIET_WAIT, "interaction_heartbeat_settled_wait"
     if mode == "successor_replan_required" and must_attempt:
         return SchedulerDisposition.ACTIVE_WORK, "interaction_successor_replan_required"
     if mode in agent_scope_modes:

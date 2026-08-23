@@ -19,6 +19,33 @@ SETTLEMENT_PLAN_SCHEMA_VERSION = "quota_settlement_plan_v1"
 SETTLEMENT_RECEIPT_SCHEMA_VERSION = "quota_settlement_receipt_v1"
 
 
+class ReceiptBoundMonitorPhase(StrEnum):
+    POLL_DUE = "poll_due"
+    SETTLEMENT_PENDING = "settlement_pending"
+    SETTLED = "settled"
+
+
+def receipt_bound_monitor_phase(
+    *,
+    poll_present: bool,
+    material_change: bool,
+    durable_writeback_present: bool,
+    quota_spend_present: bool,
+) -> ReceiptBoundMonitorPhase | None:
+    result = effect_runtime_result(
+        "settlement.receipt_bound_monitor_phase",
+        {
+            "poll_present": poll_present,
+            "material_change": material_change,
+            "durable_writeback_present": durable_writeback_present,
+            "quota_spend_present": quota_spend_present,
+        },
+    )
+    if result is None:
+        return None
+    return ReceiptBoundMonitorPhase(str(result))
+
+
 @dataclass(frozen=True)
 class EffectRequest:
     kind: str

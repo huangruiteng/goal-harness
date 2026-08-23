@@ -94,6 +94,31 @@ export const SETTLEMENT_FAILURE_KINDS = [
 ] as const;
 export type SettlementFailureKind = (typeof SETTLEMENT_FAILURE_KINDS)[number];
 
+export const RECEIPT_BOUND_MONITOR_PHASES = [
+  "poll_due",
+  "settlement_pending",
+  "settled",
+] as const;
+export type ReceiptBoundMonitorPhase =
+  (typeof RECEIPT_BOUND_MONITOR_PHASES)[number];
+
+export interface ReceiptBoundMonitorSettlementState {
+  poll_present: boolean;
+  material_change: boolean;
+  durable_writeback_present: boolean;
+  quota_spend_present: boolean;
+}
+
+export function receiptBoundMonitorPhase(
+  state: ReceiptBoundMonitorSettlementState,
+): ReceiptBoundMonitorPhase | null {
+  if (!state.poll_present) return null;
+  if (!state.material_change) return "settled";
+  return state.durable_writeback_present && state.quota_spend_present
+    ? "settled"
+    : "settlement_pending";
+}
+
 export interface SettlementIdentityInput {
   goal_id: string;
   agent_id: string;

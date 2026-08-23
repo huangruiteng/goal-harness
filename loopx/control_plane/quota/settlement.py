@@ -28,13 +28,16 @@ from .effect_program import (
     SettlementResult,
     SettlementStep,
     SettlementStepKind,
+    ReceiptBoundMonitorPhase,
     build_codex_app_settlement_plan,
     build_turn_scoped_cli_settlement_plan,
     settlement_binding_args,
+    receipt_bound_monitor_phase,
     settlement_result_payload,
     settlement_step_command,
 )
 from .heartbeat_receipt import find_heartbeat_receipt
+from .monitor_poll import find_quota_monitor_poll_turn
 from .settlement_workspace_causality import (
     delivery_workspace_causality_from_event_details,
 )
@@ -59,6 +62,7 @@ __all__ = [
     "find_settlement_step_event",
     "find_settlement_writeback",
     "infer_persisted_heartbeat_settlement_identity",
+    "receipt_bound_monitor_settlement_complete",
     "require_settlement_spend",
     "require_settlement_terminal_closeout",
     "require_settlement_writeback",
@@ -68,6 +72,78 @@ __all__ = [
     "settlement_result_payload",
     "settlement_step_command",
 ]
+
+
+def receipt_bound_monitor_settlement_complete(
+    runtime_root: Path,
+    *,
+    goal_id: str,
+    agent_id: str | None,
+    todo_id: str | None,
+    turn_instance_id: str | None,
+) -> bool | None:
+    """Resolve whether one receipt-bound monitor turn is fully settled.
+
+    ``None`` means the turn has no matching monitor-poll receipt and the caller
+    should preserve the ordinary poll-due selection rules.  An unchanged poll
+    is terminal by itself.  A material poll is terminal only after the exact
+    heartbeat identity has both durable writeback and quota-spend receipts.
+    """
+
+    normalized_agent_id = normalize_todo_claimed_by(agent_id)
+    normalized_todo_id = normalize_todo_id(todo_id)
+    try:
+        normalized_turn_id = normalize_turn_instance_id(turn_instance_id)
+    except ValueError:
+        return None
+    if not normalized_agent_id or not normalized_todo_id or not normalized_turn_id:
+        return None
+    poll = find_quota_monitor_poll_turn(
+        runtime_root,
+        goal_id=goal_id,
+        agent_id=normalized_agent_id,
+        turn_instance_id=normalized_turn_id,
+    )
+    if not isinstance(poll, Mapping):
+        return None
+    if normalize_todo_id(poll.get("todo_id")) != normalized_todo_id:
+        return None
+    material_change = poll.get("material_change") is True
+    if not material_change:
+        return (
+            receipt_bound_monitor_phase(
+                poll_present=True,
+                material_change=False,
+                durable_writeback_present=False,
+                quota_spend_present=False,
+            )
+            is ReceiptBoundMonitorPhase.SETTLED
+        )
+    identity_result = resolve_heartbeat_settlement_identity(
+        runtime_root,
+        goal_id=goal_id,
+        agent_id=normalized_agent_id,
+        todo_id=normalized_todo_id,
+        turn_instance_id=normalized_turn_id,
+    )
+    identity = identity_result.value
+    durable_writeback_present = bool(
+        identity is not None
+        and require_settlement_writeback(runtime_root, identity).value is not None
+    )
+    quota_spend_present = bool(
+        identity is not None
+        and require_settlement_spend(runtime_root, identity).value is not None
+    )
+    return (
+        receipt_bound_monitor_phase(
+            poll_present=True,
+            material_change=True,
+            durable_writeback_present=durable_writeback_present,
+            quota_spend_present=quota_spend_present,
+        )
+        is ReceiptBoundMonitorPhase.SETTLED
+    )
 
 
 def resolve_settlement_delivery_workspace_causality(

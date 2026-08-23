@@ -533,6 +533,8 @@ def _interaction_mode(payload: dict[str, Any]) -> str:
         return agent_scope_action.value
     if effective_action == "monitor_quiet_skip":
         return "monitor_quiet_skip"
+    if effective_action == "heartbeat_settled_skip":
+        return "heartbeat_settled_skip"
     if payload.get("recovery_delivery_allowed") or effective_action == "outcome_floor_recovery":
         return "outcome_floor_recovery"
     if effective_action == "capability_bridge_repair":
@@ -818,6 +820,11 @@ def interaction_next_cli_actions(
             typed_monitor_poll,
             typed_quota_guard,
         ]
+    if mode == "heartbeat_settled_skip":
+        return [
+            "finish this heartbeat without another poll, writeback, or quota spend; "
+            "the next scheduler trigger must use a fresh turn identity"
+        ]
     if mode == "monitor_due":
         return [
             typed_monitor_poll,
@@ -968,6 +975,8 @@ def _interaction_spend_policy(
         return "no spend for gate or blocker push"
     if mode == "monitor_quiet_skip":
         return "no spend for unchanged heartbeat stall receipt"
+    if mode == "heartbeat_settled_skip":
+        return "no spend for an already-settled heartbeat turn"
     if mode == "monitor_due":
         return (
             "spend once only after a validated material monitor transition; "

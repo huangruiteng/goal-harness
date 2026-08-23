@@ -115,6 +115,17 @@ def build_automation_liveness(payload: dict[str, Any]) -> dict[str, Any]:
             ),
             "spend_policy": "no quota spend for unchanged monitor-only polls",
         }
+    if effective_action == "heartbeat_settled_skip":
+        return {
+            **base,
+            "automation_action": "keep_active_quiet",
+            "reason": (
+                "the current heartbeat identity is fully settled; keep the "
+                "automation active so a new turn can select the successor"
+            ),
+            "next_trigger": "next heartbeat turn with a fresh turn identity",
+            "spend_policy": "no quota spend for an already-settled heartbeat turn",
+        }
     if effective_action == "automation_prompt_upgrade_required":
         return {
             **base,

@@ -36,6 +36,7 @@ from ..work_items.interaction_contract import (
     build_interaction_contract,
     build_protocol_action_packet,
 )
+from .effect_program import ReceiptBoundMonitorPhase
 
 from .should_run_packet import (
     _QuotaDecisionRoute,
@@ -224,6 +225,7 @@ def build_quota_should_run(
     ) = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     receipt_bound_todo_id: str | None = None,
+    receipt_bound_monitor_phase: ReceiptBoundMonitorPhase | None = None,
     receipt_bound_replan_obligation_id: str | None = None,
     turn_instance_id: str | None = None,
 ) -> dict[str, Any]:
@@ -287,6 +289,7 @@ def build_quota_should_run(
             item=item,
             health_items=health_items,
             receipt_bound_todo_id=receipt_bound_todo_id,
+            receipt_bound_monitor_phase=receipt_bound_monitor_phase,
             receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
         )
         route = _resolve_quota_should_run_route(prepared)

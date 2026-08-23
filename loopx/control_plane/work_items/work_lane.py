@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Any
 
+from ..effect_program import ReceiptBoundMonitorPhase
 from ..todos.contract import TODO_TASK_CLASS_MONITOR, normalize_todo_id
 from ..todos.projection import todo_priority_label, todo_priority_rank
 
@@ -10,6 +10,9 @@ from ..todos.projection import todo_priority_label, todo_priority_rank
 WORK_LANE_CONTRACT_SCHEMA_VERSION = "work_lane_contract_v1"
 WORK_LANE_RECEIPT_BOUND_MONITOR_SETTLEMENT_OBLIGATION = (
     "settle_receipt_bound_monitor"
+)
+WORK_LANE_RECEIPT_BOUND_MONITOR_SETTLED_OBLIGATION = (
+    "finish_settled_receipt_bound_monitor_turn"
 )
 WORK_LANE_CURRENT_AGENT_MONITOR_REPAIR_OBLIGATIONS = {
     "attempt_due_monitor",
@@ -22,13 +25,6 @@ WORK_LANE_EXTERNAL_EVIDENCE_OBSERVATION_OBLIGATION = (
 )
 WORK_LANE_LARK_INBOX_REPLY_DUE_OBLIGATION = "drain_lark_inbox_reply_due"
 WORK_LANE_TODO_MONITOR_DUE_KIND = "todo_monitor_due"
-
-
-class ReceiptBoundMonitorPhase(StrEnum):
-    """Same-turn phase of a monitor selected by a heartbeat receipt."""
-
-    POLL_DUE = "poll_due"
-    SETTLEMENT_PENDING = "settlement_pending"
 
 
 WORK_LANE_TODO_ITEM_FIELDS = (
@@ -141,10 +137,11 @@ def preserve_heartbeat_receipt_bound_work_lane(
     if not todo_id or selected_todo.get("selection_binding") != "heartbeat_receipt":
         return contract
     if selected_todo.get("task_class") == TODO_TASK_CLASS_MONITOR:
+        raw_monitor_phase = selected_todo.get("receipt_bound_monitor_phase")
         try:
-            monitor_phase = ReceiptBoundMonitorPhase(
-                selected_todo.get("receipt_bound_monitor_phase")
-            )
+            if not isinstance(raw_monitor_phase, str):
+                raise ValueError("monitor phase must be a string")
+            monitor_phase = ReceiptBoundMonitorPhase(raw_monitor_phase)
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 "receipt-bound monitor selection requires an explicit monitor phase"
@@ -174,6 +171,31 @@ def preserve_heartbeat_receipt_bound_work_lane(
                     "finish refresh and quota settlement for the already-polled "
                     "monitor bound to this heartbeat turn; do not poll again; "
                     "reconsider its successor on the next turn"
+                ),
+            }
+        if monitor_phase is ReceiptBoundMonitorPhase.SETTLED:
+            return {
+                **contract,
+                "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
+                "lane": "continuous_monitor",
+                "obligation": WORK_LANE_RECEIPT_BOUND_MONITOR_SETTLED_OBLIGATION,
+                "must_attempt_work": False,
+                "selection_binding": "heartbeat_receipt",
+                "selected_todo_id": todo_id,
+                "monitor_due_count": 0,
+                "monitor_due_items": [],
+                "receipt_bound_monitor_item": selected_todo,
+                "reason_codes": [
+                    "heartbeat_receipt_bound_replay",
+                    "monitor_poll_already_recorded",
+                    "same_turn_settlement_complete",
+                ],
+                "monitor_policy": "finish_settled_turn_before_reselection",
+                "deferred_work_lane": contract,
+                "action": (
+                    "finish this already-settled heartbeat turn without another "
+                    "poll, writeback, or quota spend; reconsider its successor "
+                    "under a new turn identity"
                 ),
             }
         return {
@@ -227,6 +249,18 @@ def work_lane_contract_is_lark_inbox_reply_due(
         isinstance(contract, dict)
         and contract.get("obligation") == WORK_LANE_LARK_INBOX_REPLY_DUE_OBLIGATION
         and contract.get("must_attempt_work") is True
+    )
+
+
+def work_lane_contract_is_receipt_bound_monitor_settled(
+    contract: dict[str, Any] | None,
+) -> bool:
+    return bool(
+        isinstance(contract, dict)
+        and contract.get("obligation")
+        == WORK_LANE_RECEIPT_BOUND_MONITOR_SETTLED_OBLIGATION
+        and contract.get("must_attempt_work") is False
+        and contract.get("selection_binding") == "heartbeat_receipt"
     )
 
 
