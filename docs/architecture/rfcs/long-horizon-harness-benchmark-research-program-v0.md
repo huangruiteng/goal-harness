@@ -676,7 +676,150 @@ The goal is not to fork each benchmark into a LoopX edition. It is to make
 LoopX a well-behaved harness participant whose results can be reproduced and
 audited by benchmark maintainers.
 
-## 11. Research Program Milestones
+## 11. Engineering Construction Plan
+
+The research contract above says what a benchmark result may prove. This
+section says how the repository should build, validate, and operate the
+supporting engineering. The two ladders are intentionally orthogonal:
+
+- **Engineering readiness** describes whether a reusable contract, runner seam,
+  evidence boundary, and operational path are implemented and qualified.
+- **Claim level (C0--C4)** describes what the resulting experiment is allowed to
+  say about LoopX. Reaching an engineering stage never upgrades a research
+  claim by itself.
+
+### 11.1 Ownership layers
+
+Build each benchmark integration in these layers, from the most reusable to the
+most benchmark-specific:
+
+1. **Provider-neutral toolkit**
+   - owns typed permissions, source and artifact boundaries, integrity receipts,
+     runtime observations, experiment-board projections, countability gates,
+     and public-safe post-run contracts;
+   - grants no runner, model, Docker, verifier, upload, submission, or
+     publication authority.
+2. **Native runtime bridge**
+   - owns the real host transaction used by a supported harness, such as the
+     native Codex Goal transport and continuation lifecycle;
+   - keeps process, environment, and task-bridge authority with the runner.
+3. **Benchmark adapter**
+   - owns task provisioning, benchmark-native lifecycle, verifier invocation,
+     score reduction, checkpoint semantics, and benchmark-specific failure
+     attribution;
+   - must import toolkit contracts instead of recreating generic state or
+     integrity logic.
+4. **Study and analysis layer**
+   - owns manifests, preregistered arm selection, paired comparisons,
+     uncertainty, and offline interpretation;
+   - may not grant runtime authority or rewrite benchmark-native results.
+
+Do not create a second active benchmark package, a generic score authority, or a
+benchmark-specific capability merely to make a runner installable. A new
+module needs a real caller, a named owner, a focused contract, and a validation
+surface in the same change or an explicitly staged follow-up.
+
+### 11.2 Engineering readiness stages
+
+Use these stages in PRs, contributor tasks, and pilot updates. They are delivery
+gates, not release promises:
+
+- **E0 -- Contract and boundary foundation**
+  - typed schema and ownership decision recorded;
+  - public/private and authority boundaries have negative coverage;
+  - no live benchmark run is required.
+- **E1 -- Native runner conformance**
+  - a pinned public-safe runner path can preflight, execute, verify, and reduce
+    one synthetic or approved task slice;
+  - source, runtime, treatment, and integrity receipts are emitted without raw
+    task material;
+  - setup, solver, verifier, and scoring failures remain distinguishable.
+- **E2 -- Campaign operations**
+  - experiment-board identity, concurrency admission, exact-job observation,
+    runtime continuity, terminal closeout, and safe reconciliation work across
+    repeated transitions;
+  - a provider can recover or quarantine an invalid run without changing the
+    score authority.
+- **E3 -- Matched-study readiness**
+  - baseline, passive, governed, and ablation arms have a declared manifest;
+  - task/model/harness/budget identity, treatment delivery, integrity, and
+    countability are independently checked;
+  - paired analysis and stopping rules are registered before outcome inspection.
+- **E4 -- Replication and promotion readiness**
+  - a named mechanism reproduces across a second benchmark family or has a
+    documented null result;
+  - protocol tax, uncertainty, authority risk, and public/private handling are
+    reviewed;
+  - non-benchmark product qualification and maintainer promotion remain
+    separate required gates.
+
+The current repository is strongest at E0--E2. E3 is the next engineering and
+research target; E4 remains a future promotion gate. A benchmark adapter may be
+technically E1-ready while its study is still C0, and a C2 result is not valid
+when its E2 runtime evidence is incomplete.
+
+### 11.3 Required delivery slice
+
+Every benchmark engineering PR or contributor task should identify a bounded
+slice containing:
+
+- the caller outcome and owning layer;
+- the schema or transition contract, including illegal states;
+- one real or synthetic call site;
+- characterization and negative or mutation coverage;
+- the compact public-safe receipt or projection;
+- the private-input boundary and artifact classification;
+- the exact validation commands and expected disposition;
+- documentation that links to this RFC without copying benchmark-specific truth
+  into generic toolkit docs.
+
+Prefer one complete vertical seam over a broad inactive framework. For example,
+an adapter should first prove one native preflight and one official-result
+reduction before adding a general campaign scheduler, a large ledger, or a
+benchmark-family abstraction with no caller.
+
+### 11.4 Community contribution routing
+
+Community contributors can work safely on public synthetic slices and reusable
+contracts:
+
+- adapter lifecycle and result-reduction fixtures;
+- integrity, source, artifact, and authority-parity negative tests;
+- experiment-board transitions, reconciliation, and concurrency reducers;
+- public-safe trajectory and case-insight projections;
+- manifest validation, matched-pair analysis, uncertainty, and protocol-tax
+  tooling;
+- benchmark-maintainer-friendly trace or runner conformance fixes;
+- documentation and examples that state claim level and non-goals.
+
+Live tasks, hidden verifiers, raw trajectories, credentials, official
+submissions, unpublished comparisons, and leaderboard operations remain
+maintainer-owned. A contributor task must state its target base branch, smallest
+useful slice, non-goals, and validation plan; an RFC or direction tracker alone
+does not authorize implementation.
+
+### 11.5 Engineering readiness review
+
+Before calling a slice ready, reviewers should answer:
+
+1. Is the behavior owned by the toolkit, native runtime, benchmark adapter, or
+   offline evaluator, and is that ownership visible in the code layout?
+2. Does a real caller exercise the new contract, or should the proposal remain
+   an RFC/fixture instead of production structure?
+3. Can an invalid, incomplete, or authority-mismatched run fail closed without
+   leaking private data or silently becoming countable?
+4. Are public receipts sufficient to explain classification without copying raw
+   evidence?
+5. Are benchmark-native score and LoopX control observations still separate?
+6. Does the validation cover the negative path and the next likely mutation?
+7. What is the highest C-level claim this engineering can support, and what
+   evidence is still missing?
+
+This review is deliberately part of ordinary engineering hygiene. It does not
+authorize a live run, a leaderboard submission, a capability promotion, or a
+change to LoopX defaults.
+
+## 12. Research Program Milestones
 
 ### M0: RFC and source registry
 
@@ -722,7 +865,7 @@ audited by benchmark maintainers.
 - evaluate capability candidates on held-out tasks;
 - require maintainer review and non-benchmark canaries before promotion.
 
-## 12. Acceptance Criteria
+## 13. Acceptance Criteria
 
 This RFC is successful when:
 
@@ -745,7 +888,7 @@ This RFC is successful when:
 14. production promotion requires product qualification beyond benchmark
     evidence.
 
-## 13. Non-Goals
+## 14. Non-Goals
 
 - One universal long-horizon score or leaderboard.
 - Replacing benchmark-native harnesses, graders, or submission rules.
@@ -757,7 +900,7 @@ This RFC is successful when:
 - Requiring ALE, LHTB, and DeepSWE to share one runner implementation.
 - Claiming model capability when the experiment changed the harness.
 
-## 14. Risks and Mitigations
+## 15. Risks and Mitigations
 
 | Risk | Mitigation |
 |---|---|
@@ -774,7 +917,7 @@ This RFC is successful when:
 | One mechanism bundles several behavior changes | Single-mechanism ablations before combined profiles. |
 | Research policy gains production authority | Offline evaluator and explicit maintainer promotion gate. |
 
-## 15. Open Research Questions
+## 16. Open Research Questions
 
 1. Which benchmark-native checkpoints are frequent enough for causal analysis
    without changing agent behavior?
@@ -793,7 +936,7 @@ This RFC is successful when:
 8. How should benchmark maintainers and harness researchers share trace schemas
    without standardizing away meaningful harness differences?
 
-## 16. RFC Maintenance Protocol
+## 17. RFC Maintenance Protocol
 
 This is a living research RFC, not a frozen benchmark snapshot.
 
@@ -818,8 +961,9 @@ This is a living research RFC, not a frozen benchmark snapshot.
 |---|---|
 | 2026-08-16 | Adopt ALE, LHTB, and DeepSWE as a complementary initial portfolio; separate capability evidence from mechanism research; require native outcomes and typed treatment integrity. |
 | 2026-08-16 | Make the current DeepSWE pilot the design-driving practice for the LoopX benchmark capability; treat legacy code/research as candidate reuse and add structured anti-cheating and authority-parity qualification. |
+| 2026-08-23 | Add an engineering readiness ladder and bounded delivery-slice rules so repository construction is tracked separately from C0--C4 research claims. |
 
-## 17. References
+## 18. References
 
 - [Agents' Last Exam project](https://agents-last-exam.org/)
 - [Agents' Last Exam paper](https://arxiv.org/abs/2606.05405)

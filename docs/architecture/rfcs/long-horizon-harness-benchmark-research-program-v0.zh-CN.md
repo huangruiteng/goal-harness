@@ -586,7 +586,127 @@ benchmark 协作应产生可 review 的 upstream value：
 目标不是 fork 出每个 benchmark 的 LoopX edition，而是让 LoopX 成为行为规范的 harness
 participant，其结果可以被 benchmark maintainer 复现和审计。
 
-## 11. 研究计划里程碑
+## 11. 工程建设计划
+
+上面的研究合同定义 benchmark 结果可以证明什么；本节定义仓库应该如何建设、验证和
+运行这些工程。两条阶梯刻意保持正交：
+
+- **工程 readiness** 描述可复用 contract、runner seam、evidence boundary 与运行路径
+  是否已经实现并通过 qualification；
+- **主张等级（C0--C4）** 描述实验最终可以对 LoopX 说什么。达到某个工程阶段不会
+  自动提升研究主张等级。
+
+### 11.1 Ownership 分层
+
+每个 benchmark integration 都应从最可复用到最具体地分成以下层：
+
+1. **Provider-neutral toolkit**
+   - 负责 typed permission、source/artifact boundary、integrity receipt、runtime
+     observation、experiment-board projection、countability gate 与 public-safe
+     post-run contract；
+   - 不授予 runner、model、Docker、verifier、upload、submission 或 publication authority。
+2. **Native runtime bridge**
+   - 负责支持的 harness 所使用的真实 host transaction，例如 native Codex Goal transport
+     与 continuation lifecycle；
+   - process、environment 与 task bridge authority 仍归 runner 所有。
+3. **Benchmark adapter**
+   - 负责 task provisioning、benchmark-native lifecycle、verifier invocation、score
+     reduction、checkpoint 语义与 benchmark-specific failure attribution；
+   - 必须导入 toolkit contract，不能重新实现 generic state 或 integrity logic。
+4. **Study 与 analysis layer**
+   - 负责 manifest、preregistered arm selection、paired comparison、uncertainty 与
+     offline interpretation；
+   - 不得授予 runtime authority，也不得重写 benchmark-native result。
+
+不要为了让 runner 可安装，就创建第二套 active benchmark package、generic score authority，
+或 benchmark-specific capability。新增 module 必须有真实 caller、明确 owner、聚焦 contract
+和同一变更中的 validation surface；否则应明确拆成后续阶段。
+
+### 11.2 工程 readiness 阶段
+
+在 PR、contributor task 与 pilot update 中统一使用以下阶段。它们是 delivery gate，不是
+release promise：
+
+- **E0：Contract 与 boundary foundation**
+  - 记录 typed schema 与 ownership 决策；
+  - public/private 和 authority boundary 有 negative coverage；
+  - 不要求 live benchmark run。
+- **E1：Native runner conformance**
+  - 一个固定的 public-safe runner path 能对 synthetic 或获准 task slice 完成 preflight、
+    execute、verify 与 reduce；
+  - source、runtime、treatment 与 integrity receipt 在不包含 raw task material 的情况下
+    生成；
+  - setup、solver、verifier 与 scoring failure 保持可区分。
+- **E2：Campaign operations**
+  - experiment-board identity、concurrency admission、exact-job observation、runtime
+    continuity、terminal closeout 与 safe reconciliation 能覆盖重复 transition；
+  - provider 可以恢复或 quarantine invalid run，而不改变 score authority。
+- **E3：Matched-study readiness**
+  - baseline、passive、governed 与 ablation arm 有声明过的 manifest；
+  - task/model/harness/budget identity、treatment delivery、integrity 与 countability
+    独立检查；
+  - paired analysis 与 stopping rule 在 outcome inspection 前注册。
+- **E4：Replication 与 promotion readiness**
+  - 一个命名机制在第二个 benchmark family 复现，或形成记录清晰的 null result；
+  - protocol tax、uncertainty、authority risk 与 public/private handling 经过 review；
+  - non-benchmark product qualification 与 maintainer promotion 仍是独立的必需 gate。
+
+当前仓库最强的是 E0--E2；E3 是下一阶段工程与研究目标，E4 仍是未来 promotion gate。
+一个 adapter 可以在工程上达到 E1，但其 study 仍然只有 C0；如果 E2 runtime evidence
+不完整，C2 result 也不成立。
+
+### 11.3 必需的 delivery slice
+
+每个 benchmark engineering PR 或 contributor task 都应声明一个有界 slice，包含：
+
+- caller outcome 与 owning layer；
+- schema 或 transition contract，包括 illegal state；
+- 一个真实或 synthetic call site；
+- characterization 以及 negative/mutation coverage；
+- compact public-safe receipt 或 projection；
+- private-input boundary 与 artifact classification；
+- 精确的 validation command 与 expected disposition；
+- 链接回本文的文档，而不是把 benchmark-specific truth 复制进 generic toolkit docs。
+
+优先交付完整的 vertical seam，而不是宽泛的 inactive framework。例如，adapter 应先证明
+一个 native preflight 和一个 official-result reduction，再考虑添加没有 caller 的通用
+campaign scheduler、大型 ledger 或 benchmark-family abstraction。
+
+### 11.4 社区贡献路由
+
+社区贡献者可以在公开 synthetic slice 和可复用 contract 上安全工作：
+
+- adapter lifecycle 与 result-reduction fixture；
+- integrity、source、artifact 与 authority-parity negative test；
+- experiment-board transition、reconciliation 与 concurrency reducer；
+- public-safe trajectory 与 case-insight projection；
+- manifest validation、matched-pair analysis、uncertainty 与 protocol-tax tooling；
+- 对 benchmark maintainer 友好的 trace 或 runner conformance fix；
+- 明确 claim level 与 non-goal 的文档和 example。
+
+Live task、hidden verifier、raw trajectory、credential、official submission、未公开比较
+和 leaderboard operation 仍由 maintainer 负责。Contributor task 必须写明目标 base branch、
+最小有用 slice、non-goal 与 validation plan；RFC 或 direction tracker 本身不授权实现。
+
+### 11.5 工程 readiness review
+
+在称一个 slice ready 之前，reviewer 应回答：
+
+1. 行为由 toolkit、native runtime、benchmark adapter 还是 offline evaluator 拥有，代码
+   布局是否表达了这个 ownership？
+2. 是否有真实 caller 执行新 contract？如果没有，提案是否应该停留在 RFC/fixture，而不是
+   变成 production structure？
+3. invalid、incomplete 或 authority-mismatched run 能否 fail closed，并且不泄露私有数据、
+   不会静默变成 countable？
+4. public receipt 是否足够解释 classification，而无需复制 raw evidence？
+5. benchmark-native score 与 LoopX control observation 是否仍然分离？
+6. validation 是否覆盖 negative path 和下一种可能 mutation？
+7. 这项工程最多支持哪个 C-level claim，还缺什么证据？
+
+该 review 是普通工程 hygiene 的一部分，不授权 live run、leaderboard submission、capability
+promotion 或修改 LoopX default。
+
+## 12. 研究计划里程碑
 
 ### M0：RFC 与 source registry
 
@@ -630,7 +750,7 @@ participant，其结果可以被 benchmark maintainer 复现和审计。
 - 在 held-out task 上评估 capability candidate；
 - promotion 前要求 maintainer review 与 non-benchmark canary。
 
-## 12. 验收标准
+## 13. 验收标准
 
 满足以下条件时，本 RFC 才算成功：
 
@@ -650,7 +770,7 @@ participant，其结果可以被 benchmark maintainer 复现和审计。
 13. 只有 current-pilot characterization 证明合同后，才复用现有 benchmark 代码；
 14. production promotion 需要 benchmark 证据之外的 product qualification。
 
-## 13. 非目标
+## 14. 非目标
 
 - 一个通用 long-horizon score 或 leaderboard。
 - 替换 benchmark-native harness、grader 或 submission rule。
@@ -661,7 +781,7 @@ participant，其结果可以被 benchmark maintainer 复现和审计。
 - 要求 ALE、LHTB 与 DeepSWE 使用同一个 runner implementation。
 - 在实验改变 harness 时主张 model capability。
 
-## 14. 风险与缓解
+## 15. 风险与缓解
 
 | 风险 | 缓解 |
 |---|---|
@@ -678,7 +798,7 @@ participant，其结果可以被 benchmark maintainer 复现和审计。
 | 一个机制打包多个行为变化 | combined profile 前先做 single-mechanism ablation。 |
 | Research policy 获得生产 authority | offline evaluator 与 maintainer promotion gate。 |
 
-## 15. 开放研究问题
+## 16. 开放研究问题
 
 1. 哪些 benchmark-native checkpoint 足够频繁，既能做因果分析，又不改变 agent 行为？
 2. provider 间 model/tool latency 差异很大时，应如何估计 protocol tax？
@@ -691,7 +811,7 @@ participant，其结果可以被 benchmark maintainer 复现和审计。
 8. benchmark maintainer 与 harness researcher 如何共享 trace schema，同时不抹平有意义的
    harness 差异？
 
-## 16. RFC 维护协议
+## 17. RFC 维护协议
 
 这是活的研究 RFC，不是冻结的 benchmark 快照。
 
@@ -711,8 +831,9 @@ participant，其结果可以被 benchmark maintainer 复现和审计。
 |---|---|
 | 2026-08-16 | 采用 ALE、LHTB 与 DeepSWE 作为互补初始组合；区分能力论证与机制研究；要求原生 outcome 与 typed treatment integrity。 |
 | 2026-08-16 | 以当前 DeepSWE pilot 驱动 LoopX benchmark capability 设计；legacy code/research 只作为复用候选，并加入结构化反作弊与 authority-parity qualification。 |
+| 2026-08-23 | 增加工程 readiness 阶梯与有界 delivery-slice 规则，将仓库建设与 C0--C4 研究主张分开跟踪。 |
 
-## 17. 参考资料
+## 18. 参考资料
 
 - [Agents' Last Exam 项目](https://agents-last-exam.org/)
 - [Agents' Last Exam 论文](https://arxiv.org/abs/2606.05405)
