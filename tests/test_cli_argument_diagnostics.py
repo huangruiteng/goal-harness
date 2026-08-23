@@ -676,6 +676,16 @@ def test_todo_update_validation_accepts_a_mutable_field() -> None:
             "use todo update first",
         ),
         (
+            [
+                "--todo-id",
+                "todo_example",
+                "--depends-on-todo-id",
+                "todo_dep001",
+            ],
+            "todo complete does not update current todo routing metadata; "
+            "use todo update first",
+        ),
+        (
             ["--todo-id", "todo_example", "--cadence", "1h"],
             "todo complete does not update target or monitor schedule metadata; "
             "use todo update before completion",

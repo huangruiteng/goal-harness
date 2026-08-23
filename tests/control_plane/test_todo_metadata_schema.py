@@ -42,6 +42,7 @@ def test_todo_metadata_round_trip_preserves_canonical_values() -> None:
         excluded_agents=["codex-other"],
         global_gate=False,
         unblocks_todo_id="todo_blocked001",
+        depends_on_todo_ids=["todo_dep001", "todo_dep002"],
         successor_todo_ids=["todo_next001", "todo_next002"],
         resume_when="todo_done:todo_blocked001",
         no_followup=False,
@@ -111,6 +112,7 @@ def test_todo_metadata_round_trip_preserves_canonical_values() -> None:
         "excluded_agents": ["codex-other"],
         "global_gate": False,
         "unblocks_todo_id": "todo_blocked001",
+        "depends_on_todo_ids": ["todo_dep001", "todo_dep002"],
         "successor_todo_ids": ["todo_next001", "todo_next002"],
         "resume_when": "todo_done:todo_blocked001",
         "no_followup": False,
@@ -211,6 +213,7 @@ def test_todo_metadata_parser_skips_invalid_canonical_values() -> None:
         ({"decision_scope": "invalid"}, "decision_scope must use"),
         ({"excluded_agents": ["bad/value"]}, "public-safe agent tokens"),
         ({"successor_todo_ids": ["bad"]}, "successor_todo_ids must contain"),
+        ({"depends_on_todo_ids": ["bad"]}, "depends_on_todo_ids must contain"),
         (
             {"completion_continuation": "implicit"},
             "completion_continuation must be one of",
