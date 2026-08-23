@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 import loopx.control_plane.todos.completion_validation as completion_validation_module
+import loopx.control_plane.todos.completion_transaction as completion_transaction_module
 from loopx.control_plane.todos.completion_validation_projection import (
     project_completion_validation_authority,
 )
@@ -129,6 +130,19 @@ def test_validation_command_declared_and_passing_commits_completion(
         return original_runner(*args, **kwargs)
 
     monkeypatch.setattr(completion_validation_module, "run_caller_validation", counting_runner)
+    original_effect_call = completion_transaction_module.effect_runtime_result
+    transaction_calls: list[str] = []
+
+    def counting_effect_call(method, params):  # type: ignore[no-untyped-def]
+        if method == "todo.completion.reduce":
+            transaction_calls.append(method)
+        return original_effect_call(method, params)
+
+    monkeypatch.setattr(
+        completion_transaction_module,
+        "effect_runtime_result",
+        counting_effect_call,
+    )
 
     result = complete_goal_todo(
         registry_path=registry,
@@ -138,6 +152,10 @@ def test_validation_command_declared_and_passing_commits_completion(
         evidence="validated completion",
     )
     assert calls["count"] == 1  # the gate actually ran the declared command
+    assert transaction_calls == [
+        "todo.completion.reduce",
+        "todo.completion.reduce",
+    ]
     assert result["ok"] is True
     assert result["changed"] is True
     assert "validation_blocked_completion" not in result
@@ -218,9 +236,25 @@ def test_validation_command_declared_and_failing_blocks_completion(
     assert _agent_todo(state, str(todo["todo_id"]))["status"] == "open"
 
 
-def test_no_validation_command_keeps_fast_path_unchanged(tmp_path: Path) -> None:
+def test_no_validation_command_keeps_fast_path_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     registry, state = _write_fixture(tmp_path)
     todo = _add_todo(registry)  # no validation_command declared
+    original_effect_call = completion_transaction_module.effect_runtime_result
+    transaction_calls: list[str] = []
+
+    def counting_effect_call(method, params):  # type: ignore[no-untyped-def]
+        if method == "todo.completion.reduce":
+            transaction_calls.append(method)
+        return original_effect_call(method, params)
+
+    monkeypatch.setattr(
+        completion_transaction_module,
+        "effect_runtime_result",
+        counting_effect_call,
+    )
     result = complete_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -230,8 +264,55 @@ def test_no_validation_command_keeps_fast_path_unchanged(tmp_path: Path) -> None
     )
     assert result["ok"] is True
     assert result["changed"] is True
+    assert transaction_calls == ["todo.completion.reduce"]
     assert "validation_blocked_completion" not in result
     assert _agent_todo(state, str(todo["todo_id"]))["status"] == "done"
+
+
+def test_validation_receipt_cannot_commit_a_changed_completion_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = _add_todo(
+        registry,
+        validation_command=_PASS_COMMAND,
+        validation_label="caller-declared smoke",
+    )
+    original_validation = (
+        completion_validation_module._run_declared_completion_validation
+    )
+
+    def validate_then_drift(**kwargs):  # type: ignore[no-untyped-def]
+        receipt = original_validation(**kwargs)
+        source = state.read_text(encoding="utf-8")
+        state.write_text(
+            source.replace(
+                "validation_label=caller-declared%20smoke",
+                "validation_label=drifted%20smoke",
+            ),
+            encoding="utf-8",
+        )
+        return receipt
+
+    monkeypatch.setattr(
+        completion_validation_module,
+        "_run_declared_completion_validation",
+        validate_then_drift,
+    )
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=str(todo["todo_id"]),
+        agent_id=AGENT,
+        evidence="stale validation receipt",
+    )
+
+    assert result["ok"] is False
+    assert result["completion_source_drift"] is True
+    assert result["changed"] is False
+    assert _agent_todo(state, str(todo["todo_id"]))["status"] == "open"
 
 
 def test_validation_timeout_blocks_completion(

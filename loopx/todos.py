@@ -56,7 +56,6 @@ from .control_plane.todos.contract import (
     require_supported_todo_resume_when,
     todo_marker_for_status,
 )
-from .control_plane.todos.completion_state import completion_state_for_todo_write
 from .control_plane.todos.active_state_editing import (
     TODO_SECTION_HEADINGS,
     find_todo_block,
@@ -73,9 +72,9 @@ from .control_plane.todos.completion_policy import (
     linked_successors_from_state,
     resolve_completion_policy,
 )
-from .control_plane.todos.completion_fence import (
-    completed_todo_replay,
-    resolve_todo_completion_identity,
+from .control_plane.todos.completion_transaction import (
+    todo_completion_source_drift_failure,
+    todo_completion_source_matches,
 )
 from .control_plane.todos import completion_validation as completion_validation_module
 from .control_plane.todos.event_writeback import (
@@ -1296,6 +1295,13 @@ def update_goal_todo(
         project=project,
         state_file=state_file,
     )
+    requested_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
+    if successor_todo_ids and not requested_successor_todo_ids:
+        raise ValueError(
+            "successor_todo_ids must contain public "
+            "todo_<letters-digits-underscore-hyphen> tokens"
+        )
+    completion_validation_gate: dict[str, Any] | None = None
     # Run caller-approved validation BEFORE acquiring the mutation lock when
     # this update writes a completion, mirroring complete_goal_todo's pre-lock
     # gate (the MUTATION lock deadline is 5s). Agent-role completions keep the
@@ -1314,14 +1320,17 @@ def update_goal_todo(
                 role=role,
             )
             if update_block_match and (role or update_block_match[0]) != "agent":
-                validation_failure = completion_validation_module.run_completion_validation_gate(
+                completion_validation_gate = completion_validation_module.run_completion_validation_gate_with_source(
                     state_file=resolved_state_file,
                     todo_id=todo_id,
                     role=role,
                     registry_path=registry_path,
                     goal_id=goal_id,
                     dry_run=dry_run,
+                    no_followup=no_followup is True,
+                    requested_has_successor=bool(requested_successor_todo_ids),
                 )
+                validation_failure = completion_validation_gate.get("failure")
                 if validation_failure is not None:
                     return validation_failure
     with exclusive_file_lock(
@@ -1468,6 +1477,39 @@ def update_goal_todo(
                 "(CLI: `loopx todo complete`) so completion policy, successor, "
                 "and no-follow-up contracts are enforced"
             )
+        completion_metadata_updates_override = None
+        if completion_validation_gate is not None:
+            source_snapshot = completion_validation_gate.get("source_snapshot")
+            if not isinstance(source_snapshot, dict) or not todo_completion_source_matches(
+                source_snapshot,
+                existing_block,
+            ):
+                return todo_completion_source_drift_failure(
+                    goal_id=goal_id,
+                    todo_id=todo_id,
+                    dry_run=dry_run,
+                    reason=(
+                        "Todo completion source changed after validation planning; "
+                        "retry against the current source"
+                    ),
+                )
+            completion_transaction = completion_validation_gate.get("transaction")
+            if not isinstance(completion_transaction, dict):
+                raise RuntimeError(
+                    "TypeScript Todo completion transaction result is missing"
+                )
+            if str(existing_block.get("status") or "") != TODO_STATUS_DONE:
+                if completion_transaction.get("decision") != "commit":
+                    raise RuntimeError(
+                        "TypeScript Todo completion transaction did not authorize "
+                        "the user Todo completion"
+                    )
+                metadata_updates = completion_transaction.get("metadata_updates")
+                if not isinstance(metadata_updates, dict):
+                    raise RuntimeError(
+                        "TypeScript Todo completion transaction metadata is missing"
+                    )
+                completion_metadata_updates_override = metadata_updates
         existing_blocks_agent = normalize_todo_blocks_agent(existing_block.get("blocks_agent"))
         existing_global_gate = normalize_todo_global_gate(existing_block.get("global_gate"))
         existing_bound_agent = normalize_todo_bound_agent(existing_block.get("bound_agent"))
@@ -1529,9 +1571,7 @@ def update_goal_todo(
         normalized_unblocks_todo_id = normalize_todo_id(unblocks_todo_id) if unblocks_todo_id else None
         if unblocks_todo_id and not normalized_unblocks_todo_id:
             raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
-        normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
-        if successor_todo_ids and not normalized_successor_todo_ids:
-            raise ValueError("successor_todo_ids must contain public todo_<letters-digits-underscore-hyphen> tokens")
+        normalized_successor_todo_ids = requested_successor_todo_ids
         normalized_resume_when = require_supported_todo_resume_when(resume_when)
         effective_resume_when = (
             None
@@ -1601,6 +1641,9 @@ def update_goal_todo(
             resume_when=normalized_resume_when,
             clear_resume_when=clear_resume_when,
             no_followup=no_followup,
+            completion_metadata_updates_override=(
+                completion_metadata_updates_override
+            ),
             monitor_metadata=normalized_monitor_metadata,
             clear_claim=clear_claim,
             claim_only=claim_only,
@@ -1681,6 +1724,12 @@ def complete_goal_todo(
         raise ValueError("--next-task-repository requires --next-agent-todo")
     if next_required_capabilities and not next_agent_todo:
         raise ValueError("--next-required-capability requires --next-agent-todo")
+    normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
+    if successor_todo_ids and not normalized_successor_todo_ids:
+        raise ValueError(
+            "successor_todo_ids must contain public "
+            "todo_<letters-digits-underscore-hyphen> tokens"
+        )
     effective_next_user_task_class = resolve_next_user_task_class(
         next_user_todo,
         next_user_task_class,
@@ -1703,6 +1752,9 @@ def complete_goal_todo(
         no_followup=no_followup,
         completion_turn_key=completion_turn_key,
         completion_identity_source=completion_identity_source,
+        requested_has_successor=bool(
+            normalized_successor_todo_ids or next_agent_todo or next_user_todo
+        ),
     )
     validation_failure = validation_gate.get("failure")
     if validation_failure is not None:
@@ -1745,12 +1797,39 @@ def complete_goal_todo(
             raise ValueError(
                 f"todo_id {normalized_todo_id!r} was not found in active user or agent todos"
             )
-        completion_turn_key, completion_identity_source = resolve_todo_completion_identity(
-            todo=completion_todo,
-            goal_id=goal_id,
-            todo_id=str(completion_todo.get("todo_id") or todo_id),
-            completion_turn_key=completion_turn_key,
-            completion_identity_source=completion_identity_source,
+        completion_transaction = validation_gate.get("transaction")
+        if not isinstance(completion_transaction, dict):
+            return todo_completion_source_drift_failure(
+                goal_id=goal_id,
+                todo_id=todo_id,
+                dry_run=dry_run,
+                reason=(
+                    "Todo completion source appeared after validation planning; "
+                    "retry against the current source"
+                ),
+            )
+        source_snapshot = validation_gate.get("source_snapshot")
+        if completion_match and (
+            not isinstance(source_snapshot, dict)
+            or not todo_completion_source_matches(
+                source_snapshot,
+                completion_todo,
+            )
+        ):
+            return todo_completion_source_drift_failure(
+                goal_id=goal_id,
+                todo_id=todo_id,
+                dry_run=dry_run,
+                reason=(
+                    "Todo completion source changed after validation planning; "
+                    "retry against the current source"
+                ),
+            )
+        completion_turn_key = completion_transaction.get(
+            "completion_identity_key"
+        )
+        completion_identity_source = completion_transaction.get(
+            "completion_identity_source"
         )
         decision_target = completion_decision_target(lines, completion_todo)
         mutation_authority = authorize_todo_lifecycle_mutation(
@@ -1764,20 +1843,32 @@ def complete_goal_todo(
             decision_target=decision_target,
         )
         completion_handoff = resolve_todo_completion_handoff(state_text=original, mutation_authority=mutation_authority)
-        terminal_replay = completed_todo_replay(
-            todo=completion_todo,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            completion_turn_key=completion_turn_key, no_followup=no_followup,
-            completion_identity_source=completion_identity_source,
-            handoff_mode=completion_handoff["handoff_mode"],
-            mutation_authority=mutation_authority,
-            state_file=str(resolved_state_file),
-            project=str(resolved_project) if resolved_project else None,
-            dry_run=dry_run,
-        )
-        if terminal_replay:
-            return terminal_replay
+        completion_fence = completion_transaction["fence"]
+        if (
+            completion_match
+            and completion_transaction["decision"] == "replay"
+            and completion_fence.get("status") == "done"
+        ):
+            return {
+                "ok": True,
+                "dry_run": dry_run,
+                "completed": True,
+                "idempotent_replay": True,
+                "changed": False,
+                "goal_id": goal_id,
+                "todo_id": todo_id,
+                "status": "done",
+                "completion_continuation": completion_fence.get(
+                    "completion_continuation"
+                ),
+                "completion_recovery": completion_todo.get(
+                    "completion_recovery"
+                ),
+                "handoff_mode": completion_handoff["handoff_mode"],
+                "mutation_authority": mutation_authority,
+                "state_file": str(resolved_state_file),
+                "project": str(resolved_project) if resolved_project else None,
+            }
         task_lease_fence = lease_fence_stack.enter_context(
             hold_task_lease_mutation_fence(
                 registry_path=registry_path,
@@ -1796,22 +1887,7 @@ def complete_goal_todo(
                 handoff=completion_handoff,
             )
         )
-        normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
-        if successor_todo_ids and not normalized_successor_todo_ids:
-            raise ValueError("successor_todo_ids must contain public todo_<letters-digits-underscore-hyphen> tokens")
-        completion_state = completion_state_for_todo_write(
-            completion_todo,
-            requested_no_followup=no_followup,
-            has_successor=bool(
-                normalized_successor_todo_ids
-                or next_agent_todo
-                or next_user_todo
-                or normalize_todo_id_list(
-                    completion_todo.get("successor_todo_ids")
-                )
-            ),
-            completion_identity_source=completion_identity_source,
-        )
+        completion_state = completion_transaction.get("completion_state")
         linked_successors = linked_successors_from_state(
             lines=lines,
             successor_todo_ids=normalized_successor_todo_ids,
@@ -1867,6 +1943,8 @@ def complete_goal_todo(
                     updated_at=updated_at,
                     dry_run=dry_run,
                     actor_agent_id=mutation_authority.get("actor_agent_id"),
+                    completion_fence=completion_fence,
+                    completion_state=completion_state,
                     completion_validation_source_authority=validation_gate.get("source_authority"),
                 )
                 event_result["linked_successor_id"] = completion_policy.linked_successor_id
@@ -1878,6 +1956,10 @@ def complete_goal_todo(
                     committed=bool(event_result.get("changed")) and not dry_run,
                 )
                 return event_result
+        if not isinstance(completion_state, dict):
+            raise RuntimeError(
+                "TypeScript Todo completion transaction did not authorize a commit"
+            )
         update_result = apply_todo_update_to_lines(
             lines,
             todo_id=todo_id,
@@ -1887,8 +1969,15 @@ def complete_goal_todo(
             note=note,
             evidence=evidence,
             completion_turn_key=completion_turn_key,
-            completion_continuation=completion_state.continuation,
-            completion_recovery=completion_state.recovery,
+            completion_continuation=str(completion_state["continuation"]),
+            completion_recovery=(
+                str(completion_state["recovery"])
+                if completion_state.get("recovery") is not None
+                else None
+            ),
+            completion_metadata_updates_override=dict(
+                completion_transaction["metadata_updates"]
+            ),
             claimed_by=effective_claimed_by,
             clear_claim=clear_claim,
             no_followup=True if no_followup else None,

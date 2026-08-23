@@ -4,8 +4,7 @@ import test from "node:test";
 
 import {
   evaluateTodoCompletionFence,
-  projectTodoCompletionIdentity,
-  TODO_COMPLETION_IDENTITY_REQUEST_SCHEMA,
+  localTodoCompletionIdentity,
   TODO_COMPLETION_FENCE_REQUEST_SCHEMA,
 } from "../../loopx/control_plane/todos/completion_fence.ts";
 
@@ -144,16 +143,11 @@ test("evaluation is input-immutable and normalizes persisted metadata", () => {
 });
 
 test("unscoped completion identity is stable and repairs a legacy terminal gap", () => {
-  const identity = projectTodoCompletionIdentity({
-    schema_version: TODO_COMPLETION_IDENTITY_REQUEST_SCHEMA,
-    goal_id: "goal-example",
-    todo_id: "todo_legacy001",
-  });
-  assert.equal(identity.identity_source, "unscoped_completion");
-  assert.match(
-    String(identity.completion_identity_key),
-    /^local_completion_[0-9a-f]{32}$/,
+  const identity = localTodoCompletionIdentity(
+    "goal-example",
+    "todo_legacy001",
   );
+  assert.match(identity, /^local_completion_[0-9a-f]{32}$/);
   assert.deepEqual(
     evaluateTodoCompletionFence({
       schema_version: TODO_COMPLETION_FENCE_REQUEST_SCHEMA,
@@ -168,7 +162,7 @@ test("unscoped completion identity is stable and repairs a legacy terminal gap",
         successor_todo_ids: [],
       },
       requested_no_followup: true,
-      requested_completion_turn_key: identity.completion_identity_key,
+      requested_completion_turn_key: identity,
       requested_completion_identity_source: "lifecycle_reentry",
     }),
     {

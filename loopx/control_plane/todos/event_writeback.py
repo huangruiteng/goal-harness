@@ -38,10 +38,7 @@ from .contract import (
     normalize_todo_id_list,
     normalize_todo_task_repository,
 )
-from .completion_fence import evaluate_todo_completion_fence
-from .completion_state import (
-    completion_state_for_todo_write,
-)
+from .completion_transaction import reduce_todo_completion_transaction
 from .text import (
     TODO_PRIORITY_PREFIX_PATTERN,
     inherit_todo_priority,
@@ -461,6 +458,7 @@ def complete_event_projected_goal_todo(
     completion_identity_source: str | None = None,
     actor_agent_id: str | None = None,
     completion_fence: dict[str, Any] | None = None,
+    completion_state: Mapping[str, Any] | None = None,
     completion_validation_source_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     item = dict(context["item"])
@@ -481,8 +479,8 @@ def complete_event_projected_goal_todo(
         item.pop("claimed_by", None)
     effective_claimed_by = claimed_by or normalize_todo_claimed_by(item.get("claimed_by"))
     store = AppendOnlyStateEventStore(Path(context["event_log_path"]))
-    if completion_fence is None:
-        completion_fence = evaluate_todo_completion_fence(
+    if completion_fence is None or completion_state is None:
+        transaction = reduce_todo_completion_transaction(
             todo=item,
             projection_source="event_log",
             completion_turn_key=completion_turn_key,
@@ -490,6 +488,25 @@ def complete_event_projected_goal_todo(
             goal_id=goal_id,
             todo_id=todo_id,
             completion_identity_source=completion_identity_source,
+            requested_has_successor=bool(
+                normalize_todo_id_list(successor_todo_ids)
+                or normalize_todo_id_list(item.get("successor_todo_ids"))
+                or next_agent_todo
+                or next_user_todo
+            ),
+            dry_run=dry_run,
+        )
+        if transaction["decision"] in {"execute_validation", "reject"}:
+            raise RuntimeError(
+                "event-projected Todo completion validation must run through "
+                "the completion gate"
+            )
+        completion_fence = dict(transaction["fence"])
+        candidate_state = transaction.get("completion_state")
+        completion_state = (
+            dict(candidate_state)
+            if isinstance(candidate_state, Mapping)
+            else None
         )
     already_done = bool(completion_fence["terminal_before_request"])
     terminal_upgrade = completion_fence["reason"] in {
@@ -593,14 +610,25 @@ def complete_event_projected_goal_todo(
         [item.get("todo_id") for item in next_results],
         normalize_todo_id_list(item.get("successor_todo_ids")),
     )
-    completion_state = completion_state_for_todo_write(
-        item,
-        requested_no_followup=no_followup,
-        has_successor=bool(normalized_successor_todo_ids),
-        completion_identity_source=completion_identity_source,
-    )
-    completion_continuation = completion_state.continuation
-    completion_recovery = completion_state.recovery
+    if not isinstance(completion_state, Mapping):
+        raise RuntimeError(
+            "event-projected Todo completion requires the TypeScript "
+            "transaction state"
+        )
+    completion_continuation = completion_state.get("continuation")
+    completion_recovery = completion_state.get("recovery")
+    if completion_continuation not in {
+        "active_goal",
+        "successor",
+        "no_followup",
+    } or completion_recovery not in {
+        None,
+        "same_turn_terminal_closeout",
+        "lifecycle_reentry_terminal_closeout",
+    }:
+        raise RuntimeError(
+            "TypeScript Todo completion transaction state shape mismatch"
+        )
     completion_payload: dict[str, Any] = {"updated_at": updated_at}
     completion_payload["completion_continuation"] = completion_continuation
     if completion_recovery:

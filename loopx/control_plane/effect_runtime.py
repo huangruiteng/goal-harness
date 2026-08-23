@@ -41,6 +41,7 @@ _SOURCE_FILES = (
     "scheduler/state_transition_rules.ts",
     "todos/completion_fence.ts",
     "todos/completion_state.ts",
+    "todos/completion_transaction.ts",
     "todos/completion_validation_plan.ts",
     "todos/next_action.ts",
     "turn_driver/turn_journal.ts",

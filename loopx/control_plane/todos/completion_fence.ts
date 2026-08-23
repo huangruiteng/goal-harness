@@ -4,7 +4,6 @@ import type { JsonObject } from "../effect_program.ts";
 import {
   requireBoolean as requiredBoolean,
   requireJsonObject as requiredObject,
-  requireNonEmptyString,
 } from "../runtime_decode.ts";
 import {
   normalizeTodoCompletionContinuation,
@@ -16,10 +15,6 @@ export const TODO_COMPLETION_FENCE_REQUEST_SCHEMA =
   "loopx_todo_completion_fence_request_v0";
 export const TODO_COMPLETION_FENCE_RESULT_SCHEMA =
   "loopx_todo_completion_fence_result_v0";
-export const TODO_COMPLETION_IDENTITY_REQUEST_SCHEMA =
-  "loopx_todo_completion_identity_request_v0";
-export const TODO_COMPLETION_IDENTITY_RESULT_SCHEMA =
-  "loopx_todo_completion_identity_v0";
 
 const TODO_STATUSES = ["open", "done", "blocked", "deferred"] as const;
 const TODO_ID_PATTERN = /^todo_[a-z0-9_-]{3,64}$/;
@@ -102,23 +97,6 @@ export function localTodoCompletionIdentity(
     .update(`loopx-local-todo-completion-v0\0${goalId}\0${todoId}`, "utf8")
     .digest("hex");
   return `local_completion_${digest.slice(0, 32)}`;
-}
-
-export function projectTodoCompletionIdentity(value: unknown): JsonObject {
-  const request = requiredObject(value, "todo.completion_identity params");
-  if (request.schema_version !== TODO_COMPLETION_IDENTITY_REQUEST_SCHEMA) {
-    throw new Error("Todo completion identity request schema mismatch");
-  }
-  const goalId = requireNonEmptyString(request.goal_id, "goal_id");
-  const todoId = requireNonEmptyString(request.todo_id, "todo_id");
-  if (!TODO_ID_PATTERN.test(todoId)) {
-    throw new Error("todo_id has an unsupported shape");
-  }
-  return {
-    schema_version: TODO_COMPLETION_IDENTITY_RESULT_SCHEMA,
-    identity_source: "unscoped_completion",
-    completion_identity_key: localTodoCompletionIdentity(goalId, todoId),
-  };
 }
 
 function todoNoFollowup(value: unknown): boolean | null {

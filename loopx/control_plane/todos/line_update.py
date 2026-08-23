@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from .active_state_editing import (
@@ -192,6 +193,7 @@ def apply_todo_update_to_lines(
     successor_todo_ids: list[str] | None = None,
     completion_continuation: str | None = None,
     completion_recovery: str | None = None,
+    completion_metadata_updates_override: Mapping[str, Any] | None = None,
     resume_when: str | None = None,
     clear_resume_when: bool = False,
     no_followup: bool | None = None,
@@ -332,8 +334,8 @@ def apply_todo_update_to_lines(
         updates["resume_when"] = normalized_resume_when
     if no_followup is not None:
         updates["no_followup"] = no_followup
-    updates.update(
-        completion_metadata_updates(
+    if completion_metadata_updates_override is None:
+        completion_updates = completion_metadata_updates(
             block,
             target_status=target_status,
             normalized_status=normalized_status,
@@ -342,7 +344,17 @@ def apply_todo_update_to_lines(
             no_followup=no_followup,
             successor_todo_ids=successor_todo_ids,
         )
-    )
+    else:
+        completion_updates = dict(completion_metadata_updates_override)
+        if any(
+            key not in {"completion_continuation", "completion_recovery"}
+            or not isinstance(value, str)
+            for key, value in completion_updates.items()
+        ):
+            raise RuntimeError(
+                "TypeScript Todo completion metadata updates shape mismatch"
+            )
+    updates.update(completion_updates)
     for key, value in (monitor_metadata or {}).items():
         if key in TODO_MONITOR_METADATA_FIELDS:
             updates[key] = value

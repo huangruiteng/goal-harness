@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
 from typing import Any, Mapping
@@ -136,48 +135,6 @@ def completion_continuation_for_write(*, no_followup: bool, has_successor: bool)
     if continuation not in {item.value for item in TodoCompletionContinuation}:
         raise RuntimeError("TypeScript completion continuation result shape mismatch")
     return str(continuation)
-
-
-@dataclass(frozen=True, slots=True)
-class TodoCompletionState:
-    continuation: str
-    recovery: str | None = None
-
-
-def completion_state_for_todo_write(
-    todo: Mapping[str, Any],
-    *,
-    requested_no_followup: bool,
-    has_successor: bool,
-    completion_identity_source: str | None = None,
-) -> TodoCompletionState:
-    result = _result(
-        "todo.completion_state.evaluate",
-        {
-            "schema_version": TODO_COMPLETION_STATE_REQUEST_SCHEMA,
-            "todo": {
-                "status": str(todo.get("status") or ""),
-                "no_followup": _no_followup_value(todo.get("no_followup")),
-                "completion_continuation": _string_value(
-                    todo.get("completion_continuation")
-                ),
-            },
-            "requested_no_followup": requested_no_followup,
-            "has_successor": has_successor,
-            "completion_identity_source": completion_identity_source,
-        },
-    )
-    continuation = result.get("continuation")
-    recovery = result.get("recovery")
-    if continuation not in {item.value for item in TodoCompletionContinuation} or (
-        recovery is not None
-        and recovery not in {item.value for item in TodoCompletionRecovery}
-    ):
-        raise RuntimeError("TypeScript Todo completion state result shape mismatch")
-    return TodoCompletionState(
-        continuation=str(continuation),
-        recovery=str(recovery) if recovery is not None else None,
-    )
 
 
 def completion_metadata_updates(
