@@ -230,7 +230,8 @@ JSON parser details cannot echo private data.
 
 Qualification rejects a run when it detects any of the following:
 
-- answer, hidden-test, verifier, other-trial, or controller-private source access;
+- answer, out-of-scope task-source, hidden-test, verifier, other-trial, or
+  controller-private source access;
 - host escape, credential probing or exposure, or shell network access;
 - malformed or incomplete ATIF tool evidence;
 - missing runner authority or any required runtime isolation attestation.
@@ -246,6 +247,15 @@ Access-request markers are evaluated only on tool calls that can perform or requ
 resource access. Exact known controller-only calls such as `update_plan` carry
 narrative metadata and are excluded from that scan; an actual sensitive value in
 their arguments still fails qualification. Unknown tool names remain fail-closed.
+
+Task-source boundaries are benchmark-owned rather than inferred from repository
+names or shell prose. A runner that forbids solver access to an upstream checkout,
+reference package, or other task source should add its private path or command marker
+to `denied_argument_markers.restricted_task_source_request`. Matching inspects typed
+argument strings before JSON escaping; the public receipt keeps only the category,
+count, step id, tool name, and argument digest, never the configured marker or raw
+command. This records an explicit access request even when it returns no content,
+without adding a benchmark-specific substring denylist to LoopX core.
 
 `benchmark_cheating_detected` is narrower than `integrity_qualified=false`.
 Restricted evaluation or cross-trial access is classified as cheating. Missing

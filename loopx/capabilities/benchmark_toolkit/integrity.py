@@ -24,6 +24,7 @@ BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION = (
 
 INTEGRITY_EVIDENCE_CATEGORIES = (
     "restricted_answer_source_request",
+    "restricted_task_source_request",
     "restricted_test_source_request",
     "verifier_source_request",
     "other_trial_request",
@@ -100,6 +101,7 @@ _DEFAULT_DENIED_ARGUMENT_MARKERS: dict[str, tuple[str, ...]] = {
 _CHEATING_CATEGORIES = frozenset(
     {
         "restricted_answer_source_request",
+        "restricted_task_source_request",
         "restricted_test_source_request",
         "verifier_source_request",
         "other_trial_request",
@@ -450,13 +452,19 @@ def build_benchmark_integrity_qualification(
             raw_arguments = raw_call.get("arguments") or {}
             arguments = _canonical_text(raw_arguments)
             lowered = arguments.lower()
+            argument_texts = (
+                lowered,
+                *(text.lower() for text in _argument_text_values(raw_arguments)),
+            )
             categories: set[str] = set()
             if function_name.lower() not in _NON_ACCESS_CONTROL_TOOLS:
                 categories = {
                     category
                     for category, category_markers in markers.items()
                     if any(
-                        _marker_present(lowered, marker) for marker in category_markers
+                        _marker_present(text, marker)
+                        for marker in category_markers
+                        for text in argument_texts
                     )
                 }
                 if credential_probe_present(function_name, raw_arguments):
