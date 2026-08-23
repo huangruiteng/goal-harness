@@ -53,17 +53,17 @@ def _runnable_candidates(
         else None
     )
     if isinstance(capability_candidates, list):
-        sources = [capability_candidates]
+        sources: list[list[Any]] = [capability_candidates]
     else:
-        sources = [
-            agent_todo_summary.get(field)
-            for field in (
-                "active_next_action_executable_items",
-                "first_executable_items",
-                "executable_backlog_items",
-            )
-            if isinstance(agent_todo_summary.get(field), list)
-        ]
+        sources = []
+        for field in (
+            "active_next_action_executable_items",
+            "first_executable_items",
+            "executable_backlog_items",
+        ):
+            items = agent_todo_summary.get(field)
+            if isinstance(items, list):
+                sources.append(items)
 
     candidates: list[dict[str, Any]] = []
     for items in sources:

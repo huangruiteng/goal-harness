@@ -28,6 +28,12 @@ selected primary becomes unavailable at its real call site. Compaction may
 remove the larger todo/capability candidate lists only after preserving this
 bounded portfolio unchanged.
 
+The `turn_envelope_action_dimensions_v2` base/head migration has a JSON-only,
+bounded growth allowance for this additive portfolio. The allowance applies
+only while a v0/v1 baseline migrates to v2, remains a review signal, and still
+fails above 1,280 characters/bytes, 36 lines, or 896 compact characters. Once
+v2 is the baseline, the ordinary hot-path growth limits apply again.
+
 Repeated vision audits use `$.vision_continuation_audit` as the canonical
 projection. Candidate lists and peer action lists retain counts and point to
 `--include-detail agent-todos`. The complete vision audit is available through

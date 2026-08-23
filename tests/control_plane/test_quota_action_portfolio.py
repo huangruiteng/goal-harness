@@ -142,3 +142,18 @@ def test_typed_future_monitor_selects_ready_work_and_preserves_priority() -> Non
     assert unavailable[0]["todo_id"] == PRIMARY_ID
     assert unavailable[0]["availability_reason"] == "scheduled_for_future"
     assert unavailable[0]["next_due_at"] == "2099-01-01T00:00:00Z"
+
+
+def test_receipt_bound_turn_cannot_switch_to_a_fallback_todo() -> None:
+    packet = build_quota_should_run(
+        _legacy_future_primary_status(),
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        receipt_bound_todo_id=PRIMARY_ID,
+    )
+
+    assert packet["selected_todo"]["todo_id"] == PRIMARY_ID
+    assert packet["agent_lane_next_action"]["selection_binding"] == (
+        "heartbeat_receipt"
+    )
+    assert "action_portfolio" not in packet

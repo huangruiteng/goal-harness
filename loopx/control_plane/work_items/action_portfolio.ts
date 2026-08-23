@@ -51,6 +51,54 @@ function candidateIdentity(candidate: ActionCandidate): string {
   return candidate.todo_id || candidate.text;
 }
 
+function requireRunnableAdvancement(
+  candidate: ActionCandidate,
+  label: string,
+): void {
+  if (candidate.status !== "open") {
+    throw new Error(`${label}.status must be open`);
+  }
+  if (candidate.task_class !== "advancement_task") {
+    throw new Error(`${label}.task_class must be advancement_task`);
+  }
+}
+
+function primaryProjection(candidate: ActionCandidate): JsonObject {
+  return { todo_id: candidate.todo_id };
+}
+
+function fallbackProjection(candidate: ActionCandidate): JsonObject {
+  const projected: JsonObject = {
+    todo_id: candidate.todo_id,
+    text: candidate.text,
+  };
+  for (const field of ["priority", "action_kind", "claimed_by"] as const) {
+    if (candidate[field] !== undefined) projected[field] = candidate[field];
+  }
+  if (candidate.claim_required_before_work === true) {
+    projected.claim_required_before_work = true;
+  }
+  return projected;
+}
+
+function unavailableProjection(candidate: ActionCandidate): JsonObject {
+  const projected: JsonObject = {
+    todo_id: candidate.todo_id,
+    text: candidate.text,
+    availability_reason: candidate.availability_reason,
+  };
+  for (const field of [
+    "priority",
+    "status",
+    "task_class",
+    "action_kind",
+    "next_due_at",
+  ] as const) {
+    if (candidate[field] !== undefined) projected[field] = candidate[field];
+  }
+  return projected;
+}
+
 /**
  * Build the bounded, model-facing action set for one quota decision.
  *
@@ -67,6 +115,7 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
     );
   }
   const primary = actionCandidate(request.primary, "action_portfolio_request.primary");
+  requireRunnableAdvancement(primary, "action_portfolio_request.primary");
   const maximum = request.max_fallback_actions === undefined
     ? 2
     : requireInteger(
@@ -87,6 +136,10 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
       rawCandidate,
       `action_portfolio_request.candidates[${index}]`,
     );
+    requireRunnableAdvancement(
+      candidate,
+      `action_portfolio_request.candidates[${index}]`,
+    );
     const identity = candidateIdentity(candidate);
     if (seen.has(identity)) continue;
     seen.add(identity);
@@ -104,6 +157,11 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
       rawCandidate,
       `action_portfolio_request.unavailable_higher_priority[${index}]`,
     );
+    if (!candidate.availability_reason) {
+      throw new Error(
+        `action_portfolio_request.unavailable_higher_priority[${index}].availability_reason must be a non-empty string`,
+      );
+    }
     const identity = candidateIdentity(candidate);
     if (identity === candidateIdentity(primary) || seenUnavailable.has(identity)) {
       continue;
@@ -118,14 +176,16 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
   }
   return {
     schema_version: ACTION_PORTFOLIO_SCHEMA_VERSION,
-    primary,
+    primary: primaryProjection(primary),
     fallback_policy: {
       trigger: "primary_unavailable_at_execution",
       selection: "first_still_runnable_in_order",
       preserve_primary_blocker: true,
       max_fallback_actions: maximum,
     },
-    fallback_actions: fallbackActions,
-    unavailable_higher_priority: unavailableHigherPriority,
+    fallback_actions: fallbackActions.map(fallbackProjection),
+    unavailable_higher_priority: unavailableHigherPriority.map(
+      unavailableProjection,
+    ),
   };
 }

@@ -36,8 +36,10 @@ Action-signature coverage is versioned independently from the envelope schema.
 `turn_envelope_action_dimensions_v1` additionally covers a blocking user
 gate's `response_plan`; `turn_envelope_action_dimensions_v2` additionally signs
 `action.action_portfolio`. Base/head qualification accepts a declared coverage
-migration as a review signal, while a digest change without a supported
-coverage migration still fails closed.
+migration as a review signal. Its bounded, JSON-only v2 migration budget applies
+only when a v0/v1 baseline moves to v2; ordinary growth limits resume once v2
+is the baseline. A digest change without a supported coverage migration, or a
+v2 portfolio above that one-version budget, still fails closed.
 
 `protocol_action_packet` remains in the full decision/cold path. The envelope
 reconstructs its ordered semantic fields from `action`, `user`, work-lane,

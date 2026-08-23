@@ -882,6 +882,29 @@ def _validate_required_vision_replan_scenario(
         raise ValueError("required-vision scenario must remain immediately runnable")
 
 
+def _validate_future_primary_fallback_scenario(
+    source_packet: Mapping[str, Any],
+) -> None:
+    signature = quota_action_signature_document(source_packet)
+    action = dict(signature.get("action") or {})
+    selected = dict(action.get("selected_todo") or {})
+    portfolio = dict(action.get("action_portfolio") or {})
+    primary = dict(portfolio.get("primary") or {})
+    unavailable = list(portfolio.get("unavailable_higher_priority") or [])
+    first_unavailable = dict(unavailable[0]) if unavailable else {}
+    if not (
+        selected.get("todo_id") == "todo_ready_fallback"
+        and primary.get("todo_id") == "todo_ready_fallback"
+        and first_unavailable.get("todo_id") == "todo_future_primary"
+        and first_unavailable.get("availability_reason")
+        == "scheduled_for_future"
+    ):
+        raise ValueError(
+            "future-primary scenario must execute the ready fallback while "
+            "preserving the unavailable higher-priority monitor"
+        )
+
+
 def _scenario_contract(
     spec: _ScenarioSpec,
     source_packet: Mapping[str, Any],
@@ -982,24 +1005,7 @@ def _scenario_contract(
                     "same-agent scenario must preserve the completing peer"
                 )
     if spec.scenario_id == "turn_future_primary_fallback":
-        signature = quota_action_signature_document(source_packet)
-        action = dict(signature.get("action") or {})
-        selected = dict(action.get("selected_todo") or {})
-        portfolio = dict(action.get("action_portfolio") or {})
-        unavailable = list(portfolio.get("unavailable_higher_priority") or [])
-        if not (
-            selected.get("todo_id") == "todo_ready_fallback"
-            and portfolio.get("primary", {}).get("todo_id")
-            == "todo_ready_fallback"
-            and unavailable
-            and unavailable[0].get("todo_id") == "todo_future_primary"
-            and unavailable[0].get("availability_reason")
-            == "scheduled_for_future"
-        ):
-            raise ValueError(
-                "future-primary scenario must execute the ready fallback while "
-                "preserving the unavailable higher-priority monitor"
-            )
+        _validate_future_primary_fallback_scenario(source_packet)
     if spec.scenario_id == "turn_human_gate":
         required = {
             "selected_todo_id": None,

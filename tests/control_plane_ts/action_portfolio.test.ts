@@ -89,4 +89,17 @@ test("malformed candidates fail closed at the typed boundary", () => {
     }),
     /todo_id/,
   );
+  assert.throws(
+    () => projectQuotaActionPortfolio({
+      schema_version: ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION,
+      primary: candidate("todo_primary001", "Run the primary slice.", "P0"),
+      candidates: [
+        {
+          ...candidate("todo_blocked001", "Blocked work.", "P1"),
+          status: "blocked",
+        },
+      ],
+    }),
+    /status must be open/,
+  );
 });

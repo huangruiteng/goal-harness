@@ -696,6 +696,29 @@ class _QuotaDecisionRoute:
     payload_work_lane_contract: dict[str, Any] | None
 
 
+def _project_quota_action_portfolio(
+    prepared: _QuotaDecisionPreparation,
+    route: _QuotaDecisionRoute,
+) -> dict[str, Any] | None:
+    if (
+        not route.should_run
+        or not route.normal_delivery_allowed
+        or prepared.receipt_bound_todo_id is not None
+        or route.receipt_bound_replan_decision
+        or prepared.agent_monitor_only
+    ):
+        return None
+    return build_quota_action_portfolio(
+        primary=route.agent_lane_next_action,
+        agent_id=normalize_todo_claimed_by(
+            (prepared.agent_identity or {}).get("agent_id")
+        ),
+        agent_todo_summary=prepared.agent_todo_summary,
+        capability_gate=prepared.capability_gate,
+        blocked_priority_fallback=prepared.blocked_priority_fallback,
+    )
+
+
 def _resolve_quota_should_run_route(
     prepared: _QuotaDecisionPreparation,
 ) -> _QuotaDecisionRoute:
@@ -1197,22 +1220,7 @@ def _build_quota_should_run_payload(
         payload["selected_todo"] = selected_todo_projection
     elif route.receipt_bound_replan_decision:
         payload["selected_todo"] = None
-    action_portfolio = (
-        build_quota_action_portfolio(
-            primary=route.agent_lane_next_action,
-            agent_id=normalize_todo_claimed_by(
-                (prepared.agent_identity or {}).get("agent_id")
-            ),
-            agent_todo_summary=prepared.agent_todo_summary,
-            capability_gate=prepared.capability_gate,
-            blocked_priority_fallback=prepared.blocked_priority_fallback,
-        )
-        if route.should_run
-        and route.normal_delivery_allowed
-        and not route.receipt_bound_replan_decision
-        and not prepared.agent_monitor_only
-        else None
-    )
+    action_portfolio = _project_quota_action_portfolio(prepared, route)
     if action_portfolio is not None:
         payload["action_portfolio"] = action_portfolio
     _attach_truthy_fields(
