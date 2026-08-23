@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from json import loads as json_loads
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from ..runtime.validation_command import (
     run_caller_validation,
 )
 from .active_state_editing import find_todo_block
+from .contract import TODO_STATUS_DONE, normalize_todo_status
 from .event_writeback import event_projection_source_authority, event_projection_todo_context
 from .completion_transaction import (
     reduce_todo_completion_transaction,
@@ -24,6 +26,24 @@ _COMPLETION_VALIDATION_TIMEOUT_SECONDS = 20
 # Per-todo overrides (declared on `todo add`) must also stay under that outer
 # budget for the same reason; the writer-side range check enforces this.
 COMPLETION_VALIDATION_TIMEOUT_MAX_SECONDS = 29
+
+
+def normalize_validation_command_json(raw: str | None) -> list[str] | None:
+    """Decode the run-once argv form used by Todo completion validation."""
+
+    if raw is None:
+        return None
+    try:
+        argv = json_loads(raw)
+    except ValueError as exc:
+        raise ValueError(
+            "--validation-command-json must be a JSON string array"
+        ) from exc
+    if not isinstance(argv, list) or not argv or not all(
+        isinstance(item, str) and item for item in argv
+    ):
+        raise ValueError("--validation-command-json must be a JSON string array")
+    return argv
 
 
 def _resolve_goal_repo_workspace(registry_path: Path, goal_id: str) -> Path | None:
@@ -281,3 +301,72 @@ def run_completion_validation_gate_with_source(
         "source_snapshot": source_snapshot,
         "transaction": transaction,
     }
+
+
+def prepare_user_todo_update_completion(
+    *,
+    status: str | None,
+    state_file: Path,
+    todo_id: str,
+    role: str | None,
+    registry_path: Path,
+    goal_id: str,
+    dry_run: bool,
+    no_followup: bool,
+    requested_has_successor: bool,
+) -> dict[str, Any] | None:
+    """Prepare the coarse transaction for a direct user-Todo completion."""
+
+    if normalize_todo_status(status) != TODO_STATUS_DONE:
+        return None
+    match = find_todo_block(
+        state_file.read_text(encoding="utf-8").splitlines(),
+        todo_id=todo_id,
+        role=role,
+    )
+    if match is None or (role or match[0]) == "agent":
+        return None
+    return run_completion_validation_gate_with_source(
+        state_file=state_file,
+        todo_id=todo_id,
+        role=role,
+        registry_path=registry_path,
+        goal_id=goal_id,
+        dry_run=dry_run,
+        no_followup=no_followup,
+        requested_has_successor=requested_has_successor,
+    )
+
+
+def locked_todo_completion_source(
+    *,
+    lines: list[str],
+    state_file: Path,
+    project: Path | None,
+    registry_path: Path,
+    goal_id: str,
+    todo_id: str,
+    role: str | None,
+) -> tuple[Any, dict[str, Any] | None, dict[str, Any] | None]:
+    """Resolve the materialized or event-projected Todo under the write lock."""
+
+    match = find_todo_block(lines, todo_id=todo_id, role=role)
+    if match:
+        item_role, _section, _start, _end, block = match
+        todo = dict(block)
+        todo["role"] = item_role
+        return match, todo, None
+    event_context = event_projection_todo_context(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        state_path=state_file,
+        todo_id=todo_id,
+        role=role,
+    )
+    if event_context is None:
+        return None, None, None
+    event_context["state_file"] = state_file
+    event_context["project"] = project
+    todo = dict(event_context["item"])
+    todo["role"] = event_context["role"]
+    return None, todo, event_context

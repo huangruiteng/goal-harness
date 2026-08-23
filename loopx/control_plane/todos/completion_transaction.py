@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
+from .contract import normalize_todo_id_list
 
 
 TODO_COMPLETION_TRANSACTION_REQUEST_SCHEMA = "loopx_todo_completion_transaction_v0"
@@ -86,6 +87,127 @@ def todo_completion_source_drift_failure(
         "todo_id": todo_id,
         "completion_source_drift": True,
         "reason": reason,
+    }
+
+
+def locked_todo_completion_transaction(
+    *,
+    validation_gate: Mapping[str, Any],
+    todo: Mapping[str, Any],
+    goal_id: str,
+    todo_id: str,
+    dry_run: bool,
+    require_source_match: bool,
+    missing_is_drift: bool,
+) -> dict[str, Any]:
+    """Bind a pre-lock transaction to the Todo observed under the write lock."""
+
+    transaction = validation_gate.get("transaction")
+    if not isinstance(transaction, Mapping):
+        if not missing_is_drift:
+            raise RuntimeError("TypeScript Todo completion transaction result is missing")
+        return {
+            "transaction": None,
+            "failure": todo_completion_source_drift_failure(
+                goal_id=goal_id,
+                todo_id=todo_id,
+                dry_run=dry_run,
+                reason=(
+                    "Todo completion source appeared after validation planning; "
+                    "retry against the current source"
+                ),
+            ),
+        }
+    source_snapshot = validation_gate.get("source_snapshot")
+    if require_source_match and (
+        not isinstance(source_snapshot, Mapping)
+        or not todo_completion_source_matches(source_snapshot, todo)
+    ):
+        return {
+            "transaction": None,
+            "failure": todo_completion_source_drift_failure(
+                goal_id=goal_id,
+                todo_id=todo_id,
+                dry_run=dry_run,
+                reason=(
+                    "Todo completion source changed after validation planning; "
+                    "retry against the current source"
+                ),
+            ),
+        }
+    return {"transaction": dict(transaction), "failure": None}
+
+
+def user_todo_completion_metadata_updates(
+    transaction: Mapping[str, Any],
+    *,
+    todo_already_done: bool,
+) -> dict[str, Any] | None:
+    """Project the metadata authorized for a direct user-Todo completion."""
+
+    if todo_already_done:
+        return None
+    if transaction.get("decision") != "commit":
+        raise RuntimeError(
+            "TypeScript Todo completion transaction did not authorize "
+            "the user Todo completion"
+        )
+    metadata_updates = transaction.get("metadata_updates")
+    if not isinstance(metadata_updates, Mapping):
+        raise RuntimeError("TypeScript Todo completion transaction metadata is missing")
+    return dict(metadata_updates)
+
+
+def require_completion_successor_todo_ids(
+    value: list[str] | None,
+) -> list[str]:
+    """Normalize caller-declared successors without silently dropping bad ids."""
+
+    normalized = normalize_todo_id_list(value)
+    if value and not normalized:
+        raise ValueError(
+            "successor_todo_ids must contain public "
+            "todo_<letters-digits-underscore-hyphen> tokens"
+        )
+    return normalized
+
+
+def materialized_todo_completion_replay(
+    *,
+    transaction: Mapping[str, Any],
+    todo: Mapping[str, Any],
+    dry_run: bool,
+    goal_id: str,
+    todo_id: str,
+    handoff: Mapping[str, Any],
+    mutation_authority: Mapping[str, Any],
+    state_file: str,
+    project: str | None,
+) -> dict[str, Any] | None:
+    """Render the stable materialized-Todo idempotent replay response."""
+
+    fence = transaction.get("fence")
+    if not (
+        transaction.get("decision") == "replay"
+        and isinstance(fence, Mapping)
+        and fence.get("status") == "done"
+    ):
+        return None
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "completed": True,
+        "idempotent_replay": True,
+        "changed": False,
+        "goal_id": goal_id,
+        "todo_id": todo_id,
+        "status": "done",
+        "completion_continuation": fence.get("completion_continuation"),
+        "completion_recovery": todo.get("completion_recovery"),
+        "handoff_mode": handoff["handoff_mode"],
+        "mutation_authority": dict(mutation_authority),
+        "state_file": state_file,
+        "project": project,
     }
 
 
