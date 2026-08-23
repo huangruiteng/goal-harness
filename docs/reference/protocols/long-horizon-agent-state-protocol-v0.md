@@ -123,6 +123,15 @@ timeline. Use an independent state file only when the work has a distinct
 `goal_id`, durable objective, protected boundary, owner policy, or backlog that
 would be misleading if compressed into the parent goal's `Next Action`.
 
+The goal-level `Next Action` remains a stable tie-breaker among equally ranked
+work. When it carries a typed todo binding, adding an executable agent todo may
+rebind it only if the new todo has strictly higher priority and belongs to the
+same agent lane (or replaces an unclaimed generated route). Manual or untyped
+operator text and routes already owned by another agent remain authoritative.
+Startup checks that are merely recommended stay below concrete task work;
+required connection, permission, or runtime setup must instead be represented
+as an explicit high-priority prerequisite or blocker.
+
 Every new rollout event that should participate in concurrent-agent views should
 try to include at least one stable join key: `agent_id`, `todo_id`, `run_id`,
 `lane.lane_id`, or `case_id`. Events that cannot expose a join

@@ -88,7 +88,7 @@ from .control_plane.todos.line_update import (
     link_superseding_todo_id,
     upsert_todo_metadata,
 )
-from .control_plane.todos.next_action_runtime import settle_completed_todo_next_action
+from .control_plane.todos.next_action_runtime import apply_added_todo_next_action, settle_completed_todo_next_action
 from .control_plane.todos.list_projection import (
     AGENT_LANE_OVERLAY_FULL_DETAIL_COLD_PATH,
     EXPLICIT_LIMIT_OVERLAY_FULL_DETAIL_COLD_PATH,
@@ -1156,7 +1156,7 @@ def add_goal_todo(
         )
         added = bool(add_result["added"])
         metadata_updated = bool(add_result["metadata_updated"])
-        changed = bool(add_result["changed"])
+        changed = apply_added_todo_next_action(lines, role=role, add_result=add_result)
 
         new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
         if changed:

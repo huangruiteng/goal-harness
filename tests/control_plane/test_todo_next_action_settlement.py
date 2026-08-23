@@ -5,7 +5,10 @@ from pathlib import Path
 
 from loopx.bootstrap import render_state_markdown
 from loopx.control_plane.effect_runtime import MAX_REQUEST_BYTES
-from loopx.control_plane.todos.next_action_runtime import _agent_todo_snapshots
+from loopx.control_plane.todos.next_action_runtime import (
+    _agent_todo_snapshots,
+    reconcile_added_todo_next_action,
+)
 from loopx.control_plane.todos.projection import TODO_MISSING_PRIORITY_RANK, todo_priority_rank
 from loopx.state_projection import active_state_next_action_entries
 from loopx.state_refresh import build_state_refresh_record
@@ -120,6 +123,180 @@ def test_bootstrap_binds_generated_connection_validation_next_action(
         state_text
     )
     assert "loopx:next-action" not in json.dumps(record)
+
+
+def test_higher_priority_agent_todo_rebinds_generated_onboarding_next_action(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = repo / "ACTIVE_GOAL_STATE.md"
+    state.write_text(
+        render_state_markdown(
+            project=repo,
+            goal_id=GOAL_ID,
+            adapter_kind="read_only_project_map_v0",
+            objective="Implement and validate the task.",
+            updated_at="2026-08-21T00:00:00+08:00",
+            goal_doc=None,
+            execution_profile=None,
+        ),
+        encoding="utf-8",
+    )
+    registry = tmp_path / "registry.global.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "common_runtime_root": str(tmp_path / "runtime"),
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "domain": "harness_self_improvement",
+                        "status": "active",
+                        "repo": str(repo),
+                        "state_file": state.name,
+                        "adapter": {"kind": "read_only_project_map_v0"},
+                        "coordination": {
+                            "agent_model": "peer_v1",
+                            "registered_agents": [AGENT_ID],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    added = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="[P0] Implement and validate the requested behavior.",
+        task_class="advancement_task",
+        action_kind="implementation",
+        claimed_by=AGENT_ID,
+    )
+
+    state_text = state.read_text(encoding="utf-8")
+    assert added["todo_id"]
+    assert active_state_next_action_entries(state_text) == [
+        "[P0] Implement and validate the requested behavior."
+    ]
+    assert f"todo_id={added['todo_id']} -->" in state_text
+
+
+def test_agent_todo_add_preserves_same_priority_and_manual_next_actions(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(
+        tmp_path,
+        next_action="Keep the owner-approved route unchanged.",
+    )
+    manual = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="[P0] Implement the requested behavior.",
+        task_class="advancement_task",
+        action_kind="implementation",
+        claimed_by=AGENT_ID,
+    )
+    assert manual["todo_id"]
+    assert active_state_next_action_entries(state.read_text(encoding="utf-8")) == [
+        "Keep the owner-approved route unchanged."
+    ]
+
+    state.write_text(
+        state.read_text(encoding="utf-8").replace(
+            "- Keep the owner-approved route unchanged.\n",
+            "- [P0] Implement the requested behavior.\n"
+            "<!-- loopx:next-action schema=loopx_next_action_binding_v0 "
+            f"todo_id={manual['todo_id']} -->\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    same_priority = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="[P0] Add focused validation.",
+        task_class="advancement_task",
+        action_kind="validation_review",
+        claimed_by=AGENT_ID,
+    )
+    assert same_priority["todo_id"]
+    assert active_state_next_action_entries(state.read_text(encoding="utf-8")) == [
+        "[P0] Implement the requested behavior."
+    ]
+
+
+def test_higher_priority_todo_does_not_take_over_another_claimed_lane(
+    tmp_path: Path,
+) -> None:
+    bound_text = "[P1] Continue the first peer's selected route."
+    registry, state = _write_fixture(tmp_path, next_action=bound_text)
+    bound = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text=bound_text,
+        task_class="advancement_task",
+        action_kind="implementation",
+        claimed_by=AGENT_ID,
+    )
+    state.write_text(
+        state.read_text(encoding="utf-8").replace(
+            f"- {bound_text}\n",
+            f"- {bound_text}\n"
+            "<!-- loopx:next-action schema=loopx_next_action_binding_v0 "
+            f"todo_id={bound['todo_id']} -->\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    registry_payload = json.loads(registry.read_text(encoding="utf-8"))
+    registry_payload["goals"][0]["coordination"]["registered_agents"].append(
+        "codex-other"
+    )
+    registry.write_text(json.dumps(registry_payload), encoding="utf-8")
+
+    added = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="[P0] Execute the other peer's independent route.",
+        task_class="advancement_task",
+        action_kind="implementation",
+        claimed_by="codex-other",
+    )
+
+    assert added["todo_id"]
+    assert active_state_next_action_entries(state.read_text(encoding="utf-8")) == [
+        bound_text
+    ]
+
+
+def test_higher_priority_todo_preserves_multi_entry_operator_route() -> None:
+    lines = [
+        "## Agent Todo",
+        "",
+        "- [ ] [P1] Run the generated startup check.",
+        "  <!-- loopx:todo todo_id=todo_startup task_class=advancement_task -->",
+        "- [ ] [P0] Implement the requested behavior.",
+        "  <!-- loopx:todo todo_id=todo_task task_class=advancement_task claimed_by=codex -->",
+        "",
+        "## Next Action",
+        "",
+        "- [P1] Run the generated startup check.",
+        "<!-- loopx:next-action schema=loopx_next_action_binding_v0 todo_id=todo_startup -->",
+        "- Preserve this operator-authored route.",
+        "",
+    ]
+
+    assert reconcile_added_todo_next_action(lines, added_todo_id="todo_task") is False
+    assert "- Preserve this operator-authored route." in lines
+    assert "todo_id=todo_startup" in "\n".join(lines)
 
 
 def test_refresh_record_preserves_a_long_wrapped_next_action_losslessly(

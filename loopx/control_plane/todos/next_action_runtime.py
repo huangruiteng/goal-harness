@@ -61,6 +61,7 @@ def _agent_todo_snapshots(lines: list[str]) -> list[dict[str, Any]]:
                 or TODO_STATUS_OPEN,
                 "task_class": str(block.get("task_class") or "").strip() or None,
                 "priority": todo_priority_label(block, text_mode="prefix"),
+                "claimed_by": str(block.get("claimed_by") or "").strip() or None,
                 "text": str(block.get("text") or "").strip(),
                 "index": int(block.get("index") or 0),
                 "completion_continuation": (
@@ -157,6 +158,42 @@ def bind_next_action_to_todo(lines: list[str], *, todo_id: str) -> bool:
         params={"todo_id": normalized_todo_id},
     )
     return bool(result["changed"])
+
+
+def reconcile_added_todo_next_action(
+    lines: list[str],
+    *,
+    added_todo_id: str,
+) -> bool:
+    """Let higher-priority task work replace a lower-priority typed route."""
+
+    normalized_todo_id = normalize_todo_id(added_todo_id)
+    if not normalized_todo_id:
+        raise ValueError("Next Action reconciliation requires a valid added todo_id")
+    result = _apply_transition(
+        lines,
+        operation="reconcile_added",
+        params={
+            "todo_id": normalized_todo_id,
+            "agent_todos": _agent_todo_snapshots(lines),
+        },
+    )
+    return bool(result["changed"])
+
+
+def apply_added_todo_next_action(
+    lines: list[str],
+    *,
+    role: str,
+    add_result: dict[str, Any],
+) -> bool:
+    """Return whether todo addition or its typed Next Action projection changed."""
+
+    changed = bool(add_result["changed"])
+    todo_id = str(add_result.get("todo_id") or "")
+    if role != "agent" or not todo_id:
+        return changed
+    return reconcile_added_todo_next_action(lines, added_todo_id=todo_id) or changed
 
 
 def settle_completed_todo_next_action(

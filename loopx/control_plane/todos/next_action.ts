@@ -31,6 +31,7 @@ export interface TodoNextActionSnapshot {
   status: string;
   task_class: string | null;
   priority: TodoPriority | null;
+  claimed_by: string | null;
   text: string;
   index: number;
   completion_continuation: string | null;
@@ -43,6 +44,13 @@ export type TodoNextActionRequest =
       operation: "bind";
       lines: readonly string[];
       todo_id: string;
+    }
+  | {
+      schema_version: typeof TODO_NEXT_ACTION_REQUEST_SCHEMA;
+      operation: "reconcile_added";
+      lines: readonly string[];
+      todo_id: string;
+      agent_todos: readonly TodoNextActionSnapshot[];
     }
   | {
       schema_version: typeof TODO_NEXT_ACTION_REQUEST_SCHEMA;
@@ -62,6 +70,7 @@ export interface TodoNextActionResult extends JsonObject {
     | "not_terminal"
     | "awaiting_successor"
     | "route_unmatched"
+    | "reprioritized"
     | "settled";
   changed: boolean;
   matched: boolean;
@@ -107,6 +116,7 @@ function todoSnapshot(value: unknown, index: number): TodoNextActionSnapshot {
     status,
     task_class: optionalString(item.task_class, `${label}.task_class`),
     priority: nullableTodoPriority(item.priority, `${label}.priority`),
+    claimed_by: optionalString(item.claimed_by, `${label}.claimed_by`),
     text: normalizeText(requiredString(item.text, `${label}.text`)),
     index: Number(item.index),
     completion_continuation: optionalString(
@@ -143,11 +153,22 @@ export function decodeTodoNextActionRequest(
       todo_id: todoId,
     };
   }
-  if (operation !== "settle_completion") {
+  if (operation !== "reconcile_added" && operation !== "settle_completion") {
     throw new Error("Todo Next Action operation is unsupported");
   }
   if (!Array.isArray(request.agent_todos)) {
     throw new Error("todo.next_action agent_todos must be an array");
+  }
+  if (operation === "reconcile_added") {
+    return {
+      schema_version: TODO_NEXT_ACTION_REQUEST_SCHEMA,
+      operation,
+      lines,
+      todo_id: todoId,
+      agent_todos: request.agent_todos.map((value, index) =>
+        todoSnapshot(value, index)
+      ),
+    };
   }
   const materializedTodoIds = stringArray(
     request.materialized_todo_ids,
@@ -331,6 +352,75 @@ function nextOpenAgentTodo(
   return candidates[0] ?? null;
 }
 
+function replaceNextAction(
+  lines: readonly string[],
+  todo: TodoNextActionSnapshot,
+): string[] | null {
+  const bounds = headingBounds(lines, "Next Action");
+  if (!bounds) return null;
+  const [start, end] = bounds;
+  return [
+    ...lines.slice(0, start),
+    "## Next Action",
+    "",
+    `- ${todo.text}`,
+    bindingLine(todo.todo_id),
+    "",
+    ...lines.slice(end),
+  ];
+}
+
+function reconcileAddedTodo(
+  request: Extract<TodoNextActionRequest, { operation: "reconcile_added" }>,
+): TodoNextActionResult {
+  const added = request.agent_todos.find(
+    (todo) => todo.todo_id === request.todo_id,
+  );
+  if (
+    added?.status !== "open" ||
+    added.task_class !== "advancement_task"
+  ) {
+    return unchangedResult("reconcile_added", "unchanged", request.lines);
+  }
+  const matches = bindingMatches(request.lines);
+  if (
+    matches.length !== 1 ||
+    matches[0].schema !== NEXT_ACTION_BINDING_SCHEMA ||
+    visibleNextActionEntries(request.lines).length !== 1
+  ) {
+    return unchangedResult("reconcile_added", "route_unmatched", request.lines);
+  }
+  const bound = request.agent_todos.find(
+    (todo) => todo.todo_id === matches[0].todoId,
+  );
+  if (
+    bound?.status !== "open" ||
+    bound.task_class !== "advancement_task" ||
+    priorityRank(added.priority) >= priorityRank(bound.priority)
+  ) {
+    return unchangedResult("reconcile_added", "unchanged", request.lines, true);
+  }
+  // An unclaimed bootstrap route may yield to concrete claimed work. A route
+  // already owned by another peer remains authoritative for that peer's lane.
+  if (bound.claimed_by && bound.claimed_by !== added.claimed_by) {
+    return unchangedResult("reconcile_added", "unchanged", request.lines, true);
+  }
+  const updated = replaceNextAction(request.lines, added);
+  if (!updated) {
+    return unchangedResult("reconcile_added", "route_unmatched", request.lines, true);
+  }
+  return {
+    schema_version: TODO_NEXT_ACTION_RESULT_SCHEMA,
+    operation: "reconcile_added",
+    outcome: "reprioritized",
+    changed: true,
+    matched: true,
+    lines: updated,
+    next_todo_id: added.todo_id,
+    next_action: added.text,
+  };
+}
+
 function settleCompletedTodo(
   request: Extract<TodoNextActionRequest, { operation: "settle_completion" }>,
 ): TodoNextActionResult {
@@ -436,7 +526,11 @@ export function transitionTodoNextAction(
   value: unknown,
 ): TodoNextActionResult {
   const request = decodeTodoNextActionRequest(value);
-  return request.operation === "bind"
-    ? bindNextAction(request.lines, request.todo_id)
-    : settleCompletedTodo(request);
+  if (request.operation === "bind") {
+    return bindNextAction(request.lines, request.todo_id);
+  }
+  if (request.operation === "reconcile_added") {
+    return reconcileAddedTodo(request);
+  }
+  return settleCompletedTodo(request);
 }

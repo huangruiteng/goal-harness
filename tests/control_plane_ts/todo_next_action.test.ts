@@ -17,6 +17,7 @@ function todo(
     status: "open",
     task_class: "advancement_task",
     priority: "P1",
+    claimed_by: null,
     text: `[P1] ${todoId}`,
     index: 1,
     completion_continuation: null,
@@ -24,6 +25,88 @@ function todo(
     ...overrides,
   };
 }
+
+function reconcileRequest(
+  lines: string[],
+  todos: TodoNextActionSnapshot[],
+  addedTodoId = "todo_task",
+): Record<string, unknown> {
+  return {
+    schema_version: TODO_NEXT_ACTION_REQUEST_SCHEMA,
+    operation: "reconcile_added",
+    lines,
+    todo_id: addedTodoId,
+    agent_todos: todos,
+  };
+}
+
+test("strictly higher-priority same-lane work replaces a generated route", () => {
+  const startup = todo("todo_startup", {
+    text: "[P1] Run the generated startup check.",
+  });
+  const task = todo("todo_task", {
+    priority: "P0",
+    claimed_by: "codex",
+    text: "[P0] Implement and validate the requested behavior.",
+    index: 2,
+  });
+  const lines = [
+    "## Next Action",
+    "",
+    `- ${startup.text}`,
+    `<!-- loopx:next-action schema=${NEXT_ACTION_BINDING_SCHEMA} todo_id=${startup.todo_id} -->`,
+    "",
+  ];
+  const before = structuredClone(lines);
+
+  const result = transitionTodoNextAction(
+    reconcileRequest(lines, [startup, task]),
+  );
+
+  assert.equal(result.outcome, "reprioritized");
+  assert.equal(result.next_todo_id, task.todo_id);
+  assert.equal(result.next_action, task.text);
+  assert.deepEqual(lines, before);
+});
+
+test("reconciliation preserves equal, cross-lane, and multi-entry routes", () => {
+  const startup = todo("todo_startup", {
+    claimed_by: "codex-first",
+    text: "[P1] Continue the selected route.",
+  });
+  const baseLines = [
+    "## Next Action",
+    "",
+    `- ${startup.text}`,
+    `<!-- loopx:next-action schema=${NEXT_ACTION_BINDING_SCHEMA} todo_id=${startup.todo_id} -->`,
+    "",
+  ];
+  const cases = [
+    todo("todo_task", { priority: "P1", claimed_by: "codex-first" }),
+    todo("todo_task", { priority: "P0", claimed_by: "codex-other" }),
+  ];
+
+  for (const task of cases) {
+    const result = transitionTodoNextAction(
+      reconcileRequest(baseLines, [startup, task]),
+    );
+    assert.equal(result.changed, false);
+    assert.deepEqual(result.lines, baseLines);
+  }
+
+  const unclaimedStartup = todo("todo_startup", { claimed_by: null });
+  const task = todo("todo_task", { priority: "P0", claimed_by: "codex" });
+  const multiEntry = [
+    ...baseLines.slice(0, -1),
+    "- Preserve this operator-authored route.",
+    "",
+  ];
+  const result = transitionTodoNextAction(
+    reconcileRequest(multiEntry, [unclaimedStartup, task]),
+  );
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.lines, multiEntry);
+});
 
 test("completion orders open work by typed priority, not display text", () => {
   const completed = todo("todo_completed", {
