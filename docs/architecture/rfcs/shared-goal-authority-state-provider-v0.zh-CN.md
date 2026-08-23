@@ -592,7 +592,8 @@ Stage 2 的 aggregate 与 provider shadow。该 aggregate 必须把 `handoff_mod
 lineage，却不会因此获得当前权威；把恢复状态晋升为 live authority head，必须经过
 显式的 lineage 与 binding fence。
 
-File-backed provider shadow 属于 Stage 2；这一切片尚未开始它。
+File-backed provider shadow 属于 Stage 2；其第一个切片与证据记录在下方的
+Stage 2 状态小节。
 
 完成续接（continuation）的持久化读回
 （`durable_completion.py`：`read_persisted_todo_record` /
@@ -602,6 +603,62 @@ settlement 之前重新读取已落盘的 lifecycle record（Markdown 优先，e
 与 successor / no-follow-up 字段矛盾时，seam 都 fail closed，因此持有完成状态的
 provider 必须逐字节保存这个字段。一旦远端 provider 成为 canonical，这个 seam 翻转为
 provider-first，且不改变下述 typed outcome 合同。
+
+#### Stage 2 切片状态（2026-08-23）
+
+第一个 Stage 2 切片已经以增量方式存在于本分支：
+
+- `loopx.control_plane.coordination.head`：`loopx_coordination_head_v0`
+  aggregate 编解码。校验是封闭字段集且 fail-closed 的，包括伪装成整数的
+  bool 与损坏的 lease 记录；`handoff_mode` 成为 head 的记录字段，v0 钦定为
+  `hard_lease`（`soft_claim` goal 在 bootstrap 处 fail closed，而不是被静默
+  反转其声明语义）。规范字节被定义为按键排序、最小分隔符、UTF-8 的 JSON，
+  且拒绝非有限浮点数；digest 与 provider 字节级 parity 都以这一编码为基准，
+  "deterministic serialization" 因此是合同条款，而非实现巧合。
+- `loopx.control_plane.coordination.file_provider`：一个 goal 一份文档，
+  排他锁内 generation 比较，独占临时文件创建加 fsync 加原子替换。崩溃窗口
+  报告 `ambiguous`；无法忠实序列化为严格 JSON 的 head 在任何字节落盘之前
+  报告 typed `failed`。
+- `loopx.control_plane.coordination.executor`：`claim_work` 的第 5 节步骤
+  1-10。所有领域决策都委托给 Stage 1 core；组合顺序是先 lease acquire、再
+  过 hard-lease holder gate 的 claim——claim-first 或 legacy 模式的组合会
+  静默绕过附录 B 的 holder gate（测试钉住了这一点）。Provider 的 `failed`
+  判据经重载 receipt index 核查而非盲信，误报已落盘写入的 provider 无法
+  制造"调用方被告知失败"的幽灵 claim。
+
+设计选型是对比出来的：三个 executor 候选（core 委托、内联规则参考实现、
+同文档内 journal 式回执日志）跑同一场景电池。只有 core 委托的候选能在不改
+本地代码的情况下跟随 core 规则翻转；journal 编码在 `retain_all_v0` 下也
+省不出有意义的字节。最终交付的是 core 委托候选。
+
+Live 资格验证在 0.11.0 标签的单节点 NoKV dev 栈上通过其 Python SDK 完成：
+`examples/nokv-shadow-provider/live_e2e.py` 的八场景不变量矩阵对 file
+provider 与 NoKV provider 逐行结果一致（同 todo 竞争恰一胜者、独立 todo
+推进、精确重放、identity 不匹配、陈旧 revision 冲突、丢失响应经 receipt
+index 恢复、回执保留、authority_revision 推进）；对 serving owner 的
+SIGKILL 加运维式重开保持了 head 字节级一致，经全新 executor 精确重放原始
+receipt，并在三个版本域上恢复 CAS 推进。renew/release/reclaim、retention
+策略、HA 与多节点部署仍未验证，与后续资格清单一致。
+
+Stage 3 必须尊重而非重新发现的实测边界：
+
+- `retain_all_v0` 在单 CAS 文档内的成本约每 receipt 750 字节；dev 栈上
+  claim 延迟在前 120 个 receipt 内增长约 7 倍，累计重发布字节呈平方增长
+  （120 次 claim 后约为最终 head 体量的 84 倍）。第 12 节的 retention 决策
+  在任何生产 canary 之前都是承重项。
+- 12 个并发独立 todo claim 下，内部 rebase 预算放行 8 个，其余返回 typed
+  失败。第 1 节的独立性承诺在两个端点成立、超出即退化；受支持的并发包络
+  与重试预算应在多 agent canary 立项时进入验收检查。
+- NoKV 文档 generation 在 remove/recreate 之后、以及 restore 进新 workbench
+  lineage 之后会重新起算。携带陈旧 generation 观测的条件替换在重建路径上
+  被实测成功；恢复线会重新到达 generation 数值相同、receipt 却不同于原线
+  的状态。这坐实了上文边界句：仅靠 `provider_generation` 无法承载 restore
+  或生命周期身份；lineage/binding fence 需要在下一阶段成为显式的 provider
+  合同字段。
+- `provider_outcome_unproved` 是 live 运行中真实出现的终态（无故障注入即
+  观测到）。经 receipt index 的重放让重新提交幂等，因此同 generation 的
+  有界重试是安全的；v0 是否采纳该活性修正是 owner 决策，在此记录而非静默
+  实现。
 
 ### P0：合同与 deterministic proof
 

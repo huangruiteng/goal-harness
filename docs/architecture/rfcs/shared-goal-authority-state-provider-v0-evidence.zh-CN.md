@@ -168,3 +168,26 @@ live NoKV 测试。确定性 fake 的通过结果与这项静态 API 核对必�
 
 真实栈若产生原始日志，应保留在 ignored local state；公共文档只记录可复跑
 命令、候选 commit、机器可判定的不变量和明确的未验证项。
+
+## 7. Stage 2 切片复跑记录（2026-08-23）
+
+按第 5 节的复跑要求逐项记录本轮 live 证据：
+
+1. **精确 commit**：LoopX 侧为 Stage 2 分支（本记录随该分支评审，git 树即
+   源码 digest），基于 Stage 1 Part 2 分支头；NoKV 侧为 `v0.11.0` 标签，
+   经其 Python SDK wheel 驱动。
+2. **探针源码**：`examples/nokv-shadow-provider/live_e2e.py`（随分支评审）。
+   驱动的是生产 `CoordinationAuthorityExecutor` 与生产 head 编解码，不再是
+   参考实现。
+3. **A → B → replay A 断言**：八场景矩阵对 file provider 与 NoKV provider
+   逐行结果一致（含精确重放行：重建 executor 后 `already_applied` 且
+   receipt 逐字段相等；lost-response 行：ambiguous 后经 receipt index 收敛
+   到 `already_applied`）。
+4. **same-id/different-request 负例**：同 operation_id 改语义字段返回
+   `rejected/operation_identity_mismatch`，且聚合与 generation 不变。
+5. **未执行与限定**：renew/release/reclaim、retention 策略、HA、多节点
+   未验证。SIGKILL 重启演练已在本地 dev 栈执行（owner 被杀后运维式重开：
+   head 字节级一致、原 receipt 精确重放、三版本域恢复推进）；该演练脚本
+   因绑定具体部署形态保留在本地忽略状态，不入公共树。回执增长、并发包络
+   等数字是单节点 dev 栈的量化观测，按第 5 节规则不构成生产结论；其含义
+   已写入 RFC 第 11 节 Stage 2 状态小节。

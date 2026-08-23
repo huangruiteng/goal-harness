@@ -685,7 +685,8 @@ independent version domains. Likewise, a restore may preserve frozen bytes and
 lineage without granting current authority: promoting restored state to the
 live authority head requires an explicit lineage and binding fence.
 
-The file-backed provider shadow is Stage 2. It has not started in this slice.
+The file-backed provider shadow is Stage 2; its first slice and the evidence
+behind it are recorded in the Stage 2 status subsection below.
 
 Durable completion continuation read-back
 (`durable_completion.py`: `read_persisted_todo_record` /
@@ -697,6 +698,78 @@ done record omits it or when it contradicts the recorded successor or
 no-follow-up fields, so a provider that holds completion state must store
 that field byte for byte. Once a remote provider becomes canonical, this seam
 flips to provider-first without changing the typed outcome contract below.
+
+#### Stage 2 slice status (2026-08-23)
+
+The first Stage 2 slice exists on this branch, additively:
+
+- `loopx.control_plane.coordination.head`: the `loopx_coordination_head_v0`
+  aggregate codec. Validation is closed-set and fail-closed, including
+  bool-disguised integers and corrupt lease records; `handoff_mode` is now a
+  recorded head field, pinned to `hard_lease` in v0 (a `soft_claim` goal
+  fails bootstrap closed instead of having its declared semantics silently
+  inverted). Canonical bytes are defined as sorted-key, minimal-separator
+  UTF-8 JSON with non-finite numbers rejected; digests and provider byte
+  parity are defined against exactly that encoding, so "deterministic
+  serialization" is a contract term here, not an implementation accident.
+- `loopx.control_plane.coordination.file_provider`: one goal, one document,
+  exclusive-lock generation compare, exclusive temp create plus fsync plus
+  atomic replace. Crash windows report `ambiguous`; a head with no faithful
+  strict-JSON form reports typed `failed` before any write reaches disk.
+- `loopx.control_plane.coordination.executor`: Section 5 steps 1-10 for
+  `claim_work`. Every domain decision is delegated to the Stage 1 core; the
+  composition is lease acquire followed by the hard-lease-gated claim,
+  because a claim-first or legacy-mode composition silently bypasses the
+  Appendix B holder gate (the tests pin this). A provider `failed` verdict
+  is verified against the reloaded receipt index rather than trusted, so a
+  provider that misreports a landed write cannot manufacture a claim whose
+  caller was told it failed.
+
+Design selection was comparative: three executor candidates (core-delegating,
+inline-rules reference, journal-style receipt log inside the same document)
+ran one scenario battery. Only core-delegating candidates follow a flipped
+core rule without local edits, and the journal codec saves no meaningful
+bytes under `retain_all_v0`; the shipped executor is the core-delegating
+candidate.
+
+Live qualification ran against a single-node NoKV dev stack at the 0.11.0
+tag through its Python SDK: the eight-scenario invariant matrix in
+`examples/nokv-shadow-provider/live_e2e.py` passes identically for the file
+provider and the NoKV provider (same-todo race with one winner,
+independent-todo progress, exact replay, identity mismatch, stale-revision
+conflict, lost-response recovery through the receipt index, receipt
+retention, authority-revision advancement), and a SIGKILL of the serving
+owner followed by an operator-style reopen preserved the head byte for
+byte, replayed the original receipt exactly through a fresh executor, and
+resumed CAS across all three version domains. Renew/release/reclaim,
+retention policy, HA, and multi-node deployments remain unexercised, as the
+Later-qualification list already states.
+
+Measured boundaries Stage 3 must respect rather than rediscover:
+
+- `retain_all_v0` costs roughly 750 bytes per receipt inside the one CAS
+  document; on the dev stack, claim latency grew about sevenfold across the
+  first 120 receipts, and cumulative republish bytes grow quadratically
+  (about 84x the final head size after 120 claims). The Section 12 retention
+  decision is load-bearing before any production canary.
+- Under 12 concurrent independent-todo claims, the internal rebase budget
+  admitted 8 and the rest returned typed failures. The Section 1
+  independence promise holds at two endpoints and degrades beyond that; the
+  supported concurrency envelope and retry budget belong in the acceptance
+  checks once a multi-agent canary is scoped.
+- The NoKV document generation restarts after remove/recreate and after
+  restore into a new workbench lineage. A conditional replace carrying a
+  stale generation observation was observed to succeed on a recreated path,
+  and a restored line re-reaches generation numbers whose receipts differ
+  from the original line. This confirms the boundary sentence above:
+  `provider_generation` alone cannot carry restore or lifecycle identity;
+  the lineage/binding fence needs an explicit provider-contract field in the
+  next stage.
+- `provider_outcome_unproved` is a real terminal state in live runs, observed
+  without fault injection. Replay through the receipt index makes
+  re-submission idempotent, so a bounded re-attempt at the same generation
+  would be safe; whether v0 adopts that liveness amendment is an owner
+  decision recorded here, not silently implemented.
 
 ### P0: contract and deterministic proof
 
