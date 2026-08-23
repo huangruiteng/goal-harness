@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,19 @@ _RECEIPT_FIELDS = {
 
 
 TransitionCheckpoint = Callable[[list[dict[str, Any]]], None]
+
+
+class GovernedTransitionSettlementPhase(StrEnum):
+    """Turn-settlement phase that owns one admitted Kernel transition."""
+
+    PRE_SETTLEMENT = "pre_settlement"
+    POST_SETTLEMENT = "post_settlement"
+
+
+_SETTLEMENT_PHASE_BY_PROPOSAL_KIND = {
+    "continuous_monitor_upsert": GovernedTransitionSettlementPhase.PRE_SETTLEMENT,
+    "continuous_monitor_complete": GovernedTransitionSettlementPhase.POST_SETTLEMENT,
+}
 
 
 def _canonical_digest(value: object) -> str:
@@ -254,13 +268,18 @@ def settle_governed_transition_proposals(
     proposals: Sequence[Mapping[str, Any]],
     existing_receipts: object,
     checkpoint: TransitionCheckpoint,
+    phase: GovernedTransitionSettlementPhase,
 ) -> list[dict[str, Any]]:
-    """Apply each admitted proposal once and checkpoint its Kernel receipt."""
+    """Apply admitted proposals for one settlement phase and checkpoint receipts."""
 
     receipts = validate_governed_transition_receipts(existing_receipts)
     by_proposal_id = {str(item["proposal_id"]): item for item in receipts}
     for raw in proposals:
         proposal = _mapping(raw, "governed transition proposal")
+        kind = str(proposal.get("kind") or "")
+        proposal_phase = _SETTLEMENT_PHASE_BY_PROPOSAL_KIND.get(kind)
+        if proposal_phase is None:
+            raise ValueError("governed transition proposal kind is unsupported")
         proposal_id = str(proposal.get("proposal_id") or "")
         proposal_digest = _canonical_digest(proposal)
         replay = by_proposal_id.get(proposal_id)
@@ -274,7 +293,8 @@ def settle_governed_transition_proposals(
                     "governed transition proposal replay does not match its receipt"
                 )
             continue
-        kind = str(proposal.get("kind") or "")
+        if proposal_phase is not phase:
+            continue
         if kind == "continuous_monitor_upsert":
             result = _upsert_monitor(
                 registry_path=Path(registry_path).expanduser(),
@@ -291,7 +311,7 @@ def settle_governed_transition_proposals(
                 proposal=proposal,
             )
         else:
-            raise ValueError("governed transition proposal kind is unsupported")
+            raise RuntimeError("governed transition proposal dispatch is incomplete")
         receipt = {
             "schema_version": GOVERNED_TRANSITION_RECEIPT_SCHEMA_VERSION,
             "proposal_id": proposal_id,

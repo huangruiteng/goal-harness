@@ -28,6 +28,7 @@ from ..control_plane.turn_driver.transaction import (
     build_loopx_turn_transaction_plan,
 )
 from ..control_plane.work_items.governed_transition_proposal import (
+    GovernedTransitionSettlementPhase,
     settle_governed_transition_proposals,
     validate_governed_transition_receipts,
 )
@@ -379,6 +380,7 @@ def _settle_journal_transition_proposals(
     *,
     journal: dict[str, Any],
     path: Path,
+    phase: GovernedTransitionSettlementPhase,
 ) -> None:
     provider_result = _mapping(
         journal.get("provider_result"), "external capability result"
@@ -406,6 +408,7 @@ def _settle_journal_transition_proposals(
         ],
         existing_receipts=journal.get("transition_receipts", []),
         checkpoint=checkpoint,
+        phase=phase,
     )
 
 
@@ -510,7 +513,11 @@ def start_governed_external_capability(
             ):
                 raise ValueError("governed capability invocation replay does not match")
             if isinstance(current.get("provider_result"), Mapping):
-                _settle_journal_transition_proposals(journal=current, path=path)
+                _settle_journal_transition_proposals(
+                    journal=current,
+                    path=path,
+                    phase=GovernedTransitionSettlementPhase.PRE_SETTLEMENT,
+                )
                 return _public_receipt(current, dry_run=False)
             journal = current
         else:
@@ -538,7 +545,11 @@ def start_governed_external_capability(
         journal["provider_result"] = validated
         journal["status"] = journal_status
         _write_journal(path, journal)
-        _settle_journal_transition_proposals(journal=journal, path=path)
+        _settle_journal_transition_proposals(
+            journal=journal,
+            path=path,
+            phase=GovernedTransitionSettlementPhase.PRE_SETTLEMENT,
+        )
         return _public_receipt(journal, dry_run=False)
 
 
@@ -608,11 +619,19 @@ def reconcile_governed_external_capability(
             journal["provider_result"] = provider_result
             journal["status"] = journal_status
             _write_journal(path, journal)
-            _settle_journal_transition_proposals(journal=journal, path=path)
+            _settle_journal_transition_proposals(
+                journal=journal,
+                path=path,
+                phase=GovernedTransitionSettlementPhase.PRE_SETTLEMENT,
+            )
             if provider_result["status"] == "running":
                 return _public_receipt(journal, dry_run=False)
 
-        _settle_journal_transition_proposals(journal=journal, path=path)
+        _settle_journal_transition_proposals(
+            journal=journal,
+            path=path,
+            phase=GovernedTransitionSettlementPhase.PRE_SETTLEMENT,
+        )
 
         effect_receipt = _mapping(
             provider_result.get("effect_receipt"), "external effect receipt"
@@ -692,6 +711,11 @@ def reconcile_governed_external_capability(
             return {**_public_receipt(journal, dry_run=False), "ok": False}
         if settlement_status != "committed":
             raise RuntimeError("TypeScript governed capability status shape mismatch")
+        _settle_journal_transition_proposals(
+            journal=journal,
+            path=path,
+            phase=GovernedTransitionSettlementPhase.POST_SETTLEMENT,
+        )
         journal["status"] = settlement_status
         _write_journal(path, journal)
         return _public_receipt(journal, dry_run=False)

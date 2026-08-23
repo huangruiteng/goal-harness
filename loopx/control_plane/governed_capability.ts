@@ -1,5 +1,9 @@
 import type { JsonObject } from "./effect_program.ts";
-import { requireNonEmptyString as requiredString } from "./runtime_decode.ts";
+import {
+  assertNever,
+  requireNonEmptyString as requiredString,
+  requireStringLiteral,
+} from "./runtime_decode.ts";
 
 export const EXTERNAL_EFFECT_RECEIPT_SCHEMA_VERSION =
   "loopx_external_effect_receipt_v0";
@@ -54,6 +58,23 @@ const MONITOR_COMPLETE_FIELDS = new Set([
   "monitor_key",
   "evidence",
 ]);
+const TRANSITION_PROPOSAL_KINDS = [
+  "continuous_monitor_upsert",
+  "continuous_monitor_complete",
+] as const;
+type TransitionProposalKind = typeof TRANSITION_PROPOSAL_KINDS[number];
+type ValidatedTransitionProposal =
+  | (JsonObject & {
+    kind: "continuous_monitor_upsert";
+    proposal_id: string;
+    monitor_key: string;
+    required_capabilities: string[];
+  })
+  | (JsonObject & {
+    kind: "continuous_monitor_complete";
+    proposal_id: string;
+    monitor_key: string;
+  });
 const PROPOSAL_ID_RE = /^[a-z][a-z0-9_.:-]{2,95}$/;
 const MONITOR_KEY_RE = /^[a-z][a-z0-9_.-]{0,31}:[a-z][a-z0-9_.:-]{2,95}$/;
 const ACTION_KIND_RE = /^[a-z][a-z0-9_]{0,63}$/;
@@ -149,7 +170,7 @@ function validateTransitionProposals(input: {
   value: unknown;
   status: string;
   transition_contract: unknown;
-}): JsonObject[] {
+}): ValidatedTransitionProposal[] {
   const proposals = boundedArray(
     input.value,
     "external capability result transition_proposals",
@@ -195,22 +216,18 @@ function validateTransitionProposals(input: {
   return proposals.map((raw, index) => {
     const label = `external capability transition_proposals[${index}]`;
     const proposal = requiredObject(raw, label);
-    const kind = boundedString(proposal.kind, `${label} kind`, 64);
+    const kind: TransitionProposalKind = requireStringLiteral(
+      proposal.kind,
+      TRANSITION_PROPOSAL_KINDS,
+      `${label} kind`,
+      `${label} kind is unsupported`,
+    );
     if (!allowedKinds.includes(kind)) {
       throw new Error(`${label} kind is not admitted by transition_contract`);
     }
     if (input.status === "running" && kind !== "continuous_monitor_upsert") {
       throw new Error(`${label} running result may only upsert a monitor`);
     }
-    const expectedFields = kind === "continuous_monitor_upsert"
-      ? MONITOR_UPSERT_FIELDS
-      : kind === "continuous_monitor_complete"
-      ? MONITOR_COMPLETE_FIELDS
-      : null;
-    if (expectedFields === null) {
-      throw new Error(`${label} kind is unsupported`);
-    }
-    requireExactFields(proposal, expectedFields, label);
     if (proposal.schema_version !== CONTINUOUS_MONITOR_PROPOSAL_SCHEMA_VERSION) {
       throw new Error(`${label} schema_version is invalid`);
     }
@@ -234,55 +251,72 @@ function validateTransitionProposals(input: {
     if (!allowedMonitorKeyPrefixes.some((prefix) => monitorKey.startsWith(prefix))) {
       throw new Error(`${label} monitor_key is not admitted`);
     }
-    if (kind === "continuous_monitor_upsert") {
-      const actionKind = boundedString(
-        proposal.action_kind,
-        `${label} action_kind`,
-        64,
-      );
-      if (!ACTION_KIND_RE.test(actionKind) || !allowedActions.includes(actionKind)) {
-        throw new Error(`${label} action_kind is not admitted`);
+    switch (kind) {
+      case "continuous_monitor_upsert": {
+        requireExactFields(proposal, MONITOR_UPSERT_FIELDS, label);
+        const actionKind = boundedString(
+          proposal.action_kind,
+          `${label} action_kind`,
+          64,
+        );
+        if (!ACTION_KIND_RE.test(actionKind) || !allowedActions.includes(actionKind)) {
+          throw new Error(`${label} action_kind is not admitted`);
+        }
+        const targetKey = boundedString(
+          proposal.target_key,
+          `${label} target_key`,
+          128,
+        );
+        if (!allowedTargetPrefixes.some((prefix) => targetKey.startsWith(prefix))) {
+          throw new Error(`${label} target_key is not admitted`);
+        }
+        const requiredCapabilities = boundedStringArray(
+          proposal.required_capabilities,
+          `${label} required_capabilities`,
+          16,
+        );
+        if (
+          new Set(requiredCapabilities).size !== requiredCapabilities.length ||
+          requiredCapabilities.some((capability) =>
+            !ACTION_KIND_RE.test(capability) || !allowedCapabilities.includes(capability)
+          )
+        ) {
+          throw new Error(`${label} required_capabilities are not admitted`);
+        }
+        return {
+          ...proposal,
+          kind,
+          proposal_id: proposalId,
+          monitor_key: monitorKey,
+          text: boundedString(proposal.text, `${label} text`, 240),
+          action_kind: actionKind,
+          target_key: targetKey,
+          cadence: boundedString(proposal.cadence, `${label} cadence`, 32),
+          next_due_at: boundedString(
+            proposal.next_due_at,
+            `${label} next_due_at`,
+            64,
+          ),
+          expires_at: boundedString(
+            proposal.expires_at,
+            `${label} expires_at`,
+            64,
+          ),
+          required_capabilities: requiredCapabilities,
+        };
       }
-      const targetKey = boundedString(
-        proposal.target_key,
-        `${label} target_key`,
-        128,
-      );
-      if (!allowedTargetPrefixes.some((prefix) => targetKey.startsWith(prefix))) {
-        throw new Error(`${label} target_key is not admitted`);
-      }
-      const requiredCapabilities = boundedStringArray(
-        proposal.required_capabilities,
-        `${label} required_capabilities`,
-        16,
-      );
-      if (
-        new Set(requiredCapabilities).size !== requiredCapabilities.length ||
-        requiredCapabilities.some((capability) =>
-          !ACTION_KIND_RE.test(capability) || !allowedCapabilities.includes(capability)
-        )
-      ) {
-        throw new Error(`${label} required_capabilities are not admitted`);
-      }
-      return {
-        ...proposal,
-        proposal_id: proposalId,
-        monitor_key: monitorKey,
-        text: boundedString(proposal.text, `${label} text`, 240),
-        action_kind: actionKind,
-        target_key: targetKey,
-        cadence: boundedString(proposal.cadence, `${label} cadence`, 32),
-        next_due_at: boundedString(proposal.next_due_at, `${label} next_due_at`, 64),
-        expires_at: boundedString(proposal.expires_at, `${label} expires_at`, 64),
-        required_capabilities: requiredCapabilities,
-      };
+      case "continuous_monitor_complete":
+        requireExactFields(proposal, MONITOR_COMPLETE_FIELDS, label);
+        return {
+          ...proposal,
+          kind,
+          proposal_id: proposalId,
+          monitor_key: monitorKey,
+          evidence: boundedString(proposal.evidence, `${label} evidence`, 240),
+        };
+      default:
+        return assertNever(kind, `${label} kind dispatch is incomplete`);
     }
-    return {
-      ...proposal,
-      proposal_id: proposalId,
-      monitor_key: monitorKey,
-      evidence: boundedString(proposal.evidence, `${label} evidence`, 240),
-    };
   });
 }
 

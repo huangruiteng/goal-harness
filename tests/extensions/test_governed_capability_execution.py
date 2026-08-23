@@ -525,6 +525,44 @@ def test_material_settlement_fails_closed_without_effect_receipt_writeback(
     assert failed["ok"] is False
     assert failed["status"] == "settlement_failed"
     assert calls == ["writeback"]
+    assert [item["kind"] for item in failed["transition_receipts"]] == [
+        "continuous_monitor_upsert"
+    ]
+    monitors = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
+    assert len(monitors) == 1
+    assert monitors[0]["status"] == "open"
+
+    def complete_writeback(context: Mapping[str, object]) -> dict[str, object]:
+        calls.append("writeback")
+        return {
+            "ok": True,
+            "appended": True,
+            "settlement_identity": context["settlement_identity"],
+            "effect_receipt_digest": context["effect_receipt_digest"],
+        }
+
+    committed = reconcile_governed_external_capability(
+        run_dir=arguments["run_dir"],
+        invocation_id=str(started["invocation_id"]),
+        writeback=complete_writeback,
+        spend=spend,
+    )
+
+    assert committed["status"] == "committed"
+    assert calls == ["writeback", "writeback", "spend"]
+    assert (tmp_path / "provider-calls.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == ["start", "reconcile"]
+    monitors = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
+    assert monitors[0]["status"] == "done"
 
 
 def test_material_reconcile_rejects_tampered_journal_request(tmp_path: Path) -> None:
@@ -581,6 +619,11 @@ def test_material_reconcile_resumes_at_spend_without_repeating_writeback(
         writeback=writeback,
         spend=spend,
     )
+    monitors_after_failure = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
     second = reconcile_governed_external_capability(
         run_dir=arguments["run_dir"],
         invocation_id=str(started["invocation_id"]),
@@ -589,8 +632,92 @@ def test_material_reconcile_resumes_at_spend_without_repeating_writeback(
     )
 
     assert first["status"] == "settlement_failed"
+    assert monitors_after_failure[0]["status"] == "open"
     assert second["status"] == "committed"
     assert calls == ["writeback", "spend", "spend"]
     assert (tmp_path / "provider-calls.txt").read_text(
         encoding="utf-8"
     ).splitlines() == ["start", "reconcile"]
+
+
+def test_material_reconcile_recovers_completion_after_pre_receipt_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    arguments = _start_arguments(tmp_path)
+    started = start_governed_external_capability(**arguments, execute=True)
+    original_write_journal = governed_execution._write_journal
+    calls: list[str] = []
+    crashed = False
+
+    def writeback(context: Mapping[str, object]) -> dict[str, object]:
+        calls.append("writeback")
+        return {
+            "ok": True,
+            "appended": True,
+            "settlement_identity": context["settlement_identity"],
+            "effect_receipt_digest": context["effect_receipt_digest"],
+        }
+
+    def spend(context: Mapping[str, object]) -> dict[str, object]:
+        calls.append("spend")
+        return {
+            "ok": True,
+            "appended": True,
+            "settlement_identity": context["settlement_identity"],
+        }
+
+    def crash_before_completion_receipt(
+        path: Path,
+        payload: Mapping[str, object],
+    ) -> None:
+        nonlocal crashed
+        raw_receipts = payload.get("transition_receipts")
+        receipts = raw_receipts if isinstance(raw_receipts, list) else []
+        if not crashed and any(
+            isinstance(item, Mapping)
+            and item.get("kind") == "continuous_monitor_complete"
+            for item in receipts
+        ):
+            crashed = True
+            raise RuntimeError("synthetic completion checkpoint crash")
+        original_write_journal(path, payload)
+
+    monkeypatch.setattr(
+        governed_execution,
+        "_write_journal",
+        crash_before_completion_receipt,
+    )
+    with pytest.raises(RuntimeError, match="synthetic completion checkpoint crash"):
+        reconcile_governed_external_capability(
+            run_dir=arguments["run_dir"],
+            invocation_id=str(started["invocation_id"]),
+            writeback=writeback,
+            spend=spend,
+        )
+
+    monkeypatch.setattr(
+        governed_execution,
+        "_write_journal",
+        original_write_journal,
+    )
+    replay = reconcile_governed_external_capability(
+        run_dir=arguments["run_dir"],
+        invocation_id=str(started["invocation_id"]),
+        writeback=writeback,
+        spend=spend,
+    )
+
+    assert replay["status"] == "committed"
+    assert calls == ["writeback", "spend"]
+    assert replay["transition_receipts"][-1]["action"] == "replayed"
+    assert (tmp_path / "provider-calls.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == ["start", "reconcile"]
+    monitors = list_goal_todos(
+        registry_path=Path(arguments["registry_path"]),
+        goal_id="fixture-goal",
+        role="agent",
+    )["todos"]
+    assert len(monitors) == 1
+    assert monitors[0]["status"] == "done"
