@@ -65,6 +65,7 @@ from .succession_warning import (
     TODO_SUCCESSION_WARNING_SCHEMA_VERSION,
 )
 from ..work_items.project_asset import build_project_asset_todo_summary
+from .resume_support import assign_depends_on_todo_ids
 from .user_gate import open_user_gate_todo_items
 
 
@@ -428,9 +429,7 @@ def structured_todo_item(
     unblocks_todo_id = normalize_todo_id(item.get("unblocks_todo_id"))
     if unblocks_todo_id:
         normalized["unblocks_todo_id"] = unblocks_todo_id
-    depends_on_todo_ids = normalize_todo_id_list(item.get("depends_on_todo_ids"))
-    if depends_on_todo_ids:
-        normalized["depends_on_todo_ids"] = depends_on_todo_ids
+    assign_depends_on_todo_ids(normalized, item.get("depends_on_todo_ids"))
     resume_when = normalize_todo_resume_when(item.get("resume_when"))
     if resume_when:
         normalized["resume_when"] = resume_when

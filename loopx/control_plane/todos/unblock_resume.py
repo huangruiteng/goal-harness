@@ -17,6 +17,7 @@ from .contract import (
     todo_done_for_status,
 )
 from .decision_scope import decision_scope_covers
+from .resume_support import apply_open_todo_resume
 
 
 TODO_UNBLOCK_RESUME_SCHEMA_VERSION = "todo_unblock_resume_v0"
@@ -317,23 +318,13 @@ def apply_completed_user_todo_lifecycle(
             target_todo_id=target_todo_id,
         )
         if unblock_resume.get("state") == "resume_ready":
-            resumed = apply_update(
+            unblock_resume = apply_open_todo_resume(
                 lines,
                 todo_id=target_todo_id,
                 role="agent",
-                status=TODO_STATUS_OPEN,
                 reason=f"authorization satisfied by completed user todo {source_todo_id}",
                 updated_at=updated_at,
+                apply_update=apply_update,
+                receipt=unblock_resume,
             )
-            unblock_resume.update(
-                state="resumed",
-                status=resumed.get("status"),
-                changed=bool(resumed.get("changed")),
-                claimed_by=resumed.get("claimed_by"),
-            )
-            unblock_resume = {
-                key: value
-                for key, value in unblock_resume.items()
-                if value not in (None, "", [], {})
-            }
     return unblock_resume, decision_scope_resolution

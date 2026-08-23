@@ -19,6 +19,90 @@ TODO_EVENT_KINDS = {
     "capture-followups": "todo_capture_followups",
 }
 
+
+def _append_todo_side_event(
+    target: dict[str, object],
+    *,
+    args: argparse.Namespace,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    append_cli_rollout_event: RolloutEventAppender,
+    event_kind: str,
+    todo_id: str | None,
+    summary: str,
+    details: dict[str, object],
+    status: str | None = None,
+) -> None:
+    append_cli_rollout_event(
+        target,
+        registry_path=registry_path,
+        runtime_root_arg=runtime_root_arg,
+        event_kind=event_kind,
+        agent_id=args.agent_id or args.claimed_by,
+        todo_id=todo_id,
+        status=status,
+        summary=summary,
+        details={
+            "command": "todo",
+            "todo_command": args.todo_command,
+            **details,
+        },
+    )
+
+
+def _append_dependency_resume_events(
+    payload: dict[str, object],
+    *,
+    args: argparse.Namespace,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    append_cli_rollout_event: RolloutEventAppender,
+) -> None:
+    resumed_dependents = [
+        item
+        for item in (payload.get("dependency_resumes") or [])
+        if isinstance(item, dict) and item.get("state") == "resumed"
+    ]
+    if not resumed_dependents:
+        return
+    primary_event = payload.get("rollout_event")
+    resume_events: list[dict[str, object]] = []
+    source_todo_id = payload.get("todo_id") or args.todo_id
+    for resume in resumed_dependents:
+        target_todo_id = str(resume.get("target_todo_id") or "").strip() or None
+        _append_todo_side_event(
+            payload,
+            args=args,
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root_arg,
+            append_cli_rollout_event=append_cli_rollout_event,
+            event_kind="todo_dependency_resume",
+            todo_id=target_todo_id,
+            summary=(
+                "todo dependency resume opened "
+                f"{target_todo_id or 'dependent todo'} after "
+                f"{source_todo_id}"
+            ),
+            details={
+                "schema_version": resume.get("schema_version"),
+                "source_todo_id": resume.get("source_todo_id"),
+                "target_todo_id": resume.get("target_todo_id"),
+                "target_role": resume.get("target_role"),
+                "previous_status": resume.get("previous_status"),
+                "status": resume.get("status"),
+                "state": resume.get("state"),
+                "changed": bool(resume.get("changed")),
+            },
+        )
+        resume_event = payload.get("rollout_event")
+        if isinstance(resume_event, dict):
+            resume_events.append(resume_event)
+    if primary_event is not None:
+        payload["rollout_event"] = primary_event
+    if resume_events:
+        payload["dependency_resume_events"] = resume_events
+
+
 def append_todo_rollout_event(
     payload: dict[str, object],
     *,
@@ -97,47 +181,13 @@ def append_todo_rollout_event(
             else None
         ),
     )
-    resumed_dependents = [
-        item
-        for item in (payload.get("dependency_resumes") or [])
-        if isinstance(item, dict) and item.get("state") == "resumed"
-    ]
-    primary_event = payload.get("rollout_event")
-    resume_events: list[dict[str, object]] = []
-    for resume in resumed_dependents:
-        target_todo_id = str(resume.get("target_todo_id") or "").strip() or None
-        append_cli_rollout_event(
-            payload,
-            registry_path=registry_path,
-            runtime_root_arg=runtime_root_arg,
-            event_kind="todo_dependency_resume",
-            agent_id=args.agent_id or args.claimed_by,
-            todo_id=target_todo_id,
-            summary=(
-                "todo dependency resume opened "
-                f"{target_todo_id or 'dependent todo'} after "
-                f"{payload.get('todo_id') or args.todo_id}"
-            ),
-            details={
-                "command": "todo",
-                "todo_command": args.todo_command,
-                "schema_version": resume.get("schema_version"),
-                "source_todo_id": resume.get("source_todo_id"),
-                "target_todo_id": resume.get("target_todo_id"),
-                "target_role": resume.get("target_role"),
-                "previous_status": resume.get("previous_status"),
-                "status": resume.get("status"),
-                "state": resume.get("state"),
-                "changed": bool(resume.get("changed")),
-            },
-        )
-        resume_event = payload.get("rollout_event")
-        if isinstance(resume_event, dict):
-            resume_events.append(resume_event)
-    if primary_event is not None:
-        payload["rollout_event"] = primary_event
-    if resume_events:
-        payload["dependency_resume_events"] = resume_events
+    _append_dependency_resume_events(
+        payload,
+        args=args,
+        registry_path=registry_path,
+        runtime_root_arg=runtime_root_arg,
+        append_cli_rollout_event=append_cli_rollout_event,
+    )
     capability_gap_status = str(
         getattr(args, "capability_gap_status", None) or ""
     ).strip()
@@ -147,12 +197,13 @@ def append_todo_rollout_event(
         "ok": True,
         "goal_id": payload.get("goal_id"),
     }
-    append_cli_rollout_event(
+    _append_todo_side_event(
         gap_payload,
+        args=args,
         registry_path=registry_path,
         runtime_root_arg=runtime_root_arg,
+        append_cli_rollout_event=append_cli_rollout_event,
         event_kind="capability_gap",
-        agent_id=args.agent_id or args.claimed_by,
         todo_id=args.todo_id or str(payload.get("todo_id") or "").strip() or None,
         status=capability_gap_status,
         summary=(
@@ -160,8 +211,6 @@ def append_todo_rollout_event(
             f"{payload.get('todo_id') or args.todo_id}"
         ),
         details={
-            "command": "todo",
-            "todo_command": args.todo_command,
             "target_capabilities": ",".join(args.target_capabilities or []),
             "evidence": args.evidence or "not_required_for_found",
         },

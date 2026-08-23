@@ -42,6 +42,7 @@ from .completion_fence import evaluate_todo_completion_fence
 from .completion_state import (
     completion_state_for_todo_write,
 )
+from .resume_support import assign_depends_on_todo_ids
 from .text import (
     TODO_PRIORITY_PREFIX_PATTERN,
     inherit_todo_priority,
@@ -371,9 +372,9 @@ def _append_event_projected_successor(
         payload["excluded_agents"] = normalized_excluded_agents
     if unblocks_todo_id:
         payload["unblocks_todo_id"] = unblocks_todo_id
-    normalized_depends_on_todo_ids = normalize_todo_id_list(depends_on_todo_ids)
-    if normalized_depends_on_todo_ids:
-        payload["depends_on_todo_ids"] = normalized_depends_on_todo_ids
+    normalized_depends_on_todo_ids = assign_depends_on_todo_ids(
+        payload, depends_on_todo_ids
+    )
     added_event = make_state_event(
         event_id=_todo_write_event_id(
             goal_id=goal_id,

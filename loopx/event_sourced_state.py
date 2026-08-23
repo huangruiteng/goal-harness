@@ -41,6 +41,7 @@ from .control_plane.todos.contract import (
     todo_marker_for_status,
     todo_status_from_marker,
 )
+from .control_plane.todos.resume_support import assign_depends_on_todo_ids
 
 
 STATE_EVENT_SCHEMA_VERSION = "loopx_state_event_v0"
@@ -720,9 +721,7 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
     unblocks_todo_id = normalize_todo_id(payload.get("unblocks_todo_id"))
     if unblocks_todo_id:
         todo["unblocks_todo_id"] = unblocks_todo_id
-    depends_on_todo_ids = normalize_todo_id_list(payload.get("depends_on_todo_ids"))
-    if depends_on_todo_ids:
-        todo["depends_on_todo_ids"] = depends_on_todo_ids
+    assign_depends_on_todo_ids(todo, payload.get("depends_on_todo_ids"))
     for key in TODO_MONITOR_METADATA_FIELDS:
         if payload.get(key):
             todo[key] = compact_text(payload[key])
@@ -822,9 +821,7 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
             todo["global_gate"] = global_gate
         if update_excluded_agents:
             todo["excluded_agents"] = update_excluded_agents
-        depends_on_todo_ids = normalize_todo_id_list(payload.get("depends_on_todo_ids"))
-        if depends_on_todo_ids:
-            todo["depends_on_todo_ids"] = depends_on_todo_ids
+        assign_depends_on_todo_ids(todo, payload.get("depends_on_todo_ids"))
         for key in TODO_MONITOR_METADATA_FIELDS:
             if payload.get(key):
                 todo[key] = compact_text(payload[key])

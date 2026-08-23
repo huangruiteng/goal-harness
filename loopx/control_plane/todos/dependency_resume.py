@@ -11,9 +11,10 @@ from .contract import (
     normalize_todo_id,
     normalize_todo_id_list,
     normalize_todo_status,
-    normalize_todo_task_class,
     todo_done_for_status,
 )
+from .projection import todo_item_task_class
+from .resume_support import apply_open_todo_resume, compact_resume_receipt
 
 
 TODO_DEPENDENCY_RESUME_SCHEMA_VERSION = "todo_dependency_resume_v0"
@@ -32,19 +33,6 @@ def require_depends_on_todo_ids(value: Any) -> list[str]:
 
 def _status(todo: dict[str, Any]) -> str:
     return normalize_todo_status(todo.get("status")) or TODO_STATUS_OPEN
-
-
-def _task_class(todo: dict[str, Any]) -> str:
-    text = " ".join(
-        str(value or "")
-        for value in (todo.get("title"), todo.get("text"))
-        if str(value or "").strip()
-    )
-    return normalize_todo_task_class(
-        todo.get("task_class"),
-        text=text,
-        action_kind=todo.get("action_kind"),
-    )
 
 
 def iter_goal_todos(lines: list[str]) -> list[dict[str, Any]]:
@@ -118,7 +106,7 @@ def plan_completed_todo_dependency_resume(
         return {**receipt, "state": "target_not_found"}
     if target_status not in TODO_DEPENDENCY_WAITING_STATUSES:
         return {**receipt, "state": "target_not_waiting"}
-    if _task_class(target) == TODO_TASK_CLASS_BLOCKER:
+    if todo_item_task_class(target) == TODO_TASK_CLASS_BLOCKER:
         return {**receipt, "state": "explicit_blocker_repair_required"}
 
     depends_on = normalize_todo_id_list(target.get("depends_on_todo_ids"))
@@ -156,36 +144,20 @@ def apply_completed_todo_dependency_resumes(
             target=target,
         )
         if receipt.get("state") != "resume_ready":
-            receipts.append(
-                {
-                    key: value
-                    for key, value in receipt.items()
-                    if value not in (None, "", [], {})
-                }
-            )
+            receipts.append(compact_resume_receipt(receipt))
             continue
-        resumed = apply_update(
-            lines,
-            todo_id=str(receipt["target_todo_id"]),
-            role=str(target.get("role") or None) or None,
-            status=TODO_STATUS_OPEN,
-            reason=(
-                "dependencies satisfied by completed todo "
-                f"{receipt['source_todo_id']}"
-            ),
-            updated_at=updated_at,
-        )
-        receipt.update(
-            state="resumed",
-            status=resumed.get("status"),
-            changed=bool(resumed.get("changed")),
-            claimed_by=resumed.get("claimed_by"),
-        )
         receipts.append(
-            {
-                key: value
-                for key, value in receipt.items()
-                if value not in (None, "", [], {})
-            }
+            apply_open_todo_resume(
+                lines,
+                todo_id=str(receipt["target_todo_id"]),
+                role=str(target.get("role") or None) or None,
+                reason=(
+                    "dependencies satisfied by completed todo "
+                    f"{receipt['source_todo_id']}"
+                ),
+                updated_at=updated_at,
+                apply_update=apply_update,
+                receipt=receipt,
+            )
         )
     return receipts
