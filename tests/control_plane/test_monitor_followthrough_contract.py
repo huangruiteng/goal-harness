@@ -700,6 +700,7 @@ def test_same_turn_should_run_settles_polled_monitor_before_successor_reselectio
         "--execute",
         registry_path=registry,
         runtime_root=runtime,
+        cwd=delivery_worktree,
     )
     assert spend["settlement_result"]["ok"] is True
 
