@@ -12,6 +12,7 @@ from loopx.cli_commands.todo_argument_validation import (
     validate_todo_add_options,
     validate_todo_archive_completed_options,
     validate_todo_capture_followups_options,
+    validate_todo_claim_next_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
     validate_todo_list_options,
@@ -557,6 +558,56 @@ def test_todo_claim_validation_preserves_exact_diagnostics(
 
     with pytest.raises(ValueError) as exc_info:
         validate_todo_claim_options(args)
+
+    assert str(exc_info.value) == expected
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected"),
+    [
+        ([], "todo claim-next requires --agent-id"),
+        (
+            [
+                "--agent-id",
+                "codex-worker-a",
+                "--claimed-by",
+                "codex-worker-b",
+            ],
+            "todo claim-next uses --agent-id as the claimant; --claimed-by must "
+            "match --agent-id when both are provided",
+        ),
+        (
+            [
+                "--agent-id",
+                "codex-worker-a",
+                "--todo-id",
+                "todo_example",
+            ],
+            "todo claim-next selects the next todo itself; do not pass --todo-id",
+        ),
+        (
+            [
+                "--agent-id",
+                "codex-worker-a",
+                "--note",
+                "not allowed",
+            ],
+            "todo claim-next only accepts --agent-id, optional --claimed-by, "
+            "--task-class, --acquire-lease, --project, --state-file, and --dry-run; "
+            "unsupported: --note",
+        ),
+    ],
+)
+def test_todo_claim_next_validation_preserves_exact_diagnostics(
+    extra_args: list[str],
+    expected: str,
+) -> None:
+    args = build_parser().parse_args(
+        ["todo", "claim-next", "--goal-id", "example-goal", *extra_args]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_todo_claim_next_options(args)
 
     assert str(exc_info.value) == expected
 
