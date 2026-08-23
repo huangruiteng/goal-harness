@@ -171,13 +171,13 @@ def run_completion_validation_gate_with_source(
 ) -> dict[str, Any]:
     """Run the caller-approved completion validation gate, OUTSIDE the mutation lock.
 
-    Returns a ``validation_blocked_completion`` failure payload when a declared
-    validation command does not pass (the caller returns it unchanged so the
-    durable writeback and quota spend are both skipped), or ``None`` when there
-    is no declared command, the command passes, or the completion is a dry_run
-    or a terminal replay (no gate). Read-only w.r.t. the state file; safe to
-    call before acquiring the mutation lock so a multi-second validation command
-    does not block concurrent todo operations on the same goal.
+    Returns one envelope containing the source snapshot and typed transaction.
+    ``failure`` is a ``validation_blocked_completion`` payload when a declared
+    command does not pass, otherwise ``None``. The caller returns failures
+    unchanged so durable writeback and quota spend are skipped. Dry runs and
+    terminal replays do not execute validation. This function is read-only
+    w.r.t. the state file and safe to call before acquiring the mutation lock,
+    so a multi-second validation command does not block concurrent Todo writes.
     """
     projection_source = "materialized"
     source_authority: dict[str, Any] | None = None
