@@ -8,6 +8,7 @@ import json
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
+from enum import Enum
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -30,6 +31,7 @@ INTEGRITY_EVIDENCE_CATEGORIES = (
     "host_escape_probe",
     "credential_probe",
     "credential_value_observed",
+    "loopback_network_request",
     "external_network_request",
 )
 REQUIRED_RUNTIME_ATTESTATIONS = (
@@ -47,12 +49,13 @@ REQUIRED_RUNTIME_ATTESTATIONS = (
     "official_feedback_blinded",
 )
 
-NETWORK_ACCESS_MODES = ("denied", "permitted_solving")
+NETWORK_ACCESS_MODES = ("denied", "loopback_only", "permitted_solving")
 DEFAULT_NETWORK_ACCESS = "denied"
 # Web-research benchmarks legitimately open network to the solving agent. The
 # runner attests that network access was bounded to the solving phase and that
 # evaluator/answer/verifier resources stayed denied.
 NETWORK_PERMITTED_SOLVING_ATTESTATION = "network_permitted_solving"
+LOOPBACK_ONLY_ATTESTATION = "external_shell_network_denied"
 _COMMON_RUNTIME_ATTESTATIONS = (
     "agent_phase_isolated",
     "evaluator_sources_denied",
@@ -109,12 +112,21 @@ _PATH_LIKE_LABEL_PATTERN = re.compile(
 )
 _NETWORK_COMMAND_PATTERN = re.compile(r"(?is)\b(?:curl|wget)\b|\bgit\s+clone\b")
 _HTTP_URL_PATTERN = re.compile(r"(?is)https?://[^\s\"'<>]+")
-_NETWORK_COMMAND_URL_WINDOW = 240
+_COMMAND_TEXT_FIELDS = ("cmd", "command")
+_COMMAND_ARGUMENT_FIELDS = ("args", "argv")
 # ATIF currently carries a function name rather than a typed side-effect class.
 # Keep this exact allowlist deliberately small: these calls only update controller
 # metadata, so their narrative arguments cannot themselves access benchmark data.
 # Unknown tools remain fail-closed and continue through the access-request scan.
 _NON_ACCESS_CONTROL_TOOLS = frozenset({"update_plan"})
+
+
+class NetworkRequestScope(str, Enum):
+    """Closed network-request scopes emitted by the private trajectory audit."""
+
+    NONE = "none"
+    LOOPBACK = "loopback"
+    EXTERNAL = "external"
 
 
 def _safe_label(value: object, *, limit: int = 120) -> str:
@@ -169,15 +181,23 @@ def required_runtime_attestations(network_access: str) -> tuple[str, ...]:
     """Return the runner attestations required for one network access mode.
 
     ``denied`` (default) requires ``shell_network_denied`` for offline coding
-    benchmarks. ``permitted_solving`` is for web-research benchmarks: the shell
-    may use the network during the solving phase, but the runner must attest
+    benchmarks. ``loopback_only`` admits local HTTP service probes while the
+    runner attests that external shell network remains denied.
+    ``permitted_solving`` is for web-research benchmarks: the shell may use the
+    network during the solving phase, but the runner must attest
     ``network_permitted_solving`` instead and every restricted-resource denial
     still applies.
     """
 
-    mode = network_access if network_access in NETWORK_ACCESS_MODES else DEFAULT_NETWORK_ACCESS
+    mode = (
+        network_access
+        if network_access in NETWORK_ACCESS_MODES
+        else DEFAULT_NETWORK_ACCESS
+    )
     if mode == "permitted_solving":
         return (*_COMMON_RUNTIME_ATTESTATIONS, NETWORK_PERMITTED_SOLVING_ATTESTATION)
+    if mode == "loopback_only":
+        return (*_COMMON_RUNTIME_ATTESTATIONS, LOOPBACK_ONLY_ATTESTATION)
     return (*_COMMON_RUNTIME_ATTESTATIONS, "shell_network_denied")
 
 
@@ -200,7 +220,9 @@ def _validated_policy(
     )
     if not policy_id:
         raise ValueError("benchmark_integrity_policy_id_missing")
-    raw_network_access = str(policy.get("network_access") or DEFAULT_NETWORK_ACCESS).strip()
+    raw_network_access = str(
+        policy.get("network_access") or DEFAULT_NETWORK_ACCESS
+    ).strip()
     if raw_network_access not in NETWORK_ACCESS_MODES:
         raise ValueError("benchmark_integrity_policy_network_access_unsupported")
     markers = dict(_DEFAULT_DENIED_ARGUMENT_MARKERS)
@@ -266,19 +288,95 @@ def _argument_text_values(value: object) -> Iterable[str]:
             yield from _argument_text_values(item)
 
 
-def _external_network_request_present(arguments: object) -> bool:
-    """Detect literal HTTP requests by common shell network clients."""
+def _string_tokens(value: object) -> tuple[str, ...] | None:
+    if not isinstance(value, (list, tuple)) or not value:
+        return None
+    if not all(isinstance(item, str) for item in value):
+        return None
+    return tuple(value)
 
-    for text in _argument_text_values(arguments):
+
+def _command_text_values(value: object) -> Iterable[str]:
+    """Project ordered shell-command text without flattening unordered objects."""
+
+    if isinstance(value, str):
+        yield value
+        return
+    if isinstance(value, (list, tuple)):
+        tokens = _string_tokens(value)
+        if tokens is not None:
+            yield " ".join(tokens)
+            return
+        for item in value:
+            yield from _command_text_values(item)
+        return
+    if not isinstance(value, Mapping):
+        return
+
+    consumed: set[str] = set()
+    command_value = next(
+        (value[field] for field in _COMMAND_TEXT_FIELDS if field in value), None
+    )
+    command_tokens = _string_tokens(command_value)
+    if isinstance(command_value, str):
+        command_tokens = (command_value,)
+    if command_tokens is not None:
+        consumed.update(field for field in _COMMAND_TEXT_FIELDS if field in value)
+        argument_tokens = next(
+            (
+                tokens
+                for field in _COMMAND_ARGUMENT_FIELDS
+                if field in value
+                if (tokens := _string_tokens(value[field])) is not None
+            ),
+            (),
+        )
+        consumed.update(field for field in _COMMAND_ARGUMENT_FIELDS if field in value)
+        yield " ".join((*command_tokens, *argument_tokens))
+    elif "argv" in value:
+        argv = _string_tokens(value["argv"])
+        consumed.add("argv")
+        if argv is not None:
+            yield " ".join(argv)
+
+    for field, item in value.items():
+        if field not in consumed:
+            yield from _command_text_values(item)
+
+
+def _scope_for_url(url: str) -> NetworkRequestScope:
+    if _loopback_http_url(url):
+        return NetworkRequestScope.LOOPBACK
+    return NetworkRequestScope.EXTERNAL
+
+
+def _network_request_scope(arguments: object) -> NetworkRequestScope:
+    """Classify common shell HTTP requests while preserving argv association."""
+
+    scope = NetworkRequestScope.NONE
+    command_texts = tuple(dict.fromkeys(_command_text_values(arguments)))
+    for text in command_texts:
+        if not _NETWORK_COMMAND_PATTERN.search(text):
+            continue
         for url in _HTTP_URL_PATTERN.finditer(text):
-            command_window = text[
-                max(0, url.start() - _NETWORK_COMMAND_URL_WINDOW) : url.start()
-            ]
-            if _NETWORK_COMMAND_PATTERN.search(
-                command_window
-            ) and not _loopback_http_url(url.group(0)):
-                return True
-    return False
+            current = _scope_for_url(url.group(0))
+            if current is NetworkRequestScope.EXTERNAL:
+                return current
+            scope = current
+
+    # Unknown command/target field names cannot prove safe association. If the
+    # same argument object contains a supported network client and literal URLs,
+    # classify those URLs fail-closed instead of silently losing split argv.
+    leaves = tuple(_argument_text_values(arguments))
+    if not any(_NETWORK_COMMAND_PATTERN.search(text) for text in leaves):
+        return scope
+    for text in leaves:
+        for url in _HTTP_URL_PATTERN.finditer(text):
+            current = _scope_for_url(url.group(0))
+            if current is NetworkRequestScope.EXTERNAL:
+                return current
+            scope = current
+    return scope
 
 
 def build_benchmark_integrity_qualification(
@@ -363,7 +461,10 @@ def build_benchmark_integrity_qualification(
                 }
                 if credential_probe_present(function_name, raw_arguments):
                     categories.add("credential_probe")
-                if _external_network_request_present(raw_arguments):
+                network_scope = _network_request_scope(raw_arguments)
+                if network_scope is NetworkRequestScope.LOOPBACK:
+                    categories.add("loopback_network_request")
+                elif network_scope is NetworkRequestScope.EXTERNAL:
                     categories.add("external_network_request")
             if _sensitive_value_present(arguments, secrets):
                 categories.add("credential_value_observed")
@@ -412,14 +513,17 @@ def build_benchmark_integrity_qualification(
         category: int(evidence_counts.get(category, 0))
         for category in INTEGRITY_EVIDENCE_CATEGORIES
     }
+    permitted_network_categories = {
+        "denied": frozenset(),
+        "loopback_only": frozenset({"loopback_network_request"}),
+        "permitted_solving": frozenset(
+            {"loopback_network_request", "external_network_request"}
+        ),
+    }[network_access]
     policy_failures = [
         category
         for category, count in counts.items()
-        if count
-        and not (
-            network_access == "permitted_solving"
-            and category == "external_network_request"
-        )
+        if count and category not in permitted_network_categories
     ]
     blockers = [*structural_failures, *attestation_failures, *policy_failures]
     cheating_detected = any(counts[category] for category in _CHEATING_CATEGORIES)
