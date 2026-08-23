@@ -296,6 +296,22 @@ loopx todo claim \
   --agent-id codex-main-control
 ```
 
+When several peers need the next free slice without racing on the same
+`todo_id`, use `todo claim-next`. Selection and the `claimed_by` write happen
+under the same goal file lock. Already claimed or actively leased todos are
+skipped. If nothing is claimable, the command returns an empty success payload
+instead of an error:
+
+```bash
+loopx todo claim-next \
+  --goal-id <goal-id> \
+  --agent-id codex-main-control
+```
+
+Optional `--task-class` filters the selected lane (default `advancement_task`).
+Optional `--acquire-lease` also takes a hard task lease after the soft claim.
+`todo claim` remains the command for a known `todo_id`.
+
 Old projects that do not yet have `coordination.registered_agents` are
 intentionally blocked when an agent tries to claim work. The CLI error includes
 the `register-agent --agent-id <agent-id> --execute` command so the agent or

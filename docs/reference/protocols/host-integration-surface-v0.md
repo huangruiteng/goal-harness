@@ -216,7 +216,7 @@ the host lacks authority. A host adapter may expose these write classes:
 
 | Write Class | CLI Baseline | Required Guards |
 | --- | --- | --- |
-| Todo claim and lifecycle | `loopx todo claim/update/complete` | registered agent id, active-state file lock, task class, active task-lease execution key when present, optional successor handoff with `blocks_agent` / `unblocks_todo_id` |
+| Todo claim and lifecycle | `loopx todo claim/claim-next/update/complete` | registered agent id, active-state file lock, task class, active task-lease execution key when present, optional successor handoff with `blocks_agent` / `unblocks_todo_id`. `claim-next` picks and claims the next runnable todo that is not already claimed or leased |
 | User/agent todo creation | `loopx todo add --role user --task-class user_gate\|user_action` / `--role agent` | public-safe text, concrete actor, duplicate detection |
 | Gate decision | `loopx operator-gate --decision approve|reject|defer` | explicit controller/user decision, dry-run preview before write |
 | Human reward | `loopx reward ... --dry-run` then explicit write | run-bound judgment, public-safe reason, no score impersonation |
@@ -282,6 +282,7 @@ loopx doctor
 loopx --format json status --agent-id <agent-id>
 loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <goal-id> --agent-id <agent-id>
 loopx todo claim --goal-id <goal-id> --todo-id <todo_id> --claimed-by <agent-id>
+loopx todo claim-next --goal-id <goal-id> --agent-id <agent-id>
 loopx todo complete --goal-id <goal-id> --todo-id <todo_id> --claimed-by <agent-id> --evidence "<public-safe evidence>"
 loopx refresh-state --goal-id <goal-id> --agent-id <agent-id>
 loopx quota spend-slot --goal-id <goal-id> --todo-id <selected-todo-id> --slots 1 --source heartbeat --execute --agent-id <agent-id>

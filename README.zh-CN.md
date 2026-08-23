@@ -281,6 +281,7 @@ loopx start-goal --guided --project . --goal-text "你的长程目标"
 ```text
 loopx quota should-run      # 当前注册 agent 是否应该执行？
 loopx todo claim            # 谁拥有这个 slice？
+loopx todo claim-next       # 挑并认领下一条空闲 slice
 loopx todo update           # 发生了什么？
 loopx refresh-state         # 下一轮应该看到什么？
 loopx quota spend-slot      # 为完成并验证的 slice 记账

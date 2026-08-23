@@ -311,6 +311,7 @@ The core tick is deliberately small:
 ```text
 loopx quota should-run      # should this registered agent act now?
 loopx todo claim            # who owns this slice?
+loopx todo claim-next       # pick and claim the next free slice
 loopx todo update           # what changed?
 loopx refresh-state         # what should the next turn see?
 loopx quota spend-slot      # account for a completed, validated slice
