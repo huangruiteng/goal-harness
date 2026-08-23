@@ -114,6 +114,20 @@ before NoKV 0.11.0 cannot decode a 0.11.0 control-plane routing record, so
 the earlier `90883d13539e31185f0d78131989fb51912dbd7e` audit baseline is no
 longer a usable pin.
 
+Since the Stage 2 slice, the live qualification is scripted and repeatable:
+`live_e2e.py` runs one eight-scenario invariant matrix (competition, replay,
+identity mismatch, stale revision, lost response, retention, revision
+advancement) through the production `CoordinationAuthorityExecutor` against
+the file-backed control provider and, when `NOKV_COORDINATION_LIVE=1` and the
+stack variables are set, against this NoKV provider, then prints a
+public-safe parity table. Without a reachable stack the NoKV rows report
+unverified and the script stays green, so it is evidence tooling, not a
+merge gate.
+
+```bash
+python3 examples/nokv-shadow-provider/live_e2e.py
+```
+
 Run the merge-relevant deterministic regression from the repository root with:
 
 ```bash
