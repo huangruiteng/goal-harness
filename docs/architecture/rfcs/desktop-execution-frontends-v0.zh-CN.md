@@ -459,6 +459,34 @@ Ark Agent Plan 有自己的受支持模型、凭据和用量边界。适配器�
 路由，而不是假设标准 Ark 端点支持的模型会自动通过 Plan 配置可用。凭据和
 原始 provider 响应保持 owner-local。
 
+### 两种模式中由 Goal 绑定的外部能力
+
+运行时和 provider 选择并不能定义 Agent 的完整工具集。挂接与托管工作会话
+必须从所选 Agent 的 Goal 绑定投影相同的外部能力。本 RFC 不新增
+`external toolkit` 运行时对象，也不新增另一套 capability-pack 契约。现有
+边界已经足够：
+
+- extension 拥有 provider 打包、安装、revision、启用、doctor 与回滚；
+- external capability 拥有 caller-outcome 契约、operation、权限、schema、
+  验证、readback 与回执；以及
+- 可选的 domain capability pack 只在确实需要领域语义时拥有领域策略、状态
+  与投影。
+
+一个恰好包含多个 skill、命令和服务的仓库只是一份源分发。它的所有者可以
+维护源清单，但每个可执行 operation 都必须通过现有 extension 与 capability
+契约进入 LoopX。安装仓库、发现 prompt skill 或观察到同名 provider 都不会
+授予权威。除非 Goal 绑定选择了一个确切且 ready 的 revision，否则重复
+provider 失败关闭。
+
+只读 operation 可以复用持久 Goal 绑定，而不创建工作事实。物质 operation
+必须绑定当前获准的工作尝试；托管模式使用受治理的 Turn 事务，挂接模式则保留
+等价的宿主或 automation 决策与结算证据。两条路径都不能允许 capability
+provider 直接变更 Goal 或 Todo 状态。
+
+私有 provider coordinates、凭据、日志、trace、数据库行和文档内容保持
+owner-local。LoopX 持久状态只保存 public-safe 的 capability 与 operation
+身份、provider revision 与 profile digest、有界证据引用和已准入回执。
+
 ## 状态与身份边界
 
 前端存储一个 Agent 级的工作会话绑定，其公开投影足以重连并解释所有权。传输
@@ -617,6 +645,10 @@ Ark Agent Plan 有自己的受支持模型、凭据和用量边界。适配器�
 - 一个 Goal 可以把不同 Lark 连接路由到不同 Agent，而不会跨会话投递；
 - 在每种前端模式下，LoopX 对 Goal/Todo 生命周期保持权威；
 - 只读交流不产生任务转换或 quota 消耗；
+- 两种模式只暴露同一 Goal 绑定在确切 provider revision 下准入的 external
+  capability operation；
+- external capability 的物质 operation 不能绕过活跃工作尝试权威、验证、
+  provider readback 或结算回执；
 - 陈旧或不匹配的身份与能力绑定失败关闭；以及
 - 已提交 packets 不包含凭据、原始转录、provider 负载、不透明句柄或真实
   本地路径。
@@ -684,6 +716,10 @@ Ark Agent Plan 有自己的受支持模型、凭据和用量边界。适配器�
 - 把每条挂接聊天消息包进托管 Turn。
 - 把 `turn run-once` 变成永恒调度器或桌面进程监督器。
 - 构建超出 Pi 与 `dsh` 所需行为的通用运行时抽象。
+- 把企业 toolkit、provider coordinates、凭据或私有操作流程 vendoring 到
+  LoopX core。
+- 把 toolkit 仓库、安装脚本或 prompt skill 当作一个隐式受信的通用
+  capability。
 - 在 LoopX 中硬编码永久的模型能力表。
 - 把标准 Ark 路由与 Ark Agent Plan 路由视为全局可互换。
 - 让转录、Desktop 存储或 provider 响应对 Goal/Todo 生命周期拥有权威。
@@ -700,6 +736,8 @@ Ark Agent Plan 有自己的受支持模型、凭据和用量边界。适配器�
 ## 相关 surface 与提案
 
 - [Runtime connector catalog](../../integrations/runtime-connector-catalog.md)
+- [Domain capability packs](../../product/domain-capability-packs.md)
+- [Extensions](../../reference/extensions.md)
 - [LoopX Turn v0](../../reference/protocols/loopx-turn-v0.md)
 - [DeepSeek Harness connector](../../integrations/deepseek-harness-connector.md)
 - [Pi Goal mode](../../../loopx/pi_goal_mode/README.md)
