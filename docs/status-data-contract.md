@@ -1248,6 +1248,27 @@ render it as an agent-lane pointer, not as `recommended_action` replacement.
 Human markdown should label this pointer as the current agent's todo and mark
 co-displayed global agent todo rows as goal-wide, so `--agent-id` is not
 mistaken for a filter that replaces the goal-wide queue.
+When more than one already-admitted advancement todo remains runnable, the
+same guard also includes `action_portfolio.schema_version=
+quota_action_portfolio_v0`. `primary` is the selected todo and remains the
+normal execution target. `fallback_actions` contains at most two ordered,
+agent-scoped, capability-ready alternatives. The machine trigger is
+`fallback_policy.trigger=primary_unavailable_at_execution`: a host or agent
+uses the first alternative that is still runnable only after the primary's
+real call site reports that it cannot execute, and must preserve/report the
+primary blocker instead of silently dropping it. This is an executable hot-path
+contract, not a request to choose a lower-priority todo eagerly.
+
+Correctly typed future work is handled earlier. A higher-priority
+`continuous_monitor` with a valid future `next_due_at` is not executable; quota
+selects the next ready advancement todo and records the future monitor under
+`action_portfolio.unavailable_higher_priority` with
+`availability_reason=scheduled_for_future`. Legacy state that labels such work
+as `advancement_task` cannot be reclassified from phrases such as “Monday” or
+“after the window opens”; explicit `task_class` remains authoritative. The
+portfolio still exposes bounded fallback actions for that compatibility case,
+so a failed execution preflight need not send a weak model back through the
+entire cold diagnostic packet.
 The same scoped guard may include
 `goal_route_hint.schema_version=goal_route_hint_v0`. This is a goal-level
 read-path synthesis over the current `agent_lane_next_action`,

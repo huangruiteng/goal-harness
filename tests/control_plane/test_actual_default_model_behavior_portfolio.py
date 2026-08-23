@@ -608,6 +608,19 @@ def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) 
     assert "next_task_action.operation" in (
         capability_signature["action"]["primary_action"]
     )
+    future_fallback = packets["turn_future_primary_fallback"]
+    future_signature = quota_action_signature_document(future_fallback)
+    assert future_signature["action"]["selected_todo"]["todo_id"] == (
+        "todo_ready_fallback"
+    )
+    future_portfolio = future_signature["action"]["action_portfolio"]
+    assert future_portfolio["primary"]["todo_id"] == "todo_ready_fallback"
+    assert future_portfolio["unavailable_higher_priority"][0]["todo_id"] == (
+        "todo_future_primary"
+    )
+    assert future_portfolio["unavailable_higher_priority"][0][
+        "availability_reason"
+    ] == "scheduled_for_future"
     regression_source = build_quota_hot_path_compaction_regression_source()
     regression = packets["turn_quota_hot_path_compaction_regression"]
     assert (
@@ -830,7 +843,7 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
     }
 
     assert catalog["topology"] == "actual_default_one_arm"
-    assert len(catalog["scenarios"]) == 16
+    assert len(catalog["scenarios"]) == 17
     assert all(
         scenario["packet_view"]
         == (
@@ -1007,10 +1020,10 @@ def test_portfolio_turn_actor_reads_actual_default_packet_without_semantic_echo(
     )
 
     assert result["qualification_passed"] is True
-    assert result["scenario_count"] == 16
+    assert result["scenario_count"] == 17
     assert result["contrast_count"] == 4
-    assert result["actor_call_budget"] == 32
-    assert result["actor_call_count"] == 32
+    assert result["actor_call_budget"] == 34
+    assert result["actor_call_count"] == 34
     assert result["failure_count"] == 0
     assert result["skip_count"] == 0
     assert result["contrast_failure_count"] == 0
@@ -1042,7 +1055,7 @@ def test_portfolio_real_tool_scenarios_choose_from_latest_quota_result(
     boundary = result["boundary"]
     assert boundary["tools_enabled"] is True
     assert boundary["tool_enabled_scenario_count"] == 5
-    assert boundary["packet_interpretation_scenario_count"] == 11
+    assert boundary["packet_interpretation_scenario_count"] == 12
     assert boundary["automatic_retries"] is False
     assert boundary["raw_model_responses_persisted"] is False
     assert boundary["raw_packets_persisted"] is False

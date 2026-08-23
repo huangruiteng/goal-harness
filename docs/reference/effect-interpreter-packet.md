@@ -103,7 +103,14 @@ The decision is returned as:
 | `should_run` | Whether compute is allowed |
 | `effective_action` | Machine-visible effective action |
 | `recommended_action` | Next concrete action text |
+| `action_portfolio` | Primary plus bounded typed fallbacks, when present |
 | `protocol_action_packet.summary` | Compact actor-facing summary |
+
+`EffectTurn.observation.action_portfolio` is the canonical TypeScript-owned
+observation of this field. Python supplies only scope/capability-admitted todo
+rows; the TypeScript reducer validates identity, removes duplicates, bounds the
+list, and fixes the execution-failure trigger before the Turn envelope signs
+it.
 
 ### 4. Next Effect
 
