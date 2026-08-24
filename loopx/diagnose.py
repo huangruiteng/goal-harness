@@ -271,6 +271,19 @@ def _compact_quota_signals(quota: dict[str, Any]) -> dict[str, Any]:
     return signals
 
 
+def _compact_interaction_contract(contract: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(contract)
+    agent_channel = _as_dict(contract.get("agent_channel"))
+    cli_channel = _as_dict(contract.get("cli_channel"))
+    for field in ("action_portfolio_ref", "suggested_action_count"):
+        agent_channel.pop(field, None)
+    for field in ("selection_policy_ref", "selection_command"):
+        cli_channel.pop(field, None)
+    compact["agent_channel"] = agent_channel
+    compact["cli_channel"] = cli_channel
+    return compact
+
+
 def _compact_scheduler_hint(scheduler_hint: dict[str, Any]) -> dict[str, Any]:
     if not scheduler_hint:
         return {}
@@ -408,7 +421,9 @@ def _build_goal_packet(
         "quota_signals": _compact_quota_signals(quota),
         "agent_id": agent_id,
         "available_capabilities": normalize_required_capabilities(available_capabilities),
-        "interaction_contract": _as_dict(quota.get("interaction_contract")),
+        "interaction_contract": _compact_interaction_contract(
+            _as_dict(quota.get("interaction_contract"))
+        ),
         "work_lane_contract": _as_dict(quota.get("work_lane_contract")),
         "goal_boundary": _as_dict(quota.get("goal_boundary")),
         "projection_warnings": {

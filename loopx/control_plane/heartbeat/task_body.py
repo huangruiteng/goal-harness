@@ -566,17 +566,16 @@ def _render_goal_task_body(
 
 {RUNTIME_EXECUTION_ROUTING_RULE}
 
-Each continuation inspect state/status/repo. {prequota_block}{HOST_LOOP_QUOTA_DISPATCH_RULE}
+{prequota_block}{HOST_LOOP_QUOTA_DISPATCH_RULE}
 Guard: `{quota_guard_command}`.
 
 `should_run=false`: no delivery/spend; surface concrete Chinese action/gate only
 for `user_channel.notify=NOTIFY`, otherwise wait.{host_wait_rule}
 
-`should_run=true`: take highest-priority unblocked in-scope todo; honor
+`should_run=true`: choose any current eligible in-scope Todo after considering priority; honor
 claims/leases and blocker-push/recovery obligations. Before dependencies, persist changed
-scope/acceptance/non-goal evidence and next todo. Keep work bounded: a segment is
-progress, not a new Goal boundary. Reuse this Goal until terminal; do not create a
-successor host Goal merely to continue.
+scope/acceptance/non-goal evidence and next todo. A bounded segment is progress
+within this Goal; reuse it until terminal—do not create a successor merely to continue.
 Validate/write public-safe evidence, critic, and next action.
 {HOST_LOOP_TODO_CLOSEOUT_RULE}
 

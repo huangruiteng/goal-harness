@@ -50,7 +50,7 @@ def test_real_quota_capability_repair_executes_before_monitor_fallback(
     assert "--available-capability network" in fixture.quota_guard_command
     assert "--available-capability private_read" not in fixture.quota_guard_command
     assert fixture.task_body.index(
-        "Run quota; selection_required -> choose next_cli_actions; else run [0] after work."
+        "use selection_command when required"
     ) < fixture.task_body.index(fixture.quota_guard_command)
     requests: list[dict[str, Any]] = []
 

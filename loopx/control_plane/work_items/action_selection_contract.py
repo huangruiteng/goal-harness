@@ -4,8 +4,6 @@ import shlex
 from collections.abc import Mapping
 from typing import Any
 
-from ..todos.contract import normalize_todo_id
-
 
 def action_portfolio_requires_explicit_selection(
     payload: Mapping[str, Any],
@@ -20,42 +18,29 @@ def action_portfolio_requires_explicit_selection(
     )
 
 
-def action_portfolio_selection_actions(
+def action_portfolio_selection_command_template(
     payload: Mapping[str, Any],
     *,
     scoped_cli_args: str,
     scheduler_args: str,
     turn_instance_id: str | None,
-) -> list[str]:
+) -> str | None:
     if not action_portfolio_requires_explicit_selection(payload):
-        return []
-    portfolio = payload.get("action_portfolio")
-    if not isinstance(portfolio, Mapping):
-        return []
-    suggested_actions = portfolio.get("suggested_actions")
-    if not isinstance(suggested_actions, list):
-        return []
+        return None
     goal_id = str(payload.get("goal_id") or "").strip()
     if not goal_id:
-        return []
+        return None
     turn_arg = (
         f" --turn-instance-id {shlex.quote(turn_instance_id)}"
         if turn_instance_id
         else ""
     )
-    commands: list[str] = []
-    for item in suggested_actions:
-        if not isinstance(item, Mapping):
-            continue
-        todo_id = normalize_todo_id(item.get("todo_id"))
-        if todo_id:
-            commands.append(
-                "loopx --format json quota should-run"
-                f" --goal-id {shlex.quote(goal_id)}"
-                f" --todo-id {shlex.quote(todo_id)}"
-                f"{scoped_cli_args}{scheduler_args}{turn_arg}"
-            )
-    return commands
+    return (
+        "loopx --format json quota should-run"
+        f" --goal-id {shlex.quote(goal_id)}"
+        " --todo-id {todo_id}"
+        f"{scoped_cli_args}{scheduler_args}{turn_arg}"
+    )
 
 
 def apply_action_selection_agent_gate(
@@ -75,8 +60,7 @@ def apply_action_selection_agent_gate(
             "selection_required": True,
             "delivery_allowed": False,
             "primary_action": (
-                "choose one currently eligible action after a bounded steering "
-                "audit; the recommendation and suggestions are not bindings"
+                "choose any current eligible Todo; recommendations are non-binding"
             ),
             "suggested_action_count": (
                 len(suggested_actions)
@@ -93,6 +77,28 @@ def apply_action_selection_cli_gate(
 ) -> None:
     if not action_portfolio_requires_explicit_selection(payload):
         return
+    actions = channel.get("next_cli_actions")
+    command_template = (
+        actions[0]
+        if isinstance(actions, list)
+        and len(actions) == 1
+        and isinstance(actions[0], str)
+        else None
+    )
+    channel["next_cli_actions"] = []
+    goal_id = str(payload.get("goal_id") or "").strip()
+    command_args_template: str | None = None
+    if command_template:
+        try:
+            command_tokens = shlex.split(command_template)
+        except ValueError:
+            command_tokens = []
+        if command_tokens[:3] == ["loopx", "--format", "json"]:
+            command_args_template = shlex.join(command_tokens[3:])
+    if command_args_template is None:
+        raise RuntimeError(
+            "explicit action selection requires one typed quota command template"
+        )
     channel.update(
         {
             "selection_required": True,
@@ -101,6 +107,16 @@ def apply_action_selection_cli_gate(
                 "no delivery or quota spend until one eligible action is "
                 "explicitly bound by rerunning quota in this turn"
             ),
+            "selection_command": {
+                "schema_version": "action_selection_cli_command_v1",
+                "route_prefix": "loopx --format json",
+                "command_args_template": command_args_template,
+                "candidate_discovery_args": (
+                    "todo list"
+                    f" --goal-id {shlex.quote(goal_id)}"
+                    " --role agent --status open --limit 50"
+                ),
+            },
         }
     )
 

@@ -717,16 +717,37 @@ def _action_projection(
             next_cli_actions.append(successor_command)
         if refresh_command:
             next_cli_actions.append(refresh_command)
+    selection_required = cli_channel.get("selection_required") is True
     writeback = {
-        "next_cli_actions": _text_list(
-            next_cli_actions,
-            limit=5,
-            item_limit=420,
-        ),
         "spend_allowed_now": bool(cli_channel.get("spend_allowed_now")),
         "spend_after_validation": bool(cli_channel.get("spend_after_validation")),
         "spend_policy": _text(cli_channel.get("spend_policy"), limit=280),
     }
+    if selection_required:
+        portfolio = _mapping(action.get("action_portfolio"))
+        suggested = portfolio.get("suggested_actions")
+        suggested_items = suggested if isinstance(suggested, list) else []
+        writeback.update(
+            {
+                "selection_required": True,
+                "suggested_todo_ids": [
+                    todo_id
+                    for item in suggested_items
+                    if isinstance(item, Mapping)
+                    and (todo_id := _text(item.get("todo_id"), limit=160))
+                ],
+                "selection_command_ref": (
+                    "full_decision.interaction_contract.cli_channel."
+                    "selection_command"
+                ),
+            }
+        )
+    else:
+        writeback["next_cli_actions"] = _text_list(
+            next_cli_actions,
+            limit=5,
+            item_limit=420,
+        )
     replan_settlement_contract = _mapping(
         cli_channel.get("replan_settlement_contract")
     )

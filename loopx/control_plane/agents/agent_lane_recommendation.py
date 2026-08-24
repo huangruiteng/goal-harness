@@ -36,23 +36,24 @@ AGENT_LANE_NEXT_ACTION_SCHEMA_VERSION = "agent_lane_next_action_v0"
 AGENT_LANE_PROGRESS_SCOPE = "agent_lane"
 
 
-def build_receipt_bound_advancement_next_action(
+def build_explicit_advancement_next_action(
     *,
     agent_identity: dict[str, Any] | None,
     agent_todo_items: list[dict[str, Any]],
     available_capabilities: Any,
-    receipt_bound_todo_id: str | None,
+    todo_id: str | None,
+    selection_binding: str,
 ) -> dict[str, Any] | None:
-    """Bind an eligible advancement omitted by bounded display projections."""
+    """Project an exact eligible advancement from the authoritative Todo set."""
 
     if not isinstance(agent_identity, dict):
         return None
     agent_id = normalize_todo_claimed_by(agent_identity.get("agent_id"))
-    todo_id = normalize_todo_id(receipt_bound_todo_id)
-    if not agent_id or not todo_id:
+    normalized_todo_id = normalize_todo_id(todo_id)
+    if not agent_id or not normalized_todo_id:
         return None
     for item in agent_todo_items:
-        if normalize_todo_id(item.get("todo_id")) != todo_id:
+        if normalize_todo_id(item.get("todo_id")) != normalized_todo_id:
             continue
         if (
             not _todo_item_is_actionable_open(item)
@@ -75,11 +76,11 @@ def build_receipt_bound_advancement_next_action(
             {
                 "schema_version": AGENT_LANE_NEXT_ACTION_SCHEMA_VERSION,
                 "agent_id": agent_id,
-                "source": "heartbeat_receipt.agent_todo",
+                "source": "authoritative_agent_todo",
                 "selected_by": "current_agent_claimed_todo",
                 "confidence": "selected",
                 "preserves_goal_next_action": True,
-                "selection_binding": "heartbeat_receipt",
+                "selection_binding": selection_binding,
             }
         )
         if not agent_scope_item_claimed_by(item):
@@ -87,6 +88,27 @@ def build_receipt_bound_advancement_next_action(
             payload["claim_required_before_work"] = True
         return payload
     return None
+
+
+def build_receipt_bound_advancement_next_action(
+    *,
+    agent_identity: dict[str, Any] | None,
+    agent_todo_items: list[dict[str, Any]],
+    available_capabilities: Any,
+    receipt_bound_todo_id: str | None,
+) -> dict[str, Any] | None:
+    """Replay a committed advancement omitted by bounded display projections."""
+
+    candidate = build_explicit_advancement_next_action(
+        agent_identity=agent_identity,
+        agent_todo_items=agent_todo_items,
+        available_capabilities=available_capabilities,
+        todo_id=receipt_bound_todo_id,
+        selection_binding="heartbeat_receipt",
+    )
+    if candidate is not None:
+        candidate["source"] = "heartbeat_receipt.agent_todo"
+    return candidate
 
 
 def build_receipt_bound_monitor_next_action(

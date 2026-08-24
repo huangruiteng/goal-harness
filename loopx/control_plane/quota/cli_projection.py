@@ -29,6 +29,9 @@ QUOTA_CLI_VISION_DETAIL_COMMAND = "quota should-run --include-detail vision"
 QUOTA_CLI_CAPABILITY_GATE_COMPACTION_SCHEMA_VERSION = (
     "quota_cli_capability_gate_compaction_v0"
 )
+QUOTA_CLI_ACTION_PORTFOLIO_COMPACTION_SCHEMA_VERSION = (
+    "quota_cli_action_portfolio_compaction_v0"
+)
 QUOTA_CLI_MONITOR_POLL_DECISION_COMPACTION_SCHEMA_VERSION = (
     "quota_cli_monitor_poll_decision_compaction_v0"
 )
@@ -372,6 +375,26 @@ def _compact_goal_boundary(boundary: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _compact_action_portfolio(portfolio: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(portfolio)
+    suggested = portfolio.get("suggested_actions")
+    if isinstance(suggested, list):
+        compact["suggested_actions"] = [
+            {
+                key: item[key]
+                for key in ("todo_id", "selection_role")
+                if key in item
+            }
+            for item in suggested
+            if isinstance(item, dict)
+        ]
+        compact["suggested_action_details"] = {
+            "schema_version": QUOTA_CLI_ACTION_PORTFOLIO_COMPACTION_SCHEMA_VERSION,
+            "ref": "$.agent_todo_summary.first_executable_items",
+        }
+    return compact
+
+
 def _compact_vision_continuation_audit(
     audit: dict[str, Any],
 ) -> dict[str, Any]:
@@ -679,6 +702,12 @@ def compact_quota_should_run_cli_payload(
             audit_ref=_vision_continuation_ref(compact_vision_audit),
         )
     if not include_todo_summary_detail:
+        action_portfolio = payload.get("action_portfolio")
+        if isinstance(action_portfolio, dict):
+            compact = dict(compact)
+            compact["action_portfolio"] = _compact_action_portfolio(
+                action_portfolio
+            )
         capability_gate = payload.get("capability_gate")
         if isinstance(capability_gate, dict):
             compact = dict(compact)

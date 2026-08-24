@@ -99,39 +99,28 @@ def bind_action_selection_cli_routes(
     cli_channel: dict[str, Any] = cli_channel_value
     if cli_channel.get("selection_required") is not True:
         return
-    actions = cli_channel.get("next_cli_actions")
-    if not isinstance(actions, list):
+    selection_command = cli_channel.get("selection_command")
+    if not isinstance(selection_command, dict):
         return
-    bound_actions: list[str] = []
-    for action in actions:
-        if not isinstance(action, str):
-            continue
-        try:
-            tokens = shlex.split(action)
-        except ValueError:
-            continue
-        if not tokens or tokens[0] != "loopx" or "--registry" in tokens:
-            bound_actions.append(action)
-            continue
-        bound_actions.append(
-            shlex.join(
-                [
-                    "loopx",
-                    "--registry",
-                    str(registry_path.expanduser().resolve()),
-                    "--runtime-root",
-                    str(runtime_root.expanduser().resolve()),
-                    *tokens[1:],
-                ]
-            )
+    route_prefix = selection_command.get("route_prefix")
+    if not isinstance(route_prefix, str):
+        return
+    try:
+        tokens = shlex.split(route_prefix)
+    except ValueError:
+        return
+    if tokens == ["loopx", "--format", "json"]:
+        selection_command["route_prefix"] = shlex.join(
+            [
+                "loopx",
+                "--registry",
+                str(registry_path.expanduser().resolve()),
+                "--runtime-root",
+                str(runtime_root.expanduser().resolve()),
+                "--format",
+                "json",
+            ]
         )
-    if bound_actions:
-        cli_channel["next_cli_actions"] = bound_actions
-        cli_channel["selection_route_binding"] = {
-            "schema_version": "action_selection_cli_route_v0",
-            "registry_bound": True,
-            "runtime_root_bound": True,
-        }
 
 
 def build_live_quota_should_run_decision(
@@ -150,6 +139,7 @@ def build_live_quota_should_run_decision(
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     bounded_research_frontier_projector: BoundedResearchFrontierProjector | None = None,
     receipt_bound_todo_id: str | None = None,
+    requested_action_todo_id: str | None = None,
     receipt_bound_replan_obligation_id: str | None = None,
     turn_instance_id: str | None = None,
 ) -> dict[str, Any]:
@@ -211,6 +201,7 @@ def build_live_quota_should_run_decision(
         scheduler_execution_context=resolved_context,
         operator_inbox_urgency_projector=operator_inbox_urgency_projector,
         receipt_bound_todo_id=receipt_bound_todo_id,
+        requested_action_todo_id=requested_action_todo_id,
         receipt_bound_monitor_phase=receipt_bound_monitor_phase,
         receipt_bound_terminal_phase=receipt_bound_terminal_phase,
         receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,

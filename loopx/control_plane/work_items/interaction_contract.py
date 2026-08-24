@@ -737,14 +737,14 @@ def interaction_next_cli_actions(
         )
     except ValueError:
         scheduler_args = ""
-    selection_actions = selection.action_portfolio_selection_actions(
+    selection_command_template = selection.action_portfolio_selection_command_template(
         payload,
         scoped_cli_args=scoped_cli_args,
         scheduler_args=scheduler_args,
         turn_instance_id=turn_instance_id,
     )
-    if selection_actions:
-        return selection_actions
+    if selection_command_template:
+        return [selection_command_template]
     typed_quota_guard = (
         f"loopx --format json quota should-run --goal-id {goal_id}"
         f"{scoped_cli_args}{scheduler_args}"

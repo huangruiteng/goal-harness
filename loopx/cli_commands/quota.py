@@ -587,12 +587,32 @@ def _require_requested_quota_action_selection(
     selected_todo = payload.get("selected_todo")
     if not isinstance(selected_todo, Mapping) or (
         normalize_todo_id(selected_todo.get("todo_id")) != requested_todo_id
-        or selected_todo.get("selection_binding") != "heartbeat_receipt"
+        or selected_todo.get("selection_binding") != "pending_action_selection"
+        or payload.get("ok") is not True
+        or payload.get("should_run") is not True
+        or payload.get("normal_delivery_allowed") is not True
     ):
         raise HeartbeatReceiptIdentityConflictError(
             "explicit action selection must name one currently projected "
             "agent-scoped, capability-ready Todo"
         )
+
+
+def _commit_pending_action_selection(
+    payload: Mapping[str, object],
+    *,
+    requested_todo_id: str | None,
+) -> None:
+    """Promote a qualified selection only after receipt reconciliation commits."""
+
+    selected_todo = payload.get("selected_todo")
+    if (
+        requested_todo_id
+        and isinstance(selected_todo, dict)
+        and normalize_todo_id(selected_todo.get("todo_id")) == requested_todo_id
+        and selected_todo.get("selection_binding") == "pending_action_selection"
+    ):
+        selected_todo["selection_binding"] = "heartbeat_receipt"
 
 
 def handle_quota_command(
@@ -609,6 +629,7 @@ def handle_quota_command(
     heartbeat_receipt_existing_appended = False
     heartbeat_receipt_ready = False
     heartbeat_stall_observation = "not_evaluated"
+    requested_todo_id: str | None = None
     detail_sections: frozenset[str] = frozenset()
     context: _QuotaCommandContext | None = None
     try:
@@ -641,7 +662,6 @@ def handle_quota_command(
                 args,
                 heartbeat_receipt_existing=heartbeat_receipt_existing,
             )
-            effective_bound_todo_id = receipt_bound_todo_id or requested_todo_id
             payload = build_live_quota_should_run_decision(
                 status_payload,
                 goal_id=args.goal_id,
@@ -657,7 +677,10 @@ def handle_quota_command(
                 bounded_research_frontier_projector=(
                     project_live_explore_composition_frontier
                 ),
-                receipt_bound_todo_id=effective_bound_todo_id,
+                receipt_bound_todo_id=receipt_bound_todo_id,
+                requested_action_todo_id=(
+                    requested_todo_id if receipt_bound_todo_id is None else None
+                ),
                 receipt_bound_replan_obligation_id=(
                     receipt_bound_replan_obligation_id
                 ),
@@ -889,6 +912,10 @@ def handle_quota_command(
                     turn_instance_id=heartbeat_turn_id,
                     status=heartbeat_receipt_existing_status,
                     appended=heartbeat_receipt_existing_appended,
+                )
+                _commit_pending_action_selection(
+                    payload,
+                    requested_todo_id=requested_todo_id,
                 )
             else:
                 settlement_identity = (

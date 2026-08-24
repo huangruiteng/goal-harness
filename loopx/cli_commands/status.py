@@ -459,7 +459,11 @@ def _build_agent_interaction_summary(
     }
     if isinstance(cli_channel, dict):
         summary["spend_after_validation"] = cli_channel.get("spend_after_validation")
-        summary["spend_policy"] = cli_channel.get("spend_policy")
+        summary["spend_policy"] = (
+            "bind eligible Todo before delivery/spend"
+            if cli_channel.get("selection_required") is True
+            else cli_channel.get("spend_policy")
+        )
     return summary
 
 

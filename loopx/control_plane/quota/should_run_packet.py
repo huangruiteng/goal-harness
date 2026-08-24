@@ -97,6 +97,7 @@ from ..todos.user_gate import (
 )
 from ..todos.write_hint import build_todo_write_hint
 from ..work_items.action_portfolio import build_quota_action_portfolio
+from ..work_items.action_portfolio import qualify_action_selection
 from ..work_items.execution_obligation import build_execution_obligation
 from ..work_items.goal_route_hint import build_goal_route_hint
 from ..work_items.interaction_contract import (
@@ -511,11 +512,34 @@ def _resolve_agent_lane_delivery_route(
     due_monitor_attempt: bool,
     receipt_bound_replan_decision: bool,
     delivery_preemptions: list[str],
+    should_run: bool,
+    normal_delivery_allowed: bool,
 ) -> dict[str, Any] | None:
     """Project candidates once, then let TypeScript own their delivery route."""
 
     if isinstance(prepared.guarded_agent_lane_next_action, dict):
         return prepared.guarded_agent_lane_next_action
+
+    if prepared.requested_action_todo_id is not None:
+        qualification = qualify_action_selection(
+            requested_todo_id=prepared.requested_action_todo_id,
+            candidate=prepared.requested_action_candidate,
+            should_run=should_run,
+            normal_delivery_allowed=normal_delivery_allowed,
+            delivery_preemptions=delivery_preemptions,
+        )
+        prepared.action_selection_qualification = qualification
+        if qualification.get("state") != "qualified":
+            return None
+        if not isinstance(prepared.requested_action_candidate, dict):
+            raise RuntimeError(
+                "qualified action selection is missing its projected candidate"
+            )
+        return {
+            **prepared.requested_action_candidate,
+            "selected_by": "agent_action_selection",
+            "selection_binding": "pending_action_selection",
+        }
 
     item = prepared.item
     fallback = prepared.receipt_bound_agent_next_action
@@ -682,6 +706,7 @@ def _project_quota_action_portfolio(
         not route.should_run
         or not route.normal_delivery_allowed
         or prepared.receipt_bound_todo_id is not None
+        or prepared.requested_action_todo_id is not None
         or route.receipt_bound_replan_decision
         or prepared.agent_monitor_only
     ):
@@ -903,6 +928,8 @@ def _resolve_quota_should_run_route(
         due_monitor_attempt=due_monitor_attempt,
         receipt_bound_replan_decision=receipt_bound_replan_decision,
         delivery_preemptions=delivery_preemptions,
+        should_run=should_run,
+        normal_delivery_allowed=normal_delivery_allowed,
     )
     agent_scope_frontier = None
     agent_lane_frontier_hint = None

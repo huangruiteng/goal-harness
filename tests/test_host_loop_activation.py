@@ -364,13 +364,13 @@ def test_goal_hosts_share_narrow_runtime_skill_routing(
         "lifecycle/registry and `loopx-self-repair` for runtime/projection drift."
         in task_body
     )
-    assert "a segment is progress, not a new Goal boundary" in task_body
-    assert "do not create a successor host Goal merely to continue" in task_body
+    assert "A bounded segment is progress within this Goal" in task_body
+    assert "do not create a successor merely to continue" in task_body
 
 
 def test_goal_hosts_reuse_thin_dispatch_and_stay_compact() -> None:
     shared_rules = (
-        "Run quota; selection_required -> choose next_cli_actions; else run [0] after work.",
+        "use selection_command when required",
         "No learning queue unless asked.",
     )
     common = {
@@ -587,7 +587,7 @@ def test_codex_app_thin_prompt_embeds_profile_only_in_quota_command() -> None:
     assert "host_surface" not in prompt["task_body"]
     assert "scheduler_owner" not in prompt["task_body"]
     assert (
-        "Run quota; selection_required -> choose next_cli_actions; else run [0] after work."
+        "use selection_command when required"
     ) in prompt["task_body"]
     assert "compact_prompt_command" not in prompt
     assert "brief_prompt_command" not in prompt

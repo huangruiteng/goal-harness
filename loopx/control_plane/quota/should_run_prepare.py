@@ -11,6 +11,7 @@ from ...quota import (
 )
 from ..agents.agent_lane_recommendation import (
     build_agent_lane_next_action,
+    build_explicit_advancement_next_action,
     build_receipt_bound_advancement_next_action,
     build_receipt_bound_monitor_next_action,
     scope_status_item_to_agent_lane as _scope_status_item_to_agent_lane,
@@ -114,6 +115,9 @@ class _QuotaDecisionPreparation:
     effective_available_capabilities: Any
     runtime_available_capabilities: Any
     receipt_bound_todo_id: str | None
+    requested_action_todo_id: str | None
+    requested_action_candidate: dict[str, Any] | None
+    action_selection_qualification: dict[str, Any] | None
     receipt_bound_monitor_phase: ReceiptBoundMonitorPhase | None
     receipt_bound_terminal_phase: ReceiptBoundTerminalPhase | None
     user_todo_summary: dict[str, Any] | None
@@ -410,6 +414,7 @@ def _prepare_quota_should_run_item(
     item: dict[str, Any],
     health_items: list[Any],
     receipt_bound_todo_id: str | None,
+    requested_action_todo_id: str | None,
     receipt_bound_monitor_phase: ReceiptBoundMonitorPhase | None,
     receipt_bound_terminal_phase: ReceiptBoundTerminalPhase | None,
     receipt_bound_replan_obligation_id: str | None,
@@ -729,6 +734,17 @@ def _prepare_quota_should_run_item(
         recovery_allowed = False
         reason = str(projection_gap_repair.get("reason") or reason)
     boundary_projection_repair = None
+    requested_action_candidate = (
+        build_explicit_advancement_next_action(
+            agent_identity=agent_identity,
+            agent_todo_items=agent_todo_source_items,
+            available_capabilities=effective_available_capabilities,
+            todo_id=requested_action_todo_id,
+            selection_binding="pending_action_selection",
+        )
+        if requested_action_todo_id
+        else None
+    )
     return _QuotaDecisionPreparation(
         status_payload=status_payload,
         safe_goal_id=safe_goal_id,
@@ -747,6 +763,9 @@ def _prepare_quota_should_run_item(
         effective_available_capabilities=effective_available_capabilities,
         runtime_available_capabilities=available_capabilities,
         receipt_bound_todo_id=receipt_bound_todo_id,
+        requested_action_todo_id=requested_action_todo_id,
+        requested_action_candidate=requested_action_candidate,
+        action_selection_qualification=None,
         receipt_bound_monitor_phase=receipt_bound_monitor_phase,
         receipt_bound_terminal_phase=receipt_bound_terminal_phase,
         user_todo_summary=user_todo_summary,
