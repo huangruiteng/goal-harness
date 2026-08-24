@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
+import shutil
 import signal
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -103,6 +104,47 @@ def test_managed_runtime_is_reused_and_restart_safe_for_typed_write(
         {},
         retry_safe=False,
     )
+
+
+def test_runtime_decode_change_rotates_identity_and_starts_replacement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_root = Path(effect_runtime.__file__).resolve().parent
+    staged_root = tmp_path / "control_plane"
+    for relative in effect_runtime._runtime_source_files(source_root):
+        source = source_root / relative
+        target = staged_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+    runtime_dir = tmp_path / "runtime"
+    monkeypatch.setattr(effect_runtime, "_control_plane_root", lambda: staged_root)
+    monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: runtime_dir)
+    monkeypatch.setenv("LOOPX_EFFECT_RUNTIME_IDLE_MS", "250")
+
+    original_fingerprint = effect_runtime._runtime_fingerprint()
+    original = effect_runtime.effect_runtime_result("runtime.ping", {})
+    decoder = staged_root / "runtime_decode.ts"
+    decoder.write_bytes(decoder.read_bytes() + b"\n// decoder-fingerprint-probe\n")
+    replacement_fingerprint = effect_runtime._runtime_fingerprint()
+    replacement = effect_runtime.effect_runtime_result("runtime.ping", {})
+
+    assert replacement_fingerprint != original_fingerprint
+    assert int(replacement["pid"]) != int(original["pid"])
+    original_info = effect_runtime._runtime_info_path(original_fingerprint)
+    replacement_info = effect_runtime._runtime_info_path(replacement_fingerprint)
+    assert original_info != replacement_info
+    assert replacement_info.exists()
+
+    effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
+    deadline = time.monotonic() + 2
+    while (
+        original_info.exists() or replacement_info.exists()
+    ) and time.monotonic() < deadline:
+        time.sleep(0.025)
+    assert not original_info.exists()
+    assert not replacement_info.exists()
 
 
 def test_typed_write_rejects_cross_effect_overwrite(

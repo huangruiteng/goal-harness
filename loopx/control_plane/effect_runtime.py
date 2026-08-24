@@ -12,10 +12,8 @@ import tempfile
 import time
 import uuid
 from collections.abc import Mapping
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
-
 
 EFFECT_RUNTIME_REQUEST_SCHEMA_VERSION = "loopx_effect_runtime_request_v0"
 EFFECT_RUNTIME_RESPONSE_SCHEMA_VERSION = "loopx_effect_runtime_response_v0"
@@ -29,30 +27,7 @@ STARTUP_LOCK_TIMEOUT_SECONDS = 15.0
 STARTUP_READY_TIMEOUT_SECONDS = 15.0
 STARTUP_POLL_SECONDS = 0.025
 _NODE_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
-_SOURCE_FILES = (
-    "effect_program.ts",
-    "governed_capability.ts",
-    "effect_runtime_handlers.ts",
-    "effect_runtime_io.ts",
-    "effect_runtime_server.ts",
-    "goals/vision_checkpoint.ts",
-    "quota/settlement_workspace_causality.ts",
-    "scheduler/state_store.ts",
-    "scheduler/state_transition_rules.ts",
-    "todos/completion_fence.ts",
-    "todos/completion_state.ts",
-    "todos/completion_transaction.ts",
-    "todos/completion_validation_plan.ts",
-    "todos/next_action.ts",
-    "turn_driver/turn_journal.ts",
-    "turn_driver/turn_journal_effects.ts",
-    "turn_driver/delivery_continuity.ts",
-    "turn_driver/settlement.ts",
-    "work_items/delivery_outcome.ts",
-    "work_items/action_portfolio.ts",
-    "work_items/replan_settlement.ts",
-    "turn_transaction_contract.json",
-)
+_RUNTIME_SOURCE_SUFFIXES = frozenset({".json", ".ts"})
 
 
 class EffectRuntimeRejected(RuntimeError):
@@ -71,11 +46,23 @@ def _control_plane_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-@lru_cache(maxsize=1)
+def _runtime_source_files(root: Path | None = None) -> tuple[str, ...]:
+    """Return the packaged source boundary owned by the managed runtime."""
+
+    source_root = root or _control_plane_root()
+    return tuple(
+        sorted(
+            path.relative_to(source_root).as_posix()
+            for path in source_root.rglob("*")
+            if path.is_file() and path.suffix in _RUNTIME_SOURCE_SUFFIXES
+        )
+    )
+
+
 def _runtime_fingerprint() -> str:
     digest = hashlib.sha256()
     root = _control_plane_root()
-    for relative in _SOURCE_FILES:
+    for relative in _runtime_source_files(root):
         digest.update(relative.encode("utf-8"))
         digest.update((root / relative).read_bytes())
     return digest.hexdigest()

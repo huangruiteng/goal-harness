@@ -20,23 +20,24 @@ def test_runtime_fingerprint_rotates_when_any_owned_source_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source_root = Path(effect_runtime.__file__).resolve().parent
-    for relative in effect_runtime._SOURCE_FILES:
+    source_files = effect_runtime._runtime_source_files(source_root)
+    assert "effect_runtime_server.ts" in source_files
+    assert "runtime_decode.ts" in source_files
+    assert "turn_transaction_contract.json" in source_files
+    for relative in source_files:
         source = source_root / relative
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
     monkeypatch.setattr(effect_runtime, "_control_plane_root", lambda: tmp_path)
 
-    effect_runtime._runtime_fingerprint.cache_clear()
     original = effect_runtime._runtime_fingerprint()
-    for index, relative in enumerate(effect_runtime._SOURCE_FILES):
+    for index, relative in enumerate(source_files):
         target = tmp_path / relative
         original_bytes = target.read_bytes()
         target.write_bytes(original_bytes + f"\n// fingerprint-{index}\n".encode())
-        effect_runtime._runtime_fingerprint.cache_clear()
         assert effect_runtime._runtime_fingerprint() != original
         target.write_bytes(original_bytes)
-    effect_runtime._runtime_fingerprint.cache_clear()
     assert effect_runtime._runtime_fingerprint() == original
 
 
