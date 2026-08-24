@@ -467,6 +467,96 @@ def _strip_heartbeat_workspace_causality(runtime: Path) -> None:
     )
 
 
+def test_gitless_goal_refresh_and_quota_spend_settle_end_to_end(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(
+        tmp_path,
+        required_capability="filesystem_write",
+    )
+    turn_id = "turn-gitless-settlement"
+    binding = (
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        TODO_ID,
+        "--turn-instance-id",
+        turn_id,
+    )
+
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        *binding,
+        "--scan-path",
+        str(project),
+        cwd=project,
+    )
+    assert guard_rc == 0, guard
+    assert guard["should_run"] is True
+    assert (
+        guard["heartbeat_receipt"]["delivery_workspace_causality"]["requirement"]
+        == "required"
+    )
+
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--classification",
+        "gitless_validated_progress",
+        "--delivery-batch-scale",
+        "implementation",
+        "--delivery-outcome",
+        "outcome_progress",
+        *binding,
+        "--no-global-sync",
+        "--suppress-external-sinks",
+        cwd=project,
+    )
+    assert refresh_rc == 0, refresh
+    assert refresh["delivery_workspace"] == {
+        "schema_version": "delivery_workspace_v1",
+        "workspace_identity": f"loopx:{GOAL_ID}",
+        "identity_kind": "local_goal",
+        "task_repository": None,
+        "repository_source": "goal_id_fallback",
+        "workspace_kind": "local_goal_workspace",
+        "peer_independent_worktree_required": False,
+    }
+    assert str(project) not in json.dumps(refresh["delivery_workspace"])
+
+    spend_rc, spend = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "spend-slot",
+        "--goal-id",
+        GOAL_ID,
+        "--slots",
+        "1",
+        "--source",
+        "heartbeat",
+        "--execute",
+        *binding,
+        "--scan-path",
+        str(project),
+        cwd=project,
+    )
+    assert spend_rc == 0, spend
+    assert spend["appended"] is True
+    assert spend["delivery_workspace_validated"] is True
+    assert spend["delivery_workspace"]["workspace_identity"] == f"loopx:{GOAL_ID}"
+    assert _spend_run_count(runtime) == 1
+
+
 def test_in_flight_progress_preserves_todo_across_heartbeat_settlements(
     tmp_path: Path,
 ) -> None:
@@ -851,7 +941,9 @@ def _assert_material_monitor_writeback_can_add_workspace_before_spend(
     assert supplement_rc == 0, supplement
     assert supplement["appended"] is True
     assert supplement["delivery_workspace"] == {
-        "schema_version": "delivery_workspace_v0",
+        "schema_version": "delivery_workspace_v1",
+        "workspace_identity": "git:github.com/example/read-only-settlement-fixture",
+        "identity_kind": "git_repository",
         "task_repository": "git:github.com/example/read-only-settlement-fixture",
         "repository_source": "refresh_state.delivery_workspace_path",
         "workspace_kind": "canonical_checkout",

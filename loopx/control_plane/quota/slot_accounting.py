@@ -8,7 +8,7 @@ from typing import Any
 
 from ..agents.workspace_guard import (
     build_delivery_workspace_guard,
-    delivery_workspace_repository,
+    delivery_workspace_identity,
 )
 from ..runtime.run_artifacts import (
     next_run_artifact_paths,
@@ -339,7 +339,7 @@ def _missing_delivery_workspace_preview(
     agent_id: str | None,
     before: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if not delivery_workspace_causality or delivery_workspace_repository(
+    if not delivery_workspace_causality or delivery_workspace_identity(
         delivery_workspace
     ):
         return None
@@ -532,12 +532,12 @@ def build_quota_slot_preview_for_decision(
     workspace_requirement = str(
         (delivery_workspace_causality or {}).get("requirement") or ""
     )
-    raw_delivery_workspace_repository = delivery_workspace_repository(
+    raw_delivery_workspace_identity = delivery_workspace_identity(
         raw_delivery_workspace
     )
     delivery_workspace = (
         raw_delivery_workspace
-        if raw_delivery_workspace_repository
+        if raw_delivery_workspace_identity
         and workspace_requirement != "not_required"
         else None
     )

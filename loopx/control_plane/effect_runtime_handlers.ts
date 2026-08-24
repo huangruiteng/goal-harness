@@ -39,6 +39,7 @@ import {
   validateGovernedCapabilitySettlementCallback,
 } from "./governed_capability.ts";
 import { evaluateDeliveryWorkspaceCausality } from "./quota/settlement_workspace_causality.ts";
+import { evaluateDeliveryWorkspace } from "./agents/delivery_workspace.ts";
 import {
   interpretTurnJournal,
   type TurnJournalInspectionRequest,
@@ -278,6 +279,7 @@ export function createEffectRuntimeHandlers(
     ["work_item.action_portfolio.project", projectQuotaActionPortfolio],
     ["work_item.action_selection.qualify", qualifyActionSelection],
     ["goal.vision_checkpoint.evaluate", buildVisionCheckpoint],
+    ["agent.delivery_workspace.evaluate", evaluateDeliveryWorkspace],
     [
       "quota.delivery_workspace_causality.evaluate",
       evaluateDeliveryWorkspaceCausality,

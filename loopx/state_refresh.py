@@ -18,7 +18,7 @@ from .control_plane.work_items.delivery_outcome import (
 )
 from .control_plane.agents.workspace_guard import (
     capture_delivery_workspace,
-    delivery_workspace_repository,
+    delivery_workspace_identity,
 )
 from .control_plane.quota.settlement import (
     SettlementIdentity,
@@ -122,7 +122,7 @@ def _delivery_workspace_supplement_required(
         == "not_required"
     ):
         return False
-    return delivery_workspace_repository(
+    return delivery_workspace_identity(
         prior_writeback.get("delivery_workspace")
     ) is None
 
@@ -1190,12 +1190,14 @@ def refresh_state_run(
         delivery_workspace = capture_delivery_workspace(
             current_path=delivery_workspace_path,
             peer_independent_worktree_required=peer_independent_worktree_required,
+            local_goal_id=safe_goal_id,
+            local_project_root=resolved_project,
+            repository_source=(
+                "refresh_state.delivery_workspace_path"
+                if delivery_workspace_path is not None
+                else None
+            ),
         )
-        if delivery_workspace_path is not None and delivery_workspace is None:
-            raise ValueError(
-                "--delivery-workspace-path must identify a git checkout with "
-                "a credential-free origin repository"
-            )
         if (
             peer_independent_worktree_required
             and (
@@ -1209,9 +1211,10 @@ def refresh_state_run(
                 "git worktree that produced it, or name that worktree with "
                 "--delivery-workspace-path"
             )
-        if delivery_workspace_path is not None and delivery_workspace is not None:
-            delivery_workspace["repository_source"] = (
-                "refresh_state.delivery_workspace_path"
+        if delivery_workspace_path is not None and delivery_workspace is None:
+            raise ValueError(
+                "--delivery-workspace-path must identify the registered local goal "
+                "workspace or a git checkout with a credential-free origin repository"
             )
     if (
         active_state_next_action_update

@@ -4,11 +4,17 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
-from ...repository_identity import normalize_repository_identity
+from ...repository_identity import (
+    normalize_repository_identity,
+    resolve_project_identity,
+)
 from ..todos.contract import normalize_todo_claimed_by, normalize_todo_task_repository
+from .delivery_workspace import (
+    build_delivery_workspace_snapshot,
+    normalize_delivery_workspace_snapshot,
+)
 
 AGENT_WORKSPACE_GUARD_SCHEMA_VERSION = "agent_workspace_guard_v1"
-DELIVERY_WORKSPACE_SCHEMA_VERSION = "delivery_workspace_v0"
 PEER_WRITE_ACTION_KINDS = {
     "fix",
     "implement",
@@ -101,18 +107,42 @@ def capture_delivery_workspace(
     current_path: Path | None = None,
     *,
     peer_independent_worktree_required: bool = False,
+    local_goal_id: str | None = None,
+    local_project_root: Path | None = None,
+    repository_source: str | None = None,
 ) -> dict[str, Any] | None:
     """Capture a compact, credential-free delivery workspace identity.
 
-    The snapshot intentionally excludes local paths and branch names.  It is
-    safe to persist with an accountable run and later binds quota accounting
-    to the repository where that delivery was actually written.
+    Git deliveries bind to their canonical repository identity. A single-agent
+    non-Git goal may instead bind to its stable LoopX goal identity. The
+    snapshot intentionally excludes local paths and branch names.
     """
 
     path = current_path or Path.cwd()
     current_root = _git_worktree_root(path)
     if current_root is None:
-        return None
+        if peer_independent_worktree_required or not local_goal_id:
+            return None
+        if local_project_root is not None and not _is_same_or_child_path(
+            path, local_project_root
+        ):
+            return None
+        try:
+            workspace_identity = resolve_project_identity(
+                path,
+                loopx_project_id=local_goal_id,
+            )
+        except ValueError:
+            return None
+        if not workspace_identity.startswith("loopx:"):
+            return None
+        return build_delivery_workspace_snapshot(
+            workspace_identity=workspace_identity,
+            identity_kind="local_goal",
+            repository_source=repository_source or "goal_id_fallback",
+            workspace_kind="local_goal_workspace",
+            peer_independent_worktree_required=False,
+        )
     current_common = _git_common_dir(path)
     current_git_dir = _git_dir(path)
     task_repository = _git_repository_identity(path)
@@ -123,31 +153,28 @@ def capture_delivery_workspace(
         if current_git_dir != current_common
         else "canonical_checkout"
     )
-    return {
-        "schema_version": DELIVERY_WORKSPACE_SCHEMA_VERSION,
-        "task_repository": task_repository,
-        "repository_source": "current_git_origin",
-        "workspace_kind": workspace_kind,
-        "peer_independent_worktree_required": bool(
-            peer_independent_worktree_required
-        ),
-    }
+    return build_delivery_workspace_snapshot(
+        workspace_identity=task_repository,
+        identity_kind="git_repository",
+        repository_source=repository_source or "current_git_origin",
+        workspace_kind=workspace_kind,
+        peer_independent_worktree_required=peer_independent_worktree_required,
+    )
+
+
+def delivery_workspace_identity(value: Any) -> str | None:
+    snapshot = normalize_delivery_workspace_snapshot(value)
+    if snapshot is None:
+        return None
+    return str(snapshot["workspace_identity"])
 
 
 def delivery_workspace_repository(value: Any) -> str | None:
-    if not isinstance(value, dict):
-        return None
-    if value.get("schema_version") != DELIVERY_WORKSPACE_SCHEMA_VERSION:
-        return None
-    if value.get("workspace_kind") not in {
-        "canonical_checkout",
-        "independent_git_worktree",
-    }:
-        return None
-    if not isinstance(value.get("peer_independent_worktree_required"), bool):
+    snapshot = normalize_delivery_workspace_snapshot(value)
+    if snapshot is None or snapshot.get("identity_kind") != "git_repository":
         return None
     try:
-        return normalize_todo_task_repository(value.get("task_repository"))
+        return normalize_todo_task_repository(snapshot.get("task_repository"))
     except (TypeError, ValueError):
         return None
 
@@ -169,16 +196,19 @@ def build_delivery_workspace_guard(
         if isinstance(delivery_run.get("delivery_workspace"), dict)
         else {}
     )
-    task_repository = delivery_workspace_repository(snapshot)
-    if not task_repository:
+    normalized_snapshot = normalize_delivery_workspace_snapshot(snapshot)
+    if normalized_snapshot is None:
         return None
+    if normalized_snapshot["identity_kind"] == "local_goal":
+        return None
+    task_repository = str(normalized_snapshot["task_repository"])
 
     current = capture_delivery_workspace(current_path)
-    current_repository = str((current or {}).get("task_repository") or "")
+    current_repository = delivery_workspace_repository(current) or ""
     current_workspace = str((current or {}).get("workspace_kind") or "")
-    recorded_workspace = str(snapshot.get("workspace_kind") or "")
+    recorded_workspace = str(normalized_snapshot.get("workspace_kind") or "")
     peer_independent_worktree_required = bool(
-        snapshot.get("peer_independent_worktree_required")
+        normalized_snapshot.get("peer_independent_worktree_required")
     )
     if not current:
         current_workspace = "not_git_worktree"
