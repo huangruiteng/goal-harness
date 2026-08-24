@@ -74,8 +74,9 @@ def test_real_tool_loop_executes_action_selected_by_real_quota(
                 "working directory is the connected goal project root; resolve "
                 "relative paths from the selected Todo there. Choose each next "
                 "action from the latest tool result. If quota sets "
-                "selection_required, choose one offered next_cli_actions command "
-                "and run that second quota command before delivery. Otherwise "
+                "selection_required, choose any currently eligible Todo; the "
+                "offered next_cli_actions are non-exhaustive conveniences. Run a "
+                "second quota command with that Todo before delivery. Otherwise "
                 "execute the exact action in selected_todo.text directly. When it names one file, "
                 "read only that file; do not discover, compare, or inspect other "
                 "targets. After that selected Todo tool succeeds, call no more "
@@ -156,6 +157,70 @@ def test_model_resumes_in_flight_todo_on_the_next_heartbeat(tmp_path: Path) -> N
     assert quota_result["interaction_contract"]["cli_channel"][
         "settlement_plan"
     ]["identity"]["todo_id"] == "todo_portfolio001"
+
+
+def test_model_can_bind_eligible_todo_outside_non_exhaustive_suggestions(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(
+        tmp_path / "oracle",
+        unsuggested_selected_todo=True,
+    )
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-004"),
+        (
+            fixture.quota_guard_command.replace(
+                '"${LOOPX_TURN:?}"', "turn-004"
+            )
+            + " --todo-id todo_portfolio001"
+        ),
+        "cat fixture/selected-lane.json",
+    ]
+    requests: list[dict[str, Any]] = []
+
+    def transport(**kwargs: Any) -> Mapping[str, Any]:
+        requests.append(json.loads(kwargs["body"]))
+        return _tool_response(
+            f"call-{len(requests)}",
+            commands[len(requests) - 1],
+        )
+
+    receipt = DoubaoSelectedTodoToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="selected-todo-unsuggested-004",
+        fixture_root=tmp_path / "actor",
+        unsuggested_selected_todo=True,
+    )
+
+    assert receipt["qualification_passed"] is True, receipt
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "quota_action_selection",
+        "selected_action",
+    ]
+    first_quota = json.loads(requests[1]["messages"][-1]["content"])
+    suggested_ids = {
+        item["todo_id"]
+        for item in first_quota["action_portfolio"]["suggested_actions"]
+    }
+    assert "todo_portfolio001" not in suggested_ids
+    assert first_quota["action_portfolio"]["selection_policy"] == {
+        "decision_owner": "agent",
+        "mode": "explicit_turn_binding",
+        "recommendation_role": "default_not_binding",
+        "requires_explicit_turn_binding": True,
+        "direct_delivery_before_selection": False,
+        "max_alternative_actions": 2,
+        "candidate_scope": "current_authoritative_eligible_todos",
+        "suggestions_exhaustive": False,
+    }
+    selected_quota = json.loads(requests[2]["messages"][-1]["content"])
+    assert selected_quota["selected_todo"]["todo_id"] == "todo_portfolio001"
+    assert selected_quota["selected_todo"]["selection_binding"] == (
+        "heartbeat_receipt"
+    )
 
 
 def test_tool_loop_rejects_delivery_before_required_action_selection(

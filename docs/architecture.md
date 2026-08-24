@@ -67,6 +67,26 @@ and
 The public framing comes from 齐梦星空,
 [主线一：Agent Loop 是 effectful program(1)](https://www.xiaohongshu.com/discovery/item/6a01d501000000003700c5de?source=webshare&xhsshare=pc_web&xsec_token=ABqpNuladcxhev099wLKw8M3ilhKBua0BQXNpxnBZEGkc=&xsec_source=pc_share).
 
+## Guided Autonomy, Not Recommendation Lock-In
+
+LoopX separates **hard boundaries** from **steering guidance**. Claims, scope,
+capability readiness, gates, quota, public/private policy, and destructive or
+production-effect rules define what an agent may do. Priorities,
+recommendations, bounded suggestions, and `next_cli_actions` help the agent
+choose efficiently inside that legal set; they do not silently shrink it.
+
+Projections therefore optimize for readability without pretending to be
+exhaustive. An agent may choose a currently authoritative eligible action that was
+not displayed among the first suggestions, but it must bring that choice back
+through the same typed preflight, receipt binding, validation, writeback, and
+spend path. This preserves process guidance and auditability while keeping the
+agent autonomous where no real boundary requires a single route.
+
+A field that is advisory must say so in its schema. If a controller intends a
+whitelist, exclusive lease, owner gate, or other machine-enforced restriction,
+that restriction belongs in a typed authority or transition contract rather
+than being inferred from list position or prompt wording.
+
 ## Turn Decision Vocabulary
 
 Operator-facing docs and heartbeat prompts often summarize a turn as deliver,

@@ -36,6 +36,59 @@ AGENT_LANE_NEXT_ACTION_SCHEMA_VERSION = "agent_lane_next_action_v0"
 AGENT_LANE_PROGRESS_SCOPE = "agent_lane"
 
 
+def build_receipt_bound_advancement_next_action(
+    *,
+    agent_identity: dict[str, Any] | None,
+    agent_todo_items: list[dict[str, Any]],
+    available_capabilities: Any,
+    receipt_bound_todo_id: str | None,
+) -> dict[str, Any] | None:
+    """Bind an eligible advancement omitted by bounded display projections."""
+
+    if not isinstance(agent_identity, dict):
+        return None
+    agent_id = normalize_todo_claimed_by(agent_identity.get("agent_id"))
+    todo_id = normalize_todo_id(receipt_bound_todo_id)
+    if not agent_id or not todo_id:
+        return None
+    for item in agent_todo_items:
+        if normalize_todo_id(item.get("todo_id")) != todo_id:
+            continue
+        if (
+            not _todo_item_is_actionable_open(item)
+            or _todo_task_class(item) != TODO_TASK_CLASS_ADVANCEMENT
+            or missing_required_capabilities(
+                item,
+                available_capabilities=available_capabilities,
+            )
+            or not agent_scope_item_claimed_by_agent_or_unclaimed(
+                item,
+                agent_id=agent_id,
+            )
+        ):
+            return None
+        text = protocol_action_text(item.get("text"), limit=500)
+        if not text:
+            return None
+        payload = compact_todo_summary_item(item, text=text)
+        payload.update(
+            {
+                "schema_version": AGENT_LANE_NEXT_ACTION_SCHEMA_VERSION,
+                "agent_id": agent_id,
+                "source": "heartbeat_receipt.agent_todo",
+                "selected_by": "current_agent_claimed_todo",
+                "confidence": "selected",
+                "preserves_goal_next_action": True,
+                "selection_binding": "heartbeat_receipt",
+            }
+        )
+        if not agent_scope_item_claimed_by(item):
+            payload["selected_by"] = "unclaimed_todo"
+            payload["claim_required_before_work"] = True
+        return payload
+    return None
+
+
 def build_receipt_bound_monitor_next_action(
     *,
     agent_identity: dict[str, Any] | None,

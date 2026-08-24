@@ -75,6 +75,7 @@ def _build_fixture(
     root: Path,
     *,
     prior_in_flight_progress: bool = False,
+    unsuggested_selected_todo: bool = False,
 ) -> _SelectedTodoToolFixture:
     source_root = Path(__file__).resolve().parents[3]
     project_root = root / "project"
@@ -127,19 +128,22 @@ def _build_fixture(
         text=True,
         timeout=10,
     )
-    next_action = (
+    decoy_action = (
         f"Read only `{_DECOY_TARGET}`; start the newly queued sibling lane."
-        if prior_in_flight_progress
+    )
+    next_action = (
+        decoy_action
+        if prior_in_flight_progress or unsuggested_selected_todo
         else SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
     )
-    decoy_todo = (
-        f"- [ ] [P1] {next_action}\n"
+    decoy_count = 3 if unsuggested_selected_todo else 1 if prior_in_flight_progress else 0
+    decoy_todo = "".join(
+        f"- [ ] [P1] {decoy_action} Candidate {index}.\n"
         "  <!-- loopx:todo "
-        "todo_id=todo_portfolio_decoy001 status=open "
+        f"todo_id=todo_portfolio_decoy00{index} status=open "
         "task_class=advancement_task action_kind=inspect_deferred_contract "
         f"claimed_by={SELECTED_TODO_TOOL_FIXTURE_AGENT_ID} priority=P1 -->\n"
-        if prior_in_flight_progress
-        else ""
+        for index in range(1, decoy_count + 1)
     )
     state_path.write_text(
         "---\n"
@@ -840,13 +844,13 @@ def _quota_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(action_portfolio_value, Mapping)
         else {}
     )
-    raw_allowed_actions = action_portfolio.get("allowed_actions")
-    allowed_actions = (
-        raw_allowed_actions if isinstance(raw_allowed_actions, list) else []
+    raw_suggested_actions = action_portfolio.get("suggested_actions")
+    suggested_actions = (
+        raw_suggested_actions if isinstance(raw_suggested_actions, list) else []
     )
-    allowed_action_ids = [
+    suggested_action_ids = [
         str(item.get("todo_id") or "").strip()
-        for item in allowed_actions
+        for item in suggested_actions
         if isinstance(item, Mapping) and str(item.get("todo_id") or "").strip()
     ]
     interaction = packet.get("interaction_contract")
@@ -866,18 +870,17 @@ def _quota_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         "quiet_noop_allowed": bool(action.get("quiet_noop_allowed")),
         "external_write_requested": False,
         "selection_required": cli_channel.get("selection_required") is True,
-        "allowed_action_ids": allowed_action_ids,
+        "suggested_action_ids": suggested_action_ids,
     }
     if (
-        contract["selected_todo_id"] != SELECTED_TODO_TOOL_FIXTURE_TODO_ID
+        (
+            not contract["selection_required"]
+            and contract["selected_todo_id"]
+            != SELECTED_TODO_TOOL_FIXTURE_TODO_ID
+        )
         or contract["user_action_required"]
         or not contract["must_attempt_work"]
         or contract["quiet_noop_allowed"]
-        or (
-            contract["selection_required"]
-            and SELECTED_TODO_TOOL_FIXTURE_TODO_ID
-            not in contract["allowed_action_ids"]
-        )
     ):
         raise ValueError("real quota packet did not select the fixture todo")
     return contract
@@ -961,10 +964,12 @@ class DoubaoSelectedTodoToolBehaviorActor:
         qualification_id: str,
         fixture_root: Path,
         prior_in_flight_progress: bool = False,
+        unsuggested_selected_todo: bool = False,
     ) -> dict[str, Any]:
         fixture = _build_fixture(
             fixture_root,
             prior_in_flight_progress=prior_in_flight_progress,
+            unsuggested_selected_todo=unsuggested_selected_todo,
         )
         messages: list[dict[str, Any]] = [
             {
@@ -975,8 +980,9 @@ class DoubaoSelectedTodoToolBehaviorActor:
                     "The shell working directory is the connected goal project "
                     "root; resolve relative paths from the selected Todo there. "
                     "Choose each next action from the latest tool result. If quota "
-                    "sets selection_required, choose one offered next_cli_actions "
-                    "command and run that second quota command before delivery. "
+                    "sets selection_required, choose any currently eligible Todo; "
+                    "the offered next_cli_actions are non-exhaustive conveniences. "
+                    "Run a second quota command with that Todo before delivery. "
                     "Otherwise execute the exact action in selected_todo.text directly. "
                     "When it names one file, read only that file; do not discover, "
                     "compare, or inspect other targets. After that selected Todo "
@@ -988,7 +994,6 @@ class DoubaoSelectedTodoToolBehaviorActor:
         steps: list[dict[str, Any]] = []
         quota_observed = False
         selection_required = False
-        allowed_action_ids: set[str] = set()
         contract: dict[str, Any] | None = None
         seen_once: set[str] = set()
         actor_ref = self._client.actor_ref
@@ -1053,11 +1058,6 @@ class DoubaoSelectedTodoToolBehaviorActor:
                         passed=False,
                         failure_code="repeated_quota_should_run",
                     )
-                if requested_todo_id not in allowed_action_ids:
-                    return receipt(
-                        passed=False,
-                        failure_code="invalid_action_selection",
-                    )
                 kind = "quota_action_selection"
                 steps[-1]["kind"] = kind
             if kind == "clock" and kind in seen_once:
@@ -1079,7 +1079,6 @@ class DoubaoSelectedTodoToolBehaviorActor:
                     contract = _quota_contract(quota_packet)
                     quota_observed = True
                     selection_required = bool(contract["selection_required"])
-                    allowed_action_ids = set(contract["allowed_action_ids"])
                     if kind == "quota_action_selection":
                         if selection_required:
                             raise ValueError("action selection did not bind the turn")

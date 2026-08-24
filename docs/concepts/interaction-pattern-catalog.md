@@ -452,9 +452,12 @@ number is stable identity, not display priority.
 
 **Expected behavior**
 
-The agent chooses one bounded segment, performs the work, runs focused
-validation, writes durable state or history, and spends exactly once after the
-validated delivery.
+The control plane projects hard eligibility boundaries separately from bounded,
+non-exhaustive steering suggestions. The agent chooses one eligible bounded
+segment, even when it was not among the displayed suggestions, binds that choice
+through the current turn guard, performs the work, runs focused validation,
+writes durable state or history, and spends exactly once after the validated
+delivery.
 
 **Visual Model**
 
@@ -1719,8 +1722,8 @@ flowchart TD
   T --> B["claimed lane claimant-balanced truncation"]
   B --> V["visibility lanes: claimed, unclaimed, monitor"]
   S --> Q["quota/capability guard chooses runnable candidate set"]
-  Q --> A["recommendation plus bounded allowed actions"]
-  A --> B["agent steering audit binds actual todo"]
+  Q --> A["recommendation plus non-exhaustive suggestions"]
+  A --> B["agent may bind any currently eligible todo"]
   Q --> N["agent_lane_next_action for --agent-id scoped turns"]
   V --> F["dashboard/frontstage/review packet shows ownership"]
   V --> C{"agent identity present?"}

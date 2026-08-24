@@ -29,25 +29,33 @@ When a P0 route waits on a human or external signal, unrelated safe P1/P2 work
 can continue. The fallback must stay visible as fallback; it must not hide the
 blocked route or pretend the gate was resolved.
 
-### 4. Feedback is not permission
+### 4. Guidance should preserve bounded autonomy
+
+Priorities and recommended next actions should make a long-running loop easier
+to steer, not turn a convenient shortlist into an accidental permission list.
+The agent may choose any currently eligible action inside typed claims, scope,
+capability, gate, quota, and safety boundaries, then bind and validate that
+choice through the normal control-plane path.
+
+### 5. Feedback is not permission
 
 Human reward, review, and preference signals can influence future ranking and
 planning, but they do not override gates, claims, scope, capability checks,
 public/private boundaries, or quota. A useful hint is still only a hint.
 
-### 5. Evidence should be compact and inspectable
+### 6. Evidence should be compact and inspectable
 
 The next agent turn needs enough evidence to recover the plot, but public
 surfaces should not copy raw logs, transcripts, benchmark traces, credentials,
 private notes, or local paths. Store compact artifacts and source references.
 
-### 6. Quota protects attention as much as compute
+### 7. Quota protects attention as much as compute
 
 A loop can waste user trust even when it uses cheap tokens. Quota should count
 whether a turn produced a verified transition, not just whether an agent spoke.
 Monitor-only or status-only turns should stay quiet unless something changed.
 
-### 7. Loop Agents need performance review
+### 8. Loop Agents need performance review
 
 A Loop Agent should be evaluated by project-level value, not only by a
 single-task benchmark score. Track output quantity, output quality, token cost,

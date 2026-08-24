@@ -199,8 +199,10 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
       requires_explicit_turn_binding: requiresExplicitTurnBinding,
       direct_delivery_before_selection: !requiresExplicitTurnBinding,
       max_alternative_actions: maximum,
+      candidate_scope: "current_authoritative_eligible_todos",
+      suggestions_exhaustive: false,
     },
-    allowed_actions: [
+    suggested_actions: [
       allowedActionProjection(primary, "recommended"),
       ...fallbackActions.map((candidate) =>
         allowedActionProjection(candidate, "alternative")

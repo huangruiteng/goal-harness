@@ -83,8 +83,10 @@ def test_sticky_primary_exposes_bounded_agent_selection_on_every_hot_path() -> N
         "requires_explicit_turn_binding": True,
         "direct_delivery_before_selection": False,
         "max_alternative_actions": 2,
+        "candidate_scope": "current_authoritative_eligible_todos",
+        "suggestions_exhaustive": False,
     }
-    assert [item["todo_id"] for item in portfolio["allowed_actions"]] == [
+    assert [item["todo_id"] for item in portfolio["suggested_actions"]] == [
         PRIMARY_ID,
         FALLBACK_ID,
     ]

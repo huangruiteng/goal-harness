@@ -32,7 +32,6 @@ from ..control_plane.quota.scheduler_ack import (
 )
 from ..control_plane.quota.settlement_cli import (
     attach_spend_settlement_result,
-    heartbeat_receipt_action_selection_todo_ids,
     quota_rollout_details,
     quota_rollout_replan_obligation_id,
     quota_rollout_todo_id,
@@ -592,24 +591,8 @@ def handle_quota_command(
             if requested_todo_id and not heartbeat_receipt_existing:
                 raise HeartbeatReceiptIdentityConflictError(
                     "explicit action selection requires a first same-turn quota "
-                    "response with bounded allowed actions"
+                    "response with current eligibility and bounded suggestions"
                 )
-            if requested_todo_id and heartbeat_receipt_existing and not (
-                receipt_bound_todo_id or receipt_bound_replan_obligation_id
-            ):
-                allowed_selection_ids = (
-                    heartbeat_receipt_action_selection_todo_ids(
-                        heartbeat_receipt_existing
-                    )
-                )
-                if (
-                    not allowed_selection_ids
-                    or requested_todo_id not in allowed_selection_ids
-                ):
-                    raise HeartbeatReceiptIdentityConflictError(
-                        "explicit action selection must use one Todo offered by "
-                        "the first same-turn quota response"
-                    )
             effective_bound_todo_id = receipt_bound_todo_id or requested_todo_id
             payload = build_live_quota_should_run_decision(
                 status_payload,

@@ -47,8 +47,10 @@ test("action portfolio exposes one recommendation and bounded selectable alterna
     requires_explicit_turn_binding: true,
     direct_delivery_before_selection: false,
     max_alternative_actions: 2,
+    candidate_scope: "current_authoritative_eligible_todos",
+    suggestions_exhaustive: false,
   });
-  assert.deepEqual(result?.allowed_actions, [
+  assert.deepEqual(result?.suggested_actions, [
     {
       todo_id: "todo_primary001",
       text: "Run the primary slice.",

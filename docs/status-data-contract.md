@@ -1252,20 +1252,25 @@ When more than one already-admitted advancement todo remains runnable, the
 same guard also includes `action_portfolio.schema_version=
 quota_action_portfolio_v1`. `primary` is the ordered recommendation, while
 `fallback_actions` preserves the compatibility view of at most two ordered,
-agent-scoped, capability-ready alternatives. `allowed_actions` is the unified
-selection set and labels those entries `recommended` or `alternative`.
+agent-scoped, capability-ready alternatives. `suggested_actions` is the bounded,
+non-exhaustive convenience view and labels those entries `recommended` or
+`alternative`.
+`selection_policy.candidate_scope=current_authoritative_eligible_todos` keeps
+the legal choice boundary separate from the displayed suggestions;
+`suggestions_exhaustive=false` makes that distinction machine-readable.
 `selection_policy.decision_owner=agent` and
 `recommendation_role=default_not_binding` make the priority order advisory at
 this boundary rather than silently binding the first Todo.
 
 The first quota response sets `selection_required=true` and exposes one exact
-`next_cli_actions` command per allowed action. Its heartbeat receipt has no
-settlement identity, so direct delivery and spend fail closed. The agent runs
-one of those commands in the same turn with the chosen `--todo-id`; quota then
-validates membership in the previously projected portfolio and upgrades the
-receipt to that Todo. Only the upgraded response restores delivery and its
-settlement plan. If there is only one admitted action, no portfolio selection
-phase is added. `fallback_policy` remains as a compatibility projection, but
+`next_cli_actions` command per displayed suggestion. Its heartbeat receipt has
+no settlement identity, so direct delivery and spend fail closed. The agent may
+run one of those commands or construct the same command for another currently
+projected, agent-scoped, capability-ready Todo. Quota revalidates current
+eligibility and upgrades the receipt to that Todo; it does not require the Todo
+to have appeared in the bounded suggestions. Only the upgraded response restores
+delivery and its settlement plan. If there is only one admitted action, no
+portfolio selection phase is added. `fallback_policy` remains as a compatibility projection, but
 its v1 trigger is `explicit_agent_selection_after_steering_audit`; it no longer
 means that alternatives are hidden until a primary execution failure.
 

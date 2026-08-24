@@ -1069,7 +1069,7 @@ def test_agent_selects_one_bounded_action_before_delivery_receipt_binding(
     assert _heartbeat_receipt_count(runtime, turn_instance_id) == 2
 
 
-def test_agent_selection_rejects_todo_outside_projected_action_set(
+def test_agent_can_select_eligible_todo_outside_bounded_suggestions(
     tmp_path: Path,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
@@ -1089,7 +1089,7 @@ def test_agent_selection_rejects_todo_outside_projected_action_set(
         str(project),
     )
     first_rc, first = _run_cli(registry_path, runtime, *guard_args)
-    invalid_rc, invalid = _run_cli(
+    selected_rc, selected = _run_cli(
         registry_path,
         runtime,
         *guard_args,
@@ -1099,11 +1099,98 @@ def test_agent_selection_rejects_todo_outside_projected_action_set(
 
     assert first_rc == 0, first
     assert OUTSIDE_BOUNDED_PORTFOLIO_TODO_ID not in {
-        item["todo_id"] for item in first["action_portfolio"]["allowed_actions"]
+        item["todo_id"]
+        for item in first["action_portfolio"]["suggested_actions"]
     }
+    assert selected_rc == 0, selected
+    assert selected["selected_todo"]["todo_id"] == (
+        OUTSIDE_BOUNDED_PORTFOLIO_TODO_ID
+    )
+    assert selected["selected_todo"]["selection_binding"] == (
+        "heartbeat_receipt"
+    )
+    assert selected["heartbeat_receipt"]["status"] == "upgraded"
+    assert selected["heartbeat_receipt"]["settlement_identity"]["todo_id"] == (
+        OUTSIDE_BOUNDED_PORTFOLIO_TODO_ID
+    )
+    assert _heartbeat_receipt_count(runtime, turn_instance_id) == 2
+
+
+def test_agent_selection_rejects_unprojected_todo(tmp_path: Path) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_selectable_alternative(project)
+    turn_instance_id = "turn-agent-selection-unprojected"
+    guard_args = (
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--scan-path",
+        str(project),
+    )
+    first_rc, first = _run_cli(registry_path, runtime, *guard_args)
+    invalid_rc, invalid = _run_cli(
+        registry_path,
+        runtime,
+        *guard_args,
+        "--todo-id",
+        "todo_not_projected",
+    )
+
+    assert first_rc == 0, first
     assert invalid_rc != 0, invalid
     assert invalid["ok"] is False
     assert invalid["error_code"] == "heartbeat_receipt_identity_conflict"
+    assert _heartbeat_receipt_count(runtime, turn_instance_id) == 1
+
+
+def test_unsuggested_selection_revalidates_current_capability_readiness(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_selectable_alternative(project)
+    state_path = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    state_text = state_path.read_text(encoding="utf-8")
+    state_path.write_text(
+        state_text.replace(
+            f"todo_id={OUTSIDE_BOUNDED_PORTFOLIO_TODO_ID} status=open ",
+            f"todo_id={OUTSIDE_BOUNDED_PORTFOLIO_TODO_ID} status=open "
+            "required_capabilities=network ",
+        ),
+        encoding="utf-8",
+    )
+    turn_instance_id = "turn-agent-selection-capability-blocked"
+    guard_args = (
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--scan-path",
+        str(project),
+    )
+
+    first_rc, first = _run_cli(registry_path, runtime, *guard_args)
+    blocked_rc, blocked = _run_cli(
+        registry_path,
+        runtime,
+        *guard_args,
+        "--todo-id",
+        OUTSIDE_BOUNDED_PORTFOLIO_TODO_ID,
+    )
+
+    assert first_rc == 0, first
+    assert blocked_rc != 0, blocked
+    assert blocked["error_code"] == "heartbeat_receipt_identity_conflict"
     assert _heartbeat_receipt_count(runtime, turn_instance_id) == 1
 
 

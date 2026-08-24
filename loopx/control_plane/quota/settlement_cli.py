@@ -272,42 +272,6 @@ def quota_rollout_settlement_binding(
     return None, normalize_todo_replan_obligation_id(replan_packet.get("obligation_id"))
 
 
-def quota_action_selection_todo_ids(
-    payload: Mapping[str, object],
-) -> tuple[str, ...]:
-    action_portfolio_value = payload.get("action_portfolio")
-    action_portfolio: Mapping[str, object] = (
-        action_portfolio_value
-        if isinstance(action_portfolio_value, Mapping)
-        else {}
-    )
-    allowed_actions = action_portfolio.get("allowed_actions")
-    if not isinstance(allowed_actions, list):
-        return ()
-    return tuple(
-        todo_id
-        for item in allowed_actions
-        if isinstance(item, Mapping)
-        and (todo_id := normalize_todo_id(item.get("todo_id")))
-    )
-
-
-def heartbeat_receipt_action_selection_todo_ids(
-    receipt: Mapping[str, object],
-) -> tuple[str, ...]:
-    details = receipt.get("details")
-    if not isinstance(details, Mapping):
-        return ()
-    raw_todo_ids = details.get("action_selection_todo_ids")
-    if not isinstance(raw_todo_ids, str):
-        return ()
-    return tuple(
-        todo_id
-        for item in raw_todo_ids.split(",")
-        if (todo_id := normalize_todo_id(item))
-    )
-
-
 def quota_rollout_replan_obligation_id(
     payload: Mapping[str, object],
     args: argparse.Namespace,
@@ -359,9 +323,6 @@ def quota_rollout_details(
     }
     if workspace_causality:
         details.update(delivery_workspace_causality_event_fields(workspace_causality))
-    action_selection_todo_ids = quota_action_selection_todo_ids(payload)
-    if action_selection_todo_ids:
-        details["action_selection_todo_ids"] = ",".join(action_selection_todo_ids)
     return details
 
 

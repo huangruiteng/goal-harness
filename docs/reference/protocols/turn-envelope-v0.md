@@ -42,10 +42,12 @@ is the baseline. A digest change without a supported coverage migration, or a
 v2 portfolio above that one-version budget, still fails closed.
 
 For `quota_action_portfolio_v1`, the envelope carries the recommendation and
-bounded `allowed_actions`, but the recommendation is not a settlement identity.
-When the full interaction contract says `selection_required=true`, the agent
-must choose one projected selection command and rerun quota with that Todo in
-the same turn. The resulting receipt-bound envelope is the delivery contract.
+bounded, non-exhaustive `suggested_actions`, but neither is a settlement
+identity or permission list. When the full interaction contract says
+`selection_required=true`, the agent must rerun quota in the same turn with any
+currently authoritative, same-agent, capability-ready Todo. The displayed commands
+are conveniences; the second guard revalidates the chosen Todo, and the
+resulting receipt-bound envelope is the delivery contract.
 
 `protocol_action_packet` remains in the full decision/cold path. The envelope
 reconstructs its ordered semantic fields from `action`, `user`, work-lane,

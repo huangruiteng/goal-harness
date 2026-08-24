@@ -343,17 +343,18 @@ candidate is missing a capability, the gate returns
 `action=skip` for unsupported capability classes.
 
 When more than one same-agent action is admitted, `quota should-run` makes that
-choice executable through `action_portfolio.allowed_actions`: one ordered
-recommendation plus at most two alternatives. The recommendation is a default,
-not a binding. The first response sets
+choice legible through `action_portfolio.suggested_actions`: one ordered
+recommendation plus at most two alternatives. These suggestions are bounded for
+readability and explicitly non-exhaustive; the recommendation is a default, not
+a binding or permission list. The first response sets
 `interaction_contract.cli_channel.selection_required=true`, returns one exact
-quota command per allowed action, and creates an identity-less heartbeat
-receipt. The agent chooses one command after its steering audit and reruns it in
-the same turn with `--todo-id <chosen-id>`. That second guard validates that the
-Todo was in the projected set and upgrades the receipt to the chosen identity.
-Delivery and quota spend remain disabled until this binding succeeds. A
-single-candidate response keeps the direct execution path and does not add an
-extra selection round trip.
+quota command per displayed suggestion, and creates an identity-less heartbeat
+receipt. After its steering audit, the agent may use one of those convenience
+commands or name any other currently authoritative, same-agent, capability-ready
+Todo in the same command shape. The second guard revalidates current eligibility
+and upgrades the receipt to the chosen identity. Delivery and quota spend remain
+disabled until this binding succeeds. A single-candidate response keeps the
+direct execution path and does not add an extra selection round trip.
 
 Blocked candidates retain typed `resolution_bindings` even when another todo is
 runnable. Each binding names the capability, its resolution owner, and the

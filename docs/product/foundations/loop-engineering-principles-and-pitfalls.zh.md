@@ -31,6 +31,16 @@ Human-in-the-loop 不应该等价于每隔几分钟让用户确认一次。一�
 但 fallback 必须被明确标记为 fallback，不能掩盖主路线仍然 blocked，
 也不能把“旁路有进展”写成“gate 已解决”。
 
+### 流程引导要保留有边界的自主性
+
+优先级、推荐 next action 和短候选列表应该帮助长期 loop 更容易被调度，不能把
+为了可读性展示的少量建议意外变成权限白名单。只要一个行动仍满足当前 typed
+claim、scope、capability、gate、quota 和安全边界，agent 就可以自主选择它，
+再通过同一套 preflight、receipt binding、validation 和 writeback 流程完成审计。
+
+真正的限制必须由 typed authority 或 transition contract 明确表达，不能从列表
+顺序、展示条数或 prompt 措辞中推断。
+
 ### Feedback 不是权限
 
 人的 reward、review 和偏好信号可以影响后续排序和规划，但不能绕过 gate、

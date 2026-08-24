@@ -672,8 +672,8 @@ def _action_portfolio_selection_actions(
     if not _action_portfolio_requires_explicit_selection(payload):
         return []
     portfolio = typing.cast(Mapping[str, Any], payload.get("action_portfolio"))
-    allowed_actions = portfolio.get("allowed_actions")
-    if not isinstance(allowed_actions, list):
+    suggested_actions = portfolio.get("suggested_actions")
+    if not isinstance(suggested_actions, list):
         return []
     goal_id = str(payload.get("goal_id") or "").strip()
     if not goal_id:
@@ -684,7 +684,7 @@ def _action_portfolio_selection_actions(
         else ""
     )
     commands: list[str] = []
-    for item in allowed_actions:
+    for item in suggested_actions:
         if not isinstance(item, Mapping):
             continue
         todo_id = normalize_todo_id(item.get("todo_id"))
@@ -1234,19 +1234,21 @@ def _build_interaction_agent_channel(
     if isinstance(payload.get("action_portfolio"), dict):
         channel["action_portfolio_ref"] = "$.action_portfolio"
     if _action_portfolio_requires_explicit_selection(payload):
-        allowed_actions = typing.cast(
+        suggested_actions = typing.cast(
             Mapping[str, Any], payload.get("action_portfolio")
-        ).get("allowed_actions")
+        ).get("suggested_actions")
         channel.update(
             {
                 "selection_required": True,
                 "delivery_allowed": False,
                 "primary_action": (
-                    "choose one allowed action after a bounded steering audit; "
-                    "the recommended action is a default, not a binding"
+                    "choose one currently eligible action after a bounded steering "
+                    "audit; the recommendation and suggestions are not bindings"
                 ),
-                "allowed_action_count": (
-                    len(allowed_actions) if isinstance(allowed_actions, list) else 0
+                "suggested_action_count": (
+                    len(suggested_actions)
+                    if isinstance(suggested_actions, list)
+                    else 0
                 ),
             }
         )
@@ -1387,7 +1389,7 @@ def _build_interaction_cli_channel(
                 "selection_required": True,
                 "selection_policy_ref": "$.action_portfolio.selection_policy",
                 "spend_policy": (
-                    "no delivery or quota spend until one allowed action is "
+                    "no delivery or quota spend until one eligible action is "
                     "explicitly bound by rerunning quota in this turn"
                 ),
             }
