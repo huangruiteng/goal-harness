@@ -15,11 +15,13 @@ from loopx.control_plane.coordination.authority_core import (
     HandoffMode,
     TodoSnapshot,
 )
+from loopx.control_plane.coordination.goal_state_shadow import (
+    bootstrap_head_from_goal_state,
+)
 from loopx.control_plane.coordination.head import (
     HEAD_SCHEMA_VERSION,
     HeadValidationError,
     bootstrap_head,
-    bootstrap_head_from_goal_state,
     canonical_head_bytes,
     claim_snapshot_for_todo,
     head_digest,
@@ -150,6 +152,7 @@ def leased_head() -> dict:
         (lambda lease: lease.update(lease_epoch=True), "positive"),
         (lambda lease: lease.update(owner=""), "identity"),
         (lambda lease: lease.update(expires_at=123), "timestamp"),
+        (lambda lease: lease.update(expires_at="not-a-time"), "timestamp"),
         (lambda lease: lease.update(write_scopes=["repo"]), "write_scopes"),
     ],
 )
@@ -157,6 +160,83 @@ def test_validated_head_rejects_corrupt_lease_records(mutate, match) -> None:
     assert validated_head(leased_head(), goal_id="goal-a")
     broken = leased_head()
     mutate(broken["coordination"]["leases"]["todo-1"])
+    with pytest.raises(HeadValidationError, match=match):
+        validated_head(broken, goal_id="goal-a")
+
+
+_RECEIPT_DIGEST = "sha256:" + "0" * 64
+
+
+def receipted_head() -> dict:
+    built = leased_head()
+    built["receipt_index"]["op-1"] = {
+        "request_digest": _RECEIPT_DIGEST,
+        "original_receipt": {
+            "schema_version": "loopx_authority_receipt_v0",
+            "operation_id": "op-1",
+            "request_digest": _RECEIPT_DIGEST,
+            "command": "claim_work",
+            "actor": {"agent_id": "agent-a", "device_id": "dev-a"},
+            "todo_id": "todo-1",
+            "accepted_authority_revision": 1,
+            "accepted_todo_revision": 8,
+            "applied_at": "2027-01-01T00:00:00.000Z",
+            "lease_id": "lease_abc",
+            "lease_epoch": 7,
+            "expires_at": "2027-01-01T00:10:00.000Z",
+        },
+    }
+    return built
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (lambda e: e.update(original_receipt={}), "fields do not match"),
+        (lambda e: e.update(extra=True), "fields do not match"),
+        (lambda e: e.update(request_digest="sha256:bootstrap"), "request_digest"),
+        (
+            lambda e: e["original_receipt"].update(operation_id="op-2"),
+            "its own operation id",
+        ),
+        (
+            lambda e: e["original_receipt"].update(
+                request_digest="sha256:" + "1" * 64
+            ),
+            "disagrees with its index entry",
+        ),
+        (
+            lambda e: e["original_receipt"].update(todo_id="todo-9"),
+            "todo the head does not carry",
+        ),
+        (
+            lambda e: e["original_receipt"].update(accepted_todo_revision=0),
+            "accepted revisions",
+        ),
+        (lambda e: e["original_receipt"].update(lease_epoch=True), "lease_epoch"),
+        (
+            lambda e: e["original_receipt"].update(applied_at="not-a-time"),
+            "timestamps",
+        ),
+        (
+            lambda e: e["original_receipt"].update(actor={"agent_id": ""}),
+            "actor identity",
+        ),
+        (
+            lambda e: e["original_receipt"].update(command="release_work"),
+            "outside the v0 slice",
+        ),
+    ],
+)
+def test_validated_head_rejects_corrupt_receipt_entries(mutate, match) -> None:
+    """Persisted receipts cross the same trust boundary as todos and leases:
+    every field the executor later dereferences unconditionally is validated
+    here, so a digest-matching entry with a gutted ``original_receipt`` fails
+    closed instead of surfacing as a KeyError inside replay."""
+
+    assert validated_head(receipted_head(), goal_id="goal-a")
+    broken = receipted_head()
+    mutate(broken["receipt_index"]["op-1"])
     with pytest.raises(HeadValidationError, match=match):
         validated_head(broken, goal_id="goal-a")
 

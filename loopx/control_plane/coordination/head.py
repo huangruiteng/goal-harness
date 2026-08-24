@@ -17,11 +17,10 @@ import copy
 import hashlib
 import json
 import re
+from datetime import datetime
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, cast
 
-from ..todos.contract import normalize_todo_claimed_by, normalize_todo_id
-from ..todos.handoff_mode import goal_handoff_mode
 from .authority_core import (
     CoordinationSnapshot,
     HandoffMode,
@@ -66,8 +65,25 @@ _ELIGIBILITY_REVISION_FIELDS = (
     "gate_revision",
 )
 _LEASE_FIELDS = {"lease_id", "owner", "lease_epoch", "expires_at", "write_scopes"}
+_RECEIPT_ENTRY_FIELDS = {"request_digest", "original_receipt"}
+_RECEIPT_FIELDS = {
+    "schema_version",
+    "operation_id",
+    "request_digest",
+    "command",
+    "actor",
+    "todo_id",
+    "accepted_authority_revision",
+    "accepted_todo_revision",
+    "applied_at",
+    "lease_id",
+    "lease_epoch",
+    "expires_at",
+}
+_RECEIPT_ACTOR_FIELDS = {"agent_id", "device_id"}
 _REPOSITORY_PATTERN = re.compile(r"git:[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+")
 _CODE_REVISION_PATTERN = re.compile(r"[0-9a-fA-F]{7,64}")
+_REQUEST_DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 class HeadValidationError(ValueError):
@@ -110,6 +126,23 @@ def _require(condition: bool, message: str) -> None:
 def _is_count(value: Any, *, minimum: int = 0) -> bool:
     # bool is an int subclass; a True epoch would silently mint True+1.
     return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
+
+
+def _is_timestamp(value: Any) -> bool:
+    # The executor parses these fields unconditionally (expiry decisions,
+    # authorization status); an unparseable persisted timestamp must fail
+    # closed here instead of escaping as a bare ValueError later.
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
+def _is_request_digest(value: Any) -> bool:
+    return isinstance(value, str) and _REQUEST_DIGEST_PATTERN.fullmatch(value) is not None
 
 
 def _validated_todo(todo_id: str, source: Any) -> dict[str, Any]:
@@ -174,6 +207,81 @@ def _validated_todo(todo_id: str, source: Any) -> dict[str, Any]:
     return cast(dict[str, Any], source)
 
 
+def _validated_receipt_entry(
+    operation_id: Any,
+    entry: Any,
+    todos: dict[str, Any],
+) -> None:
+    """Fail closed unless one receipt-index entry is a complete v0 record.
+
+    The executor dereferences these fields unconditionally on the replay and
+    success paths, so this is part of the trust boundary persisted state must
+    cross before any of it is consumed.
+    """
+
+    _require(
+        isinstance(operation_id, str) and bool(operation_id),
+        "receipt index keys must be non-empty operation ids",
+    )
+    _require(
+        isinstance(entry, dict) and set(entry) == _RECEIPT_ENTRY_FIELDS,
+        f"receipt entry {operation_id!r} fields do not match v0",
+    )
+    _require(
+        _is_request_digest(entry["request_digest"]),
+        f"receipt entry {operation_id!r} request_digest is invalid",
+    )
+    receipt = entry["original_receipt"]
+    _require(
+        isinstance(receipt, dict) and set(receipt) == _RECEIPT_FIELDS,
+        f"receipt {operation_id!r} fields do not match v0",
+    )
+    _require(
+        receipt["schema_version"] == RECEIPT_SCHEMA_VERSION,
+        f"receipt {operation_id!r} schema_version is invalid",
+    )
+    _require(
+        receipt["operation_id"] == operation_id,
+        f"receipt {operation_id!r} does not record its own operation id",
+    )
+    _require(
+        receipt["request_digest"] == entry["request_digest"],
+        f"receipt {operation_id!r} digest disagrees with its index entry",
+    )
+    _require(
+        receipt["command"] == "claim_work",
+        f"receipt {operation_id!r} command is outside the v0 slice",
+    )
+    actor = receipt["actor"]
+    _require(
+        isinstance(actor, dict)
+        and set(actor) == _RECEIPT_ACTOR_FIELDS
+        and all(isinstance(actor[key], str) and actor[key] for key in _RECEIPT_ACTOR_FIELDS),
+        f"receipt {operation_id!r} actor identity is invalid",
+    )
+    _require(
+        isinstance(receipt["todo_id"], str) and receipt["todo_id"] in todos,
+        f"receipt {operation_id!r} names a todo the head does not carry",
+    )
+    _require(
+        _is_count(receipt["accepted_authority_revision"], minimum=1)
+        and _is_count(receipt["accepted_todo_revision"], minimum=1),
+        f"receipt {operation_id!r} accepted revisions are invalid",
+    )
+    _require(
+        isinstance(receipt["lease_id"], str) and bool(receipt["lease_id"]),
+        f"receipt {operation_id!r} lease_id is invalid",
+    )
+    _require(
+        _is_count(receipt["lease_epoch"], minimum=1),
+        f"receipt {operation_id!r} lease_epoch must be a positive integer",
+    )
+    _require(
+        _is_timestamp(receipt["applied_at"]) and _is_timestamp(receipt["expires_at"]),
+        f"receipt {operation_id!r} timestamps are invalid",
+    )
+
+
 def validated_head(head: Any, *, goal_id: str) -> dict[str, Any]:
     """Fail closed unless ``head`` is a complete v0 aggregate for ``goal_id``."""
 
@@ -224,14 +332,16 @@ def validated_head(head: Any, *, goal_id: str) -> dict[str, Any]:
             f"lease {todo_id!r} lease_epoch must be a positive integer",
         )
         _require(
-            isinstance(lease["expires_at"], str) and bool(lease["expires_at"]),
-            f"lease {todo_id!r} expires_at must be a timestamp string",
+            _is_timestamp(lease["expires_at"]),
+            f"lease {todo_id!r} expires_at must be a parseable timestamp",
         )
         _require(
             lease["write_scopes"] == [],
             f"lease {todo_id!r} write_scopes must be empty in v0",
         )
     _require(isinstance(head["receipt_index"], dict), "receipt_index must be an object")
+    for operation_id, entry in head["receipt_index"].items():
+        _validated_receipt_entry(operation_id, entry, coordination["todos"])
     _require(head["receipt_retention"] == RETAIN_ALL, "v0 requires retain_all_v0")
     return cast(dict[str, Any], head)
 
@@ -276,80 +386,6 @@ def bootstrap_head(goal_id: str, todos: dict[str, Any]) -> dict[str, Any]:
         "receipt_index": {},
         "receipt_retention": copy.deepcopy(RETAIN_ALL),
     }
-
-
-def _static_projection_digest(allowed_agent_ids: list[str]) -> str:
-    encoded = json.dumps(sorted(allowed_agent_ids), separators=(",", ":"))
-    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
-def bootstrap_head_from_goal_state(
-    state_text: str,
-    *,
-    goal_id: str,
-    repository: str,
-    code_revision: str,
-    allowed_agent_ids: list[str],
-    with_report: bool = False,
-) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
-    """Shadow the current Markdown active state into a bootstrap head.
-
-    Reads the goal state through loopx's own projection and admits exactly the
-    open, unclaimed agent todos (the only shape v0 bootstrap accepts); claimed
-    and done todos are reported, never silently dropped. This is the read side
-    of the RFC section 11 shadow; nothing is written back.
-    """
-
-    from ..todos.active_state_todo_parser import parse_active_state_todos
-
-    source_mode = goal_handoff_mode(state_text)
-    _require(
-        source_mode != HandoffMode.SOFT_CLAIM.value,
-        "a soft_claim goal cannot bootstrap into shared authority: its"
-        " declared mode rejects lease minting, which shared claim_work"
-        " performs on every accepted claim",
-    )
-    projected = parse_active_state_todos(state_text)
-    skipped: dict[str, str] = {}
-    todos: dict[str, Any] = {}
-    for item in projected["agent_todos"]["items"]:
-        todo_id = normalize_todo_id(item.get("todo_id"))
-        if not todo_id:
-            continue
-        if item.get("done"):
-            skipped[todo_id] = "done"
-            continue
-        if normalize_todo_claimed_by(item.get("claimed_by")):
-            skipped[todo_id] = "claimed"
-            continue
-        todos[todo_id] = {
-            "todo_revision": 0,
-            "status": "open",
-            "claimed_by": None,
-            "eligibility": {
-                "authorization_projection_revision": 0,
-                "authorization_projection_digest": _static_projection_digest(
-                    allowed_agent_ids
-                ),
-                "allowed_agent_ids": list(allowed_agent_ids),
-                "dependencies_satisfied": True,
-                "dependency_revision": 0,
-                "gates_open": True,
-                "gate_revision": 0,
-            },
-            "repository": repository,
-            "code_revision": code_revision,
-            "last_lease_epoch": 0,
-        }
-    head = bootstrap_head(goal_id, todos)
-    if not with_report:
-        return head
-    report = {
-        "skipped": skipped,
-        "source_handoff_mode": source_mode,
-        "admitted": sorted(todos),
-    }
-    return head, report
 
 
 def claim_snapshot_for_todo(
