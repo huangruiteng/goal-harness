@@ -441,7 +441,11 @@ def test_active_presentation_surfaces_hide_disabled_or_stale_extension(
         now=datetime(2026, 1, 20, tzinfo=timezone.utc),
     )["ready_count"] == 1
 
-    _projection_provider(tmp_path / "provider")
+    provider = tmp_path / "provider"
+    provider.write_text(
+        provider.read_text(encoding="utf-8") + "# changed provider content\n",
+        encoding="utf-8",
+    )
     assert collect_active_extension_presentation_surfaces(
         state_file=state_file
     )["items"] == []
