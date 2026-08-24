@@ -1081,7 +1081,6 @@ def _build_quota_should_run_payload(
     prepared: _QuotaDecisionPreparation,
     route: _QuotaDecisionRoute,
     *,
-    project_advisory_action_portfolio: bool = True,
     turn_instance_id: str | None = None,
 ) -> dict[str, Any]:
     agent_scope_action = _agent_scope_frontier_action(route.effective_action)
@@ -1250,11 +1249,7 @@ def _build_quota_should_run_payload(
         payload["selected_todo"] = selected_todo_projection
     elif route.receipt_bound_replan_decision:
         payload["selected_todo"] = None
-    action_portfolio = (
-        _project_quota_action_portfolio(prepared, route)
-        if project_advisory_action_portfolio
-        else None
-    )
+    action_portfolio = _project_quota_action_portfolio(prepared, route)
     if action_portfolio is not None:
         payload["action_portfolio"] = action_portfolio
     _attach_truthy_fields(

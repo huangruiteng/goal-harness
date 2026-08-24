@@ -55,6 +55,15 @@ only a qualified request upgrades the identity-less receipt. A newly due hard
 lane leaves the receipt unbound, and only the resulting receipt-bound envelope
 is a delivery contract.
 
+`loopx turn plan` and `loopx turn run-once` have no agent selection phase before
+they build the host transaction. When such a Turn sees a v1 portfolio, its
+outer controller binds the advisory primary by rerunning the same current
+eligibility qualification, retains the portfolio in the envelope for audit,
+and marks the selected Todo with
+`selected_by=turn_controller_advisory_primary`. This deterministic compatibility
+path does not apply to heartbeat/model turns: their first response remains
+identity-less and delivery-blocked until the agent explicitly chooses.
+
 The compact envelope does not truncate those executable commands into unusable
 strings. It carries non-exhaustive `writeback.suggested_todo_ids` plus
 `selection_command_ref`; the full decision remains the authority for exact argv.

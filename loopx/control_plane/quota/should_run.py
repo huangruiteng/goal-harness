@@ -241,7 +241,6 @@ def build_quota_should_run(
     receipt_bound_monitor_phase: ReceiptBoundMonitorPhase | None = None,
     receipt_bound_terminal_phase: ReceiptBoundTerminalPhase | None = None,
     receipt_bound_replan_obligation_id: str | None = None,
-    project_advisory_action_portfolio: bool = True,
     turn_instance_id: str | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = str(goal_id or "").strip()
@@ -314,7 +313,6 @@ def build_quota_should_run(
         return _build_quota_should_run_payload(
             prepared,
             route,
-            project_advisory_action_portfolio=project_advisory_action_portfolio,
             turn_instance_id=turn_instance_id,
         )
     if health_item:

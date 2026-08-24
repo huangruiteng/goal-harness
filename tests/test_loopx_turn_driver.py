@@ -987,6 +987,55 @@ def test_turn_cli_consumes_live_state_without_writes(
     assert before == after
 
 
+def test_turn_cli_binds_advisory_primary_without_hiding_portfolio(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry = _write_live_fixture(
+        tmp_path,
+        todo_metadata_extra="successor_todo_ids=todo_fixture0002",
+        extra_agent_todo_lines=(
+            "- [ ] [P2] Continue the public fixture.",
+            "  <!-- loopx:todo todo_id=todo_fixture0002 status=open "
+            "task_class=advancement_task priority=P2 -->",
+        ),
+    )
+    output = io.StringIO()
+
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--registry",
+                str(registry),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "turn",
+                "plan",
+                "--goal-id",
+                "loopx-turn-fixture",
+                "--agent-id",
+                "codex-fixture",
+                "--scan-root",
+                str(project),
+            ]
+        )
+
+    payload = json.loads(output.getvalue())
+    assert exit_code == 0, payload
+    assert payload["route"]["kind"] == LoopXTurnRoute.READY_FOR_HOST.value
+    envelope = payload["turn_envelope"]
+    assert envelope["action"]["delivery_allowed"] is True
+    assert envelope["action"]["selected_todo"]["selected_by"] == (
+        "turn_controller_advisory_primary"
+    )
+    portfolio = envelope["action"]["action_portfolio"]
+    assert portfolio["schema_version"] == "quota_action_portfolio_v1"
+    assert portfolio["primary"]["todo_id"] == "todo_fixture0001"
+    assert portfolio["selection_policy"]["requires_explicit_turn_binding"] is True
+    assert envelope["writeback"].get("selection_required") is None
+
+
 def test_turn_cli_omits_transaction_detail_by_default(tmp_path: Path) -> None:
     project, runtime, registry = _write_live_fixture(tmp_path)
     output = io.StringIO()

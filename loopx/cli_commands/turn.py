@@ -67,6 +67,44 @@ PrintPayload = Callable[
 FormatSelector = Callable[..., str]
 
 
+def _turn_controller_advisory_primary(
+    decision: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]] | None:
+    """Resolve the default for Turn's model-free outer-controller phase."""
+
+    interaction = decision.get("interaction_contract")
+    cli_channel = (
+        interaction.get("cli_channel")
+        if isinstance(interaction, Mapping)
+        else None
+    )
+    if not isinstance(cli_channel, Mapping) or (
+        cli_channel.get("selection_required") is not True
+    ):
+        return None
+    portfolio = decision.get("action_portfolio")
+    if not isinstance(portfolio, Mapping) or (
+        portfolio.get("schema_version") != "quota_action_portfolio_v1"
+    ):
+        raise ValueError(
+            "Turn action selection requires a typed advisory action portfolio"
+        )
+    policy = portfolio.get("selection_policy")
+    primary = portfolio.get("primary")
+    todo_id = (
+        str(primary.get("todo_id") or "").strip()
+        if isinstance(primary, Mapping)
+        else ""
+    )
+    if (
+        not isinstance(policy, Mapping)
+        or policy.get("requires_explicit_turn_binding") is not True
+        or not todo_id
+    ):
+        raise ValueError("Turn advisory action portfolio has no bindable primary")
+    return todo_id, dict(portfolio)
+
+
 def handle_turn_command(
     args: argparse.Namespace,
     *,
@@ -126,23 +164,43 @@ def handle_turn_command(
             execution_mode=args.execution_mode,
             scheduler_owner=args.scheduler_owner,
         )
-        decision = build_live_quota_should_run_decision(
-            status_payload,
-            goal_id=args.goal_id,
-            agent_id=args.agent_id,
-            available_capabilities=args.available_capabilities,
-            include_scheduler_detail=False,
-            codex_app_current_rrule=None,
-            registry_path=registry_path,
-            runtime_root=runtime_root,
-            route_source="loopx_turn_plan",
-            scheduler_execution_context=scheduler_context,
-            operator_inbox_urgency_projector=operator_inbox_urgency_projector,
-            bounded_research_frontier_projector=(
-                project_live_explore_composition_frontier
-            ),
-            project_advisory_action_portfolio=False,
-        )
+        def build_turn_decision(
+            *, requested_action_todo_id: str | None = None
+        ) -> dict[str, Any]:
+            return build_live_quota_should_run_decision(
+                status_payload,
+                goal_id=args.goal_id,
+                agent_id=args.agent_id,
+                available_capabilities=args.available_capabilities,
+                include_scheduler_detail=False,
+                codex_app_current_rrule=None,
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                route_source="loopx_turn_plan",
+                scheduler_execution_context=scheduler_context,
+                operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+                bounded_research_frontier_projector=(
+                    project_live_explore_composition_frontier
+                ),
+                requested_action_todo_id=requested_action_todo_id,
+            )
+
+        decision = build_turn_decision()
+        controller_default = _turn_controller_advisory_primary(decision)
+        if controller_default is not None:
+            primary_todo_id, advisory_portfolio = controller_default
+            decision = build_turn_decision(
+                requested_action_todo_id=primary_todo_id,
+            )
+            selected_todo = decision.get("selected_todo")
+            if not isinstance(selected_todo, dict) or (
+                selected_todo.get("todo_id") != primary_todo_id
+            ):
+                raise ValueError(
+                    "Turn controller advisory primary failed current eligibility"
+                )
+            selected_todo["selected_by"] = "turn_controller_advisory_primary"
+            decision["action_portfolio"] = advisory_portfolio
         resume_identity = {
             "goal_id": args.resume_goal_id,
             "agent_id": args.resume_agent_id,
@@ -832,7 +890,6 @@ def handle_turn_command(
                     bounded_research_frontier_projector=(
                         project_live_explore_composition_frontier
                     ),
-                    project_advisory_action_portfolio=False,
                 )
                 hint = (
                     latest.get("scheduler_hint")

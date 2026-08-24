@@ -141,7 +141,6 @@ def build_live_quota_should_run_decision(
     receipt_bound_todo_id: str | None = None,
     requested_action_todo_id: str | None = None,
     receipt_bound_replan_obligation_id: str | None = None,
-    project_advisory_action_portfolio: bool = True,
     turn_instance_id: str | None = None,
 ) -> dict[str, Any]:
     """Build one live CLI decision while keeping host observation injectable."""
@@ -206,7 +205,6 @@ def build_live_quota_should_run_decision(
         receipt_bound_monitor_phase=receipt_bound_monitor_phase,
         receipt_bound_terminal_phase=receipt_bound_terminal_phase,
         receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
-        project_advisory_action_portfolio=project_advisory_action_portfolio,
         turn_instance_id=turn_instance_id,
     )
     bind_scheduler_followup_cli_routes(
