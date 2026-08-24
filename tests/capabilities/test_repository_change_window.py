@@ -21,6 +21,7 @@ from loopx.capabilities.repository_change_window import (
     resolve_pending_change,
     run_git_hook_provider,
     uninstall_git_hook_provider,
+    verify_git_hook_provider,
     verify_pending_change,
 )
 from loopx.capabilities.repository_change_window.policy import (
@@ -80,6 +81,25 @@ def _weekday_policy():
         blocked_start="10:00",
         blocked_end="21:00",
     )
+
+
+def _write_legacy_global_guard(root: Path) -> None:
+    root.mkdir()
+    (root / "README.md").write_text(
+        "# LoopX Local Commit Time Gate\n",
+        encoding="utf-8",
+    )
+    (root / "gate-common.sh").write_text(
+        "loopx_commit_gate_enforce() { return 0; }\n",
+        encoding="utf-8",
+    )
+    for name in ("pre-commit", "pre-push"):
+        hook = root / name
+        hook.write_text(
+            "#!/bin/sh\n. \"$(dirname \"$0\")/gate-common.sh\"\nexit 0\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
 
 
 def _rewrite_provider_as_legacy(
@@ -206,7 +226,11 @@ def test_install_is_default_off_preserves_prior_hook_and_is_linked_worktree_shar
     assert _git(repo, "config", "--local", "--get", "core.hooksPath") == str(
         prior_hooks
     )
-    assert git_hook_provider_status(repo_path=repo)["status"] == "not_installed"
+    assert (
+        git_hook_provider_status(repo_path=repo)["status"]
+        == "effective_external_guard_detected"
+    )
+    assert preview["installation_mode"] == "layered_external_guard"
 
     installed = install_git_hook_provider(
         repo_path=repo,
@@ -217,6 +241,7 @@ def test_install_is_default_off_preserves_prior_hook_and_is_linked_worktree_shar
     assert installed["enforcement_level"] == "hook_only"
     assert installed["managed_hook_names"] == ["pre-commit", "pre-push"]
     assert installed["contains_personal_path"] is False
+    assert installed["installation_mode"] == "layered_external_guard"
     assert str(tmp_path) not in json.dumps(installed, sort_keys=True)
 
     linked = tmp_path / "linked"
@@ -260,6 +285,98 @@ def test_install_is_default_off_preserves_prior_hook_and_is_linked_worktree_shar
         prior_hooks
     )
     assert prior_hook.is_file()
+
+
+def test_status_reports_external_and_recognized_legacy_global_guards_path_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repository(tmp_path, monkeypatch)
+    unknown_hooks = tmp_path / "unknown-hooks"
+    unknown_hooks.mkdir()
+    (unknown_hooks / "pre-commit").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    _git(repo, "config", "--global", "core.hooksPath", str(unknown_hooks))
+    _git(
+        repo,
+        "config",
+        "--global",
+        "core.sshCommand",
+        f"ssh -F {tmp_path / 'private-ssh-config'}",
+    )
+
+    unknown = git_hook_provider_status(repo_path=repo)
+    assert unknown["status"] == "effective_external_guard_detected"
+    diagnostic = unknown["external_guard"]
+    assert diagnostic == {
+        "schema_version": "repository_change_window_external_guard_diagnostic_v0",
+        "detected": True,
+        "status": "detected",
+        "effective_surfaces": ["hooks_path", "ssh_command"],
+        "configuration_scopes": {
+            "hooks_path": "global",
+            "ssh_command": "global",
+        },
+        "diagnostic_only": True,
+        "trusted_provider": False,
+        "policy_known": False,
+        "admission_known": False,
+        "recognized_legacy_kind": None,
+        "path_free": True,
+        "remote_write_authority_granted": False,
+    }
+    assert str(tmp_path) not in json.dumps(unknown, sort_keys=True)
+    verification = verify_git_hook_provider(repo_path=repo)
+    assert verification["ok"] is False
+    assert verification["verified"] is False
+
+    legacy_hooks = tmp_path / "legacy-hooks"
+    _write_legacy_global_guard(legacy_hooks)
+    _git(repo, "config", "--global", "core.hooksPath", str(legacy_hooks))
+    recognized = git_hook_provider_status(repo_path=repo)
+    recognized_guard = recognized["external_guard"]
+    assert recognized_guard["recognized_legacy_kind"] == (
+        "loopx_global_commit_time_gate_v0"
+    )
+    assert recognized_guard["policy_known"] is False
+    assert recognized_guard["migration_preview"] == {
+        "schema_version": "repository_change_window_legacy_migration_preview_v0",
+        "action": "install_repository_provider",
+        "integration_mode": "layered_legacy_global_guard",
+        "preview_required": True,
+        "execute_required": True,
+        "automatic_migration": False,
+        "preserves_effective_guard": True,
+        "mutates_global_configuration": False,
+        "grants_remote_write_authority": False,
+    }
+    preview = install_git_hook_provider(repo_path=repo, policy=_weekday_policy())
+    assert preview["dry_run"] is True
+    assert preview["installation_mode"] == "layered_legacy_global_guard"
+    assert preview["previous_guard_diagnostic"] == recognized_guard
+    assert str(tmp_path) not in json.dumps(preview, sort_keys=True)
+
+
+def test_provider_is_shared_by_linked_worktrees_but_not_separate_clones(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repository(tmp_path, monkeypatch)
+    installed = install_git_hook_provider(
+        repo_path=repo,
+        policy=_weekday_policy(),
+        execute=True,
+    )
+    linked = tmp_path / "linked-provider"
+    _git(repo, "worktree", "add", "-b", "feature/provider", str(linked))
+    linked_status = git_hook_provider_status(repo_path=linked)
+    assert linked_status["status"] == "ready"
+    assert linked_status["repository_id"] == installed["repository_id"]
+
+    clone = tmp_path / "separate-clone"
+    _git(repo, "clone", "--quiet", "--no-hardlinks", str(repo), str(clone))
+    clone_status = git_hook_provider_status(repo_path=clone)
+    assert clone_status["status"] == "provider_not_installed"
+    assert clone_status["installed"] is False
 
 
 def test_reference_guard_uses_fake_clock_and_shared_linked_worktree_state(
@@ -554,6 +671,9 @@ def test_reference_guard_v1_migration_preserves_original_ssh_route(
         execute=True,
     )
     assert replaced["status"] == "installed"
+    assert replaced["installation_mode"] == (
+        "migrated_legacy_repository_provider"
+    )
     assert git_hook_provider_status(repo_path=repo)["status"] == "ready"
     managed_ssh = _git(repo, "config", "--local", "--get", "core.sshCommand")
     assert managed_ssh != str(prior_ssh)
