@@ -431,6 +431,10 @@ def test_restart_managed_loopx_services_restarts_only_loopx_launchagents(
     assert all(call[0] == "launchctl" for call in calls)
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="archive snapshot updates require the POSIX installer path",
+)
 def test_successful_update_revalidates_enabled_extensions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
