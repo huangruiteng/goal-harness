@@ -152,6 +152,154 @@ def test_document_bytes_are_canonical_json(provider, tmp_path) -> None:
     assert envelope["head"] == head()
 
 
+def test_short_writes_are_continued_until_complete(
+    provider, tmp_path, monkeypatch
+) -> None:
+    """os.write may write fewer bytes than asked; the commit sequence must
+    continue until every byte landed, or a truncated document could be
+    reported as applied and fail to parse on the next load."""
+
+    import loopx.control_plane.coordination.file_provider as module
+
+    real_write = module.os.write
+    chunks = []
+
+    def short_write(descriptor, view):
+        chunk = bytes(view)[:7]
+        chunks.append(len(chunk))
+        return real_write(descriptor, chunk)
+
+    monkeypatch.setattr(module.os, "write", short_write)
+    outcome = provider.compare_and_put(0, head())
+    monkeypatch.undo()
+    assert outcome == {"result": "applied", "provider_generation": 1}
+    assert len(chunks) > 1
+    assert provider.load() == (head(), 1)
+
+
+def test_write_fault_after_short_write_is_ambiguous_and_document_intact(
+    provider, tmp_path, monkeypatch
+) -> None:
+    """A storage fault midway through the write must never surface as
+    applied: the document keeps its previous readable state and the verdict
+    is ambiguous, which the authority resolves by reload."""
+
+    import loopx.control_plane.coordination.file_provider as module
+
+    assert provider.compare_and_put(0, head())["result"] == "applied"
+    real_write = module.os.write
+    state = {"calls": 0}
+
+    def failing_write(descriptor, view):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            return real_write(descriptor, bytes(view)[: max(1, len(view) // 2)])
+        raise OSError("simulated storage fault after a short write")
+
+    monkeypatch.setattr(module.os, "write", failing_write)
+    outcome = provider.compare_and_put(1, head(1))
+    monkeypatch.undo()
+    assert outcome == {"result": "ambiguous"}
+    assert provider.load() == (head(), 1)
+    assert not list((tmp_path / "coordination").glob("*.tmp-*"))
+
+
+def test_commit_sequence_fsyncs_file_before_rename_and_directory_after(
+    provider, monkeypatch
+) -> None:
+    import loopx.control_plane.coordination.file_provider as module
+
+    events = []
+    real_fsync = module.os.fsync
+    real_replace = module.os.replace
+    real_directory_fsync = module._fsync_directory
+
+    def recording_fsync(descriptor):
+        events.append("fsync")
+        return real_fsync(descriptor)
+
+    def recording_replace(source, target):
+        events.append("replace")
+        return real_replace(source, target)
+
+    def recording_directory_fsync(directory):
+        events.append("dir_fsync")
+        return real_directory_fsync(directory)
+
+    monkeypatch.setattr(module.os, "fsync", recording_fsync)
+    monkeypatch.setattr(module.os, "replace", recording_replace)
+    monkeypatch.setattr(module, "_fsync_directory", recording_directory_fsync)
+    assert provider.compare_and_put(0, head())["result"] == "applied"
+    monkeypatch.undo()
+    assert events.index("fsync") < events.index("replace") < events.index("dir_fsync")
+
+
+def test_directory_fsync_fault_is_ambiguous_not_applied(
+    provider, monkeypatch
+) -> None:
+    """Until the parent directory entry is flushed the rename is not provably
+    durable, so a fault there must stay ambiguous instead of applied."""
+
+    import loopx.control_plane.coordination.file_provider as module
+
+    def failing_directory_fsync(directory):
+        raise OSError("simulated directory fsync fault")
+
+    monkeypatch.setattr(module, "_fsync_directory", failing_directory_fsync)
+    outcome = provider.compare_and_put(0, head())
+    monkeypatch.undo()
+    assert outcome == {"result": "ambiguous"}
+    # The rename itself landed; reload recovers the write, which is exactly
+    # the ambiguous contract.
+    assert provider.load() == (head(), 1)
+
+
+def test_lock_timeout_is_typed_failed_without_write(tmp_path) -> None:
+    from loopx.file_lock import exclusive_file_lock
+
+    directory = tmp_path / "coordination"
+    provider = FileCoordinationProvider(
+        directory, "goal-a", lock_timeout_seconds=0.05
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    with exclusive_file_lock(directory / provider_document_name()):
+        outcome = provider.compare_and_put(0, head())
+    assert outcome["result"] == "failed"
+    assert provider.load() == (None, 0)
+    assert provider.compare_and_put(0, head())["result"] == "applied"
+
+
+def provider_document_name() -> str:
+    import hashlib
+
+    digest = hashlib.sha256(b"goal-a").hexdigest()[:16]
+    return f"coordination-head-{digest}.json"
+
+
+def test_module_imports_without_fcntl() -> None:
+    """The provider must stay importable on interpreters without ``fcntl``
+    (Windows); platform locking belongs to ``loopx.file_lock``, the one lock
+    owner with both backends."""
+
+    import importlib
+    import sys
+
+    import loopx.control_plane.coordination.file_provider as module
+
+    sentinel = object()
+    saved = sys.modules.pop("fcntl", sentinel)
+    sys.modules["fcntl"] = None  # type: ignore[assignment]
+    try:
+        reloaded = importlib.reload(module)
+        assert hasattr(reloaded, "FileCoordinationProvider")
+    finally:
+        if saved is sentinel:
+            sys.modules.pop("fcntl", None)
+        else:
+            sys.modules["fcntl"] = saved
+        importlib.reload(module)
+
+
 def test_unserializable_head_fails_typed_and_writes_nothing(
     provider, tmp_path
 ) -> None:
