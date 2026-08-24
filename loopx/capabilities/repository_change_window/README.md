@@ -26,6 +26,20 @@ loopx change-window status --repo-path . --format json
 loopx change-window verify --repo-path . --format json
 ```
 
+Before a repository provider exists, `status` reports one of two typed states:
+
+- `provider_not_installed` when neither `core.hooksPath` nor
+  `core.sshCommand` contributes an effective configured guard; or
+- `effective_external_guard_detected` when either surface is configured.
+
+The external-guard diagnostic contains only surface and configuration-scope
+enums. It never returns a hook path or command, infers a schedule, or treats an
+arbitrary script as trusted provider state. A bounded signature can recognize
+the earlier LoopX global commit-time gate and offer a typed, preview-first
+repository-provider migration. That preview layers the repository provider,
+preserves the effective global guard, and does not modify global Git
+configuration. Unknown external guards remain diagnostic-only and fail closed.
+
 Installation defaults to the backward-compatible `hook_only` enforcement
 level. It manages `pre-commit` and `pre-push`; Git's `--no-verify` option can
 skip those client hooks. Repositories that want a stronger local guard must
@@ -79,6 +93,26 @@ stdin and hook arguments. The SSH guard delegates to the previously effective
 `core.sshCommand`, or to `ssh` when none was configured. A modified managed
 command, changed hook or SSH route, invalid policy, or missing state fails
 verification closed.
+
+At the CLI composition root, this capability registers a bounded, read-only
+`interaction_projection` hook. Kernel orchestration validates the registration
+and candidate in the typed TypeScript boundary, isolates provider failure, and
+rejects write scopes or conflicting projection slots without importing this
+capability. When the provider is installed and all provider checks pass,
+`quota should-run` adds `interaction_contract.repository_delivery`. This
+projection keeps `prepare_dirty_worktree` and `validate_dirty_worktree`
+admitted by the local schedule while projecting `commit` and `push` separately
+from the verified policy decision. A blocked decision carries
+`next_eligible_at`. Uninstalled, external-only, or drifted providers produce no
+trusted repository-delivery admission. The projection is path-free, is shared
+across linked worktrees, does not extend to separate clones, and never grants
+remote-write authority or overrides other LoopX gates.
+
+This is a read-time projection hook, not an effect callback: it receives only
+the path-free provider status candidate, runs at most once per dispatch, and
+cannot write Git configuration, create commits, push, or merge. A future
+post-writeback hook uses a separate durable-receipt and idempotency contract;
+this registration does not implicitly gain that lifecycle.
 
 The execution clock is not a caller argument. Live hooks use the invocation
 clock; tests inject an aware fake clock through the Python contract so an
