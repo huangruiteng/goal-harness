@@ -203,6 +203,25 @@ def quota_rollout_settlement_binding(
     if explicit_todo_id or explicit_replan_obligation_id:
         return explicit_todo_id, explicit_replan_obligation_id
 
+    action_portfolio_value = payload.get("action_portfolio")
+    action_portfolio: Mapping[str, object] = (
+        action_portfolio_value
+        if isinstance(action_portfolio_value, Mapping)
+        else {}
+    )
+    selection_policy_value = action_portfolio.get("selection_policy")
+    selection_policy: Mapping[str, object] = (
+        selection_policy_value
+        if isinstance(selection_policy_value, Mapping)
+        else {}
+    )
+    if selection_policy.get("requires_explicit_turn_binding") is True:
+        # The first portfolio guard is intentionally identity-less. The same
+        # turn is upgraded only after the agent reruns quota with one exact
+        # projected --todo-id, so recommendation order cannot become hidden
+        # settlement authority.
+        return None, None
+
     interaction = (
         payload.get("interaction_contract")
         if isinstance(payload.get("interaction_contract"), Mapping)
@@ -251,6 +270,42 @@ def quota_rollout_settlement_binding(
         else {}
     )
     return None, normalize_todo_replan_obligation_id(replan_packet.get("obligation_id"))
+
+
+def quota_action_selection_todo_ids(
+    payload: Mapping[str, object],
+) -> tuple[str, ...]:
+    action_portfolio_value = payload.get("action_portfolio")
+    action_portfolio: Mapping[str, object] = (
+        action_portfolio_value
+        if isinstance(action_portfolio_value, Mapping)
+        else {}
+    )
+    allowed_actions = action_portfolio.get("allowed_actions")
+    if not isinstance(allowed_actions, list):
+        return ()
+    return tuple(
+        todo_id
+        for item in allowed_actions
+        if isinstance(item, Mapping)
+        and (todo_id := normalize_todo_id(item.get("todo_id")))
+    )
+
+
+def heartbeat_receipt_action_selection_todo_ids(
+    receipt: Mapping[str, object],
+) -> tuple[str, ...]:
+    details = receipt.get("details")
+    if not isinstance(details, Mapping):
+        return ()
+    raw_todo_ids = details.get("action_selection_todo_ids")
+    if not isinstance(raw_todo_ids, str):
+        return ()
+    return tuple(
+        todo_id
+        for item in raw_todo_ids.split(",")
+        if (todo_id := normalize_todo_id(item))
+    )
 
 
 def quota_rollout_replan_obligation_id(
@@ -304,6 +359,9 @@ def quota_rollout_details(
     }
     if workspace_causality:
         details.update(delivery_workspace_causality_event_fields(workspace_causality))
+    action_selection_todo_ids = quota_action_selection_todo_ids(payload)
+    if action_selection_todo_ids:
+        details["action_selection_todo_ids"] = ",".join(action_selection_todo_ids)
     return details
 
 

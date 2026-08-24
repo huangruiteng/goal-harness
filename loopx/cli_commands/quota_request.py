@@ -22,7 +22,14 @@ QUOTA_DETAIL_SECTIONS = (
 def register_quota_monitor_poll_request_arguments(
     quota_parser: argparse.ArgumentParser,
 ) -> None:
-    quota_parser.add_argument("--todo-id", help="Monitor todo id for `quota monitor-poll` metadata writeback.")
+    quota_parser.add_argument(
+        "--todo-id",
+        help=(
+            "For `quota should-run`, explicitly bind one action offered by the "
+            "first same-turn quota response after steering; for monitor-poll or "
+            "spend-slot, name the accountable Todo settlement target."
+        ),
+    )
     quota_parser.add_argument("--target-key", help="Stable monitor target key for `quota monitor-poll` metadata writeback.")
     quota_parser.add_argument("--result-hash", help="Public-safe result hash observed by `quota monitor-poll`.")
     quota_parser.add_argument("--material-change", action="store_true", help="Mark a monitor poll as a material transition instead of unchanged evidence.")
@@ -95,6 +102,10 @@ def validate_quota_command_request(args: argparse.Namespace) -> None:
     if command == "void-slot" and not args.void_generated_at:
         raise QuotaCommandValidationError(
             "`loopx quota void-slot` requires --void-generated-at"
+        )
+    if command == "should-run" and args.todo_id and not args.turn_instance_id:
+        raise QuotaCommandValidationError(
+            "`loopx quota should-run --todo-id` requires --turn-instance-id"
         )
     if (
         command not in {"status", "plan", "should-run"}

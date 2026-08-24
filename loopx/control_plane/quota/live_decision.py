@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,61 @@ def bind_scheduler_followup_cli_routes(
                 else "scheduler_failure_cli_route_v0"
             ),
             "source": source,
+            "registry_bound": True,
+            "runtime_root_bound": True,
+        }
+
+
+def bind_action_selection_cli_routes(
+    payload: dict[str, Any],
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+) -> None:
+    """Bind two-phase action-selection commands to this live CLI source."""
+
+    interaction_value = payload.get("interaction_contract")
+    interaction: Mapping[str, Any] = (
+        interaction_value
+        if isinstance(interaction_value, Mapping)
+        else {}
+    )
+    cli_channel_value = interaction.get("cli_channel")
+    if not isinstance(cli_channel_value, dict):
+        return
+    cli_channel: dict[str, Any] = cli_channel_value
+    if cli_channel.get("selection_required") is not True:
+        return
+    actions = cli_channel.get("next_cli_actions")
+    if not isinstance(actions, list):
+        return
+    bound_actions: list[str] = []
+    for action in actions:
+        if not isinstance(action, str):
+            continue
+        try:
+            tokens = shlex.split(action)
+        except ValueError:
+            continue
+        if not tokens or tokens[0] != "loopx" or "--registry" in tokens:
+            bound_actions.append(action)
+            continue
+        bound_actions.append(
+            shlex.join(
+                [
+                    "loopx",
+                    "--registry",
+                    str(registry_path.expanduser().resolve()),
+                    "--runtime-root",
+                    str(runtime_root.expanduser().resolve()),
+                    *tokens[1:],
+                ]
+            )
+        )
+    if bound_actions:
+        cli_channel["next_cli_actions"] = bound_actions
+        cli_channel["selection_route_binding"] = {
+            "schema_version": "action_selection_cli_route_v0",
             "registry_bound": True,
             "runtime_root_bound": True,
         }
@@ -165,5 +221,10 @@ def build_live_quota_should_run_decision(
         registry_path=registry_path,
         runtime_root=runtime_root,
         source=route_source,
+    )
+    bind_action_selection_cli_routes(
+        payload,
+        registry_path=registry_path,
+        runtime_root=runtime_root,
     )
     return payload

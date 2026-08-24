@@ -32,6 +32,7 @@ from ..control_plane.quota.scheduler_ack import (
 )
 from ..control_plane.quota.settlement_cli import (
     attach_spend_settlement_result,
+    heartbeat_receipt_action_selection_todo_ids,
     quota_rollout_details,
     quota_rollout_replan_obligation_id,
     quota_rollout_todo_id,
@@ -50,6 +51,7 @@ from ..control_plane.scheduler.execution_context import (
     SchedulerRuntimeProfile,
     scheduler_execution_context_for_runtime_profile,
 )
+from ..control_plane.todos.contract import normalize_todo_id
 from ..file_lock import lock_timeout_error_fields
 from ..presentation.renderers.quota_event_markdown import (
     render_quota_monitor_poll_markdown,
@@ -586,6 +588,29 @@ def handle_quota_command(
                     ) = _heartbeat_receipt_settlement_bindings(
                         heartbeat_receipt_existing
                     )
+            requested_todo_id = normalize_todo_id(args.todo_id)
+            if requested_todo_id and not heartbeat_receipt_existing:
+                raise HeartbeatReceiptIdentityConflictError(
+                    "explicit action selection requires a first same-turn quota "
+                    "response with bounded allowed actions"
+                )
+            if requested_todo_id and heartbeat_receipt_existing and not (
+                receipt_bound_todo_id or receipt_bound_replan_obligation_id
+            ):
+                allowed_selection_ids = (
+                    heartbeat_receipt_action_selection_todo_ids(
+                        heartbeat_receipt_existing
+                    )
+                )
+                if (
+                    not allowed_selection_ids
+                    or requested_todo_id not in allowed_selection_ids
+                ):
+                    raise HeartbeatReceiptIdentityConflictError(
+                        "explicit action selection must use one Todo offered by "
+                        "the first same-turn quota response"
+                    )
+            effective_bound_todo_id = receipt_bound_todo_id or requested_todo_id
             payload = build_live_quota_should_run_decision(
                 status_payload,
                 goal_id=args.goal_id,
@@ -601,12 +626,31 @@ def handle_quota_command(
                 bounded_research_frontier_projector=(
                     project_live_explore_composition_frontier
                 ),
-                receipt_bound_todo_id=receipt_bound_todo_id,
+                receipt_bound_todo_id=effective_bound_todo_id,
                 receipt_bound_replan_obligation_id=(
                     receipt_bound_replan_obligation_id
                 ),
                 turn_instance_id=heartbeat_turn_id,
             )
+            if requested_todo_id and not (
+                receipt_bound_todo_id or receipt_bound_replan_obligation_id
+            ):
+                selected_todo_value = payload.get("selected_todo")
+                selected_todo: Mapping[str, object] = (
+                    selected_todo_value
+                    if isinstance(selected_todo_value, Mapping)
+                    else {}
+                )
+                if (
+                    normalize_todo_id(selected_todo.get("todo_id"))
+                    != requested_todo_id
+                    or selected_todo.get("selection_binding")
+                    != "heartbeat_receipt"
+                ):
+                    raise HeartbeatReceiptIdentityConflictError(
+                        "explicit action selection must name one currently "
+                        "projected agent-scoped, capability-ready Todo"
+                    )
             if heartbeat_turn_id:
                 if heartbeat_receipt_existing:
                     (

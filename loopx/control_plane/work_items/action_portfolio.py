@@ -19,7 +19,7 @@ from .primary_action import protocol_action_text
 
 
 ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION = "quota_action_portfolio_request_v0"
-ACTION_PORTFOLIO_SCHEMA_VERSION = "quota_action_portfolio_v0"
+ACTION_PORTFOLIO_SCHEMA_VERSION = "quota_action_portfolio_v1"
 
 
 def _compact_candidate(value: Mapping[str, Any]) -> dict[str, Any] | None:

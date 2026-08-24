@@ -51,7 +51,7 @@ RUNTIME_EXECUTION_ROUTING_RULE = (
     "lifecycle/registry and `loopx-self-repair` for runtime/projection drift."
 )
 HOST_LOOP_QUOTA_DISPATCH_RULE = (
-    "Run quota; execute interaction_contract.cli_channel.next_cli_actions[0] verbatim."
+    "Run quota; selection_required -> choose next_cli_actions; else run [0] after work."
 )
 HOST_LOOP_TODO_CLOSEOUT_RULE = (
     "Done -> successor first; final -> accountable refresh, spend, then "

@@ -7,7 +7,7 @@ import {
 
 import type { JsonObject } from "../effect_program.ts";
 
-export const ACTION_PORTFOLIO_SCHEMA_VERSION = "quota_action_portfolio_v0";
+export const ACTION_PORTFOLIO_SCHEMA_VERSION = "quota_action_portfolio_v1";
 export const ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION =
   "quota_action_portfolio_request_v0";
 
@@ -79,6 +79,16 @@ function fallbackProjection(candidate: ActionCandidate): JsonObject {
     projected.claim_required_before_work = true;
   }
   return projected;
+}
+
+function allowedActionProjection(
+  candidate: ActionCandidate,
+  selectionRole: "recommended" | "alternative",
+): JsonObject {
+  return {
+    ...fallbackProjection(candidate),
+    selection_role: selectionRole,
+  };
 }
 
 function unavailableProjection(candidate: ActionCandidate): JsonObject {
@@ -174,12 +184,31 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
   if (fallbackActions.length === 0 && unavailableHigherPriority.length === 0) {
     return null;
   }
+  const requiresExplicitTurnBinding = fallbackActions.length > 0;
   return {
     schema_version: ACTION_PORTFOLIO_SCHEMA_VERSION,
     primary: primaryProjection(primary),
+    selection_policy: {
+      decision_owner: "agent",
+      mode: requiresExplicitTurnBinding
+        ? "explicit_turn_binding"
+        : "recommended_only",
+      recommendation_role: requiresExplicitTurnBinding
+        ? "default_not_binding"
+        : "only_runnable_action",
+      requires_explicit_turn_binding: requiresExplicitTurnBinding,
+      direct_delivery_before_selection: !requiresExplicitTurnBinding,
+      max_alternative_actions: maximum,
+    },
+    allowed_actions: [
+      allowedActionProjection(primary, "recommended"),
+      ...fallbackActions.map((candidate) =>
+        allowedActionProjection(candidate, "alternative")
+      ),
+    ],
     fallback_policy: {
-      trigger: "primary_unavailable_at_execution",
-      selection: "first_still_runnable_in_order",
+      trigger: "explicit_agent_selection_after_steering_audit",
+      selection: "bind_selected_todo_then_rerun_quota",
       preserve_primary_blocker: true,
       max_fallback_actions: maximum,
     },
