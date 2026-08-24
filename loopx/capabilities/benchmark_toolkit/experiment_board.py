@@ -44,6 +44,7 @@ _ROW_FIELDS = {
     "protocol_id",
     "comparison_protocol_id",
     "runner_revision",
+    "orchestrator_runtime",
     "comparison_anchor_run_id",
     "claim_scope",
     "primary_metric",
@@ -218,6 +219,32 @@ def _insight(value: Any) -> dict[str, Any]:
     return result
 
 
+def _orchestrator_runtime(value: Any) -> dict[str, str] | None:
+    if value in (None, {}):
+        return None
+    if not isinstance(value, Mapping):
+        raise TypeError("orchestrator_runtime must be an object")
+    _reject_unknown_fields(
+        value,
+        allowed={"provider_id", "version", "revision"},
+        field="orchestrator_runtime",
+    )
+    result = {
+        "provider_id": _token(
+            value.get("provider_id"), field="orchestrator_runtime.provider_id"
+        ),
+        "revision": _token(
+            value.get("revision"), field="orchestrator_runtime.revision"
+        ),
+    }
+    version = _optional_token(
+        value.get("version"), field="orchestrator_runtime.version"
+    )
+    if version is not None:
+        result["version"] = version
+    return result
+
+
 def normalize_benchmark_experiment_board_row(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -319,6 +346,9 @@ def normalize_benchmark_experiment_board_row(
     )
     if runner_revision is not None:
         row["runner_revision"] = runner_revision
+    orchestrator_runtime = _orchestrator_runtime(payload.get("orchestrator_runtime"))
+    if orchestrator_runtime is not None:
+        row["orchestrator_runtime"] = orchestrator_runtime
     if comparison_anchor_run_id is not None:
         row["comparison_anchor_run_id"] = comparison_anchor_run_id
     return row
@@ -706,6 +736,16 @@ def _comparison_lane_counts(
     }
 
 
+def _orchestrator_runtime_key(row: Mapping[str, Any]) -> str:
+    runtime = row.get("orchestrator_runtime")
+    if not isinstance(runtime, Mapping):
+        return "none"
+    provider_id = str(runtime.get("provider_id") or "unknown")
+    version = str(runtime.get("version") or "unversioned")
+    revision = str(runtime.get("revision") or "unknown")
+    return f"{provider_id}@{version}@{revision}"
+
+
 def build_benchmark_experiment_board(
     rows: Iterable[Mapping[str, Any]],
     *,
@@ -746,6 +786,12 @@ def build_benchmark_experiment_board(
     case_keys = {
         (row["benchmark_id"], row["study_id"], row["case_id"]) for row in normalized
     }
+    orchestrator_runtime_counts: dict[str, int] = {}
+    for row in normalized:
+        runtime_key = _orchestrator_runtime_key(row)
+        orchestrator_runtime_counts[runtime_key] = (
+            orchestrator_runtime_counts.get(runtime_key, 0) + 1
+        )
     return {
         "ok": True,
         "schema_version": BENCHMARK_EXPERIMENT_BOARD_SCHEMA_VERSION,
@@ -767,6 +813,9 @@ def build_benchmark_experiment_board(
             "arm_role_counts": role_counts,
             "comparison_arm_role_counts": comparison_arm_role_counts,
             "comparison_claim_scope_counts": comparison_claim_scope_counts,
+            "orchestrator_runtime_counts": dict(
+                sorted(orchestrator_runtime_counts.items())
+            ),
         },
         "runs": normalized,
         "comparisons": comparisons,
@@ -810,6 +859,16 @@ def _format_metric(metric: Mapping[str, Any] | None) -> str:
     return f"{value}/{total}" if total is not None else str(value)
 
 
+def _format_orchestrator_runtime(value: Any) -> str:
+    if not isinstance(value, Mapping):
+        return "n/a"
+    provider_id = str(value.get("provider_id") or "unknown")
+    version = str(value.get("version") or "")
+    revision = str(value.get("revision") or "unknown")
+    identity = f"{provider_id}@{version}" if version else provider_id
+    return f"{identity}:{revision[:12]}"
+
+
 def render_benchmark_experiment_board_markdown(payload: Mapping[str, Any]) -> str:
     summary = (
         payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
@@ -841,8 +900,8 @@ def render_benchmark_experiment_board_markdown(payload: Mapping[str, Any]) -> st
         "",
         "## Runs",
         "",
-        "| Benchmark | Study | Case | Role | Arm | Status | Primary | Reward | Integrity | Countable | Fidelity | Steps | Cost USD | Insight |",
-        "| --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | ---: | ---: | --- |",
+        "| Benchmark | Study | Case | Role | Arm | Orchestrator | Status | Primary | Reward | Integrity | Countable | Fidelity | Steps | Cost USD | Insight |",
+        "| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | ---: | ---: | --- |",
     ]
     for row in payload.get("runs", []) or []:
         if not isinstance(row, Mapping):
@@ -866,6 +925,7 @@ def render_benchmark_experiment_board_markdown(payload: Mapping[str, Any]) -> st
                     str(row.get("case_id")),
                     str(row.get("arm_role")),
                     str(row.get("arm_id")),
+                    _format_orchestrator_runtime(row.get("orchestrator_runtime")),
                     str(row.get("status")),
                     _format_metric(primary if isinstance(primary, Mapping) else None),
                     _format_metric(reward if isinstance(reward, Mapping) else None),
@@ -881,7 +941,7 @@ def render_benchmark_experiment_board_markdown(payload: Mapping[str, Any]) -> st
         )
     if not payload.get("runs"):
         lines.append(
-            "| n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |"
+            "| n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |"
         )
 
     lines.extend(

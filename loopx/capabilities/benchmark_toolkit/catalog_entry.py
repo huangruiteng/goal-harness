@@ -147,7 +147,8 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             ),
             "purpose": (
                 "Idempotently record one planned, running, or terminal compact run "
-                "row; omit --execute for a no-write preview."
+                "row, including optional provider-neutral orchestrator runtime "
+                "revision provenance; omit --execute for a no-write preview."
             ),
             "write_boundary": (
                 "explicit project-local domain-state write; rejects raw paths, "

@@ -671,8 +671,12 @@ loopx benchmark experiment-board-upsert \
 The default ledger is locked, atomically updated, and keyed by benchmark, study,
 case, and run identity. A compact row carries arm role, exact and comparison
 protocol ids, model, score metrics, countability, treatment fidelity, bounded
-effort, and an optional insight status or public-safe handle. Unknown fields and
-path-like references fail closed.
+effort, and an optional insight status or public-safe handle. When an arm uses an
+orchestration/control runtime, record its public-safe `provider_id`, exact
+`revision`, and optional package `version` in `orchestrator_runtime`; keep this
+separate from `runner_revision`, which identifies the benchmark runner. The board
+summary groups rows by that exact runtime identity so version cohorts are not
+silently pooled. Unknown fields and path-like references fail closed.
 
 Every non-baseline row names an exact `comparison_anchor_run_id`. Standard control
 or treatment rows anchor to a baseline. Explore rows use `diagnostic_only` claim

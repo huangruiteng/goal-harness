@@ -39,6 +39,7 @@ def _row(
     score_countable: bool = True,
     fidelity: str = "qualified",
     insight_status: str = "complete",
+    orchestrator_runtime: dict[str, str] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "schema_version": BENCHMARK_EXPERIMENT_BOARD_ROW_SCHEMA_VERSION,
@@ -89,6 +90,8 @@ def _row(
     }
     if comparison_anchor_run_id is not None:
         payload["comparison_anchor_run_id"] = comparison_anchor_run_id
+    if orchestrator_runtime is not None:
+        payload["orchestrator_runtime"] = orchestrator_runtime
     return payload
 
 
@@ -221,6 +224,11 @@ def test_board_keeps_standard_and_explore_lanes_and_compares_explicit_anchor() -
         observed_at="2026-08-18T00:20:00+00:00",
         f2p=64,
         comparison_anchor_run_id="baseline-12",
+        orchestrator_runtime={
+            "provider_id": "loopx",
+            "version": "0.5.2",
+            "revision": "0123456789abcdef",
+        },
     )
     explore = _row(
         run_id="explore-12",
@@ -242,6 +250,10 @@ def test_board_keeps_standard_and_explore_lanes_and_compares_explicit_anchor() -
         "treatment": 0,
     }
     assert board["summary"]["matched_pair_countable_count"] == 2
+    assert board["summary"]["orchestrator_runtime_counts"] == {
+        "loopx@0.5.2@0123456789abcdef": 1,
+        "none": 2,
+    }
     assert board["summary"]["comparison_arm_role_counts"] == {
         "control": {"all": 1, "matched_pair_countable": 1},
         "explore": {"all": 1, "matched_pair_countable": 1},
@@ -263,6 +275,12 @@ def test_board_keeps_standard_and_explore_lanes_and_compares_explicit_anchor() -
     assert comparisons["control"]["warning_codes"] == [
         "exact_protocol_revision_differs"
     ]
+    assert board["runs"][1]["orchestrator_runtime"] == {
+        "provider_id": "loopx",
+        "revision": "0123456789abcdef",
+        "version": "0.5.2",
+    }
+    assert "loopx@0.5.2:0123456789ab" in rendered
     assert comparisons["explore"]["claim_scope"] == "diagnostic_only"
     assert comparisons["explore"]["comparison_anchor_arm_role"] == "control"
     assert comparisons["explore"]["metric_deltas"]["feature_pass"]["delta"] == 2
@@ -296,6 +314,21 @@ def test_locked_jsonl_upsert_updates_one_stable_run_row(tmp_path: Path) -> None:
     assert rows[0]["status"] == "completed"
     assert rows[0]["arm_id"] == "corrected-native-goal"
     assert "domain_state_key" not in rows[0]
+
+
+def test_row_rejects_incomplete_or_path_like_orchestrator_runtime() -> None:
+    missing_revision = _baseline(orchestrator_runtime={"provider_id": "loopx"})
+    with pytest.raises(ValueError, match="orchestrator_runtime.revision"):
+        normalize_benchmark_experiment_board_row(missing_revision)
+
+    path_revision = _baseline(
+        orchestrator_runtime={
+            "provider_id": "loopx",
+            "revision": "/private/runtime",
+        }
+    )
+    with pytest.raises(ValueError, match="compact public-safe token"):
+        normalize_benchmark_experiment_board_row(path_revision)
 
 
 def test_upsert_rejects_stale_transition_after_terminal_state(tmp_path: Path) -> None:
