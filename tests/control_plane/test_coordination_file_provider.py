@@ -96,6 +96,29 @@ def test_concurrent_cas_from_same_generation_has_one_winner(provider) -> None:
     assert loaded in (head(1), head(2))
 
 
+def test_bool_disguised_generations_fail_closed(provider, tmp_path) -> None:
+    """The provider generation is typed state exactly like revisions and
+    epochs: JSON ``true`` must not load as generation 1, and a bool expected
+    generation must not hit the CAS and silently repair a corrupt envelope
+    into a valid lineage."""
+
+    for expected in (True, False):
+        outcome = provider.compare_and_put(expected, head())
+        assert outcome["result"] == "failed"
+        assert "non-negative integer" in outcome["error"]
+    assert provider.compare_and_put(0, head())["result"] == "applied"
+    document = next((tmp_path / "coordination").glob("*.json"))
+    body = document.read_text(encoding="utf-8")
+    document.write_text(
+        body.replace('"provider_generation":1', '"provider_generation":true'),
+        encoding="utf-8",
+    )
+    with pytest.raises(ProviderProtocolError, match="v0 contract"):
+        provider.load()
+    with pytest.raises(ProviderProtocolError, match="v0 contract"):
+        provider.compare_and_put(1, head(1))
+
+
 def test_corrupt_document_fails_closed(provider, tmp_path) -> None:
     assert provider.compare_and_put(0, head())["result"] == "applied"
     document = next((tmp_path / "coordination").glob("*.json"))

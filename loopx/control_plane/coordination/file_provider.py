@@ -114,11 +114,15 @@ class FileCoordinationProvider:
             raise ProviderProtocolError(
                 f"coordination document is not valid JSON: {exc}"
             ) from exc
+        generation = envelope.get("provider_generation") if isinstance(envelope, dict) else None
         if (
             not isinstance(envelope, dict)
             or set(envelope) != {"provider_generation", "head"}
-            or not isinstance(envelope["provider_generation"], int)
-            or envelope["provider_generation"] < 1
+            # bool is an int subclass; JSON true must not load as generation 1
+            # and silently repair a corrupt envelope into a valid lineage.
+            or not isinstance(generation, int)
+            or isinstance(generation, bool)
+            or generation < 1
             or not isinstance(envelope["head"], dict)
         ):
             raise ProviderProtocolError(
@@ -140,6 +144,7 @@ class FileCoordinationProvider:
 
         if (
             not isinstance(expected_provider_generation, int)
+            or isinstance(expected_provider_generation, bool)
             or expected_provider_generation < 0
         ):
             return {
