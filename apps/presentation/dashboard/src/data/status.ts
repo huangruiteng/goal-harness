@@ -84,6 +84,7 @@ export const todoGroupSchema = z.object({
   total_count: z.number().optional().default(0),
   open_count: z.number().optional().default(0),
   done_count: z.number().optional().default(0),
+  advancement_done_count: z.number().optional(),
   items: z.array(todoItemSchema).optional().default([]),
 });
 
@@ -212,6 +213,7 @@ export const projectAssetTodoSummarySchema = z.object({
   open: z.number().optional().default(0),
   done: z.number().optional().default(0),
   total: z.number().optional().default(0),
+  advancement_done_count: z.number().optional(),
   next: z.string().optional().nullable(),
   next_index: z.number().optional().nullable(),
   items: z.array(todoItemSchema).optional().default([]),

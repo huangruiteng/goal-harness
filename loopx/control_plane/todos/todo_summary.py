@@ -1143,6 +1143,11 @@ def compact_todo_group(
         "total_count": len(items),
         "open_count": len(lanes.open_items),
         "done_count": len(lanes.terminal_items),
+        "advancement_done_count": sum(
+            1
+            for item in lanes.done_items
+            if todo_item_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
+        ),
         "deferred_count": len(lanes.deferred_items),
         "first_open_items": [
             compact_todo_item(item) for item in lanes.projected_open_items[:3]

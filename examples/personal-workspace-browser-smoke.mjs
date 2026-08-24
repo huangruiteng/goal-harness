@@ -129,6 +129,7 @@ async function installApi(page) {
       };
       fixture.attention_queue.items.push({
         agent_todos: {
+          advancement_done_count: 42,
           done_count: 4,
           items: [
             currentTodo,
@@ -145,6 +146,7 @@ async function installApi(page) {
         goal_id: "progress-projection",
         project_asset: {
           agent_todos: {
+            advancement_done_count: 42,
             done: 4,
             items: [
               currentTodo,
@@ -934,7 +936,7 @@ async function main() {
     const progressColumn = page.locator(".personal-object-list", { hasText: "待执行 / 进行中" });
     if ((await progressColumn.locator(".personal-task-card").count()) !== 2) throw new Error("Id-less long Todo was duplicated across compact and full projections");
     const completedColumn = page.locator(".personal-object-list", { hasText: "已完成" }).last();
-    await completedColumn.getByText("3", { exact: true }).waitFor({ state: "visible" });
+    await completedColumn.getByText("42", { exact: true }).waitFor({ state: "visible" });
     await completedColumn.getByText("Completed A", { exact: true }).waitFor({ state: "visible" });
     if (await completedColumn.getByText("Completed Monitor", { exact: true }).count()) throw new Error("Completed continuous monitor leaked into the completed Tasks column");
     await goalButton.click();
