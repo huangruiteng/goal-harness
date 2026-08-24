@@ -31,7 +31,6 @@ from .autonomous_replan_obligation import (
     build_autonomous_replan_cli_actions,
     project_todo_lifecycle_settlement_reentry,
 )
-from .delivery_outcome import ACCOUNTABLE_DELIVERY_OUTCOMES
 from .progress_observation import semantic_delta_from_writeback
 from .repair_delta import (
     build_repair_delta_contract,
@@ -376,7 +375,6 @@ def qualify_refresh_replan_writeback(
     agent_id: str,
     dry_run: bool,
     settlement_todo_id: str | None,
-    settlement_bound: bool,
     newest_first_runs: list[dict[str, Any]],
     state_text: str,
     goal_id: str,
@@ -450,11 +448,6 @@ def qualify_refresh_replan_writeback(
         effective_recorded = True
         classification = requested_classification
         delivery_outcome = requested_delivery_outcome
-    if settlement_bound and delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES:
-        raise ValueError(
-            "turn-scoped refresh-state produced no accountable semantic delta; "
-            "no state or settlement receipt was written"
-        )
     return RefreshReplanQualification(
         repair_delta_contract=repair_delta_contract,
         semantic_delta=semantic_delta,

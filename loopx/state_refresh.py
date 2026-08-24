@@ -1144,7 +1144,6 @@ def refresh_state_run(
         agent_id=normalized_agent_id,
         dry_run=dry_run,
         settlement_todo_id=(settlement_identity.todo_id if settlement_identity else None),
-        settlement_bound=settlement_identity is not None,
         newest_first_runs=newest_first_runs,
         state_text=state_text,
         goal_id=safe_goal_id,

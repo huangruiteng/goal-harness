@@ -1299,8 +1299,11 @@ def test_autonomous_replan_semantic_delta_keeps_accountable_receipt_chain(
     assert obligation_id not in json.dumps(next_guard, sort_keys=True)
 
 
-def test_turn_scoped_replan_noop_fails_before_durable_write(tmp_path: Path) -> None:
+def test_open_replan_rejects_missing_semantic_delta_before_durable_write(
+    tmp_path: Path,
+) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_selected_todo_replan_fixture(project, registry_path)
     _initialize_git_checkout(project)
     turn_instance_id = "turn-autonomous-replan-noop-1"
 
@@ -1320,7 +1323,8 @@ def test_turn_scoped_replan_noop_fails_before_durable_write(tmp_path: Path) -> N
         str(project),
     )
     assert guard_rc == 0, guard
-    assert guard["selected_todo"]["todo_id"] == TODO_ID
+    assert guard["decision"] == "autonomous_replan_required", guard
+    assert guard["selected_todo"]["todo_id"] == SELECTED_REPLAN_TODO_ID
 
     refresh_rc, refresh = _run_cli(
         registry_path,
@@ -1333,7 +1337,7 @@ def test_turn_scoped_replan_noop_fails_before_durable_write(tmp_path: Path) -> N
         "--turn-instance-id",
         turn_instance_id,
         "--todo-id",
-        TODO_ID,
+        SELECTED_REPLAN_TODO_ID,
         "--delivery-workspace-path",
         str(project),
         "--autonomous-replan-recorded",
@@ -1352,7 +1356,7 @@ def test_turn_scoped_replan_noop_fails_before_durable_write(tmp_path: Path) -> N
     assert refresh_rc == 1, refresh
     assert refresh["ok"] is False
     assert refresh["appended"] is False
-    assert "no accountable semantic delta" in refresh["error"]
+    assert "requires a typed semantic delta" in refresh["error"]
     assert _classification_count(runtime, "validated_progress") == 0
     assert _classification_count(runtime, "replan_noop") == 0
 
