@@ -1066,6 +1066,13 @@ Post-turn accounting protocol:
   `--delivery-workspace-path <delivery-worktree>`; the path is validated locally
   and omitted from persisted history. Do not point this option at the canonical
   checkout for peer work.
+- delivery attribution is not synonymous with Git. A registered single-agent
+  goal whose project has no Git origin records a path-free `local_goal`
+  workspace identity (`loopx:<goal-id>`) when refresh runs inside that
+  registered project root. This lets validated non-repository work settle
+  without inventing a repository. It does not weaken peer isolation: a peer
+  repository write still requires an `independent_git_worktree`, and a local
+  goal workspace is rejected when that requirement is active.
 - autonomous replans follow the same accountable-outcome rule: spend after a
   concrete successor, blocker, or `outcome_progress`/`primary_goal_outcome`
   writeback, but do not spend for a `surface_only` watch-lane continuation or

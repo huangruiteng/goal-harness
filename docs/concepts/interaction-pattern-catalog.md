@@ -1492,6 +1492,14 @@ running from a non-git, unrelated, or non-isolated checkout. In that state
 to move to a compliant worktree/branch and rerun the guard before editing.
 Workspace repair is preflight and does not spend quota.
 
+Accountable settlement uses the same typed boundary without assuming that all
+delivery is a repository write. Git-backed delivery records a canonical
+`git_repository` workspace identity. A registered single-agent, non-Git goal
+may instead record a path-free `local_goal` identity (`loopx:<goal-id>`) while
+running inside its registered project root. That identity is sufficient for
+causal quota settlement, but is never accepted as a substitute for the
+independent Git worktree required by a repository-writing peer.
+
 The same scoped identity must be carried through the whole successful turn.
 If `quota should-run` was evaluated with `--agent-id <peer-agent-id>`, follow-up
 commands that interpret the same turn's control-plane state, especially
