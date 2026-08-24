@@ -110,10 +110,13 @@ def fixture_delivery_workspace(
     current_path: Path | None = None,
     *,
     peer_independent_worktree_required: bool = False,
+    **_ignored: object,
 ) -> dict[str, object]:
     del current_path
     return {
-        "schema_version": "delivery_workspace_v0",
+        "schema_version": "delivery_workspace_v1",
+        "workspace_identity": "git:github.com/loopx/refresh-state-fixture",
+        "identity_kind": "git_repository",
         "task_repository": "git:github.com/loopx/refresh-state-fixture",
         "repository_source": "smoke_fixture",
         "workspace_kind": "independent_git_worktree",

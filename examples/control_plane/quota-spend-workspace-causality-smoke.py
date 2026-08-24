@@ -208,7 +208,9 @@ def main() -> None:
             )
         workspace = refresh["delivery_workspace"]
         assert workspace == {
-            "schema_version": "delivery_workspace_v0",
+            "schema_version": "delivery_workspace_v1",
+            "workspace_identity": DELIVERY_REPOSITORY,
+            "identity_kind": "git_repository",
             "task_repository": DELIVERY_REPOSITORY,
             "repository_source": "current_git_origin",
             "workspace_kind": "independent_git_worktree",
@@ -393,7 +395,9 @@ def main() -> None:
                 quota_decision(workspace_repair=True),
             )
         assert canonical_refresh["delivery_workspace"] == {
-            "schema_version": "delivery_workspace_v0",
+            "schema_version": "delivery_workspace_v1",
+            "workspace_identity": "git:example.invalid/loopx/canonical-delivery",
+            "identity_kind": "git_repository",
             "task_repository": "git:example.invalid/loopx/canonical-delivery",
             "repository_source": "current_git_origin",
             "workspace_kind": "canonical_checkout",
