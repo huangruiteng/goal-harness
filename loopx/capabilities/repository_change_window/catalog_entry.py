@@ -76,6 +76,26 @@ REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "loopx/capabilities/repository_change_window/README.md",
         },
         {
+            "schema_version": "repository_change_window_git_hook_status_v2",
+            "module": "loopx.capabilities.repository_change_window.git_hook",
+            "doc": "loopx/capabilities/repository_change_window/README.md",
+        },
+        {
+            "schema_version": "loopx_capability_hook_registration_v0",
+            "module": "loopx.control_plane.capability_hooks",
+            "doc": "loopx/capabilities/repository_change_window/README.md",
+        },
+        {
+            "schema_version": "loopx_interaction_projection_hook_result_v0",
+            "module": "loopx.control_plane.capability_hooks",
+            "doc": "loopx/capabilities/repository_change_window/README.md",
+        },
+        {
+            "schema_version": "repository_delivery_gate_v0",
+            "module": "loopx.control_plane.work_items.repository_delivery",
+            "doc": "loopx/capabilities/repository_change_window/README.md",
+        },
+        {
             "schema_version": "repository_pending_change_event_v0",
             "module": "loopx.capabilities.repository_change_window.ledger",
             "doc": "loopx/capabilities/repository_change_window/README.md",
@@ -95,6 +115,7 @@ REPOSITORY_CHANGE_WINDOW_CATALOG_ENTRY: dict[str, Any] = {
     "docs": ["loopx/capabilities/repository_change_window/README.md"],
     "boundaries": [
         "The capability is disabled until an explicit executed install for a repository.",
+        "The read-only interaction hook is registered at the CLI composition root; Kernel orchestration owns validation, bounded dispatch, slot conflicts, and failure isolation without importing this capability.",
         "The hook provider uses a trusted invocation clock; fake clocks exist only as an injected test seam.",
         "Pending-change events store references, digests, counts, and typed lifecycle data, never code bodies, diff bodies, credentials, or local absolute paths.",
         "A private locator sidecar may retain a local worktree path and repository-relative changed-path inventory for recovery, but those values are never copied into the shared projection or command result.",

@@ -5,6 +5,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..capabilities.repository_change_window import (
+    repository_delivery_interaction_hook,
+)
 from ..capabilities.explore.composition_frontier import (
     project_live_explore_composition_frontier,
 )
@@ -86,6 +89,7 @@ from .quota_request import (
 )
 from .quota_monitor_poll import record_quota_monitor_poll_for_cli
 from .quota_registration import register_quota_command as register_quota_command
+
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -645,6 +649,9 @@ def handle_quota_command(
         scheduler_context = context.scheduler_context
         operator_inbox_urgency_projector = context.operator_inbox_urgency_projector
         if args.quota_command == "should-run":
+            interaction_projection_hooks = (
+                repository_delivery_interaction_hook(repo_path=Path.cwd()),
+            )
             (
                 heartbeat_receipt_existing,
                 receipt_bound_todo_id,
@@ -679,6 +686,7 @@ def handle_quota_command(
                     receipt_bound_replan_obligation_id
                 ),
                 turn_instance_id=heartbeat_turn_id,
+                interaction_projection_hooks=interaction_projection_hooks,
             )
             _require_requested_quota_action_selection(
                 payload,
@@ -762,6 +770,9 @@ def handle_quota_command(
                                 receipt_bound_replan_obligation_id
                             ),
                             turn_instance_id=heartbeat_turn_id,
+                            interaction_projection_hooks=(
+                                interaction_projection_hooks
+                            ),
                         )
                         cache_metadata = None
                         heartbeat_stall_observation = (

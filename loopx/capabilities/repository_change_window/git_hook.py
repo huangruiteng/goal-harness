@@ -26,7 +26,10 @@ from .repository import (
 PROVIDER_STATE_SCHEMA_VERSION = "repository_change_window_git_hook_state_v2"
 PREVIOUS_PROVIDER_STATE_SCHEMA_VERSION = "repository_change_window_git_hook_state_v1"
 LEGACY_PROVIDER_STATE_SCHEMA_VERSION = "repository_change_window_git_hook_state_v0"
-PROVIDER_STATUS_SCHEMA_VERSION = "repository_change_window_git_hook_status_v1"
+PROVIDER_STATUS_SCHEMA_VERSION = "repository_change_window_git_hook_status_v2"
+EXTERNAL_GUARD_DIAGNOSTIC_SCHEMA_VERSION = (
+    "repository_change_window_external_guard_diagnostic_v0"
+)
 HOOK_RUNTIME_SCHEMA_VERSION = "repository_change_window_hook_runtime_v1"
 PROVIDER_RELATIVE_DIR = Path("loopx") / "repository-change-window"
 
@@ -65,6 +68,8 @@ BASE_HOOK_NAMES = ("pre-commit", "pre-push")
 REFERENCE_GUARD_HOOK_NAME = "reference-transaction"
 SSH_TRANSPORT_EVENT = "ssh-transport"
 SSH_COMMAND_NAME = "ssh-command"
+LEGACY_GLOBAL_GUARD_KIND = "loopx_global_commit_time_gate_v0"
+LEGACY_MARKER_READ_LIMIT = 64 * 1024
 
 
 def hook_runtime_contract() -> dict[str, Any]:
@@ -247,6 +252,137 @@ def _read_state(path: Path) -> dict[str, Any]:
 def _effective_hooks_path(repo: Path) -> Path:
     raw = Path(git_text(repo, "rev-parse", "--git-path", "hooks"))
     return (raw if raw.is_absolute() else repo / raw).resolve()
+
+
+def _effective_config_scope(repo: Path, key: str) -> str | None:
+    output = git_text(
+        repo,
+        "config",
+        "--show-scope",
+        "--get",
+        key,
+        check=False,
+    )
+    if not output:
+        return None
+    scope = output.split(None, 1)[0].strip().lower()
+    return (
+        scope
+        if scope in {"system", "global", "local", "worktree", "command"}
+        else "unknown"
+    )
+
+
+def _bounded_regular_text(path: Path) -> str | None:
+    if path.is_symlink():
+        return None
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return None
+    if not path.is_file() or stat_result.st_size > LEGACY_MARKER_READ_LIMIT:
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _recognized_legacy_global_guard(
+    *, hooks_root: Path, hooks_scope: str | None
+) -> str | None:
+    """Recognize the one bounded legacy LoopX layout without trusting its policy."""
+
+    if hooks_scope != "global" or hooks_root.is_symlink():
+        return None
+    readme = _bounded_regular_text(hooks_root / "README.md")
+    common = _bounded_regular_text(hooks_root / "gate-common.sh")
+    pre_commit = _bounded_regular_text(hooks_root / "pre-commit")
+    pre_push = _bounded_regular_text(hooks_root / "pre-push")
+    if (
+        readme is not None
+        and common is not None
+        and pre_commit is not None
+        and pre_push is not None
+        and "LoopX Local Commit Time Gate" in readme
+        and "loopx_commit_gate_enforce" in common
+        and "gate-common.sh" in pre_commit
+        and "gate-common.sh" in pre_push
+    ):
+        return LEGACY_GLOBAL_GUARD_KIND
+    return None
+
+
+def _external_guard_diagnostic(*, repo: Path) -> dict[str, Any]:
+    hooks_scope = _effective_config_scope(repo, "core.hooksPath")
+    ssh_scope = _effective_config_scope(repo, "core.sshCommand")
+    hooks_root = _effective_hooks_path(repo)
+    hooks_configured = hooks_scope is not None
+    ssh_configured = ssh_scope is not None
+    surfaces = [
+        surface
+        for surface, configured in (
+            ("hooks_path", hooks_configured),
+            ("ssh_command", ssh_configured),
+        )
+        if configured
+    ]
+    legacy_kind = (
+        _recognized_legacy_global_guard(
+            hooks_root=hooks_root,
+            hooks_scope=hooks_scope,
+        )
+        if hooks_configured
+        else None
+    )
+    diagnostic: dict[str, Any] = {
+        "schema_version": EXTERNAL_GUARD_DIAGNOSTIC_SCHEMA_VERSION,
+        "detected": bool(surfaces),
+        "status": "detected" if surfaces else "not_detected",
+        "effective_surfaces": surfaces,
+        "configuration_scopes": {
+            "hooks_path": hooks_scope,
+            "ssh_command": ssh_scope,
+        },
+        "diagnostic_only": True,
+        "trusted_provider": False,
+        "policy_known": False,
+        "admission_known": False,
+        "recognized_legacy_kind": legacy_kind,
+        "path_free": True,
+        "remote_write_authority_granted": False,
+    }
+    if legacy_kind is not None:
+        diagnostic["migration_preview"] = {
+            "schema_version": "repository_change_window_legacy_migration_preview_v0",
+            "action": "install_repository_provider",
+            "integration_mode": "layered_legacy_global_guard",
+            "preview_required": True,
+            "execute_required": True,
+            "automatic_migration": False,
+            "preserves_effective_guard": True,
+            "mutates_global_configuration": False,
+            "grants_remote_write_authority": False,
+        }
+    return diagnostic
+
+
+def _installation_mode(
+    *, existing: Mapping[str, Any] | None, diagnostic: Mapping[str, Any]
+) -> str:
+    if existing is not None:
+        schema = existing.get("schema_version")
+        if schema in {
+            PREVIOUS_PROVIDER_STATE_SCHEMA_VERSION,
+            LEGACY_PROVIDER_STATE_SCHEMA_VERSION,
+        }:
+            return "migrated_legacy_repository_provider"
+        return "reconfigured_repository_provider"
+    if diagnostic.get("recognized_legacy_kind") == LEGACY_GLOBAL_GUARD_KIND:
+        return "layered_legacy_global_guard"
+    if diagnostic.get("detected") is True:
+        return "layered_external_guard"
+    return "fresh_repository_provider"
 
 
 def _local_hooks_override(repo: Path) -> tuple[bool, str | None]:
@@ -497,6 +633,7 @@ def install_git_hook_provider(
         )
     state_path = _state_path(context.common_dir)
     hooks_dir = _hooks_dir(context.common_dir)
+    external_guard: dict[str, Any] | None = None
     existing: dict[str, Any] | None = None
     if state_path.exists():
         existing = _read_state(state_path)
@@ -512,6 +649,9 @@ def install_git_hook_provider(
             and _state_enforcement_level(existing) is enforcement
             and all(bool(item["ok"]) for item in checks)
         ):
+            installation_mode = str(
+                existing.get("installation_mode") or "fresh_repository_provider"
+            )
             return {
                 "ok": True,
                 "schema_version": "repository_change_window_install_v1",
@@ -522,6 +662,7 @@ def install_git_hook_provider(
                 "provider_id": "git-hook",
                 "enforcement_level": enforcement.value,
                 "policy": policy.to_dict(),
+                "installation_mode": installation_mode,
             }
         if not replace:
             raise RepositoryChangeWindowError(
@@ -529,6 +670,7 @@ def install_git_hook_provider(
             )
 
     if existing is None:
+        external_guard = _external_guard_diagnostic(repo=context.root)
         previous_hook_root = _effective_hooks_path(context.root)
         previous_local_override, previous_local_value = _local_hooks_override(
             context.root
@@ -584,6 +726,10 @@ def install_git_hook_provider(
                     "preceded the managed command; uninstall the legacy provider "
                     "with its matching LoopX runtime before replacing it"
                 )
+    installation_mode = _installation_mode(
+        existing=existing,
+        diagnostic=external_guard or {},
+    )
     installed_at = (
         (now or datetime.now(timezone.utc))
         .astimezone(timezone.utc)
@@ -613,6 +759,7 @@ def install_git_hook_provider(
             else None
         ),
         "installed_at": installed_at,
+        "installation_mode": installation_mode,
     }
     if execute:
         runtime_check = _hook_runtime_check(enforcement)
@@ -651,6 +798,12 @@ def install_git_hook_provider(
         "default_enabled": False,
         "enabled": execute,
         "preserves_previous_hooks": True,
+        "installation_mode": installation_mode,
+        **(
+            {"previous_guard_diagnostic": external_guard}
+            if external_guard is not None
+            else {}
+        ),
         "policy": policy.to_dict(),
         "managed_hook_names": list(_managed_hook_names(enforcement)),
         "guards_ssh_transport": enforcement is EnforcementLevel.REFERENCE_GUARD,
@@ -666,10 +819,15 @@ def git_hook_provider_status(
     context = resolve_repository_context(repo_path)
     state_path = _state_path(context.common_dir)
     if not state_path.exists():
+        external_guard = _external_guard_diagnostic(repo=context.root)
         return {
             "ok": True,
             "schema_version": PROVIDER_STATUS_SCHEMA_VERSION,
-            "status": "not_installed",
+            "status": (
+                "effective_external_guard_detected"
+                if external_guard["detected"]
+                else "provider_not_installed"
+            ),
             "installed": False,
             "enabled": False,
             "repository_id": context.repository_id,
@@ -677,6 +835,8 @@ def git_hook_provider_status(
             "default_enabled": False,
             "enforcement_level": None,
             "supported_enforcement_levels": [item.value for item in EnforcementLevel],
+            "external_guard": external_guard,
+            "contains_personal_path": False,
         }
     state = _read_state(state_path)
     enforcement = _state_enforcement_level(state)
@@ -703,6 +863,9 @@ def git_hook_provider_status(
         "decision": decision,
         "checks": checks,
         "preserves_previous_hooks": True,
+        "installation_mode": str(
+            state.get("installation_mode") or "fresh_repository_provider"
+        ),
         "contains_personal_path": False,
     }
 

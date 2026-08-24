@@ -171,6 +171,9 @@ def _compact_monitor_poll_interaction_contract(
             for key in _RETAINED_MONITOR_POLL_RESPONSE_PLAN_FIELDS
             if key in response_plan
         }
+    repository_delivery = contract.get("repository_delivery")
+    if isinstance(repository_delivery, dict):
+        compact["repository_delivery"] = repository_delivery
     return compact
 
 
