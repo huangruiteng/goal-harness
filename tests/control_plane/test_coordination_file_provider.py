@@ -109,13 +109,17 @@ def test_corrupt_document_fails_closed(provider, tmp_path) -> None:
 def test_crash_after_temp_write_before_rename_changes_nothing(
     provider, monkeypatch
 ) -> None:
+    # Faults are injected through the provider's own commit seam, not the
+    # global os attributes: loopx.file_lock's Windows holder sidecar also
+    # calls os.replace, and a global patch would crash lock bookkeeping
+    # instead of the document commit under test.
     assert provider.compare_and_put(0, head())["result"] == "applied"
     import loopx.control_plane.coordination.file_provider as module
 
     def crash(_source, _target):
         raise OSError("simulated crash before rename")
 
-    monkeypatch.setattr(module.os, "replace", crash)
+    monkeypatch.setattr(module, "_replace_document", crash)
     outcome = provider.compare_and_put(1, head(1))
     assert outcome["result"] == "ambiguous"
     monkeypatch.undo()
@@ -130,13 +134,13 @@ def test_lost_response_after_rename_is_recoverable_by_reload(
     assert provider.compare_and_put(0, head())["result"] == "applied"
     import loopx.control_plane.coordination.file_provider as module
 
-    real_replace = module.os.replace
+    real_replace = module._replace_document
 
     def replace_then_crash(source, target):
         real_replace(source, target)
         raise OSError("simulated lost response after rename")
 
-    monkeypatch.setattr(module.os, "replace", replace_then_crash)
+    monkeypatch.setattr(module, "_replace_document", replace_then_crash)
     outcome = provider.compare_and_put(1, head(1))
     assert outcome["result"] == "ambiguous"
     monkeypatch.undo()
@@ -210,13 +214,13 @@ def test_commit_sequence_fsyncs_file_before_rename_and_directory_after(
     import loopx.control_plane.coordination.file_provider as module
 
     events = []
-    real_fsync = module.os.fsync
-    real_replace = module.os.replace
+    real_file_fsync = module._fsync_file
+    real_replace = module._replace_document
     real_directory_fsync = module._fsync_directory
 
-    def recording_fsync(descriptor):
+    def recording_file_fsync(descriptor):
         events.append("fsync")
-        return real_fsync(descriptor)
+        return real_file_fsync(descriptor)
 
     def recording_replace(source, target):
         events.append("replace")
@@ -226,12 +230,12 @@ def test_commit_sequence_fsyncs_file_before_rename_and_directory_after(
         events.append("dir_fsync")
         return real_directory_fsync(directory)
 
-    monkeypatch.setattr(module.os, "fsync", recording_fsync)
-    monkeypatch.setattr(module.os, "replace", recording_replace)
+    monkeypatch.setattr(module, "_fsync_file", recording_file_fsync)
+    monkeypatch.setattr(module, "_replace_document", recording_replace)
     monkeypatch.setattr(module, "_fsync_directory", recording_directory_fsync)
     assert provider.compare_and_put(0, head())["result"] == "applied"
     monkeypatch.undo()
-    assert events.index("fsync") < events.index("replace") < events.index("dir_fsync")
+    assert events == ["fsync", "replace", "dir_fsync"]
 
 
 def test_directory_fsync_fault_is_ambiguous_not_applied(

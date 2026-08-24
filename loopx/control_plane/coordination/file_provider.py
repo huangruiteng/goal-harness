@@ -57,6 +57,21 @@ def _write_all(descriptor: int, payload: bytes) -> None:
         view = view[written:]
 
 
+# The commit-sequence steps below are module seams on purpose: fault
+# injection in tests targets the provider's own document commit without
+# touching the global os attributes that loopx.file_lock's holder
+# bookkeeping also uses (its Windows sidecar path calls os.fsync and
+# os.replace of its own).
+
+
+def _fsync_file(descriptor: int) -> None:
+    os.fsync(descriptor)
+
+
+def _replace_document(source: Path, target: Path) -> None:
+    os.replace(source, target)
+
+
 def _fsync_directory(directory: Path) -> None:
     # The rename only becomes durable once the parent directory entry is
     # flushed. Windows exposes no directory-handle fsync; there the rename's
@@ -193,10 +208,10 @@ class FileCoordinationProvider:
             )
             try:
                 _write_all(descriptor, envelope)
-                os.fsync(descriptor)
+                _fsync_file(descriptor)
             finally:
                 os.close(descriptor)
-            os.replace(temp_path, self._document)
+            _replace_document(temp_path, self._document)
             _fsync_directory(self.directory)
         except OSError:
             # The commit sequence did not provably converge: the temp write
