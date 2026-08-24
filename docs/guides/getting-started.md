@@ -376,9 +376,10 @@ loopx slash-commands --install
 loopx doctor
 ```
 
-The GitHub Pages archive installer remains available as a fallback. Archive
-installs keep their existing `loopx update --check|--dry-run|--execute` path;
-do not mix that updater with the active PyPI executable.
+The GitHub Pages archive installer remains available as a fallback. `loopx
+update` now projects the active installation owner: PyPI environments stay
+package-manager owned, archive snapshots stay LoopX owned, and live source
+checkouts stay Git owned.
 
 ## Contributor Install
 
@@ -417,13 +418,18 @@ checkout to the default local release.
 - the local manual page under `~/.local/share/man`;
 - the LoopX Codex skills under `~/.codex/skills`.
 
-For a no-clone install, use `loopx update` to refresh the release snapshot and
-skills:
+Use the named update actions so read-only inspection and mutation are visible:
 
 ```bash
-loopx update --check
-loopx update --execute
+loopx update check
+loopx update plan
+loopx update apply
 ```
+
+On PyPI installs, apply uses the owning pip or pipx environment and then
+refreshes host material and readbacks. On archive installs, it atomically
+replaces the release snapshot. A live checkout is never pulled or rewritten by
+this command; update Git explicitly and rerun the contributor installer.
 
 For a contributor checkout, re-run the installer to update both surfaces from
 the current clean `origin/main` checkout:
@@ -1039,7 +1045,7 @@ bootstrap / connect     connect a project-local goal
 new-project-prompt      generate a Codex prompt for project connection
 demo                    create a disposable local demo goal
 doctor                  diagnose installation and import health
-update                  check or execute a no-clone LoopX self-update
+update [check|plan|apply] inspect or apply through the active install owner
 registry                inspect registered goals
 registry-boundary       classify registry local/public boundary and push policy
 status                  show first-screen operator status

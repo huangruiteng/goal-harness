@@ -371,9 +371,9 @@ def main() -> None:
     for required in [
         "Status: v0.x maintainer contract.",
         "## Supported Install And Update Paths",
-        "loopx update --check",
-        "loopx update --dry-run",
-        "loopx update --execute",
+        "loopx update check",
+        "loopx update plan",
+        "loopx update apply",
         "## Named Version Contract",
         "The version source is `loopx.__version__`, mirrored by `pyproject.toml`",
         "examples/release/release-version-contract-smoke.py",

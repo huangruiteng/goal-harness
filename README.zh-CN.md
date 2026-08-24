@@ -220,6 +220,9 @@ loopx workflow-skills --install
 loopx doctor
 ```
 
+已有安装可使用 `loopx update plan` 与 `loopx update apply`；LoopX 会保留检测到
+的 pip、pipx 或 archive owner，不会在升级时暗中切换安装渠道。
+
 原生 Windows PowerShell 7 可直接使用同一 PyPI release，不需要 POSIX 兼容层：
 
 ```powershell

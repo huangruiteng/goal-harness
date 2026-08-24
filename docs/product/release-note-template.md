@@ -26,8 +26,8 @@ operator surface." Keep this readable in 15 seconds.>
 command. Full commands live in `## Install / Update` below.>
 
 ```bash
-loopx update --check       # 已是最新则无需操作
-loopx update --execute     # 升级到 vX.Y.Z
+loopx update check         # 只读检查安装 owner 与新版本
+loopx update apply         # 由当前安装 owner 升级到 vX.Y.Z
 loopx --version && loopx doctor
 ```
 
@@ -169,12 +169,13 @@ loopx slash-commands --install
 loopx doctor
 ```
 
-Archive-fallback users should preview and execute their archive update
-explicitly:
+All existing installs use explicit update intent; the command preserves the
+active pip, pipx, or archive owner:
 
 ```bash
-loopx update --check --ref stable
-loopx update --execute --ref stable
+loopx update check
+loopx update plan
+loopx update apply
 loopx doctor
 ```
 

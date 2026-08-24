@@ -9,32 +9,33 @@ which control-plane surfaces are safe to build on.
 
 ## Supported Install And Update Paths
 
-For a first-time user, prefer the no-clone archive installer:
+For a first-time user, prefer the canonical PyPI release:
 
 ```bash
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 loopx doctor
 ```
 
-The installer and `loopx update` use the public `stable` ref by default. Use
-`LOOPX_REF=main` or `loopx update --ref main` only for maintainer/dev repair
-when you intentionally want the current repository head instead of the stable
-channel.
+PyPI owns normal release acquisition and dependency resolution. `loopx update
+apply` uses that same owning environment and then refreshes LoopX host material
+and readbacks; it does not switch channels.
 
-For a user who already installed from the archive, update through the explicit
-CLI flow:
+Use the same explicit intent flow for PyPI and archive installations:
 
 ```bash
-loopx update --check
-loopx update --dry-run
-loopx update --execute
+loopx update check
+loopx update plan
+loopx update apply
 loopx doctor
 ```
 
-Re-running the curl installer remains a repair/fallback path when the wrapper
-or local release snapshot is broken. It is not the primary update path for a
-healthy archive install.
+For a pip or pipx distribution, apply delegates to that owner. For an archive
+snapshot, apply uses the public `stable` ref by default and preserves atomic
+snapshot rollback. Use `loopx update plan --ref main` and `loopx update apply
+--ref main` only for maintainer/dev archive qualification. Re-running the curl
+installer remains a repair path when an archive wrapper is too broken to run
+its own updater.
 
 For contributors, keep the clone-plus-canary path:
 
@@ -45,8 +46,8 @@ loopx doctor
 loopx-canary doctor
 ```
 
-The no-clone path is the user default. The clone-plus-canary path is the
-maintainer validation path.
+The PyPI path is the user default. The clone-plus-canary path is the maintainer
+validation path, and the no-clone archive is the recovery fallback.
 
 Before promoting a stable install/update recommendation, maintainers must move
 the public `stable` ref to the release commit that passed this gate. Do not
@@ -59,7 +60,7 @@ prove that an installed LoopX runtime contains that commit. This distinction
 matters when a fix reaches `main` after the latest named release: package
 versions may still match while the installed source commit is behind.
 
-Use `loopx update --check --ref main` for maintainer qualification. Its
+Use `loopx update check --ref main` for archive maintainer qualification. Its
 `runtime_activation_qualification` result compares the release-manifest source
 commit with the trusted source lineage reported by `loopx doctor`:
 
@@ -75,7 +76,7 @@ must not say the fix is active in the installed runtime unless this receipt is
 `runtime_active`. Publishing a release remains a separate maintainer action.
 When the qualification command itself runs from newer source code, pass a local
 snapshot from the older installed CLI with `--installed-doctor-json`; this
-option is read-only and accepted only by `update --check`.
+option is read-only and accepted only by `update check`.
 
 ## Named Version Contract
 
@@ -89,10 +90,10 @@ Before moving `stable`, maintainers should:
   release behavior changes;
 - create or verify the matching Git tag, for example `v0.1.3`;
 - fast-forward `stable` to that tagged commit after the release canary passes;
-- confirm `release.json`, `loopx doctor`, and `loopx update --check` report the
+- confirm `release.json`, `loopx doctor`, and `loopx update check` report the
   same package version and tag;
-- tell existing users to run `loopx update --check`, then
-  `loopx update --execute` when the check recommends or when they want to
+- tell existing users to run `loopx update check`, then
+  `loopx update apply` when the check recommends or when they want to
   refresh to the named stable release.
 
 The release workflow builds a wheel and source distribution from the tagged

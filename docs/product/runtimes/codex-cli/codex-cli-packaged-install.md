@@ -85,29 +85,33 @@ loopx slash-commands --install
 loopx doctor
 ```
 
-For users installed through the archive fallback, keep the explicit archive
-update flow:
+The channel-aware update flow uses explicit intent for both PyPI and archive
+installs:
 
 ```bash
-loopx update --check
-loopx update --dry-run
-loopx update --execute
+loopx update check
+loopx update plan
+loopx update apply
 loopx doctor
 ```
 
-The update command plans the source archive, reports the installed release
-snapshot, preserves runtime state under `~/.codex/loopx`, and refreshes the
-executable and skills together when `--execute` is accepted.
+The update command reports the installation owner before mutation. For a pip
+or pipx PyPI distribution, apply delegates the package transaction to that
+same environment and then refreshes skills, slash commands, doctor, enabled
+extensions, and managed services. For an archive install, apply plans the
+source archive, preserves runtime state under `~/.codex/loopx`, and atomically
+refreshes the executable and host material. It never rewrites a live source
+checkout.
 
-For the normal GitHub repo/ref source, `--check` compares the installed package
+For the normal GitHub repo/ref archive source, `update check` compares the installed package
 version with that exact ref using a short, read-only network probe. Offline
 checks still report local install health and make the missing remote comparison
 explicit. Custom archive URLs skip this comparison rather than guessing which
 version they contain.
 
-`loopx update` uses the same `stable` ref by default. Use `loopx update --ref
-main` only when you intentionally want a dev/head refresh instead of the stable
-channel.
+Archive updates use the `stable` ref by default. Use `loopx update plan --ref
+main` and `loopx update apply --ref main` only when you intentionally want a
+dev/head refresh instead of the stable channel.
 
 Re-running the curl installer is still the repair/fallback path when the local
 wrapper or release snapshot is broken enough that `loopx update` cannot run.

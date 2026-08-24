@@ -96,15 +96,16 @@ an existing identity only for an explicitly authorized takeover.
 For a no-clone installation, `loopx update` is the primary path. Do not overwrite a release snapshot by
 hand:
 
-Run `loopx update --check` for a read-only freshness check, then
-`loopx update --dry-run` for the install preview. Neither command installs.
+Run `loopx update check` for a read-only freshness and installation-owner
+check, then `loopx update plan` for the install preview. Neither command
+installs.
 
 A normal upgrade needs only:
 
 ```bash
-loopx update --check
-loopx update --dry-run
-loopx update --execute
+loopx update check
+loopx update plan
+loopx update apply
 loopx doctor
 ```
 
@@ -118,13 +119,13 @@ loopx --version
 loopx --format json doctor > /tmp/loopx-doctor-before.json
 
 # 2. Inspect stable ref, freshness, and the recommendation
-loopx update --check
+loopx update check
 
 # 3. Preview the ref, release id, and rollback target
-loopx update --dry-run
+loopx update plan
 
 # 4. Run the archive installer and post-update doctor
-loopx update --execute
+loopx update apply
 
 # 5. Recheck commands, skills, Host integration, and project state
 loopx --version
@@ -134,10 +135,11 @@ loopx slash-commands --install
 loopx status
 ```
 
-The public `stable` ref is the default source. `--ref main` is a maintainer or development qualification
-path, not the ordinary user default. `update --execute` installs a release snapshot and runs doctor; a
-successful exit does not prove that every Host automation, Goal migration, or Extension Provider is
-updated.
+The public `stable` ref is the default archive source. `--ref main` is a maintainer or development
+qualification path, not the ordinary user default. `update apply` preserves the active installation
+owner: pip and pipx keep the PyPI environment, archive installs keep the release snapshot, and live
+checkouts remain explicit. A successful exit does not prove that every Host automation, Goal migration,
+or Extension Provider is updated.
 
 Validate the surfaces you use:
 

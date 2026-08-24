@@ -10,6 +10,19 @@ loopx workflow-skills --install
 loopx doctor
 ```
 
+Choose one installation owner and keep it authoritative:
+
+| Use case | Owner | Install or acquire | Upgrade |
+| --- | --- | --- | --- |
+| Normal release | Python package environment | `python3 -m pip install loopx` | `loopx update apply` or the manual pip sequence below |
+| Isolated CLI on an externally managed machine | `pipx` | `pipx install loopx` | `pipx upgrade loopx`, then refresh LoopX host material |
+| Contributor or source qualification | Git checkout | clone/fetch plus `scripts/install-local.sh` | update the checkout explicitly, rerun the installer, validate `loopx-canary` before promotion |
+| No-clone recovery fallback | LoopX archive snapshot | published archive installer | `loopx update apply` |
+
+PyPI is the canonical source for normal releases. A source checkout is a
+development and qualification surface, not a second implicit package channel.
+The archive snapshot remains a recovery path rather than a competing default.
+
 LoopX's Effect Program core runs in a managed, idle-exiting TypeScript runtime
 and requires Node.js 22.6 or later. LoopX starts and reuses that local runtime
 automatically; users do not run a daemon manually. The runtime binds only to
@@ -118,8 +131,32 @@ gate.
 
 ## Upgrade And Repair
 
-Upgrade the Python distribution first, then refresh the host material from the
-same version:
+`loopx update` is the channel-aware upgrade entry point. Its actions have the
+same meaning for humans and agents:
+
+```bash
+loopx update check       # read-only freshness and installation-owner check
+loopx update plan        # read-only command, validation, and rollback plan
+loopx update apply       # explicit local-environment mutation
+```
+
+Bare `loopx update` remains a read-only plan. The older `--check`, `--dry-run`,
+and `--execute` spellings remain compatibility aliases, but new instructions
+should use the named actions.
+
+Human-readable output starts with **No update was applied** and a copyable
+**Next Action** command. JSON output exposes the same decision as
+`requested_action`, `changes_applied`, and a typed `next_action` object with
+mutation and authorization fields. Agents should inspect those fields instead
+of inferring authority from prose.
+
+For a PyPI distribution installed by pip, `update apply` asks the exact Python
+interpreter that owns LoopX to upgrade its environment, then starts fresh
+processes to install workflow skills and slash commands, runs doctor, revalidates
+enabled extensions, and restarts managed local LoopX services. It does not
+switch the installation to an archive snapshot.
+
+The equivalent manual sequence is:
 
 ```bash
 python3 -m pip install --upgrade loopx
@@ -127,6 +164,18 @@ loopx workflow-skills --install
 loopx slash-commands --install
 loopx doctor
 ```
+
+The first command is the package transaction; the remaining commands are the
+LoopX activation and readback contract. Running only `pip install` can leave
+host material from the previous version active. Conversely, `loopx update
+apply` does not replace pip as the owner of dependency resolution, environment
+policy, package indexes, or uninstall.
+
+For an installation owned by another Python package manager, `update plan`
+reports that owner and its command; LoopX fails closed instead of guessing a
+pip mutation. For a live source checkout, it reports the contributor installer
+and never performs `git pull` or rewrites the worktree. Source acquisition and
+repository mutation remain explicit human or authorized-agent actions.
 
 `loopx doctor` reports `install_kind: python_distribution` for this path and
 returns the same pip-native repair sequence when packaged skills are missing or
@@ -157,8 +206,18 @@ loopx doctor
 ```
 
 This fallback installs an archive snapshot, wrapper, man page, and host
-materials together. Its update path remains `loopx update`; do not mix the
-archive and PyPI upgrade mechanisms for the same active executable.
+materials together. LoopX owns that snapshot lifecycle, so its update path is:
+
+```bash
+loopx update check
+loopx update plan
+loopx update apply
+```
+
+Archive apply retains the atomic release pointer, doctor validation, extension
+readback, managed-service restart, and first-class snapshot rollback. The
+installation-owner projection prevents this path from being mixed with an
+active PyPI executable.
 
 ## Uninstall
 

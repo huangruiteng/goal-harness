@@ -95,14 +95,15 @@ identity 或 Host selection gate。选择后使用 packet 给出的精确命令�
 
 no-clone 安装的主路径是 `loopx update`，不是手工覆盖 release snapshot：
 
-先用 `loopx update --check` 只读检查，再用 `loopx update --dry-run` 预览；两步都不会安装。
+先用 `loopx update check` 只读检查 freshness 与安装 owner，再用 `loopx update plan`
+预览；两步都不会安装。
 
 正常升级只需要：
 
 ```bash
-loopx update --check
-loopx update --dry-run
-loopx update --execute
+loopx update check
+loopx update plan
+loopx update apply
 loopx doctor
 ```
 
@@ -115,13 +116,13 @@ loopx --version
 loopx --format json doctor > /tmp/loopx-doctor-before.json
 
 # 2. 检查 stable ref、freshness 与推荐动作
-loopx update --check
+loopx update check
 
 # 3. 预览将安装的 ref、release id 与回滚目标
-loopx update --dry-run
+loopx update plan
 
 # 4. 执行 archive installer，并由 update 运行 post-update doctor
-loopx update --execute
+loopx update apply
 
 # 5. 重验命令、skill、Host 与项目状态
 loopx --version
@@ -131,8 +132,9 @@ loopx slash-commands --install
 loopx status
 ```
 
-默认来源是公开 `stable` ref。`--ref main` 是 maintainer/dev qualification 路径，不应作为普通用户
-默认升级。`update --execute` 安装 release snapshot 并运行 doctor；成功退出不代表每个 Host
+archive 的默认来源是公开 `stable` ref。`--ref main` 是 maintainer/dev qualification 路径，
+不应作为普通用户默认升级。`update apply` 保留当前安装 owner：pip/pipx 继续管理 PyPI 环境，
+archive 继续管理 release snapshot，live checkout 仍需显式更新。成功退出不代表每个 Host
 automation、Goal migration 或 Extension Provider 都已更新。
 
 升级后按使用面继续验证：

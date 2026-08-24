@@ -247,6 +247,9 @@ loopx workflow-skills --install
 loopx doctor
 ```
 
+Existing installs can use `loopx update plan` and `loopx update apply`; LoopX
+keeps the detected pip, pipx, or archive owner instead of switching channels.
+
 On native Windows PowerShell 7, use the same PyPI release without a POSIX
 compatibility layer:
 
