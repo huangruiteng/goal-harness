@@ -174,7 +174,94 @@ cost、output token 与 agent step。
 - verifier pass 本身不能证明维护成本更低或具备广泛专业迁移；
 - repository trace 可能敏感且体积很大，进入 LoopX state 前必须 reduction。
 
-### 3.4 为什么三者是一个组合
+### 3.4 StartupBench
+
+[StartupBench](https://startupbench.github.io/) 评测通用 agent 在"市场验证过的
+startup 工作流"上的表现。包含 97 个真实工作流任务，覆盖六个专业域（医疗健康 21、
+金融 18、商业与管理 19、法律 16、STEM 与计算机 16、教育与人文 7）。任务来自获得
+融资的 AI-native startup 产品、产品 demo 与用户访谈中真实委托给 agent 的工作流；
+每个任务要求 agent 在接近真实的工作区约束下搜索、推理、组织、验证并交付多格式
+artifact（DOCX、XLSX、PPTX、PDF、Markdown、图片、文本）。
+
+评分是 artifact-first：每个提交先转换为 evidence view，再按细粒度加权 rubric
+（平均每个任务 25.3 条）评判，而不是按答案相似度。公开的 Agent-as-Judge 框架报告
+92% 人类一致性、pass 阈值为 90、九个大模型上最高平均分 73.67、top pass@1 31.27，
+说明多数真实工作流交付物仍达不到生产就绪。
+
+**最适合 LoopX 研究的问题**
+
+- 长程 artifact 交付与多格式输出验证；
+- 超越软件的专业域工作流委托（金融、法律、医疗、商业）以及控制平面能否迁移；
+- 交付物质量与自我验证幻觉：agent 声称满足需求而 rubric 检查失败；
+- 交付物被外部评判的 human-attention 与 authority 研究；
+- 围绕 artifact 完成度与格式合规的 evidence-linked Todo/settlement。
+
+**主张限制**
+
+- 任务场景、参考材料与生成 artifact 不得进入 LoopX 公共 state 或可复用
+  training/memory surface；
+- Agent-as-Judge 是 benchmark 原生评测，不是通用生产 oracle 或权威；
+- rubric 分数本身不能证明维护成本更低或广泛专业迁移，需要独立审计；
+- leaderboard 是 model/scaffold 特定结果；更换 harness 是独立实验。
+
+### 3.5 LoopsBench
+
+[LoopsBench](https://loopsbench.ai/)（microsoft/Loopsbench）是长程终端环境软件
+任务的 benchmark 与 harness。每个任务打包 agent 可见 workspace、单元级需求、
+模块依赖图，以及 Docker-backed 执行环境，verifier 区分 incomplete、partial、
+complete 三种完成度。任务语料通过 GitHub-native 的 task proposal 与 validation
+社区化生长，发布确定性 bundle 与 SHA-256 校验；[论文](https://arxiv.org/abs/2608.00267)
+公开，数据集在 [Hugging Face](https://huggingface.co/datasets/LoopsBench/LoopsBench)。
+内置 adapter 覆盖 Oracle、Mini SWE-agent、SWE-agent、OpenHands、Claude Code、
+Cursor、Codex、Qwen Code、Copilot。
+
+**最适合 LoopX 研究的问题**
+
+- 多单元长程实现：跨相连模块规划、实现、测试与恢复，且依赖图显式可见；
+- partial-vs-complete verifier 语义：进展与完成可分别观测；
+- 依赖图感知的工作排序与 stall/replan 研究；
+- Docker/terminal 真实感与可复现的远程/本地执行；
+- 单元测试失败与 verifier 反馈后的恢复，且不把 read/ACK 当作进展。
+
+**主张限制**
+
+- 任务语料仍在增长；每次实验必须固定 upstream revision 与精确任务集；
+- incomplete/partial/complete 分层是 benchmark 合同，不得复制为通用 LoopX
+  生产语义；
+- Docker-backed 终端任务需要干净的网络与容器隔离 attestation；
+- 早期 leaderboard 比较是暂定的，不是饱和参考。
+
+### 3.6 WideSearch
+
+[WideSearch](https://widesearch-seed.github.io/)（ByteDance-Seed/WideSearch）
+评测 agentic broad information-seeking。包含 200 个双语任务（100 英文、100 中文）
+覆盖 18 个行业，要求 agent 搜索、收集并把大规模结构化信息整理成 markdown 表格。
+挑战在于操作规模与完整性，而不是单条事实的认知难度；评测用细粒度 Item F1，
+含 exact-match、number-near、URL-match、date-near 与 LLM-judge 组件。
+[论文](https://arxiv.org/abs/2508.07999)与[数据集](https://huggingface.co/datasets/ByteDance-Seed/WideSearch)
+以 MIT 协议公开，并有 [Harbor adapter](https://github.com/harbor-framework/harbor)
+支持确定性任务生成。
+
+**最适合 LoopX 研究的问题**
+
+- 需要 benchmark toolkit 网络放行策略（`widesearch-permitted-solving`）的
+  网络研究型任务，LoopX integrity reducer 已建模该策略；
+- 长程收集/完整性与幻觉：agent 必须验证规模与完整性，而不只是找到一条事实；
+- 基于证据的验证（citation、URL、日期、数字），可衔接 evidence 与
+  human-attention 研究；
+- 跨 18 个行业的双语（中/英）泛化；
+- 作为"深搜"benchmark 的互补：强调广度与体量。
+
+**主张限制**
+
+- 实时网络收集对时间与环境敏感；每次实验必须固定检索窗口、工具与搜索面；
+- Item F1 与 LLM-judge 指标必须固定到精确合同与 judge model；
+- 外部网络访问保持在 benchmark 原生 `permitted_solving` 策略内，不得泛化为
+  生产网络 authority；
+- 原始网页内容进入 LoopX state 前必须 reduction；benchmark 材料不得作为
+  training、memory 或 skill 输入。
+
+### 3.7 为什么这六个组成一个组合
 
 | 证据维度 | ALE | LHTB | DeepSWE |
 |---|---|---|---|
@@ -188,6 +275,20 @@ cost、output token 与 agent step。
 
 计划必须在各 benchmark 的原生 metric space 中报告，不能把 ALE score、LHTB reward 与
 DeepSWE pass rate 平均成一个 LoopX 数字。
+
+第二组三个 benchmark 为同一计划补充了三个互补 surface：
+
+| 证据维度 | StartupBench | LoopsBench | WideSearch |
+|---|---|---|---|
+| 工作 surface | 多格式专业 artifact | 多单元终端软件 | 大规模网络收集 |
+| 核心挑战 | 交付物质量与格式合规 | 相连单元间的 partial vs complete | 规模上的广度与完整性 |
+| 主要指标 | Weighted rubric / Agent-as-Judge | incomplete/partial/complete verifier 分层 | Item F1 与组件指标 |
+| 长程相关性 | Artifact 组装与一致性 | 依赖图规划与恢复 | 持续的搜索/收集/验证 loop |
+| 网络边界 | 工作流本地 | 容器化终端 | 求解阶段允许外部网络 |
+| 最适合回答的 LoopX 问题 | 控制能否改善经验证的 artifact 交付？ | 多单元工作为何、何时 stall 或恢复？ | 证据门控的控制能否在规模上降低幻觉？ |
+
+六个 benchmark 仍须在各自主语空间报告；StartupBench rubric、LoopsBench verifier
+分层与 WideSearch Item F1 不得互相平均，也不得并入 ALE/LHTB/DeepSWE 的结果。
 
 ## 4. 主张阶梯
 
@@ -567,6 +668,54 @@ DeepSWE 也是第 7.1 节 benchmark capability 的第一孵化环境。pilot 应
 经过测试的 seam；不能整体保留 legacy benchmark 目录，也不能在真实 call site 提出需求前
 先重写整个目录。
 
+### 9.4 StartupBench
+
+固定 upstream revision、任务集与 rubric 合同后才新增 adapter。第一份 package 应包含：
+
+1. deterministic public task sampling 与固定 workspace/参考材料；
+2. 在 license-compatible slice 上做 native no-LoopX reproduction，并与公开
+   rubric score 对齐 outcome parity；
+3. passive LoopX trajectory/result reduction，不把任务场景、参考答案或生成
+   artifact 留在 reusable state；
+4. 一个带 preregistered hypothesis 的 governed delivery/recovery experiment；
+5. authority-parity audit，把 Agent-as-Judge 框架视为 benchmark 原生证据，
+   而不是生产 oracle。
+
+StartupBench 材料必须留在 LoopX 公共 state、memory 与 skills 之外；只有紧凑的
+qualification receipt 与 artifact 级 evidence pointer 可以进入控制平面。
+
+### 9.5 LoopsBench
+
+固定 repository revision、任务集、Docker image 与 verifier 语义后才新增 adapter。
+第一份 package 应包含：
+
+1. oracle smoke 与一次通过内置 adapter 的原生 reproduction；
+2. 在不保留原始 verifier output 的前提下 reduction incomplete/partial/complete
+   verifier outcome；
+3. passive stall/repetition 与依赖图有序工作的 characterization；
+4. 在固定多单元任务上做一个 semantic-replan ablation；
+5. runner-to-adapter conformance 测试，区分 solver、verifier 与 infrastructure
+   失败，并做干净的网络/容器隔离 attestation。
+
+verifier 分层是 benchmark 合同：LoopX 应把它当作该 benchmark 提供的 evidence，
+不得泛化为生产 completion 语义。
+
+### 9.6 WideSearch
+
+固定 dataset revision、检索窗口与 judge model 后才新增 adapter。第一份 package 应包含：
+
+1. 通过 Harbor adapter 做 deterministic task generation，固定 split 与 judge
+   configuration；
+2. 在 public slice 上做 native no-LoopX reproduction，Item F1 parity；
+3. passive LoopX reduction，在 `widesearch-permitted-solving` 策略下记录
+   loopback/external network evidence，且不削弱 fail-closed 的受限资源拒绝；
+4. 一个带 preregistered hypothesis 的 governed evidence-gating experiment
+   （citation/URL/date/number 验证）；
+5. anti-cheating audit，覆盖检索窗口固定与原始网页内容对 reusable state 的污染。
+
+外部网络访问是 benchmark 原生 `permitted_solving`；不得成为通用生产网络
+authority，也不得绕过任何模式下保持 fail-closed 的受限资源拒绝。
+
 ## 10. 协作合同
 
 benchmark 协作应产生可 review 的 upstream value：
@@ -832,6 +981,7 @@ promotion 或修改 LoopX default。
 | 2026-08-16 | 采用 ALE、LHTB 与 DeepSWE 作为互补初始组合；区分能力论证与机制研究；要求原生 outcome 与 typed treatment integrity。 |
 | 2026-08-16 | 以当前 DeepSWE pilot 驱动 LoopX benchmark capability 设计；legacy code/research 只作为复用候选，并加入结构化反作弊与 authority-parity qualification。 |
 | 2026-08-23 | 增加工程 readiness 阶梯与有界 delivery-slice 规则，将仓库建设与 C0--C4 研究主张分开跟踪。 |
+| 2026-08-25 | 把 StartupBench、LoopsBench 与 WideSearch 加入 benchmark primer 与集成计划，作为第二组互补 trio；每个 benchmark 必须在原生 metric space 报告，且 benchmark 材料不得进入可复用的 LoopX state。 |
 
 ## 18. 参考资料
 
@@ -843,6 +993,16 @@ promotion 或修改 LoopX default。
 - [DeepSWE 项目与 leaderboard](https://deepswe.datacurve.ai/)
 - [DeepSWE 论文](https://arxiv.org/abs/2607.07946)
 - [DeepSWE 运行指南](https://deepswe.datacurve.ai/run)
+- [StartupBench 项目](https://startupbench.github.io/)
+- [StartupBench 论文](https://startupbench.github.io/assets/StartupBench.pdf)
+- [LoopsBench 项目](https://loopsbench.ai/)
+- [LoopsBench 仓库](https://github.com/microsoft/Loopsbench)
+- [LoopsBench 论文](https://arxiv.org/abs/2608.00267)
+- [LoopsBench 数据集](https://huggingface.co/datasets/LoopsBench/LoopsBench)
+- [WideSearch 项目](https://widesearch-seed.github.io/)
+- [WideSearch 仓库](https://github.com/ByteDance-Seed/WideSearch)
+- [WideSearch 论文](https://arxiv.org/abs/2508.07999)
+- [WideSearch 数据集](https://huggingface.co/datasets/ByteDance-Seed/WideSearch)
 - [Benchmark 研究工作区](https://github.com/huangruiteng/loopx/blob/main/benchmark/README.md)
 - [DeepSWE 研究实践](https://github.com/huangruiteng/loopx/blob/main/benchmark/deepswe/README.md)
 - [旧 Benchmark 归档](https://github.com/huangruiteng/loopx/blob/main/deprecate/benchmark-legacy/README.md)

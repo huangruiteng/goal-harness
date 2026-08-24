@@ -216,7 +216,124 @@ with confidence intervals, cost, output tokens, and agent steps.
 - repository-level traces can contain sensitive or high-volume material and
   must be reduced before entering LoopX state.
 
-### 3.4 Why these three are a portfolio
+### 3.4 StartupBench
+
+[StartupBench](https://startupbench.github.io/) benchmarks general-purpose agents
+on market-validated startup workflows. It contains 97 real-world workflow tasks
+across six professional domains (medical & healthcare 21, finance 18, business &
+management 19, legal 16, STEM & computer science 16, education & humanities 7).
+Tasks are derived from funded AI-native startup products, product demos, and
+user interviews around workflows users actually delegate; each task asks the
+agent to search, reason, compose, verify, and deliver multi-format artifacts
+(DOCX, XLSX, PPTX, PDF, Markdown, images, text) under realistic workspace
+constraints.
+
+Scoring is artifact-first: each submission is transformed into evidence views
+and judged against fine-grained weighted rubrics (25.3 rubrics per task on
+average) rather than answer similarity. The published Agent-as-Judge framework
+reports 92% human agreement, a pass threshold of 90, and a top pass@1 of 31.27
+with the best average score 73.67 across nine frontier agents, leaving most
+realistic workflow deliverables short of production-ready completion.
+
+**Best fit for LoopX research**
+
+- long-horizon artifact delivery and multi-format output verification;
+- professional-domain workflow delegation beyond software (finance, legal,
+  medical, business) and whether one control plane transfers there;
+- deliverable quality and self-verification hallucination: agents claiming
+  requirements are met while rubric inspection fails;
+- human-attention and authority studies where deliverables are externally
+  judged;
+- evidence-linked Todo/settlement around artifact completion and format
+  compliance.
+
+**Limits on claims**
+
+- task scenarios, reference materials, and generated artifacts must not enter
+  LoopX public state or the reusable training/memory surface;
+- Agent-as-Judge is benchmark-native evaluation, not a general production
+  oracle or authority;
+- a rubric score does not by itself prove lower maintenance cost or broad
+  professional transfer without an independent audit;
+- leaderboard results are model/scaffold specific; changing the harness is
+  its own experiment.
+
+### 3.5 LoopsBench
+
+[LoopsBench](https://loopsbench.ai/) (microsoft/Loopsbench) is a benchmark and
+harness for long-horizon software tasks in terminal environments. Each task
+packages an agent-visible workspace, unit-level requirements, module dependency
+graphs, and Docker-backed execution with verifiers that distinguish incomplete,
+partial, and complete solutions. The corpus is community-grown through
+GitHub-native task proposal and validation, with deterministic task bundles and
+SHA-256 checksums; the paper is
+[arXiv 2608.00267](https://arxiv.org/abs/2608.00267) and the dataset is hosted
+on [Hugging Face](https://huggingface.co/datasets/LoopsBench/LoopsBench).
+Built-in adapters cover Oracle, Mini SWE-agent, SWE-agent, OpenHands, Claude
+Code, Cursor, Codex, Qwen Code, and Copilot.
+
+**Best fit for LoopX research**
+
+- multi-unit long-horizon implementation: plan, implement, test, and recover
+  across connected modules with explicit dependency graphs;
+- partial-vs-complete verifier semantics: making progress is observable
+  separately from finishing;
+- dependency-graph-aware work ordering and stall/replan studies;
+- Docker/terminal realism and reproducible remote or local execution;
+- recovery after failed unit tests and verifier feedback without treating a
+  read or ACK as progress.
+
+**Limits on claims**
+
+- the task corpus is still growing; every experiment must pin the upstream
+  revision and exact task set;
+- the incomplete/partial/complete verifier tiers are a benchmark contract and
+  must not be copied into generic LoopX production semantics;
+- Docker-backed terminal tasks require clean network and container isolation
+  attestation;
+- early-stage leaderboard comparisons are provisional, not a saturated
+  reference.
+
+### 3.6 WideSearch
+
+[WideSearch](https://widesearch-seed.github.io/) (ByteDance-Seed/WideSearch)
+benchmarks agentic broad information-seeking. It contains 200 bilingual tasks
+(100 English, 100 Chinese) across 18 industries that require the agent to
+search, collect, and organize large-scale structured information into markdown
+tables. The challenge is operational scale and completeness rather than
+single-fact cognitive difficulty; evaluation uses fine-grained Item F1 with
+exact-match, number-near, URL-match, date-near, and LLM-judge components. The
+[paper](https://arxiv.org/abs/2508.07999) and
+[dataset](https://huggingface.co/datasets/ByteDance-Seed/WideSearch) are public
+under MIT, and a [Harbor adapter](https://github.com/harbor-framework/harbor)
+is available for deterministic task generation.
+
+**Best fit for LoopX research**
+
+- web-research workloads that need the benchmark toolkit's network-permitted
+  solving policy (`widesearch-permitted-solving`), which the LoopX integrity
+  reducer already models;
+- long-horizon collection/completeness versus hallucination: agents must
+  verify scale and completeness, not only find one fact;
+- evidence-based verification (citations, URLs, dates, numbers) that connects
+  to evidence and human-attention research;
+- bilingual (English/Chinese) generalization across 18 industries;
+- a complement to "deep" search benchmarks by stressing breadth and volume.
+
+**Limits on claims**
+
+- live web collection is time- and environment-sensitive; pin the retrieval
+  window, tools, and search surface per experiment;
+- Item F1 and LLM-judge metrics must be pinned to their exact contract and
+  judge model;
+- external network access stays under the benchmark-native
+  `permitted_solving` policy and must never generalize into a production
+  network authority;
+- raw web content and retrieved pages must be reduced before entering LoopX
+  state; benchmark material must not be reused as training, memory, or skill
+  input.
+
+### 3.7 Why these six form a portfolio
 
 | Evidence dimension | ALE | LHTB | DeepSWE |
 |---|---|---|---|
@@ -230,6 +347,21 @@ with confidence intervals, cost, output tokens, and agent steps.
 
 The program must report each benchmark in its native metric space. It must not
 average ALE score, LHTB reward, and DeepSWE pass rate into one LoopX number.
+
+The second trio adds three complementary surfaces to the same program:
+
+| Evidence dimension | StartupBench | LoopsBench | WideSearch |
+|---|---|---|---|
+| Work surface | Multi-format professional artifacts | Multi-unit terminal software | Large-scale web collection |
+| Core challenge | Deliverable quality and format compliance | Partial vs. complete across connected units | Breadth and completeness at scale |
+| Primary metric | Weighted rubric / Agent-as-Judge | Incomplete/partial/complete verifier tiers | Item F1 and component metrics |
+| Long-horizon relevance | Artifact assembly and consistency | Dependency-graph planning and recovery | Sustained search/collect/verify loops |
+| Network boundary | Workflow-local | Containerized terminal | External network permitted for solving |
+| Best LoopX question | Does control improve verified artifact delivery? | Why and when does multi-unit work stall or recover? | Does evidence-gated control reduce hallucination at scale? |
+
+The six must still be reported in their native metric spaces; StartupBench
+rubrics, LoopsBench verifier tiers, and WideSearch Item F1 must not be averaged
+into one number or into the ALE/LHTB/DeepSWE results.
 
 ## 4. Claim Ladder
 
@@ -655,6 +787,62 @@ described in Section 7.1. The pilot should extract one cohesive, tested seam at
 a time; it should not preserve the legacy benchmark directory wholesale or
 rewrite it before a real call site demands the change.
 
+### 9.4 StartupBench
+
+Add an adapter only after pinning the upstream revision, task set, and rubric
+contract. The first package should include:
+
+1. deterministic public task sampling and pinned workspace/reference material;
+2. native no-LoopX reproduction on a license-compatible slice with outcome
+   parity against the published rubric scores;
+3. passive LoopX trajectory/result reduction without retaining task scenarios,
+   reference answers, or generated artifacts in reusable state;
+4. one governed delivery or recovery experiment with a preregistered
+   hypothesis;
+5. an authority-parity audit that treats the Agent-as-Judge framework as
+   benchmark-native evidence, not a production oracle.
+
+StartupBench material must stay out of LoopX public state, memory, and skills;
+only compact qualification receipts and artifact-level evidence pointers may
+enter the control plane.
+
+### 9.5 LoopsBench
+
+Add an adapter only after pinning the repository revision, task set, Docker
+images, and verifier semantics. The first package should include:
+
+1. oracle smoke and one native reproduction through the built-in adapters;
+2. reduction of incomplete/partial/complete verifier outcomes without raw
+   verifier output;
+3. passive stall/repetition and dependency-graph-ordered work characterization;
+4. a single semantic-replan ablation on a pinned multi-unit task;
+5. runner-to-adapter conformance tests that distinguish solver, verifier, and
+   infrastructure failure, plus clean network/container isolation attestation.
+
+The verifier tiers are a benchmark contract: LoopX must consume them as
+evidence offered by this benchmark, not generalize them into production
+completion semantics.
+
+### 9.6 WideSearch
+
+Add an adapter only after pinning the dataset revision, retrieval window, and
+judge model. The first package should include:
+
+1. deterministic task generation through the Harbor adapter with pinned split
+   and judge configuration;
+2. native no-LoopX reproduction with Item F1 parity on a public slice;
+3. passive LoopX reduction that records loopback/external network evidence
+   under the `widesearch-permitted-solving` policy without weakening the
+   fail-closed restricted-resource denials;
+4. one governed evidence-gating experiment (citation/URL/date/number
+   verification) with a preregistered hypothesis;
+5. an anti-cheating audit covering retrieval-window pinning and contamination
+   of raw web content into reusable state.
+
+External network access is benchmark-native `permitted_solving`; it must not
+become a general production network authority or bypass the restricted-resource
+denials that stay fail-closed in every mode.
+
 ## 10. Collaboration Contract
 
 Benchmark collaboration should produce reviewable upstream value:
@@ -962,6 +1150,7 @@ This is a living research RFC, not a frozen benchmark snapshot.
 | 2026-08-16 | Adopt ALE, LHTB, and DeepSWE as a complementary initial portfolio; separate capability evidence from mechanism research; require native outcomes and typed treatment integrity. |
 | 2026-08-16 | Make the current DeepSWE pilot the design-driving practice for the LoopX benchmark capability; treat legacy code/research as candidate reuse and add structured anti-cheating and authority-parity qualification. |
 | 2026-08-23 | Add an engineering readiness ladder and bounded delivery-slice rules so repository construction is tracked separately from C0--C4 research claims. |
+| 2026-08-25 | Add StartupBench, LoopsBench, and WideSearch to the benchmark primer and integration plan as a second, complementary trio; require native metrics per benchmark and keep benchmark material out of reusable LoopX state. |
 
 ## 18. References
 
@@ -973,6 +1162,16 @@ This is a living research RFC, not a frozen benchmark snapshot.
 - [DeepSWE project and leaderboard](https://deepswe.datacurve.ai/)
 - [DeepSWE paper](https://arxiv.org/abs/2607.07946)
 - [DeepSWE run guide](https://deepswe.datacurve.ai/run)
+- [StartupBench project](https://startupbench.github.io/)
+- [StartupBench paper](https://startupbench.github.io/assets/StartupBench.pdf)
+- [LoopsBench project](https://loopsbench.ai/)
+- [LoopsBench repository](https://github.com/microsoft/Loopsbench)
+- [LoopsBench paper](https://arxiv.org/abs/2608.00267)
+- [LoopsBench dataset](https://huggingface.co/datasets/LoopsBench/LoopsBench)
+- [WideSearch project](https://widesearch-seed.github.io/)
+- [WideSearch repository](https://github.com/ByteDance-Seed/WideSearch)
+- [WideSearch paper](https://arxiv.org/abs/2508.07999)
+- [WideSearch dataset](https://huggingface.co/datasets/ByteDance-Seed/WideSearch)
 - [Benchmark research workspace](https://github.com/huangruiteng/loopx/blob/main/benchmark/README.md)
 - [DeepSWE research practice](https://github.com/huangruiteng/loopx/blob/main/benchmark/deepswe/README.md)
 - [Legacy benchmark archive](https://github.com/huangruiteng/loopx/blob/main/deprecate/benchmark-legacy/README.md)
