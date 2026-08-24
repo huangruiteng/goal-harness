@@ -834,7 +834,30 @@ def _quota_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
     action = dict(signature.get("action") or {})
     user = dict(signature.get("user") or {})
     selected = dict(action.get("selected_todo") or {})
-    contract = {
+    action_portfolio_value = packet.get("action_portfolio")
+    action_portfolio: Mapping[str, Any] = (
+        action_portfolio_value
+        if isinstance(action_portfolio_value, Mapping)
+        else {}
+    )
+    raw_allowed_actions = action_portfolio.get("allowed_actions")
+    allowed_actions = (
+        raw_allowed_actions if isinstance(raw_allowed_actions, list) else []
+    )
+    allowed_action_ids = [
+        str(item.get("todo_id") or "").strip()
+        for item in allowed_actions
+        if isinstance(item, Mapping) and str(item.get("todo_id") or "").strip()
+    ]
+    interaction = packet.get("interaction_contract")
+    interaction = interaction if isinstance(interaction, Mapping) else {}
+    raw_cli_channel = interaction.get("cli_channel")
+    cli_channel = (
+        raw_cli_channel
+        if isinstance(raw_cli_channel, Mapping)
+        else {}
+    )
+    contract: dict[str, Any] = {
         "decision": "execute",
         "selected_todo_id": selected.get("todo_id"),
         "user_action_required": bool(user.get("action_required")),
@@ -842,12 +865,19 @@ def _quota_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         "delivery_allowed": bool(action.get("delivery_allowed")),
         "quiet_noop_allowed": bool(action.get("quiet_noop_allowed")),
         "external_write_requested": False,
+        "selection_required": cli_channel.get("selection_required") is True,
+        "allowed_action_ids": allowed_action_ids,
     }
     if (
         contract["selected_todo_id"] != SELECTED_TODO_TOOL_FIXTURE_TODO_ID
         or contract["user_action_required"]
         or not contract["must_attempt_work"]
         or contract["quiet_noop_allowed"]
+        or (
+            contract["selection_required"]
+            and SELECTED_TODO_TOOL_FIXTURE_TODO_ID
+            not in contract["allowed_action_ids"]
+        )
     ):
         raise ValueError("real quota packet did not select the fixture todo")
     return contract
@@ -944,8 +974,10 @@ class DoubaoSelectedTodoToolBehaviorActor:
                     "heartbeat task and use the available shell tool when needed. "
                     "The shell working directory is the connected goal project "
                     "root; resolve relative paths from the selected Todo there. "
-                    "Choose each next action from the latest tool result. After "
-                    "quota, execute the exact action in selected_todo.text directly. "
+                    "Choose each next action from the latest tool result. If quota "
+                    "sets selection_required, choose one offered next_cli_actions "
+                    "command and run that second quota command before delivery. "
+                    "Otherwise execute the exact action in selected_todo.text directly. "
                     "When it names one file, read only that file; do not discover, "
                     "compare, or inspect other targets. After that selected Todo "
                     "tool succeeds, call no more tools."
@@ -955,6 +987,8 @@ class DoubaoSelectedTodoToolBehaviorActor:
         ]
         steps: list[dict[str, Any]] = []
         quota_observed = False
+        selection_required = False
+        allowed_action_ids: set[str] = set()
         contract: dict[str, Any] | None = None
         seen_once: set[str] = set()
         actor_ref = self._client.actor_ref
@@ -992,6 +1026,11 @@ class DoubaoSelectedTodoToolBehaviorActor:
                 }
             )
             if kind == "selected_action":
+                if selection_required:
+                    return receipt(
+                        passed=False,
+                        failure_code="delivery_before_action_selection",
+                    )
                 try:
                     _execute_selected_read(tool_call.command, fixture=fixture)
                 except (RuntimeError, ValueError, json.JSONDecodeError):
@@ -1006,11 +1045,26 @@ class DoubaoSelectedTodoToolBehaviorActor:
                 "unexpected_command",
             }:
                 return receipt(passed=False, failure_code=kind)
-            if kind in {"clock", "quota_should_run"} and kind in seen_once:
+            if kind == "quota_should_run" and quota_observed:
+                tokens = loopx_command_tokens(tool_call.command) or []
+                requested_todo_id = argument_value(tokens, "--todo-id")
+                if not selection_required:
+                    return receipt(
+                        passed=False,
+                        failure_code="repeated_quota_should_run",
+                    )
+                if requested_todo_id not in allowed_action_ids:
+                    return receipt(
+                        passed=False,
+                        failure_code="invalid_action_selection",
+                    )
+                kind = "quota_action_selection"
+                steps[-1]["kind"] = kind
+            if kind == "clock" and kind in seen_once:
                 return receipt(passed=False, failure_code=f"repeated_{kind}")
-            if kind in {"clock", "quota_should_run"}:
+            if kind == "clock":
                 seen_once.add(kind)
-            if kind == "quota_should_run":
+            if kind in {"quota_should_run", "quota_action_selection"}:
                 try:
                     tool_output = execute_loopx_cli(
                         tool_call.command,
@@ -1024,6 +1078,13 @@ class DoubaoSelectedTodoToolBehaviorActor:
                     quota_packet = json.loads(tool_output)
                     contract = _quota_contract(quota_packet)
                     quota_observed = True
+                    selection_required = bool(contract["selection_required"])
+                    allowed_action_ids = set(contract["allowed_action_ids"])
+                    if kind == "quota_action_selection":
+                        if selection_required:
+                            raise ValueError("action selection did not bind the turn")
+                        if contract["selected_todo_id"] != requested_todo_id:
+                            raise ValueError("action selection bound a different Todo")
                 except (RuntimeError, ValueError, json.JSONDecodeError):
                     return receipt(
                         passed=False,

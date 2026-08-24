@@ -513,6 +513,26 @@ def test_quota_command_request_validation_preserves_exact_diagnostics(
     assert str(exc_info.value) == expected
 
 
+def test_quota_action_selection_requires_turn_identity() -> None:
+    args = build_parser().parse_args(
+        [
+            "quota",
+            "should-run",
+            "--goal-id",
+            "goal",
+            "--todo-id",
+            "todo_candidate001",
+        ]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_quota_command_request(args)
+
+    assert str(exc_info.value) == (
+        "`loopx quota should-run --todo-id` requires --turn-instance-id"
+    )
+
+
 @pytest.mark.parametrize(
     ("extra_args", "expected"),
     [

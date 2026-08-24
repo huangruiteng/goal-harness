@@ -263,9 +263,27 @@ def test_quota_action_portfolio_schema_migration_has_same_bounded_budget() -> No
     ]
 
 
-def test_unknown_action_portfolio_schema_migration_fails_closed() -> None:
+def test_quota_action_portfolio_v1_schema_migration_is_declared() -> None:
     candidate = _row(
         action_portfolio_schema_versions=["quota_action_portfolio_v1"],
+    )
+    base = _row(
+        action_portfolio_schema_versions=["quota_action_portfolio_v0"],
+    )
+
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+
+    assert result["ok"] is True
+    assert result["review_required"] is True
+    assert result["rows"][0]["review_signals"] == [
+        "action_portfolio schema migrated: quota_action_portfolio_v0 -> "
+        "quota_action_portfolio_v1"
+    ]
+
+
+def test_unknown_action_portfolio_schema_migration_fails_closed() -> None:
+    candidate = _row(
+        action_portfolio_schema_versions=["quota_action_portfolio_v2"],
     )
 
     result = compare_cli_output_receipts(_receipt(_row()), _receipt(candidate))

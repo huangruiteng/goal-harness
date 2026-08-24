@@ -73,8 +73,10 @@ def test_real_tool_loop_executes_action_selected_by_real_quota(
                 "task and use the available shell tool when needed. The shell "
                 "working directory is the connected goal project root; resolve "
                 "relative paths from the selected Todo there. Choose each next "
-                "action from the latest tool result. After quota, execute the exact "
-                "action in selected_todo.text directly. When it names one file, "
+                "action from the latest tool result. If quota sets "
+                "selection_required, choose one offered next_cli_actions command "
+                "and run that second quota command before delivery. Otherwise "
+                "execute the exact action in selected_todo.text directly. When it names one file, "
                 "read only that file; do not discover, compare, or inspect other "
                 "targets. After that selected Todo tool succeeds, call no more "
                 "tools."
@@ -86,9 +88,9 @@ def test_real_tool_loop_executes_action_selected_by_real_quota(
     assert first["tool_choice"] == "auto"
     assert "response_format" not in first
     assert "todo_portfolio001" not in first["messages"][1]["content"]
-    assert (
-        "execute interaction_contract.cli_channel.next_cli_actions[0] verbatim"
-    ) in first["messages"][1]["content"]
+    assert "selection_required -> choose next_cli_actions" in first["messages"][1][
+        "content"
+    ]
 
     quota_result = json.loads(requests[2]["messages"][-1]["content"])
     assert quota_result["selected_todo"]["todo_id"] == "todo_portfolio001"
@@ -102,6 +104,12 @@ def test_model_resumes_in_flight_todo_on_the_next_heartbeat(tmp_path: Path) -> N
     )
     commands = [
         fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-002"),
+        (
+            fixture.quota_guard_command.replace(
+                '"${LOOPX_TURN:?}"', "turn-002"
+            )
+            + " --todo-id todo_portfolio001"
+        ),
         "cat fixture/selected-lane.json",
     ]
     requests: list[dict[str, Any]] = []
@@ -125,17 +133,65 @@ def test_model_resumes_in_flight_todo_on_the_next_heartbeat(tmp_path: Path) -> N
     assert receipt["qualification_passed"] is True, receipt
     assert receipt["observed_tool_sequence"] == [
         "quota_should_run",
+        "quota_action_selection",
         "selected_action",
     ]
-    quota_result = json.loads(requests[1]["messages"][-1]["content"])
+    first_quota_result = json.loads(requests[1]["messages"][-1]["content"])
+    assert first_quota_result["interaction_contract"]["cli_channel"][
+        "selection_required"
+    ] is True
+    quota_result = json.loads(requests[2]["messages"][-1]["content"])
     assert quota_result["selected_todo"]["todo_id"] == "todo_portfolio001"
-    assert quota_result["selected_todo"]["selected_by"] == "in_flight_todo"
-    assert quota_result["selected_todo"]["delivery_boundary"] == (
-        "in_flight_continuation"
+    assert quota_result["selected_todo"]["selection_binding"] == (
+        "heartbeat_receipt"
     )
-    assert "--delivery-boundary in_flight_continuation" in (
-        quota_result["interaction_contract"]["cli_channel"]["next_cli_actions"][0]
+    assert "action_portfolio" not in quota_result
+    assert quota_result["interaction_contract"]["agent_channel"].get(
+        "selection_required"
+    ) is None
+    assert quota_result["interaction_contract"]["agent_channel"][
+        "delivery_allowed"
+    ] is True
+    assert quota_result["heartbeat_receipt"]["status"] == "upgraded"
+    assert quota_result["interaction_contract"]["cli_channel"][
+        "settlement_plan"
+    ]["identity"]["todo_id"] == "todo_portfolio001"
+
+
+def test_tool_loop_rejects_delivery_before_required_action_selection(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(
+        tmp_path / "oracle",
+        prior_in_flight_progress=True,
     )
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-003"),
+        "cat fixture/selected-lane.json",
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoSelectedTodoToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="selected-todo-selection-required-003",
+        fixture_root=tmp_path / "actor",
+        prior_in_flight_progress=True,
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "delivery_before_action_selection"
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "selected_action",
+    ]
 
 
 def test_tool_loop_rejects_selected_action_before_quota(tmp_path: Path) -> None:

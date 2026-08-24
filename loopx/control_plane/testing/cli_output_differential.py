@@ -15,6 +15,7 @@ CLI_OUTPUT_PROBE_SCHEMA_VERSION = "loopx_cli_output_probe_v0"
 CLI_OUTPUT_FIXTURE_CONTRACT_VERSION = "loopx_cli_output_public_fixture_v0"
 CLI_OUTPUT_DIFFERENTIAL_SCHEMA_VERSION = "loopx_cli_output_differential_v0"
 ACTION_PORTFOLIO_SCHEMA_VERSION_V0 = "quota_action_portfolio_v0"
+ACTION_PORTFOLIO_SCHEMA_VERSION_V1 = "quota_action_portfolio_v1"
 
 Metric = Literal["chars", "utf8_bytes", "lines", "compact_payload_chars"]
 
@@ -174,10 +175,19 @@ def _action_portfolio_schema_migration(
 ) -> str | None:
     base_versions = base.get("action_portfolio_schema_versions")
     candidate_versions = candidate.get("action_portfolio_schema_versions")
-    if base_versions == [] and candidate_versions == [
-        ACTION_PORTFOLIO_SCHEMA_VERSION_V0
-    ]:
-        return f"none -> {ACTION_PORTFOLIO_SCHEMA_VERSION_V0}"
+    allowed_migrations = {
+        ((), (ACTION_PORTFOLIO_SCHEMA_VERSION_V0,)),
+        ((), (ACTION_PORTFOLIO_SCHEMA_VERSION_V1,)),
+        (
+            (ACTION_PORTFOLIO_SCHEMA_VERSION_V0,),
+            (ACTION_PORTFOLIO_SCHEMA_VERSION_V1,),
+        ),
+    }
+    migration = (tuple(base_versions or []), tuple(candidate_versions or []))
+    if migration in allowed_migrations:
+        before = base_versions[0] if base_versions else "none"
+        after = candidate_versions[0] if candidate_versions else "none"
+        return f"{before} -> {after}"
     return None
 
 

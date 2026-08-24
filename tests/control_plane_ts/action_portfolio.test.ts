@@ -17,7 +17,7 @@ function candidate(todoId: string, text: string, priority: string) {
   };
 }
 
-test("action portfolio preserves primary and bounds ordered fallbacks", () => {
+test("action portfolio exposes one recommendation and bounded selectable alternatives", () => {
   const primary = candidate("todo_primary001", "Run the primary slice.", "P0");
   const result = projectQuotaActionPortfolio({
     schema_version: ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION,
@@ -33,16 +33,47 @@ test("action portfolio preserves primary and bounds ordered fallbacks", () => {
     max_fallback_actions: 2,
   });
 
-  assert.equal(result?.schema_version, "quota_action_portfolio_v0");
+  assert.equal(result?.schema_version, "quota_action_portfolio_v1");
   assert.deepEqual(
     (result?.fallback_actions as Array<Record<string, unknown>>).map(
       (item) => item.todo_id,
     ),
     ["todo_fallback001", "todo_fallback002"],
   );
+  assert.deepEqual(result?.selection_policy, {
+    decision_owner: "agent",
+    mode: "explicit_turn_binding",
+    recommendation_role: "default_not_binding",
+    requires_explicit_turn_binding: true,
+    direct_delivery_before_selection: false,
+    max_alternative_actions: 2,
+  });
+  assert.deepEqual(result?.allowed_actions, [
+    {
+      todo_id: "todo_primary001",
+      text: "Run the primary slice.",
+      priority: "P0",
+      claimed_by: "codex-main",
+      selection_role: "recommended",
+    },
+    {
+      todo_id: "todo_fallback001",
+      text: "Run fallback one.",
+      priority: "P1",
+      claimed_by: "codex-main",
+      selection_role: "alternative",
+    },
+    {
+      todo_id: "todo_fallback002",
+      text: "Run fallback two.",
+      priority: "P2",
+      claimed_by: "codex-main",
+      selection_role: "alternative",
+    },
+  ]);
   assert.deepEqual(result?.fallback_policy, {
-    trigger: "primary_unavailable_at_execution",
-    selection: "first_still_runnable_in_order",
+    trigger: "explicit_agent_selection_after_steering_audit",
+    selection: "bind_selected_todo_then_rerun_quota",
     preserve_primary_blocker: true,
     max_fallback_actions: 2,
   });
@@ -69,6 +100,11 @@ test("future or blocked higher priority work keeps the portfolio visible", () =>
     "scheduled_for_future",
   );
   assert.deepEqual(result?.fallback_actions, []);
+  assert.equal(
+    (result?.selection_policy as Record<string, unknown>)
+      .requires_explicit_turn_binding,
+    false,
+  );
 });
 
 test("a single primary needs no redundant portfolio", () => {

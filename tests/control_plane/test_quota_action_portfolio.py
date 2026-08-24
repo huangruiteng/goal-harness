@@ -62,11 +62,12 @@ def _legacy_future_primary_status() -> dict:
     )
 
 
-def test_sticky_primary_exposes_bounded_fallback_on_every_hot_path() -> None:
+def test_sticky_primary_exposes_bounded_agent_selection_on_every_hot_path() -> None:
     packet = build_quota_should_run(
         _legacy_future_primary_status(),
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
+        turn_instance_id="turn-portfolio-001",
     )
 
     assert packet["selected_todo"]["todo_id"] == PRIMARY_ID
@@ -75,12 +76,41 @@ def test_sticky_primary_exposes_bounded_fallback_on_every_hot_path() -> None:
     assert [item["todo_id"] for item in portfolio["fallback_actions"]] == [
         FALLBACK_ID
     ]
+    assert portfolio["selection_policy"] == {
+        "decision_owner": "agent",
+        "mode": "explicit_turn_binding",
+        "recommendation_role": "default_not_binding",
+        "requires_explicit_turn_binding": True,
+        "direct_delivery_before_selection": False,
+        "max_alternative_actions": 2,
+    }
+    assert [item["todo_id"] for item in portfolio["allowed_actions"]] == [
+        PRIMARY_ID,
+        FALLBACK_ID,
+    ]
     assert portfolio["fallback_policy"]["trigger"] == (
-        "primary_unavailable_at_execution"
+        "explicit_agent_selection_after_steering_audit"
     )
     assert packet["interaction_contract"]["agent_channel"][
         "action_portfolio_ref"
     ] == "$.action_portfolio"
+    assert packet["interaction_contract"]["agent_channel"][
+        "selection_required"
+    ] is True
+    assert packet["interaction_contract"]["agent_channel"][
+        "delivery_allowed"
+    ] is False
+    cli_channel = packet["interaction_contract"]["cli_channel"]
+    assert cli_channel["selection_required"] is True
+    assert cli_channel["spend_after_validation"] is False
+    assert len(cli_channel["next_cli_actions"]) == 2
+    assert f"--todo-id {PRIMARY_ID}" in cli_channel["next_cli_actions"][0]
+    assert f"--todo-id {FALLBACK_ID}" in cli_channel["next_cli_actions"][1]
+    assert all(
+        "--turn-instance-id turn-portfolio-001" in command
+        for command in cli_channel["next_cli_actions"]
+    )
+    assert "settlement_plan" not in cli_channel
 
     compact = compact_quota_should_run_cli_payload(packet)
     assert compact["action_portfolio"] == portfolio
