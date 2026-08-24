@@ -714,8 +714,9 @@ flowchart TD
   M -->|"bridge"| P["repair_bridge"]
   M -->|"owner-held"| U["ask_owner with concrete capability ask"]
   M -->|"unsupported"| S["skip without spend"]
-  R --> A["agent steering audit chooses one runnable todo"]
-  A --> V["validate chosen work"]
+  R --> A["quota recommends one and exposes bounded alternatives"]
+  A --> B["agent steering audit binds one todo with same-turn quota"]
+  B --> V["validate chosen work"]
   V --> W["write back and spend-slot with same available capabilities"]
 ```
 
@@ -1718,7 +1719,8 @@ flowchart TD
   T --> B["claimed lane claimant-balanced truncation"]
   B --> V["visibility lanes: claimed, unclaimed, monitor"]
   S --> Q["quota/capability guard chooses runnable candidate set"]
-  Q --> A["agent steering audit chooses actual todo"]
+  Q --> A["recommendation plus bounded allowed actions"]
+  A --> B["agent steering audit binds actual todo"]
   Q --> N["agent_lane_next_action for --agent-id scoped turns"]
   V --> F["dashboard/frontstage/review packet shows ownership"]
   V --> C{"agent identity present?"}

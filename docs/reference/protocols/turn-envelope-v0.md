@@ -14,8 +14,8 @@ loopx quota should-run --goal-id <goal-id> --agent-id <agent-id> --turn-envelope
 The default `quota should-run` output remains unchanged. The v0 envelope keeps:
 
 - the selected todo, claim, and effective action;
-- the bounded action portfolio when another admitted action can take over after
-  a primary execution failure;
+- the bounded action portfolio when the agent must choose among multiple
+  admitted actions before delivery;
 - concrete user actions and gate reasons;
 - required reads;
 - write scope, approvals, guards, workspace/capability gates, and stop rule;
@@ -40,6 +40,12 @@ migration as a review signal. Its bounded, JSON-only v2 migration budget applies
 only when a v0/v1 baseline moves to v2; ordinary growth limits resume once v2
 is the baseline. A digest change without a supported coverage migration, or a
 v2 portfolio above that one-version budget, still fails closed.
+
+For `quota_action_portfolio_v1`, the envelope carries the recommendation and
+bounded `allowed_actions`, but the recommendation is not a settlement identity.
+When the full interaction contract says `selection_required=true`, the agent
+must choose one projected selection command and rerun quota with that Todo in
+the same turn. The resulting receipt-bound envelope is the delivery contract.
 
 `protocol_action_packet` remains in the full decision/cold path. The envelope
 reconstructs its ordered semantic fields from `action`, `user`, work-lane,
