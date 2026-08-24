@@ -11,6 +11,7 @@ from typing import Any
 from ...extensions.runtime import (
     execute_extension_runtime_binding,
 )
+from ...rollout_event_log import load_rollout_events
 from .core import build_periodic_report_run
 from .extension_envelope import build_openviking_archive_execution_envelope
 from .presets import (
@@ -18,6 +19,7 @@ from .presets import (
     build_periodic_report_preset_activation,
 )
 from .profile import build_periodic_report_activation
+from .runtime_producer import build_periodic_report_runtime_trigger_decision
 from .triggers import build_periodic_report_trigger_decision
 
 PrintPayload = Callable[
@@ -73,6 +75,21 @@ def register_periodic_report_commands(
         "--request-json",
         required=True,
         help="Path to periodic_report_trigger_request_v0 JSON; use '-' for stdin.",
+    )
+    evaluate_runtime = commands.add_parser(
+        "evaluate-runtime-trigger",
+        help="Promote durable rollout events into a periodic-report trigger.",
+    )
+    add_subcommand_format(evaluate_runtime)
+    evaluate_runtime.add_argument(
+        "--request-json",
+        required=True,
+        help="Path to periodic_report_runtime_trigger_request_v0 JSON.",
+    )
+    evaluate_runtime.add_argument(
+        "--rollout-events-jsonl",
+        required=True,
+        help="Durable LoopX rollout-event-log.jsonl to evaluate.",
     )
     inspect_profile = commands.add_parser(
         "inspect-profile",
@@ -298,6 +315,14 @@ def handle_periodic_report_command(
         elif args.periodic_report_command == "evaluate-trigger":
             request = _load_json_object(args.request_json)
             payload = build_periodic_report_trigger_decision(request)
+        elif args.periodic_report_command == "evaluate-runtime-trigger":
+            request = _load_json_object(args.request_json)
+            payload = build_periodic_report_runtime_trigger_decision(
+                request,
+                rollout_events=load_rollout_events(
+                    Path(args.rollout_events_jsonl).expanduser()
+                ),
+            )
         else:
             request = _load_json_object(args.request_json)
             payload = build_periodic_report_run(request)

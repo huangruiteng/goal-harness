@@ -24,10 +24,6 @@ from .bindings import (
     normalize_periodic_report_sink_bindings,
 )
 from .core import build_periodic_report_run
-from .profile import (
-    build_periodic_report_activation,
-    normalize_periodic_report_profile,
-)
 from .presets import (
     PERIODIC_REPORT_PROFILE_PRESET_ALIASES,
     PERIODIC_REPORT_PROFILE_PRESET_IDS,
@@ -35,11 +31,16 @@ from .presets import (
     build_periodic_report_preset_activation,
     resolve_periodic_report_profile_preset,
 )
+from .profile import (
+    build_periodic_report_activation,
+    normalize_periodic_report_profile,
+)
 from .project_progress import (
     PROJECT_PROGRESS_PROJECTION_SCHEMA,
     build_project_progress_periodic_report_source,
     project_progress_periodic_report_source_adapter,
 )
+from .runtime_producer import build_periodic_report_runtime_trigger_decision
 from .triggers import (
     build_periodic_report_trigger_decision,
     normalize_periodic_report_trigger_policy,
@@ -65,6 +66,7 @@ __all__ = [
     "build_project_progress_periodic_report_source",
     "build_periodic_report_archive_bundle",
     "build_periodic_report_run",
+    "build_periodic_report_runtime_trigger_decision",
     "build_periodic_report_source_result",
     "build_periodic_report_trigger_decision",
     "normalize_periodic_report_profile",

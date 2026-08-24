@@ -326,6 +326,39 @@ def _normalize_trigger_receipt(raw: object) -> dict[str, Any] | None:
             maximum=31 * 24 * 60 * 60,
         ),
     }
+    if raw_policy.get("aggregation") is not None:
+        raw_aggregation = _object(
+            raw_policy.get("aggregation"),
+            "trigger_receipt.trigger_policy.aggregation",
+        )
+        aggregation: dict[str, Any] = {
+            "window_seconds": _integer(
+                raw_aggregation.get("window_seconds"),
+                "trigger_receipt.trigger_policy.aggregation.window_seconds",
+                minimum=1,
+                maximum=31 * 24 * 60 * 60,
+            ),
+            "promote_replan": _boolean(
+                raw_aggregation.get("promote_replan"),
+                "trigger_receipt.trigger_policy.aggregation.promote_replan",
+            ),
+        }
+        if raw_aggregation.get("todo_completed_threshold") is not None:
+            aggregation["todo_completed_threshold"] = _integer(
+                raw_aggregation.get("todo_completed_threshold"),
+                "trigger_receipt.trigger_policy.aggregation.todo_completed_threshold",
+                minimum=1,
+                maximum=64,
+            )
+        if (
+            "todo_completed_threshold" not in aggregation
+            and not aggregation["promote_replan"]
+        ):
+            raise ValueError(
+                "trigger_receipt.trigger_policy.aggregation must enable "
+                "a todo threshold or replan promotion"
+            )
+        trigger_policy["aggregation"] = aggregation
     expected_report_key = _digest(
         {
             "profile": profile,

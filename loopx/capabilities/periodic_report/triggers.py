@@ -94,7 +94,7 @@ def _normalize_policy(raw: object) -> dict[str, Any]:
             enabled.append(kind)
     if not enabled:
         raise ValueError("trigger_policy.enabled_kinds must not be empty")
-    return {
+    normalized: dict[str, Any] = {
         "enabled_kinds": sorted(enabled),
         "minimum_interval_seconds": _integer(
             policy.get("minimum_interval_seconds", 0),
@@ -102,6 +102,44 @@ def _normalize_policy(raw: object) -> dict[str, Any]:
             maximum=31 * 24 * 60 * 60,
         ),
     }
+    if policy.get("aggregation") is not None:
+        aggregation = _object(policy.get("aggregation"), "trigger_policy.aggregation")
+        _reject_unknown_facts(
+            aggregation,
+            allowed={
+                "promote_replan",
+                "todo_completed_threshold",
+                "window_seconds",
+            },
+            label="trigger_policy.aggregation",
+        )
+        threshold = aggregation.get("todo_completed_threshold")
+        promote_replan = _boolean(
+            aggregation.get("promote_replan", False),
+            "trigger_policy.aggregation.promote_replan",
+        )
+        normalized_aggregation: dict[str, Any] = {
+            "window_seconds": _integer(
+                aggregation.get("window_seconds", 7 * 24 * 60 * 60),
+                "trigger_policy.aggregation.window_seconds",
+                minimum=1,
+                maximum=31 * 24 * 60 * 60,
+            ),
+            "promote_replan": promote_replan,
+        }
+        if threshold is not None:
+            normalized_aggregation["todo_completed_threshold"] = _integer(
+                threshold,
+                "trigger_policy.aggregation.todo_completed_threshold",
+                minimum=1,
+                maximum=64,
+            )
+        if threshold is None and not promote_replan:
+            raise ValueError(
+                "trigger_policy.aggregation must enable a todo threshold or replan promotion"
+            )
+        normalized["aggregation"] = normalized_aggregation
+    return normalized
 
 
 def normalize_periodic_report_trigger_policy(raw: object) -> dict[str, Any]:
