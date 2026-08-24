@@ -42,6 +42,12 @@ test("Todo-bound replan keeps semantic obligation outside settlement identity", 
 
 test("Todo-less replan binds the semantic obligation directly", () => {
   const contract = projectReplanSettlementContract(request());
+  assert.equal(contract.settlement_binding.kind, "autonomous_replan");
+  // The binding kind is the discriminant: after this check TypeScript knows
+  // the matching settlement flag and discharge semantics without casts.
+  assert.equal(contract.settlement_binding.cli_argument, "--replan-obligation-id");
+  assert.equal(contract.semantic_obligation.settlement_bound, true);
+  assert.equal(contract.semantic_obligation.discharge, "direct_settlement");
   assert.deepEqual(contract.settlement_binding, {
     kind: "autonomous_replan",
     id: "replan-0000000000000001",

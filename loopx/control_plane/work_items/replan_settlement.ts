@@ -17,6 +17,50 @@ export const TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA =
 export const TODO_LIFECYCLE_REENTRY_SCHEMA =
   "todo_lifecycle_settlement_reentry_v0";
 
+interface TodoSettlementBinding extends JsonObject {
+  kind: "todo";
+  id: string;
+  cli_argument: "--todo-id";
+}
+
+interface DirectReplanSettlementBinding extends JsonObject {
+  kind: "autonomous_replan";
+  id: string;
+  cli_argument: "--replan-obligation-id";
+}
+
+interface TodoBoundSemanticObligation extends JsonObject {
+  kind: "autonomous_replan";
+  id: string;
+  settlement_bound: false;
+  discharge: "todo_bound_writeback";
+}
+
+interface DirectSemanticObligation extends JsonObject {
+  kind: "autonomous_replan";
+  id: string;
+  settlement_bound: true;
+  discharge: "direct_settlement";
+}
+
+interface TodoBoundReplanSettlementContract extends JsonObject {
+  schema_version: typeof REPLAN_SETTLEMENT_CONTRACT_SCHEMA;
+  single_binding_required: true;
+  settlement_binding: TodoSettlementBinding;
+  semantic_obligation: TodoBoundSemanticObligation;
+}
+
+interface DirectReplanSettlementContract extends JsonObject {
+  schema_version: typeof REPLAN_SETTLEMENT_CONTRACT_SCHEMA;
+  single_binding_required: true;
+  settlement_binding: DirectReplanSettlementBinding;
+  semantic_obligation: DirectSemanticObligation;
+}
+
+export type ReplanSettlementContract =
+  | TodoBoundReplanSettlementContract
+  | DirectReplanSettlementContract;
+
 function shellArgument(value: string): string {
   if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
   return `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -116,7 +160,9 @@ export function projectTodoLifecycleSettlementReentry(value: unknown): JsonObjec
   };
 }
 
-export function projectReplanSettlementContract(value: unknown): JsonObject {
+export function projectReplanSettlementContract(
+  value: unknown,
+): ReplanSettlementContract {
   const request = requireJsonObject(value, "work_item.replan_settlement params");
   if (request.schema_version !== REPLAN_SETTLEMENT_REQUEST_SCHEMA) {
     throw new Error("Replan settlement request schema mismatch");
@@ -129,29 +175,37 @@ export function projectReplanSettlementContract(value: unknown): JsonObject {
     request.semantic_replan_obligation_id,
     "semantic_replan_obligation_id",
   );
-  const semanticObligationSettlementBound = selectedTodoId === null;
-  const settlementBindingKind = semanticObligationSettlementBound
-    ? "autonomous_replan"
-    : "todo";
-  const settlementBindingId = selectedTodoId ?? semanticObligationId;
+  if (selectedTodoId !== null) {
+    return {
+      schema_version: REPLAN_SETTLEMENT_CONTRACT_SCHEMA,
+      single_binding_required: true,
+      settlement_binding: {
+        kind: "todo",
+        id: selectedTodoId,
+        cli_argument: "--todo-id",
+      },
+      semantic_obligation: {
+        kind: "autonomous_replan",
+        id: semanticObligationId,
+        settlement_bound: false,
+        discharge: "todo_bound_writeback",
+      },
+    };
+  }
 
   return {
     schema_version: REPLAN_SETTLEMENT_CONTRACT_SCHEMA,
     single_binding_required: true,
     settlement_binding: {
-      kind: settlementBindingKind,
-      id: settlementBindingId,
-      cli_argument: semanticObligationSettlementBound
-        ? "--replan-obligation-id"
-        : "--todo-id",
+      kind: "autonomous_replan",
+      id: semanticObligationId,
+      cli_argument: "--replan-obligation-id",
     },
     semantic_obligation: {
       kind: "autonomous_replan",
       id: semanticObligationId,
-      settlement_bound: semanticObligationSettlementBound,
-      discharge: semanticObligationSettlementBound
-        ? "direct_settlement"
-        : "todo_bound_writeback",
+      settlement_bound: true,
+      discharge: "direct_settlement",
     },
   };
 }
