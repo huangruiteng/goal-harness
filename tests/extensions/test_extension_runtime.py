@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import argparse
 import ast
-from collections.abc import Callable
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
+from collections.abc import Callable
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,10 +24,18 @@ from loopx.capabilities.semantic_preference.cli import (
 from loopx.capabilities.semantic_preference.contract import provider_doctor, recall
 from loopx.cli import main
 from loopx.extensions.manifest import load_extension_manifest
+from loopx.extensions.openviking_semantic_preference.provider import (
+    register_openviking_provider_arguments,
+)
+from loopx.extensions.readiness import (
+    resolve_runtime_entrypoint,
+    resolved_entrypoint_identity,
+)
 from loopx.extensions.runtime import (
     MAX_EXTENSION_REQUEST_BYTES,
     MAX_EXTENSION_RESPONSE_BYTES,
     disable_extension,
+    doctor_enabled_extensions,
     doctor_installed_extension,
     enable_extension,
     execute_extension_runtime_binding,
@@ -39,9 +48,6 @@ from loopx.extensions.runtime import (
     resolve_extension_runtime_binding,
     rollback_extension,
     run_standalone_extension,
-)
-from loopx.extensions.openviking_semantic_preference.provider import (
-    register_openviking_provider_arguments,
 )
 
 
@@ -526,6 +532,60 @@ def test_python_module_runtime_uses_current_interpreter_without_console_script(
             "test-lark-module-extension",
             state_file=state_file,
         )
+
+
+def test_runtime_identity_survives_unchanged_release_root_move(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release_a = tmp_path / "release-a"
+    release_b = tmp_path / "release-b"
+    release_a.mkdir()
+    release_b.mkdir()
+    module_a = release_a / "fixture_provider.py"
+    module_b = release_b / "fixture_provider.py"
+    module_a.write_text("VALUE = 1\n", encoding="utf-8")
+    module_b.write_text(module_a.read_text(encoding="utf-8"), encoding="utf-8")
+    current_origin = module_a
+    monkeypatch.setattr(
+        "loopx.extensions.readiness.importlib.util.find_spec",
+        lambda _module: SimpleNamespace(origin=str(current_origin)),
+    )
+    runtime = {"python_module": "fixture_provider"}
+
+    identity_a = resolve_runtime_entrypoint(runtime)
+    current_origin = module_b
+    identity_b = resolve_runtime_entrypoint(runtime)
+
+    assert identity_a is not None and identity_b is not None
+    assert identity_a.argv_prefix == identity_b.argv_prefix
+    assert identity_a.identity == identity_b.identity
+
+    module_b.write_text("VALUE = 2\n", encoding="utf-8")
+    changed = resolve_runtime_entrypoint(runtime)
+    assert changed is not None
+    assert changed.identity != identity_a.identity
+
+
+def test_executable_identity_is_content_addressed_across_paths(tmp_path: Path) -> None:
+    provider_a = _provider(tmp_path / "release-a-provider")
+    provider_b = tmp_path / "release-b-provider"
+    provider_b.write_bytes(provider_a.read_bytes())
+    provider_b.chmod(0o755)
+
+    identity_a = resolved_entrypoint_identity(str(provider_a))
+    identity_b = resolved_entrypoint_identity(str(provider_b))
+
+    assert identity_a is not None and identity_b is not None
+    assert identity_a[1] == identity_b[1]
+
+    provider_b.write_text(
+        provider_b.read_text(encoding="utf-8") + "# changed\n",
+        encoding="utf-8",
+    )
+    changed = resolved_entrypoint_identity(str(provider_b))
+    assert changed is not None
+    assert changed[1] != identity_a[1]
 
 
 def test_standalone_runtime_does_not_require_a_capability_contract(
@@ -1101,6 +1161,77 @@ def test_failed_executed_doctor_clears_stale_readiness_proof(
         )
 
 
+def test_enabled_extension_doctor_batch_migrates_stale_identity(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = _manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        version="1.0.0",
+    )
+    state_file = tmp_path / "extensions.json"
+    install_extension(manifest, state_file=state_file, execute=True)
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    state["extensions"]["test-semantic-extension"][
+        "doctor_verified_entrypoint_identity"
+    ] = "legacy-release-identity"
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+
+    preview = doctor_enabled_extensions(state_file=state_file)
+    assert preview["ok"] is True
+    assert preview["status"] == "probe_required"
+    assert preview["enabled_count"] == 1
+    assert preview["local_state_write_performed"] is False
+    assert (
+        json.loads(state_file.read_text(encoding="utf-8"))["extensions"][
+            "test-semantic-extension"
+        ]["doctor_verified_entrypoint_identity"]
+        == "legacy-release-identity"
+    )
+
+    repaired = doctor_enabled_extensions(state_file=state_file, execute=True)
+    assert repaired["ok"] is True
+    assert repaired["status"] == "ready"
+    assert repaired["verified_count"] == 1
+    assert repaired["blocked_count"] == 0
+    assert repaired["external_writes_performed"] is False
+    assert (
+        resolve_extension_activation(
+            "test-semantic-extension",
+            state_file=state_file,
+        )["doctor_verified"]
+        is True
+    )
+
+
+def test_enabled_extension_doctor_batch_keeps_failed_provider_closed(
+    tmp_path: Path,
+) -> None:
+    provider = _provider(tmp_path / "provider")
+    manifest = _manifest(
+        tmp_path / "extension.toml",
+        entrypoint=provider,
+        version="1.0.0",
+    )
+    state_file = tmp_path / "extensions.json"
+    install_extension(manifest, state_file=state_file, execute=True)
+    _provider(provider, doctor_exit=2)
+
+    repaired = doctor_enabled_extensions(state_file=state_file, execute=True)
+
+    assert repaired["ok"] is False
+    assert repaired["status"] == "blocked"
+    assert repaired["verified_count"] == 0
+    assert repaired["blocked_count"] == 1
+    assert repaired["extensions"][0]["failure_kind"] == "probe_nonzero_exit"
+    with pytest.raises(ValueError, match="extension doctor .* --execute"):
+        resolve_extension_activation(
+            "test-semantic-extension",
+            state_file=state_file,
+        )
+
+
 def test_executed_doctor_rebinds_revision_only_legacy_proof(tmp_path: Path) -> None:
     provider = _provider(tmp_path / "provider")
     manifest = _manifest(
@@ -1443,6 +1574,26 @@ def test_extension_cli_installs_preinstalled_runtime(
     enabled = json.loads(capsys.readouterr().out)
     assert enabled["enabled"] is True
     assert enabled["doctor"]["verified"] is True
+
+    assert (
+        main(
+            [
+                "--runtime-root",
+                str(runtime_root),
+                "--format",
+                "json",
+                "extension",
+                "doctor",
+                "--all-enabled",
+                "--execute",
+            ]
+        )
+        == 0
+    )
+    batch = json.loads(capsys.readouterr().out)
+    assert batch["schema_version"] == "loopx_extension_doctor_batch_v0"
+    assert batch["status"] == "ready"
+    assert batch["verified_count"] == 1
 
 
 def test_extension_cli_rejects_implements_provider_direct_run(

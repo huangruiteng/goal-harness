@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
 import json
-from pathlib import Path
 import sys
+from collections.abc import Callable
+from pathlib import Path
 
 from ..extensions.bundled import BUNDLED_EXTENSION_IDS, bundled_extension_manifest
 from ..extensions.presentation import publish_extension_projection
-from ..extensions.scaffold import scaffold_extension
 from ..extensions.runtime import (
     MAX_EXTENSION_REQUEST_BYTES,
     default_extension_state_file,
     disable_extension,
+    doctor_enabled_extensions,
     doctor_installed_extension,
     enable_extension,
     extension_status,
@@ -20,7 +20,7 @@ from ..extensions.runtime import (
     rollback_extension,
     run_standalone_extension,
 )
-
+from ..extensions.scaffold import scaffold_extension
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -128,10 +128,21 @@ def register_extension_commands(
     for command in ("enable", "disable", "rollback", "doctor"):
         operation = commands.add_parser(command)
         _add_common(operation, add_subcommand_format)
-        operation.add_argument("extension_id")
+        if command == "doctor":
+            operation.add_argument("extension_id", nargs="?")
+        else:
+            operation.add_argument("extension_id")
         if command != "doctor":
             operation.add_argument("--execute", action="store_true")
         else:
+            operation.add_argument(
+                "--all-enabled",
+                action="store_true",
+                help=(
+                    "Revalidate every enabled extension after an install, update, "
+                    "or rollback."
+                ),
+            )
             operation.add_argument(
                 "--execute",
                 action="store_true",
@@ -253,11 +264,22 @@ def handle_extension_command(
                 execute=args.execute,
             )
         else:
-            payload = doctor_installed_extension(
-                args.extension_id,
-                state_file=state_file,
-                execute=args.execute,
-            )
+            if bool(args.extension_id) == bool(args.all_enabled):
+                raise ValueError(
+                    "extension doctor requires exactly one extension_id or "
+                    "--all-enabled"
+                )
+            if args.all_enabled:
+                payload = doctor_enabled_extensions(
+                    state_file=state_file,
+                    execute=args.execute,
+                )
+            else:
+                payload = doctor_installed_extension(
+                    args.extension_id,
+                    state_file=state_file,
+                    execute=args.execute,
+                )
     except ValueError as exc:
         payload = {
             "ok": False,

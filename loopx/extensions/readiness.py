@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
 import hashlib
 import importlib.util
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-
 EXTENSION_DOCTOR_SCHEMA_VERSION = "loopx_extension_doctor_v0"
+RUNTIME_ENTRYPOINT_IDENTITY_SCHEMA_VERSION = "loopx_runtime_entrypoint_identity_v1"
 
 
 @dataclass(frozen=True)
@@ -39,11 +39,10 @@ def _file_identity(path: Path, *, executable: bool) -> tuple[Path, str] | None:
     except OSError:
         return None
     identity = {
-        "path": str(path),
-        "device": stat.st_dev,
-        "inode": stat.st_ino,
+        "schema_version": RUNTIME_ENTRYPOINT_IDENTITY_SCHEMA_VERSION,
+        "kind": "file_artifact",
+        "executable": executable,
         "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
         "content_sha256": content_digest,
     }
     serialized = json.dumps(identity, sort_keys=True, separators=(",", ":"))

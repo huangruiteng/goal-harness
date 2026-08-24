@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
-from contextlib import nullcontext
-from copy import deepcopy
 import hashlib
 import json
 import os
+from collections.abc import Iterable, Mapping, Sequence
+from contextlib import nullcontext
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from ..file_lock import exclusive_file_lock
-from .process_runtime import run_capped_process
 from .manifest import load_extension_manifest
+from .process_runtime import run_capped_process
 from .readiness import (
     EXTENSION_DOCTOR_SCHEMA_VERSION,
     ResolvedRuntimeEntrypoint,
@@ -20,12 +20,12 @@ from .readiness import (
     resolve_runtime_entrypoint,
 )
 
-
 EXTENSION_STATE_SCHEMA_VERSION = "loopx_extension_state_v0"
 EXTENSION_OPERATION_SCHEMA_VERSION = "loopx_extension_operation_v0"
 EXTENSION_BINDING_SCHEMA_VERSION = "loopx_extension_runtime_binding_v0"
 EXTENSION_ACTIVATION_SCHEMA_VERSION = "loopx_extension_activation_v0"
 EXTENSION_RUN_SCHEMA_VERSION = "loopx_extension_run_receipt_v0"
+EXTENSION_DOCTOR_BATCH_SCHEMA_VERSION = "loopx_extension_doctor_batch_v0"
 MAX_REVISIONS = 5
 MAX_EXTENSION_REQUEST_BYTES = 1_000_000
 MAX_EXTENSION_RESPONSE_BYTES = 1_000_000
@@ -443,6 +443,57 @@ def doctor_installed_extension(
     return doctor
 
 
+def doctor_enabled_extensions(
+    *,
+    state_file: str | Path,
+    execute: bool = False,
+) -> dict[str, Any]:
+    """Revalidate every enabled extension after a runtime release transition.
+
+    Extension doctors are declared read-only provider probes. Running them as
+    one bounded batch lets installers and rollback paths refresh the runtime
+    identity without weakening the fail-closed activation fence.
+    """
+
+    path = Path(state_file).expanduser()
+    state = _read_state(path)
+    extension_ids = sorted(
+        str(extension_id)
+        for extension_id, entry in state["extensions"].items()
+        if isinstance(entry, Mapping) and entry.get("enabled")
+    )
+    doctors = [
+        doctor_installed_extension(
+            extension_id,
+            state_file=path,
+            execute=execute,
+        )
+        for extension_id in extension_ids
+    ]
+    verified_count = sum(bool(doctor.get("verified")) for doctor in doctors)
+    blocked_count = len(doctors) - verified_count if execute else 0
+    return {
+        "ok": blocked_count == 0,
+        "schema_version": EXTENSION_DOCTOR_BATCH_SCHEMA_VERSION,
+        "status": (
+            "ready"
+            if execute and blocked_count == 0
+            else "blocked"
+            if execute
+            else "probe_required"
+            if doctors
+            else "ready"
+        ),
+        "execute": execute,
+        "enabled_count": len(doctors),
+        "verified_count": verified_count,
+        "blocked_count": blocked_count,
+        "extensions": doctors,
+        "local_state_write_performed": execute and bool(doctors),
+        "external_writes_performed": False,
+    }
+
+
 def _verified_entrypoint(
     entry: Mapping[str, Any],
 ) -> ResolvedRuntimeEntrypoint | None:
@@ -577,7 +628,10 @@ def _resolved_active_extension(
     active_revision = str(entry.get("active_revision") or "")
     verified_entrypoint = _verified_entrypoint(entry)
     if verified_entrypoint is None:
-        raise ValueError(f"extension `{extension_id}` doctor readiness is stale")
+        raise ValueError(
+            f"extension `{extension_id}` doctor readiness is stale; run "
+            f"`loopx extension doctor {extension_id} --execute`"
+        )
     manifest = _active_manifest(entry)
     return active_revision, verified_entrypoint, manifest
 
