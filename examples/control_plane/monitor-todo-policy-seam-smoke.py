@@ -91,6 +91,10 @@ def main() -> int:
     unscheduled.pop("next_due_at")
     assert_policy_matches_wrappers(unscheduled, due=False, expired=False)
     assert monitor_todo_missing_schedule(unscheduled, now=NOW) is True, unscheduled
+    cadence_only = monitor_item(cadence="30m")
+    cadence_only.pop("next_due_at")
+    assert_policy_matches_wrappers(cadence_only, due=False, expired=False)
+    assert monitor_todo_missing_schedule(cadence_only, now=NOW) is True, cadence_only
     assert monitor_todo_next_due_at({"next_due_at": "2026-01-01T00:00:00"}) == NOW
     assert parse_monitor_counter("3") == 3
     assert parse_monitor_counter("not-a-number") == 0

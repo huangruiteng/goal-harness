@@ -87,6 +87,64 @@ test("transition decisions do not mutate caller input", () => {
   assert.deepEqual(request, before);
 });
 
+test("monitor schedule materializes cadence and preserves explicit due time", () => {
+  const cadence = evaluateSchedulerStateTransition({
+    schema_version: SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,
+    operation: "monitor_schedule",
+    generated_at: "2026-08-25T10:00:00+08:00",
+    cadence: "30 minutes",
+    explicit_next_due_at: null,
+  });
+  assert.deepEqual(cadence, {
+    schema_version: SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA,
+    operation: "monitor_schedule",
+    next_due_at: "2026-08-25T02:30:00Z",
+    schedule_source: "cadence",
+    cadence_seconds: 1800,
+  });
+
+  const explicit = evaluateSchedulerStateTransition({
+    schema_version: SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,
+    operation: "monitor_schedule",
+    generated_at: "ignored-for-explicit-schedule",
+    cadence: "1h",
+    explicit_next_due_at: "2026-08-26T09:00:00+08:00",
+  });
+  assert.equal(explicit.next_due_at, "2026-08-26T09:00:00+08:00");
+  assert.equal(explicit.schedule_source, "explicit");
+  assert.equal(explicit.cadence_seconds, 3600);
+
+  const missing = evaluateSchedulerStateTransition({
+    schema_version: SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,
+    operation: "monitor_schedule",
+    generated_at: "2026-08-25T10:00:00+08:00",
+    cadence: "not-a-cadence",
+  });
+  assert.equal(missing.next_due_at, null);
+  assert.equal(missing.schedule_source, "none");
+});
+
+test("monitor schedule rejects malformed timestamps without wall-clock fallback", () => {
+  assert.throws(
+    () => evaluateSchedulerStateTransition({
+      schema_version: SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,
+      operation: "monitor_schedule",
+      generated_at: "not-a-timestamp",
+      cadence: "30m",
+    }),
+    /generated_at must be an ISO timestamp/,
+  );
+  assert.throws(
+    () => evaluateSchedulerStateTransition({
+      schema_version: SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,
+      operation: "monitor_schedule",
+      generated_at: "2026-08-25T10:00:00Z",
+      explicit_next_due_at: "not-a-timestamp",
+    }),
+    /explicit_next_due_at must be an ISO timestamp/,
+  );
+});
+
 function backoffRequest(extra: Record<string, unknown> = {}) {
   return {
     schema_version: SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,

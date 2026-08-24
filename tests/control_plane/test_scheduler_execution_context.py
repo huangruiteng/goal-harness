@@ -637,22 +637,24 @@ def test_quota_payload_compaction_preserves_earliest_frontier_deadline() -> None
             "deferred_count": 0,
             "monitor_open_items": [
                 {
-                    "todo_id": "todo_unscheduled_monitor_a",
+                        "todo_id": "todo_later_monitor_a",
                     "index": 0,
                     "status": "open",
                     "task_class": "continuous_monitor",
-                    "text": "[P1] Unscheduled monitor A",
-                    "target_key": "unscheduled-monitor-a",
-                    "cadence": "60m",
+                        "text": "[P1] Later monitor A",
+                        "target_key": "later-monitor-a",
+                        "cadence": "60m",
+                        "next_due_at": (now + timedelta(minutes=60)).isoformat(),
                 },
                 {
-                    "todo_id": "todo_unscheduled_monitor_b",
+                        "todo_id": "todo_later_monitor_b",
                     "index": 1,
                     "status": "open",
                     "task_class": "continuous_monitor",
-                    "text": "[P1] Unscheduled monitor B",
-                    "target_key": "unscheduled-monitor-b",
-                    "cadence": "60m",
+                        "text": "[P1] Later monitor B",
+                        "target_key": "later-monitor-b",
+                        "cadence": "60m",
+                        "next_due_at": (now + timedelta(minutes=60)).isoformat(),
                 },
                 {
                     "todo_id": "todo_earliest_monitor",
@@ -697,8 +699,8 @@ def test_quota_payload_compaction_preserves_earliest_frontier_deadline() -> None
     compacted_summary = quota["agent_todo_summary"]
     compacted_monitors = compacted_summary["monitor_open_items"]
     assert [item["todo_id"] for item in compacted_monitors] == [
-        "todo_unscheduled_monitor_a",
-        "todo_unscheduled_monitor_b",
+            "todo_later_monitor_a",
+            "todo_later_monitor_b",
     ]
     assert compacted_summary["frontier_deadline"]["identity"] == (
         "todo_earliest_monitor"

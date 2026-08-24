@@ -196,6 +196,13 @@ def test_monitor_resume_when_is_a_supported_bounded_policy(
         monitor_metadata={"target_key": "public-pr:42", "cadence": "1h"},
     )
     assert bounded["resume_when"] == "pr_merged:owner/repo#42"
+    assert bounded["next_due_at"]
+    persisted = resolve_monitor_todo_item(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=bounded["todo_id"],
+    )
+    assert persisted["next_due_at"] == bounded["next_due_at"]
 
     monitor = _add_monitor(
         registry,
@@ -219,6 +226,46 @@ def test_monitor_resume_when_is_a_supported_bounded_policy(
             "resume_ready": False,
         }
     ) is False
+
+
+def test_todo_add_cli_materializes_cadence_only_monitor_due_time(
+    tmp_path: Path,
+) -> None:
+    registry, runtime, _state = _write_fixture(tmp_path)
+
+    added = run_json_cli(
+        "todo",
+        "add",
+        "--goal-id",
+        GOAL_ID,
+        "--role",
+        "agent",
+        "--text",
+        "Poll a public dependency on cadence.",
+        "--task-class",
+        "continuous_monitor",
+        "--action-kind",
+        "monitor",
+        "--claimed-by",
+        AGENT_ID,
+        "--target-key",
+        "public-dependency:cadence-only",
+        "--cadence",
+        "30m",
+        "--watch-only",
+        registry_path=registry,
+        runtime_root=runtime,
+    )
+
+    assert added["cadence"] == "30m"
+    assert added["next_due_at"]
+    persisted = resolve_monitor_todo_item(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=added["todo_id"],
+    )
+    assert persisted["next_due_at"] == added["next_due_at"]
+    assert persisted["target_key"] == "public-dependency:cadence-only"
 
 
 def test_runtime_writeback_can_read_legacy_unbounded_monitor(tmp_path: Path) -> None:
