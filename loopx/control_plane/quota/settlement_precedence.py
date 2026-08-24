@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from ..effect_program import ReceiptBoundTerminalPhase
+from ..effect_program import ReceiptBoundReplayPhase
 
 
-TERMINAL_HEARTBEAT_SETTLED_REASON = (
-    "the receipt-bound terminal closeout and required settlement receipts "
+HEARTBEAT_SETTLED_REPLAY_REASON = (
+    "the receipt-bound Todo completion and required settlement receipts "
     "are complete for this heartbeat turn; defer successor selection to a new turn"
 )
 
@@ -39,7 +39,7 @@ _ACTION_PROJECTION_KEYS = (
 )
 
 
-class TerminalSettlementRoute(Protocol):
+class SettledReplayRoute(Protocol):
     normal_delivery_allowed: bool
     recovery_allowed: bool
     self_repair_allowed: bool
@@ -62,14 +62,14 @@ class TerminalSettlementRoute(Protocol):
     goal_route_hint: dict[str, Any] | None
 
 
-def apply_terminal_settlement_route_precedence(
-    route: TerminalSettlementRoute,
+def apply_settled_replay_route_precedence(
+    route: SettledReplayRoute,
     *,
-    terminal_phase: ReceiptBoundTerminalPhase | None,
+    replay_phase: ReceiptBoundReplayPhase | None,
 ) -> None:
     """Prevent a settled heartbeat identity from selecting work in the same turn."""
 
-    if terminal_phase is not ReceiptBoundTerminalPhase.SETTLED:
+    if replay_phase is not ReceiptBoundReplayPhase.SETTLED:
         return
     route.normal_delivery_allowed = False
     route.recovery_allowed = False
@@ -78,7 +78,7 @@ def apply_terminal_settlement_route_precedence(
     route.workspace_repair_allowed = False
     route.should_run = False
     route.effective_action = "heartbeat_settled_skip"
-    route.reason = TERMINAL_HEARTBEAT_SETTLED_REASON
+    route.reason = HEARTBEAT_SETTLED_REPLAY_REASON
     route.replan_decision_allowed = False
     route.receipt_bound_replan_decision = False
     route.heartbeat_recommendation = {
@@ -108,16 +108,16 @@ def clear_quota_action_projections(
         payload.pop(key, None)
 
 
-def apply_terminal_heartbeat_settlement_precedence(
+def apply_settled_replay_payload_precedence(
     payload: dict[str, Any],
     *,
-    terminal_phase: ReceiptBoundTerminalPhase | None,
+    replay_phase: ReceiptBoundReplayPhase | None,
 ) -> None:
     """Keep late supporting projections from reopening a settled heartbeat turn."""
 
-    if terminal_phase is not ReceiptBoundTerminalPhase.SETTLED:
+    if replay_phase is not ReceiptBoundReplayPhase.SETTLED:
         return
-    reason = TERMINAL_HEARTBEAT_SETTLED_REASON
+    reason = HEARTBEAT_SETTLED_REPLAY_REASON
     payload.update(
         {
             "decision": "skip",

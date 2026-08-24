@@ -831,6 +831,51 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
     assert replay["appended"] is False
     assert _spend_run_count(runtime) == 1
 
+    settled_replay_rc, settled_replay = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        TURN_ID,
+        "--scan-path",
+        str(project),
+    )
+    assert settled_replay_rc == 0, settled_replay
+    assert settled_replay["decision"] == "skip"
+    assert settled_replay["effective_action"] == "heartbeat_settled_skip"
+    assert settled_replay["execution_obligation"]["must_attempt_work"] is False
+    assert settled_replay.get("selected_todo") is None
+    assert settled_replay["heartbeat_receipt"]["status"] == "replayed"
+    assert (
+        settled_replay["heartbeat_receipt"]["settlement_identity"]["todo_id"]
+        == TODO_ID
+    )
+    assert _spend_run_count(runtime) == 1
+
+    fresh_turn_rc, fresh_turn = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        "turn-settlement-cli-2",
+        "--scan-path",
+        str(project),
+    )
+    assert fresh_turn_rc == 0, fresh_turn
+    assert fresh_turn["selected_todo"]["todo_id"] == successor_id
+
 
 def _assert_material_monitor_writeback_can_add_workspace_before_spend(
     tmp_path: Path,

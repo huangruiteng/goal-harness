@@ -115,7 +115,7 @@ from ..work_items.work_lane import (
 
 from .should_run_prepare import _QuotaDecisionPreparation
 from .settlement_precedence import (
-    apply_terminal_heartbeat_settlement_precedence,
+    apply_settled_replay_payload_precedence,
     clear_quota_action_projections,
 )
 
@@ -1384,9 +1384,9 @@ def _build_quota_should_run_payload(
         monitor_only=prepared.agent_monitor_only,
         inbox_reply_due=prepared.inbox_reply_due,
     )
-    apply_terminal_heartbeat_settlement_precedence(
+    apply_settled_replay_payload_precedence(
         payload,
-        terminal_phase=prepared.receipt_bound_terminal_phase,
+        replay_phase=prepared.receipt_bound_replay_phase,
     )
     if isinstance(payload.get("autonomous_replan_obligation"), dict):
         payload["replan_action_packet"] = build_replan_action_packet(

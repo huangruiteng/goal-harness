@@ -1,6 +1,21 @@
 import { EffectRuntimeRequestError } from "./effect_runtime_errors.ts";
 import { isStringLiteral } from "./runtime_decode.ts";
 
+export {
+  RECEIPT_BOUND_MONITOR_PHASES,
+  RECEIPT_BOUND_REPLAY_PHASES,
+  RECEIPT_BOUND_TERMINAL_PHASES,
+  receiptBoundMonitorPhase,
+  receiptBoundReplayPhase,
+  receiptBoundTerminalPhase,
+  type ReceiptBoundMonitorPhase,
+  type ReceiptBoundMonitorSettlementState,
+  type ReceiptBoundReplayPhase,
+  type ReceiptBoundReplaySettlementState,
+  type ReceiptBoundTerminalPhase,
+  type ReceiptBoundTerminalSettlementState,
+} from "./quota/settlement_phase.ts";
+
 export const SETTLEMENT_IDENTITY_SCHEMA_VERSION =
   "quota_settlement_identity_v0";
 export const SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION =
@@ -95,54 +110,6 @@ export const SETTLEMENT_FAILURE_KINDS = [
   "effect_outcome_unknown",
 ] as const;
 export type SettlementFailureKind = (typeof SETTLEMENT_FAILURE_KINDS)[number];
-
-export const RECEIPT_BOUND_MONITOR_PHASES = [
-  "poll_due",
-  "settlement_pending",
-  "settled",
-] as const;
-export type ReceiptBoundMonitorPhase =
-  (typeof RECEIPT_BOUND_MONITOR_PHASES)[number];
-
-export interface ReceiptBoundMonitorSettlementState {
-  poll_present: boolean;
-  material_change: boolean;
-  durable_writeback_present: boolean;
-  quota_spend_present: boolean;
-}
-
-export function receiptBoundMonitorPhase(
-  state: ReceiptBoundMonitorSettlementState,
-): ReceiptBoundMonitorPhase {
-  if (!state.poll_present) return "poll_due";
-  if (!state.material_change) return "settled";
-  return state.durable_writeback_present && state.quota_spend_present
-    ? "settled"
-    : "settlement_pending";
-}
-
-export const RECEIPT_BOUND_TERMINAL_PHASES = [
-  "open",
-  "settlement_pending",
-  "settled",
-] as const;
-export type ReceiptBoundTerminalPhase =
-  (typeof RECEIPT_BOUND_TERMINAL_PHASES)[number];
-
-export interface ReceiptBoundTerminalSettlementState {
-  terminal_closeout_present: boolean;
-  durable_writeback_present: boolean;
-  quota_spend_present: boolean;
-}
-
-export function receiptBoundTerminalPhase(
-  state: ReceiptBoundTerminalSettlementState,
-): ReceiptBoundTerminalPhase {
-  if (!state.terminal_closeout_present) return "open";
-  return state.durable_writeback_present && state.quota_spend_present
-    ? "settled"
-    : "settlement_pending";
-}
 
 export interface SettlementIdentityInput {
   goal_id: string;

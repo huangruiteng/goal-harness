@@ -12,7 +12,7 @@ from ..capability_hooks import (
 )
 from .settlement import (
     receipt_bound_monitor_settlement_phase,
-    receipt_bound_terminal_settlement_phase,
+    receipt_bound_replay_settlement_phase,
 )
 from ..scheduler.execution_context import (
     SchedulerExecutionContextResolution,
@@ -190,7 +190,7 @@ def build_live_quota_should_run_decision(
         todo_id=receipt_bound_todo_id,
         turn_instance_id=turn_instance_id,
     )
-    receipt_bound_terminal_phase = receipt_bound_terminal_settlement_phase(
+    receipt_bound_replay_phase = receipt_bound_replay_settlement_phase(
         runtime_root,
         goal_id=goal_id,
         agent_id=agent_id,
@@ -211,7 +211,7 @@ def build_live_quota_should_run_decision(
         receipt_bound_todo_id=receipt_bound_todo_id,
         requested_action_todo_id=requested_action_todo_id,
         receipt_bound_monitor_phase=receipt_bound_monitor_phase,
-        receipt_bound_terminal_phase=receipt_bound_terminal_phase,
+        receipt_bound_replay_phase=receipt_bound_replay_phase,
         receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
         turn_instance_id=turn_instance_id,
     )

@@ -9,8 +9,6 @@ import {
   settlementIdentity,
   settlementIdentityPayload,
   settlementPlanPayload,
-  receiptBoundMonitorPhase,
-  receiptBoundTerminalPhase,
   settlementResultPayload,
   SETTLEMENT_FAILURE_KINDS,
   SETTLEMENT_STEP_KINDS,
@@ -24,6 +22,11 @@ import {
   type SettlementStep,
   type SettlementStepKind,
 } from "./effect_program.ts";
+import {
+  receiptBoundMonitorPhase,
+  receiptBoundReplayPhase,
+  receiptBoundTerminalPhase,
+} from "./quota/settlement_phase.ts";
 import { EffectRuntimeRequestError } from "./effect_runtime_errors.ts";
 import {
   optionalNonEmptyString as optionalString,
@@ -380,6 +383,14 @@ export function createEffectRuntimeHandlers(
       (params) => receiptBoundMonitorPhase({
         poll_present: params.poll_present === true,
         material_change: params.material_change === true,
+        durable_writeback_present: params.durable_writeback_present === true,
+        quota_spend_present: params.quota_spend_present === true,
+      }),
+    ],
+    [
+      "settlement.receipt_bound_replay_phase",
+      (params) => receiptBoundReplayPhase({
+        completion_receipt_present: params.completion_receipt_present === true,
         durable_writeback_present: params.durable_writeback_present === true,
         quota_spend_present: params.quota_spend_present === true,
       }),

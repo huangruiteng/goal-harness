@@ -25,10 +25,14 @@ class ReceiptBoundMonitorPhase(StrEnum):
     SETTLED = "settled"
 
 
-class ReceiptBoundTerminalPhase(StrEnum):
+class ReceiptBoundReplayPhase(StrEnum):
     OPEN = "open"
     SETTLEMENT_PENDING = "settlement_pending"
     SETTLED = "settled"
+
+
+# Compatibility alias for callers that predate ordinary-completion replay.
+ReceiptBoundTerminalPhase = ReceiptBoundReplayPhase
 
 
 def receipt_bound_monitor_phase(
@@ -52,23 +56,38 @@ def receipt_bound_monitor_phase(
     return ReceiptBoundMonitorPhase(str(result))
 
 
-def receipt_bound_terminal_phase(
+def receipt_bound_replay_phase(
     *,
-    terminal_closeout_present: bool,
+    completion_receipt_present: bool,
     durable_writeback_present: bool,
     quota_spend_present: bool,
-) -> ReceiptBoundTerminalPhase | None:
+) -> ReceiptBoundReplayPhase | None:
     result = effect_runtime_result(
-        "settlement.receipt_bound_terminal_phase",
+        "settlement.receipt_bound_replay_phase",
         {
-            "terminal_closeout_present": terminal_closeout_present,
+            "completion_receipt_present": completion_receipt_present,
             "durable_writeback_present": durable_writeback_present,
             "quota_spend_present": quota_spend_present,
         },
     )
     if result is None:
         return None
-    return ReceiptBoundTerminalPhase(str(result))
+    return ReceiptBoundReplayPhase(str(result))
+
+
+def receipt_bound_terminal_phase(
+    *,
+    terminal_closeout_present: bool,
+    durable_writeback_present: bool,
+    quota_spend_present: bool,
+) -> ReceiptBoundTerminalPhase | None:
+    """Compatibility adapter for the pre-successor terminal-only contract."""
+
+    return receipt_bound_replay_phase(
+        completion_receipt_present=terminal_closeout_present,
+        durable_writeback_present=durable_writeback_present,
+        quota_spend_present=quota_spend_present,
+    )
 
 
 @dataclass(frozen=True)
