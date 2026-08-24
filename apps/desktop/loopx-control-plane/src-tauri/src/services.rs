@@ -152,8 +152,8 @@ impl ServiceSet {
                     // service (KeepAlive + throttle) has time to restart on the
                     // current release; unknown (Foreign) processes keep the
                     // hard error.
+                    terminate_stale_listener(kind, &executable, kind.port())?;
                     self.healed = true;
-                    terminate_listener(kind.port());
                     if Instant::now() >= stale_deadline {
                         return Err(ServiceError(format!(
                             "port {} is serving LoopX {} from a different installed runtime and could not be restarted",
@@ -193,8 +193,8 @@ impl ServiceSet {
                     )));
                 }
                 Probe::Stale => {
+                    terminate_stale_listener(kind, &executable, kind.port())?;
                     self.healed = true;
-                    terminate_listener(kind.port());
                     thread::sleep(Duration::from_millis(200));
                 }
                 Probe::Unavailable => thread::sleep(Duration::from_millis(100)),
@@ -221,24 +221,207 @@ impl Drop for ServiceSet {
     }
 }
 
-fn terminate_listener(port: u16) {
+#[derive(Debug, Eq, PartialEq)]
+struct ListenerProcess {
+    pid: i32,
+    command_line: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum LoopxProcessInvocation {
+    DirectExecutable,
+    PythonModule,
+    ManagedReleaseLauncher,
+}
+
+const MANAGED_RELEASE_LAUNCHER_MARKER: &str =
+    r#"runpy.run_module("loopx.cli", run_name="__main__")"#;
+
+fn terminate_stale_listener(
+    kind: ServiceKind,
+    loopx_executable: &str,
+    port: u16,
+) -> Result<(), ServiceError> {
     #[cfg(not(windows))]
     {
-        let output = Command::new("lsof")
-            .args(["-tiTCP", &format!(":{port}"), "-sTCP:LISTEN"])
-            .output();
-        if let Ok(output) = output {
-            for line in String::from_utf8_lossy(&output.stdout).lines() {
-                if let Ok(pid) = line.trim().parse::<i32>() {
-                    let _ = Command::new("kill").arg(pid.to_string()).status();
-                }
+        let processes = listener_processes(port)?;
+        let pids = verified_loopx_listener_pids(kind, loopx_executable, port, &processes)?;
+        for pid in pids {
+            let current = inspect_process(pid, port)?;
+            verified_loopx_listener_pids(kind, loopx_executable, port, &[current])?;
+            let status = Command::new("kill")
+                .arg(pid.to_string())
+                .status()
+                .map_err(|error| {
+                    ServiceError(format!(
+                        "could not stop stale LoopX {} listener on port {port}: {error}",
+                        kind.label()
+                    ))
+                })?;
+            if !status.success() {
+                return Err(ServiceError(format!(
+                    "could not stop stale LoopX {} listener on port {port}",
+                    kind.label()
+                )));
             }
         }
+        Ok(())
     }
     #[cfg(windows)]
     {
-        // Windows keeps the owner-facing error path; no process is terminated.
+        let _ = (kind, loopx_executable, port);
+        Err(ServiceError(format!(
+            "port {port} is serving stale LoopX {}; automatic replacement is unavailable on Windows",
+            kind.label()
+        )))
     }
+}
+
+#[cfg(not(windows))]
+fn listener_processes(port: u16) -> Result<Vec<ListenerProcess>, ServiceError> {
+    let selector = format!("-iTCP:{port}");
+    let output = Command::new("lsof")
+        .args(["-nP", "-t", "-a", selector.as_str(), "-sTCP:LISTEN"])
+        .output()
+        .map_err(|error| {
+            ServiceError(format!(
+                "could not inspect the listener on port {port}: {error}"
+            ))
+        })?;
+    if !output.status.success() {
+        return Err(ServiceError(format!(
+            "could not identify the stale LoopX listener on port {port}"
+        )));
+    }
+
+    let mut pids = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let pid = line.trim().parse::<i32>().map_err(|_| {
+            ServiceError(format!(
+                "could not parse the listener process on port {port}"
+            ))
+        })?;
+        if !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+    if pids.is_empty() {
+        return Err(ServiceError(format!(
+            "could not identify the stale LoopX listener on port {port}"
+        )));
+    }
+
+    pids.into_iter()
+        .map(|pid| inspect_process(pid, port))
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn inspect_process(pid: i32, port: u16) -> Result<ListenerProcess, ServiceError> {
+    let output = Command::new("ps")
+        .args(["-ww", "-p", &pid.to_string(), "-o", "args="])
+        .output()
+        .map_err(|error| {
+            ServiceError(format!(
+                "could not inspect the stale listener process on port {port}: {error}"
+            ))
+        })?;
+    let command_line = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() || command_line.is_empty() {
+        return Err(ServiceError(format!(
+            "could not inspect the stale listener process on port {port}"
+        )));
+    }
+    Ok(ListenerProcess { pid, command_line })
+}
+
+fn verified_loopx_listener_pids(
+    kind: ServiceKind,
+    loopx_executable: &str,
+    port: u16,
+    processes: &[ListenerProcess],
+) -> Result<Vec<i32>, ServiceError> {
+    if processes.is_empty()
+        || processes.iter().any(|process| {
+            !is_expected_loopx_listener_command(kind, loopx_executable, port, &process.command_line)
+        })
+    {
+        return Err(ServiceError(format!(
+            "refusing to stop the listener on port {port} because its process is not a confirmed LoopX {} command",
+            kind.label()
+        )));
+    }
+    Ok(processes.iter().map(|process| process.pid).collect())
+}
+
+fn is_expected_loopx_listener_command(
+    kind: ServiceKind,
+    loopx_executable: &str,
+    port: u16,
+    command_line: &str,
+) -> bool {
+    let arguments = command_line.split_ascii_whitespace().collect::<Vec<_>>();
+    let is_loopx =
+        classify_loopx_process_invocation(loopx_executable, command_line, &arguments).is_some();
+    let expected_command = match kind {
+        ServiceKind::Status => "serve-status",
+        ServiceKind::Chat => "chat",
+    };
+    let has_command = arguments.contains(&expected_command);
+    let expected_port = port.to_string();
+    let has_port = arguments
+        .windows(2)
+        .any(|pair| pair[0] == "--port" && pair[1] == expected_port)
+        || arguments
+            .iter()
+            .any(|argument| *argument == format!("--port={port}"));
+    is_loopx && has_command && has_port
+}
+
+fn classify_loopx_process_invocation(
+    loopx_executable: &str,
+    command_line: &str,
+    arguments: &[&str],
+) -> Option<LoopxProcessInvocation> {
+    let interpreter_is_python = arguments
+        .first()
+        .and_then(|argument| Path::new(argument).file_name())
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.to_ascii_lowercase().starts_with("python"));
+    let executable_is_direct = arguments
+        .first()
+        .is_some_and(|argument| paths_refer_to_same_file(argument, loopx_executable))
+        || (interpreter_is_python
+            && arguments
+                .get(1)
+                .is_some_and(|argument| paths_refer_to_same_file(argument, loopx_executable)));
+    if executable_is_direct {
+        return Some(LoopxProcessInvocation::DirectExecutable);
+    }
+    if interpreter_is_python && arguments.windows(2).any(|pair| pair == ["-m", "loopx.cli"]) {
+        return Some(LoopxProcessInvocation::PythonModule);
+    }
+
+    // Installed LoopX wrappers intentionally exec Python with a stable `-c`
+    // bootstrap. `ps` exposes that bootstrap instead of the wrapper path, so
+    // the exact module-launch statement and release-root contract are the
+    // durable positive fingerprint for this typed invocation variant.
+    if interpreter_is_python
+        && arguments.contains(&"-c")
+        && command_line.contains(MANAGED_RELEASE_LAUNCHER_MARKER)
+        && command_line.contains("LOOPX_RELEASE_ROOT")
+    {
+        return Some(LoopxProcessInvocation::ManagedReleaseLauncher);
+    }
+    None
+}
+
+fn paths_refer_to_same_file(candidate: &str, expected: &str) -> bool {
+    candidate == expected
+        || fs::canonicalize(candidate)
+            .ok()
+            .zip(fs::canonicalize(expected).ok())
+            .is_some_and(|(candidate, expected)| candidate == expected)
 }
 
 fn loopx_executable() -> String {
@@ -321,7 +504,15 @@ fn runtime_identity_for_executable_with_path(
 }
 
 fn probe(kind: ServiceKind, expected_runtime_identity: Option<&serde_json::Value>) -> Probe {
-    let address = SocketAddr::from(([127, 0, 0, 1], kind.port()));
+    probe_on_port(kind, kind.port(), expected_runtime_identity)
+}
+
+fn probe_on_port(
+    kind: ServiceKind,
+    port: u16,
+    expected_runtime_identity: Option<&serde_json::Value>,
+) -> Probe {
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = match TcpStream::connect_timeout(&address, PROBE_TIMEOUT) {
         Ok(stream) => stream,
         Err(_) => return Probe::Unavailable,
@@ -331,7 +522,7 @@ fn probe(kind: ServiceKind, expected_runtime_identity: Option<&serde_json::Value
     let request = format!(
         "GET {} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
         kind.probe_path(),
-        kind.port()
+        port
     );
     if stream.write_all(request.as_bytes()).is_err() {
         return Probe::Foreign;
@@ -565,3 +756,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "services_tests.rs"]
+mod supervisor_tests;

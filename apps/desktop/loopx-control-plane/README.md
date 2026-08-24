@@ -30,8 +30,12 @@ services are reused only after a successful response exposes both the exact
 top-level JSON fingerprint and the same installed release identity as the
 selected `loopx` command. Marker-like text in headers or nested values is not
 accepted. A service left running by an older installation is reported as stale
-with a restart instruction instead of silently handling current control-plane
-writes with old code.
+and is replaced automatically only after the shell resolves the listener PID
+and confirms that its command is the expected `loopx serve-status` or
+`loopx chat` invocation on the matching port. If process ownership cannot be
+confirmed, startup fails closed without sending a termination signal. Unknown
+services remain a hard error. Windows currently keeps this owner-facing error
+path instead of terminating an existing process automatically.
 
 The WebView is pinned to the loopback Chat origin served by the installed
 LoopX release. Dashboard requests to the status and Chat services remain
