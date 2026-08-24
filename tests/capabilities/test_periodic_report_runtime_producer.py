@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from loopx.capabilities.periodic_report import (
-    build_periodic_report_run,
+from loopx.capabilities.periodic_report import build_periodic_report_run
+from loopx.capabilities.periodic_report.runtime_producer import (
     build_periodic_report_runtime_trigger_decision,
 )
 from loopx.cli import main

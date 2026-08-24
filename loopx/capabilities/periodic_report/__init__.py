@@ -40,7 +40,6 @@ from .project_progress import (
     build_project_progress_periodic_report_source,
     project_progress_periodic_report_source_adapter,
 )
-from .runtime_producer import build_periodic_report_runtime_trigger_decision
 from .triggers import (
     build_periodic_report_trigger_decision,
     normalize_periodic_report_trigger_policy,
@@ -66,7 +65,6 @@ __all__ = [
     "build_project_progress_periodic_report_source",
     "build_periodic_report_archive_bundle",
     "build_periodic_report_run",
-    "build_periodic_report_runtime_trigger_decision",
     "build_periodic_report_source_result",
     "build_periodic_report_trigger_decision",
     "normalize_periodic_report_profile",

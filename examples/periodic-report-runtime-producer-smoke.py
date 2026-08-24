@@ -8,8 +8,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.capabilities.periodic_report import (  # noqa: E402
-    build_periodic_report_run,
+from loopx.capabilities.periodic_report import build_periodic_report_run  # noqa: E402
+from loopx.capabilities.periodic_report.runtime_producer import (  # noqa: E402
     build_periodic_report_runtime_trigger_decision,
 )
 from loopx.rollout_event_log import build_rollout_event  # noqa: E402
