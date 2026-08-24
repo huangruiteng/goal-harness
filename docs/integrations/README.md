@@ -16,6 +16,7 @@ and external systems while preserving one control-plane authority.
 - [Botmux Goal Channel runtime](botmux-goal-channel-runtime.md)
 - [Extensions and capabilities](../reference/extensions.md)
 - [Host integration surface v0](../reference/protocols/host-integration-surface-v0.md)
+- [Reliable SSH reverse egress proxy](ssh-reverse-egress-proxy.md)
 
 Architecture proposals belong under
 [`docs/architecture/rfcs/`](../architecture/rfcs/README.md).
