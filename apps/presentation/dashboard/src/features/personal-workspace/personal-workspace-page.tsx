@@ -642,6 +642,7 @@ export function PersonalWorkspacePage({
   const [localGoalId, setLocalGoalId] = useState<string | null>(controlledGoalId ?? null);
   const [localAgentId, setLocalAgentId] = useState(controlledAgentId ?? agents.find((agent) => agent.available)?.agentId ?? "codex");
   const [selection, setSelection] = useState<WorkspaceDrawerSelection | null>(null);
+  const [taskInspectorExpanded, setTaskInspectorExpanded] = useState(false);
   const [activeSessionRun, setActiveSessionRun] = useState<WorkspaceRun | null>(null);
   const [proposals, setProposals] = useState<Record<string, WorkspaceActionPreview>>({});
   const [selectedGoalTab, setSelectedGoalTab] = useState<WorkspaceGoalTab>("chat");
@@ -1575,7 +1576,7 @@ export function PersonalWorkspacePage({
 
   return (
     <WorkspaceShell
-      drawer={drawerSelection ? <ContextDrawer agents={agents} callbacks={effectiveDrawerCallbacks} goalNotifications={model.goalNotifications ?? []} goals={workspaceGoals} larkConnections={readOnly ? [] : larkConnections} onClose={() => {
+      drawer={drawerSelection ? <ContextDrawer agents={agents} callbacks={effectiveDrawerCallbacks} goalNotifications={model.goalNotifications ?? []} goals={workspaceGoals} inspectorExpanded={taskInspectorExpanded} larkConnections={readOnly ? [] : larkConnections} onClose={() => {
         if (drawerSelection.kind === "proposal"
           && ["applied", "rejected"].includes(drawerSelection.item.status)
           && !(drawerSelection.item.actionKind === "heartbeat.bind" && drawerSelection.item.status === "applied")) {
@@ -1585,8 +1586,10 @@ export function PersonalWorkspacePage({
             return next;
           });
         }
+        setTaskInspectorExpanded(false);
         setSelection(null);
-      }} readOnly={readOnly} runs={items.flatMap((item) => item.kind === "run" ? [item.run] : [])} selection={drawerSelection} /> : null}
+      }} onToggleInspectorSize={() => setTaskInspectorExpanded((current) => !current)} readOnly={readOnly} runs={items.flatMap((item) => item.kind === "run" ? [item.run] : [])} selection={drawerSelection} /> : null}
+      drawerMode={drawerSelection?.kind === "todo" ? (taskInspectorExpanded ? "inspector-full" : "inspector") : "panel"}
       drawerOpen={drawerSelection !== null}
       mobileSidebarOpen={mobileSidebarOpen}
       onCloseMobileSidebar={() => setMobileSidebarOpen(false)}
@@ -1659,6 +1662,7 @@ export function PersonalWorkspacePage({
                   summary: `标记完成：${todo.text}`,
                 })}
                 onSelect={setSelection}
+                selectedTodoId={drawerSelection?.kind === "todo" ? drawerSelection.item.todoId : null}
                 userTodos={model.userTodos}
               />
             ) : selectedGoal && selectedGoalTab === "files" ? (

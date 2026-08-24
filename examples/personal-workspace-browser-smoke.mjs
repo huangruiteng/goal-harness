@@ -1130,30 +1130,51 @@ async function main() {
 
     await page.getByRole("button", { name: "Goal 详情" }).click();
     await page.getByRole("button", { name: "Tasks" }).click();
-    const taskRow = page.locator(".personal-object-list", { hasText: "进行中" }).locator("button").first();
+    const taskCards = page.locator(".personal-object-list", { hasText: "进行中" }).locator(".personal-task-card");
+    const taskRow = taskCards.first().locator(":scope > button");
     await taskRow.click();
-    await page.getByText("Todo 详情").waitFor({ state: "visible" });
-    await page.getByRole("button", { name: "查看处理方式" }).click();
+    const taskInspector = page.getByRole("dialog", { name: "Todo 详情" });
+    await taskInspector.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.querySelector('[data-context-drawer]')?.contains(document.activeElement));
+    const mainBox = await page.locator(".personal-workspace-main").boundingBox();
+    const inspectorBox = await page.locator('[data-context-drawer][data-drawer-mode="inspector"]').boundingBox();
+    if (!mainBox || !inspectorBox || mainBox.x + mainBox.width > inspectorBox.x + 1) throw new Error("Half-screen Todo inspector covered the task board instead of occupying its own layout column");
+    if (!(await page.locator(".personal-task-card.is-selected").isVisible())) throw new Error("Opening a Todo did not keep its selected card visible in the board viewport");
+    await page.getByRole("button", { name: "切换到全屏", exact: true }).click();
+    if (await page.locator(".personal-workspace-main").isVisible()) throw new Error("Full-screen Todo inspector left the board visible");
+    await page.getByRole("button", { name: "切换到半屏", exact: true }).click();
+    if (!(await page.locator(".personal-workspace-main").isVisible())) throw new Error("Half-screen Todo inspector did not restore the board");
+    if (await taskCards.count() < 2) throw new Error("Todo focus smoke requires two task cards");
+    const secondTaskRow = taskCards.nth(1).locator(":scope > button");
+    await secondTaskRow.click();
+    await page.waitForFunction(() => document.activeElement?.id === "personal-drawer-title");
+    await page.getByRole("button", { name: /关闭详情/ }).click();
+    await page.waitForFunction(() => document.activeElement?.closest(".personal-task-card") === document.querySelectorAll(".personal-task-card")[1]);
+    await taskRow.click();
+    let taskManagement = page.locator("details.personal-task-management");
+    await taskManagement.locator("summary").click();
+    await taskManagement.locator(".personal-inline-agent-select", { hasText: "改派给" }).getByRole("button", { name: "查看处理方式", exact: true }).click();
     await page.getByText("确认执行").waitFor({ state: "visible" });
     if (!api.actionPreviews.some((preview) => preview.action_kind === "todo.update" && preview.normalized_parameters.operation === "reassign")) throw new Error("Todo reassign did not create a typed preview");
     await page.getByRole("button", { name: "关闭", exact: true }).click();
     await taskRow.click();
+    taskManagement = page.locator("details.personal-task-management");
+    await taskManagement.locator("summary").click();
     await page.getByLabel("Todo 暂缓恢复条件").fill("pr_merged:huangruiteng/loopx#3399");
     await page.screenshot({ path: resolve(outputDir, "todo-defer-resume-condition.png"), fullPage: false, animations: "disabled" });
-    await page.getByRole("button", { name: "检查暂缓", exact: true }).click();
+    await taskManagement.locator(".personal-inline-resume-when").getByRole("button", { name: "预览" }).click();
     await page.getByText("确认执行").waitFor({ state: "visible" });
     const explicitDefer = api.actionPreviews.findLast((preview) => preview.action_kind === "todo.update" && preview.normalized_parameters.operation === "defer");
     if (explicitDefer?.normalized_parameters.resume_when !== "pr_merged:huangruiteng/loopx#3399") throw new Error(`Todo defer did not preserve its supported resume condition: ${JSON.stringify(explicitDefer)}`);
     if (JSON.stringify(api.actionPreviews).includes("owner_resume")) throw new Error("Personal Workspace emitted the unsupported owner_resume sentinel");
     await page.getByRole("button", { name: "关闭", exact: true }).click();
-    for (const [label, actionKind, operation] of [
-      ["标记阻塞", "todo.update", "block"],
-      ["标记完成", "todo.update", "complete"],
-      ["创建后续 Todo", "todo.create", null],
+    for (const [label, actionKind, operation, managementAction] of [
+      ["标记阻塞", "todo.update", "block", true],
+      ["完成任务", "todo.update", "complete", false],
+      ["创建后续 Todo", "todo.create", null, true],
     ]) {
       await taskRow.click();
-      const moreMenu = page.locator("details.personal-compact-menu", { hasText: "更多操作" });
-      if (!(await moreMenu.getAttribute("open"))) await moreMenu.locator("summary").click();
+      if (managementAction) await page.locator("details.personal-task-management").locator("summary").click();
       await page.getByRole("button", { name: label, exact: true }).click();
       await page.getByText("确认执行").waitFor({ state: "visible" });
       if (!api.actionPreviews.some((preview) => preview.action_kind === actionKind && (operation === null || preview.normalized_parameters.operation === operation))) throw new Error(`Todo ${label} did not create the expected typed preview`);
@@ -1340,9 +1361,9 @@ async function main() {
     await remote.locator(".personal-goal-link").first().click();
     await remote.getByRole("button", { name: "Tasks", current: "page" }).waitFor({ state: "visible" });
     await remote.locator(".personal-object-list", { hasText: "进行中" }).locator("button").first().click();
-    await remote.getByText("Todo 详情").waitFor({ state: "visible" });
-    const remoteTodoDrawer = remote.getByRole("dialog", { name: "Todo 详情" });
-    for (const label of ["标记完成", "检查变更", "检查暂缓"]) {
+    await remote.getByRole("dialog", { name: "任务" }).waitFor({ state: "visible" });
+    const remoteTodoDrawer = remote.getByRole("dialog", { name: "任务" });
+    for (const label of ["完成任务", "管理任务"]) {
       const visibleMatches = await visibleElementCount(remoteTodoDrawer.getByRole("button", { name: label, exact: true }));
       if (visibleMatches) throw new Error(`Remote Todo drawer exposed ${label}`);
     }
