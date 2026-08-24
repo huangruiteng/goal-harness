@@ -55,6 +55,11 @@ _PRECONDITION_FIELDS = {
     "gate_revision",
 }
 _MAX_CAS_ATTEMPTS = 8
+# The local task-lease authority's ceiling
+# (work_items.task_lease.MAX_TASK_LEASE_TTL_SECONDS), mirrored here so this
+# module's import closure stays inside the strict type gate; a pin test
+# asserts the two never drift.
+MAX_LEASE_TTL_SECONDS = 24 * 60 * 60
 
 # Core code -> RFC reason vocabulary for the claim_work slice. Actor and
 # owner ineligibility collapse onto the RFC's one actor reason; ownership
@@ -220,8 +225,19 @@ class CoordinationAuthorityExecutor:
         if not isinstance(digest, str) or not digest.startswith("sha256:"):
             raise EnvelopeError("expected authorization projection digest is invalid")
         ttl = command["lease_ttl_seconds"]
-        if not isinstance(ttl, int) or isinstance(ttl, bool) or ttl <= 0:
-            raise EnvelopeError("lease_ttl_seconds must be positive")
+        # The bound is the local task-lease authority's own ceiling, so the
+        # shared envelope cannot mint a lease the local contract would refuse,
+        # and an unbounded caller value can never reach wall-clock arithmetic
+        # (an astronomical TTL overflows timestamp formatting).
+        if (
+            not isinstance(ttl, int)
+            or isinstance(ttl, bool)
+            or ttl <= 0
+            or ttl > MAX_LEASE_TTL_SECONDS
+        ):
+            raise EnvelopeError(
+                f"lease_ttl_seconds must be between 1 and {MAX_LEASE_TTL_SECONDS}"
+            )
         # Transport metadata is deliberately excluded from the semantic request.
         return {
             "schema_version": COMMAND_SCHEMA_VERSION,

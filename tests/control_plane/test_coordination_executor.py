@@ -18,7 +18,10 @@ from loopx.control_plane.coordination.executor import (
     EnvelopeError,
     sample_claim_envelope,
 )
-from loopx.control_plane.coordination.head import bootstrap_head
+from loopx.control_plane.coordination.executor import (
+    MAX_LEASE_TTL_SECONDS,
+)
+from loopx.control_plane.coordination.head import HeadValidationError, bootstrap_head
 
 
 def eligibility(allowed=("agent-a", "agent-b")) -> dict:
@@ -441,3 +444,47 @@ def test_envelope_rejects_bool_disguised_integers() -> None:
         mutate(request["command"])
         with pytest.raises(EnvelopeError):
             executor.apply(request)
+
+def test_corrupt_stored_receipt_fails_typed_before_replay() -> None:
+    """A digest-matching receipt entry whose ``original_receipt`` was gutted
+    must surface as the typed head-validation failure at load, never as a
+    KeyError from inside the replay or success paths."""
+
+    provider = FakeProvider()
+    bootstrap(provider)
+    executor = executor_for(provider)
+    assert executor.apply(envelope("agent-a", "todo-1"))["result"] == "applied"
+    stored, generation = provider.load()
+    stored["receipt_index"]["op-agent-a-todo-1"]["original_receipt"] = {}
+    assert provider.compare_and_put(generation, stored)["result"] == "applied"
+    with pytest.raises(HeadValidationError, match="receipt"):
+        executor.apply(envelope("agent-a", "todo-1"))
+
+
+def test_lease_ttl_is_bounded_by_the_task_lease_ceiling() -> None:
+    """The shared envelope reuses the local task-lease TTL ceiling, so an
+    astronomical caller value is a typed rejection at the envelope boundary
+    and can never reach wall-clock arithmetic as an OverflowError."""
+
+    provider = FakeProvider()
+    bootstrap(provider)
+    executor = executor_for(provider)
+    for ttl in (10**100, MAX_LEASE_TTL_SECONDS + 1):
+        request = envelope("agent-a", "todo-1")
+        request["command"]["lease_ttl_seconds"] = ttl
+        with pytest.raises(EnvelopeError, match="between 1 and"):
+            executor.apply(request)
+    at_ceiling = envelope("agent-a", "todo-1")
+    at_ceiling["command"]["lease_ttl_seconds"] = MAX_LEASE_TTL_SECONDS
+    assert executor.apply(at_ceiling)["result"] == "applied"
+
+
+def test_lease_ttl_ceiling_matches_the_local_task_lease_authority() -> None:
+    """The executor mirrors the constant instead of importing the (untyped)
+    task-lease module; this pin keeps the two ceilings from drifting."""
+
+    from loopx.control_plane.work_items.task_lease import (
+        MAX_TASK_LEASE_TTL_SECONDS,
+    )
+
+    assert MAX_LEASE_TTL_SECONDS == MAX_TASK_LEASE_TTL_SECONDS
