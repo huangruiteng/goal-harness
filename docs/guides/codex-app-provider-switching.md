@@ -31,7 +31,8 @@ LoopX 只记录目标、门禁、证据和回滚状态。它不保存 OAuth toke
 
 | 项目 | 锁定版本 | 本 runbook 使用的边界 |
 | --- | --- | --- |
-| CPA | [`a7e3596b7e351d800e58ed29529fbca3d1c18737`](https://github.com/router-for-me/CLIProxyAPI/commit/a7e3596b7e351d800e58ed29529fbca3d1c18737) | 多 Codex OAuth、`fill-first`、priority、prefix、session affinity、stream bootstrap buffering、OpenAI-compatible provider |
+| CPA self-use pin | [`2aa8c43a3bb6b3a39d969fb0b58981f578016c1e`](https://github.com/huangruiteng/CLIProxyAPI/commit/2aa8c43a3bb6b3a39d969fb0b58981f578016c1e) | 多 Codex OAuth、provider-bound history、commit-before-failover、Ark Responses/SSE normalizer；在上游合并前也可按 digest 构建自用 |
+| CPA upstream release baseline | [`a7e3596b7e351d800e58ed29529fbca3d1c18737`](https://github.com/router-for-me/CLIProxyAPI/commit/a7e3596b7e351d800e58ed29529fbca3d1c18737) | `fill-first`、priority、prefix、session affinity、stream bootstrap buffering、OpenAI-compatible provider 的原始基线 |
 | CPA candidate upstream base | [`ca601db05d858472b25e7c56580555ab62b90e68`](https://github.com/router-for-me/CLIProxyAPI/commit/ca601db05d858472b25e7c56580555ab62b90e68) | [PR #5220](https://github.com/router-for-me/CLIProxyAPI/pull/5220) 自动 retarget 到 `dev` 后使用的集成与回归基线；不是安装 pin |
 | AgentSwap | [`c9b76f4a4adae81274eb8f52d428bba925a1a7ef`](https://github.com/bojieli/agentswap/commit/c9b76f4a4adae81274eb8f52d428bba925a1a7ef) | `teleport` / `handoff`、`--dry-run`、`--compact`、`--budget` |
 | Codex protocol reference | [`40b7560169c7274147a47f9b0c75db89fe016d34`](https://github.com/openai/codex/commit/40b7560169c7274147a47f9b0c75db89fe016d34) | `ResponseItem::Reasoning`、history normalization 和 remote compaction 行为的源码参照 |
@@ -47,24 +48,27 @@ LoopX 只记录目标、门禁、证据和回滚状态。它不保存 OAuth toke
 存在的 credential”为准，不能用空 profile 假装第三个可用账号。
 
 锁定 CPA baseline 上形成的 candidate 已 forward-port 到当前 `dev`，并提交为
-[CLIProxyAPI PR #5220](https://github.com/router-for-me/CLIProxyAPI/pull/5220)。PR head 和 fork
-commit 都不是新的安装 pin；上游合并后仍须锁定 merge commit，并重新运行本文矩阵。
+[CLIProxyAPI PR #5220](https://github.com/router-for-me/CLIProxyAPI/pull/5220)。该 PR 的 fork head
+`2aa8c43a` 已作为当前 self-use pin 完成资格验证；上游 merge 仍是升级与公共分发渠道，
+不再是本机自用的前置条件。上游合并后仍须锁定 merge commit，并重新运行本文矩阵。
 当前证据边界如下：
 
 | Surface | 当前进展 | 证据边界 |
 | --- | --- | --- |
-| A → B credential failover | 已通过 | `fill-first`、priority、session affinity 与首个可见事件前的 stream failover 已在源码构建的 loopback 场景验证 |
-| Provider-bound history normalization | 已实现候选补丁 | 同 provider 的 A → B 也视为 scope 变化；跨 scope 时移除异源 identity / opaque state，保留可移植 summary，并校验 tool call/result 因果链 |
-| Ark Responses SSE lifecycle normalizer | 已实现候选补丁 | 只对显式 `is-compat: true` 的模型启用；原生 Codex stream 保持原字节路径 |
-| A → B → Ark 组合路径 | loopback 已通过 | 两个订阅依次返回 quota error，Ark 返回故意缺少 item lifecycle 的 SSE；下游只收到一条被规范化的 stream |
-| CPA upstream review | PR 已提交、CI 通过 | PR #5220 目标分支为 `dev`，已合入 retarget 时的最新 `dev`；公开 diff 不含 provider endpoint、credential、真实轨迹或本机路径 |
+| A → B credential failover | loopback 与 live 均通过 | `fill-first`、priority、session affinity 与 commit 前 stream failover 已验证；live auto 请求在 A 建连失败后由 B 完成 |
+| Provider-bound history normalization | candidate 与 stale-task 投影通过 | 同 provider 的 A → B 也视为 scope 变化；跨 scope 时移除异源 identity / opaque state，保留可移植 summary，并校验 tool call/result 因果链；只读 stale task 投影未改写源 rollout |
+| Ark Responses SSE lifecycle normalizer | candidate 与真实 endpoint 通过 | 只对显式 `is-compat: true` 的模型启用；原生 Codex stream 保持原字节路径；真实 Ark HTTP/SSE 返回完整 lifecycle |
+| A → B → Ark 组合路径 | loopback 与分层 live 证据通过 | 合成 quota 链 5/5 通过；live A → B 在同一请求完成；隔离禁用 A/B 后 auto 由 Ark 完成并恢复 auth 状态 |
+| Codex App selector projection | App Server 与 bundled Codex 通过 | `model/list` 暴露 Auto、A、B、Ark 四个 route，C 不存在；实际 App home 的 auto CLI E2E 退出码为 0 |
+| CPA upstream review | PR 已提交、CI 通过 | PR #5220 目标分支为 `dev`，head `2aa8c43a`；公开 diff 不含 provider endpoint、credential、真实轨迹或本机路径 |
 | 上游回归 | 候选与当前 `dev` 已集成验证 | changed packages、race 与 server build 通过；全仓仅命中既有 `internal/home` 一秒同步 flake，同一失败在干净 `origin/dev` 上 50 次复现 2 次，PR 未改该目录，也不声称该测试通过 |
-| 真实 Ark endpoint qualification | 基础 Responses probe 已通过，生产门禁未闭环 | source-built candidate 经隔离 localhost CPA 调用真实 OpenAI-compatible endpoint：HTTP 200、唯一 `response.completed`、两个 output item 均严格 `added/done` 配对；额度错误、长上下文、tool use 与完整 A → B → Ark live chain 仍待验证 |
-| 当前 Codex App | 未改动 | 尚未合并双 App、迁移登录态或开启生产 heterogeneous auto route |
+| 真实 Ark endpoint qualification | 基础 Responses 与 auto fallback 已通过 | source-built candidate 经隔离 CPA 调用真实 OpenAI-compatible endpoint：HTTP 200、唯一 terminal，output item 严格 `added/done` 配对；额度分类由公开安全的黑盒 fixture 覆盖 |
+| 当前 Codex App | self-use 配置已安装，UI readback 待重启 | 主 App 已指向 loopback CPA 并加载受控 model catalog；旧 App 与旧 home 不复制、不删除，继续作为回滚面 |
 
-这张表刻意区分“adapter 证据”“provider 基础连通证据”和“生产 failover 证据”。一次真实
-Responses probe 只能关闭 lifecycle 基础门禁，不能代替额度耗尽、tool use、长历史和完整队列
-降级的 live qualification。
+这张表刻意区分“adapter 证据”“provider 基础连通证据”和“live 路由证据”。真实 A → B
+来自 commit 前网络失败；A/B → Ark 来自隔离 auth 状态故障注入；真实 quota 耗尽仍由同一
+错误分类的 loopback black-box 覆盖。三层证据合在一起才支持 self-use 灰度，不能把其中
+任意一层单独扩写成所有生产故障都已验证。
 
 ## 总体架构
 
@@ -95,7 +99,7 @@ flowchart LR
 
 | 模型 ID | 行为 |
 | --- | --- |
-| `auto/gpt-5.6-sol` | 目标态：Codex A → B → 可选 C；所有已配置订阅都不可用且尚未提交输出时，转 Ark |
+| `auto/gpt-5.6-sol` | 当前 self-use pin：Codex A → B；两个订阅都不可用且尚未提交输出时，转 Ark |
 | `codex-a/gpt-5.6-sol` | 手动固定到订阅 A |
 | `codex-b/gpt-5.6-sol` | 手动固定到订阅 B |
 | `codex-c/gpt-5.6-sol` | 预留；只有第三个订阅真实接入并通过矩阵后才暴露 |
@@ -104,9 +108,9 @@ flowchart LR
 模型 ID 是路由契约，不是上游真实 model slug。显示名可本地化，但 ID 一经上线应保持稳定，
 否则已有 task 的 model metadata 会产生第二种方言。
 
-当前 CPA pin 已能完成同 provider 的多账号选择和 prefix 固定路由。Codex OAuth 与 Ark
-之间的 heterogeneous alias failover 仍须通过后文门禁；在通过前，`auto/...` 只自动轮转
-Codex 订阅，Ark 保持手动可选。不要用第二层 AgentSwap proxy 假装补齐这个缺口。
+当前 self-use pin 已完成 Codex 多账号、prefix 固定路由和 Codex → Ark heterogeneous
+failover 的分层资格验证，因此 `auto/...` 可以在该锁定 commit 上灰度。升级到其他 commit
+时不能继承这个结论，必须重跑后文矩阵。不要用第二层 AgentSwap proxy 假装补齐缺口。
 
 这里的“开启自动切换开关”不是修改 CPA 的一个全局布尔值，而是让 App selector 暴露并
 允许选择 `auto/...` 虚拟模型。关闭时只暴露显式 `codex-a`、`codex-b` 和 `ark`；打开后
@@ -119,7 +123,9 @@ CPA 才按已验收的 provider pool 执行自动路由。
 ```sh
 git clone https://github.com/router-for-me/CLIProxyAPI.git
 cd CLIProxyAPI
-git checkout --detach a7e3596b7e351d800e58ed29529fbca3d1c18737
+git remote add self-use https://github.com/huangruiteng/CLIProxyAPI.git
+git fetch self-use 2aa8c43a3bb6b3a39d969fb0b58981f578016c1e
+git checkout --detach 2aa8c43a3bb6b3a39d969fb0b58981f578016c1e
 go build -o ./bin/cliproxyapi ./cmd/server
 ```
 
@@ -134,9 +140,6 @@ go build -o ./bin/cliproxyapi ./cmd/server
 host: "127.0.0.1"
 port: <CPA_PORT>
 auth-dir: "<CPA_AUTH_DIR>"
-
-api-keys:
-  - "<LOCAL_CODEX_TO_CPA_TOKEN>"
 
 remote-management:
   allow-remote: false
@@ -159,6 +162,9 @@ codex:
 
 `fill-first` 与 auth 记录中的 `priority` 决定冷启动顺序。已建立的 session binding
 优先于恢复后的高优先级账号，避免同一 task 在每个 turn 抖动；当前账号不可用时才重绑。
+该最小 self-use 形状只监听 loopback，且关闭 remote management。若部署环境需要本地 bearer
+auth，CPA 与 Codex provider 必须同时配置同一个由 secret store 注入的 token；不要只在一侧
+声明 `api-keys`，否则 App 请求会被拒绝。
 
 首轮 qualification 使用 `request-retry / max-retry-credentials / max-retry-interval =
 0 / 0 / 0`。这不等于“完全不 failover”：round 0 仍会把每个 eligible credential 最多
@@ -232,20 +238,23 @@ CPA commit 尚未包含这些修复，就使用带可审计补丁的构建并保
 
 ```toml
 model_provider = "local-cpa"
-model = "gpt-5.6-sol"
+model = "auto/gpt-5.6-sol"
+model_catalog_json = "<CONTROLLED_MODEL_CATALOG_JSON>"
 
 [model_providers.local-cpa]
 name = "Local CPA"
 base_url = "http://127.0.0.1:<CPA_PORT>/v1"
 wire_api = "responses"
-experimental_bearer_token = "<LOCAL_CODEX_TO_CPA_TOKEN>"
+requires_openai_auth = false
 supports_websockets = false
+request_max_retries = 0
+stream_max_retries = 0
 ```
 
-上面的无 prefix 模型先用于 Codex A → B → C 自动轮转。让 CPA `/v1/models` 或受控的
-model catalog 暴露手动虚拟模型 ID，App 的原生模型下拉框就是唯一手动切换入口。
-heterogeneous auto pool 通过门禁后，再把默认值改为 `auto/gpt-5.6-sol`。不要再让
-CC Switch 在 App 运行期间替换这份 provider 配置。
+受控 model catalog 同时描述 Auto、A、B、Ark 四个虚拟模型 ID；未配置的 C 不写入 catalog。
+App 的原生模型下拉框就是唯一手动切换入口。Codex client retry 保持为 0，由 CPA 独占
+credential 遍历与 commit barrier，避免双层重试。不要再让 CC Switch 在 App 运行期间
+替换这份 provider 配置。
 
 ## 一键切模型时如何切轨迹
 
@@ -405,29 +414,31 @@ in-band SSE error、客户端取消和 handler 自己补出的 lifecycle event�
 
 | Upstream | 计划 | 合并门槛 |
 | --- | --- | --- |
-| CPA | **必需 PR，已提交 [#5220](https://github.com/router-for-me/CLIProxyAPI/pull/5220)**：provider/credential-scoped history normalizer、attempt commit semantics、`is-compat` Responses SSE lifecycle normalizer 与 focused tests | current upstream `dev` 上可审阅且 CI 通过；review、回归、race、source-built loopback 与真实 provider qualification 分层报告；合并前不把 fork SHA 当发布 pin |
+| CPA | **公共分发 PR，已提交 [#5220](https://github.com/router-for-me/CLIProxyAPI/pull/5220)**：provider/credential-scoped history normalizer、attempt commit semantics、`is-compat` Responses SSE lifecycle normalizer 与 focused tests | current upstream `dev` 上可审阅且 CI 通过；review、回归、race、source-built loopback 与真实 provider qualification 分层报告；self-use 可锁定 fork SHA，但不得把它表述为 upstream release |
 | AgentSwap | **条件 PR**：只有 locked commit 的 Codex writer 不能保持 multipart tool-result 1:1，或需要 provider-neutral checkpoint export 时才提交 | round-trip test 先复现真实缺口；不增加在线 retry、模型选择或第二 data plane |
 | Codex App / App Server | **条件 PR**：只为 compaction barrier 提供原子的 fork + navigate host hook | 普通可移植历史在没有该 PR 时仍须可用；hook 不获得 provider 路由、凭据或 LoopX authority |
 | CC Switch | 当前无 PR | 只保留 bootstrap、credential import、snapshot 和 rollback；不重新进入 per-turn 在线切换 |
 | LoopX | 维护本 runbook、pin、门禁和脱敏 evidence contract | 不实现代理、不保存 credential、不接管 Codex session store |
 
 所以近期技术选型不是 CPA 或 AgentSwap 二选一，而是 **CPA online + AgentSwap offline**，
-同时保持单一在线 authority。第一优先级已经从“形成 CPA PR”转为推动 #5220 review，并在
-上游合并后锁定 merge commit、重跑 qualification；AgentSwap 只有在独立、可复现的迁移
+同时保持单一在线 authority。自用运行锁定 `2aa8c43a`，不等待 #5220 review；上游合并后
+再把 merge commit 作为升级候选并重跑 qualification。AgentSwap 只有在独立、可复现的迁移
 缺口出现时才改。Codex App PR 不阻塞日常切换，只决定 barrier case 能否真正“一键 fork
 并跳转”。
 
 ## 分阶段上线与回滚
 
-1. **影子验证**：保持现有 App 不变，只在隔离 `CODEX_HOME` 和 stale task 上跑完整矩阵。
-2. **单 App / 手动路由**：App 指向 CPA；当前先开放 `codex-a`、`codex-b`、`ark` 手动模型；
-   `codex-c` 等真实接入第三个订阅后再开放，不开 heterogeneous auto fallback。
-3. **Codex pool 自动切换**：开启 priority + fill-first + affinity，验证额度窗口和冷却。
-4. **跨 provider 自动切换**：history projection、Ark SSE 修复、首字节提交边界、真实 Ark
-   qualification 和 barrier 的显式 fork/recovery 全部通过后，才让 `auto/...` 从 Codex
-   pool 降级到 Ark。若尚无 App hook，barrier 必须 fail closed 并走显式 fork。
-5. **收敛 App**：连续 soak 期内无轨迹损坏、重复 tool result 或错误 provider 归属后，才退役
-   第二个 App；退役前保留只读快照和一键回滚 profile。
+1. **影子验证（已完成）**：保持现有 App 不变，在隔离 home、loopback fault server 和 stale
+   task 上跑完整矩阵。
+2. **单 App / 手动路由（已完成后端资格验证）**：App 指向固定 CPA；开放 `codex-a`、
+   `codex-b`、`ark`，未配置的 `codex-c` 不出现在 selector。
+3. **Codex pool 自动切换（已完成）**：priority + fill-first + affinity 已通过 loopback 与 live
+   A → B；安全回切发生在新 session / turn 边界。
+4. **跨 provider 自动切换（self-use 灰度中）**：固定 fork 已通过 history projection、Ark SSE、
+   commit barrier、真实 Ark 与故障注入矩阵，`auto/...` 可降级到 Ark；foreign compaction
+   barrier 仍 fail closed 并走显式 fork。
+5. **收敛 App（待 soak）**：重启 App 确认四个 selector 后，在不活跃任务上观察一轮；连续
+   soak 期内无轨迹损坏、重复 tool result 或错误 provider 归属后，才退役第二个 App。
 
 回滚时停止新 CPA，恢复升级前的 Codex provider 配置和旧二进制 symlink。不要回滚 session
 数据库，不删除新 task，也不要把新旧 `CODEX_HOME` 合并。CC Switch 在这里提供 profile
