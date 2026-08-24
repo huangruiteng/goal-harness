@@ -782,7 +782,7 @@ def build_update_plan(
         "apply": apply_command,
         "owner_upgrade": owner_upgrade_command,
     }
-    if execute:
+    if execute and apply_supported:
         next_action = {
             "kind": "review_execution",
             "command": "loopx doctor",

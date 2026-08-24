@@ -324,6 +324,27 @@ def test_live_checkout_apply_never_mutates_git_or_switches_install_channels() ->
     assert payload["changes_applied"] is False
 
 
+def test_unknown_package_manager_apply_fails_without_guessing_pip() -> None:
+    doctor = doctor_payload()
+    doctor["package"] = {"install_kind": "python_distribution"}
+    doctor["install_freshness"].update(
+        {
+            "install_kind": "python_distribution",
+            "python_distribution_installer": "custom-manager",
+            "upgrade_command": None,
+        }
+    )
+
+    payload = build_update_plan(action="apply", doctor_payload=doctor)
+
+    assert payload["ok"] is False
+    assert payload["install_lifecycle"]["execution_driver"] is None
+    assert payload["commands"]["apply"] is None
+    assert payload["commands"]["owner_upgrade"] is None
+    assert payload["next_action"]["command"] is None
+    assert "pip install" not in payload["recommended_action"]
+
+
 def test_cli_rejects_conflicting_named_and_legacy_actions() -> None:
     result = subprocess.run(
         [

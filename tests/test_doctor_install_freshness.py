@@ -387,6 +387,24 @@ def test_pipx_distribution_preserves_the_pipx_owner(tmp_path: Path) -> None:
     assert "python -m pip" not in freshness["upgrade_command"]
 
 
+def test_unknown_distribution_installer_has_no_guessed_upgrade_command(tmp_path: Path) -> None:
+    freshness = build_install_freshness(
+        command_path=tmp_path / "loopx",
+        release_root=None,
+        repo_root=tmp_path,
+        skills={"loopx-project": {"exists": True, "required_phrases": True}},
+        python_distribution={
+            "available": True,
+            "kind": "python_distribution",
+            "version": "0.4.8",
+            "installer": "custom-manager",
+        },
+    )
+
+    assert freshness["python_distribution_installer"] == "custom-manager"
+    assert freshness["upgrade_command"] is None
+
+
 def test_python_distribution_detects_pipx_metadata_owner(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
