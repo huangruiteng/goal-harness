@@ -195,7 +195,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "purpose": "Preview, append, or read supervisor proposals and host execution receipts.",
             },
             {"command": "loopx upgrade-plan", "purpose": "Plan default heartbeat upgrade propagation."},
-            {"command": "loopx update", "purpose": "Check, dry-run, or execute the no-clone update path."},
+            {
+                "command": "loopx update [check|plan|apply]",
+                "purpose": "Inspect installation ownership, then explicitly apply archive updates.",
+            },
             {
                 "command": "loopx project-skill --help",
                 "purpose": "Install, inspect, or remove release-owned skills in selected project agent hosts.",

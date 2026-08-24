@@ -10,7 +10,13 @@ from unittest import mock
 from loopx import __version__
 import pytest
 
-from loopx.self_update import build_update_plan, execute_update_plan, restart_managed_loopx_services
+from loopx.self_update import (
+    UpdateAction,
+    build_update_plan,
+    execute_update_plan,
+    resolve_update_action,
+    restart_managed_loopx_services,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -126,7 +132,9 @@ def test_missing_commit_lineage_never_proves_runtime_active() -> None:
 
 def test_different_selected_source_never_reuses_unrelated_lineage() -> None:
     payload = build_check(
-        doctor_payload(target_commit=INSTALLED_COMMIT, relation="same", source_ref="stable"),
+        doctor_payload(
+            target_commit=INSTALLED_COMMIT, relation="same", source_ref="stable"
+        ),
         ref="main",
     )
 
@@ -148,9 +156,9 @@ def test_cli_check_qualifies_explicit_installed_doctor_snapshot(tmp_path: Path) 
             "-m",
             "loopx.cli",
             "update",
+            "check",
             "--format",
             "json",
-            "--check",
             "--repo",
             "example/loopx",
             "--ref",
@@ -173,6 +181,171 @@ def test_cli_check_qualifies_explicit_installed_doctor_snapshot(tmp_path: Path) 
     assert activation["decision"] == "release_or_install_successor_required"
     assert activation["installed_source_commit"] == INSTALLED_COMMIT
     assert activation["target_source_commit"] == TARGET_COMMIT
+
+
+def test_update_actions_are_explicit_and_legacy_flags_remain_compatible() -> None:
+    assert resolve_update_action("check") is UpdateAction.CHECK
+    assert resolve_update_action("plan") is UpdateAction.PLAN
+    assert resolve_update_action("apply") is UpdateAction.APPLY
+    assert resolve_update_action(check=True) is UpdateAction.CHECK
+    assert resolve_update_action(dry_run=True) is UpdateAction.PLAN
+    assert resolve_update_action(execute=True) is UpdateAction.APPLY
+    assert resolve_update_action() is UpdateAction.PLAN
+
+    with pytest.raises(ValueError, match="conflicts with the legacy option"):
+        resolve_update_action("check", execute=True)
+
+
+def test_python_distribution_apply_uses_the_owning_interpreter_pip() -> None:
+    doctor = doctor_payload()
+    doctor["package"] = {
+        "install_kind": "python_distribution",
+        "release_root": None,
+    }
+    doctor["install_freshness"]["install_kind"] = "python_distribution"
+    doctor["install_freshness"]["python_distribution_installer"] = "pip"
+    doctor["install_freshness"]["upgrade_command"] = (
+        "/managed/python -m pip install --upgrade loopx\n"
+        "loopx workflow-skills --install\n"
+        "loopx slash-commands --install\n"
+        "loopx doctor"
+    )
+
+    payload = build_update_plan(action="apply", doctor_payload=doctor)
+
+    assert payload["ok"] is True
+    assert payload["requested_action"] == "apply"
+    assert payload["changes_applied"] is False
+    assert payload["install_lifecycle"] == {
+        "install_kind": "python_distribution",
+        "owner": "python_package_manager",
+        "loopx_apply_supported": True,
+        "execution_driver": "python_pip",
+        "package_manager": "pip",
+        "package_manager_environment": None,
+        "reason": (
+            "LoopX can ask the owning Python interpreter's pip to upgrade the same environment"
+        ),
+        "owner_upgrade_command": doctor["install_freshness"]["upgrade_command"],
+    }
+    assert payload["commands"]["apply"] == "loopx update apply"
+    assert payload["commands"]["owner_upgrade"].startswith("/managed/python -m pip")
+    assert payload["plan"]["install_command"] == payload["commands"]["owner_upgrade"]
+    assert payload["plan"]["mutates_release_install"] is True
+    assert payload["plan"]["backup"]["rollback_version"] == __version__
+    assert f"loopx=={__version__}" in payload["plan"]["backup"]["rollback_command"]
+    assert payload["error"] is None
+
+    passed = subprocess.CompletedProcess(
+        args=[],
+        returncode=0,
+        stdout='{"ok": true}',
+        stderr="",
+    )
+    with (
+        mock.patch(
+            "loopx.self_update.subprocess.run",
+            side_effect=[passed, passed, passed, passed, passed],
+        ) as run,
+        mock.patch(
+            "loopx.self_update.restart_managed_loopx_services",
+            return_value=["com.loopx.status"],
+        ),
+    ):
+        result = execute_update_plan(payload)
+
+    assert result["ok"] is True
+    assert result["changes_applied"] is True
+    assert result["execution"]["driver"] == "python_pip"
+    assert result["execution"]["restarted_services"] == ["com.loopx.status"]
+    assert run.call_args_list[0].args[0] == [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        "loopx",
+    ]
+    assert run.call_args_list[1].args[0][3:5] == ["workflow-skills", "--install"]
+    assert run.call_args_list[2].args[0][3:5] == ["slash-commands", "--install"]
+
+
+def test_pipx_distribution_apply_preserves_the_pipx_environment() -> None:
+    doctor = doctor_payload()
+    doctor["package"] = {"install_kind": "python_distribution"}
+    doctor["install_freshness"].update(
+        {
+            "install_kind": "python_distribution",
+            "python_distribution_installer": "pipx",
+            "python_distribution_installer_environment": "loopx-preview",
+            "upgrade_command": "pipx upgrade loopx-preview\nloopx doctor",
+        }
+    )
+    payload = build_update_plan(action="apply", doctor_payload=doctor)
+
+    assert payload["install_lifecycle"]["execution_driver"] == "python_pipx"
+    assert (
+        payload["install_lifecycle"]["package_manager_environment"] == "loopx-preview"
+    )
+    assert payload["plan"]["backup"]["available"] is False
+
+    passed = subprocess.CompletedProcess([], 0, '{"ok": true}', "")
+    with (
+        mock.patch(
+            "loopx.self_update.subprocess.run",
+            side_effect=[passed, passed, passed, passed, passed],
+        ) as run,
+        mock.patch(
+            "loopx.self_update.restart_managed_loopx_services",
+            return_value=[],
+        ),
+    ):
+        result = execute_update_plan(payload)
+
+    assert result["ok"] is True
+    assert run.call_args_list[0].args[0] == ["pipx", "upgrade", "loopx-preview"]
+
+
+def test_live_checkout_apply_never_mutates_git_or_switches_install_channels() -> None:
+    doctor = doctor_payload()
+    doctor["package"] = {"install_kind": "live_checkout", "release_root": None}
+    doctor["install_freshness"]["contributor_upgrade_command"] = (
+        "/workspace/loopx/scripts/install-local.sh\nloopx doctor"
+    )
+
+    payload = build_update_plan(action="apply", doctor_payload=doctor)
+
+    assert payload["ok"] is False
+    assert payload["install_lifecycle"]["owner"] == "source_checkout"
+    assert payload["install_lifecycle"]["execution_driver"] is None
+    assert payload["commands"]["apply"] is None
+    assert payload["plan"]["install_command"].startswith("/workspace/loopx/")
+    assert "git pull" not in payload["plan"]["install_command"]
+    assert payload["changes_applied"] is False
+
+
+def test_cli_rejects_conflicting_named_and_legacy_actions() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "loopx.cli",
+            "update",
+            "check",
+            "--execute",
+            "--format",
+            "json",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    payload = json.loads(result.stdout)
+    assert payload["changes_applied"] is False
+    assert "conflicts with the legacy option" in payload["error"]
 
 
 def test_cli_rejects_installed_doctor_snapshot_outside_check(tmp_path: Path) -> None:
@@ -200,7 +373,7 @@ def test_cli_rejects_installed_doctor_snapshot_outside_check(tmp_path: Path) -> 
     assert result.returncode == 1, (result.stdout, result.stderr)
     payload = json.loads(result.stdout)
     assert payload["ok"] is False
-    assert payload["error"] == "--installed-doctor-json requires update --check"
+    assert payload["error"] == "--installed-doctor-json requires `loopx update check`"
 
 
 def test_restart_managed_loopx_services_restarts_only_loopx_launchagents(
@@ -228,7 +401,11 @@ def test_restart_managed_loopx_services_restarts_only_loopx_launchagents(
     monkeypatch.setattr("loopx.self_update.subprocess.run", fake_run)
 
     restarted = restart_managed_loopx_services()
-    assert set(restarted) == {"com.loopx.status", "com.loopx.chat", "com.goal-harness.status"}
+    assert set(restarted) == {
+        "com.loopx.status",
+        "com.loopx.chat",
+        "com.goal-harness.status",
+    }
     assert len(calls) == 3
     assert all(call[0] == "launchctl" for call in calls)
 

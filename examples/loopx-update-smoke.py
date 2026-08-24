@@ -164,6 +164,10 @@ def test_module_plan() -> None:
     assert payload["mode"] == "update", payload
     assert payload["dry_run"] is True, payload
     assert payload["execute_requested"] is False, payload
+    assert payload["requested_action"] == "plan", payload
+    assert payload["changes_applied"] is False, payload
+    assert payload["next_action"]["command"].startswith("loopx update apply"), payload
+    assert payload["next_action"]["requires_authorization"] is True, payload
     assert payload["current"]["requires_upgrade"] is True, payload
     assert payload["current"]["current_version"] == __version__, payload
     assert payload["current"]["current_version_tag"] == release_version_tag(), payload
@@ -181,6 +185,9 @@ def test_module_plan() -> None:
     assert "ln -sfn" not in payload["plan"]["backup"]["rollback_command"], payload
     assert "LOOPX_ARCHIVE_URL=https://example.invalid/loopx.tar.gz" in payload["plan"]["install_command"], payload
     rendered = render_update_plan_markdown(payload)
+    assert "**No update was applied.**" in rendered, rendered
+    assert "## Next Action" in rendered, rendered
+    assert "loopx update apply" in rendered, rendered
     assert f"Current version tag: `{release_version_tag()}`" in rendered, rendered
     assert f"Manifest package version tag: `{release_version_tag()}`" in rendered, rendered
 

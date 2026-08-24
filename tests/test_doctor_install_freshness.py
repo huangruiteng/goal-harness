@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from loopx import __version__
 from loopx.doctor import (
     REQUIRED_INSTALLED_SKILL_PHRASES,
@@ -12,8 +14,35 @@ from loopx.doctor import (
     current_script_invocation_path,
     git_revision_relation,
     installed_skill_summary,
+    python_distribution_install,
     trusted_release_ref_for_root,
 )
+
+
+class _FakeDistributionFile:
+    def __init__(self, module_path: Path) -> None:
+        self._module_path = module_path
+
+    def as_posix(self) -> str:
+        return "loopx/doctor.py"
+
+    def locate(self) -> Path:
+        return self._module_path
+
+
+class _FakeDistribution:
+    version = "0.4.8"
+
+    def __init__(self, module_path: Path, root: Path) -> None:
+        self.files = [_FakeDistributionFile(module_path)]
+        self._root = root
+
+    def read_text(self, name: str) -> str:
+        assert name == "INSTALLER"
+        return "pip"
+
+    def locate_file(self, _name: str) -> Path:
+        return self._root
 
 
 def _git(root: Path, *args: str) -> str:
@@ -208,7 +237,9 @@ def test_stable_channel_upgrade_command_keeps_public_default(tmp_path: Path) -> 
     assert freshness["upgrade_command"] == command
 
 
-def test_unknown_canary_relation_does_not_stale_current_default_release(tmp_path: Path) -> None:
+def test_unknown_canary_relation_does_not_stale_current_default_release(
+    tmp_path: Path,
+) -> None:
     current = "a" * 40
     freshness = _freshness(
         tmp_path,
@@ -327,9 +358,58 @@ def test_python_distribution_uses_pip_native_upgrade_path(tmp_path: Path) -> Non
     if os.name == "nt":
         assert "install-windows.ps1" in str(freshness["no_clone_upgrade_command"])
     else:
-        assert "huangruiteng.github.io" in str(
-            freshness["no_clone_upgrade_command"]
-        )
+        assert "huangruiteng.github.io" in str(freshness["no_clone_upgrade_command"])
+
+
+def test_pipx_distribution_preserves_the_pipx_owner(tmp_path: Path) -> None:
+    freshness = build_install_freshness(
+        command_path=tmp_path / "loopx",
+        release_root=None,
+        repo_root=tmp_path,
+        skills={
+            "loopx-project": {
+                "exists": True,
+                "required_phrases": True,
+            }
+        },
+        python_distribution={
+            "available": True,
+            "kind": "python_distribution",
+            "version": "0.4.8",
+            "installer": "pipx",
+            "installer_environment": "loopx-preview",
+        },
+    )
+
+    assert freshness["python_distribution_installer"] == "pipx"
+    assert freshness["python_distribution_installer_environment"] == "loopx-preview"
+    assert freshness["upgrade_command"].startswith("pipx upgrade loopx-preview\n")
+    assert "python -m pip" not in freshness["upgrade_command"]
+
+
+def test_python_distribution_detects_pipx_metadata_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    venv = tmp_path / "venvs" / "loopx-preview"
+    module_path = venv / "lib" / "python" / "site-packages" / "loopx" / "doctor.py"
+    module_path.parent.mkdir(parents=True)
+    module_path.write_text("# fixture\n", encoding="utf-8")
+    (venv / "pipx_metadata.json").write_text(
+        '{"pipx_metadata_version":"0.12","environment":"loopx-preview"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "loopx.doctor.distribution",
+        lambda _name: _FakeDistribution(module_path, module_path.parents[2]),
+    )
+    monkeypatch.setattr("loopx.doctor.sys.prefix", str(venv))
+
+    installed = python_distribution_install(module_path)
+
+    assert installed["available"] is True
+    assert installed["installer"] == "pipx"
+    assert installed["installer_environment"] == "loopx-preview"
 
 
 def test_python_distribution_ignores_archive_manifest_version(tmp_path: Path) -> None:

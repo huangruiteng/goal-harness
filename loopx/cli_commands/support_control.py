@@ -43,11 +43,13 @@ from ..registry import (
     render_registry_markdown,
 )
 from ..self_update import (
+    UpdateAction,
     build_rollback_plan,
     build_update_plan,
     execute_rollback_plan,
     execute_update_plan,
     render_update_plan_markdown,
+    resolve_update_action,
 )
 from ..status_server import (
     DEFAULT_STATUS_HOST,
@@ -110,7 +112,9 @@ def register_support_control_commands(
         help="Generate a guarded heartbeat or visible-goal host-loop task body.",
     )
     add_subcommand_format(heartbeat_prompt_parser)
-    heartbeat_prompt_parser.add_argument("--goal-id", required=True, help="Stable LoopX goal id.")
+    heartbeat_prompt_parser.add_argument(
+        "--goal-id", required=True, help="Stable LoopX goal id."
+    )
     heartbeat_prompt_parser.add_argument(
         "--active-state",
         help="Active goal state file the heartbeat should read and write back. Defaults to the registry goal state_file.",
@@ -299,7 +303,12 @@ def register_support_control_commands(
         help="Plan local default upgrade propagation for managed heartbeat automations.",
     )
     add_subcommand_format(upgrade_plan_parser)
-    upgrade_plan_parser.add_argument("--goal-id", action="append", default=[], help="Only include one goal id. Repeatable.")
+    upgrade_plan_parser.add_argument(
+        "--goal-id",
+        action="append",
+        default=[],
+        help="Only include one goal id. Repeatable.",
+    )
     upgrade_plan_parser.add_argument(
         "--installed-manifest",
         help=(
@@ -323,13 +332,36 @@ def register_support_control_commands(
 
     update_parser = subparsers.add_parser(
         "update",
-        help="Check or execute a no-clone LoopX self-update.",
+        help="Inspect or apply an update using the active installation owner.",
+        description=(
+            "Use `update check` for a read-only freshness probe, `update plan` for the "
+            "full no-write plan, or `update apply` for an explicit archive-snapshot "
+            "mutation. Bare `update` remains a read-only plan."
+        ),
     )
     add_subcommand_format(update_parser)
+    update_parser.add_argument(
+        "update_action",
+        nargs="?",
+        choices=tuple(action.value for action in UpdateAction),
+        help="Explicit intent: check (read only), plan (read only), or apply (mutating).",
+    )
     update_mode = update_parser.add_mutually_exclusive_group()
-    update_mode.add_argument("--check", action="store_true", help="Only report install freshness and update source.")
-    update_mode.add_argument("--dry-run", action="store_true", help="Preview the update plan without installing.")
-    update_mode.add_argument("--execute", action="store_true", help="Run the installer and validate with loopx doctor.")
+    update_mode.add_argument(
+        "--check",
+        action="store_true",
+        help="Compatibility alias for `loopx update check`.",
+    )
+    update_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compatibility alias for `loopx update plan`.",
+    )
+    update_mode.add_argument(
+        "--execute",
+        action="store_true",
+        help="Compatibility alias for `loopx update apply`; prefer the explicit action.",
+    )
     update_mode.add_argument(
         "--rollback",
         metavar="RELEASE_ID",
@@ -358,10 +390,12 @@ def register_support_control_commands(
         "--timeout-seconds",
         type=int,
         default=600,
-        help="Timeout for --execute installer and post-update doctor commands.",
+        help="Timeout for `update apply` installer and post-update doctor commands.",
     )
 
-    subparsers.add_parser("registry", help="Inspect registry goals and adapter declarations.")
+    subparsers.add_parser(
+        "registry", help="Inspect registry goals and adapter declarations."
+    )
     registry_boundary_parser = subparsers.add_parser(
         "registry-boundary",
         help="Classify a registry file as local-only, global-local, public projection, or public fixture.",
@@ -381,10 +415,18 @@ def register_support_control_commands(
         help="Return non-zero if the registry should be ignored but is neither ignored nor tracked.",
     )
 
-    serve_status_parser = subparsers.add_parser("serve-status", help="Serve live status JSON for the local dashboard.")
-    serve_status_parser.add_argument("--host", default=DEFAULT_STATUS_HOST, help="Bind host. Defaults to localhost only.")
+    serve_status_parser = subparsers.add_parser(
+        "serve-status", help="Serve live status JSON for the local dashboard."
+    )
+    serve_status_parser.add_argument(
+        "--host",
+        default=DEFAULT_STATUS_HOST,
+        help="Bind host. Defaults to localhost only.",
+    )
     serve_status_parser.add_argument("--port", type=int, default=DEFAULT_STATUS_PORT)
-    serve_status_parser.add_argument("--path", default=DEFAULT_STATUS_PATH, help="Status JSON route.")
+    serve_status_parser.add_argument(
+        "--path", default=DEFAULT_STATUS_PATH, help="Status JSON route."
+    )
     serve_status_parser.add_argument(
         "--scan-root",
         default=default_public_scan_root(),
@@ -412,14 +454,20 @@ def register_support_control_commands(
         action="store_true",
         help="Serve the shared global registry view even when invoked from a project directory.",
     )
-    serve_status_parser.add_argument("--verbose", action="store_true", help="Print HTTP request logs.")
+    serve_status_parser.add_argument(
+        "--verbose", action="store_true", help="Print HTTP request logs."
+    )
 
     chat_parser = subparsers.add_parser(
         "chat",
         help="Open the local Goal Studio and review Agent-proposed LoopX Todos.",
     )
-    chat_parser.add_argument("--goal-id", help="Goal to select when the local workspace opens.")
-    chat_parser.add_argument("--host", default=DEFAULT_CHAT_HOST, help="Loopback bind host.")
+    chat_parser.add_argument(
+        "--goal-id", help="Goal to select when the local workspace opens."
+    )
+    chat_parser.add_argument(
+        "--host", default=DEFAULT_CHAT_HOST, help="Loopback bind host."
+    )
     chat_parser.add_argument("--port", type=int, default=DEFAULT_CHAT_PORT)
     chat_parser.add_argument(
         "--codex-bin",
@@ -482,7 +530,9 @@ def register_support_control_commands(
         action="store_true",
         help="Start the local server without opening a browser.",
     )
-    chat_parser.add_argument("--verbose", action="store_true", help="Print HTTP request logs.")
+    chat_parser.add_argument(
+        "--verbose", action="store_true", help="Print HTTP request logs."
+    )
 
     register_chat_endpoint_command(subparsers, add_subcommand_format)
 
@@ -490,8 +540,12 @@ def register_support_control_commands(
         "dashboard",
         help="Start the local LoopX dashboard, status service, and Chat service.",
     )
-    dashboard_parser.add_argument("--goal-id", help="Goal to select when the local workspace opens.")
-    dashboard_parser.add_argument("--host", default=DEFAULT_CHAT_HOST, help="Loopback bind host.")
+    dashboard_parser.add_argument(
+        "--goal-id", help="Goal to select when the local workspace opens."
+    )
+    dashboard_parser.add_argument(
+        "--host", default=DEFAULT_CHAT_HOST, help="Loopback bind host."
+    )
     dashboard_parser.add_argument("--port", type=int, default=DEFAULT_CHAT_PORT)
     dashboard_parser.add_argument(
         "--codex-bin",
@@ -541,7 +595,9 @@ def register_support_control_commands(
         action="store_true",
         help="Prefer the Vite HMR dev launcher if running from a local repository checkout.",
     )
-    dashboard_parser.add_argument("--verbose", action="store_true", help="Print HTTP request logs.")
+    dashboard_parser.add_argument(
+        "--verbose", action="store_true", help="Print HTTP request logs."
+    )
 
 
 def handle_support_control_command(
@@ -608,8 +664,12 @@ def handle_support_control_command(
             )
             agent_registry_path = registry_path
             if active_state_source.startswith("registry:"):
-                agent_registry_path = Path(active_state_source.removeprefix("registry:"))
-            registered_agents = registered_agent_ids_from_registry(agent_registry_path, args.goal_id)
+                agent_registry_path = Path(
+                    active_state_source.removeprefix("registry:")
+                )
+            registered_agents = registered_agent_ids_from_registry(
+                agent_registry_path, args.goal_id
+            )
             registry_goal = load_goal_from_registry(
                 agent_registry_path,
                 args.goal_id,
@@ -627,7 +687,9 @@ def handle_support_control_command(
                     agent_id=args.agent_id,
                     field="agent_id",
                 )
-                agent_profile = agent_profile_from_registry(agent_registry_path, args.goal_id, effective_agent_id)
+                agent_profile = agent_profile_from_registry(
+                    agent_registry_path, args.goal_id, effective_agent_id
+                )
             explicit_scheduler_fields = (
                 args.host_surface,
                 args.scheduler_owner,
@@ -687,8 +749,12 @@ def handle_support_control_command(
             fallback_active_state_source = active_state_source
             if fallback_active_state is None and args.active_state:
                 fallback_active_state = Path(args.active_state).expanduser()
-                fallback_resolved_active_state = fallback_resolved_active_state or fallback_active_state
-                fallback_active_state_source = fallback_active_state_source or "explicit"
+                fallback_resolved_active_state = (
+                    fallback_resolved_active_state or fallback_active_state
+                )
+                fallback_active_state_source = (
+                    fallback_active_state_source or "explicit"
+                )
             elif fallback_active_state_source is None:
                 fallback_active_state_source = "registry"
             payload = build_heartbeat_prompt_error_payload(
@@ -774,7 +840,9 @@ def handle_support_control_command(
             payload = build_upgrade_plan(
                 registry_path=registry_path,
                 runtime_root_override=args.runtime_root,
-                installed_manifest=Path(args.installed_manifest).expanduser() if args.installed_manifest else None,
+                installed_manifest=Path(args.installed_manifest).expanduser()
+                if args.installed_manifest
+                else None,
                 cli_bin=args.cli_bin,
                 modes=args.mode or None,
                 goal_ids=args.goal_id or None,
@@ -806,41 +874,63 @@ def handle_support_control_command(
         return 0 if payload.get("ok") else 1
 
     if args.command == "update":
+        update_action = UpdateAction.PLAN
         try:
-            if args.installed_doctor_json and not args.check:
-                raise ValueError("--installed-doctor-json requires update --check")
+            update_action = resolve_update_action(
+                args.update_action,
+                check=args.check,
+                dry_run=args.dry_run,
+                execute=args.execute,
+            )
+            if args.rollback and args.update_action:
+                raise ValueError(
+                    "update rollback cannot be combined with check, plan, or apply"
+                )
+            if args.installed_doctor_json and update_action is not UpdateAction.CHECK:
+                raise ValueError(
+                    "--installed-doctor-json requires `loopx update check`"
+                )
             if args.rollback:
                 payload = build_rollback_plan(release_id=args.rollback)
-                payload = execute_rollback_plan(payload, timeout_seconds=args.timeout_seconds)
+                payload = execute_rollback_plan(
+                    payload, timeout_seconds=args.timeout_seconds
+                )
             else:
                 doctor_payload = None
                 if args.installed_doctor_json:
                     doctor_path = Path(args.installed_doctor_json).expanduser()
                     loaded_doctor = json.loads(doctor_path.read_text(encoding="utf-8"))
                     if not isinstance(loaded_doctor, dict):
-                        raise ValueError("--installed-doctor-json must contain a JSON object")
+                        raise ValueError(
+                            "--installed-doctor-json must contain a JSON object"
+                        )
                     doctor_payload = loaded_doctor
                 payload = build_update_plan(
                     repo=args.repo,
                     ref=args.ref,
                     archive_url=args.archive_url,
-                    check_only=args.check,
-                    execute=args.execute,
+                    action=update_action,
                     doctor_payload=doctor_payload,
                 )
                 payload["installed_doctor_source"] = (
                     "explicit_json" if doctor_payload is not None else "current_runtime"
                 )
-                if args.execute:
-                    payload = execute_update_plan(payload, timeout_seconds=args.timeout_seconds)
+                if update_action is UpdateAction.APPLY and payload.get("plan", {}).get(
+                    "apply_supported"
+                ):
+                    payload = execute_update_plan(
+                        payload, timeout_seconds=args.timeout_seconds
+                    )
         except Exception as exc:
             payload = {
                 "ok": False,
                 "schema_version": "loopx_update_plan_v0",
                 "mode": "update",
-                "check_only": bool(getattr(args, "check", False)),
-                "dry_run": not bool(getattr(args, "execute", False)),
-                "execute_requested": bool(getattr(args, "execute", False)),
+                "requested_action": update_action.value,
+                "check_only": update_action is UpdateAction.CHECK,
+                "dry_run": update_action is not UpdateAction.APPLY,
+                "execute_requested": update_action is UpdateAction.APPLY,
+                "changes_applied": False,
                 "error": str(exc),
                 "recommended_action": "fix update planning or installation before retrying",
             }
@@ -856,14 +946,27 @@ def handle_support_control_command(
         boundary_path = Path(args.path).expanduser() if args.path else registry_path
         payload = inspect_registry_boundary(boundary_path)
         git = payload.get("git") if isinstance(payload.get("git"), dict) else {}
-        if args.require_not_tracked and payload.get("ok") and git.get("tracked") and not payload.get(
-            "github_push_allowed"
+        if (
+            args.require_not_tracked
+            and payload.get("ok")
+            and git.get("tracked")
+            and not payload.get("github_push_allowed")
         ):
             payload = dict(payload)
             payload["ok"] = False
-            payload.setdefault("risks", []).append("registry_tracked_but_not_push_allowed")
-        if args.require_gitignored and payload.get("ok") and payload.get("should_be_gitignored"):
-            if git.get("inside_worktree") and not git.get("ignored") and not git.get("tracked"):
+            payload.setdefault("risks", []).append(
+                "registry_tracked_but_not_push_allowed"
+            )
+        if (
+            args.require_gitignored
+            and payload.get("ok")
+            and payload.get("should_be_gitignored")
+        ):
+            if (
+                git.get("inside_worktree")
+                and not git.get("ignored")
+                and not git.get("tracked")
+            ):
                 payload = dict(payload)
                 payload["ok"] = False
                 payload.setdefault("risks", []).append("registry_should_be_gitignored")
@@ -872,7 +975,11 @@ def handle_support_control_command(
 
     if args.command == "serve-status":
         try:
-            status_registry_path = explicit_global_registry(args.runtime_root) if args.global_registry else registry_path
+            status_registry_path = (
+                explicit_global_registry(args.runtime_root)
+                if args.global_registry
+                else registry_path
+            )
             scan_roots = [Path(item).expanduser() for item in args.scan_path]
             if not scan_roots:
                 scan_roots = [Path(args.scan_root).expanduser()]
@@ -885,13 +992,19 @@ def handle_support_control_command(
                 port=args.port,
                 status_path=args.path,
                 enable_reward_write_api=bool(args.enable_reward_write_api),
-                enable_control_plane_write_api=bool(args.enable_control_plane_write_api),
+                enable_control_plane_write_api=bool(
+                    args.enable_control_plane_write_api
+                ),
                 verbose=bool(args.verbose),
             )
         except Exception as exc:
             payload = {
                 "ok": False,
-                "registry": str(status_registry_path if "status_registry_path" in locals() else registry_path),
+                "registry": str(
+                    status_registry_path
+                    if "status_registry_path" in locals()
+                    else registry_path
+                ),
                 "runtime_root": args.runtime_root,
                 "error": str(exc),
             }
@@ -901,8 +1014,14 @@ def handle_support_control_command(
 
     if args.command == "dashboard":
         try:
-            dashboard_registry_path = explicit_global_registry(args.runtime_root) if getattr(args, "global_registry", False) else registry_path
-            scan_roots = [Path(item).expanduser() for item in getattr(args, "scan_path", []) or []]
+            dashboard_registry_path = (
+                explicit_global_registry(args.runtime_root)
+                if getattr(args, "global_registry", False)
+                else registry_path
+            )
+            scan_roots = [
+                Path(item).expanduser() for item in getattr(args, "scan_path", []) or []
+            ]
             if not scan_roots and getattr(args, "scan_root", None):
                 scan_roots = [Path(args.scan_root).expanduser()]
             return launch_dashboard(
@@ -916,7 +1035,9 @@ def handle_support_control_command(
                 codex_bin=getattr(args, "codex_bin", "codex"),
                 claude_bin=getattr(args, "claude_bin", "claude"),
                 lark_cli_bin=getattr(args, "lark_cli_bin", None),
-                assets_dir=Path(args.assets_dir).expanduser().resolve() if getattr(args, "assets_dir", None) else None,
+                assets_dir=Path(args.assets_dir).expanduser().resolve()
+                if getattr(args, "assets_dir", None)
+                else None,
                 verbose=getattr(args, "verbose", False),
                 open_browser=not getattr(args, "no_open", False),
                 prefer_dev=getattr(args, "dev", False),
@@ -932,7 +1053,11 @@ def handle_support_control_command(
 
     if args.command == "chat":
         try:
-            chat_registry_path = explicit_global_registry(args.runtime_root) if args.global_registry else registry_path
+            chat_registry_path = (
+                explicit_global_registry(args.runtime_root)
+                if args.global_registry
+                else registry_path
+            )
             scan_roots = [Path(item).expanduser() for item in args.scan_path]
             if not scan_roots:
                 scan_roots = [Path(args.scan_root).expanduser()]
@@ -950,7 +1075,9 @@ def handle_support_control_command(
                 startup_timeout_sec=max(0.1, float(args.startup_timeout_seconds)),
                 idle_timeout_sec=max(0.1, float(args.idle_timeout_seconds)),
                 hard_timeout_sec=max(0.1, float(args.hard_timeout_seconds)),
-                assets_dir=Path(args.assets_dir).expanduser() if args.assets_dir else None,
+                assets_dir=Path(args.assets_dir).expanduser()
+                if args.assets_dir
+                else None,
                 open_browser=not bool(args.no_open),
                 verbose=bool(args.verbose),
             )
