@@ -6,7 +6,7 @@ presentation, and destinations to profiles and adapters.
 
 | Surface | Value |
 | --- | --- |
-| CLI | `loopx periodic-report inspect-profile --preset weekly`, custom `--profile-json <path>`, `evaluate-trigger`, `compose-run`, and optional `archive-openviking` |
+| CLI | `loopx periodic-report inspect-profile --preset weekly`, custom `--profile-json <path>`, `evaluate-trigger`, `evaluate-runtime-trigger`, `compose-run`, and optional `archive-openviking` |
 | Protocol | [`periodic_report_v0`](../../../docs/reference/protocols/periodic-report-v0.md) |
 | Smokes | `python3 examples/periodic-report-smoke.py`, `periodic-report-profile-smoke.py`, `periodic-report-html-smoke.py`, `periodic-report-bindings-smoke.py`, and `openviking-periodic-report-extension-smoke.py` |
 
@@ -86,6 +86,16 @@ Profiles can enable trigger kinds and set a minimum interval; urgent outcome,
 closure, blocker, and manual triggers may bypass that interval. Concurrent
 material facts are coalesced into one report and previously covered trigger
 ids are deduplicated.
+
+An enabled custom profile may also declare `trigger_policy.aggregation` with a
+bounded `window_seconds`, an optional `todo_completed_threshold`, and
+`promote_replan`. The `evaluate-runtime-trigger` command reads the durable
+public-safe rollout event log supplied by the caller, deduplicates completed
+Todo ids, and promotes either the threshold crossing or a durable
+`autonomous_replan_recorded` refresh into the normal
+`bounded_segment_milestone` decision. The producer performs no provider call or
+external write; an eligible receipt continues through the existing
+`compose-run`, renderer, and separately authorized sink boundaries.
 
 Project-specific scheduled reports should be layered as profiles and adapters.
 For example, a maintenance profile may choose a local timezone and weekly
