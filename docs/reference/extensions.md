@@ -279,6 +279,18 @@ loopx extension enable openviking-semantic-preference --execute --format json
 loopx extension install --bundled loopx-lark --execute --format json
 ```
 
+After an install, update, or rollback changes the active LoopX release,
+revalidate all enabled extension runtimes as one bounded read-only batch:
+
+```bash
+loopx extension doctor --all-enabled --execute --format json
+```
+
+The local installer runs this batch automatically. A passing doctor refreshes
+only the local runtime-identity proof; it grants no new provider permission and
+performs no connector write. Failed providers remain fail closed and the batch
+names the exact repair command.
+
 For a separately distributed provider, pass `--manifest <extension.toml>`.
 `upgrade` validates and probes the new manifest before changing the active
 revision. `rollback` probes the previous revision before switching back. A
@@ -524,10 +536,11 @@ authorization.
 `disable` is reversible, but `enable` never trusts an earlier readiness result:
 it reruns the configured doctor and changes the enabled bit only after that
 probe succeeds. A successful doctor binds readiness to both the active manifest
-revision and the resolved runtime identity. Missing or replaced executables,
-interpreters, or Python module sources fail closed until a new executed doctor
-succeeds; a failed executed doctor clears the stale proof without switching
-revisions.
+revision and a content-addressed runtime identity. Moving an unchanged release
+to a new install root, inode, or equivalent interpreter path preserves that
+identity; changed executable, interpreter, or Python module content fails closed
+until a new executed doctor succeeds. A failed executed doctor clears the stale
+proof without switching revisions.
 
 An enabled implementation is resolved by capability id and versioned protocol,
 then checked against its declared permission, current revision, and current

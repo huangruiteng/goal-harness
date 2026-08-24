@@ -769,6 +769,10 @@ fi
 
 export PATH="$bin_dir:$PATH"
 "$bin_dir/loopx" doctor >/dev/null
+if ! "$bin_dir/loopx" --format json extension doctor --all-enabled --execute >/dev/null; then
+  echo "loopx installer warning: one or more enabled extensions failed post-install doctor revalidation" >&2
+  echo "Run 'loopx extension doctor --all-enabled --execute' after repairing the provider." >&2
+fi
 if [[ "$install_canary" != "0" ]]; then
   "$bin_dir/loopx-canary" doctor >/dev/null
 fi
