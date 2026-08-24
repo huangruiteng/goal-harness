@@ -233,6 +233,49 @@ def test_restart_managed_loopx_services_restarts_only_loopx_launchagents(
     assert all(call[0] == "launchctl" for call in calls)
 
 
+def test_successful_update_revalidates_enabled_extensions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "source": {"installer_url": "https://example.invalid/install.sh"},
+        "plan": {"backup": {}},
+    }
+    completed = [
+        subprocess.CompletedProcess([], 0, "installed", ""),
+        subprocess.CompletedProcess([], 0, '{"ok": true}', ""),
+        subprocess.CompletedProcess([], 0, '{"ok": true}', ""),
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(args))
+        return completed[len(calls) - 1]
+
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(
+        "loopx.self_update._installer_env_for_source",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr("loopx.self_update.subprocess.run", fake_run)
+
+    updated = execute_update_plan(payload)
+
+    assert updated["ok"] is True
+    assert updated["execution"]["extension_doctor_returncode"] == 0
+    assert calls[2] == [
+        str(tmp_path / ".local" / "bin" / "loopx"),
+        "--format",
+        "json",
+        "extension",
+        "doctor",
+        "--all-enabled",
+        "--execute",
+    ]
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows update boundary")
 def test_windows_execute_update_fails_closed_without_launching_bash() -> None:
     payload = {"ok": True, "source": {}, "plan": {}}

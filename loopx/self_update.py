@@ -623,11 +623,44 @@ def execute_update_plan(payload: dict[str, Any], *, timeout_seconds: int = 600) 
         "doctor_stdout_tail": doctor_result.stdout[-2000:],
         "doctor_stderr_tail": doctor_result.stderr[-2000:],
     }
+    extension_doctor_result = None
+    if install_result.returncode == 0 and doctor_result.returncode == 0:
+        extension_doctor_result = subprocess.run(
+            [
+                str(loopx_bin),
+                "--format",
+                "json",
+                "extension",
+                "doctor",
+                "--all-enabled",
+                "--execute",
+            ],
+            text=True,
+            capture_output=True,
+            env=env,
+            timeout=timeout_seconds,
+        )
+        execution.update(
+            {
+                "extension_doctor_returncode": extension_doctor_result.returncode,
+                "extension_doctor_stdout_tail": extension_doctor_result.stdout[-2000:],
+                "extension_doctor_stderr_tail": extension_doctor_result.stderr[-2000:],
+            }
+        )
+    else:
+        execution["extension_doctor_status"] = "skipped_release_update_failed"
     updated = dict(payload)
     updated["execution"] = execution
-    updated["ok"] = install_result.returncode == 0 and doctor_result.returncode == 0
+    updated["ok"] = (
+        install_result.returncode == 0
+        and doctor_result.returncode == 0
+        and extension_doctor_result is not None
+        and extension_doctor_result.returncode == 0
+    )
     if not updated["ok"]:
-        updated["recommended_action"] = "inspect update execution tails and restore from rollback plan if needed"
+        updated["recommended_action"] = (
+            "inspect update execution tails and restore from rollback plan if needed"
+        )
         return updated
     execution["restarted_services"] = restart_managed_loopx_services()
     return updated
