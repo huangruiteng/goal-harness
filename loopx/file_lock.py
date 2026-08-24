@@ -309,7 +309,8 @@ class LockAcquireTimeoutError(TimeoutError):
         self.incident = incident
         self.incident_recorded = incident_recorded
         self.incident_channel = incident_channel
-        holder = incident.get("holder") if isinstance(incident.get("holder"), dict) else {}
+        raw_holder = incident.get("holder")
+        holder: dict[str, object] = raw_holder if isinstance(raw_holder, dict) else {}
         super().__init__(
             "file lock acquisition timed out"
             + (f" while waiting for holder pid {holder.get('pid')}" if holder.get("pid") else "")
@@ -349,7 +350,7 @@ def _timeout_error(
         "waited_seconds": round(waited_seconds, 3),
     }
     action = _operator_action(holder, retry_mode=LOCK_POLICIES[policy].retry_mode)
-    incident = {
+    incident: dict[str, object] = {
         "schema_version": LOCK_INCIDENT_SCHEMA_VERSION,
         "error_code": LOCK_ACQUIRE_TIMEOUT_ERROR_CODE,
         "recorded_at": _utc_now_iso(),
