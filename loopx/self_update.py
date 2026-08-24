@@ -787,7 +787,7 @@ def build_update_plan(
             "kind": "review_execution",
             "command": "loopx doctor",
             "mutating": False,
-            "requires_authorization": False,
+            "requires_explicit_approval": False,
             "reason": recommended_action,
         }
     elif apply_command:
@@ -795,7 +795,7 @@ def build_update_plan(
             "kind": "apply_update",
             "command": apply_command,
             "mutating": True,
-            "requires_authorization": True,
+            "requires_explicit_approval": True,
             "reason": recommended_action,
         }
     else:
@@ -803,7 +803,7 @@ def build_update_plan(
             "kind": "use_installation_owner",
             "command": owner_upgrade_command,
             "mutating": bool(owner_upgrade_command),
-            "requires_authorization": bool(owner_upgrade_command),
+            "requires_explicit_approval": bool(owner_upgrade_command),
             "reason": recommended_action,
         }
     return {
@@ -1026,7 +1026,7 @@ def _execute_python_distribution_update(
             "kind": "use_updated_runtime",
             "command": "loopx doctor",
             "mutating": False,
-            "requires_authorization": False,
+            "requires_explicit_approval": False,
             "reason": updated["recommended_action"],
         }
     else:
@@ -1047,7 +1047,7 @@ def _execute_python_distribution_update(
             "kind": "review_or_rollback",
             "command": rollback_command,
             "mutating": bool(rollback_command),
-            "requires_authorization": bool(rollback_command),
+            "requires_explicit_approval": bool(rollback_command),
             "reason": updated["recommended_action"],
         }
     return updated
@@ -1175,7 +1175,7 @@ def execute_update_plan(
             "kind": "review_or_rollback",
             "command": rollback_command,
             "mutating": bool(rollback_command),
-            "requires_authorization": bool(rollback_command),
+            "requires_explicit_approval": bool(rollback_command),
             "reason": updated["recommended_action"],
         }
         return updated
@@ -1187,7 +1187,7 @@ def execute_update_plan(
         "kind": "use_updated_runtime",
         "command": "loopx doctor",
         "mutating": False,
-        "requires_authorization": False,
+        "requires_explicit_approval": False,
         "reason": updated["recommended_action"],
     }
     return updated
@@ -1394,7 +1394,7 @@ def render_update_plan_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- Kind: `{next_action.get('kind')}`",
         f"- Mutating: `{next_action.get('mutating')}`",
-        f"- Requires authorization: `{next_action.get('requires_authorization')}`",
+        f"- Requires explicit approval: `{next_action.get('requires_explicit_approval')}`",
     ]
     next_command = next_action.get("command")
     if next_command:

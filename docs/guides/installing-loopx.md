@@ -147,7 +147,7 @@ should use the named actions.
 Human-readable output starts with **No update was applied** and a copyable
 **Next Action** command. JSON output exposes the same decision as
 `requested_action`, `changes_applied`, and a typed `next_action` object with
-mutation and authorization fields. Agents should inspect those fields instead
+mutation and explicit-approval fields. Agents should inspect those fields instead
 of inferring authority from prose.
 
 For a PyPI distribution installed by pip, `update apply` asks the exact Python

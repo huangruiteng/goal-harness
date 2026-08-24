@@ -167,7 +167,7 @@ def test_module_plan() -> None:
     assert payload["requested_action"] == "plan", payload
     assert payload["changes_applied"] is False, payload
     assert payload["next_action"]["command"].startswith("loopx update apply"), payload
-    assert payload["next_action"]["requires_authorization"] is True, payload
+    assert payload["next_action"]["requires_explicit_approval"] is True, payload
     assert payload["current"]["requires_upgrade"] is True, payload
     assert payload["current"]["current_version"] == __version__, payload
     assert payload["current"]["current_version_tag"] == release_version_tag(), payload
