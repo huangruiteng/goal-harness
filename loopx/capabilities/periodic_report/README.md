@@ -96,6 +96,9 @@ Todo ids, and promotes either the threshold crossing or a durable
 `bounded_segment_milestone` decision. The producer performs no provider call or
 external write; an eligible receipt continues through the existing
 `compose-run`, renderer, and separately authorized sink boundaries.
+The CLI streams the append-only log and applies the 4,096-row capacity limit
+only after goal, segment-window, and relevant-kind filtering. Malformed durable
+rows and an oversized relevant window fail closed.
 
 Project-specific scheduled reports should be layered as profiles and adapters.
 For example, a maintenance profile may choose a local timezone and weekly

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -23,6 +23,7 @@ from .triggers import (
 
 RUNTIME_TRIGGER_REQUEST_SCHEMA = "periodic_report_runtime_trigger_request_v0"
 RUNTIME_PRODUCER_RECEIPT_SCHEMA = "periodic_report_runtime_producer_v0"
+_MAX_RELEVANT_ROLLOUT_EVENTS = 4096
 
 _SAFE_BOUNDARY_FIELDS = (
     "raw_task_text_recorded",
@@ -51,28 +52,23 @@ def _safe_durable_event(
     raw: Mapping[str, Any],
     *,
     goal_id: str,
-    start_at: str,
-    end_at: str,
+    window_start: datetime,
+    window_end: datetime,
     index: int,
 ) -> dict[str, Any] | None:
     label = f"rollout_events[{index}]"
     event = _object(raw, label)
     if event.get("schema_version") != ROLLOUT_EVENT_SCHEMA_VERSION:
         raise ValueError(f"{label} must use {ROLLOUT_EVENT_SCHEMA_VERSION}")
-    event_goal_id = _token(event.get("goal_id"), f"{label}.goal_id")
-    if event_goal_id != goal_id:
-        raise ValueError(f"{label}.goal_id must match request.goal_id")
-    event_id = _text(event.get("event_id"), f"{label}.event_id", maximum=128)
-    recorded_at = _timestamp(event.get("recorded_at"), f"{label}.recorded_at")
-    if not (
-        _parsed_timestamp(start_at)
-        <= _parsed_timestamp(recorded_at)
-        <= _parsed_timestamp(end_at)
-    ):
+    if event.get("goal_id") != goal_id:
         return None
     kind = str(event.get("event_kind") or "").strip()
     if kind not in {"todo_complete", "refresh_state"}:
         return None
+    recorded_at = _timestamp(event.get("recorded_at"), f"{label}.recorded_at")
+    if not window_start <= _parsed_timestamp(recorded_at) <= window_end:
+        return None
+    event_id = _text(event.get("event_id"), f"{label}.event_id", maximum=128)
     boundary = _object(event.get("boundary"), f"{label}.boundary")
     if any(boundary.get(field) is not False for field in _SAFE_BOUNDARY_FIELDS):
         raise ValueError(f"{label}.boundary does not prove a public-safe event")
@@ -93,7 +89,7 @@ def _safe_durable_event(
 def build_periodic_report_runtime_trigger_decision(
     request: Mapping[str, Any],
     *,
-    rollout_events: Sequence[Mapping[str, Any]],
+    rollout_events: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Promote durable control-plane events into one normal trigger decision.
 
@@ -133,13 +129,13 @@ def build_periodic_report_runtime_trigger_decision(
     segment_ref = _token(segment.get("segment_ref"), "segment.segment_ref")
     start_at = _timestamp(segment.get("start_at"), "segment.start_at")
     end_at = _timestamp(segment.get("end_at"), "segment.end_at")
-    if _parsed_timestamp(start_at) >= _parsed_timestamp(end_at):
+    window_start = _parsed_timestamp(start_at)
+    window_end = _parsed_timestamp(end_at)
+    if window_start >= window_end:
         raise ValueError("segment.start_at must be earlier than segment.end_at")
     if end_at != evaluated_at:
         raise ValueError("segment.end_at must match evaluated_at")
-    duration = int(
-        (_parsed_timestamp(end_at) - _parsed_timestamp(start_at)).total_seconds()
-    )
+    duration = int((window_end - window_start).total_seconds())
     if duration > int(aggregation["window_seconds"]):
         raise ValueError("segment window exceeds trigger_policy.aggregation.window_seconds")
     remaining_todo_count = _integer(
@@ -147,24 +143,28 @@ def build_periodic_report_runtime_trigger_decision(
         "segment.remaining_todo_count",
         maximum=1_000_000,
     )
-    if isinstance(rollout_events, (str, bytes)):
-        raise ValueError("rollout_events must be a bounded object list")
-    values = list(rollout_events)
-    if len(values) > 4096:
-        raise ValueError("rollout_events must contain at most 4096 items")
+    if isinstance(rollout_events, (str, bytes, Mapping)):
+        raise ValueError("rollout_events must be an iterable of objects")
 
     relevant: list[dict[str, Any]] = []
+    relevant_count = 0
     seen_event_ids: set[str] = set()
-    for index, raw_event in enumerate(values):
+    for index, raw_event in enumerate(rollout_events):
         event = _safe_durable_event(
             raw_event,
             goal_id=goal_id,
-            start_at=start_at,
-            end_at=end_at,
+            window_start=window_start,
+            window_end=window_end,
             index=index,
         )
         if event is None:
             continue
+        relevant_count += 1
+        if relevant_count > _MAX_RELEVANT_ROLLOUT_EVENTS:
+            raise ValueError(
+                "rollout_events must contain at most "
+                f"{_MAX_RELEVANT_ROLLOUT_EVENTS} relevant window items"
+            )
         event_id = str(event["event_id"])
         if event_id in seen_event_ids:
             continue

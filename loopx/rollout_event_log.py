@@ -5,7 +5,7 @@ import json
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from .file_lock import exclusive_file_lock
 
@@ -432,23 +432,47 @@ def append_rollout_event_once(
     return payload, True
 
 
-def load_rollout_events(log_path: Path, *, limit: int | None = None) -> list[dict[str, Any]]:
+def iter_rollout_events(
+    log_path: Path,
+    *,
+    strict: bool = False,
+) -> Iterator[dict[str, Any]]:
     try:
-        lines = log_path.read_text(encoding="utf-8").splitlines()
+        handle = log_path.open(encoding="utf-8")
     except OSError:
-        return []
+        return
+    with handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                if strict:
+                    raise ValueError(
+                        f"rollout event log line {line_number} must contain valid JSON"
+                    ) from None
+                continue
+            if not isinstance(parsed, dict):
+                if strict:
+                    raise ValueError(
+                        f"rollout event log line {line_number} must contain an object"
+                    )
+                continue
+            if parsed.get("schema_version") != ROLLOUT_EVENT_SCHEMA_VERSION:
+                if strict:
+                    raise ValueError(
+                        f"rollout event log line {line_number} must use "
+                        f"{ROLLOUT_EVENT_SCHEMA_VERSION}"
+                    )
+                continue
+            yield parsed
+
+
+def load_rollout_events(log_path: Path, *, limit: int | None = None) -> list[dict[str, Any]]:
+    events = list(iter_rollout_events(log_path))
     if limit is not None:
-        lines = lines[-max(0, limit) :]
-    events: list[dict[str, Any]] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict) and parsed.get("schema_version") == ROLLOUT_EVENT_SCHEMA_VERSION:
-            events.append(parsed)
+        events = events[-max(0, limit) :]
     return events
 
 

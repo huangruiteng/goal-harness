@@ -11,7 +11,7 @@ from typing import Any
 from ...extensions.runtime import (
     execute_extension_runtime_binding,
 )
-from ...rollout_event_log import load_rollout_events
+from ...rollout_event_log import iter_rollout_events
 from .core import build_periodic_report_run
 from .extension_envelope import build_openviking_archive_execution_envelope
 from .presets import (
@@ -319,8 +319,9 @@ def handle_periodic_report_command(
             request = _load_json_object(args.request_json)
             payload = build_periodic_report_runtime_trigger_decision(
                 request,
-                rollout_events=load_rollout_events(
-                    Path(args.rollout_events_jsonl).expanduser()
+                rollout_events=iter_rollout_events(
+                    Path(args.rollout_events_jsonl).expanduser(),
+                    strict=True,
                 ),
             )
         else:

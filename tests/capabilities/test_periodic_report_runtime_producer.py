@@ -204,3 +204,87 @@ def test_runtime_producer_cli_reads_durable_rollout_log(tmp_path, capsys) -> Non
     payload = json.loads(capsys.readouterr().out)
     assert payload["eligible"] is True
     assert payload["producer_receipt"]["status"] == "promoted"
+
+
+def test_runtime_producer_cli_streams_large_history_before_bounded_window(
+    tmp_path, capsys
+) -> None:
+    request_path = tmp_path / "request.json"
+    event_log = tmp_path / "rollout-event-log.jsonl"
+    request_path.write_text(json.dumps(_request(threshold=1)), encoding="utf-8")
+    old_event = _event(
+        "quota_should_run",
+        event_at="2026-08-17T09:00:00Z",
+    )
+    current_event = _event(
+        "todo_complete",
+        event_at="2026-08-20T09:00:00Z",
+        todo_id="todo-current",
+    )
+    rows = [
+        json.dumps({**old_event, "event_id": f"old-{index}"})
+        for index in range(4096)
+    ]
+    rows.append(json.dumps(current_event))
+    event_log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    assert main(
+        [
+            "--format",
+            "json",
+            "periodic-report",
+            "evaluate-runtime-trigger",
+            "--request-json",
+            str(request_path),
+            "--rollout-events-jsonl",
+            str(event_log),
+        ]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["eligible"] is True
+    assert payload["producer_receipt"]["todo_completed_count"] == 1
+
+
+def test_runtime_producer_rejects_relevant_window_over_capacity() -> None:
+    event = _event(
+        "todo_complete",
+        event_at="2026-08-20T09:00:00Z",
+        todo_id="todo-template",
+    )
+    events = (
+        {
+            **event,
+            "event_id": f"current-{index}",
+            "todo_id": f"todo-{index}",
+        }
+        for index in range(4097)
+    )
+
+    with pytest.raises(ValueError, match="4096 relevant window items"):
+        build_periodic_report_runtime_trigger_decision(
+            _request(threshold=1),
+            rollout_events=events,
+        )
+
+
+def test_runtime_producer_cli_rejects_malformed_durable_row(tmp_path, capsys) -> None:
+    request_path = tmp_path / "request.json"
+    event_log = tmp_path / "rollout-event-log.jsonl"
+    request_path.write_text(json.dumps(_request(threshold=1)), encoding="utf-8")
+    event_log.write_text("{not-json}\n", encoding="utf-8")
+
+    assert main(
+        [
+            "--format",
+            "json",
+            "periodic-report",
+            "evaluate-runtime-trigger",
+            "--request-json",
+            str(request_path),
+            "--rollout-events-jsonl",
+            str(event_log),
+        ]
+    ) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"] == "rollout event log line 1 must contain valid JSON"
