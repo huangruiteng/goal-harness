@@ -704,26 +704,41 @@ flips to provider-first without changing the typed outcome contract below.
 The first Stage 2 slice exists on this branch, additively:
 
 - `loopx.control_plane.coordination.head`: the `loopx_coordination_head_v0`
-  aggregate codec. Validation is closed-set and fail-closed, including
-  bool-disguised integers and corrupt lease records; `handoff_mode` is now a
-  recorded head field, pinned to `hard_lease` in v0 (a `soft_claim` goal
-  fails bootstrap closed instead of having its declared semantics silently
-  inverted). Canonical bytes are defined as sorted-key, minimal-separator
-  UTF-8 JSON with non-finite numbers rejected; digests and provider byte
-  parity are defined against exactly that encoding, so "deterministic
-  serialization" is a contract term here, not an implementation accident.
-- `loopx.control_plane.coordination.file_provider`: one goal, one document,
-  exclusive-lock generation compare, exclusive temp create plus fsync plus
-  atomic replace. Crash windows report `ambiguous`; a head with no faithful
-  strict-JSON form reports typed `failed` before any write reaches disk.
+  aggregate codec. Validation is closed-set and fail-closed for every field
+  the executor later dereferences: todos, lease records, and each
+  receipt-index entry (entry shape, digest form, receipt schema, operation
+  identity, todo membership, revisions, epochs, and parseable timestamps),
+  including bool-disguised integers; `handoff_mode` is a recorded head
+  field, pinned to `hard_lease` in v0 (a `soft_claim` goal fails bootstrap
+  closed instead of having its declared semantics silently inverted).
+  Canonical bytes are defined as sorted-key, minimal-separator UTF-8 JSON
+  with non-finite numbers rejected; digests and provider byte parity are
+  defined against exactly that encoding, so "deterministic serialization"
+  is a contract term here, not an implementation accident. The Markdown
+  shadow constructor lives in its own bridge module
+  (`goal_state_shadow`), keeping the codec's import closure inside the
+  repository's strict type gate.
+- `loopx.control_plane.coordination.file_provider`: one goal, one document.
+  Locking goes through `loopx.file_lock`, the repository's one
+  cross-platform lock owner, with its bounded deadline (a lock that cannot
+  be acquired in time is a typed `failed` because no write was attempted).
+  Durability is a fixed commit sequence: write-all of the canonical bytes
+  (short writes are continued, never ignored), file fsync, atomic rename,
+  then parent-directory fsync on POSIX; `applied` is returned only after
+  the whole sequence converges, and any storage fault inside it reports
+  `ambiguous`. A head with no faithful strict-JSON form reports typed
+  `failed` before any write reaches disk.
 - `loopx.control_plane.coordination.executor`: Section 5 steps 1-10 for
   `claim_work`. Every domain decision is delegated to the Stage 1 core; the
   composition is lease acquire followed by the hard-lease-gated claim,
   because a claim-first or legacy-mode composition silently bypasses the
-  Appendix B holder gate (the tests pin this). A provider `failed` verdict
-  is verified against the reloaded receipt index rather than trusted, so a
-  provider that misreports a landed write cannot manufacture a claim whose
-  caller was told it failed.
+  Appendix B holder gate (the tests pin this). `lease_ttl_seconds` is
+  bounded by the local task-lease authority's own ceiling, so the shared
+  envelope cannot mint a lease the local contract would refuse and an
+  unbounded caller value cannot escape as timestamp-arithmetic overflow. A
+  provider `failed` verdict is verified against the reloaded receipt index
+  rather than trusted, so a provider that misreports a landed write cannot
+  manufacture a claim whose caller was told it failed.
 
 Design selection was comparative: three executor candidates (core-delegating,
 inline-rules reference, journal-style receipt log inside the same document)

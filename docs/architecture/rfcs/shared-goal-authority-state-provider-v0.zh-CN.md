@@ -609,22 +609,32 @@ provider-first，且不改变下述 typed outcome 合同。
 第一个 Stage 2 切片已经以增量方式存在于本分支：
 
 - `loopx.control_plane.coordination.head`：`loopx_coordination_head_v0`
-  aggregate 编解码。校验是封闭字段集且 fail-closed 的，包括伪装成整数的
-  bool 与损坏的 lease 记录；`handoff_mode` 成为 head 的记录字段，v0 钦定为
-  `hard_lease`（`soft_claim` goal 在 bootstrap 处 fail closed，而不是被静默
-  反转其声明语义）。规范字节被定义为按键排序、最小分隔符、UTF-8 的 JSON，
-  且拒绝非有限浮点数；digest 与 provider 字节级 parity 都以这一编码为基准，
-  "deterministic serialization" 因此是合同条款，而非实现巧合。
-- `loopx.control_plane.coordination.file_provider`：一个 goal 一份文档，
-  排他锁内 generation 比较，独占临时文件创建加 fsync 加原子替换。崩溃窗口
-  报告 `ambiguous`；无法忠实序列化为严格 JSON 的 head 在任何字节落盘之前
-  报告 typed `failed`。
+  aggregate 编解码。校验对 executor 后续无条件解引用的每个字段都是封闭
+  字段集且 fail-closed 的：todo、lease 记录、以及每条 receipt-index 条目
+  （条目形状、digest 形式、receipt schema、operation 身份、todo 归属、
+  revision/epoch、可解析的时间戳），包括伪装成整数的 bool；`handoff_mode`
+  是 head 的记录字段，v0 钦定为 `hard_lease`（`soft_claim` goal 在
+  bootstrap 处 fail closed，而不是被静默反转其声明语义）。规范字节被定义
+  为按键排序、最小分隔符、UTF-8 的 JSON，且拒绝非有限浮点数；digest 与
+  provider 字节级 parity 都以这一编码为基准，"deterministic serialization"
+  因此是合同条款，而非实现巧合。Markdown shadow 构造器独立为桥接模块
+  （`goal_state_shadow`），使编解码模块的 import 闭包留在仓库的 strict
+  类型门之内。
+- `loopx.control_plane.coordination.file_provider`：一个 goal 一份文档。
+  锁经由 `loopx.file_lock`——仓库唯一的跨平台锁 owner——并带其有界等待
+  （超时未获锁是 typed `failed`，因为尚未尝试任何写入）。持久化是固定的
+  提交序列：规范字节 write-all（短写会被继续写完，绝不忽略）、文件
+  fsync、原子 rename、POSIX 上再对父目录 fsync；只有整个序列收敛后才返回
+  `applied`，序列内任何存储故障都报告 `ambiguous`。无法忠实序列化为严格
+  JSON 的 head 在任何字节落盘之前报告 typed `failed`。
 - `loopx.control_plane.coordination.executor`：`claim_work` 的第 5 节步骤
   1-10。所有领域决策都委托给 Stage 1 core；组合顺序是先 lease acquire、再
   过 hard-lease holder gate 的 claim——claim-first 或 legacy 模式的组合会
-  静默绕过附录 B 的 holder gate（测试钉住了这一点）。Provider 的 `failed`
-  判据经重载 receipt index 核查而非盲信，误报已落盘写入的 provider 无法
-  制造"调用方被告知失败"的幽灵 claim。
+  静默绕过附录 B 的 holder gate（测试钉住了这一点）。`lease_ttl_seconds`
+  受本地 task-lease authority 自身上限约束：共享 envelope 铸不出本地合同
+  会拒绝的 lease，无界的调用方数值也不可能以时间戳运算溢出的形式逃逸。
+  Provider 的 `failed` 判据经重载 receipt index 核查而非盲信，误报已落盘
+  写入的 provider 无法制造"调用方被告知失败"的幽灵 claim。
 
 设计选型是对比出来的：三个 executor 候选（core 委托、内联规则参考实现、
 同文档内 journal 式回执日志）跑同一场景电池。只有 core 委托的候选能在不改
