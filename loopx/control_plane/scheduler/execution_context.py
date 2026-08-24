@@ -73,6 +73,13 @@ NATIVE_GOAL_RUNTIME_PROFILES = frozenset(
     }
 )
 
+GUIDED_START_TURN_RUNTIME_PROFILES = frozenset(
+    {
+        SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
+        SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
+    }
+)
+
 
 _SCHEDULER_RUNTIME_PROFILE_CONTEXTS = {
     SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL: (

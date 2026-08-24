@@ -18,6 +18,9 @@ from .control_plane.goals.start_contract import (
     build_goal_start_contract,
     build_goal_start_prompt,
 )
+from .control_plane.scheduler.execution_context import (
+    GUIDED_START_TURN_RUNTIME_PROFILES,
+)
 from .host_loop_activation import (
     agent_type_for_host_surface,
     build_host_loop_activation_packet,
@@ -808,7 +811,7 @@ def build_loopx_bootstrap_command_pack(
         explicit_goal_start
         and selected_agent_id
         and scheduler_command_binding.get("runtime_profile")
-        == "codex_app_heartbeat"
+        in {profile.value for profile in GUIDED_START_TURN_RUNTIME_PROFILES}
     )
     quota_guard_command = (
         render_quota_guard_command(

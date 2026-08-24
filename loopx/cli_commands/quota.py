@@ -5,16 +5,17 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..capabilities.repository_change_window import (
-    repository_delivery_interaction_hook,
-)
 from ..capabilities.explore.composition_frontier import (
     project_live_explore_composition_frontier,
+)
+from ..capabilities.repository_change_window import (
+    repository_delivery_interaction_hook,
 )
 from ..control_plane.quota.cli_projection import (
     compact_quota_monitor_poll_cli_payload,
     compact_quota_should_run_cli_payload,
 )
+from ..control_plane.quota.effect_program import SettlementIdentity
 from ..control_plane.quota.error_codes import (
     HeartbeatReceiptIdentityConflictError,
     QuotaCommandValidationError,
@@ -38,10 +39,9 @@ from ..control_plane.quota.settlement_cli import (
     quota_rollout_details,
     quota_rollout_replan_obligation_id,
     quota_rollout_todo_id,
-    render_existing_heartbeat_receipt_payload,
     reconcile_existing_heartbeat_receipt_for_turn,
+    render_existing_heartbeat_receipt_payload,
 )
-from ..control_plane.quota.effect_program import SettlementIdentity
 from ..control_plane.quota.turn_envelope import build_turn_envelope
 from ..control_plane.runtime.status_projection_cache import (
     load_status_projection_cache,
@@ -49,6 +49,7 @@ from ..control_plane.runtime.status_projection_cache import (
     write_status_projection_cache,
 )
 from ..control_plane.scheduler.execution_context import (
+    GUIDED_START_TURN_RUNTIME_PROFILES,
     SchedulerExecutionContextResolution,
     SchedulerRuntimeProfile,
     scheduler_execution_context_for_runtime_profile,
@@ -82,15 +83,16 @@ from ..turn_identity import mint_turn_instance_id, normalize_turn_instance_id
 from ..upgrade import resolve_codex_app_automation_rrule
 from .lark_inbox import build_lark_operator_inbox_urgency_projector
 from .quota_host_poll import attach_host_poll_receipt
+from .quota_monitor_poll import record_quota_monitor_poll_for_cli
+from .quota_registration import (
+    register_quota_command as register_quota_command,  # noqa: PLC0414
+)
 from .quota_request import (
     QUOTA_MONITOR_POLL_DETAIL_SECTIONS,
     QUOTA_SHOULD_RUN_DETAIL_SECTIONS,
     quota_detail_sections_from_args,
     validate_quota_command_request,
 )
-from .quota_monitor_poll import record_quota_monitor_poll_for_cli
-from .quota_registration import register_quota_command as register_quota_command
-
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -253,9 +255,10 @@ def _prepare_quota_command_context(
     validate_quota_command_request(args)
     if begin_turn:
         profile = scheduler_runtime_profile_for_execution_context(scheduler_context)
-        if profile is not SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT:
+        if profile not in GUIDED_START_TURN_RUNTIME_PROFILES:
             raise QuotaCommandValidationError(
-                "--begin-turn requires runtime-profile codex_app_heartbeat"
+                "--begin-turn requires runtime-profile codex_app_heartbeat "
+                "or codex_app_ssh_goal"
             )
         heartbeat_turn_id = mint_turn_instance_id(prefix="guided-start")
     if heartbeat_turn_id and command == "should-run" and bool(args.dry_run):
@@ -556,7 +559,8 @@ def _requested_quota_action_todo_id(
 ) -> str | None:
     if not (
         bool(args.codex_app)
-        or args.runtime_profile == "codex_app_heartbeat"
+        or args.runtime_profile
+        in {profile.value for profile in GUIDED_START_TURN_RUNTIME_PROFILES}
     ):
         return None
     return normalize_todo_id(args.todo_id)

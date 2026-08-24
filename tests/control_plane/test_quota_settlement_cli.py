@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from loopx.bootstrap_command_pack import build_start_goal_guided_packet
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1256,8 +1258,10 @@ def test_agent_selects_one_bounded_action_before_delivery_receipt_binding(
     assert _heartbeat_receipt_count(runtime, turn_instance_id) == 2
 
 
+@pytest.mark.parametrize("host_surface", ["codex-app", "codex-app-ssh"])
 def test_guided_start_begins_one_turn_and_executes_returned_selection(
     tmp_path: Path,
+    host_surface: str,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
     _configure_selectable_alternative(project)
@@ -1266,7 +1270,7 @@ def test_guided_start_begins_one_turn_and_executes_returned_selection(
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         cli_bin="loopx",
-        host_surface="codex-app",
+        host_surface=host_surface,
         goal_text="Start one accountable delivery turn.",
     )
     guard_command = next(
@@ -1306,18 +1310,27 @@ def test_guided_start_begins_one_turn_and_executes_returned_selection(
 
     assert selected_rc == 0, selected
     assert selected["selected_todo"]["todo_id"] == ALTERNATIVE_TODO_ID
+    assert selected["selected_todo"]["selection_binding"] == "heartbeat_receipt"
     receipt_identity = selected["heartbeat_receipt"]["settlement_identity"]
     assert receipt_identity["turn_instance_id"] == turn_instance_id
-    settlement_plan = selected["interaction_contract"]["cli_channel"][
-        "settlement_plan"
-    ]
-    assert settlement_plan["identity"] == receipt_identity
-    assert f"--turn-instance-id {turn_instance_id}" in json.dumps(settlement_plan)
+    cli_channel = selected["interaction_contract"]["cli_channel"]
+    if host_surface == "codex-app":
+        settlement_plan = cli_channel["settlement_plan"]
+        assert settlement_plan["identity"] == receipt_identity
+        assert f"--turn-instance-id {turn_instance_id}" in json.dumps(settlement_plan)
+    else:
+        assert "settlement_plan" not in cli_channel
+        assert any(
+            "--source visible-goal" in action
+            for action in cli_channel["next_cli_actions"]
+        )
     assert _heartbeat_receipt_count(runtime, turn_instance_id) == 2
 
 
+@pytest.mark.parametrize("host_surface", ["codex-app", "codex-app-ssh"])
 def test_single_todo_guided_start_keeps_direct_delivery_semantics(
     tmp_path: Path,
+    host_surface: str,
 ) -> None:
     project, _runtime, registry_path = _write_fixture(tmp_path)
     packet = build_start_goal_guided_packet(
@@ -1325,7 +1338,7 @@ def test_single_todo_guided_start_keeps_direct_delivery_semantics(
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         cli_bin="loopx",
-        host_surface="codex-app",
+        host_surface=host_surface,
         goal_text="Start one accountable delivery turn.",
     )
     guard_command = next(
@@ -1371,7 +1384,8 @@ def test_begin_turn_rejects_a_non_receipt_runtime_profile(tmp_path: Path) -> Non
     assert guard_rc == 1, guard
     assert guard["error_code"] == "QUOTA_VALIDATION_FAILED"
     assert guard["reason"] == (
-        "--begin-turn requires runtime-profile codex_app_heartbeat"
+        "--begin-turn requires runtime-profile codex_app_heartbeat "
+        "or codex_app_ssh_goal"
     )
 
 
