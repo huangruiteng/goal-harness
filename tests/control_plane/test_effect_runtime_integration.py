@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from loopx.control_plane import effect_runtime
 
 
@@ -176,8 +178,10 @@ def test_typed_write_rejects_cross_effect_overwrite(
                 "expected_previous_sha256": _digest(journal_path),
             },
         )
-    except RuntimeError as exc:
+    except effect_runtime.EffectRuntimeConflict as exc:
         assert "belongs to another settlement effect" in str(exc)
+        assert exc.error_kind == "conflict"
+        assert exc.diagnostic_code == "journal_effect_conflict"
     else:
         raise AssertionError("cross-effect overwrite must fail closed")
     assert json.loads(journal_path.read_text(encoding="utf-8")) == first
@@ -231,6 +235,9 @@ def test_typed_write_serializes_same_effect_checkpoints_with_cas(
 
     assert sum(isinstance(outcome, RuntimeError) for outcome in outcomes) == 1
     failure = next(outcome for outcome in outcomes if isinstance(outcome, RuntimeError))
+    assert isinstance(failure, effect_runtime.EffectRuntimeConflict)
+    assert failure.error_kind == "conflict"
+    assert failure.diagnostic_code == "compare_and_swap_conflict"
     assert "compare-and-swap precondition failed" in str(failure)
     assert json.loads(journal_path.read_text(encoding="utf-8")) in (first, second)
     success = next(outcome for outcome in outcomes if isinstance(outcome, dict))
@@ -518,3 +525,71 @@ def test_oversized_request_is_rejected_before_runtime_dispatch(
         {},
         retry_safe=False,
     )
+
+
+@pytest.mark.parametrize(
+    ("payload", "exception_type", "transient"),
+    [
+        (
+            {"kind": "request_rejected", "code": "invalid_request", "message": "bad"},
+            effect_runtime.EffectRuntimeRejected,
+            None,
+        ),
+        (
+            {"kind": "conflict", "code": "state_conflict", "message": "stale"},
+            effect_runtime.EffectRuntimeConflict,
+            None,
+        ),
+        (
+            {"kind": "io_transient", "code": "io_busy", "message": "busy"},
+            effect_runtime.EffectRuntimeTransientIOError,
+            True,
+        ),
+        (
+            {"kind": "io_permanent", "code": "io_not_found", "message": "gone"},
+            effect_runtime.EffectRuntimePermanentIOError,
+            False,
+        ),
+        (
+            {
+                "kind": "lock_timeout",
+                "code": "mutation_lock_timeout",
+                "message": "waited",
+            },
+            effect_runtime.EffectRuntimeLockTimeout,
+            None,
+        ),
+        (
+            {
+                "kind": "internal_failure",
+                "code": "unexpected_handler_error",
+                "message": "failed",
+            },
+            effect_runtime.EffectRuntimeInternalError,
+            None,
+        ),
+    ],
+)
+def test_remote_error_envelope_preserves_typed_exception(
+    payload: dict[str, str],
+    exception_type: type[effect_runtime.EffectRuntimeRemoteError],
+    transient: bool | None,
+) -> None:
+    error = effect_runtime._remote_runtime_error(payload)
+
+    assert isinstance(error, exception_type)
+    assert error.error_kind == payload["kind"]
+    assert error.diagnostic_code == payload["code"]
+    if transient is not None:
+        assert isinstance(error, effect_runtime.EffectRuntimeIOError)
+        assert error.transient is transient
+
+
+def test_invalid_remote_error_envelope_fails_as_bounded_internal_error() -> None:
+    error = effect_runtime._remote_runtime_error(
+        {"kind": "internal_failure", "message": "/private/path\nstack"}
+    )
+
+    assert isinstance(error, effect_runtime.EffectRuntimeInternalError)
+    assert error.diagnostic_code == "invalid_error_envelope"
+    assert "/private/path" not in str(error)

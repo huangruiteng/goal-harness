@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   requireBoolean as requiredBoolean,
   requireJsonObject as requiredObject,
@@ -71,7 +72,7 @@ export type TodoCompletionFenceResult =
 function optionalOpaqueString(value: unknown, label: string): string | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value !== "string") {
-    throw new Error(`${label} must be a string or null`);
+    throw new EffectRuntimeRequestError(`${label} must be a string or null`);
   }
   return value;
 }
@@ -86,7 +87,7 @@ function completionIdentitySource(
   ) {
     return value;
   }
-  throw new Error("requested_completion_identity_source is unsupported");
+  throw new EffectRuntimeRequestError("requested_completion_identity_source is unsupported");
 }
 
 export function localTodoCompletionIdentity(
@@ -104,7 +105,7 @@ function todoNoFollowup(value: unknown): boolean | null {
     value !== null && value !== undefined &&
     typeof value !== "boolean" && typeof value !== "string"
   ) {
-    throw new Error("todo.no_followup must be a boolean, string, or null");
+    throw new EffectRuntimeRequestError("todo.no_followup must be a boolean, string, or null");
   }
   return normalizeTodoNoFollowup(value);
 }
@@ -116,32 +117,32 @@ function todoCompletionContinuation(
     value !== null && value !== undefined && value !== "" &&
     typeof value !== "string"
   ) {
-    throw new Error("todo.completion_continuation must be a string or null");
+    throw new EffectRuntimeRequestError("todo.completion_continuation must be a string or null");
   }
   return normalizeTodoCompletionContinuation(value);
 }
 
 function todoStatus(value: unknown): TodoStatus {
   if (typeof value !== "string") {
-    throw new Error("todo.status must be a supported string");
+    throw new EffectRuntimeRequestError("todo.status must be a supported string");
   }
   const normalized = value.trim().toLowerCase();
   if (!TODO_STATUSES.some((status) => status === normalized)) {
-    throw new Error("todo.status is unsupported");
+    throw new EffectRuntimeRequestError("todo.status is unsupported");
   }
   return normalized as TodoStatus;
 }
 
 function projectionSource(value: unknown): TodoCompletionProjectionSource {
   if (value === "materialized" || value === "event_log") return value;
-  throw new Error("projection_source is unsupported");
+  throw new EffectRuntimeRequestError("projection_source is unsupported");
 }
 
 function successorTodoIds(value: unknown): string[] {
   if (value === null || value === undefined) return [];
   const values = Array.isArray(value) ? value : [value];
   if (values.some((item) => typeof item !== "string")) {
-    throw new Error("todo.successor_todo_ids must contain only strings");
+    throw new EffectRuntimeRequestError("todo.successor_todo_ids must contain only strings");
   }
   const result: string[] = [];
   for (const raw of values as string[]) {
@@ -164,7 +165,7 @@ export function decodeTodoCompletionFenceRequest(
 ): TodoCompletionFenceRequest {
   const request = requiredObject(value, "todo.completion_fence params");
   if (request.schema_version !== TODO_COMPLETION_FENCE_REQUEST_SCHEMA) {
-    throw new Error("Todo completion fence request schema mismatch");
+    throw new EffectRuntimeRequestError("Todo completion fence request schema mismatch");
   }
   const todo = requiredObject(request.todo, "todo.completion_fence todo");
   return {
@@ -223,14 +224,14 @@ export function evaluateTodoCompletionFence(
     request.requested_completion_identity_source === "lifecycle_reentry" &&
     !done
   ) {
-    throw new Error("Todo lifecycle reentry requires an already completed Todo");
+    throw new EffectRuntimeRequestError("Todo lifecycle reentry requires an already completed Todo");
   }
 
   if (
     done && requestedKey !== null && requestedKey !== storedKey &&
     !unscopedIdentityRepair
   ) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "todo is already completed under a different completion_turn_key",
     );
   }
@@ -239,19 +240,19 @@ export function evaluateTodoCompletionFence(
     normalizeTodoNoFollowup(request.todo.no_followup) !== true;
   if (terminalUpgrade) {
     if (request.todo.successor_todo_ids.length > 0) {
-      throw new Error(
+      throw new EffectRuntimeRequestError(
         "todo terminal closeout cannot replace an existing successor",
       );
     }
     if (continuation === null) {
-      throw new Error(
+      throw new EffectRuntimeRequestError(
         "completed todo is missing completion_continuation; repair the " +
           "Todo with `loopx todo complete` without --no-follow-up before terminal " +
           "closeout",
       );
     }
     if (continuation !== "active_goal") {
-      throw new Error(
+      throw new EffectRuntimeRequestError(
         "todo terminal closeout recovery requires " +
           "completion_continuation=active_goal",
       );
@@ -260,7 +261,7 @@ export function evaluateTodoCompletionFence(
       requestedKey === null ||
       (requestedKey !== storedKey && !unscopedIdentityRepair)
     ) {
-      throw new Error(
+      throw new EffectRuntimeRequestError(
         "todo terminal closeout requires the original completion_turn_key",
       );
     }

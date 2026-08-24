@@ -4,6 +4,10 @@ import { isAbsolute } from "node:path";
 
 import type { JsonObject } from "../effect_program.ts";
 import {
+  EffectRuntimeConflictError,
+  EffectRuntimeRequestError,
+} from "../effect_runtime_errors.ts";
+import {
   atomicWriteJson,
   withFileMutationLock,
 } from "../effect_runtime_io.ts";
@@ -49,22 +53,28 @@ export async function commitTurnJournal(
 ): Promise<JsonObject> {
   const path = requiredString(params.path, "path");
   if (!isAbsolute(path)) {
-    throw new Error("Turn journal path must be absolute");
+    throw new EffectRuntimeRequestError("Turn journal path must be absolute");
   }
   const journal = asObject(params.journal);
   if (journal.schema_version !== "loopx_turn_journal_v0") {
-    throw new Error("Turn journal has an unsupported schema");
+    throw new EffectRuntimeRequestError(
+      "Turn journal has an unsupported schema",
+    );
   }
   const expectedEffectId = typeof params.expected_effect_id === "string"
     ? params.expected_effect_id.trim()
     : "";
   const incomingEffectId = journalEffectId(journal);
   if (expectedEffectId && incomingEffectId !== expectedEffectId) {
-    throw new Error("Turn journal does not carry the expected settlement effect");
+    throw new EffectRuntimeRequestError(
+      "Turn journal does not carry the expected settlement effect",
+    );
   }
   const expectedPreviousSha256 = params.expected_previous_sha256;
   if (expectedPreviousSha256 !== null && typeof expectedPreviousSha256 !== "string") {
-    throw new Error("expected_previous_sha256 must be a string or null");
+    throw new EffectRuntimeRequestError(
+      "expected_previous_sha256 must be a string or null",
+    );
   }
   const incomingOperationId = operationId(journal);
   return await withFileMutationLock(path, async () => {
@@ -80,7 +90,10 @@ export async function commitTurnJournal(
         incomingEffectId &&
         existingEffectId !== incomingEffectId
       ) {
-        throw new Error("Turn journal belongs to another settlement effect");
+        throw new EffectRuntimeConflictError(
+          "Turn journal belongs to another settlement effect",
+          "journal_effect_conflict",
+        );
       }
       if (operationId(existing) === incomingOperationId) {
         return {
@@ -95,7 +108,10 @@ export async function commitTurnJournal(
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
     if (existingSha256 !== expectedPreviousSha256) {
-      throw new Error("Turn journal compare-and-swap precondition failed");
+      throw new EffectRuntimeConflictError(
+        "Turn journal compare-and-swap precondition failed",
+        "compare_and_swap_conflict",
+      );
     }
     await atomicWriteJson(path, journal);
     return {

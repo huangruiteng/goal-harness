@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString,
   requireJsonObject,
@@ -75,7 +76,7 @@ function argumentSuffix(values: readonly string[]): string {
 function lifecycleTrigger(value: unknown, index: number): JsonObject {
   const trigger = requireJsonObject(value, `triggers[${index}]`);
   if (trigger.kind !== "completed_advancement_without_successor") {
-    throw new Error(`triggers[${index}].kind is unsupported`);
+    throw new EffectRuntimeRequestError(`triggers[${index}].kind is unsupported`);
   }
   return {
     kind: trigger.kind,
@@ -96,11 +97,11 @@ export function projectTodoLifecycleSettlementReentry(value: unknown): JsonObjec
     "work_item.replan_settlement.reentry params",
   );
   if (request.schema_version !== TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA) {
-    throw new Error("Todo lifecycle reentry request schema mismatch");
+    throw new EffectRuntimeRequestError("Todo lifecycle reentry request schema mismatch");
   }
   const goalId = requireNonEmptyString(request.goal_id, "goal_id");
   if (!Array.isArray(request.triggers) || request.triggers.length === 0) {
-    throw new Error("triggers must be a non-empty array");
+    throw new EffectRuntimeRequestError("triggers must be a non-empty array");
   }
   const triggers = request.triggers.slice(0, 3).map(lifecycleTrigger).map(
     (trigger) => {
@@ -165,7 +166,7 @@ export function projectReplanSettlementContract(
 ): ReplanSettlementContract {
   const request = requireJsonObject(value, "work_item.replan_settlement params");
   if (request.schema_version !== REPLAN_SETTLEMENT_REQUEST_SCHEMA) {
-    throw new Error("Replan settlement request schema mismatch");
+    throw new EffectRuntimeRequestError("Replan settlement request schema mismatch");
   }
   const selectedTodoId = optionalNonEmptyString(
     request.selected_todo_id,

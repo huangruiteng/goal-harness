@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   DELIVERY_BOUNDARIES,
   type DeliveryBoundary,
@@ -40,7 +41,7 @@ interface ExistingVisionContinuityBasis extends JsonObject {
 
 function requiredObject(value: unknown, label: string): JsonObject {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
+    throw new EffectRuntimeRequestError(`${label} must be an object`);
   }
   return value as JsonObject;
 }
@@ -53,14 +54,14 @@ function optionalObject(value: unknown, label: string): JsonObject | null {
 function optionalString(value: unknown, label: string): string | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${label} must be a non-empty string or null`);
+    throw new EffectRuntimeRequestError(`${label} must be a non-empty string or null`);
   }
   return value.trim();
 }
 
 function requiredBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new Error(`${label} must be a boolean`);
+    throw new EffectRuntimeRequestError(`${label} must be a boolean`);
   }
   return value;
 }
@@ -84,7 +85,7 @@ function deliveryBoundary(value: unknown): DeliveryBoundary {
   if (DELIVERY_BOUNDARIES.some((candidate) => candidate === value)) {
     return value as DeliveryBoundary;
   }
-  throw new Error("delivery_boundary is unsupported");
+  throw new EffectRuntimeRequestError("delivery_boundary is unsupported");
 }
 
 export function decodeVisionCheckpointRequest(
@@ -92,7 +93,7 @@ export function decodeVisionCheckpointRequest(
 ): VisionCheckpointRequest {
   const request = requiredObject(value, "goal.vision_checkpoint params");
   if (request.schema_version !== VISION_CHECKPOINT_REQUEST_SCHEMA) {
-    throw new Error("Vision checkpoint request schema mismatch");
+    throw new EffectRuntimeRequestError("Vision checkpoint request schema mismatch");
   }
   return {
     schema_version: VISION_CHECKPOINT_REQUEST_SCHEMA,
@@ -127,27 +128,27 @@ export function decodeVisionCheckpointRequest(
 function validateInFlightBoundary(request: VisionCheckpointRequest): void {
   if (request.delivery_boundary !== "in_flight_continuation") return;
   if (request.delivery_outcome !== "outcome_progress") {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "in_flight_continuation requires delivery_outcome=outcome_progress",
     );
   }
   if (request.agent_id === null || request.todo_id === null) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "in_flight_continuation requires an agent-bound Todo settlement",
     );
   }
   if (request.completion_todo_id !== null) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "in_flight_continuation conflicts with Todo completion closeout",
     );
   }
   if (request.active_state_next_action_would_update) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "in_flight_continuation conflicts with a durable Next Action update",
     );
   }
   if (request.autonomous_replan_recorded) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "in_flight_continuation conflicts with autonomous replan writeback",
     );
   }

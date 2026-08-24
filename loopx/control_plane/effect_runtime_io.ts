@@ -3,6 +3,7 @@ import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type { JsonObject } from "./effect_program.ts";
+import { EffectRuntimeLockTimeoutError } from "./effect_runtime_errors.ts";
 
 const MUTATION_LOCK_TIMEOUT_MS = 5_000;
 const MUTATION_LOCK_POLL_MS = 25;
@@ -88,7 +89,7 @@ export async function withFileMutationLock<T>(
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       await reclaimStaleMutationLock(lockPath);
       if (Date.now() >= deadline) {
-        throw new Error("Effect runtime mutation lock timed out");
+        throw new EffectRuntimeLockTimeoutError();
       }
       await new Promise((resolve) => setTimeout(resolve, MUTATION_LOCK_POLL_MS));
     }

@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString as optionalString,
   requireJsonObject as requiredObject,
@@ -88,7 +89,7 @@ function nullableTodoPriority(
   if (value === null) return null;
   const priority = requiredString(value, label).trim().toUpperCase();
   if (!TODO_PRIORITY_PATTERN.test(priority)) {
-    throw new Error(`${label} must start with P0, P1, P2, P3, or P4`);
+    throw new EffectRuntimeRequestError(`${label} must start with P0, P1, P2, P3, or P4`);
   }
   return priority as TodoPriority;
 }
@@ -96,7 +97,7 @@ function nullableTodoPriority(
 function normalizedTodoId(value: unknown, label: string): string {
   const candidate = requiredString(value, label).trim().toLowerCase();
   if (!TODO_ID_PATTERN.test(candidate)) {
-    throw new Error(`${label} must be a valid todo_id`);
+    throw new EffectRuntimeRequestError(`${label} must be a valid todo_id`);
   }
   return candidate;
 }
@@ -106,10 +107,10 @@ function todoSnapshot(value: unknown, index: number): TodoNextActionSnapshot {
   const item = requiredObject(value, label);
   const status = requiredString(item.status, `${label}.status`).trim().toLowerCase();
   if (!TODO_STATUSES.has(status)) {
-    throw new Error(`${label}.status is unsupported`);
+    throw new EffectRuntimeRequestError(`${label}.status is unsupported`);
   }
   if (!Number.isSafeInteger(item.index) || Number(item.index) < 1) {
-    throw new Error(`${label}.index must be a positive integer`);
+    throw new EffectRuntimeRequestError(`${label}.index must be a positive integer`);
   }
   return {
     todo_id: normalizedTodoId(item.todo_id, `${label}.todo_id`),
@@ -137,7 +138,7 @@ export function decodeTodoNextActionRequest(
 ): TodoNextActionRequest {
   const request = requiredObject(value, "todo.next_action params");
   if (request.schema_version !== TODO_NEXT_ACTION_REQUEST_SCHEMA) {
-    throw new Error("Todo Next Action request schema mismatch");
+    throw new EffectRuntimeRequestError("Todo Next Action request schema mismatch");
   }
   const operation = requiredString(
     request.operation,
@@ -154,10 +155,10 @@ export function decodeTodoNextActionRequest(
     };
   }
   if (operation !== "reconcile_added" && operation !== "settle_completion") {
-    throw new Error("Todo Next Action operation is unsupported");
+    throw new EffectRuntimeRequestError("Todo Next Action operation is unsupported");
   }
   if (!Array.isArray(request.agent_todos)) {
-    throw new Error("todo.next_action agent_todos must be an array");
+    throw new EffectRuntimeRequestError("todo.next_action agent_todos must be an array");
   }
   if (operation === "reconcile_added") {
     return {
@@ -432,7 +433,7 @@ function settleCompletedTodo(
     (todo) => todo.todo_id === request.todo_id,
   );
   if (!completed) {
-    throw new Error("completed Todo is absent from the Agent Todo projection");
+    throw new EffectRuntimeRequestError("completed Todo is absent from the Agent Todo projection");
   }
   if (completed.status !== "done") {
     return unchangedResult(

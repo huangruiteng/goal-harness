@@ -1,3 +1,5 @@
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
+
 export const DELIVERY_OUTCOMES = [
   "surface_only",
   "outcome_gap",
@@ -23,7 +25,7 @@ export function decodeOptionalDeliveryOutcome(
   if (DELIVERY_OUTCOMES.some((candidate) => candidate === value)) {
     return value as DeliveryOutcome;
   }
-  throw new Error(`${label} is unsupported`);
+  throw new EffectRuntimeRequestError(`${label} is unsupported`);
 }
 
 export function decodeOptionalMaterialDeliveryOutcome(
@@ -37,7 +39,7 @@ export function decodeOptionalMaterialDeliveryOutcome(
   ) {
     return outcome as MaterialDeliveryOutcome | null;
   }
-  throw new Error(`${label} is not a material delivery outcome`);
+  throw new EffectRuntimeRequestError(`${label} is not a material delivery outcome`);
 }
 
 export function isMaterialDeliveryOutcome(

@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   requireBoolean,
   requireJsonObject,
@@ -50,7 +51,7 @@ function projectionSource(value: unknown): TodoCompletionProjectionSource {
 function optionalOpaqueString(value: unknown, label: string): string | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value !== "string") {
-    throw new Error(`${label} must be a string or null`);
+    throw new EffectRuntimeRequestError(`${label} must be a string or null`);
   }
   return value;
 }
@@ -144,7 +145,7 @@ export function evaluateTodoCompletionValidationPlan(
     "todo.completion_validation_plan params",
   );
   if (request.schema_version !== TODO_COMPLETION_VALIDATION_PLAN_REQUEST_SCHEMA) {
-    throw new Error("Todo completion validation plan request schema mismatch");
+    throw new EffectRuntimeRequestError("Todo completion validation plan request schema mismatch");
   }
   const todo = requireJsonObject(
     request.todo,

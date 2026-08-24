@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   requireBoolean as requiredBoolean,
   requireJsonObject as requiredObject,
@@ -43,7 +44,7 @@ function optionalBoolean(value: unknown, label: string): boolean | null {
 function optionalString(value: unknown, label: string): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string") {
-    throw new Error(`${label} must be a string or null`);
+    throw new EffectRuntimeRequestError(`${label} must be a string or null`);
   }
   return value;
 }
@@ -51,7 +52,7 @@ function optionalString(value: unknown, label: string): string | null {
 function requestObject(value: unknown, operation: string): JsonObject {
   const request = requiredObject(value, `todo.completion_state.${operation} params`);
   if (request.schema_version !== TODO_COMPLETION_STATE_REQUEST_SCHEMA) {
-    throw new Error("Todo completion state request schema mismatch");
+    throw new EffectRuntimeRequestError("Todo completion state request schema mismatch");
   }
   return request;
 }
@@ -60,7 +61,7 @@ export function normalizeTodoNoFollowup(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
   if (value === null || value === undefined) return null;
   if (typeof value !== "string") {
-    throw new Error("no_followup must be a boolean, string, or null");
+    throw new EffectRuntimeRequestError("no_followup must be a boolean, string, or null");
   }
   const candidate = value.trim().toLowerCase();
   if (["1", "true", "yes", "y", "no_followup", "no-followup"].includes(candidate)) {
@@ -75,7 +76,7 @@ export function normalizeTodoCompletionContinuation(
 ): TodoCompletionContinuation | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string") {
-    throw new Error("completion_continuation must be a string or null");
+    throw new EffectRuntimeRequestError("completion_continuation must be a string or null");
   }
   const candidate = value.trim().toLowerCase();
   return TODO_COMPLETION_CONTINUATIONS.some((item) => item === candidate)
@@ -88,7 +89,7 @@ export function requireTodoCompletionContinuation(
 ): TodoCompletionContinuation {
   const normalized = normalizeTodoCompletionContinuation(value);
   if (normalized !== null) return normalized;
-  throw new Error(
+  throw new EffectRuntimeRequestError(
     "completion_continuation must be one of: active_goal, successor, no_followup",
   );
 }
@@ -98,7 +99,7 @@ export function normalizeTodoCompletionRecovery(
 ): TodoCompletionRecovery | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string") {
-    throw new Error("completion_recovery must be a string or null");
+    throw new EffectRuntimeRequestError("completion_recovery must be a string or null");
   }
   const candidate = value.trim().toLowerCase();
   return TODO_COMPLETION_RECOVERIES.some((item) => item === candidate)
@@ -117,7 +118,7 @@ export function requireTodoCompletionMetadata(
   if (normalized !== null || value === null || value === undefined || value === "") {
     return normalized;
   }
-  throw new Error(
+  throw new EffectRuntimeRequestError(
     "completion_recovery must be same_turn_terminal_closeout or " +
       "lifecycle_reentry_terminal_closeout",
   );
@@ -128,7 +129,7 @@ export function completionContinuationForWrite(
   hasSuccessor: boolean,
 ): TodoCompletionContinuation {
   if (noFollowup && hasSuccessor) {
-    throw new Error("todo completion cannot record both no_followup and a successor");
+    throw new EffectRuntimeRequestError("todo completion cannot record both no_followup and a successor");
   }
   if (noFollowup) return "no_followup";
   if (hasSuccessor) return "successor";
@@ -139,7 +140,7 @@ export function normalizeTodoCompletionValue(value: unknown): JsonObject {
   const request = requestObject(value, "normalize");
   const kind = request.kind;
   if (kind !== "no_followup" && kind !== "continuation" && kind !== "recovery") {
-    throw new Error("completion normalization kind is unsupported");
+    throw new EffectRuntimeRequestError("completion normalization kind is unsupported");
   }
   const raw = request.value;
   const normalized = kind === "no_followup"
@@ -157,7 +158,7 @@ export function normalizeTodoCompletionValue(value: unknown): JsonObject {
 export function requireTodoCompletionMetadataValue(value: unknown): JsonObject {
   const request = requestObject(value, "require_metadata");
   const key = optionalString(request.key, "key");
-  if (key === null) throw new Error("key must be a string");
+  if (key === null) throw new EffectRuntimeRequestError("key must be a string");
   return {
     schema_version: TODO_COMPLETION_STATE_RESULT_SCHEMA,
     value: requireTodoCompletionMetadata(key, request.value),
@@ -198,7 +199,7 @@ export function selectTodoCompletionState(value: unknown): TodoCompletionStateRe
     completionIdentitySource !== "unscoped_completion" &&
     completionIdentitySource !== "lifecycle_reentry"
   ) {
-    throw new Error("completion_identity_source is unsupported");
+    throw new EffectRuntimeRequestError("completion_identity_source is unsupported");
   }
   const recovery = String(todo.status ?? "") === "done" &&
       requestedNoFollowup &&

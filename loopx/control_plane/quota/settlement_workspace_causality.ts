@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { requireJsonObject as requiredObject } from "../runtime_decode.ts";
 
 export const DELIVERY_WORKSPACE_CAUSALITY_SCHEMA_VERSION =
@@ -67,7 +68,7 @@ function optionalObject(value: unknown, label: string): JsonObject | null {
 }
 
 function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string") throw new Error(`${label} must be a string`);
+  if (typeof value !== "string") throw new EffectRuntimeRequestError(`${label} must be a string`);
   return value;
 }
 
@@ -78,7 +79,7 @@ function optionalString(value: unknown, label: string): string | null {
 
 function stringArray(value: unknown, label: string): readonly string[] {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new Error(`${label} must be an array of strings`);
+    throw new EffectRuntimeRequestError(`${label} must be an array of strings`);
   }
   return value;
 }
@@ -89,13 +90,13 @@ function operation(value: unknown): DeliveryWorkspaceCausalityOperation {
     value === "event_fields" || value === "missing_workspace" ||
     value === "from_event"
   ) return value;
-  throw new Error("delivery workspace causality operation is unsupported");
+  throw new EffectRuntimeRequestError("delivery workspace causality operation is unsupported");
 }
 
 function requestObject(value: unknown): JsonObject {
   const request = requiredObject(value, "delivery workspace causality request");
   if (request.schema_version !== DELIVERY_WORKSPACE_CAUSALITY_REQUEST_SCHEMA) {
-    throw new Error("delivery workspace causality request schema mismatch");
+    throw new EffectRuntimeRequestError("delivery workspace causality request schema mismatch");
   }
   return request;
 }

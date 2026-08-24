@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString,
   requireBoolean,
@@ -138,14 +139,14 @@ function optionalInteger(value: unknown, label: string): number | null {
 function optionalString(value: unknown, label: string): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string") {
-    throw new Error(`${label} must be a string or null`);
+    throw new EffectRuntimeRequestError(`${label} must be a string or null`);
   }
   return value;
 }
 
 function requireFalse(value: unknown, label: string): false {
   if (requireBoolean(value, label) !== false) {
-    throw new Error(`${label} must be false`);
+    throw new EffectRuntimeRequestError(`${label} must be false`);
   }
   return false;
 }
@@ -169,7 +170,7 @@ function decodeValidationReceipt(
     "validation_receipt.passed",
   );
   if ((passed && exitCode !== 0) || (!passed && exitCode === 0)) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "validation_receipt exit_code and passed must describe the same outcome",
     );
   }
@@ -317,7 +318,7 @@ export function reduceTodoCompletionTransaction(
 
   if (fence.outcome === "replay") {
     if (request.validation_receipt !== null) {
-      throw new Error("terminal replay must not carry a validation_receipt");
+      throw new EffectRuntimeRequestError("terminal replay must not carry a validation_receipt");
     }
     return { ...base, decision: "replay" };
   }
@@ -353,7 +354,7 @@ export function reduceTodoCompletionTransaction(
     const expectedLabel = validationPlan.validation_label ??
       "todo completion validation";
     if (request.validation_receipt.command_label !== expectedLabel) {
-      throw new Error(
+      throw new EffectRuntimeRequestError(
         "validation_receipt.command_label does not match the authorized effect",
       );
     }
@@ -371,7 +372,7 @@ export function reduceTodoCompletionTransaction(
       };
     }
   } else if (request.validation_receipt !== null) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "validation_receipt requires a declared completion validation effect",
     );
   }

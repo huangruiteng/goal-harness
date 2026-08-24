@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   atomicWriteJson,
   withFileMutationLock,
@@ -123,7 +124,7 @@ function pythonInteger(value: unknown): number | null {
 
 export function rruleForMinutes(value: unknown): string {
   const minutes = pythonInteger(value);
-  if (minutes === null) throw new Error("scheduler minutes must be an integer");
+  if (minutes === null) throw new EffectRuntimeRequestError("scheduler minutes must be an integer");
   return `FREQ=MINUTELY;INTERVAL=${Math.max(1, minutes)}`;
 }
 
@@ -235,7 +236,7 @@ export function mergeSchedulerHostUpdateFailure(
   referenceTime: unknown = null,
 ): JsonObject[] {
   const normalized = normalizeSchedulerHostUpdateFailure(failure);
-  if (!normalized) throw new Error("scheduler host update failure is invalid");
+  if (!normalized) throw new EffectRuntimeRequestError("scheduler host update failure is invalid");
   const retained = retainedSchedulerHostUpdateFailures(
     value,
     referenceTime,
@@ -338,7 +339,7 @@ export function buildSchedulerState(params: JsonObject): JsonObject {
   if (pythonTruthy(params.source)) state.source = pythonString(params.source);
   const normalized = normalizeSchedulerState(state, scope);
   if (!normalized) {
-    throw new Error("scheduler state is missing required persisted-state fields");
+    throw new EffectRuntimeRequestError("scheduler state is missing required persisted-state fields");
   }
   return normalized;
 }
@@ -405,7 +406,7 @@ function legacySchedulerStatePath(
 function operationRequest(value: unknown): JsonObject {
   const request = requiredObject(value, "scheduler.state params");
   if (request.schema_version !== SCHEDULER_STATE_OPERATION_REQUEST_SCHEMA) {
-    throw new Error("Scheduler state operation request schema mismatch");
+    throw new EffectRuntimeRequestError("Scheduler state operation request schema mismatch");
   }
   return request;
 }
@@ -484,7 +485,7 @@ function storeRequest(value: unknown, operation: "load" | "write"): {
 } {
   const request = requiredObject(value, `scheduler.state.${operation} params`);
   if (request.schema_version !== SCHEDULER_STATE_STORE_REQUEST_SCHEMA) {
-    throw new Error("Scheduler state store request schema mismatch");
+    throw new EffectRuntimeRequestError("Scheduler state store request schema mismatch");
   }
   const scope = schedulerScope(request);
   const runtimeRoot = requiredString(request.runtime_root, "runtime_root");
@@ -582,7 +583,7 @@ export async function writeSchedulerState(
 ): Promise<SchedulerStateWriteResult> {
   const { request, scope, path } = storeRequest(value, "write");
   const state = normalizeSchedulerState(request.state, scope);
-  if (!state) throw new Error("scheduler state does not match target scope or schema");
+  if (!state) throw new EffectRuntimeRequestError("scheduler state does not match target scope or schema");
   return await withFileMutationLock(path, async () => {
     try {
       const existing = normalizeSchedulerState(

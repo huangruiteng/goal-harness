@@ -1,3 +1,4 @@
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString,
   requireInteger,
@@ -60,10 +61,10 @@ function requireRunnableAdvancement(
   label: string,
 ): void {
   if (candidate.status !== "open") {
-    throw new Error(`${label}.status must be open`);
+    throw new EffectRuntimeRequestError(`${label}.status must be open`);
   }
   if (candidate.task_class !== "advancement_task") {
-    throw new Error(`${label}.task_class must be advancement_task`);
+    throw new EffectRuntimeRequestError(`${label}.task_class must be advancement_task`);
   }
 }
 
@@ -124,7 +125,7 @@ function unavailableProjection(candidate: ActionCandidate): JsonObject {
 export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
   const request = requireJsonObject(value, "action_portfolio_request");
   if (request.schema_version !== ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       `action_portfolio_request.schema_version must be ${ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION}`,
     );
   }
@@ -137,7 +138,7 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
       "action_portfolio_request.max_alternative_actions",
     );
   if (maximum < 1 || maximum > MAX_ALTERNATIVE_ACTIONS) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       `action_portfolio_request.max_alternative_actions must be between 1 and ${MAX_ALTERNATIVE_ACTIONS}`,
     );
   }
@@ -172,7 +173,7 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
       `action_portfolio_request.unavailable_higher_priority[${index}]`,
     );
     if (!candidate.availability_reason) {
-      throw new Error(
+      throw new EffectRuntimeRequestError(
         `action_portfolio_request.unavailable_higher_priority[${index}].availability_reason must be a non-empty string`,
       );
     }

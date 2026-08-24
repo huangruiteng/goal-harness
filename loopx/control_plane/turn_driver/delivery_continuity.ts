@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString,
   requireBoolean,
@@ -136,7 +137,7 @@ function todoStatus(value: unknown, label: string): TodoStatus {
 
 function preemptions(value: unknown): DeliveryContinuityPreemption[] {
   if (!Array.isArray(value)) {
-    throw new Error("preemptions must be an array");
+    throw new EffectRuntimeRequestError("preemptions must be an array");
   }
   const result: DeliveryContinuityPreemption[] = [];
   for (const item of value) {
@@ -144,7 +145,7 @@ function preemptions(value: unknown): DeliveryContinuityPreemption[] {
       typeof item !== "string" ||
       !DELIVERY_CONTINUITY_PREEMPTIONS.some((candidate) => candidate === item)
     ) {
-      throw new Error("preemptions contains an unsupported reason");
+      throw new EffectRuntimeRequestError("preemptions contains an unsupported reason");
     }
     const reason = item as DeliveryContinuityPreemption;
     if (!result.includes(reason)) result.push(reason);
@@ -292,7 +293,7 @@ function resolveDeliveryBoundary(
 function decodeDeliveryRoutingRequest(value: unknown): DeliveryRoutingRequest {
   const request = requireJsonObject(value, "turn.delivery_route params");
   if (request.schema_version !== DELIVERY_ROUTING_REQUEST_SCHEMA) {
-    throw new Error("Delivery routing request schema mismatch");
+    throw new EffectRuntimeRequestError("Delivery routing request schema mismatch");
   }
   return {
     schema_version: DELIVERY_ROUTING_REQUEST_SCHEMA,

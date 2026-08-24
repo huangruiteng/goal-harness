@@ -3,6 +3,7 @@ import transactionContract from "../turn_transaction_contract.json" with {
 };
 
 import type { EffectTurn } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 
 export const TURN_JOURNAL_INSPECTION_SCHEMA_VERSION =
   "loopx_turn_journal_inspection_v0";
@@ -90,7 +91,7 @@ export function interpretTurnJournalEffect(
   request: TurnJournalInspectionRequest,
 ): TurnJournalEffect {
   if (request.schema_version !== "loopx_turn_journal_interpretation_request_v0") {
-    throw new Error("Turn-journal interpretation request schema mismatch");
+    throw new EffectRuntimeRequestError("Turn-journal interpretation request schema mismatch");
   }
   const journal = asObject(request.journal);
   const plan = asObject(journal.plan);

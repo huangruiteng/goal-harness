@@ -218,3 +218,63 @@ def test_scheduler_state_scope_mismatch_is_rejected_before_disk_write(
         agent_id=AGENT_ID,
     ).exists()
     _shutdown_runtime()
+
+
+def test_scheduler_state_facade_preserves_permanent_io_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runtime_dir = tmp_path / "effect-runtime"
+    invalid_root = tmp_path / "not-a-directory"
+    invalid_root.write_text("occupied", encoding="utf-8")
+    monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: runtime_dir)
+    monkeypatch.setenv("LOOPX_EFFECT_RUNTIME_IDLE_MS", "1000")
+
+    with pytest.raises(effect_runtime.EffectRuntimePermanentIOError) as captured:
+        write_scheduler_state(
+            invalid_root,
+            _state(),
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+        )
+
+    assert captured.value.error_kind == "io_permanent"
+    assert captured.value.diagnostic_code in {"io_not_directory", "io_not_found"}
+    assert captured.value.transient is False
+    assert str(invalid_root) not in str(captured.value)
+    _shutdown_runtime()
+
+
+def test_scheduler_state_mutation_lock_timeout_remains_typed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runtime_dir = tmp_path / "effect-runtime"
+    state_root = tmp_path / "state"
+    monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: runtime_dir)
+    monkeypatch.setenv("LOOPX_EFFECT_RUNTIME_IDLE_MS", "10000")
+    runtime = effect_runtime.effect_runtime_result("runtime.ping", {})
+    target = scheduler_state_path(
+        state_root,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock = Path(f"{target}.ts-effect.lock")
+    lock.write_text(
+        json.dumps({"pid": runtime["pid"], "token": "live-writer"}),
+        encoding="utf-8",
+    )
+
+    try:
+        with pytest.raises(effect_runtime.EffectRuntimeLockTimeout) as captured:
+            effect_runtime.effect_runtime_result(
+                "scheduler.state.write",
+                _store_request(state_root, _state()),
+                timeout=7,
+            )
+        assert captured.value.error_kind == "lock_timeout"
+        assert captured.value.diagnostic_code == "mutation_lock_timeout"
+    finally:
+        lock.unlink(missing_ok=True)
+        _shutdown_runtime()

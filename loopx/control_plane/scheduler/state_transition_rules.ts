@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   requireBoolean as requiredBoolean,
   requireInteger as requiredInteger,
@@ -91,7 +92,7 @@ function requiredPositiveIntegerList(value: unknown, label: string): number[] {
       typeof item !== "number" || !Number.isInteger(item) || item <= 0
     )
   ) {
-    throw new Error(`${label} must be a non-empty array of positive integers`);
+    throw new EffectRuntimeRequestError(`${label} must be a non-empty array of positive integers`);
   }
   return [...value] as number[];
 }
@@ -99,7 +100,7 @@ function requiredPositiveIntegerList(value: unknown, label: string): number[] {
 function requestObject(value: unknown): JsonObject {
   const request = requiredObject(value, "scheduler.state_transition params");
   if (request.schema_version !== SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA) {
-    throw new Error("Scheduler state transition request schema mismatch");
+    throw new EffectRuntimeRequestError("Scheduler state transition request schema mismatch");
   }
   return request;
 }
@@ -110,7 +111,7 @@ function evaluateCadence(request: JsonObject): SchedulerCadenceTransitionResult 
     "progression_size",
   );
   if (progressionSize < 1) {
-    throw new Error("scheduler cadence progression must not be empty");
+    throw new EffectRuntimeRequestError("scheduler cadence progression must not be empty");
   }
   if (!requiredBoolean(request.state_present, "state_present")) {
     return {
@@ -267,7 +268,7 @@ function evaluateBackoff(request: JsonObject): SchedulerBackoffTransitionResult 
     "stale_tolerance_minutes",
   );
   if (staleToleranceMinutes < 0) {
-    throw new Error("stale_tolerance_minutes must not be negative");
+    throw new EffectRuntimeRequestError("stale_tolerance_minutes must not be negative");
   }
 
   const allHostUpdateFailures = retainedSchedulerHostUpdateFailures(
@@ -391,5 +392,5 @@ export function evaluateSchedulerStateTransition(
   if (request.operation === "cadence") return evaluateCadence(request);
   if (request.operation === "host") return evaluateHost(request);
   if (request.operation === "backoff") return evaluateBackoff(request);
-  throw new Error("Scheduler state transition operation is unsupported");
+  throw new EffectRuntimeRequestError("Scheduler state transition operation is unsupported");
 }

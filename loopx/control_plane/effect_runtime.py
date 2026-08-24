@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 EFFECT_RUNTIME_REQUEST_SCHEMA_VERSION = "loopx_effect_runtime_request_v0"
-EFFECT_RUNTIME_RESPONSE_SCHEMA_VERSION = "loopx_effect_runtime_response_v0"
+EFFECT_RUNTIME_RESPONSE_SCHEMA_VERSION = "loopx_effect_runtime_response_v1"
 EFFECT_RUNTIME_INFO_SCHEMA_VERSION = "loopx_effect_runtime_info_v0"
 EFFECT_RUNTIME_READINESS_SCHEMA_VERSION = "loopx_effect_runtime_readiness_v0"
 MINIMUM_NODE_VERSION = (22, 6, 0)
@@ -39,8 +39,111 @@ _RUNTIME_SOURCE_TOPOLOGIES: dict[str, _RuntimeSourceTopology] = {}
 _RUNTIME_SOURCE_TOPOLOGY_LOCK = threading.Lock()
 
 
-class EffectRuntimeRejected(RuntimeError):
+class EffectRuntimeRemoteError(RuntimeError):
+    """A typed exception returned by the managed TypeScript runtime."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_kind: str,
+        diagnostic_code: str,
+    ) -> None:
+        super().__init__(message)
+        self.error_kind = error_kind
+        self.diagnostic_code = diagnostic_code
+
+
+class EffectRuntimeRejected(EffectRuntimeRemoteError):
     """A typed request reached the runtime but failed semantic validation."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        diagnostic_code: str = "invalid_request",
+    ) -> None:
+        super().__init__(
+            message,
+            error_kind="request_rejected",
+            diagnostic_code=diagnostic_code,
+        )
+
+
+class EffectRuntimeConflict(EffectRuntimeRemoteError):
+    """The request conflicted with newer persisted state."""
+
+    def __init__(self, message: str, *, diagnostic_code: str) -> None:
+        super().__init__(
+            message,
+            error_kind="conflict",
+            diagnostic_code=diagnostic_code,
+        )
+
+
+class EffectRuntimeIOError(EffectRuntimeRemoteError):
+    """A managed runtime filesystem operation failed."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_kind: str,
+        diagnostic_code: str,
+        transient: bool,
+    ) -> None:
+        super().__init__(
+            message,
+            error_kind=error_kind,
+            diagnostic_code=diagnostic_code,
+        )
+        self.transient = transient
+
+
+class EffectRuntimeTransientIOError(EffectRuntimeIOError):
+    """A retryable managed runtime filesystem operation failed."""
+
+    def __init__(self, message: str, *, diagnostic_code: str) -> None:
+        super().__init__(
+            message,
+            error_kind="io_transient",
+            diagnostic_code=diagnostic_code,
+            transient=True,
+        )
+
+
+class EffectRuntimePermanentIOError(EffectRuntimeIOError):
+    """A non-retryable managed runtime filesystem operation failed."""
+
+    def __init__(self, message: str, *, diagnostic_code: str) -> None:
+        super().__init__(
+            message,
+            error_kind="io_permanent",
+            diagnostic_code=diagnostic_code,
+            transient=False,
+        )
+
+
+class EffectRuntimeLockTimeout(EffectRuntimeRemoteError):
+    """A managed mutation lock could not be acquired before its deadline."""
+
+    def __init__(self, message: str, *, diagnostic_code: str) -> None:
+        super().__init__(
+            message,
+            error_kind="lock_timeout",
+            diagnostic_code=diagnostic_code,
+        )
+
+
+class EffectRuntimeInternalError(EffectRuntimeRemoteError):
+    """The managed handler failed outside a declared request or I/O error."""
+
+    def __init__(self, message: str, *, diagnostic_code: str) -> None:
+        super().__init__(
+            message,
+            error_kind="internal_failure",
+            diagnostic_code=diagnostic_code,
+        )
 
 
 class EffectRuntimeStartupError(RuntimeError):
@@ -312,7 +415,10 @@ def _request_with_info(
     }
     encoded = (json.dumps(request, separators=(",", ":")) + "\n").encode()
     if len(encoded) > MAX_REQUEST_BYTES:
-        raise EffectRuntimeRejected("TypeScript Effect runtime request is oversized")
+        raise EffectRuntimeRejected(
+            "TypeScript Effect runtime request is oversized",
+            diagnostic_code="request_too_large",
+        )
     chunks: list[bytes] = []
     size = 0
     with socket.create_connection(
@@ -343,12 +449,49 @@ def _request_with_info(
     ):
         raise RuntimeError("TypeScript Effect runtime response shape mismatch")
     if response.get("ok") is not True:
-        error = response.get("error")
-        message = error.get("message") if isinstance(error, Mapping) else None
-        raise EffectRuntimeRejected(
-            str(message or "TypeScript Effect runtime request failed")
-        )
+        raise _remote_runtime_error(response.get("error"))
     return response
+
+
+def _remote_runtime_error(value: object) -> EffectRuntimeRemoteError:
+    if not isinstance(value, Mapping):
+        return EffectRuntimeInternalError(
+            "TypeScript Effect runtime returned an invalid error envelope",
+            diagnostic_code="invalid_error_envelope",
+        )
+    kind = value.get("kind")
+    code = value.get("code")
+    message = value.get("message")
+    if (
+        not isinstance(kind, str)
+        or not kind
+        or not isinstance(code, str)
+        or not code
+    ):
+        return EffectRuntimeInternalError(
+            "TypeScript Effect runtime returned an invalid error envelope",
+            diagnostic_code="invalid_error_envelope",
+        )
+    rendered = " ".join(
+        str(message or "TypeScript Effect runtime request failed").split()
+    )
+    rendered = rendered[:240] or "TypeScript Effect runtime request failed"
+    if kind == "request_rejected":
+        return EffectRuntimeRejected(rendered, diagnostic_code=code)
+    if kind == "conflict":
+        return EffectRuntimeConflict(rendered, diagnostic_code=code)
+    if kind == "io_transient":
+        return EffectRuntimeTransientIOError(rendered, diagnostic_code=code)
+    if kind == "io_permanent":
+        return EffectRuntimePermanentIOError(rendered, diagnostic_code=code)
+    if kind == "lock_timeout":
+        return EffectRuntimeLockTimeout(rendered, diagnostic_code=code)
+    if kind == "internal_failure":
+        return EffectRuntimeInternalError(rendered, diagnostic_code=code)
+    return EffectRuntimeInternalError(
+        "TypeScript Effect runtime returned an unsupported error kind",
+        diagnostic_code="unsupported_error_kind",
+    )
 
 
 def _start_runtime(*, fingerprint: str, info_path: Path) -> dict[str, Any]:
@@ -475,6 +618,8 @@ def effect_runtime_request(
                 timeout=timeout,
             )
         except EffectRuntimeRejected:
+            raise
+        except EffectRuntimeRemoteError:
             raise
         except (OSError, RuntimeError) as exc:
             last_error = exc

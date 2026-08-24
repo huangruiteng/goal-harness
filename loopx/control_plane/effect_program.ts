@@ -1,3 +1,4 @@
+import { EffectRuntimeRequestError } from "./effect_runtime_errors.ts";
 import { isStringLiteral } from "./runtime_decode.ts";
 
 export const SETTLEMENT_IDENTITY_SCHEMA_VERSION =
@@ -260,7 +261,7 @@ function stringArray(value: unknown): string[] {
 function requireStepKind(value: unknown): SettlementStepKind {
   const rendered = pythonString(value);
   if (!isStringLiteral(rendered, SETTLEMENT_STEP_KINDS)) {
-    throw new Error(`unsupported settlement step kind: ${rendered}`);
+    throw new EffectRuntimeRequestError("unsupported settlement step kind");
   }
   return rendered;
 }
@@ -268,7 +269,7 @@ function requireStepKind(value: unknown): SettlementStepKind {
 function requireFailureKind(value: unknown): SettlementFailureKind {
   const rendered = pythonString(value);
   if (!isStringLiteral(rendered, SETTLEMENT_FAILURE_KINDS)) {
-    throw new Error(`unsupported settlement failure kind: ${rendered}`);
+    throw new EffectRuntimeRequestError("unsupported settlement failure kind");
   }
   return rendered;
 }
@@ -429,7 +430,7 @@ export function settlementIdentity(
   const replanObligationId =
     truthyString(input.replan_obligation_id).trim() || null;
   if (todoId && replanObligationId) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "settlement identity cannot bind both todo_id and replan_obligation_id",
     );
   }
@@ -905,7 +906,7 @@ export function commitStepPayload(options: {
   }
   const phaseIndex = options.transaction_phases.indexOf(stepKind);
   if (phaseIndex < 0) {
-    throw new Error(`transaction phases do not contain ${stepKind}`);
+    throw new EffectRuntimeRequestError(`transaction phases do not contain ${stepKind}`);
   }
   const completedPhases = options.transaction_phases.slice(0, phaseIndex + 1);
   const sourcePrefix = options.source_ref_prefix ?? "turn_journal";

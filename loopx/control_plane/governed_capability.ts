@@ -1,4 +1,5 @@
 import type { JsonObject } from "./effect_program.ts";
+import { EffectRuntimeRequestError } from "./effect_runtime_errors.ts";
 import {
   assertNever,
   requireNonEmptyString as requiredString,
@@ -81,14 +82,14 @@ const ACTION_KIND_RE = /^[a-z][a-z0-9_]{0,63}$/;
 
 function requiredObject(value: unknown, label: string): JsonObject {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
+    throw new EffectRuntimeRequestError(`${label} must be an object`);
   }
   return { ...(value as JsonObject) };
 }
 
 function boundedArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value) || value.length > 64) {
-    throw new Error(`${label} must be an array with at most 64 items`);
+    throw new EffectRuntimeRequestError(`${label} must be an array with at most 64 items`);
   }
   return [...value];
 }
@@ -96,7 +97,7 @@ function boundedArray(value: unknown, label: string): unknown[] {
 function boundedString(value: unknown, label: string, limit: number): string {
   const result = requiredString(value, label);
   if (result.length > limit || result.includes("\n") || result.includes("\r")) {
-    throw new Error(`${label} must be bounded single-line text`);
+    throw new EffectRuntimeRequestError(`${label} must be bounded single-line text`);
   }
   return result;
 }
@@ -111,7 +112,7 @@ function boundedStringArray(
     result.length > limit ||
     result.some((item) => typeof item !== "string" || item.length === 0)
   ) {
-    throw new Error(`${label} must contain bounded non-empty strings`);
+    throw new EffectRuntimeRequestError(`${label} must contain bounded non-empty strings`);
   }
   return result as string[];
 }
@@ -126,7 +127,7 @@ function requireExactFields(
     actual.length !== expected.size ||
     actual.some((field) => !expected.has(field))
   ) {
-    throw new Error(`${label} fields are invalid`);
+    throw new EffectRuntimeRequestError(`${label} fields are invalid`);
   }
 }
 
@@ -142,18 +143,18 @@ function externalEffectReceipt(
     "external capability effect_receipt",
   );
   if (receipt.schema_version !== EXTERNAL_EFFECT_RECEIPT_SCHEMA_VERSION) {
-    throw new Error("external capability effect_receipt schema is invalid");
+    throw new EffectRuntimeRequestError("external capability effect_receipt schema is invalid");
   }
   if (receipt.invocation_id !== invocationId) {
-    throw new Error("external capability effect_receipt invocation_id is invalid");
+    throw new EffectRuntimeRequestError("external capability effect_receipt invocation_id is invalid");
   }
   if (receipt.idempotency_key !== effectId) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "external capability effect_receipt idempotency_key is invalid",
     );
   }
   if (receipt.status !== "committed" && receipt.status !== "no_change") {
-    throw new Error("external capability effect_receipt status is invalid");
+    throw new EffectRuntimeRequestError("external capability effect_receipt status is invalid");
   }
   requiredString(
     receipt.external_ref,
@@ -223,13 +224,13 @@ function validateTransitionProposals(input: {
       `${label} kind is unsupported`,
     );
     if (!allowedKinds.includes(kind)) {
-      throw new Error(`${label} kind is not admitted by transition_contract`);
+      throw new EffectRuntimeRequestError(`${label} kind is not admitted by transition_contract`);
     }
     if (input.status === "running" && kind !== "continuous_monitor_upsert") {
-      throw new Error(`${label} running result may only upsert a monitor`);
+      throw new EffectRuntimeRequestError(`${label} running result may only upsert a monitor`);
     }
     if (proposal.schema_version !== CONTINUOUS_MONITOR_PROPOSAL_SCHEMA_VERSION) {
-      throw new Error(`${label} schema_version is invalid`);
+      throw new EffectRuntimeRequestError(`${label} schema_version is invalid`);
     }
     const proposalId = boundedString(
       proposal.proposal_id,
@@ -237,7 +238,7 @@ function validateTransitionProposals(input: {
       96,
     );
     if (!PROPOSAL_ID_RE.test(proposalId) || seenProposalIds.has(proposalId)) {
-      throw new Error(`${label} proposal_id is invalid or duplicated`);
+      throw new EffectRuntimeRequestError(`${label} proposal_id is invalid or duplicated`);
     }
     seenProposalIds.add(proposalId);
     const monitorKey = boundedString(
@@ -246,10 +247,10 @@ function validateTransitionProposals(input: {
       128,
     );
     if (!MONITOR_KEY_RE.test(monitorKey)) {
-      throw new Error(`${label} monitor_key is invalid`);
+      throw new EffectRuntimeRequestError(`${label} monitor_key is invalid`);
     }
     if (!allowedMonitorKeyPrefixes.some((prefix) => monitorKey.startsWith(prefix))) {
-      throw new Error(`${label} monitor_key is not admitted`);
+      throw new EffectRuntimeRequestError(`${label} monitor_key is not admitted`);
     }
     switch (kind) {
       case "continuous_monitor_upsert": {
@@ -260,7 +261,7 @@ function validateTransitionProposals(input: {
           64,
         );
         if (!ACTION_KIND_RE.test(actionKind) || !allowedActions.includes(actionKind)) {
-          throw new Error(`${label} action_kind is not admitted`);
+          throw new EffectRuntimeRequestError(`${label} action_kind is not admitted`);
         }
         const targetKey = boundedString(
           proposal.target_key,
@@ -268,7 +269,7 @@ function validateTransitionProposals(input: {
           128,
         );
         if (!allowedTargetPrefixes.some((prefix) => targetKey.startsWith(prefix))) {
-          throw new Error(`${label} target_key is not admitted`);
+          throw new EffectRuntimeRequestError(`${label} target_key is not admitted`);
         }
         const requiredCapabilities = boundedStringArray(
           proposal.required_capabilities,
@@ -281,7 +282,7 @@ function validateTransitionProposals(input: {
             !ACTION_KIND_RE.test(capability) || !allowedCapabilities.includes(capability)
           )
         ) {
-          throw new Error(`${label} required_capabilities are not admitted`);
+          throw new EffectRuntimeRequestError(`${label} required_capabilities are not admitted`);
         }
         return {
           ...proposal,
@@ -334,12 +335,12 @@ export function validateGovernedCapabilityAdmission(input: {
     "governed capability selected_todo",
   );
   if (selectedTodo.todo_id !== input.todo_id) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "governed capability selected_todo does not match the settlement Todo",
     );
   }
   if (selectedTodo.role !== "agent" || selectedTodo.status !== "open") {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "governed capability selected_todo must be an open agent Todo",
     );
   }
@@ -365,7 +366,7 @@ export function validateGovernedCapabilityAdmission(input: {
     actionKinds.some((value) => typeof value !== "string") ||
     !actionKinds.includes(selectedTodo.action_kind)
   ) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "governed capability operation is not authorized by selected_todo action_kind",
     );
   }
@@ -378,7 +379,7 @@ export function validateGovernedCapabilityAdmission(input: {
     targetKeyPrefixes.some((value) => typeof value !== "string") ||
     !targetKeyPrefixes.some((prefix) => targetKey.startsWith(prefix as string))
   ) {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "governed capability operation is not authorized by selected_todo target_key",
     );
   }
@@ -394,22 +395,22 @@ export function validateGovernedCapabilityResult(input: {
   transition_contract?: unknown;
 }): { result: JsonObject; journal_status: "running" | "ready_to_settle" } {
   if (input.effect_class !== "external_write") {
-    throw new Error("governed capability execution requires external_write");
+    throw new EffectRuntimeRequestError("governed capability execution requires external_write");
   }
   const result = requiredObject(input.value, "external capability result");
   requireExactFields(result, RESULT_FIELDS, "external capability result");
   if (result.schema_version !== input.result_schema) {
-    throw new Error("external capability result schema_version is invalid");
+    throw new EffectRuntimeRequestError("external capability result schema_version is invalid");
   }
   if (result.invocation_id !== input.invocation_id) {
-    throw new Error("external capability result invocation_id is invalid");
+    throw new EffectRuntimeRequestError("external capability result invocation_id is invalid");
   }
   if (
     result.status !== "running" &&
     result.status !== "succeeded" &&
     result.status !== "no_change"
   ) {
-    throw new Error("external capability result status is invalid");
+    throw new EffectRuntimeRequestError("external capability result status is invalid");
   }
   for (const field of [
     "observations",
@@ -429,7 +430,7 @@ export function validateGovernedCapabilityResult(input: {
   );
   if (result.status === "running") {
     if (result.effect_receipt !== null) {
-      throw new Error(
+      throw new EffectRuntimeRequestError(
         "running external capability cannot claim an effect receipt",
       );
     }
@@ -438,7 +439,7 @@ export function validateGovernedCapabilityResult(input: {
       "domain_transition_receipts",
     ]) {
       if ((result[field] as unknown[]).length > 0) {
-        throw new Error(
+        throw new EffectRuntimeRequestError(
           `running external capability must leave ${field} empty`,
         );
       }
@@ -452,7 +453,7 @@ export function validateGovernedCapabilityResult(input: {
   );
   if (result.status === "no_change") {
     if (receipt.status !== "no_change") {
-      throw new Error(
+      throw new EffectRuntimeRequestError(
         "no-change external capability requires a no-change effect receipt",
       );
     }
@@ -462,13 +463,13 @@ export function validateGovernedCapabilityResult(input: {
       "transition_proposals",
     ]) {
       if ((result[field] as unknown[]).length > 0) {
-        throw new Error(
+        throw new EffectRuntimeRequestError(
           `no-change external capability must leave ${field} empty`,
         );
       }
     }
   } else if (receipt.status !== "committed") {
-    throw new Error(
+    throw new EffectRuntimeRequestError(
       "succeeded external capability requires a committed effect receipt",
     );
   }
