@@ -207,6 +207,15 @@ def _readback_matches_reply(
     return " ".join(actual_text.split()) == expected_text
 
 
+def _normalized_reply_text(value: Any) -> str:
+    lines = [" ".join(line.split()) for line in str(value or "").splitlines()]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)[:1200]
+
+
 def _result(
     *,
     status: str,
@@ -219,6 +228,7 @@ def _result(
     readback_performed: bool = False,
     reply_verified: bool = False,
     reaction_cleanup_verified: bool = False,
+    placement: str | None = None,
     blocker: str | None = None,
 ) -> dict[str, Any]:
     packet: dict[str, Any] = {
@@ -242,6 +252,8 @@ def _result(
     }
     if blocker:
         packet["blocker"] = blocker
+    if placement:
+        packet["placement"] = placement
     return packet
 
 
@@ -254,7 +266,7 @@ def reply_lark_event_inbox(
     execute: bool = False,
     runner: CommandRunner = _default_runner,
 ) -> dict[str, Any]:
-    """Reply in the source thread with the explicit inbox-configured bot."""
+    """Reply with the explicit inbox-configured bot and placement policy."""
 
     config = load_lark_event_inbox_config(project=project, config_path=config_path)
     if not config["enabled"]:
@@ -263,17 +275,21 @@ def reply_lark_event_inbox(
     if not MESSAGE_ID_PATTERN.fullmatch(source_message_id):
         raise ValueError("lark inbox reply requires a valid message id")
     inbox = config["inbox_path"]
-    source_captured = any(
-        event.get("message_id") == source_message_id
-        for path in (inbox.glob("*.json") if inbox.is_dir() else [])
-        if path.name != "processed.json"
-        if (event := _event_from_file(path)) is not None
+    source_event = next(
+        (
+            event
+            for path in (inbox.glob("*.json") if inbox.is_dir() else [])
+            if path.name != "processed.json"
+            if (event := _event_from_file(path)) is not None
+            if event.get("message_id") == source_message_id
+        ),
+        None,
     )
-    if not source_captured:
+    if source_event is None:
         raise ValueError(
             "lark inbox reply source message is not captured by this inbox"
         )
-    reply_text = " ".join(str(text or "").split())[:1200]
+    reply_text = _normalized_reply_text(text)
     if not reply_text:
         raise ValueError("lark inbox reply requires non-empty text")
 
@@ -289,9 +305,22 @@ def reply_lark_event_inbox(
 
     profile = str(reply_config["sender_profile"])
     chat_id = str(reply_config["chat_id"])
+    source_is_threaded = bool(
+        source_event.get("parent_id") or source_event.get("root_id")
+    )
+    placement = (
+        "chat_root"
+        if reply_config["placement_policy"] == "source_context"
+        and not source_is_threaded
+        else "source_thread"
+    )
     digest = hashlib.sha256(
         json.dumps(
-            {"message_id": source_message_id, "text": reply_text},
+            {
+                "message_id": source_message_id,
+                "placement": placement,
+                "text": reply_text,
+            },
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -304,6 +333,7 @@ def reply_lark_event_inbox(
             ok=True,
             execute=False,
             receipt=receipt,
+            placement=placement,
         )
 
     base = ["lark-cli", "--profile", profile]
@@ -351,10 +381,17 @@ def reply_lark_event_inbox(
             blocker="lark_inbox_reply_sender_not_in_configured_chat",
         )
 
-    send = _call(
-        runner,
-        base
-        + [
+    destination = (
+        [
+            "im",
+            "+messages-send",
+            "--chat-id",
+            chat_id,
+            "--text",
+            reply_text,
+        ]
+        if placement == "chat_root"
+        else [
             "im",
             "+messages-reply",
             "--message-id",
@@ -362,6 +399,13 @@ def reply_lark_event_inbox(
             "--text",
             reply_text,
             "--reply-in-thread",
+        ]
+    )
+    send = _call(
+        runner,
+        base
+        + destination
+        + [
             "--idempotency-key",
             f"loopx-{digest[:32]}",
             "--as",
@@ -378,6 +422,7 @@ def reply_lark_event_inbox(
             receipt=receipt,
             identity_verified=True,
             membership_verified=True,
+            placement=placement,
             blocker="lark_inbox_reply_provider_failed",
         )
 
@@ -391,6 +436,7 @@ def reply_lark_event_inbox(
             identity_verified=True,
             membership_verified=True,
             write_performed=True,
+            placement=placement,
             blocker="lark_inbox_reply_not_verified",
         )
     readback = _call(
@@ -450,6 +496,7 @@ def reply_lark_event_inbox(
         readback_performed=True,
         reply_verified=verified,
         reaction_cleanup_verified=reaction_cleanup_verified,
+        placement=placement,
         blocker=(
             None
             if completed

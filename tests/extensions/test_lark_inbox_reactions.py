@@ -154,7 +154,7 @@ class ReplyRunner:
             }
         if call[3:6] == ["im", "chats", "get"]:
             return {"returncode": 0, "stdout": "{}", "stderr": ""}
-        if "+messages-reply" in call:
+        if "+messages-reply" in call or "+messages-send" in call:
             return {
                 "returncode": 0,
                 "stdout": json.dumps({"message_id": "om_reply_fixture"}),
@@ -405,6 +405,7 @@ def test_verified_reply_removes_processing_reaction(tmp_path: Path) -> None:
     assert result["status"] == "sent_verified"
     assert result["reply_verified"] is True
     assert result["reaction_cleanup_verified"] is True
+    assert result["placement"] == "source_thread"
     delete_call = next(call for call in runner.calls if "delete" in call)
     assert delete_call[delete_call.index("--reaction-id") + 1] == (
         "reaction_OnIt"
@@ -416,6 +417,65 @@ def test_verified_reply_removes_processing_reaction(tmp_path: Path) -> None:
         )
         == {}
     )
+
+
+def test_source_context_reply_uses_chat_root_for_top_level_message(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    payload = json.loads(config.read_text(encoding="utf-8"))
+    payload["reply"].update(
+        {
+            "placement_policy": "source_context",
+            "editorial_style": "bullet_points_preferred",
+        }
+    )
+    config.write_text(json.dumps(payload), encoding="utf-8")
+    runner = ReplyRunner(readback_text="进展：\n- 第一项\n- 第二项")
+
+    result = reply_lark_event_inbox(
+        project=project,
+        config_path=config,
+        message_id="om_reaction_fixture",
+        text="进展：\n- 第一项\n- 第二项",
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is True
+    assert result["placement"] == "chat_root"
+    send_call = next(call for call in runner.calls if "+messages-send" in call)
+    assert "--reply-in-thread" not in send_call
+    assert send_call[send_call.index("--chat-id") + 1] == "oc_project_review"
+    assert send_call[send_call.index("--text") + 1] == "进展：\n- 第一项\n- 第二项"
+
+
+def test_source_context_reply_stays_in_existing_topic(tmp_path: Path) -> None:
+    config, inbox, project = _fixture(tmp_path, lifecycle=False)
+    payload = json.loads(config.read_text(encoding="utf-8"))
+    payload["reply"]["placement_policy"] = "source_context"
+    config.write_text(json.dumps(payload), encoding="utf-8")
+    event_path = inbox / "om_reaction_fixture.json"
+    event = json.loads(event_path.read_text(encoding="utf-8"))
+    event["parent_id"] = "om_topic_root_fixture"
+    event["root_id"] = "om_topic_root_fixture"
+    event_path.write_text(json.dumps(event), encoding="utf-8")
+    runner = ReplyRunner()
+
+    result = reply_lark_event_inbox(
+        project=project,
+        config_path=config,
+        message_id="om_reaction_fixture",
+        text="处理完成",
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is True
+    assert result["placement"] == "source_thread"
+    send_call = next(call for call in runner.calls if "+messages-reply" in call)
+    assert "--reply-in-thread" in send_call
+    assert not any("+messages-send" in call for call in runner.calls)
 
 
 def test_verified_reply_accepts_provider_token_or_rendered_mention_name(

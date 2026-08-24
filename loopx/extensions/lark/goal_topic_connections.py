@@ -99,6 +99,7 @@ class LarkTopicEventDecisionReason(str, Enum):
     BINDING_UNAVAILABLE = "binding_unavailable"
     CHAT_MISMATCH = "chat_mismatch"
     TOPIC_MISMATCH = "topic_mismatch"
+    ROUTE_AMBIGUOUS = "route_ambiguous"
     SELF_MESSAGE = "self_message"
     INVALID_ROUTING_STATE = "invalid_routing_state"
     NOT_ADDRESSED = "not_addressed"
@@ -825,6 +826,7 @@ def list_lark_connections(
                 "binding_unavailable",
                 "chat_mismatch",
                 "topic_mismatch",
+                "route_ambiguous",
             }
         ):
             event_blocker = "lark_event_route_mismatch"
@@ -1034,7 +1036,7 @@ def decide_lark_topic_event(
         }
     has_binding = False
     matched_chat = False
-    matched_topic = False
+    candidates: list[dict[str, Any]] = []
     for goal_id, payload in binding_payloads.items():
         binding = binding_for_goal(payload, goal_id)
         if not binding or binding.get("enabled") is not True:
@@ -1045,27 +1047,14 @@ def decide_lark_topic_event(
         if target is None:
             continue
         channel = target.get("channel") if isinstance(target.get("channel"), Mapping) else {}
+        if str(channel.get("chat_id") or "") != chat_id:
+            continue
+        matched_chat = True
         identity = target.get("identity") if isinstance(target.get("identity"), Mapping) else {}
         topic = binding.get("topic") if isinstance(binding.get("topic"), Mapping) else {}
         binding_channel = binding.get("channel") if isinstance(binding.get("channel"), Mapping) else {}
         topic_root = str(topic.get("root_message_id") or binding_channel.get("pinned_message_id") or "")
         routing = binding.get("routing") if isinstance(binding.get("routing"), Mapping) else {}
-        if str(channel.get("chat_id") or "") != chat_id:
-            continue
-        matched_chat = True
-        if topic_root != root_id:
-            continue
-        matched_topic = True
-        sender_id = str(event.get("sender_id") or "")
-        if sender_id and sender_id in {
-            str(identity.get("bot_app_id") or ""),
-            str(identity.get("bot_open_id") or ""),
-        }:
-            return {
-                "matched": False,
-                "reason": LarkTopicEventDecisionReason.SELF_MESSAGE.value,
-                "route": None,
-            }
         try:
             capture_scope = _routing_value(
                 CaptureScope,
@@ -1108,57 +1097,103 @@ def decide_lark_topic_event(
                 "reason": LarkTopicEventDecisionReason.INVALID_ROUTING_STATE.value,
                 "route": None,
             }
-        if capture_scope != "configured_chat_all" and not is_event_addressed_to_bot(
-            event, identity
-        ):
-            return {
-                "matched": False,
-                "reason": LarkTopicEventDecisionReason.NOT_ADDRESSED.value,
-                "route": None,
+        candidates.append(
+            {
+                "goal_id": goal_id,
+                "binding": binding,
+                "identity": identity,
+                "target_ref": target_ref,
+                "topic_root": topic_root,
+                "capture_scope": capture_scope,
+                "ingress_mode": ingress_mode,
+                "reply_mode": reply_mode,
+                "routing": routing,
+                "connector": connector,
             }
-        route = {
-            "app_ref": str(identity.get("sender_profile") or "default"),
-            "goal_id": goal_id,
-            "message_id": message_id,
-            "reply_mode": reply_mode,
-            "target_ref": target_ref,
-            "topic_root_message_id": topic_root,
-        }
-        if ingress_mode != "direct_session" or binding.get("agent_id"):
-            route.update(
-                {
-                    "agent_id": str(binding.get("agent_id") or ""),
-                    "session_id": str(binding.get("session_id") or ""),
-                    "capture_scope": capture_scope,
-                    "ingress_mode": ingress_mode,
-                    "inbox_config_ref": str(routing.get("inbox_config_ref") or ""),
-                    **(
-                        {"connector": dict(connector)}
-                        if isinstance(connector, Mapping)
-                        else {}
-                    ),
-                    **(
-                        {"event_id": str(event.get("event_id") or message_id)}
-                        if isinstance(connector, Mapping)
-                        else {}
-                    ),
-                }
-            )
+        )
+
+    exact_topic_candidates = [
+        candidate for candidate in candidates if candidate["topic_root"] == root_id
+    ]
+    eligible = exact_topic_candidates or [
+        candidate
+        for candidate in candidates
+        if candidate["capture_scope"] == CaptureScope.CONFIGURED_CHAT_ALL.value
+    ]
+    if len(eligible) > 1:
         return {
-            "matched": True,
-            "reason": LarkTopicEventDecisionReason.MATCHED.value,
-            "route": route,
+            "matched": False,
+            "reason": LarkTopicEventDecisionReason.ROUTE_AMBIGUOUS.value,
+            "route": None,
         }
-    reason = (
-        LarkTopicEventDecisionReason.BINDING_UNAVAILABLE
-        if not has_binding
-        else LarkTopicEventDecisionReason.CHAT_MISMATCH
-        if not matched_chat
-        else LarkTopicEventDecisionReason.TOPIC_MISMATCH
-        if not matched_topic
-        else LarkTopicEventDecisionReason.BINDING_UNAVAILABLE
-    )
-    return {"matched": False, "reason": reason.value, "route": None}
+    if not eligible:
+        reason = (
+            LarkTopicEventDecisionReason.BINDING_UNAVAILABLE
+            if not has_binding
+            else LarkTopicEventDecisionReason.CHAT_MISMATCH
+            if not matched_chat
+            else LarkTopicEventDecisionReason.TOPIC_MISMATCH
+        )
+        return {"matched": False, "reason": reason.value, "route": None}
+
+    selected = eligible[0]
+    identity = selected["identity"]
+    sender_id = str(event.get("sender_id") or "")
+    if sender_id and sender_id in {
+        str(identity.get("bot_app_id") or ""),
+        str(identity.get("bot_open_id") or ""),
+    }:
+        return {
+            "matched": False,
+            "reason": LarkTopicEventDecisionReason.SELF_MESSAGE.value,
+            "route": None,
+        }
+    capture_scope = str(selected["capture_scope"])
+    if capture_scope != CaptureScope.CONFIGURED_CHAT_ALL.value and not is_event_addressed_to_bot(
+        event, identity
+    ):
+        return {
+            "matched": False,
+            "reason": LarkTopicEventDecisionReason.NOT_ADDRESSED.value,
+            "route": None,
+        }
+    binding = selected["binding"]
+    ingress_mode = str(selected["ingress_mode"])
+    routing = selected["routing"]
+    connector = selected["connector"]
+    route = {
+        "app_ref": str(identity.get("sender_profile") or "default"),
+        "goal_id": str(selected["goal_id"]),
+        "message_id": message_id,
+        "reply_mode": str(selected["reply_mode"]),
+        "target_ref": str(selected["target_ref"]),
+        "topic_root_message_id": str(selected["topic_root"]),
+    }
+    if ingress_mode != IngressMode.DIRECT_SESSION.value or binding.get("agent_id"):
+        route.update(
+            {
+                "agent_id": str(binding.get("agent_id") or ""),
+                "session_id": str(binding.get("session_id") or ""),
+                "capture_scope": capture_scope,
+                "ingress_mode": ingress_mode,
+                "inbox_config_ref": str(routing.get("inbox_config_ref") or ""),
+                **(
+                    {"connector": dict(connector)}
+                    if isinstance(connector, Mapping)
+                    else {}
+                ),
+                **(
+                    {"event_id": str(event.get("event_id") or message_id)}
+                    if isinstance(connector, Mapping)
+                    else {}
+                ),
+            }
+        )
+    return {
+        "matched": True,
+        "reason": LarkTopicEventDecisionReason.MATCHED.value,
+        "route": route,
+    }
 
 
 def route_lark_topic_event(

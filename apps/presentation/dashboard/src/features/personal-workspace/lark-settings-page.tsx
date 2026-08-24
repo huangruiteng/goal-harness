@@ -87,11 +87,15 @@ function larkConnectionHealth(connection: LarkGoalConnection): { label: string; 
   }
   if (
     connection.health_error_code === "lark_event_route_mismatch"
-    || ["chat_mismatch", "topic_mismatch"].includes(connection.last_event_reason ?? "")
+    || ["chat_mismatch", "topic_mismatch", "route_ambiguous"].includes(connection.last_event_reason ?? "")
   ) {
     return {
-      label: "消息未匹配当前 Goal Topic",
-      detail: "事件来自其他群聊或 Topic。请重新选择群聊并连接该 Goal，然后发送一条新的 @ 消息。",
+      label: connection.last_event_reason === "route_ambiguous"
+        ? "消息匹配多个 Goal"
+        : "消息未匹配当前 Goal Topic",
+      detail: connection.last_event_reason === "route_ambiguous"
+        ? "同一 Bot 和群聊存在多个完整群捕获连接。请让每个 Agent 使用独立 Bot，或只保留一个完整群连接。"
+        : "事件来自其他群聊或 Topic。请重新选择群聊并连接该 Goal，然后发送一条新的 @ 消息。",
       ready: false,
     };
   }

@@ -882,6 +882,94 @@ def test_profile_poll_routes_provider_event_through_existing_reply_path(tmp_path
     assert state["reply_text"] == "当前运行的是 LoopX 开发版。"
 
 
+def test_profile_poll_scopes_chat_wide_capture_to_the_consuming_bot_target(
+    tmp_path: Path,
+) -> None:
+    from loopx.extensions.lark.goal_topic_runtime import (
+        poll_lark_goal_topic_profile_once,
+    )
+
+    target_payload = {
+        "schema_version": "loopx_goal_channel_provider_targets_v0",
+        "targets": {
+            "mew-product": {
+                "name": "mew-product",
+                "provider": "lark",
+                "enabled": True,
+                "channel": {"chat_id": "oc_public_fixture"},
+                "identity": {
+                    "sender_profile": "mew",
+                    "bot_app_id": "cli_public_fixture",
+                    "bot_display_name": "linkmacbot",
+                    "cli_bin": "fake-lark",
+                },
+            },
+            "owl-product": {
+                "name": "owl-product",
+                "provider": "lark",
+                "enabled": True,
+                "channel": {"chat_id": "oc_public_fixture"},
+                "identity": {
+                    "sender_profile": "owl",
+                    "bot_app_id": "cli_other_fixture",
+                    "bot_display_name": "owlbot",
+                    "cli_bin": "fake-lark",
+                },
+            },
+        },
+    }
+    binding_payloads: dict[str, Any] = {}
+    for goal_id, target_ref, topic_root in (
+        ("goal-alpha", "mew-product", "om_topic_alpha"),
+        ("goal-beta", "owl-product", "om_topic_beta"),
+    ):
+        binding_payloads[goal_id] = {
+            "schema_version": "loopx_goal_channel_lark_binding_v0",
+            "bindings": {
+                goal_id: {
+                    "goal_id": goal_id,
+                    "provider": "lark",
+                    "enabled": True,
+                    "target_ref": target_ref,
+                    "topic": {"root_message_id": topic_root},
+                    "routing": {
+                        "incoming_mode": "all",
+                        "reply_mode": "topic_reply",
+                    },
+                }
+            },
+        }
+    state: dict[str, Any] = {}
+    event = {
+        "event_id": "evt_cross_topic",
+        "message_id": "om_cross_topic",
+        "chat_id": "oc_public_fixture",
+        "root_id": "om_new_topic",
+        "content": "new topic message",
+    }
+
+    result = poll_lark_goal_topic_profile_once(
+        profile="mew",
+        snapshot={
+            "target_payload": target_payload,
+            "binding_payloads": binding_payloads,
+            "goal_contexts": {},
+        },
+        runtime_root=tmp_path,
+        answer=lambda route, _text: f"routed to {route['goal_id']}",
+        consume_runner=lambda _args: {
+            "returncode": 0,
+            "stdout": json.dumps(event) + "\n",
+            "stderr": "",
+        },
+        provider_runner=lambda _args: subprocess.CompletedProcess([], 0, "", ""),
+        reply_runner=_reply_runner(state),
+    )
+
+    assert result["event_statuses"] == ["replied_and_acknowledged"]
+    assert state["reply_text"] == "routed to goal-alpha"
+
+
 def test_profile_poll_routes_the_only_goal_in_a_chat_without_querying_message_history(
     tmp_path: Path,
 ) -> None:

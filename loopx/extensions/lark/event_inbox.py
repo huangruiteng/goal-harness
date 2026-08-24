@@ -21,6 +21,8 @@ EVENT_ID_PATTERN = re.compile(r"[A-Za-z0-9:_-]{1,200}")
 SAFE_PROFILE_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 CHAT_ID_PATTERN = re.compile(r"oc_[A-Za-z0-9_-]+")
 REACTION_EMOJI_PATTERN = re.compile(r"[A-Za-z0-9_]{1,64}")
+REPLY_PLACEMENT_POLICIES = {"source_thread", "source_context"}
+REPLY_EDITORIAL_STYLES = {"concise", "bullet_points_preferred"}
 LARK_OPERATOR_INBOX_SOURCE_CONTRACT = OperatorInboxSourceContract(
     config_schema_version=CONFIG_SCHEMA_VERSION,
     event_schema_version=EVENT_SCHEMA_VERSION,
@@ -91,6 +93,18 @@ def load_lark_event_inbox_config(
         str(reply_payload.get("bot_display_name") or "").split()
     )[:100]
     chat_id = str(reply_payload.get("chat_id") or "").strip()
+    placement_policy = str(
+        reply_payload.get("placement_policy") or "source_thread"
+    ).strip()
+    editorial_style = str(reply_payload.get("editorial_style") or "concise").strip()
+    if placement_policy not in REPLY_PLACEMENT_POLICIES:
+        raise ValueError(
+            "lark inbox placement_policy must be source_thread or source_context"
+        )
+    if editorial_style not in REPLY_EDITORIAL_STYLES:
+        raise ValueError(
+            "lark inbox editorial_style must be concise or bullet_points_preferred"
+        )
     received_reaction_emoji = str(
         reply_payload.get("received_reaction_emoji") or ""
     ).strip()
@@ -141,6 +155,8 @@ def load_lark_event_inbox_config(
             "sender_identity": sender_identity,
             "bot_display_name": bot_display_name,
             "chat_id": chat_id,
+            "placement_policy": placement_policy,
+            "editorial_style": editorial_style,
             "received_reaction_emoji": received_reaction_emoji,
             "processing_reaction_emoji": processing_reaction_emoji,
         },
@@ -384,6 +400,10 @@ def inspect_lark_event_inbox(
         "configured": True,
         "capture_scope": config["capture_scope"],
         "thread_complete": config["thread_complete"],
+        "reply_guidance": {
+            "placement_policy": config["reply"]["placement_policy"],
+            "editorial_style": config["reply"]["editorial_style"],
+        },
         "coverage_warning": (
             None
             if config["thread_complete"]
@@ -401,7 +421,8 @@ def inspect_lark_event_inbox(
             "For an actionable item, first run `loopx lark-inbox processing` for "
             "its message_id, then translate it into a todo, vision correction, PR "
             "update, or no-follow-up rationale. Send and verify any required reply "
-            "before acknowledging the message_id. If no reply is required, run "
+            "before acknowledging the message_id. Follow reply_guidance for "
+            "placement and editorial style. If no reply is required, run "
             "`loopx lark-inbox reaction-complete` before acknowledging it."
         ),
     }

@@ -1000,6 +1000,7 @@ const larkTopicEventRejectionReasons = [
   "binding_unavailable",
   "chat_mismatch",
   "topic_mismatch",
+  "route_ambiguous",
   "self_message",
   "invalid_routing_state",
   "not_addressed",

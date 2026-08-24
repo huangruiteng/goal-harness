@@ -812,6 +812,20 @@ def test_routes_bound_topic_messages_and_replies_in_thread(tmp_path: Path) -> No
     assert unmentioned_all_mode is not None
     assert unmentioned_all_mode["goal_id"] == "goal-alpha"
 
+    different_topic_all_mode = decide_lark_topic_event(
+        target_payload=read_goal_channel_targets(target_path),
+        binding_payloads={"goal-alpha": all_binding},
+        event={
+            "chat_id": CHAT_ID,
+            "root_id": "om_another_topic",
+            "message_id": "om_incoming_from_another_topic",
+            "content": "follow-up from another topic in the configured chat",
+        },
+    )
+    assert different_topic_all_mode["matched"] is True
+    assert different_topic_all_mode["reason"] == "matched"
+    assert different_topic_all_mode["route"]["goal_id"] == "goal-alpha"
+
     # Negative cases: mentioning another user or @all must NOT match in mentions mode
     other_user_decision = decide_lark_topic_event(
         target_payload=read_goal_channel_targets(target_path),
@@ -1110,6 +1124,50 @@ def test_topic_route_decision_reports_safe_reason_codes(tmp_path: Path) -> None:
     assert matched["matched"] is True
     assert matched["reason"] == "matched"
     assert matched["route"]["goal_id"] == "goal-alpha"
+
+
+def test_configured_chat_all_fails_closed_when_multiple_goal_routes_match(
+    tmp_path: Path,
+) -> None:
+    state: dict[str, Any] = {}
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="all",
+        runner=_runner(state),
+        cli_bin="fake-lark",
+    )
+    alpha = read_goal_channel_binding(binding_path)
+    beta = json.loads(json.dumps(alpha))
+    beta_binding = beta["bindings"].pop("goal-alpha")
+    beta_binding["goal_id"] = "goal-beta"
+    beta_binding["topic"]["root_message_id"] = "om_topic_beta"
+    beta_binding["channel"]["pinned_message_id"] = "om_topic_beta"
+    beta["bindings"]["goal-beta"] = beta_binding
+
+    decision = decide_lark_topic_event(
+        target_payload=read_goal_channel_targets(target_path),
+        binding_payloads={"goal-alpha": alpha, "goal-beta": beta},
+        event={
+            "chat_id": CHAT_ID,
+            "root_id": "om_third_topic",
+            "message_id": "om_ambiguous",
+            "content": "unscoped chat-wide event",
+        },
+    )
+
+    assert decision == {
+        "matched": False,
+        "reason": "route_ambiguous",
+        "route": None,
+    }
 
 
 def test_disconnect_removes_only_the_selected_goal_topic(tmp_path: Path) -> None:

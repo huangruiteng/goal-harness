@@ -169,6 +169,23 @@ def _topic_roots_for_target(
     return roots
 
 
+def _binding_payloads_for_target(
+    binding_payloads: Mapping[str, Any], *, target_ref: str
+) -> dict[str, Mapping[str, Any]]:
+    selected: dict[str, Mapping[str, Any]] = {}
+    for goal_id, payload in binding_payloads.items():
+        if not isinstance(payload, Mapping):
+            continue
+        binding = binding_for_goal(payload, str(goal_id))
+        if (
+            binding
+            and binding.get("enabled") is True
+            and str(binding.get("target_ref") or "") == target_ref
+        ):
+            selected[str(goal_id)] = payload
+    return selected
+
+
 def _event_payloads(stdout: Any) -> list[Mapping[str, Any]]:
     events: list[Mapping[str, Any]] = []
     for line in str(stdout or "").splitlines():
@@ -266,11 +283,10 @@ def poll_lark_goal_topic_profile_once(
         try:
             event_result = process_lark_goal_topic_event(
                 target_payload=target_payload,
-                binding_payloads={
-                    str(goal_id): payload
-                    for goal_id, payload in binding_payloads.items()
-                    if isinstance(payload, Mapping)
-                },
+                binding_payloads=_binding_payloads_for_target(
+                    binding_payloads,
+                    target_ref=target_ref,
+                ),
                 event=routed_event,
                 runtime_root=runtime_root,
                 goal_contexts=(
@@ -766,6 +782,8 @@ def _inbox_config(
             "sender_identity": "bot",
             "bot_display_name": bot_display_name,
             "chat_id": chat_id,
+            "placement_policy": "source_context",
+            "editorial_style": "bullet_points_preferred",
         },
     }
     config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
