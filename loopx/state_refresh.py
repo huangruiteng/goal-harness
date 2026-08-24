@@ -31,19 +31,13 @@ from .control_plane.quota.settlement import (
 from .control_plane.work_items.repair_delta import (
     REPAIR_DELTA_CONTRACT_SCHEMA_VERSION as REPAIR_DELTA_CONTRACT_SCHEMA_VERSION,
     REPAIR_DELTA_KIND_CHOICES as REPAIR_DELTA_KIND_CHOICES,
-    build_repair_delta_contract,
     normalize_repair_delta_kinds,
-    repair_delta_kinds_have_accountable_progress,
-)
-from .control_plane.work_items.autonomous_replan_ack import (
-    latest_monitor_replan_frontier_identity,
-    watch_lane_continuation_todo_ids,
 )
 from .control_plane.work_items.progress_observation import (
     normalize_progress_observation,
 )
 from .control_plane.work_items.semantic_replan_writeback import (
-    enforce_open_replan_writeback,
+    qualify_refresh_replan_writeback,
 )
 from .control_plane.runtime.shared_runtime_refresh_projection import (
     build_shared_runtime_projection,
@@ -84,7 +78,6 @@ from .control_plane.todos.contract import (
     normalize_todo_claimed_by,
     normalize_todo_replan_obligation_id,
 )
-from .control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from .control_plane.todos.completion_validation_accountability import (
     require_accountable_completion_validation,
 )
@@ -230,13 +223,6 @@ def normalize_progress_scope(value: str | None) -> str:
             "--progress-scope must be one of: " + ", ".join(PROGRESS_SCOPE_CHOICES)
         )
     return normalized
-
-
-def _noop_classification_for(classification: str) -> str:
-    normalized = str(classification or "").strip().lower()
-    if "repair" in normalized and "replan" not in normalized:
-        return "repair_noop"
-    return "replan_noop"
 
 
 def next_action_section_bounds(lines: list[str]) -> tuple[int, int] | None:
@@ -1148,78 +1134,35 @@ def refresh_state_run(
     else:
         action, recommended_action_source = derive_recommended_action_with_source(state_text)
     validate_local_control_text("recommended_action", action)
-    repair_delta_contract: dict[str, Any] | None = None
-    validated_repair_delta_kinds: list[str] = []
     requested_classification = classification
-    requested_delivery_outcome = normalized_delivery_outcome
-    effective_autonomous_replan_recorded = bool(autonomous_replan_recorded)
-    if autonomous_replan_recorded:
-        repair_delta_contract = build_repair_delta_contract(
-            requested_delta_kinds=normalized_repair_delta_kinds,
-            active_state_next_action_update=active_state_next_action_update,
-            agent_vision=agent_vision,
-            existing_agent_vision=existing_agent_vision,
-            agent_todo_summary=parse_active_state_todos(
-                state_text, item_limit=None
-            ).get("agent_todos"),
-            agent_id=normalized_agent_id or None,
-            dry_run=dry_run,
-            selected_todo_id=(settlement_identity.todo_id if settlement_identity else None),
-            newest_first_runs=newest_first_runs,
-        )
-        validated_repair_delta_kinds = list(
-            repair_delta_contract.get("delta_kinds") or []
-        )
-        if not repair_delta_contract["delta_present"]:
-            classification = _noop_classification_for(classification)
-            effective_autonomous_replan_recorded = False
-            if normalized_delivery_outcome in {"outcome_progress", "primary_goal_outcome"}:
-                normalized_delivery_outcome = "outcome_gap"
-        elif (
-            normalized_delivery_outcome in {"outcome_progress", "primary_goal_outcome"}
-            and not repair_delta_kinds_have_accountable_progress(
-                validated_repair_delta_kinds
-            )
-        ):
-            normalized_delivery_outcome = "outcome_gap"
-        if effective_autonomous_replan_recorded and normalized_agent_id:
-            autonomous_replan_frontier_identity = (
-                latest_monitor_replan_frontier_identity(
-                    newest_first_runs,
-                    agent_id=normalized_agent_id,
-                    watch_todo_ids=watch_lane_continuation_todo_ids(
-                        repair_delta_contract
-                    ),
-                )
-            )
-    replan_semantic_delta = enforce_open_replan_writeback(
+    replan_qualification = qualify_refresh_replan_writeback(
+        autonomous_replan_recorded=autonomous_replan_recorded,
+        requested_delta_kinds=normalized_repair_delta_kinds,
+        active_state_next_action_update=active_state_next_action_update,
+        agent_vision=agent_vision,
+        existing_agent_vision=existing_agent_vision,
+        agent_id=normalized_agent_id,
+        dry_run=dry_run,
+        settlement_todo_id=(settlement_identity.todo_id if settlement_identity else None),
+        settlement_bound=settlement_identity is not None,
         newest_first_runs=newest_first_runs,
         state_text=state_text,
-        agent_id=normalized_agent_id,
         goal_id=safe_goal_id,
         progress_observation=normalized_progress_observation,
         registry_goal=registry_goal,
-        agent_vision=agent_vision,
         completion_todo_id=completion_todo_id,
         completion_turn_key=completion_turn_key,
+        classification=classification,
+        delivery_outcome=normalized_delivery_outcome,
     )
-    if replan_semantic_delta:
-        effective_autonomous_replan_recorded = True
-        # The semantic gate is authoritative for an open replan obligation.
-        # A repair-delta label may fail to describe the state change while the
-        # same writeback still carries a fresh accepted typed observation. In
-        # that case this is not a noop: preserve the caller's accountable
-        # settlement outcome so the durable run and receipt remain one chain.
-        classification = requested_classification
-        normalized_delivery_outcome = requested_delivery_outcome
-    if (
-        settlement_identity is not None
-        and normalized_delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES
-    ):
-        raise ValueError(
-            "turn-scoped refresh-state produced no accountable semantic delta; "
-            "no state or settlement receipt was written"
-        )
+    repair_delta_contract = replan_qualification.repair_delta_contract
+    replan_semantic_delta = replan_qualification.semantic_delta
+    autonomous_replan_frontier_identity = replan_qualification.frontier_identity
+    classification = replan_qualification.classification
+    normalized_delivery_outcome = replan_qualification.delivery_outcome
+    effective_autonomous_replan_recorded = (
+        replan_qualification.autonomous_replan_recorded
+    )
     vision_checkpoint = build_vision_checkpoint(
         agent_id=normalized_agent_id or None,
         agent_vision=agent_vision,

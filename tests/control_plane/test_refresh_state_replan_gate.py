@@ -16,13 +16,11 @@ from loopx.control_plane.status.autonomous_replan_projection import (
 from loopx.control_plane.work_items.semantic_replan_writeback import (
     ReplanWritebackRejected,
     _obligation_was_created_by_current_completion,
+    enforce_open_replan_writeback,
     qualify_replan_writeback,
     project_replan_writeback_rejection,
 )
-from loopx.state_refresh import (
-    enforce_open_replan_writeback,
-    refresh_state_run,
-)
+from loopx.state_refresh import refresh_state_run
 from loopx.todos import add_goal_todo
 
 GOAL_ID = "replan-gate-fixture"

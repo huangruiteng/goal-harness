@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from ...agent_registry import registered_agent_ids_for_goal
@@ -22,15 +23,34 @@ from ..todos.quota_summary import (
     select_quota_todo_summary,
 )
 from ..todos.succession_warning import todo_succession_gap_items
+from .autonomous_replan_ack import (
+    latest_monitor_replan_frontier_identity,
+    watch_lane_continuation_todo_ids,
+)
 from .autonomous_replan_obligation import (
     build_autonomous_replan_cli_actions,
     project_todo_lifecycle_settlement_reentry,
 )
+from .delivery_outcome import ACCOUNTABLE_DELIVERY_OUTCOMES
 from .progress_observation import semantic_delta_from_writeback
+from .repair_delta import (
+    build_repair_delta_contract,
+    repair_delta_kinds_have_accountable_progress,
+)
 from .work_lane_context import build_work_lane_context_contract
 
 
 REPLAN_WRITEBACK_REJECTION_SCHEMA_VERSION = "replan_writeback_rejection_v0"
+
+
+@dataclass(frozen=True)
+class RefreshReplanQualification:
+    repair_delta_contract: dict[str, Any] | None
+    semantic_delta: dict[str, Any] | None
+    frontier_identity: str | None
+    classification: str
+    delivery_outcome: str | None
+    autonomous_replan_recorded: bool
 
 
 class ReplanWritebackRejected(ValueError):
@@ -343,4 +363,103 @@ def enforce_open_replan_writeback(
         ),
         obligation=obligation,
         semantic_delta=semantic_delta,
+    )
+
+
+def qualify_refresh_replan_writeback(
+    *,
+    autonomous_replan_recorded: bool,
+    requested_delta_kinds: list[str],
+    active_state_next_action_update: dict[str, Any] | None,
+    agent_vision: dict[str, Any] | None,
+    existing_agent_vision: dict[str, Any] | None,
+    agent_id: str,
+    dry_run: bool,
+    settlement_todo_id: str | None,
+    settlement_bound: bool,
+    newest_first_runs: list[dict[str, Any]],
+    state_text: str,
+    goal_id: str,
+    progress_observation: dict[str, Any] | None,
+    registry_goal: dict[str, Any] | None,
+    completion_todo_id: str | None,
+    completion_turn_key: str | None,
+    classification: str,
+    delivery_outcome: str | None,
+) -> RefreshReplanQualification:
+    """Qualify one refresh's replan delta and accountable settlement outcome."""
+
+    requested_classification = classification
+    requested_delivery_outcome = delivery_outcome
+    repair_delta_contract = None
+    frontier_identity = None
+    effective_recorded = bool(autonomous_replan_recorded)
+    if autonomous_replan_recorded:
+        repair_delta_contract = build_repair_delta_contract(
+            requested_delta_kinds=requested_delta_kinds,
+            active_state_next_action_update=active_state_next_action_update,
+            agent_vision=agent_vision,
+            existing_agent_vision=existing_agent_vision,
+            agent_todo_summary=parse_active_state_todos(
+                state_text, item_limit=None
+            ).get("agent_todos"),
+            agent_id=agent_id or None,
+            dry_run=dry_run,
+            selected_todo_id=settlement_todo_id,
+            newest_first_runs=newest_first_runs,
+        )
+        validated_delta_kinds = list(repair_delta_contract.get("delta_kinds") or [])
+        if not repair_delta_contract["delta_present"]:
+            normalized = str(classification or "").strip().lower()
+            classification = (
+                "repair_noop"
+                if "repair" in normalized and "replan" not in normalized
+                else "replan_noop"
+            )
+            effective_recorded = False
+            if delivery_outcome in {"outcome_progress", "primary_goal_outcome"}:
+                delivery_outcome = "outcome_gap"
+        elif (
+            delivery_outcome in {"outcome_progress", "primary_goal_outcome"}
+            and not repair_delta_kinds_have_accountable_progress(
+                validated_delta_kinds
+            )
+        ):
+            delivery_outcome = "outcome_gap"
+        if effective_recorded and agent_id:
+            frontier_identity = latest_monitor_replan_frontier_identity(
+                newest_first_runs,
+                agent_id=agent_id,
+                watch_todo_ids=watch_lane_continuation_todo_ids(
+                    repair_delta_contract
+                ),
+            )
+
+    semantic_delta = enforce_open_replan_writeback(
+        newest_first_runs=newest_first_runs,
+        state_text=state_text,
+        agent_id=agent_id,
+        goal_id=goal_id,
+        progress_observation=progress_observation,
+        registry_goal=registry_goal,
+        agent_vision=agent_vision,
+        completion_todo_id=completion_todo_id,
+        completion_turn_key=completion_turn_key,
+    )
+    if semantic_delta:
+        effective_recorded = True
+        classification = requested_classification
+        delivery_outcome = requested_delivery_outcome
+    if settlement_bound and delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES:
+        raise ValueError(
+            "turn-scoped refresh-state produced no accountable semantic delta; "
+            "no state or settlement receipt was written"
+        )
+    return RefreshReplanQualification(
+        repair_delta_contract=repair_delta_contract,
+        semantic_delta=semantic_delta,
+        frontier_identity=frontier_identity,
+        classification=classification,
+        delivery_outcome=delivery_outcome,
+        autonomous_replan_recorded=effective_recorded,
     )
