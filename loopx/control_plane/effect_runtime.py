@@ -9,9 +9,11 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Mapping
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,13 @@ STARTUP_READY_TIMEOUT_SECONDS = 15.0
 STARTUP_POLL_SECONDS = 0.025
 _NODE_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 _RUNTIME_SOURCE_SUFFIXES = frozenset({".json", ".ts"})
+_RuntimeSourceSnapshot = tuple[tuple[str, int, int, int], ...]
+_RuntimeDirectorySnapshot = tuple[tuple[str, int, int], ...]
+_RuntimeSourceTopology = tuple[
+    tuple[str, ...], tuple[str, ...], _RuntimeDirectorySnapshot
+]
+_RUNTIME_SOURCE_TOPOLOGIES: dict[str, _RuntimeSourceTopology] = {}
+_RUNTIME_SOURCE_TOPOLOGY_LOCK = threading.Lock()
 
 
 class EffectRuntimeRejected(RuntimeError):
@@ -46,26 +55,120 @@ def _control_plane_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-def _runtime_source_files(root: Path | None = None) -> tuple[str, ...]:
-    """Return the packaged source boundary owned by the managed runtime."""
-
-    source_root = root or _control_plane_root()
+def _runtime_directory_snapshot(
+    root: Path,
+    directories: tuple[str, ...],
+) -> _RuntimeDirectorySnapshot:
     return tuple(
-        sorted(
-            path.relative_to(source_root).as_posix()
-            for path in source_root.rglob("*")
-            if path.is_file() and path.suffix in _RUNTIME_SOURCE_SUFFIXES
+        (
+            relative,
+            (metadata := (root / relative).stat()).st_mtime_ns,
+            metadata.st_ctime_ns,
         )
+        for relative in directories
     )
 
 
-def _runtime_fingerprint() -> str:
+def _scan_runtime_source_topology(root: Path) -> _RuntimeSourceTopology:
+    files: list[str] = []
+    directories = [""]
+    for directory, child_directories, filenames in os.walk(root):
+        child_directories.sort()
+        relative_directory = os.path.relpath(directory, root)
+        if relative_directory == ".":
+            relative_directory = ""
+        directories.extend(
+            Path(relative_directory, child).as_posix() for child in child_directories
+        )
+        files.extend(
+            Path(relative_directory, filename).as_posix()
+            for filename in sorted(filenames)
+            if Path(filename).suffix in _RUNTIME_SOURCE_SUFFIXES
+            and Path(directory, filename).is_file()
+        )
+    directory_tuple = tuple(sorted(directories))
+    return (
+        tuple(sorted(files)),
+        directory_tuple,
+        _runtime_directory_snapshot(root, directory_tuple),
+    )
+
+
+def _runtime_file_snapshot(
+    root: Path,
+    files: tuple[str, ...],
+) -> _RuntimeSourceSnapshot:
+    return tuple(
+        (
+            relative,
+            (metadata := (root / relative).stat()).st_mtime_ns,
+            metadata.st_ctime_ns,
+            metadata.st_size,
+        )
+        for relative in files
+    )
+
+
+def _runtime_source_snapshot(root: Path | None = None) -> _RuntimeSourceSnapshot:
+    """Return cheap metadata that invalidates the packaged-source hash."""
+
+    source_root = (root or _control_plane_root()).resolve()
+    root_key = os.fspath(source_root)
+    with _RUNTIME_SOURCE_TOPOLOGY_LOCK:
+        topology = _RUNTIME_SOURCE_TOPOLOGIES.get(root_key)
+        if topology is not None:
+            files, directories, previous_directory_snapshot = topology
+            try:
+                current_directory_snapshot = _runtime_directory_snapshot(
+                    source_root, directories
+                )
+            except FileNotFoundError:
+                current_directory_snapshot = ()
+            if current_directory_snapshot != previous_directory_snapshot:
+                topology = None
+        if topology is None:
+            topology = _scan_runtime_source_topology(source_root)
+            if (
+                root_key not in _RUNTIME_SOURCE_TOPOLOGIES
+                and len(_RUNTIME_SOURCE_TOPOLOGIES) >= 8
+            ):
+                _RUNTIME_SOURCE_TOPOLOGIES.pop(next(iter(_RUNTIME_SOURCE_TOPOLOGIES)))
+            _RUNTIME_SOURCE_TOPOLOGIES[root_key] = topology
+        files, _directories, _directory_snapshot = topology
+        try:
+            return _runtime_file_snapshot(source_root, files)
+        except FileNotFoundError:
+            topology = _scan_runtime_source_topology(source_root)
+            _RUNTIME_SOURCE_TOPOLOGIES[root_key] = topology
+            files, _directories, _directory_snapshot = topology
+            return _runtime_file_snapshot(source_root, files)
+
+
+def _runtime_source_files(root: Path | None = None) -> tuple[str, ...]:
+    """Return the packaged source boundary owned by the managed runtime."""
+
+    return tuple(relative for relative, *_metadata in _runtime_source_snapshot(root))
+
+
+@lru_cache(maxsize=8)
+def _runtime_fingerprint_for_snapshot(
+    root: str,
+    snapshot: _RuntimeSourceSnapshot,
+) -> str:
     digest = hashlib.sha256()
-    root = _control_plane_root()
-    for relative in _runtime_source_files(root):
+    source_root = Path(root)
+    for relative, *_metadata in snapshot:
         digest.update(relative.encode("utf-8"))
-        digest.update((root / relative).read_bytes())
+        digest.update((source_root / relative).read_bytes())
     return digest.hexdigest()
+
+
+def _runtime_fingerprint() -> str:
+    root = _control_plane_root()
+    return _runtime_fingerprint_for_snapshot(
+        os.fspath(root.resolve()),
+        _runtime_source_snapshot(root),
+    )
 
 
 def _runtime_dir() -> Path:

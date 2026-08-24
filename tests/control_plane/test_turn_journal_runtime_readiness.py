@@ -41,6 +41,38 @@ def test_runtime_fingerprint_rotates_when_any_owned_source_changes(
     assert effect_runtime._runtime_fingerprint() == original
 
 
+def test_runtime_fingerprint_reuses_hash_until_source_snapshot_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "runtime_decode.ts").write_text("export {};\n", encoding="utf-8")
+    (tmp_path / "turn_transaction_contract.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(effect_runtime, "_control_plane_root", lambda: tmp_path)
+    original_read_bytes = Path.read_bytes
+    reads: list[Path] = []
+
+    def counted_read_bytes(path: Path) -> bytes:
+        reads.append(path)
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted_read_bytes)
+
+    original = effect_runtime._runtime_fingerprint()
+    assert len(reads) == 2
+    assert effect_runtime._runtime_fingerprint() == original
+    assert len(reads) == 2
+
+    added = tmp_path / "new_runtime_dependency.ts"
+    added.write_text("export const added = true;\n", encoding="utf-8")
+    expanded = effect_runtime._runtime_fingerprint()
+    assert expanded != original
+    assert len(reads) == 5
+
+    added.unlink()
+    assert effect_runtime._runtime_fingerprint() == original
+    assert len(reads) == 5
+
+
 def test_missing_node_blocks_the_typescript_control_plane_and_is_actionable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
