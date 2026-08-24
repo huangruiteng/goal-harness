@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { effectRuntimeErrorPayload } from "../../loopx/control_plane/effect_runtime_errors.ts";
 import {
+  assertNever,
   jsonObject,
   optionalNonEmptyString,
   requireBoolean,
@@ -45,6 +47,20 @@ test("runtime decoder rejects malformed primitive boundary values", () => {
     () => requireStringArray(["ok", 1], "value"),
     /value must be an array of strings/,
   );
+});
+
+test("internal exhaustiveness assertions do not become request rejection", () => {
+  let caught: unknown;
+  try {
+    assertNever("unexpected" as never, "internal assertion failed");
+  } catch (error) {
+    caught = error;
+  }
+  assert.deepEqual(effectRuntimeErrorPayload(caught), {
+    kind: "internal_failure",
+    code: "unexpected_handler_error",
+    message: "Effect runtime handler failed unexpectedly",
+  });
 });
 
 test("literal decoder narrows only values present in the runtime allowlist", () => {

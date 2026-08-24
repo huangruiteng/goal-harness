@@ -11,7 +11,10 @@ import {
   effectRuntimeErrorPayload,
 } from "./effect_runtime_errors.ts";
 import { atomicWriteJson } from "./effect_runtime_io.ts";
-import { requireNonEmptyString as requiredString } from "./runtime_decode.ts";
+import {
+  requireJsonObject as requiredObject,
+  requireNonEmptyString as requiredString,
+} from "./runtime_decode.ts";
 
 const REQUEST_SCHEMA = "loopx_effect_runtime_request_v0";
 const RESPONSE_SCHEMA = "loopx_effect_runtime_response_v1";
@@ -19,14 +22,6 @@ const INFO_SCHEMA = "loopx_effect_runtime_info_v0";
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 const DEFAULT_IDLE_MS = 5 * 60 * 1_000;
 let shutdownRequested = false;
-
-interface RuntimeRequest {
-  schema_version: typeof REQUEST_SCHEMA;
-  token: string;
-  request_id: string;
-  method: string;
-  params: JsonObject;
-}
 
 function asObject(value: unknown): JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -79,17 +74,18 @@ const server = createServer((socket) => {
     void (async () => {
       let requestId = "unknown";
       try {
-        let request: RuntimeRequest;
+        let parsed: unknown;
         try {
-          request = JSON.parse(
+          parsed = JSON.parse(
             raw.slice(0, raw.indexOf("\n")),
-          ) as RuntimeRequest;
+          );
         } catch {
           throw new EffectRuntimeRequestError(
             "Effect runtime request is not valid JSON",
             "malformed_json",
           );
         }
+        const request = requiredObject(parsed, "Effect runtime request");
         requestId = requiredString(request.request_id, "request_id");
         if (request.schema_version !== REQUEST_SCHEMA || request.token !== token) {
           throw new EffectRuntimeRequestError(

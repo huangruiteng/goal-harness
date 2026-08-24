@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { effectRuntimeErrorPayload } from "../../loopx/control_plane/effect_runtime_errors.ts";
 import { settlementIdentity } from "../../loopx/control_plane/effect_program.ts";
 import {
   reduceTurnSettlementTransaction,
@@ -127,6 +128,31 @@ test("writeback rejection retains validation receipt and typed failure", () => {
     reduced.result.receipts.map((receipt) => receipt.step_kind),
     ["validation"],
   );
+});
+
+test("internal settlement contradictions remain internal failures", () => {
+  let caught: unknown;
+  try {
+    reduceTurnSettlementTransaction(
+      request({
+        completed_phases: [...phases.slice(0, 3)],
+        writeback_payload: null,
+        quota_spend_payload: null,
+        failed_provider_attempt: {
+          step_kind: "durable_writeback",
+          payload: { ok: true, appended: true, record: "writeback" },
+        },
+      }),
+    );
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.deepEqual(effectRuntimeErrorPayload(caught), {
+    kind: "internal_failure",
+    code: "unexpected_handler_error",
+    message: "Effect runtime handler failed unexpectedly",
+  });
 });
 
 test("terminal closeout joins the same transaction after spend", () => {

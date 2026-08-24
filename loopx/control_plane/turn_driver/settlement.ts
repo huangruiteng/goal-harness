@@ -14,7 +14,6 @@ import {
   type SettlementResult,
   type SettlementStepKind,
 } from "../effect_program.ts";
-import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString,
   requireBoolean,
@@ -310,7 +309,7 @@ function providerFailure(
     payload: attempt.payload,
   });
   if (committed.result.failure === null) {
-    throw new EffectRuntimeRequestError(
+    throw new Error(
       `failed_provider_attempt for ${stepKind} unexpectedly committed`,
     );
   }
@@ -332,7 +331,7 @@ function pendingProviderEffects(
     if (step === "validation" || completed.has(step)) continue;
     const phaseIndex = request.transaction_phases.indexOf(step);
     if (phaseIndex < 0) {
-      throw new EffectRuntimeRequestError(`transaction phases do not contain ${step}`);
+      throw new Error(`transaction phases do not contain ${step}`);
     }
     effects.push({
       step_kind: step,
@@ -342,7 +341,7 @@ function pendingProviderEffects(
     });
   }
   if (effects[0]?.step_kind !== firstStep) {
-    throw new EffectRuntimeRequestError(`Turn settlement next provider is not ${firstStep}`);
+    throw new Error(`Turn settlement next provider is not ${firstStep}`);
   }
   if (request.terminal_closeout_required) {
     effects.push({
@@ -462,7 +461,7 @@ function providerExecution(
 
   const effect = effects.find((candidate) => candidate.step_kind === firstStep);
   if (!effect) {
-    throw new EffectRuntimeRequestError(`Turn settlement has no provider effect for ${firstStep}`);
+    throw new Error(`Turn settlement has no provider effect for ${firstStep}`);
   }
   return execution([
     {
@@ -518,7 +517,7 @@ export function reduceTurnSettlementTransaction(
   if (base.decision === "failed") return failedState(base.result);
   if (base.decision === "execute") {
     if (base.step_kind === "validation" || base.step_kind === "terminal_closeout") {
-      throw new EffectRuntimeRequestError(`unsupported base settlement step ${base.step_kind}`);
+      throw new Error(`unsupported base settlement step ${base.step_kind}`);
     }
     const effects = pendingProviderEffects(request, identity, base.step_kind);
     return request.failed_provider_attempt === null
@@ -602,7 +601,7 @@ export function reduceTurnSettlementTransaction(
   }
 
   if (request.failed_provider_attempt !== null) {
-    throw new EffectRuntimeRequestError(
+    throw new Error(
       "failed_provider_attempt remains after all required settlement effects committed",
     );
   }

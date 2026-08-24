@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import signal
+import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -33,6 +34,26 @@ def _digest(path: Path) -> str | None:
         return hashlib.sha256(path.read_bytes()).hexdigest()
     except FileNotFoundError:
         return None
+
+
+def _raw_runtime_response(
+    info: dict[str, object],
+    payload: bytes,
+) -> dict[str, object]:
+    response = b""
+    with socket.create_connection(
+        (str(info["host"]), int(info["port"])), timeout=2
+    ) as connection:
+        connection.settimeout(2)
+        connection.sendall(payload)
+        while b"\n" not in response:
+            chunk = connection.recv(64 * 1024)
+            if not chunk:
+                break
+            response += chunk
+    decoded = json.loads(response.split(b"\n", 1)[0])
+    assert isinstance(decoded, dict)
+    return decoded
 
 
 def test_windows_pid_liveness_uses_a_non_signaling_probe(monkeypatch) -> None:
@@ -525,6 +546,65 @@ def test_oversized_request_is_rejected_before_runtime_dispatch(
         {},
         retry_safe=False,
     )
+
+
+def test_non_object_json_request_is_rejected_at_the_socket_boundary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runtime_dir = tmp_path / "runtime"
+    monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: runtime_dir)
+    monkeypatch.setenv("LOOPX_EFFECT_RUNTIME_IDLE_MS", "1000")
+
+    ping = effect_runtime.effect_runtime_result("runtime.ping", {})
+    fingerprint = effect_runtime._runtime_fingerprint()
+    info = effect_runtime._read_info(
+        effect_runtime._runtime_info_path(fingerprint),
+        fingerprint=fingerprint,
+    )
+    assert info is not None
+
+    response = _raw_runtime_response(info, b"null\n")
+
+    assert response["request_id"] == "unknown"
+    assert response["ok"] is False
+    assert response["error"] == {
+        "kind": "request_rejected",
+        "code": "invalid_request",
+        "message": "Effect runtime request must be an object",
+    }
+    assert (
+        effect_runtime.effect_runtime_result("runtime.ping", {})["pid"]
+        == ping["pid"]
+    )
+    effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
+
+
+def test_corrupt_persisted_journal_maps_to_bounded_internal_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runtime_dir = tmp_path / "runtime"
+    monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: runtime_dir)
+    monkeypatch.setenv("LOOPX_EFFECT_RUNTIME_IDLE_MS", "1000")
+    journal_path = tmp_path / "corrupt-turn-journal.json"
+    journal_path.write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(effect_runtime.EffectRuntimeInternalError) as caught:
+        effect_runtime.effect_runtime_result(
+            "turn_journal.write",
+            {
+                "path": str(journal_path),
+                "journal": _journal("effect-one"),
+                "expected_effect_id": "effect-one",
+                "expected_previous_sha256": _digest(journal_path),
+            },
+        )
+
+    assert caught.value.diagnostic_code == "unexpected_handler_error"
+    assert str(caught.value) == "Effect runtime handler failed unexpectedly"
+    assert str(journal_path) not in str(caught.value)
+    effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
 
 
 @pytest.mark.parametrize(

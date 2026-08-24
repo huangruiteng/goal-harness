@@ -71,5 +71,5 @@ export function requireStringLiteral<const Values extends readonly string[]>(
 
 export function assertNever(value: never, message: string): never {
   void value;
-  throw new EffectRuntimeRequestError(message);
+  throw new Error(message);
 }
