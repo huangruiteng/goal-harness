@@ -38,6 +38,7 @@ from .autonomous_replan_obligation import (
     todo_lifecycle_settlement_obligation,
 )
 from .accountable_settlement import build_accountable_work_item_settlement_plan
+from . import action_selection_contract as selection
 from .primary_action import (
     build_primary_action_projection,
     protocol_action_label as _protocol_action_label,
@@ -584,7 +585,7 @@ def _turn_scoped_cli_settlement_context(
     ),
     turn_instance_id: str | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    if _action_portfolio_requires_explicit_selection(payload):
+    if selection.action_portfolio_requires_explicit_selection(payload):
         return None, None
     agent_identity = (
         payload.get("agent_identity")
@@ -646,57 +647,6 @@ def _turn_scoped_cli_settlement_context(
         plan.as_dict() if plan is not None else None,
         replan_settlement_contract,
     )
-
-
-def _action_portfolio_requires_explicit_selection(payload: Mapping[str, Any]) -> bool:
-    portfolio = (
-        payload.get("action_portfolio")
-        if isinstance(payload.get("action_portfolio"), Mapping)
-        else {}
-    )
-    policy = (
-        portfolio.get("selection_policy")
-        if isinstance(portfolio.get("selection_policy"), Mapping)
-        else {}
-    )
-    return policy.get("requires_explicit_turn_binding") is True
-
-
-def _action_portfolio_selection_actions(
-    payload: Mapping[str, Any],
-    *,
-    scoped_cli_args: str,
-    scheduler_args: str,
-    turn_instance_id: str | None,
-) -> list[str]:
-    if not _action_portfolio_requires_explicit_selection(payload):
-        return []
-    portfolio = typing.cast(Mapping[str, Any], payload.get("action_portfolio"))
-    suggested_actions = portfolio.get("suggested_actions")
-    if not isinstance(suggested_actions, list):
-        return []
-    goal_id = str(payload.get("goal_id") or "").strip()
-    if not goal_id:
-        return []
-    turn_arg = (
-        f" --turn-instance-id {shlex.quote(turn_instance_id)}"
-        if turn_instance_id
-        else ""
-    )
-    commands: list[str] = []
-    for item in suggested_actions:
-        if not isinstance(item, Mapping):
-            continue
-        todo_id = normalize_todo_id(item.get("todo_id"))
-        if not todo_id:
-            continue
-        commands.append(
-            "loopx --format json quota should-run"
-            f" --goal-id {shlex.quote(goal_id)}"
-            f" --todo-id {shlex.quote(todo_id)}"
-            f"{scoped_cli_args}{scheduler_args}{turn_arg}"
-        )
-    return commands
 
 
 def _terminal_cli_actions(
@@ -787,7 +737,7 @@ def interaction_next_cli_actions(
         )
     except ValueError:
         scheduler_args = ""
-    selection_actions = _action_portfolio_selection_actions(
+    selection_actions = selection.action_portfolio_selection_actions(
         payload,
         scoped_cli_args=scoped_cli_args,
         scheduler_args=scheduler_args,
@@ -1233,25 +1183,7 @@ def _build_interaction_agent_channel(
     channel.update(build_primary_action_projection(payload, mode=mode))
     if isinstance(payload.get("action_portfolio"), dict):
         channel["action_portfolio_ref"] = "$.action_portfolio"
-    if _action_portfolio_requires_explicit_selection(payload):
-        suggested_actions = typing.cast(
-            Mapping[str, Any], payload.get("action_portfolio")
-        ).get("suggested_actions")
-        channel.update(
-            {
-                "selection_required": True,
-                "delivery_allowed": False,
-                "primary_action": (
-                    "choose one currently eligible action after a bounded steering "
-                    "audit; the recommendation and suggestions are not bindings"
-                ),
-                "suggested_action_count": (
-                    len(suggested_actions)
-                    if isinstance(suggested_actions, list)
-                    else 0
-                ),
-            }
-        )
+    selection.apply_action_selection_agent_gate(channel, payload)
     if capability_reentry is not None:
         candidate = capability_reentry["candidates"][0]
         target = candidate["verification_target"]
@@ -1348,8 +1280,7 @@ def _build_interaction_cli_channel(
     capability_reentry: dict[str, Any] | None = None,
     turn_instance_id: str | None = None,
 ) -> dict[str, Any]:
-    selection_required = _action_portfolio_requires_explicit_selection(payload)
-    effective_spend_after_validation = spend_after_validation and not selection_required
+    spend_after_selection = selection.delivery_spend_allowed(payload, spend_after_validation)
     if capability_reentry is None:
         capability_reentry = build_runtime_capability_reentry_packet(
             payload,
@@ -1375,26 +1306,16 @@ def _build_interaction_cli_channel(
             turn_instance_id=turn_instance_id,
         ),
         "spend_allowed_now": False,
-        "spend_after_validation": effective_spend_after_validation,
+        "spend_after_validation": spend_after_selection,
         "spend_policy": _interaction_spend_policy(
             execution_obligation,
             heartbeat_recommendation,
             mode=mode,
-            spend_after_validation=effective_spend_after_validation,
+            spend_after_validation=spend_after_selection,
         ),
     }
-    if selection_required:
-        channel.update(
-            {
-                "selection_required": True,
-                "selection_policy_ref": "$.action_portfolio.selection_policy",
-                "spend_policy": (
-                    "no delivery or quota spend until one eligible action is "
-                    "explicitly bound by rerunning quota in this turn"
-                ),
-            }
-        )
-    if settlement_plan is not None and effective_spend_after_validation:
+    selection.apply_action_selection_cli_gate(channel, payload)
+    if settlement_plan is not None and spend_after_selection:
         channel["settlement_plan"] = settlement_plan
     if settlement_plan is not None and replan_settlement_contract is not None:
         channel["replan_settlement_contract"] = replan_settlement_contract
@@ -1405,7 +1326,7 @@ def _build_interaction_cli_channel(
         if isinstance(payload.get("selected_todo"), Mapping)
         else {}
     )
-    if effective_spend_after_validation and selected_todo.get("task_repository"):
+    if spend_after_selection and selected_todo.get("task_repository"):
         channel["delivery_workspace_causality"] = {
             "schema_version": "delivery_workspace_causality_v0",
             "refresh": "delivery_workspace; otherwise --delivery-workspace-path",
