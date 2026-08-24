@@ -674,7 +674,7 @@ def add_todo_to_lines(
     normalized_monitor_metadata = todo_monitor_metadata.require_monitor_metadata_scope(
         monitor_metadata=monitor_metadata,
         role=role,
-        task_class=task_class,
+        task_class=task_class, generated_at=updated_at,
     )
     bounds = section_bounds(lines, role)
     section = bounds[2] if bounds else TODO_SECTION_HEADINGS[role]
@@ -1079,7 +1079,7 @@ def add_goal_todo(
         normalized_monitor_metadata = todo_monitor_metadata.require_monitor_metadata_scope(
             monitor_metadata=monitor_metadata,
             role=role,
-            task_class=task_class,
+            task_class=task_class, generated_at=updated_at,
         )
         todo_monitor_metadata.require_continuous_monitor_boundedness(
             task_class=task_class,
@@ -1535,7 +1535,7 @@ def update_goal_todo(
         normalized_monitor_metadata = todo_monitor_metadata.require_monitor_metadata_scope(
             monitor_metadata=monitor_metadata,
             role=target_role,
-            task_class=target_task_class,
+            task_class=target_task_class, generated_at=updated_at,
         )
         effective_monitor_metadata = {
             k: v

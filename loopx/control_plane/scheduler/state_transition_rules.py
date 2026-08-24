@@ -35,6 +35,58 @@ class SchedulerCadenceDecision:
     current_cadence_acknowledged: bool
 
 
+@dataclass(frozen=True)
+class MonitorScheduleProjection:
+    next_due_at: str | None
+    schedule_source: str
+    cadence_seconds: int | None
+
+
+def project_monitor_todo_schedule(
+    *,
+    generated_at: str,
+    cadence: Any = None,
+    explicit_next_due_at: Any = None,
+) -> MonitorScheduleProjection:
+    """Project monitor schedule facts through the TypeScript scheduler owner."""
+
+    result = _runtime_result(
+        {
+            "schema_version": SCHEDULER_STATE_TRANSITION_REQUEST_SCHEMA,
+            "operation": "monitor_schedule",
+            "generated_at": generated_at,
+            "cadence": None if cadence is None else str(cadence),
+            "explicit_next_due_at": (
+                None
+                if explicit_next_due_at is None
+                else str(explicit_next_due_at)
+            ),
+        }
+    )
+    next_due_at = result.get("next_due_at")
+    schedule_source = result.get("schedule_source")
+    cadence_seconds = result.get("cadence_seconds")
+    if (
+        result.get("operation") != "monitor_schedule"
+        or (next_due_at is not None and not isinstance(next_due_at, str))
+        or schedule_source not in {"explicit", "cadence", "none"}
+        or (
+            cadence_seconds is not None
+            and (
+                isinstance(cadence_seconds, bool)
+                or not isinstance(cadence_seconds, int)
+                or cadence_seconds <= 0
+            )
+        )
+    ):
+        raise RuntimeError("TypeScript monitor schedule result shape mismatch")
+    return MonitorScheduleProjection(
+        next_due_at=next_due_at,
+        schedule_source=str(schedule_source),
+        cadence_seconds=cadence_seconds,
+    )
+
+
 def _runtime_result(params: dict[str, Any]) -> Mapping[str, Any]:
     try:
         result = effect_runtime_result("scheduler.state_transition.evaluate", params)

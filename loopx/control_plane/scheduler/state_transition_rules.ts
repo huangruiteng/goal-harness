@@ -79,10 +79,97 @@ export interface SchedulerBackoffTransitionResult extends JsonObject {
   repeated_failed_pair: boolean;
 }
 
+export interface SchedulerMonitorScheduleResult extends JsonObject {
+  schema_version: typeof SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA;
+  operation: "monitor_schedule";
+  next_due_at: string | null;
+  schedule_source: "explicit" | "cadence" | "none";
+  cadence_seconds: number | null;
+}
+
 export type SchedulerStateTransitionResult =
   | SchedulerCadenceTransitionResult
   | SchedulerHostTransitionResult
-  | SchedulerBackoffTransitionResult;
+  | SchedulerBackoffTransitionResult
+  | SchedulerMonitorScheduleResult;
+
+const MONITOR_CADENCE_PATTERN =
+  /^\s*(?<count>[1-9][0-9]{0,4})\s*(?<unit>s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\s*$/i;
+
+function optionalRequestString(value: unknown, label: string): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") {
+    throw new EffectRuntimeRequestError(`${label} must be a string when present`);
+  }
+  return value.trim();
+}
+
+function monitorCadenceSeconds(value: unknown): number | null {
+  const cadence = optionalRequestString(value, "monitor cadence");
+  if (!cadence) return null;
+  const match = MONITOR_CADENCE_PATTERN.exec(cadence);
+  if (!match?.groups) return null;
+  const count = Number.parseInt(match.groups.count, 10);
+  const unit = match.groups.unit.toLowerCase();
+  const multiplier = unit.startsWith("s")
+    ? 1
+    : unit.startsWith("m")
+    ? 60
+    : unit.startsWith("h")
+    ? 60 * 60
+    : 24 * 60 * 60;
+  return count * multiplier;
+}
+
+function monitorScheduleTimestamp(milliseconds: number): string {
+  return new Date(milliseconds).toISOString().replace(".000Z", "Z");
+}
+
+function evaluateMonitorSchedule(
+  request: JsonObject,
+): SchedulerMonitorScheduleResult {
+  const explicitNextDueAt = optionalRequestString(
+    request.explicit_next_due_at,
+    "explicit_next_due_at",
+  );
+  if (explicitNextDueAt) {
+    if (schedulerTimestampMilliseconds(explicitNextDueAt) === null) {
+      throw new EffectRuntimeRequestError("explicit_next_due_at must be an ISO timestamp");
+    }
+    return {
+      schema_version: SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA,
+      operation: "monitor_schedule",
+      next_due_at: explicitNextDueAt,
+      schedule_source: "explicit",
+      cadence_seconds: monitorCadenceSeconds(request.cadence),
+    };
+  }
+
+  const cadenceSeconds = monitorCadenceSeconds(request.cadence);
+  if (cadenceSeconds === null) {
+    return {
+      schema_version: SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA,
+      operation: "monitor_schedule",
+      next_due_at: null,
+      schedule_source: "none",
+      cadence_seconds: null,
+    };
+  }
+  const generatedAt = requiredString(request.generated_at, "generated_at");
+  const generatedAtMilliseconds = schedulerTimestampMilliseconds(generatedAt);
+  if (generatedAtMilliseconds === null) {
+    throw new EffectRuntimeRequestError("generated_at must be an ISO timestamp");
+  }
+  return {
+    schema_version: SCHEDULER_STATE_TRANSITION_RESULT_SCHEMA,
+    operation: "monitor_schedule",
+    next_due_at: monitorScheduleTimestamp(
+      generatedAtMilliseconds + cadenceSeconds * 1_000,
+    ),
+    schedule_source: "cadence",
+    cadence_seconds: cadenceSeconds,
+  };
+}
 
 function requiredPositiveIntegerList(value: unknown, label: string): number[] {
   if (
@@ -392,5 +479,8 @@ export function evaluateSchedulerStateTransition(
   if (request.operation === "cadence") return evaluateCadence(request);
   if (request.operation === "host") return evaluateHost(request);
   if (request.operation === "backoff") return evaluateBackoff(request);
+  if (request.operation === "monitor_schedule") {
+    return evaluateMonitorSchedule(request);
+  }
   throw new EffectRuntimeRequestError("Scheduler state transition operation is unsupported");
 }

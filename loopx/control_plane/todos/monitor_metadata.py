@@ -1,22 +1,14 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from ..runtime.time import parse_timestamp
+from ..scheduler.monitor_todo import monitor_cadence_delta, monitor_next_due_at
 from .contract import (
     TODO_MONITOR_METADATA_FIELDS,
     TODO_TASK_CLASS_MONITOR,
     normalize_todo_watch_only,
 )
-
-
-MONITOR_CADENCE_PATTERN = re.compile(
-    r"^\s*(?P<count>[1-9][0-9]{0,4})\s*"
-    r"(?P<unit>s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\s*$",
-    re.IGNORECASE,
-)
-
 
 def normalize_monitor_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
@@ -29,7 +21,10 @@ def normalize_monitor_metadata(metadata: dict[str, Any] | None) -> dict[str, Any
         candidate = str(value or "").strip()
         if candidate:
             normalized[key] = candidate
-    if normalized.get("cadence") is not None and not MONITOR_CADENCE_PATTERN.match(normalized["cadence"]):
+    if (
+        normalized.get("cadence") is not None
+        and monitor_cadence_delta(normalized["cadence"]) is None
+    ):
         raise ValueError("--cadence must look like 30m, 2h, or 1d")
     if normalized.get("next_due_at") is not None and parse_timestamp(normalized["next_due_at"]) is None:
         raise ValueError("--next-due-at must be an ISO timestamp")
@@ -49,6 +44,30 @@ def normalize_monitor_metadata(metadata: dict[str, Any] | None) -> dict[str, Any
     ) is None:
         raise ValueError("--watch-only metadata must be true or false")
     return normalized
+
+
+def materialize_monitor_schedule(
+    *,
+    task_class: str | None,
+    monitor_metadata: dict[str, Any],
+    generated_at: str,
+) -> dict[str, Any]:
+    """Materialize the first due time for a cadence-only monitor mutation."""
+
+    if task_class != TODO_TASK_CLASS_MONITOR:
+        return monitor_metadata
+    if monitor_metadata.get("next_due_at") is not None:
+        return monitor_metadata
+    cadence = monitor_metadata.get("cadence")
+    if cadence is None:
+        return monitor_metadata
+    next_due_at = monitor_next_due_at(
+        generated_at=generated_at,
+        cadence=cadence,
+    )
+    if next_due_at is None:
+        return monitor_metadata
+    return {**monitor_metadata, "next_due_at": next_due_at}
 
 
 def require_continuous_monitor_boundedness(
@@ -77,6 +96,7 @@ def require_monitor_metadata_scope(
     monitor_metadata: dict[str, Any] | None,
     role: str,
     task_class: str | None,
+    generated_at: str | None = None,
 ) -> dict[str, Any]:
     normalized = normalize_monitor_metadata(monitor_metadata)
     if not normalized:
@@ -88,4 +108,10 @@ def require_monitor_metadata_scope(
         )
     if normalized.get("target_key") is not None and role != "agent":
         raise ValueError("target_key requires --role agent")
-    return normalized
+    if generated_at is None:
+        return normalized
+    return materialize_monitor_schedule(
+        task_class=task_class,
+        monitor_metadata=normalized,
+        generated_at=generated_at,
+    )
