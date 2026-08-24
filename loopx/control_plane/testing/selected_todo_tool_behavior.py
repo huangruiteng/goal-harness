@@ -35,11 +35,17 @@ SELECTED_TODO_TOOL_BEHAVIOR_MAX_CALLS = 6
 SELECTED_TODO_TOOL_FIXTURE_GOAL_ID = "portfolio-goal"
 SELECTED_TODO_TOOL_FIXTURE_AGENT_ID = "codex-portfolio"
 SELECTED_TODO_TOOL_FIXTURE_TODO_ID = "todo_portfolio001"
+STALE_DONE_PRIMARY_TODO_ID = "todo_portfolio_stale001"
 _SELECTED_TARGET = "fixture/selected-lane.json"
 _DECOY_TARGET = "fixture/deferred-lane.json"
 SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT = (
     f"Read only `{_SELECTED_TARGET}`; use its self-contained JSON to verify "
     "the selected lane contract."
+)
+STALE_DONE_PRIMARY_ACTION_TEXT = (
+    "Do not repeat the legacy primary slice: its delivery and validation are "
+    "already complete, but this Todo is intentionally still open to model "
+    "stale-control-plane drift. Choose the visible successor instead."
 )
 _READ_ONLY_PREFLIGHT_COMMANDS = {
     "pwd",
@@ -76,6 +82,7 @@ def _build_fixture(
     *,
     prior_in_flight_progress: bool = False,
     unsuggested_selected_todo: bool = False,
+    stale_done_primary_successor: bool = False,
 ) -> _SelectedTodoToolFixture:
     source_root = Path(__file__).resolve().parents[3]
     project_root = root / "project"
@@ -129,21 +136,34 @@ def _build_fixture(
         timeout=10,
     )
     decoy_action = (
+        STALE_DONE_PRIMARY_ACTION_TEXT
+        if stale_done_primary_successor
+        else
         f"Read only `{_DECOY_TARGET}`; start the newly queued sibling lane."
     )
     next_action = (
         decoy_action
-        if prior_in_flight_progress or unsuggested_selected_todo
+        if prior_in_flight_progress
+        or unsuggested_selected_todo
+        or stale_done_primary_successor
         else SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
     )
     decoy_count = 3 if unsuggested_selected_todo else 1 if prior_in_flight_progress else 0
-    decoy_todo = "".join(
-        f"- [ ] [P1] {decoy_action} Candidate {index}.\n"
+    decoy_todo = (
+        f"- [ ] [P1] {STALE_DONE_PRIMARY_ACTION_TEXT}\n"
         "  <!-- loopx:todo "
-        f"todo_id=todo_portfolio_decoy00{index} status=open "
-        "task_class=advancement_task action_kind=inspect_deferred_contract "
+        f"todo_id={STALE_DONE_PRIMARY_TODO_ID} status=open "
+        "task_class=advancement_task action_kind=legacy_slice_already_complete "
         f"claimed_by={SELECTED_TODO_TOOL_FIXTURE_AGENT_ID} priority=P1 -->\n"
-        for index in range(1, decoy_count + 1)
+        if stale_done_primary_successor
+        else "".join(
+            f"- [ ] [P1] {decoy_action} Candidate {index}.\n"
+            "  <!-- loopx:todo "
+            f"todo_id=todo_portfolio_decoy00{index} status=open "
+            "task_class=advancement_task action_kind=inspect_deferred_contract "
+            f"claimed_by={SELECTED_TODO_TOOL_FIXTURE_AGENT_ID} priority=P1 -->\n"
+            for index in range(1, decoy_count + 1)
+        )
     )
     state_path.write_text(
         "---\n"
@@ -288,6 +308,22 @@ def _is_quota_guard(command: str) -> bool:
         == SELECTED_TODO_TOOL_FIXTURE_AGENT_ID
         and "--codex-app" in tokens
         and argument_value(tokens, "--turn-instance-id")
+    )
+
+
+def _is_candidate_discovery(command: str) -> bool:
+    tokens = loopx_command_tokens(command)
+    if not tokens:
+        return False
+    try:
+        todo_index = tokens.index("todo")
+    except ValueError:
+        return False
+    return bool(
+        tokens[todo_index : todo_index + 2] == ["todo", "list"]
+        and argument_value(tokens, "--goal-id")
+        == SELECTED_TODO_TOOL_FIXTURE_GOAL_ID
+        and argument_value(tokens, "--role") == "agent"
     )
 
 
@@ -799,6 +835,8 @@ def _classify_tool_command(
 ) -> tuple[str, str | None]:
     if _is_quota_guard(command):
         return "quota_should_run", None
+    if _is_candidate_discovery(command):
+        return "candidate_discovery", None
     clock_output = _clock_output(command)
     if clock_output is not None:
         return "clock", clock_output
@@ -965,11 +1003,13 @@ class DoubaoSelectedTodoToolBehaviorActor:
         fixture_root: Path,
         prior_in_flight_progress: bool = False,
         unsuggested_selected_todo: bool = False,
+        stale_done_primary_successor: bool = False,
     ) -> dict[str, Any]:
         fixture = _build_fixture(
             fixture_root,
             prior_in_flight_progress=prior_in_flight_progress,
             unsuggested_selected_todo=unsuggested_selected_todo,
+            stale_done_primary_successor=stale_done_primary_successor,
         )
         messages: list[dict[str, Any]] = [
             {
@@ -981,8 +1021,11 @@ class DoubaoSelectedTodoToolBehaviorActor:
                     "root; resolve relative paths from the selected Todo there. "
                     "Choose each next action from the latest tool result. If quota "
                     "sets selection_required, choose any currently eligible Todo; "
-                    "the offered next_cli_actions are non-exhaustive conveniences. "
-                    "Run a second quota command with that Todo before delivery. "
+                    "selection_command is non-binding. Replace {todo_id}, then "
+                    "run exactly `<route_prefix> <command_args_template>` for the "
+                    "second quota guard before delivery. Only when the visible "
+                    "packet lacks the Todo identity you need, run exactly "
+                    "`<route_prefix> <candidate_discovery_args>`. "
                     "Otherwise execute the exact action in selected_todo.text directly. "
                     "When it names one file, read only that file; do not discover, "
                     "compare, or inspect other targets. After that selected Todo "
@@ -1088,6 +1131,21 @@ class DoubaoSelectedTodoToolBehaviorActor:
                     return receipt(
                         passed=False,
                         failure_code="quota_execution_failed",
+                    )
+            elif kind == "candidate_discovery":
+                try:
+                    tool_output = execute_loopx_cli(
+                        tool_call.command,
+                        source_root=fixture.source_root,
+                        project_root=fixture.project_root,
+                        argument_overrides={
+                            "--registry": str(fixture.global_registry_path),
+                        },
+                    )
+                except (RuntimeError, ValueError, json.JSONDecodeError):
+                    return receipt(
+                        passed=False,
+                        failure_code="candidate_discovery_failed",
                     )
             elif kind == "workspace_read":
                 try:

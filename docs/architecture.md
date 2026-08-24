@@ -77,7 +77,9 @@ choose efficiently inside that legal set; they do not silently shrink it.
 
 Projections therefore optimize for readability without pretending to be
 exhaustive. An agent may choose a currently authoritative eligible action that was
-not displayed among the first suggestions, but it must bring that choice back
+not displayed among the first suggestions; a typed discovery route should expose
+the authoritative queue when the bounded view is insufficient. The agent must
+bring that choice back
 through the same typed preflight, receipt binding, validation, writeback, and
 spend path. This preserves process guidance and auditability while keeping the
 agent autonomous where no real boundary requires a single route.

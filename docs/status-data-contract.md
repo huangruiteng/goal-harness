@@ -1251,10 +1251,10 @@ mistaken for a filter that replaces the goal-wide queue.
 When more than one already-admitted advancement todo remains runnable, the
 same guard also includes `action_portfolio.schema_version=
 quota_action_portfolio_v1`. `primary` is the ordered recommendation, while
-`fallback_actions` preserves the compatibility view of at most two ordered,
-agent-scoped, capability-ready alternatives. `suggested_actions` is the bounded,
-non-exhaustive convenience view and labels those entries `recommended` or
-`alternative`.
+`suggested_actions` is the single canonical bounded convenience view: it carries
+the recommendation plus at most two ordered, agent-scoped, capability-ready
+alternatives and labels them `recommended` or `alternative`. The portfolio does
+not duplicate those candidates under a second fallback view.
 `selection_policy.candidate_scope=current_authoritative_eligible_todos` keeps
 the legal choice boundary separate from the displayed suggestions;
 `suggestions_exhaustive=false` makes that distinction machine-readable.
@@ -1262,17 +1262,20 @@ the legal choice boundary separate from the displayed suggestions;
 `recommendation_role=default_not_binding` make the priority order advisory at
 this boundary rather than silently binding the first Todo.
 
-The first quota response sets `selection_required=true` and exposes one exact
-`next_cli_actions` command per displayed suggestion. Its heartbeat receipt has
-no settlement identity, so direct delivery and spend fail closed. The agent may
-run one of those commands or construct the same command for another currently
-projected, agent-scoped, capability-ready Todo. Quota revalidates current
-eligibility and upgrades the receipt to that Todo; it does not require the Todo
-to have appeared in the bounded suggestions. Only the upgraded response restores
-delivery and its settlement plan. If there is only one admitted action, no
-portfolio selection phase is added. `fallback_policy` remains as a compatibility projection, but
-its v1 trigger is `explicit_agent_selection_after_steering_audit`; it no longer
-means that alternatives are hidden until a primary execution failure.
+The first quota response sets `selection_required=true` and exposes one typed
+`selection_command.command_args_template` with a `{todo_id}` placeholder plus a
+shared bound `route_prefix` and compact `candidate_discovery_args` for the
+authoritative open agent queue. Its
+heartbeat receipt has no settlement identity, so direct delivery and spend fail
+closed. The template is deliberately independent of the bounded suggestions:
+the agent may discover and request any currently projected, agent-scoped,
+capability-ready Todo. That request is a pending selection, not a committed
+receipt identity. Quota first re-runs current lane arbitration and eligibility;
+a newly due hard-priority monitor, blocking user gate, or other preemption
+defers the request and keeps the receipt identity-less. A qualified request does
+not need to have appeared in the bounded suggestions. Only the upgraded response
+restores delivery and its settlement plan. If there is only one admitted action,
+no portfolio selection phase is added.
 
 Correctly typed future work is handled earlier. A higher-priority
 `continuous_monitor` with a valid future `next_due_at` is not executable; quota

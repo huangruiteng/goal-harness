@@ -45,9 +45,19 @@ For `quota_action_portfolio_v1`, the envelope carries the recommendation and
 bounded, non-exhaustive `suggested_actions`, but neither is a settlement
 identity or permission list. When the full interaction contract says
 `selection_required=true`, the agent must rerun quota in the same turn with any
-currently authoritative, same-agent, capability-ready Todo. The displayed commands
-are conveniences; the second guard revalidates the chosen Todo, and the
-resulting receipt-bound envelope is the delivery contract.
+currently authoritative, same-agent, capability-ready Todo. The full decision's
+`selection_command.command_args_template` is a rendering template, not a
+permission list. It and `candidate_discovery_args` share one bound
+`route_prefix`; the discovery route exposes the current open agent queue
+when the bounded suggestions are insufficient. The requested Todo remains
+pending until the second guard re-runs current lane arbitration and eligibility;
+only a qualified request upgrades the identity-less receipt. A newly due hard
+lane leaves the receipt unbound, and only the resulting receipt-bound envelope
+is a delivery contract.
+
+The compact envelope does not truncate those executable commands into unusable
+strings. It carries non-exhaustive `writeback.suggested_todo_ids` plus
+`selection_command_ref`; the full decision remains the authority for exact argv.
 
 `protocol_action_packet` remains in the full decision/cold path. The envelope
 reconstructs its ordered semantic fields from `action`, `user`, work-lane,
