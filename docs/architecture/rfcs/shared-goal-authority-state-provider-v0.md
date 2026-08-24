@@ -707,7 +707,9 @@ The first Stage 2 slice exists on this branch, additively:
   aggregate codec. Validation is closed-set and fail-closed for every field
   the executor later dereferences: todos, lease records, and each
   receipt-index entry (entry shape, digest form, receipt schema, operation
-  identity, todo membership, revisions, epochs, and parseable timestamps),
+  identity, todo membership, revisions, epochs, and timezone-aware UTC
+  timestamps: a naive timestamp reads differently under each host's
+  local timezone, so it fails closed),
   including bool-disguised integers; `handoff_mode` is a recorded head
   field, pinned to `hard_lease` in v0 (a `soft_claim` goal fails bootstrap
   closed instead of having its declared semantics silently inverted).

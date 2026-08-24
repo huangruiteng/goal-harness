@@ -612,7 +612,7 @@ provider-first，且不改变下述 typed outcome 合同。
   aggregate 编解码。校验对 executor 后续无条件解引用的每个字段都是封闭
   字段集且 fail-closed 的：todo、lease 记录、以及每条 receipt-index 条目
   （条目形状、digest 形式、receipt schema、operation 身份、todo 归属、
-  revision/epoch、可解析的时间戳），包括伪装成整数的 bool；`handoff_mode`
+  revision/epoch、带时区的 UTC 时间戳（naive 值会随执行主机时区漂移，fail closed）），包括伪装成整数的 bool；`handoff_mode`
   是 head 的记录字段，v0 钦定为 `hard_lease`（`soft_claim` goal 在
   bootstrap 处 fail closed，而不是被静默反转其声明语义）。规范字节被定义
   为按键排序、最小分隔符、UTF-8 的 JSON，且拒绝非有限浮点数；digest 与

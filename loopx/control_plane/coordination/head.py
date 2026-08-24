@@ -17,7 +17,7 @@ import copy
 import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, cast
 
@@ -131,14 +131,18 @@ def _is_count(value: Any, *, minimum: int = 0) -> bool:
 def _is_timestamp(value: Any) -> bool:
     # The executor parses these fields unconditionally (expiry decisions,
     # authorization status); an unparseable persisted timestamp must fail
-    # closed here instead of escaping as a bare ValueError later.
+    # closed here instead of escaping as a bare ValueError later. The value
+    # must also be timezone-aware UTC: a naive timestamp is interpreted in
+    # the executing host's local timezone, so the same persisted bytes would
+    # read as active on one endpoint and expired on another, and v0 mints
+    # UTC only, so UTC is also what it accepts.
     if not isinstance(value, str) or not value:
         return False
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return False
-    return True
+    return parsed.tzinfo is not None and parsed.utcoffset() == timedelta(0)
 
 
 def _is_request_digest(value: Any) -> bool:

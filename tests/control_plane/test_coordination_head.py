@@ -153,6 +153,14 @@ def leased_head() -> dict:
         (lambda lease: lease.update(owner=""), "identity"),
         (lambda lease: lease.update(expires_at=123), "timestamp"),
         (lambda lease: lease.update(expires_at="not-a-time"), "timestamp"),
+        # Naive timestamps read differently under each host's local timezone,
+        # so the same persisted bytes would be active on one endpoint and
+        # expired on another; v0 mints and accepts aware UTC only.
+        (lambda lease: lease.update(expires_at="2030-01-01T00:00:00"), "timestamp"),
+        (
+            lambda lease: lease.update(expires_at="2030-01-01T00:00:00+08:00"),
+            "timestamp",
+        ),
         (lambda lease: lease.update(write_scopes=["repo"]), "write_scopes"),
     ],
 )
@@ -216,6 +224,16 @@ def receipted_head() -> dict:
         (lambda e: e["original_receipt"].update(lease_epoch=True), "lease_epoch"),
         (
             lambda e: e["original_receipt"].update(applied_at="not-a-time"),
+            "timestamps",
+        ),
+        (
+            lambda e: e["original_receipt"].update(applied_at="2030-01-01T00:00:00"),
+            "timestamps",
+        ),
+        (
+            lambda e: e["original_receipt"].update(
+                expires_at="2030-01-01T00:00:00+08:00"
+            ),
             "timestamps",
         ),
         (
