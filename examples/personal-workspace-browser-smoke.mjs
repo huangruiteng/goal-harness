@@ -115,6 +115,72 @@ async function installApi(page) {
         total_count: 1,
       };
     }
+    if (!fixture.attention_queue.items.some((item) => item.goal_id === "progress-projection")) {
+      const idlessLongTitle = `Idless long Todo ${"projection identity ".repeat(16)}keeps one card`;
+      const currentTodo = {
+        done: false,
+        index: 4,
+        role: "agent",
+        status: "open",
+        task_class: "advancement_task",
+        text: "Current Todo",
+        title: "Current Todo",
+        todo_id: "todo-progress-current",
+      };
+      fixture.attention_queue.items.push({
+        agent_todos: {
+          done_count: 4,
+          items: [
+            currentTodo,
+            { done: false, index: 5, role: "agent", status: "open", task_class: "advancement_task", text: idlessLongTitle, title: idlessLongTitle },
+            { done: true, index: 1, role: "agent", status: "done", task_class: "advancement_task", text: "Completed A", title: "Completed A", todo_id: "todo-progress-a" },
+            { done: true, index: 2, role: "agent", status: "done", task_class: "advancement_task", text: "Completed B", title: "Completed B", todo_id: "todo-progress-b" },
+            { done: true, index: 3, role: "agent", status: "done", task_class: "advancement_task", text: "Completed C", title: "Completed C", todo_id: "todo-progress-c" },
+            { done: true, index: 6, role: "agent", status: "done", task_class: "continuous_monitor", text: "Completed Monitor", title: "Completed Monitor", todo_id: "todo-progress-monitor" },
+          ],
+          open_count: 2,
+          source_section: "Agent Todo",
+          total_count: 6,
+        },
+        goal_id: "progress-projection",
+        project_asset: {
+          agent_todos: {
+            done: 4,
+            items: [
+              currentTodo,
+              { done: false, index: 5, role: "agent", status: "open", task_class: "advancement_task", text: idlessLongTitle.slice(0, 220), title: idlessLongTitle.slice(0, 220) },
+            ],
+            open: 2,
+            total: 6,
+          },
+          gate: "none",
+          next_action: "Current Todo",
+          owner: "example-agent",
+          stop_condition: "All synthetic Todos complete",
+        },
+        recommended_action: "Older Todo",
+        severity: "info",
+        status: "active",
+        waiting_on: "codex",
+      });
+      fixture.agent_management_projection.agents.push({
+        agent_id: "example-agent",
+        current_todo: {
+          action_kind: "synthetic_progress_projection",
+          goal_id: "progress-projection",
+          priority: "P0",
+          role: "agent",
+          status: "open",
+          task_class: "advancement_task",
+          title: "Current Todo",
+          todo_id: "todo-progress-current",
+        },
+        goal_ids: ["progress-projection"],
+        last_activity_at: "2026-08-24T14:53:12+08:00",
+        next_action: "Continue projected todo todo-progress-current.",
+        state: "running",
+      });
+    }
     const delayMs = state.nextStatusDelayMs;
     state.nextStatusDelayMs = 0;
     if (delayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, delayMs));
@@ -861,6 +927,17 @@ async function main() {
     const goalNavigation = page.getByRole("navigation", { name: "Goal 视图" });
     const defaultTasksTab = goalNavigation.getByRole("button", { name: "Tasks" });
     if (await defaultTasksTab.getAttribute("aria-current") !== "page") throw new Error("Selecting a Goal did not prioritize its Tasks view");
+    await page.locator(".personal-goal-link", { hasText: "Progress Projection" }).click();
+    await page.getByRole("heading", { name: "Progress Projection" }).waitFor({ state: "visible" });
+    const progressHeader = page.locator(".personal-channel-title p");
+    if (!(await progressHeader.innerText()).includes("Current Todo")) throw new Error(`Goal header did not prefer the current Todo: ${await progressHeader.innerText()}`);
+    const progressColumn = page.locator(".personal-object-list", { hasText: "待执行 / 进行中" });
+    if ((await progressColumn.locator(".personal-task-card").count()) !== 2) throw new Error("Id-less long Todo was duplicated across compact and full projections");
+    const completedColumn = page.locator(".personal-object-list", { hasText: "已完成" }).last();
+    await completedColumn.getByText("3", { exact: true }).waitFor({ state: "visible" });
+    await completedColumn.getByText("Completed A", { exact: true }).waitFor({ state: "visible" });
+    if (await completedColumn.getByText("Completed Monitor", { exact: true }).count()) throw new Error("Completed continuous monitor leaked into the completed Tasks column");
+    await goalButton.click();
     const readBoardGeometry = async () => {
       const kanban = page.locator(".personal-task-kanban");
       await kanban.waitFor({ state: "visible" });
