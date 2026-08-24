@@ -1222,7 +1222,7 @@ def test_unsuggested_selection_revalidates_current_capability_readiness(
     assert _heartbeat_receipt_count(runtime, turn_instance_id) == 1
 
 
-def test_agent_selection_requires_first_same_turn_quota_response(
+def test_first_call_agent_selection_is_qualified_before_receipt_commit(
     tmp_path: Path,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
@@ -1247,10 +1247,14 @@ def test_agent_selection_requires_first_same_turn_quota_response(
         ALTERNATIVE_TODO_ID,
     )
 
-    assert selected_rc != 0, selected
-    assert selected["error_code"] == "heartbeat_receipt_identity_conflict"
-    assert "first same-turn quota response" in selected["reason"]
-    assert _heartbeat_receipt_count(runtime, turn_instance_id) == 0
+    assert selected_rc == 0, selected
+    assert selected["selected_todo"]["todo_id"] == ALTERNATIVE_TODO_ID
+    assert selected["selected_todo"]["selection_binding"] == "heartbeat_receipt"
+    assert selected["heartbeat_receipt"]["status"] == "committed"
+    assert selected["heartbeat_receipt"]["settlement_identity"]["todo_id"] == (
+        ALTERNATIVE_TODO_ID
+    )
+    assert _heartbeat_receipt_count(runtime, turn_instance_id) == 1
 
 
 def test_pending_action_selection_does_not_preempt_newly_due_monitor(

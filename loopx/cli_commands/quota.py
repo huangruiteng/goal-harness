@@ -541,16 +541,13 @@ def _quota_renderer(
 
 def _requested_quota_action_todo_id(
     args: argparse.Namespace,
-    *,
-    heartbeat_receipt_existing: Mapping[str, object] | None,
 ) -> str | None:
-    requested_todo_id = normalize_todo_id(args.todo_id)
-    if requested_todo_id and not heartbeat_receipt_existing:
-        raise HeartbeatReceiptIdentityConflictError(
-            "explicit action selection requires a first same-turn quota "
-            "response with current eligibility and bounded suggestions"
-        )
-    return requested_todo_id
+    if not (
+        bool(args.codex_app)
+        or args.runtime_profile == "codex_app_heartbeat"
+    ):
+        return None
+    return normalize_todo_id(args.todo_id)
 
 
 def _heartbeat_quota_action_selection_bindings(
@@ -629,7 +626,6 @@ def handle_quota_command(
     heartbeat_receipt_existing_appended = False
     heartbeat_receipt_ready = False
     heartbeat_stall_observation = "not_evaluated"
-    requested_todo_id: str | None = None
     detail_sections: frozenset[str] = frozenset()
     context: _QuotaCommandContext | None = None
     try:
@@ -658,10 +654,6 @@ def handle_quota_command(
                 args=args,
                 heartbeat_turn_id=heartbeat_turn_id,
             )
-            requested_todo_id = _requested_quota_action_todo_id(
-                args,
-                heartbeat_receipt_existing=heartbeat_receipt_existing,
-            )
             payload = build_live_quota_should_run_decision(
                 status_payload,
                 goal_id=args.goal_id,
@@ -679,7 +671,9 @@ def handle_quota_command(
                 ),
                 receipt_bound_todo_id=receipt_bound_todo_id,
                 requested_action_todo_id=(
-                    requested_todo_id if receipt_bound_todo_id is None else None
+                    _requested_quota_action_todo_id(args)
+                    if receipt_bound_todo_id is None
+                    else None
                 ),
                 receipt_bound_replan_obligation_id=(
                     receipt_bound_replan_obligation_id
@@ -688,7 +682,7 @@ def handle_quota_command(
             )
             _require_requested_quota_action_selection(
                 payload,
-                requested_todo_id=requested_todo_id,
+                requested_todo_id=_requested_quota_action_todo_id(args),
                 receipt_bound_todo_id=receipt_bound_todo_id,
                 receipt_bound_replan_obligation_id=(
                     receipt_bound_replan_obligation_id
@@ -915,7 +909,7 @@ def handle_quota_command(
                 )
                 _commit_pending_action_selection(
                     payload,
-                    requested_todo_id=requested_todo_id,
+                    requested_todo_id=_requested_quota_action_todo_id(args),
                 )
             else:
                 settlement_identity = (
@@ -977,6 +971,10 @@ def handle_quota_command(
                         receipt,
                         turn_instance_id=heartbeat_turn_id,
                         status="committed" if rollout_event.get("appended") else "replayed",
+                    )
+                    _commit_pending_action_selection(
+                        payload,
+                        requested_todo_id=_requested_quota_action_todo_id(args),
                     )
                 else:
                     fail_heartbeat_receipt(

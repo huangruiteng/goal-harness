@@ -569,22 +569,23 @@ def _render_goal_task_body(
 {prequota_block}{HOST_LOOP_QUOTA_DISPATCH_RULE}
 Guard: `{quota_guard_command}`.
 
-`should_run=false`: no delivery/spend; surface concrete Chinese action/gate only
-for `user_channel.notify=NOTIFY`, otherwise wait.{host_wait_rule}
+`should_run=false`: no delivery/spend; NOTIFY surfaces Chinese action/gate;
+otherwise wait.{host_wait_rule}
 
-`should_run=true`: choose any current eligible in-scope Todo after considering priority; honor
-claims/leases and blocker-push/recovery obligations. Before dependencies, persist changed
-scope/acceptance/non-goal evidence and next todo. A bounded segment is progress
-within this Goal; reuse it until terminal—do not create a successor merely to continue.
-Validate/write public-safe evidence, critic, and next action.
+`should_run=true`: take highest-priority unblocked in-scope todo by default; choose any
+other eligible Todo with a reason. Honor claims/leases and blocker-push/recovery obligations.
+Before dependencies, persist changed scope/acceptance/non-goal evidence and next todo.
+A bounded segment is progress within this Goal: a segment is progress, not a new Goal
+boundary. Reuse this Goal until terminal; do not create a successor host Goal merely to
+continue; do not create a successor merely to continue. Validate; write public-safe evidence.
 {HOST_LOOP_TODO_CLOSEOUT_RULE}
 
-Use actual classification/scale/outcome only; never default or upgrade them to
+For classification/scale/outcome, never default or upgrade them to
 `multi_surface` / `outcome_progress`; refresh the accountable progress record
 before spending: `{progress_refresh_state_command}`. Then spend exactly once
 against that refresh; no pipe/retry: `{quota_spend_command}`.
 Rerun the same guard read-only. Complete {completion_subject} only on
-`should_run=false` + terminal no-follow-up; otherwise obey its next action.
+`should_run=false` + terminal no-follow-up; else obey next action.
 
 No spend: gate/wait/dry-run/preflight failure/no-op/duplicate. Stop: private/company
 material, credentials, destructive git, unauthorized production, or repo rules.

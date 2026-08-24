@@ -216,9 +216,8 @@ def quota_rollout_settlement_binding(
         else {}
     )
     if selection_policy.get("requires_explicit_turn_binding") is True:
-        # The first portfolio guard is intentionally identity-less. The same
-        # turn is upgraded only after the agent reruns quota with one exact
-        # projected --todo-id, so recommendation order cannot become hidden
+        # A portfolio guard without an explicit selection is intentionally
+        # identity-less, so recommendation order cannot become hidden
         # settlement authority.
         return None, None
 

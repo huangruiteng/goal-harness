@@ -141,6 +141,7 @@ def handle_turn_command(
             bounded_research_frontier_projector=(
                 project_live_explore_composition_frontier
             ),
+            project_advisory_action_portfolio=False,
         )
         resume_identity = {
             "goal_id": args.resume_goal_id,
@@ -831,6 +832,7 @@ def handle_turn_command(
                     bounded_research_frontier_projector=(
                         project_live_explore_composition_frontier
                     ),
+                    project_advisory_action_portfolio=False,
                 )
                 hint = (
                     latest.get("scheduler_hint")
