@@ -175,7 +175,8 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "loopx benchmark concurrency-configure --goal-id <goal-id> "
                 "--max-active-cases <n> --target-active-cases <n> "
                 "--max-baseline-cases <n> --max-test-cases <n> "
-                "--reserved-test-cases <n> --execute --format json"
+                "--reserved-test-cases <n> "
+                "[--require-resource-headroom-receipt] --execute --format json"
             ),
             "purpose": (
                 "Configure one combined capacity envelope across baseline, control, "
@@ -190,6 +191,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "command": (
                 "loopx benchmark concurrency-admit --goal-id <goal-id> "
                 "--run-id <run-id> --case-id <case-id> --arm-role <role> "
+                "[--resource-headroom-json <receipt.json>] "
                 "--execute --format json"
             ),
             "purpose": (
@@ -197,8 +199,9 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "before an independently authorized runner launch."
             ),
             "write_boundary": (
-                "compact project-local run identities only; launch, liveness, and "
-                "termination remain runner-owned"
+                "compact project-local run identities only; resource receipts and "
+                "raw metrics are not persisted, and launch, liveness, and termination "
+                "remain runner-owned"
             ),
         },
         {
@@ -263,6 +266,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "reconcile_admission_ledger_with_real_runner_liveness",
             "backfill_when_concurrency_status_reports_underfilled",
             "qualify_source_revision_before_each_new_run_admission",
+            "qualify_resource_headroom_when_the_envelope_requires_a_receipt",
             "atomically_admit_case_slot_before_runner_launch",
             "upsert_preregistered_or_running_row_when_a_run_starts",
             "classify_exact_runtime_observation_during_active_monitor_cycles",
@@ -298,11 +302,13 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "loopx benchmark concurrency-configure --goal-id <goal-id> "
                 "--max-active-cases <n> --target-active-cases <n> "
                 "--max-baseline-cases <n> --max-test-cases <n> "
-                "--reserved-test-cases <n> --execute --format json"
+                "--reserved-test-cases <n> "
+                "[--require-resource-headroom-receipt] --execute --format json"
             ),
             "admit": (
                 "loopx benchmark concurrency-admit --goal-id <goal-id> "
                 "--run-id <run-id> --case-id <case-id> --arm-role <role> "
+                "[--resource-headroom-json <receipt.json>] "
                 "--execute --format json"
             ),
             "release": (
@@ -312,7 +318,9 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         "concurrency_boundary": (
             "The envelope owns capacity admission only. A benchmark runner remains "
-            "responsible for launch, liveness, termination, and score transitions."
+            "responsible for resource observation, launch, liveness, termination, "
+            "and score transitions. When configured, admission requires a fresh "
+            "public-safe resource-headroom receipt but never persists raw metrics."
         ),
         "selection_rule": (
             "Keep diagnostic-only explore rows separate and make paired claims "

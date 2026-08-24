@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -76,6 +78,14 @@ def register_benchmark_concurrency_commands(
     configure_parser.add_argument("--max-baseline-cases", type=int)
     configure_parser.add_argument("--max-test-cases", type=int)
     configure_parser.add_argument("--reserved-test-cases", type=int, default=0)
+    configure_parser.add_argument(
+        "--require-resource-headroom-receipt",
+        action="store_true",
+        help=(
+            "Fail closed unless each new admission supplies a fresh typed resource "
+            "headroom receipt."
+        ),
+    )
     _add_execute_argument(configure_parser)
 
     admit_parser = benchmark_subparsers.add_parser(
@@ -90,6 +100,13 @@ def register_benchmark_concurrency_commands(
         "--arm-role",
         required=True,
         choices=["baseline", "control", "treatment", "explore"],
+    )
+    admit_parser.add_argument(
+        "--resource-headroom-json",
+        help=(
+            "Public-safe benchmark_resource_headroom_receipt_v0 JSON path, or - "
+            "for stdin. Required when the configured envelope enables the gate."
+        ),
     )
     _add_execute_argument(admit_parser)
 
@@ -130,6 +147,9 @@ def handle_benchmark_concurrency_command(
                 max_baseline_cases=args.max_baseline_cases,
                 max_test_cases=args.max_test_cases,
                 reserved_test_cases=args.reserved_test_cases,
+                require_resource_headroom_receipt=(
+                    args.require_resource_headroom_receipt
+                ),
             )
             payload = configure_benchmark_concurrency_envelope(
                 path,
@@ -138,6 +158,16 @@ def handle_benchmark_concurrency_command(
                 agent_id=args.agent_id,
             )
         elif args.benchmark_command == "concurrency-admit":
+            resource_headroom_receipt = None
+            if args.resource_headroom_json:
+                if args.resource_headroom_json == "-":
+                    resource_headroom_receipt = json.load(sys.stdin)
+                else:
+                    resource_headroom_receipt = json.loads(
+                        Path(args.resource_headroom_json)
+                        .expanduser()
+                        .read_text(encoding="utf-8")
+                    )
             payload = admit_benchmark_case(
                 path,
                 run_id=args.run_id,
@@ -145,6 +175,7 @@ def handle_benchmark_concurrency_command(
                 arm_role=args.arm_role,
                 execute=args.execute,
                 agent_id=args.agent_id,
+                resource_headroom_receipt=resource_headroom_receipt,
             )
         else:
             payload = release_benchmark_case(

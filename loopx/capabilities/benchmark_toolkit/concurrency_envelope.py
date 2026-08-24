@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +12,23 @@ from ...file_lock import exclusive_file_lock
 from ...registry import atomic_write_json
 
 BENCHMARK_CONCURRENCY_ENVELOPE_SCHEMA_VERSION = "benchmark_concurrency_envelope_v0"
+BENCHMARK_RESOURCE_HEADROOM_RECEIPT_SCHEMA_VERSION = (
+    "benchmark_resource_headroom_receipt_v0"
+)
 BENCHMARK_CONCURRENCY_ENVELOPE_FILENAME = "concurrency-envelope.json"
 
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}$")
 _ARM_ROLES = {"baseline", "control", "treatment", "explore"}
+_RESOURCE_HEADROOM_KINDS = {
+    "file_descriptors",
+    "memory",
+    "persistent_storage",
+    "process_capacity",
+    "provider_capacity",
+    "temporary_storage",
+}
+_RESOURCE_HEADROOM_STATES = {"sufficient", "insufficient", "unresolved"}
+_MAX_RESOURCE_HEADROOM_VALIDITY = timedelta(minutes=15)
 _STATE_FIELDS = {
     "schema_version",
     "configured_at",
@@ -29,8 +42,16 @@ _CONFIG_FIELDS = {
     "max_baseline_cases",
     "max_test_cases",
     "reserved_test_cases",
+    "require_resource_headroom_receipt",
 }
 _ACTIVE_RUN_FIELDS = {"run_id", "case_id", "arm_role", "admitted_at"}
+_RESOURCE_HEADROOM_RECEIPT_FIELDS = {
+    "schema_version",
+    "observed_at",
+    "expires_at",
+    "checks",
+}
+_RESOURCE_HEADROOM_CHECK_FIELDS = {"kind", "state"}
 
 
 def _now_iso() -> str:
@@ -76,7 +97,9 @@ def _arm_group(arm_role: str) -> str:
     return "baseline" if arm_role == "baseline" else "test"
 
 
-def normalize_benchmark_concurrency_config(value: Mapping[str, Any]) -> dict[str, int]:
+def normalize_benchmark_concurrency_config(
+    value: Mapping[str, Any],
+) -> dict[str, int | bool]:
     if not isinstance(value, Mapping):
         raise TypeError("benchmark concurrency config must be an object")
     _reject_unknown_fields(value, allowed=_CONFIG_FIELDS, field="config")
@@ -98,7 +121,12 @@ def normalize_benchmark_concurrency_config(value: Mapping[str, Any]) -> dict[str
         "reserved_test_cases": _bounded_int(
             value.get("reserved_test_cases"), field="reserved_test_cases"
         ),
+        "require_resource_headroom_receipt": value.get(
+            "require_resource_headroom_receipt", False
+        ),
     }
+    if not isinstance(config["require_resource_headroom_receipt"], bool):
+        raise TypeError("require_resource_headroom_receipt must be boolean")
     if config["target_active_cases"] > total:
         raise ValueError("target_active_cases cannot exceed max_active_cases")
     if config["max_baseline_cases"] > total:
@@ -126,7 +154,8 @@ def build_benchmark_concurrency_config(
     max_baseline_cases: int | None = None,
     max_test_cases: int | None = None,
     reserved_test_cases: int = 0,
-) -> dict[str, int]:
+    require_resource_headroom_receipt: bool = False,
+) -> dict[str, int | bool]:
     total = _bounded_int(max_active_cases, field="max_active_cases", minimum=1)
     reserved = _bounded_int(reserved_test_cases, field="reserved_test_cases")
     return normalize_benchmark_concurrency_config(
@@ -140,8 +169,105 @@ def build_benchmark_concurrency_config(
             ),
             "max_test_cases": total if max_test_cases is None else max_test_cases,
             "reserved_test_cases": reserved,
+            "require_resource_headroom_receipt": require_resource_headroom_receipt,
         }
     )
+
+
+def normalize_benchmark_resource_headroom_receipt(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate a public-safe provider observation without persisting raw metrics."""
+
+    if not isinstance(value, Mapping):
+        raise TypeError("benchmark resource headroom receipt must be an object")
+    _reject_unknown_fields(
+        value,
+        allowed=_RESOURCE_HEADROOM_RECEIPT_FIELDS,
+        field="resource_headroom_receipt",
+    )
+    if (
+        value.get("schema_version")
+        != BENCHMARK_RESOURCE_HEADROOM_RECEIPT_SCHEMA_VERSION
+    ):
+        raise ValueError("benchmark resource headroom receipt schema mismatch")
+    observed_at = _timestamp(value.get("observed_at"), field="observed_at")
+    expires_at = _timestamp(value.get("expires_at"), field="expires_at")
+    observed_time = datetime.fromisoformat(observed_at)
+    expires_time = datetime.fromisoformat(expires_at)
+    if expires_time <= observed_time:
+        raise ValueError("expires_at must be later than observed_at")
+    if expires_time - observed_time > _MAX_RESOURCE_HEADROOM_VALIDITY:
+        raise ValueError(
+            "resource headroom receipt validity must not exceed 15 minutes"
+        )
+    raw_checks = value.get("checks")
+    if not isinstance(raw_checks, list) or not raw_checks:
+        raise ValueError("resource headroom receipt requires at least one check")
+    checks: list[dict[str, str]] = []
+    for raw_check in raw_checks:
+        if not isinstance(raw_check, Mapping):
+            raise TypeError("resource headroom check must be an object")
+        _reject_unknown_fields(
+            raw_check,
+            allowed=_RESOURCE_HEADROOM_CHECK_FIELDS,
+            field="resource_headroom_check",
+        )
+        kind = _token(raw_check.get("kind"), field="resource_headroom_kind")
+        state = _token(raw_check.get("state"), field="resource_headroom_state")
+        if kind not in _RESOURCE_HEADROOM_KINDS:
+            raise ValueError("resource headroom kind is unsupported")
+        if state not in _RESOURCE_HEADROOM_STATES:
+            raise ValueError("resource headroom state is unsupported")
+        checks.append({"kind": kind, "state": state})
+    kinds = [item["kind"] for item in checks]
+    if len(kinds) != len(set(kinds)):
+        raise ValueError("resource headroom checks cannot repeat a kind")
+    return {
+        "schema_version": BENCHMARK_RESOURCE_HEADROOM_RECEIPT_SCHEMA_VERSION,
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+        "checks": sorted(checks, key=lambda item: item["kind"]),
+    }
+
+
+def _resource_headroom_admission(
+    receipt: Mapping[str, Any] | None,
+    *,
+    required: bool,
+    admitted_at: str,
+) -> dict[str, Any]:
+    if receipt is None:
+        return {
+            "qualified": not required,
+            "required": required,
+            "reason_codes": ["resource_headroom_receipt_required"] if required else [],
+            "check_count": 0,
+            "check_kinds": [],
+            "receipt_persisted": False,
+        }
+    normalized = normalize_benchmark_resource_headroom_receipt(receipt)
+    reasons: list[str] = []
+    admission_time = datetime.fromisoformat(admitted_at)
+    observed_time = datetime.fromisoformat(normalized["observed_at"])
+    expires_time = datetime.fromisoformat(normalized["expires_at"])
+    if observed_time > admission_time:
+        reasons.append("resource_headroom_receipt_from_future")
+    if admission_time >= expires_time:
+        reasons.append("resource_headroom_receipt_expired")
+    for check in normalized["checks"]:
+        if check["state"] == "insufficient":
+            reasons.append(f"{check['kind']}_insufficient")
+        elif check["state"] == "unresolved":
+            reasons.append(f"{check['kind']}_unresolved")
+    return {
+        "qualified": not reasons,
+        "required": required,
+        "reason_codes": reasons,
+        "check_count": len(normalized["checks"]),
+        "check_kinds": [item["kind"] for item in normalized["checks"]],
+        "receipt_persisted": False,
+    }
 
 
 def _normalize_active_run(value: Mapping[str, Any]) -> dict[str, str]:
@@ -210,7 +336,7 @@ def _counts(active_runs: list[dict[str, str]]) -> dict[str, int]:
     return {"total": len(active_runs), "baseline": baseline, "test": test}
 
 
-def _capacity(config: Mapping[str, int], counts: Mapping[str, int]) -> dict[str, int]:
+def _capacity(config: Mapping[str, Any], counts: Mapping[str, int]) -> dict[str, int]:
     return {
         "total": max(0, config["max_active_cases"] - counts["total"]),
         "baseline": max(0, config["max_baseline_cases"] - counts["baseline"]),
@@ -321,6 +447,7 @@ def _admission_preview(
     case_id: str,
     arm_role: str,
     admitted_at: str,
+    resource_headroom_receipt: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     compact_run = _normalize_active_run(
         {
@@ -369,6 +496,12 @@ def _admission_preview(
     counts = _counts(normalized["active_runs"])
     group = _arm_group(compact_run["arm_role"])
     reasons: list[str] = []
+    resource_headroom = _resource_headroom_admission(
+        resource_headroom_receipt,
+        required=bool(config["require_resource_headroom_receipt"]),
+        admitted_at=admitted_at,
+    )
+    reasons.extend(resource_headroom["reason_codes"])
     if counts["total"] >= config["max_active_cases"]:
         reasons.append("total_capacity_exhausted")
     if group == "baseline" and counts["baseline"] >= config["max_baseline_cases"]:
@@ -389,6 +522,7 @@ def _admission_preview(
             "write_performed": False,
             "reason_codes": reasons,
             "run": compact_run,
+            "resource_headroom": resource_headroom,
             "status": build_benchmark_concurrency_status(normalized),
         }
     next_envelope = {
@@ -403,6 +537,7 @@ def _admission_preview(
         "write_performed": False,
         "reason_codes": [],
         "run": compact_run,
+        "resource_headroom": resource_headroom,
         "status": build_benchmark_concurrency_status(next_envelope),
         "envelope": normalize_benchmark_concurrency_envelope(next_envelope),
     }
@@ -470,6 +605,7 @@ def admit_benchmark_case(
     execute: bool = False,
     agent_id: str | None = None,
     admitted_at: str | None = None,
+    resource_headroom_receipt: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     target = Path(path).expanduser()
     timestamp = _timestamp(admitted_at or _now_iso(), field="admitted_at")
@@ -480,6 +616,7 @@ def admit_benchmark_case(
             case_id=case_id,
             arm_role=arm_role,
             admitted_at=timestamp,
+            resource_headroom_receipt=resource_headroom_receipt,
         )
         result["dry_run"] = True
         return result
@@ -492,6 +629,7 @@ def admit_benchmark_case(
             case_id=case_id,
             arm_role=arm_role,
             admitted_at=timestamp,
+            resource_headroom_receipt=resource_headroom_receipt,
         )
         result["dry_run"] = False
         envelope = result.pop("envelope", None)
@@ -590,6 +728,10 @@ def render_benchmark_concurrency_markdown(payload: Mapping[str, Any]) -> str:
                 f"- Baseline cap: `{config.get('max_baseline_cases')}`",
                 f"- Test cap: `{config.get('max_test_cases')}`",
                 f"- Reserved test slots: `{config.get('reserved_test_cases')}`",
+                (
+                    "- Resource headroom receipt required: "
+                    f"`{config.get('require_resource_headroom_receipt', False)}`"
+                ),
             ]
         )
     target = status.get("target_occupancy")

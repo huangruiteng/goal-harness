@@ -3,16 +3,19 @@ from __future__ import annotations
 import json
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from loopx.capabilities.benchmark_toolkit import (
+    BENCHMARK_RESOURCE_HEADROOM_RECEIPT_SCHEMA_VERSION,
     admit_benchmark_case,
     build_benchmark_concurrency_config,
     build_benchmark_concurrency_status,
     configure_benchmark_concurrency_envelope,
     default_benchmark_concurrency_envelope_path,
+    normalize_benchmark_resource_headroom_receipt,
     read_benchmark_concurrency_envelope,
     release_benchmark_case,
 )
@@ -60,6 +63,7 @@ def _configure(
     total: int = 8,
     target: int | None = None,
     baseline: int = 7,
+    require_resource_headroom_receipt: bool = False,
 ) -> None:
     result = configure_benchmark_concurrency_envelope(
         path,
@@ -69,12 +73,30 @@ def _configure(
             max_baseline_cases=baseline,
             max_test_cases=total,
             reserved_test_cases=1,
+            require_resource_headroom_receipt=require_resource_headroom_receipt,
         ),
         execute=True,
         observed_at="2026-08-18T07:00:00Z",
     )
     assert result["ok"] is True
     assert result["write_performed"] is True
+
+
+def _resource_headroom_receipt(
+    *,
+    state: str = "sufficient",
+    observed_at: str = "2026-08-18T07:00:00Z",
+    expires_at: str = "2026-08-18T07:10:00Z",
+) -> dict[str, object]:
+    return {
+        "schema_version": BENCHMARK_RESOURCE_HEADROOM_RECEIPT_SCHEMA_VERSION,
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+        "checks": [
+            {"kind": "temporary_storage", "state": state},
+            {"kind": "process_capacity", "state": "sufficient"},
+        ],
+    }
 
 
 def test_config_rejects_role_caps_outside_total() -> None:
@@ -205,6 +227,122 @@ def test_reserved_test_slot_prevents_baseline_starvation(tmp_path: Path) -> None
         "baseline": 3,
         "test": 1,
     }
+
+
+def test_required_resource_headroom_receipt_fails_closed_before_reservation(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "concurrency-envelope.json"
+    _configure(path, total=2, baseline=1, require_resource_headroom_receipt=True)
+
+    missing = admit_benchmark_case(
+        path,
+        run_id="baseline-missing",
+        case_id="case-missing",
+        arm_role="baseline",
+        execute=True,
+        admitted_at="2026-08-18T07:05:00Z",
+    )
+    insufficient = admit_benchmark_case(
+        path,
+        run_id="baseline-low-storage",
+        case_id="case-low-storage",
+        arm_role="baseline",
+        execute=True,
+        admitted_at="2026-08-18T07:05:00Z",
+        resource_headroom_receipt=_resource_headroom_receipt(state="insufficient"),
+    )
+    expired = admit_benchmark_case(
+        path,
+        run_id="baseline-expired",
+        case_id="case-expired",
+        arm_role="baseline",
+        execute=True,
+        admitted_at="2026-08-18T08:00:00Z",
+        resource_headroom_receipt=_resource_headroom_receipt(),
+    )
+    unresolved = admit_benchmark_case(
+        path,
+        run_id="baseline-unresolved",
+        case_id="case-unresolved",
+        arm_role="baseline",
+        execute=True,
+        admitted_at="2026-08-18T07:05:00Z",
+        resource_headroom_receipt=_resource_headroom_receipt(state="unresolved"),
+    )
+    future = admit_benchmark_case(
+        path,
+        run_id="baseline-future",
+        case_id="case-future",
+        arm_role="baseline",
+        execute=True,
+        admitted_at="2026-08-18T07:05:00Z",
+        resource_headroom_receipt=_resource_headroom_receipt(
+            observed_at="2026-08-18T07:06:00Z",
+        ),
+    )
+
+    assert missing["reason_codes"] == ["resource_headroom_receipt_required"]
+    assert insufficient["reason_codes"] == ["temporary_storage_insufficient"]
+    assert expired["reason_codes"] == ["resource_headroom_receipt_expired"]
+    assert unresolved["reason_codes"] == ["temporary_storage_unresolved"]
+    assert future["reason_codes"] == ["resource_headroom_receipt_from_future"]
+    assert missing["write_performed"] is False
+    assert insufficient["write_performed"] is False
+    assert expired["write_performed"] is False
+    assert unresolved["write_performed"] is False
+    assert future["write_performed"] is False
+    assert read_benchmark_concurrency_envelope(path)["active_runs"] == []
+
+
+def test_qualified_resource_headroom_receipt_is_not_persisted(tmp_path: Path) -> None:
+    path = tmp_path / "concurrency-envelope.json"
+    _configure(path, total=2, baseline=1, require_resource_headroom_receipt=True)
+
+    admitted = admit_benchmark_case(
+        path,
+        run_id="baseline-qualified",
+        case_id="case-qualified",
+        arm_role="baseline",
+        execute=True,
+        admitted_at="2026-08-18T07:05:00Z",
+        resource_headroom_receipt=_resource_headroom_receipt(),
+    )
+
+    assert admitted["admitted"] is True
+    assert admitted["resource_headroom"] == {
+        "qualified": True,
+        "required": True,
+        "reason_codes": [],
+        "check_count": 2,
+        "check_kinds": ["process_capacity", "temporary_storage"],
+        "receipt_persisted": False,
+    }
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert "resource_headroom" not in stored
+    assert stored["config"]["require_resource_headroom_receipt"] is True
+
+
+def test_resource_headroom_receipt_rejects_unknown_or_duplicate_checks() -> None:
+    invalid_kind = _resource_headroom_receipt()
+    invalid_kind["checks"] = [{"kind": "private_mount", "state": "sufficient"}]
+    with pytest.raises(ValueError, match="kind is unsupported"):
+        normalize_benchmark_resource_headroom_receipt(invalid_kind)
+
+    duplicate = _resource_headroom_receipt()
+    duplicate["checks"] = [
+        {"kind": "memory", "state": "sufficient"},
+        {"kind": "memory", "state": "sufficient"},
+    ]
+    with pytest.raises(ValueError, match="cannot repeat"):
+        normalize_benchmark_resource_headroom_receipt(duplicate)
+
+    overlong = _resource_headroom_receipt(
+        observed_at="2026-08-18T07:00:00Z",
+        expires_at="2026-08-18T07:15:01Z",
+    )
+    with pytest.raises(ValueError, match="must not exceed 15 minutes"):
+        normalize_benchmark_resource_headroom_receipt(overlong)
 
 
 def test_admission_is_idempotent_and_release_reopens_capacity(tmp_path: Path) -> None:
@@ -375,6 +513,113 @@ def test_cli_previews_config_and_requires_admission_before_launch(
     assert payload["target_occupancy"]["missing_cases"] == 5
     assert payload["backfill_hint"]["required"] is True
     assert payload["next_action"] == "backfill_to_target"
+
+
+def test_cli_resource_headroom_gate_requires_fresh_typed_receipt(
+    tmp_path: Path,
+) -> None:
+    configure = subprocess.run(
+        [
+            str(REPO_ROOT / "scripts/loopx"),
+            "benchmark",
+            "concurrency-configure",
+            "--goal-id",
+            "fixture-goal",
+            "--project",
+            str(tmp_path),
+            "--max-active-cases",
+            "2",
+            "--max-baseline-cases",
+            "1",
+            "--max-test-cases",
+            "1",
+            "--require-resource-headroom-receipt",
+            "--execute",
+            "--format",
+            "json",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert (
+        json.loads(configure.stdout)["status"]["config"][
+            "require_resource_headroom_receipt"
+        ]
+        is True
+    )
+
+    missing = subprocess.run(
+        [
+            str(REPO_ROOT / "scripts/loopx"),
+            "benchmark",
+            "concurrency-admit",
+            "--goal-id",
+            "fixture-goal",
+            "--project",
+            str(tmp_path),
+            "--run-id",
+            "baseline-missing",
+            "--case-id",
+            "case-missing",
+            "--arm-role",
+            "baseline",
+            "--execute",
+            "--format",
+            "json",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert missing.returncode == 2
+    assert json.loads(missing.stdout)["reason_codes"] == [
+        "resource_headroom_receipt_required"
+    ]
+
+    receipt_path = tmp_path / "resource-headroom.json"
+    observed_at = datetime.now(UTC)
+    receipt_path.write_text(
+        json.dumps(
+            _resource_headroom_receipt(
+                observed_at=observed_at.isoformat(),
+                expires_at=(observed_at + timedelta(minutes=5)).isoformat(),
+            )
+        ),
+        encoding="utf-8",
+    )
+    admitted = subprocess.run(
+        [
+            str(REPO_ROOT / "scripts/loopx"),
+            "benchmark",
+            "concurrency-admit",
+            "--goal-id",
+            "fixture-goal",
+            "--project",
+            str(tmp_path),
+            "--run-id",
+            "baseline-qualified",
+            "--case-id",
+            "case-qualified",
+            "--arm-role",
+            "baseline",
+            "--resource-headroom-json",
+            str(receipt_path),
+            "--execute",
+            "--format",
+            "json",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(admitted.stdout)
+    assert payload["admitted"] is True
+    assert payload["resource_headroom"]["qualified"] is True
+    assert str(receipt_path) not in admitted.stdout
 
 
 def test_cli_omitted_project_routes_envelope_to_registered_goal_repo(

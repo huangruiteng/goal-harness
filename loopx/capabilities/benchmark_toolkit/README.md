@@ -588,6 +588,7 @@ loopx benchmark concurrency-configure \
   --max-baseline-cases 7 \
   --max-test-cases 4 \
   --reserved-test-cases 1 \
+  --require-resource-headroom-receipt \
   --execute \
   --format json
 
@@ -606,6 +607,7 @@ loopx benchmark concurrency-admit \
   --run-id <run-id> \
   --case-id <case-id> \
   --arm-role <baseline|control|treatment|explore> \
+  --resource-headroom-json resource-headroom.json \
   --execute \
   --format json
 
@@ -624,6 +626,33 @@ runtime proof. On each launch, terminal or runner-invalid transition, and a boun
 periodic cadence, pass exact-job receipt and runner-owner facts through
 `runtime-observation`. Apply its typed terminal or runner-invalid transition before
 releasing that reservation, then backfill the reported gap.
+
+For hosts where parallel jobs can exhaust temporary storage, memory, process
+capacity, file descriptors, persistent storage, or provider capacity, enable
+`--require-resource-headroom-receipt`. Each new admission must then include a
+fresh `benchmark_resource_headroom_receipt_v0`. The provider observes its own
+environment and supplies only typed `sufficient`, `insufficient`, or `unresolved`
+checks plus a validity window of at most 15 minutes. Missing, expired, future,
+unresolved, or
+insufficient receipts fail closed before the slot is reserved. LoopX never records
+raw metrics, paths, provider logs, or the receipt in the envelope, and the receipt
+does not grant launch authority.
+
+Read back the gate with `concurrency-status`. To disable it, rerun
+`concurrency-configure` with the same capacity values and omit
+`--require-resource-headroom-receipt`; existing active reservations are preserved.
+
+```json
+{
+  "schema_version": "benchmark_resource_headroom_receipt_v0",
+  "observed_at": "2026-08-23T04:00:00Z",
+  "expires_at": "2026-08-23T04:05:00Z",
+  "checks": [
+    {"kind": "temporary_storage", "state": "sufficient"},
+    {"kind": "process_capacity", "state": "sufficient"}
+  ]
+}
+```
 
 Every participant must resolve the same goal repository and envelope file on a
 filesystem that supports LoopX's inter-process lock and atomic replacement. Separate
