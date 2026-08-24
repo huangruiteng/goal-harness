@@ -22,6 +22,7 @@ def build_accountable_work_item_settlement_plan(
     delivery_boundary: str | None = None,
 ) -> SettlementPlan | None:
     if runtime_profile is SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT:
+        normalized_turn_instance_id = normalize_turn_instance_id(turn_instance_id)
         return build_codex_app_settlement_plan(
             goal_id=goal_id,
             agent_id=agent_id,
@@ -29,6 +30,7 @@ def build_accountable_work_item_settlement_plan(
             replan_obligation_id=replan_obligation_id,
             scoped_cli_args=scoped_cli_args,
             lifecycle_actor_args=lifecycle_actor_args,
+            turn_instance_id_ref=normalized_turn_instance_id,
             delivery_boundary=delivery_boundary,
         )
     if runtime_profile is not SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP:

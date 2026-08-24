@@ -63,7 +63,7 @@ def build_codex_app_settlement_plan(
     replan_obligation_id: str | None = None,
     scoped_cli_args: str,
     lifecycle_actor_args: str,
-    turn_instance_id_ref: str = "${LOOPX_TURN:?}",
+    turn_instance_id_ref: str | None = None,
     delivery_boundary: str | None = None,
 ) -> SettlementPlan:
     return build_turn_scoped_cli_settlement_plan(
@@ -73,7 +73,7 @@ def build_codex_app_settlement_plan(
         replan_obligation_id=replan_obligation_id,
         scoped_cli_args=scoped_cli_args,
         lifecycle_actor_args=lifecycle_actor_args,
-        turn_instance_id=turn_instance_id_ref,
+        turn_instance_id=turn_instance_id_ref or "${LOOPX_TURN:?}",
         delivery_boundary=delivery_boundary,
     )
 

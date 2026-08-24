@@ -30,7 +30,6 @@ from .project_prompt import (
     render_available_capability_args,
     render_quota_guard_command,
     render_refresh_state_command,
-    render_scheduler_execution_args,
     shell_arg,
 )
 from .registry import registry_goals, resolve_state_file
@@ -805,32 +804,26 @@ def build_loopx_bootstrap_command_pack(
     heartbeat_prompt_command = activation_commands.get("heartbeat_prompt")
     heartbeat_prompt_json_command = activation_commands.get("heartbeat_prompt_json")
     scheduler_command_binding = scheduler_command_binding_for_agent_type(agent_type)
+    guided_start_begins_turn = bool(
+        explicit_goal_start
+        and selected_agent_id
+        and scheduler_command_binding.get("runtime_profile")
+        == "codex_app_heartbeat"
+    )
     quota_guard_command = (
         render_quota_guard_command(
             resolved_goal_id,
             cli_bin=cli_bin,
             agent_id=str(selected_agent_id) if selected_agent_id else None,
             available_capabilities=available_capabilities,
+            begin_turn=guided_start_begins_turn,
+            include_shared_registry=False,
             **scheduler_command_binding,
         )
         if activation_allowed
         else None
     )
-    goal_start_quota_should_run = (
-        (
-            f"{shell_arg(cli_bin)} quota should-run --goal-id "
-            f"{shell_arg(resolved_goal_id)}"
-            + (
-                f" --agent-id {shell_arg(str(selected_agent_id))}"
-                if selected_agent_id
-                else ""
-            )
-            + render_available_capability_args(available_capabilities)
-            + render_scheduler_execution_args(**scheduler_command_binding)
-        )
-        if activation_allowed
-        else None
-    )
+    goal_start_quota_should_run = quota_guard_command
     status_command = _project_command(resolved_project, f"{shell_arg(cli_bin)} status")
     goal_start_bootstrap_command = _goal_start_bootstrap_command(
         project=resolved_project,

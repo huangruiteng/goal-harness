@@ -380,6 +380,29 @@ def test_standard_codex_app_actions_use_typed_settlement_before_turn_driver() ->
         assert '--turn-instance-id "${LOOPX_TURN:?}"' in command
 
 
+def test_codex_app_actions_preserve_a_concrete_admitted_turn_identity() -> None:
+    todo_id = "todo_concrete_turn"
+    turn_instance_id = "guided-start:concrete-turn"
+
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": GOAL_ID,
+            "agent_identity": {"agent_id": AGENT_ID},
+            "selected_todo": {"todo_id": todo_id},
+        },
+        mode="bounded_delivery",
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+        ),
+        turn_instance_id=turn_instance_id,
+    )
+
+    assert len(actions) == 2
+    for command in actions:
+        assert f"--turn-instance-id {turn_instance_id}" in command
+        assert "${LOOPX_TURN:?}" not in command
+
+
 @pytest.mark.parametrize(
     "profile",
     (

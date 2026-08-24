@@ -99,21 +99,31 @@ def render_quota_guard_command(
     runtime_profile: str | None = None,
     scheduler_execution_context: dict[str, Any] | None = None,
     heartbeat_turn_receipt: bool = False,
+    begin_turn: bool = False,
+    include_shared_registry: bool = True,
 ) -> str:
+    if heartbeat_turn_receipt and begin_turn:
+        raise ValueError(
+            "quota guard cannot both begin a Turn and reuse a heartbeat Turn identity"
+        )
     agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
     capability_args = render_available_capability_args(available_capabilities)
     scheduler_args = render_scheduler_execution_args(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
     )
-    turn_arg = (
-        ' --turn-instance-id "${LOOPX_TURN:?}"'
-        if heartbeat_turn_receipt
-        else ""
+    if heartbeat_turn_receipt:
+        turn_arg = ' --turn-instance-id "${LOOPX_TURN:?}"'
+    elif begin_turn:
+        turn_arg = " --begin-turn"
+    else:
+        turn_arg = ""
+    registry_arg = (
+        f"--registry {SHARED_GLOBAL_REGISTRY} " if include_shared_registry else ""
     )
     return (
         f"{shell_arg(cli_bin)} --format json "
-        f"--registry {SHARED_GLOBAL_REGISTRY} "
+        f"{registry_arg}"
         f"quota should-run --goal-id {shell_arg(goal_id)}{agent_arg}"
         f"{capability_args}{scheduler_args}{turn_arg}"
     )

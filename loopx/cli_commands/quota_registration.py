@@ -163,6 +163,16 @@ def register_quota_command(
         ),
     )
     quota_parser.add_argument(
+        "--begin-turn",
+        action="store_true",
+        help=(
+            "For an initial Codex App `quota should-run`, mint and persist one "
+            "new Turn identity. Any explicit Todo-selection command returned by "
+            "the guard reuses the minted identity. Cannot be combined with "
+            "--turn-instance-id or --todo-id."
+        ),
+    )
+    quota_parser.add_argument(
         "--replan-obligation-id",
         help=(
             "Typed autonomous replan obligation binding for `quota spend-slot`. "
