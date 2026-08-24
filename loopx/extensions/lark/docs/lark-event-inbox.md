@@ -86,7 +86,12 @@ configuration or host state and must not enter public LoopX packets.
 `capture_scope` defaults to `addressed_only` for compatibility. Drain output
 reports `thread_complete=false` and a coverage warning for that mode. For
 `configured_chat_all`, the collector's jq filter should select the configured
-chat only; do not add a content-level `@bot` predicate.
+chat only; do not add a content-level `@bot` predicate. A Goal Topic root is
+presentation and reply context, not an additional ingress filter for
+`configured_chat_all`: new topics and replies in the same configured chat must
+remain visible to the bound Agent. When more than one chat-wide Goal route is
+eligible for the same Bot target, routing fails closed instead of choosing one
+by iteration order.
 
 Optional source-thread replies are a separate, default-off boundary. Bind an
 explicit non-default bot profile to the same local-private chat. An
@@ -297,8 +302,13 @@ and interprets the source event before deciding the durable effect or reply; the
 summary is a scheduling signal, not semantic authority.
 
 For a direct question, explicit bot mention, or verified reply to the configured
-bot, write the requested durable effect first, preview one concise source-thread
-reply, execute it, require readback, and only then ACK:
+bot, write the requested durable effect first, preview one concise reply,
+execute it, require readback, and only then ACK. New Goal Topic inbox configs use
+`reply.placement_policy=source_context`: a top-level chat request receives a new
+top-level chat response, while an event already inside a topic receives a reply
+inside that source topic. Existing configs without the field retain the legacy
+`source_thread` policy. `reply.editorial_style=bullet_points_preferred` projects
+an operator hint for structured replies; the command preserves line breaks.
 
 ```bash
 loopx lark-inbox reply \
@@ -315,10 +325,10 @@ loopx lark-inbox reply \
   --execute
 ```
 
-The command uses an idempotency key derived from the source message and reply
-text, sends with `--reply-in-thread`, and reads the created message back through
-the same configured profile. Lifecycle reactions are removed only after that
-readback succeeds. A sent reply whose reaction cleanup fails returns
+The command uses an idempotency key derived from the source message, resolved
+placement, and reply text, then reads the created message back through the same
+configured profile. Lifecycle reactions are removed only after that readback
+succeeds. A sent reply whose reaction cleanup fails returns
 `sent_verified_cleanup_pending`; retry `lark-inbox reaction-complete` before
 acknowledging the source:
 
