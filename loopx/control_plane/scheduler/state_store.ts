@@ -544,16 +544,36 @@ async function migrateLegacySchedulerState(
   );
 }
 
+async function readLegacySchedulerState(
+  scope: SchedulerScope,
+  legacyPath: string,
+): Promise<JsonObject | null> {
+  try {
+    return normalizeSchedulerState(
+      JSON.parse(await readFile(legacyPath, "utf8")),
+      scope,
+    );
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENAMETOOLONG" || error instanceof SyntaxError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function loadSchedulerState(
   value: unknown,
 ): Promise<SchedulerStateLoadResult> {
-  const { scope, path, legacyPath } = storeRequest(value, "load");
+  const { request, scope, path, legacyPath } = storeRequest(value, "load");
   let state: JsonObject | null = null;
   try {
     state = normalizeSchedulerState(JSON.parse(await readFile(path, "utf8")), scope);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      state = await migrateLegacySchedulerState(scope, path, legacyPath);
+      state = request.migrate_legacy === false
+        ? await readLegacySchedulerState(scope, legacyPath)
+        : await migrateLegacySchedulerState(scope, path, legacyPath);
     }
   }
   return {

@@ -83,8 +83,11 @@ all hosts have the same transport or lifecycle API.
 
 The `codex-app-ssh` task body is an interactive Goal contract, not a scheduled
 heartbeat. It must fit the Codex `/goal` text limit, call `quota should-run`
-without a heartbeat turn receipt, and must not instruct the host to invoke
-`automation_update`, apply an RRULE, or synthesize `LOOPX_TURN`.
+with `--begin-turn` so the CLI mints the identity required for exact Todo
+selection, and must not instruct the host to invoke `automation_update`, apply
+an RRULE, or synthesize `LOOPX_TURN`. This CLI-owned selection receipt does not
+turn the Goal into heartbeat automation or a Turn-bound settlement flow; after
+validated writeback, the Goal still spends once with `--source visible-goal`.
 
 Visible Goal activation captures the capabilities observed when the task body
 is generated, but that initial list is not exhaustive for a long-running

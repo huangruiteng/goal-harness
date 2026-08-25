@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from loopx.bootstrap_command_pack import build_start_goal_guided_packet
+from loopx.heartbeat_prompt import build_heartbeat_prompt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GOAL_ID = "settlement-cli-fixture"
@@ -1324,6 +1325,66 @@ def test_guided_start_begins_one_turn_and_executes_returned_selection(
             "--source visible-goal" in action
             for action in cli_channel["next_cli_actions"]
         )
+    assert _heartbeat_receipt_count(runtime, turn_instance_id) == 2
+
+
+def test_visible_goal_continuation_begins_turn_and_executes_returned_selection(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_selectable_alternative(project)
+    prompt = build_heartbeat_prompt(
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        runtime_profile="codex_app_ssh_goal",
+        thin=True,
+    )
+    guard_command = prompt["quota_guard_command"].replace(
+        "$HOME/.codex/loopx/registry.global.json",
+        str(registry_path),
+    )
+
+    assert "--begin-turn" in guard_command
+    assert "--turn-instance-id" not in guard_command
+    first_rc, first = _run_generated_cli(
+        guard_command,
+        registry_path=registry_path,
+    )
+
+    assert first_rc == 0, first
+    assert first["interaction_contract"]["cli_channel"][
+        "selection_required"
+    ] is True
+    turn_instance_id = first["heartbeat_receipt"]["turn_instance_id"]
+    assert turn_instance_id.startswith("guided-start:")
+    selection = first["interaction_contract"]["cli_channel"]["selection_command"]
+    assert f"--turn-instance-id {turn_instance_id}" in selection[
+        "command_args_template"
+    ]
+    selection_command = (
+        f"{selection['route_prefix']} "
+        + selection["command_args_template"].replace(
+            "{todo_id}", ALTERNATIVE_TODO_ID
+        )
+    )
+
+    selected_rc, selected = _run_generated_cli(
+        selection_command,
+        registry_path=registry_path,
+    )
+
+    assert selected_rc == 0, selected
+    assert selected["selected_todo"]["todo_id"] == ALTERNATIVE_TODO_ID
+    assert selected["selected_todo"]["selection_binding"] == "heartbeat_receipt"
+    assert selected["heartbeat_receipt"]["settlement_identity"][
+        "turn_instance_id"
+    ] == turn_instance_id
+    cli_channel = selected["interaction_contract"]["cli_channel"]
+    assert "settlement_plan" not in cli_channel
+    assert any(
+        "--source visible-goal" in action
+        for action in cli_channel["next_cli_actions"]
+    )
     assert _heartbeat_receipt_count(runtime, turn_instance_id) == 2
 
 

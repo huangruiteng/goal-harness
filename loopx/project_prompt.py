@@ -7,7 +7,9 @@ from typing import Any
 from .bootstrap import default_goal_id
 from .control_plane.scheduler.execution_context import (
     GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
+    SchedulerRuntimeProfile,
     render_scheduler_execution_args,
+    scheduler_runtime_profile_for_execution_context,
 )
 from .control_plane.todos.contract import normalize_required_capabilities
 from .install_contract import NO_CLONE_INSTALL_URL
@@ -102,6 +104,17 @@ def render_quota_guard_command(
     begin_turn: bool = False,
     include_shared_registry: bool = True,
 ) -> str:
+    if not heartbeat_turn_receipt and agent_id and (
+        runtime_profile == SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE.value
+        or (
+            runtime_profile is None
+            and scheduler_runtime_profile_for_execution_context(
+                scheduler_execution_context
+            )
+            is SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE
+        )
+    ):
+        begin_turn = True
     if heartbeat_turn_receipt and begin_turn:
         raise ValueError(
             "quota guard cannot both begin a Turn and reuse a heartbeat Turn identity"

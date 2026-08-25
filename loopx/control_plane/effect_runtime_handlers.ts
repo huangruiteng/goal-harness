@@ -60,6 +60,7 @@ import {
 import { reduceTodoCompletionTransaction } from "./todos/completion_transaction.ts";
 import { transitionTodoNextAction } from "./todos/next_action.ts";
 import { evaluateSchedulerStateTransition } from "./scheduler/state_transition_rules.ts";
+import { evaluateSchedulerHeartbeatCommit } from "./scheduler/heartbeat_commit.ts";
 import {
   evaluateSchedulerStateOperation,
   loadSchedulerState,
@@ -278,6 +279,7 @@ export function createEffectRuntimeHandlers(
     ["scheduler.state.evaluate", evaluateSchedulerStateOperation],
     ["scheduler.state.load", loadSchedulerState],
     ["scheduler.state.write", writeSchedulerState],
+    ["scheduler.heartbeat.commit", evaluateSchedulerHeartbeatCommit],
     ["turn.delivery_route.evaluate", evaluateDeliveryRoute],
     ["work_item.action_portfolio.project", projectQuotaActionPortfolio],
     ["work_item.action_selection.qualify", qualifyActionSelection],

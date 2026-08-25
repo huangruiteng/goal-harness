@@ -429,7 +429,7 @@ def main() -> int:
         assert "--runtime-profile codex_app_ssh_goal" in (
             app_ssh_prompt["quota_guard_command"]
         ), app_ssh_prompt
-        assert "--begin-turn" not in app_ssh_prompt["quota_guard_command"], app_ssh_prompt
+        assert "--begin-turn" in app_ssh_prompt["quota_guard_command"], app_ssh_prompt
         assert "--turn-instance-id" not in app_ssh_prompt["quota_guard_command"], app_ssh_prompt
         assert "--source visible-goal" in app_ssh_prompt["quota_spend_command"], app_ssh_prompt
         spend_args = build_parser().parse_args(

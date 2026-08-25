@@ -157,6 +157,7 @@ choice is now implemented rather than hypothetical.
 | Effect runtime and Turn journal ([#3416](https://github.com/huangruiteng/loopx/pull/3416)) | Effect algebra, settlement rules, runtime lifecycle, typed Turn-journal interpretation, and durable checkpoint effects | Python settlement facades still expose fine-grained calls and duplicate DTO/enum shapes |
 | Todo, quota, and scheduler proof slices ([#3431](https://github.com/huangruiteng/loopx/pull/3431)–[#3434](https://github.com/huangruiteng/loopx/pull/3434)) | Completion fence/state, workspace causality, and scheduler transitions each have one TS rule owner | The cuts are mostly leaf-shaped; Python still composes several product transactions |
 | Scheduler durable state ([#3440](https://github.com/huangruiteng/loopx/pull/3440)) | State normalization, persistence, replay, and one coarse transition are TS-owned | The Python compatibility path still pays a cross-runtime transport tax |
+| Scheduler heartbeat/state transaction | TypeScript owns ACK and host-failure validation, state construction, failure-cache transitions, replay/CAS fencing, and atomic writes | Python remains a compact-facts transport and legacy event projection while the external host adapter and CLI still live in Python |
 | Runtime decoders ([#3443](https://github.com/huangruiteng/loopx/pull/3443)) | Stable primitive decoding has one small shared module; domain decoders remain local | No larger schema framework is justified |
 | Transaction payoff ([#3464](https://github.com/huangruiteng/loopx/pull/3464), [#3481](https://github.com/huangruiteng/loopx/pull/3481), and Todo completion) | Turn settlement, quota delivery routing, and Todo completion each cross one coarse TS boundary; the Todo transaction owns identity, replay fencing, validation planning/result reduction, continuation/recovery, and completion metadata | Python still executes explicitly external providers and materializes legacy Markdown/event results; other domains still need their own bounded cutovers |
 
@@ -235,8 +236,8 @@ one durable end-to-end adapter contract. Retain a characterization corpus only
 while an old authority remains executable or a versioned compatibility window
 requires differential proof; record its deletion trigger when introduced.
 
-Current implementation status: Stage 1, the bounded Stage 2A proofs, and three
-Stage 2B cutovers are shipped:
+Current implementation status: Stage 1, the bounded Stage 2A proofs, and the
+shipped Stage 2B cutovers are in place:
 
 - Turn settlement/commit: TypeScript owns preflight authorization,
   ordered-prefix and replay validation, provider failure classification,
@@ -254,6 +255,13 @@ Stage 2B cutovers are shipped:
   between two reductions. A source snapshot is compared after the mutation
   lock so a receipt for one declaration cannot authorize a changed Todo.
   Materialized and event-projected writes consume the same typed result.
+- Scheduler heartbeat/state: TypeScript owns ACK and host-failure validation,
+  identity-aware progression, failure-cache retention/counting, replay and CAS
+  fencing, preview reduction, and the locked atomic write. Python supplies the
+  host outcome and compact scheduler facts, then projects the typed state into
+  the legacy event shape. The remaining facade exits when the scheduler CLI and
+  host adapter call this transaction natively; until then its state preflight is
+  limited to the external-provider boundary.
 
 The Todo cutover removes the Python state-evaluation dataclass, local identity
 projection, replay helper, and public runtime handlers for those implementation

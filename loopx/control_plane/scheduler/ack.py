@@ -126,6 +126,12 @@ def build_scheduler_ack_plan(
     reset_token: str | None = None,
     identity_signature: str | None = None,
 ) -> dict[str, Any]:
+    """Compatibility admission helper for legacy callers.
+
+    The active quota facade sends compact facts to the TypeScript heartbeat
+    transaction; this helper remains only for direct compatibility imports and
+    characterization tests until the scheduler CLI moves to the native kernel.
+    """
     safe_agent_id = str(agent_id or "").strip()
     scheduler_hint, codex_app, stateful_backoff = scheduler_backoff_packet(before)
     if not safe_agent_id:
@@ -223,6 +229,11 @@ def build_codex_app_scheduler_ack_event(
     reason_summary: str | None = None,
     compact_before: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Project a legacy event for compatibility callers.
+
+    Canonical persisted scheduler state is built by the TypeScript heartbeat
+    transaction, not by this legacy projection helper.
+    """
     safe_agent_id = str(agent_id or "").strip()
     if not safe_agent_id:
         raise ValueError("quota scheduler-ack requires a scoped --agent-id")

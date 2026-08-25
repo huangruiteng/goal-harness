@@ -136,6 +136,7 @@ replay、receipt 与 settlement。这个架构选择已经落地，不再是假�
 | Effect runtime 与 Turn journal（[#3416](https://github.com/huangruiteng/loopx/pull/3416)） | Effect algebra、settlement rule、runtime lifecycle、typed Turn-journal interpretation 与 durable checkpoint effect | Python settlement facade 仍暴露细粒度调用，并重复 DTO/enum shape |
 | Todo、quota 与 scheduler 证明切片（[#3431](https://github.com/huangruiteng/loopx/pull/3431)–[#3434](https://github.com/huangruiteng/loopx/pull/3434)） | Completion fence/state、workspace causality 与 scheduler transition 各有一个 TS rule owner | 切口大多仍是 leaf-shaped；Python 继续组合多个产品 transaction |
 | Scheduler durable state（[#3440](https://github.com/huangruiteng/loopx/pull/3440)） | State normalization、persistence、replay 与一笔粗粒度 transition 由 TS 拥有 | Python compatibility path 仍承担跨 runtime transport 税 |
+| Scheduler heartbeat/state transaction | TypeScript 拥有 ACK 与 host-failure validation、state construction、failure-cache transition、replay/CAS fencing 与 atomic write | Python 只保留 compact-facts transport 与 legacy event projection；external host adapter 与 CLI 仍在 Python |
 | Runtime decoder（[#3443](https://github.com/huangruiteng/loopx/pull/3443)） | 稳定 primitive decoding 进入一个很小的共享模块；domain decoder 仍留在本地 | 没有理由建设更大的 schema framework |
 | Transaction 兑现（[#3464](https://github.com/huangruiteng/loopx/pull/3464)、[#3481](https://github.com/huangruiteng/loopx/pull/3481) 与 Todo completion） | Turn settlement、quota delivery routing 与 Todo completion 均只跨一个粗粒度 TS boundary；Todo transaction 拥有 identity、replay fence、validation planning/result reduction、continuation/recovery 与 completion metadata | Python 仍执行显式 external provider，并物化 legacy Markdown/event result；其他 domain 仍需各自的 bounded cutover |
 
@@ -205,7 +206,7 @@ implementation fixture。只有旧 authority 仍可执行，或 versioned compat
 window 仍需 differential proof 时才保留 characterization corpus；引入时必须记录
 删除触发条件。
 
-当前实现状态：Stage 1、bounded Stage 2A proof 与三笔 Stage 2B cutover 已交付：
+当前实现状态：Stage 1、bounded Stage 2A proof 与已交付的 Stage 2B cutover 已就位：
 
 - Turn settlement/commit：TypeScript 拥有 preflight authorization、ordered-prefix
   与 replay validation、provider failure classification、receipt construction、
@@ -221,6 +222,12 @@ window 仍需 differential proof 时才保留 characterization corpus；引入�
   作为显式 Python provider，位于两次 reduction 之间。取得 mutation lock 后会比较
   source snapshot，确保一份 declaration 的 receipt 不能授权已经变化的 Todo。
   Materialized 与 event-projected 写入消费同一 typed result。
+- Scheduler heartbeat/state：TypeScript 拥有 ACK 与 host-failure validation、带
+  identity 的 progression、failure-cache retention/counting、replay 与 CAS
+  fencing、preview reduction，以及锁内 atomic write。Python 提供 host outcome 与
+  compact scheduler facts，再把 typed state 投影成 legacy event shape。剩余 facade
+  会在 scheduler CLI 与 host adapter 原生调用这笔 transaction 后退出；在此之前，
+  它的 state preflight 仅限于 external-provider boundary。
 
 Todo cutover 删除了 Python state-evaluation dataclass、local identity projection、
 replay helper，以及这些 implementation leaf 的 public runtime handler。剩余 Python
