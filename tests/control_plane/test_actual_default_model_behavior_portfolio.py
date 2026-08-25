@@ -1144,6 +1144,17 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
         }
         for scenario in catalog["scenarios"]
     )
+    planning = next(
+        scenario
+        for scenario in catalog["scenarios"]
+        if scenario["scenario_id"] == "turn_planning_horizon_strategic_context"
+    )
+    assert planning["action_oracle"] == "planning_horizon_regression_gate_v0"
+    assert all(
+        "action_oracle" not in scenario
+        for scenario in catalog["scenarios"]
+        if scenario is not planning
+    )
 
 
 def test_portfolio_preflights_every_scenario_before_actor_spend(tmp_path: Path) -> None:
@@ -1299,7 +1310,7 @@ def test_portfolio_turn_actor_reads_actual_default_packet_without_semantic_echo(
     )
 
 
-def test_planning_horizon_live_scenario_requires_bounded_semantic_readback(
+def test_planning_horizon_scenario_requires_bounded_semantic_readback(
     tmp_path: Path,
 ) -> None:
     def forgetful_actor(request: Mapping[str, Any]) -> dict[str, Any]:
@@ -1328,26 +1339,61 @@ def test_planning_horizon_live_scenario_requires_bounded_semantic_readback(
     assert scenario["failure_codes"] == ["actor_result_invalid"]
 
 
-def test_planning_horizon_live_scenario_rejects_semantic_echo_without_inspection(
+@pytest.mark.parametrize(
+    ("actions", "expected_pass", "failure_codes"),
+    [
+        (
+            ("inspect", "read", "test", "writeback", "spend"),
+            True,
+            [],
+        ),
+        (
+            ("test", "writeback", "spend"),
+            False,
+            ["action_oracle:first_action_must_inspect"],
+        ),
+        (
+            ("inspect", "edit", "test", "writeback", "spend"),
+            False,
+            ["action_oracle:forbidden_action:edit"],
+        ),
+        (
+            ("inspect", "read", "writeback", "spend"),
+            False,
+            ["action_oracle:test_must_precede_settlement"],
+        ),
+        (
+            ("inspect", "test", "spend", "writeback"),
+            False,
+            ["action_oracle:settlement_suffix_mismatch"],
+        ),
+    ],
+    ids=(
+        "bounded-read",
+        "missing-inspection",
+        "premature-edit",
+        "missing-test",
+        "reversed-settlement",
+    ),
+)
+def test_planning_horizon_action_oracle_grades_semantic_stages(
     tmp_path: Path,
+    actions: tuple[str, ...],
+    expected_pass: bool,
+    failure_codes: list[str],
 ) -> None:
-    def local_only_actor(request: Mapping[str, Any]) -> dict[str, Any]:
+    def actor(request: Mapping[str, Any]) -> dict[str, Any]:
         result = _turn_actor(request)
         if request["packet"].get("planning_horizon"):
-            result["decision"]["intended_action_kinds"] = [
-                "edit",
-                "test",
-                "writeback",
-                "spend",
-            ]
+            result["decision"]["intended_action_kinds"] = list(actions)
         return result
 
     sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
         packets,
         scenario_sources=sources,
-        qualification_id="actual-default-planning-horizon-local-only-model",
-        turn_actor=local_only_actor,
+        qualification_id="actual-default-planning-horizon-action-oracle",
+        turn_actor=actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
         replan_semantic_action_actor=_replan_semantic_action_actor,
@@ -1358,14 +1404,10 @@ def test_planning_horizon_live_scenario_rejects_semantic_echo_without_inspection
         for item in result["scenarios"]
         if item["scenario_id"] == "turn_planning_horizon_strategic_context"
     )
-    assert result["qualification_passed"] is False
-    assert scenario["status"] == "failed"
-    assert scenario["failure_codes"] == [
-        "source_mismatch:intended_action_kinds"
-    ]
-    assert scenario["observed_action_kind_sequences"] == [
-        ["edit", "test", "writeback", "spend"]
-    ]
+    assert result["qualification_passed"] is expected_pass
+    assert scenario["status"] == ("passed" if expected_pass else "failed")
+    assert scenario["failure_codes"] == failure_codes
+    assert scenario["observed_action_kind_sequences"] == [list(actions)]
 
 
 def test_portfolio_real_tool_scenarios_choose_from_latest_quota_result(

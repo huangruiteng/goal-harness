@@ -33,6 +33,10 @@ from .model_behavior_qualification import (
     model_behavior_semantic_contract_from_packet,
     run_model_behavior_qualification_arm,
 )
+from .model_behavior_action_oracles import (
+    PLANNING_HORIZON_REGRESSION_GATE_ACTION_ORACLE,
+    model_behavior_action_oracle_failures,
+)
 from .onboarding_model_behavior_qualification import (
     OnboardingActualBehaviorValidationError,
     OnboardingModelBehaviorActor,
@@ -80,6 +84,7 @@ class _ScenarioSpec:
     scenario_family: str = "core_contract"
     composition_dimensions: tuple[str, ...] = ()
     semantic_contract_fields: tuple[str, ...] = ()
+    action_oracle: str | None = None
 
 
 @dataclass(frozen=True)
@@ -170,6 +175,7 @@ _SCENARIOS = (
             "selection_authority",
         ),
         semantic_contract_fields=("planning_horizon",),
+        action_oracle=PLANNING_HORIZON_REGRESSION_GATE_ACTION_ORACLE,
     ),
     _ScenarioSpec(
         "turn_human_gate",
@@ -324,6 +330,11 @@ def actual_default_model_behavior_scenario_catalog() -> dict[str, Any]:
                 "composition_dimensions": list(spec.composition_dimensions),
                 "semantic_contract_required": bool(spec.semantic_contract_fields),
                 "semantic_contract_fields": list(spec.semantic_contract_fields),
+                **(
+                    {"action_oracle": spec.action_oracle}
+                    if spec.action_oracle is not None
+                    else {}
+                ),
                 "packet_view": (
                     "production_heartbeat_tool_loop"
                     if spec.actor_kind in _TOOL_ACTOR_KINDS
@@ -881,7 +892,7 @@ def _validate_required_vision_replan_scenario(
 
 def _validate_planning_horizon_model_scenario(
     source_packet: Mapping[str, Any],
-) -> list[str]:
+) -> None:
     """Validate the fixed strategic facts and the model-facing read contract."""
 
     _validate_planning_horizon_strategic_context_scenario(source_packet)
@@ -900,7 +911,6 @@ def _validate_planning_horizon_model_scenario(
         raise ValueError(
             "planning-horizon semantic summary must preserve the typed chain"
         )
-    return ["inspect", "test", "writeback", "spend"]
 
 
 def _validate_identity_scenario_contract(
@@ -970,9 +980,7 @@ def _validate_planning_context_scenario(
     if spec.scenario_id == "turn_external_wait_fallback":
         _validate_external_wait_fallback_scenario(source_packet)
     if spec.scenario_id == "turn_planning_horizon_strategic_context":
-        contract["intended_action_kinds"] = _validate_planning_horizon_model_scenario(
-            source_packet
-        )
+        _validate_planning_horizon_model_scenario(source_packet)
     if spec.scenario_id != "turn_human_gate":
         return
     required = {
@@ -1180,6 +1188,12 @@ def _receipt_alignment(
             and receipt.get("semantic_contract_complete") is not True
         ):
             mismatches.append("semantic_contract_incomplete")
+        mismatches.extend(
+            model_behavior_action_oracle_failures(
+                spec.action_oracle,
+                [str(item) for item in receipt.get("intended_action_kinds") or []],
+            )
+        )
     else:
         mismatches = []
         if receipt.get("next_action") != spec.expected_route:
