@@ -50,7 +50,9 @@ task workspace at the returned `host-visible` alias, and an optional formal Loop
 profile at its verified absolute path. The surrounding host root, original task
 path, ambient host `/tmp`, nested host mounts, symlinked work children, and
 `/proc/1/root` escape path are absent. The helper requires unprivileged user, mount,
-and PID namespaces plus `pivot_root` and fails closed when its roots overlap.
+and PID namespaces, `pivot_root`, and `tini`. It runs `tini` as the isolated PID 1
+so long-lived workers reap orphaned command subprocesses, and fails closed when
+its roots overlap or the init resolves from a mutable task/profile/work root.
 
 ```python
 from loopx.capabilities.benchmark_toolkit.native_codex_isolation import (

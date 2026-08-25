@@ -40,6 +40,10 @@ def _namespace_mounts_supported() -> bool:
     return probe.returncode == 0
 
 
+def _native_codex_isolation_supported() -> bool:
+    return _namespace_mounts_supported() and shutil.which("tini") is not None
+
+
 def test_native_codex_isolation_rejects_overlapping_authority_roots(
     tmp_path: Path,
 ) -> None:
@@ -229,8 +233,8 @@ def test_native_codex_loopx_state_rebase_requires_complete_registry_pair(
 
 
 @pytest.mark.skipif(
-    not _namespace_mounts_supported(),
-    reason="unprivileged user/mount namespaces are unavailable",
+    not _native_codex_isolation_supported(),
+    reason="native Codex isolation prerequisites are unavailable",
 )
 def test_native_codex_isolation_exposes_only_workspace_profile_and_work_children(
     tmp_path: Path,
@@ -306,8 +310,8 @@ def test_native_codex_isolation_exposes_only_workspace_profile_and_work_children
 
 
 @pytest.mark.skipif(
-    not _namespace_mounts_supported(),
-    reason="unprivileged user/mount namespaces are unavailable",
+    not _native_codex_isolation_supported(),
+    reason="native Codex isolation prerequisites are unavailable",
 )
 def test_native_codex_isolation_hides_runner_provider_authority_from_shell_probe(
     tmp_path: Path,
@@ -358,7 +362,7 @@ def test_native_codex_isolation_hides_runner_provider_authority_from_shell_probe
         profile_root=profile_root,
     )
     isolated_env = {
-        "PATH": "/usr/bin:/bin",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
         "HOME": str(home),
         "CODEX_HOME": str(codex_home),
         "LOOPX_MODEL_PROVIDER_SENTINEL": "runner-owned-gateway-no-upstream-secret",
@@ -381,8 +385,8 @@ def test_native_codex_isolation_hides_runner_provider_authority_from_shell_probe
 
 
 @pytest.mark.skipif(
-    not _namespace_mounts_supported(),
-    reason="unprivileged user/mount namespaces are unavailable",
+    not _native_codex_isolation_supported(),
+    reason="native Codex isolation prerequisites are unavailable",
 )
 def test_native_codex_isolation_rejects_symlinked_work_children(
     tmp_path: Path,
@@ -407,3 +411,69 @@ def test_native_codex_isolation_rejects_symlinked_work_children(
     )
 
     assert completed.returncode == 64
+
+
+@pytest.mark.skipif(
+    not _native_codex_isolation_supported(),
+    reason="native Codex isolation prerequisites are unavailable",
+)
+def test_native_codex_isolation_reaps_orphaned_command_processes(
+    tmp_path: Path,
+) -> None:
+    private_root = tmp_path / "controller-private"
+    private_root.mkdir()
+    work_dir = tmp_path / "run-work"
+    work_dir.mkdir()
+    probe = textwrap.dedent(
+        """
+        import os
+        import time
+
+        child = os.fork()
+        if child == 0:
+            grandchild = os.fork()
+            if grandchild == 0:
+                time.sleep(0.05)
+                os._exit(0)
+            os._exit(0)
+        os.waitpid(child, 0)
+        time.sleep(0.5)
+
+        zombies = []
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                fields = {}
+                with open(f"/proc/{entry}/status", encoding="utf-8") as handle:
+                    for line in handle:
+                        if ":" in line:
+                            key, value = line.split(":", 1)
+                            fields[key] = value.strip()
+                if (
+                    fields.get("PPid") == "1"
+                    and fields.get("State", "").startswith("Z")
+                ):
+                    zombies.append(entry)
+            except (FileNotFoundError, ProcessLookupError, PermissionError):
+                pass
+        print(len(zombies))
+        """
+    )
+    envelope = build_native_codex_isolation_envelope(
+        executable="python3",
+        process_args=["-c", probe],
+        work_dir=work_dir,
+        private_root=private_root,
+    )
+
+    completed = subprocess.run(
+        envelope.process_command,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "0\n"

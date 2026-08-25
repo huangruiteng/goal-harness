@@ -50,7 +50,8 @@ work_dir=$3
 profile_root=$4
 executable=$5
 setpriv_bin=$6
-shift 6
+init_bin=$7
+shift 7
 
 mount --make-rprivate /
 sandbox_root="$work_dir/.sandbox-root"
@@ -125,23 +126,29 @@ if [ -n "$profile_root" ]; then
     mount --bind "$profile_root" "$sandbox_root$profile_root"
 fi
 
-# A test launcher or alternate Codex binary may live outside the shared system
-# runtime, work directory, or formal profile.  Re-expose only the resolved file.
-bind_executable=1
-case "$executable" in
-    /usr/*|/bin/*|/sbin/*|/lib/*|/lib64/*|"$work_dir"/*) bind_executable=0 ;;
-esac
-if [ -n "$profile_root" ]; then
-    case "$executable" in
-        "$profile_root"/*) bind_executable=0 ;;
+# A test launcher, alternate Codex binary, or init may live outside the shared
+# system runtime, work directory, or formal profile.  Re-expose only each
+# resolved file.
+bind_runtime_file() {
+    runtime_file=$1
+    bind_file=1
+    case "$runtime_file" in
+        /usr/*|/bin/*|/sbin/*|/lib/*|/lib64/*|"$work_dir"/*) bind_file=0 ;;
     esac
-fi
-if [ "$bind_executable" = 1 ]; then
-    mkdir -p "$sandbox_root$(dirname "$executable")"
-    touch "$sandbox_root$executable"
-    mount --bind "$executable" "$sandbox_root$executable"
-    mount -o remount,bind,ro "$sandbox_root$executable"
-fi
+    if [ -n "$profile_root" ]; then
+        case "$runtime_file" in
+            "$profile_root"/*) bind_file=0 ;;
+        esac
+    fi
+    if [ "$bind_file" = 1 ]; then
+        mkdir -p "$sandbox_root$(dirname "$runtime_file")"
+        touch "$sandbox_root$runtime_file"
+        mount --bind "$runtime_file" "$sandbox_root$runtime_file"
+        mount -o remount,bind,ro "$sandbox_root$runtime_file"
+    fi
+}
+bind_runtime_file "$executable"
+bind_runtime_file "$init_bin"
 
 mkdir -p "$sandbox_root/.old-root"
 cd "$sandbox_root"
@@ -157,7 +164,9 @@ cd "$work_dir"
 
 # Capabilities exist only inside the fresh user namespace so Codex can install
 # its nested workspace/network sandbox.  They cannot reach the host namespace.
-exec "$setpriv_bin" --no-new-privs "$executable" "$@"
+# Keep a real init as PID 1 so orphaned command subprocesses are reaped during
+# long-running Goal workers instead of accumulating as defunct processes.
+exec "$init_bin" -s -- "$setpriv_bin" --no-new-privs "$executable" "$@"
 """
 
 
@@ -456,6 +465,7 @@ def build_native_codex_isolation_envelope(
     unshare = _resolve_executable("unshare", error="native_codex_unshare_missing")
     setpriv = _resolve_executable("setpriv", error="native_codex_setpriv_missing")
     shell = _resolve_executable("sh", error="native_codex_shell_missing")
+    init = _resolve_executable("tini", error="native_codex_init_missing")
     resolved_executable = _resolve_executable(
         executable, error="native_codex_executable_missing"
     )
@@ -470,6 +480,15 @@ def build_native_codex_isolation_envelope(
         raise NativeCodexIsolationError(
             "native_codex_executable_inside_workspace_source"
         )
+    if init == resolved_private_root or resolved_private_root in init.parents:
+        raise NativeCodexIsolationError("native_codex_init_inside_private_root")
+    mutable_roots = [resolved_work_dir]
+    if resolved_workspace is not None:
+        mutable_roots.append(resolved_workspace)
+    if resolved_profile is not None:
+        mutable_roots.append(resolved_profile)
+    if any(init == root or root in init.parents for root in mutable_roots):
+        raise NativeCodexIsolationError("native_codex_init_inside_mutable_root")
     if workspace_alias is not None:
         workspace_alias.mkdir(parents=True, exist_ok=True)
 
@@ -491,6 +510,7 @@ def build_native_codex_isolation_envelope(
         profile_raw,
         str(resolved_executable),
         str(setpriv),
+        str(init),
         *(str(value) for value in process_args),
     )
     return NativeCodexIsolationEnvelope(
