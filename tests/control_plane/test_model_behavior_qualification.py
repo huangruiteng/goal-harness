@@ -579,8 +579,31 @@ def test_semantic_contract_preserves_bounded_planning_horizon_relations() -> Non
         ],
         "complete": False,
         "truncated": True,
+        "cold_path_available": True,
+    }
+
+
+def test_semantic_contract_rejects_a_dangling_planning_horizon_cold_path() -> None:
+    full = _full_packet()
+    full["planning_horizon"] = {
+        "schema_version": "quota_planning_horizon_v0",
+        "selected_todo_id": "todo_fixture001",
+        "work_items": [{"todo_id": "todo_fixture001"}],
+        "relations": [],
+        "completeness": {"complete": False, "omitted_candidate_todo_count": 1},
         "detail_refs": {"agent_todos": "quota should-run --include-detail agent-todos"},
     }
+    candidate = build_turn_envelope(full)
+    candidate.pop("detail_ref")
+
+    assert model_behavior_semantic_contract_from_packet(
+        full,
+        arm="full_packet",
+    )["planning_horizon"]["cold_path_available"] is True
+    assert model_behavior_semantic_contract_from_packet(
+        candidate,
+        arm="candidate_packet",
+    )["planning_horizon"]["cold_path_available"] is False
 
 
 def test_same_wrong_semantics_in_both_arms_fail_source_alignment() -> None:

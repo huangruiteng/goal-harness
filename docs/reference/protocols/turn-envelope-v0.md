@@ -49,6 +49,12 @@ budget, still fails closed.
 Its `selection_contract` points back to `selected_todo` and `action_portfolio`,
 and `horizon_changes_selection=false`. Effect Program transports this
 observation; the TypeScript work-item reducer owns its ordering and bounds.
+The quota projection keeps the horizon's typed `detail_refs`. TurnEnvelope does
+not copy those commands a second time: it emits
+`action.planning_horizon.detail_refs_ref="$.detail_ref"`, and the existing
+top-level cold path owns the full-decision, Todo, and status reads. This
+transport compaction is covered by the same action signature and does not
+change horizon completeness or selection authority.
 See [`quota_planning_horizon_v0`](quota-planning-horizon-v0.md).
 
 For `quota_action_portfolio_v2`, the envelope carries the recommendation and

@@ -7,6 +7,7 @@ from hashlib import sha256
 from typing import Any, Protocol
 
 from ..quota.turn_envelope import (
+    PLANNING_HORIZON_DETAIL_REFS_REF,
     TURN_ENVELOPE_SCHEMA_VERSION,
     quota_action_signature_document,
     turn_envelope_action_signature_document,
@@ -461,6 +462,39 @@ def model_behavior_semantic_contract_from_packet(
             )
         )
     )
+    if arm == "full_packet":
+        source_horizon = packet.get("planning_horizon")
+        source_detail_refs = (
+            source_horizon.get("detail_refs")
+            if isinstance(source_horizon, Mapping)
+            else None
+        )
+        horizon_cold_path_available = bool(
+            isinstance(source_detail_refs, Mapping) and source_detail_refs
+        )
+    else:
+        source_action = packet.get("action")
+        source_horizon = (
+            source_action.get("planning_horizon")
+            if isinstance(source_action, Mapping)
+            else None
+        )
+        source_detail_refs = (
+            source_horizon.get("detail_refs")
+            if isinstance(source_horizon, Mapping)
+            else None
+        )
+        detail_ref = packet.get("detail_ref")
+        horizon_cold_path_available = bool(
+            (isinstance(source_detail_refs, Mapping) and source_detail_refs)
+            or (
+                isinstance(source_horizon, Mapping)
+                and source_horizon.get("detail_refs_ref")
+                == PLANNING_HORIZON_DETAIL_REFS_REF
+                and isinstance(detail_ref, Mapping)
+                and detail_ref
+            )
+        )
     return {
         "concrete_user_question": user_actions[0] if user_actions else None,
         "required_reads": list(signature.get("required_reads") or []),
@@ -505,7 +539,7 @@ def model_behavior_semantic_contract_from_packet(
             "relations": normalized_relations,
             "complete": horizon_complete,
             "truncated": horizon_truncated,
-            "detail_refs": dict(planning_horizon.get("detail_refs") or {}),
+            "cold_path_available": horizon_cold_path_available,
         },
         "actionable_warnings": list(capsule.get("actionable_warning_refs") or []),
     }

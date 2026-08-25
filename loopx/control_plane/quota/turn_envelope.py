@@ -32,6 +32,7 @@ ACTION_SIGNATURE_COVERAGE_V1 = "turn_envelope_action_dimensions_v1"
 ACTION_SIGNATURE_COVERAGE_V2 = "turn_envelope_action_dimensions_v2"
 ACTION_SIGNATURE_COVERAGE_V3 = "turn_envelope_action_dimensions_v3"
 ACTION_SIGNATURE_COVERAGE = ACTION_SIGNATURE_COVERAGE_V0
+PLANNING_HORIZON_DETAIL_REFS_REF = "$.detail_ref"
 ACTIONABLE_WARNING_FIELDS = (
     "state_projection_gap",
     "boundary_projection_gap",
@@ -793,6 +794,24 @@ def _action_projection(
     return projection
 
 
+def _turn_action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove cold-path references already owned by the Turn envelope."""
+
+    projection = _action_projection(payload)
+    action = _mapping(projection.get("action"))
+    planning_horizon = action.get("planning_horizon")
+    if not isinstance(planning_horizon, Mapping) or not isinstance(
+        planning_horizon.get("detail_refs"), Mapping
+    ):
+        return projection
+    compact_horizon = dict(planning_horizon)
+    compact_horizon.pop("detail_refs", None)
+    compact_horizon["detail_refs_ref"] = PLANNING_HORIZON_DETAIL_REFS_REF
+    action["planning_horizon"] = compact_horizon
+    projection["action"] = action
+    return projection
+
+
 def _action_signature_coverage(
     envelope: Mapping[str, Any], response_plan: Any
 ) -> str:
@@ -837,7 +856,10 @@ def turn_envelope_action_signature_document(envelope: Mapping[str, Any]) -> dict
 
 
 def quota_action_signature_document(payload: Mapping[str, Any]) -> dict[str, Any]:
-    return turn_envelope_action_signature_document(_action_projection(payload))
+    # Sign the canonical Turn transport shape. The full quota packet retains
+    # its typed planning-horizon cold paths, while the Turn envelope points at
+    # its existing top-level detail_ref instead of duplicating those commands.
+    return turn_envelope_action_signature_document(_turn_action_projection(payload))
 
 
 def _cold_path(
@@ -887,6 +909,7 @@ def build_turn_envelope(
     agent_identity = _mapping(payload.get("agent_identity"))
     agent_id = str(agent_identity.get("agent_id") or "").strip() or None
 
+    action_projection = _turn_action_projection(payload)
     envelope: dict[str, Any] = {
         "ok": bool(payload.get("ok")),
         "schema_version": TURN_ENVELOPE_SCHEMA_VERSION,
@@ -897,7 +920,7 @@ def build_turn_envelope(
         "reason": _text(payload.get("reason"), limit=360),
         "action_required": bool(payload.get("action_required")),
         "open_count": int(payload.get("open_count") or 0),
-        **_action_projection(payload),
+        **action_projection,
         "detail_ref": _cold_path(payload, agent_id, scheduler_execution_context),
     }
 

@@ -7,7 +7,9 @@ from loopx.control_plane.quota.cli_projection import (
 from loopx.control_plane.quota.should_run import build_quota_should_run
 from loopx.control_plane.quota.turn_envelope import (
     ACTION_SIGNATURE_COVERAGE_V3,
+    PLANNING_HORIZON_DETAIL_REFS_REF,
     build_turn_envelope,
+    quota_action_signature_document,
 )
 from loopx.control_plane.testing.action_portfolio_scenarios import (
     ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_AGENT_ID,
@@ -61,8 +63,17 @@ def test_default_quota_and_turn_envelope_expose_one_bounded_planning_horizon() -
     assert effect_turn.observation.planning_horizon == horizon
 
     envelope = build_turn_envelope(packet)
-    assert envelope["action"]["planning_horizon"] == horizon
+    envelope_horizon = envelope["action"]["planning_horizon"]
+    assert "detail_refs" not in envelope_horizon
+    assert envelope_horizon["detail_refs_ref"] == PLANNING_HORIZON_DETAIL_REFS_REF
+    assert envelope["detail_ref"]["todo_detail"].endswith(
+        f"--goal-id {GOAL_ID}"
+    )
+    assert quota_action_signature_document(packet)["action"][
+        "planning_horizon"
+    ] == envelope_horizon
     assert envelope["action_signature"]["coverage"] == (ACTION_SIGNATURE_COVERAGE_V3)
+    assert envelope["action_signature"]["matches"] is True
     assert envelope["compaction"]["within_budget"] is True
     assert envelope["compaction"]["envelope_json_bytes"] <= 8_192
 

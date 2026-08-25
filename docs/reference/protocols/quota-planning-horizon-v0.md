@@ -101,6 +101,12 @@ it must not treat the five visible items as the entire Goal.
 `source_context_todo_count` counts current open plus deferred Todos; completed
 history is intentionally outside this planning view.
 
+When the same observation is nested in `loopx_turn_envelope_v0`, the transport
+may replace the repeated `detail_refs` object with
+`detail_refs_ref="$.detail_ref"`. The Turn envelope's top-level cold path then
+owns those reads. This is transport compaction only: it does not change the
+TypeScript reducer output, completeness accounting, or action authority.
+
 ## Relation Semantics
 
 The v0 relation kinds are:

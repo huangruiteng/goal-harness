@@ -175,7 +175,10 @@ def _semantic_contract_field_rules(*, arm: str) -> dict[str, str]:
             "planning_horizon": """summarize packet.action.planning_horizon. Always return
   exactly present, selected_todo_id, visible_todo_ids, attention_todo_ids,
   relation_kinds, relation_count, relations, complete, truncated, and
-  detail_refs. When absent, use false/null/empty collections. When present,
+  cold_path_available. When absent, use false/null/empty collections. Set
+  cold_path_available=true only when the horizon contains non-empty inline
+  detail_refs, or detail_refs_ref is exactly $.detail_ref and the top-level
+  packet.detail_ref object is non-empty. When present,
   preserve work-item and relation order; each relation contains exactly
   from_todo_id, relation, to_ref, and enforcement. Set truncated when
   completeness.complete is false or an omission/truncation counter is positive.
@@ -215,7 +218,9 @@ def _semantic_contract_field_rules(*, arm: str) -> dict[str, str]:
   vision_continuation_audit. Use {} when absent.""",
             "planning_horizon": """summarize packet.planning_horizon with the same exact
   fields and ordering rules as the candidate packet. When absent, use
-  false/null/empty collections. A present horizon requires the model to begin
+  false/null/empty collections. Set cold_path_available=true only when
+  packet.planning_horizon.detail_refs is a non-empty object. A present horizon
+  requires the model to begin
   intended_action_kinds with inspect before continuing selected work; the
   horizon remains read-only and never changes selected_todo_id.""",
             "actionable_warnings": """return, in packet order, only names of non-empty fields
@@ -275,7 +280,7 @@ _SEMANTIC_CONTRACT_EXAMPLES: dict[str, Any] = {
         "relations": [],
         "complete": None,
         "truncated": False,
-        "detail_refs": {},
+        "cold_path_available": False,
     },
     "actionable_warnings": [],
 }

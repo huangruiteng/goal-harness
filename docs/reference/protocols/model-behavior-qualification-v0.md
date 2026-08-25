@@ -79,7 +79,7 @@ planning-horizon strategic-context scenario therefore asks the model only for
 `planning_horizon`, instead of coupling that proof to unrelated peer or
 scheduler reconstruction. The horizon summary retains presence,
 selected/visible/attention Todo ids, ordered typed relations,
-completeness/truncation, and cold-path refs. The core
+completeness/truncation, and whether a valid cold path is available. The core
 derives the expected contract independently from each arm's packet and compares
 the model result with that source before comparing arms. Two arms that repeat
 the same wrong or incomplete interpretation therefore fail source alignment.
