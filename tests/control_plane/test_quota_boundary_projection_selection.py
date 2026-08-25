@@ -82,6 +82,88 @@ def test_workspace_and_boundary_guards_check_the_selected_todo_only(
     assert "boundary_projection_gap" not in packet
 
 
+def test_workspace_guard_keeps_alternative_todo_selection_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    foreign_primary = quota_todo_item(
+        todo_id="todo_foreign_primary001",
+        index=1,
+        priority="P0",
+        title="Implement the primary repository change.",
+        claimed_by=AGENT_ID,
+        required_write_scopes=["src/**"],
+    )
+    matching_alternative = quota_todo_item(
+        todo_id="todo_matching_alternative001",
+        index=2,
+        priority="P1",
+        title="Implement the current repository change.",
+        claimed_by=AGENT_ID,
+        required_write_scopes=["src/**"],
+    )
+    status = quota_status_payload(
+        goal_id=GOAL_ID,
+        status="active",
+        agent_todo_items=[foreign_primary, matching_alternative],
+        recommended_action=foreign_primary["text"],
+        coordination={
+            "agent_model": "peer_v1",
+            "registered_agents": [AGENT_ID, "codex-peer"],
+            "write_scope": ["src/**"],
+        },
+        claim_scope_agent_id=AGENT_ID,
+    )
+
+    def _guard_foreign_primary_only(
+        *args: object,
+        selected_todo: dict[str, Any] | None = None,
+        **kwargs: object,
+    ) -> dict[str, Any] | None:
+        if (selected_todo or {}).get("todo_id") == foreign_primary["todo_id"]:
+            return {
+                "schema_version": "agent_workspace_guard_v1",
+                "reason": "selected Todo belongs to another repository",
+                "required_action": "select a Todo matching the current worktree",
+            }
+        return None
+
+    monkeypatch.setattr(
+        "loopx.control_plane.quota.should_run.build_agent_workspace_guard",
+        _guard_foreign_primary_only,
+    )
+
+    guarded = build_quota_should_run(
+        status,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        turn_instance_id="turn-workspace-selection",
+    )
+
+    assert guarded["decision"] == "workspace_guard"
+    assert guarded["normal_delivery_allowed"] is False
+    assert guarded["action_portfolio"]["selection_policy"][
+        "requires_explicit_turn_binding"
+    ] is True
+    assert guarded["interaction_contract"]["agent_channel"][
+        "selection_required"
+    ] is True
+
+    selected = build_quota_should_run(
+        status,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        requested_action_todo_id=matching_alternative["todo_id"],
+        turn_instance_id="turn-workspace-selection",
+    )
+
+    assert selected["normal_delivery_allowed"] is True
+    assert selected["selected_todo"]["todo_id"] == matching_alternative["todo_id"]
+    assert selected["selected_todo"]["selection_binding"] == (
+        "pending_action_selection"
+    )
+    assert "workspace_guard" not in selected
+
+
 def test_boundary_projection_preserves_a_guarded_continuation_selection() -> None:
     queue_head = quota_todo_item(
         todo_id="todo_research001",

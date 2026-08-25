@@ -706,9 +706,14 @@ def _planning_projections(
     *,
     include_detail: bool,
 ) -> dict[str, Any]:
+    selection_available = route.normal_delivery_allowed or bool(
+        route.workspace_repair_allowed
+        and prepared.workspace_guard
+        and prepared.normal_delivery_allowed
+    )
     projection_enabled = bool(
         route.should_run
-        and route.normal_delivery_allowed
+        and selection_available
         and prepared.receipt_bound_todo_id is None
         and prepared.requested_action_todo_id is None
         and not route.receipt_bound_replan_decision
