@@ -129,6 +129,25 @@ def test_lease_epoch_migrates_legacy_records_and_rejects_corruption() -> None:
         assert error.value.code == "corrupt_lease"
 
 
+def test_bool_disguised_lease_integers_fail_closed() -> None:
+    """bool is an int subclass: a JSON ``true`` must not become epoch/version/
+    TTL ``1`` silently.  The shared Stage 2 head codec already rejects bool
+    (head._is_count); the local record codec is the migration source for
+    ``last_lease_epoch`` seeding, so the same typed corrupt_lease applies
+    before any local-to-shared migration."""
+
+    for raw in (True, False):
+        with pytest.raises(TaskLeaseError) as error:
+            task_lease.lease_epoch({"lease_epoch": raw})
+        assert error.value.code == "corrupt_lease"
+        with pytest.raises(TaskLeaseError) as error:
+            task_lease.lease_version({"version": raw})
+        assert error.value.code == "corrupt_lease"
+        with pytest.raises(TaskLeaseError) as error:
+            task_lease.lease_acquire_ttl_seconds({"acquire_ttl_seconds": raw})
+        assert error.value.code == "corrupt_lease"
+
+
 def test_task_lease_lifecycle_preserves_idempotency_and_versions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

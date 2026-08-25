@@ -69,6 +69,13 @@ def lease_epoch(lease: dict[str, Any] | None) -> int:
     if raw_epoch is None:
         # A pre-lease_epoch record is the first visible generation.
         return 1
+    if isinstance(raw_epoch, bool):
+        # bool is an int subclass: JSON true must not become epoch 1.
+        raise TaskLeaseError(
+            "lease epoch must be a positive integer",
+            code="corrupt_lease",
+            payload={"lease_epoch": raw_epoch},
+        )
     try:
         epoch = int(raw_epoch)
     except (TypeError, ValueError) as exc:
@@ -92,6 +99,12 @@ def lease_version(lease: dict[str, Any] | None) -> int:
     raw_version = (lease or {}).get("version")
     if raw_version is None:
         return 0
+    if isinstance(raw_version, bool):
+        raise TaskLeaseError(
+            "lease version must be a non-negative integer",
+            code="corrupt_lease",
+            payload={"version": raw_version},
+        )
     try:
         version = int(raw_version)
     except (TypeError, ValueError) as exc:
@@ -115,6 +128,12 @@ def lease_acquire_ttl_seconds(lease: dict[str, Any] | None) -> int | None:
     raw_ttl = (lease or {}).get("acquire_ttl_seconds")
     if raw_ttl is None:
         return None
+    if isinstance(raw_ttl, bool):
+        raise TaskLeaseError(
+            "lease acquire_ttl_seconds must be an integer",
+            code="corrupt_lease",
+            payload={"acquire_ttl_seconds": raw_ttl},
+        )
     try:
         return int(raw_ttl)
     except (TypeError, ValueError) as exc:
@@ -159,6 +178,14 @@ def require_expected_version(expected_version: int | None, *, action: str) -> in
             f"task lease {action} requires the current lease version",
             code="version_required",
             payload={"action": action},
+        )
+    if isinstance(expected_version, bool):
+        # bool is an int subclass; JSON true from a tool argument must not
+        # silently become expected version 1.
+        raise TaskLeaseError(
+            f"task lease {action} requires an integer lease version",
+            code="version_required",
+            payload={"action": action, "expected_version": expected_version},
         )
     return int(expected_version)
 
