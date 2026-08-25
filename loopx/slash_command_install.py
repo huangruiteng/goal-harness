@@ -160,6 +160,17 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
                 "Identify the exact current host surface (codex-app, codex-app-ssh, codex-ide-plugin, codex-cli-tui, opencode, opencode2, traex-cli, pi, gemini-cli, cursor-agent, zcode, agy, deepseek-harness, or ark-managed-agent).",
+                (
+                    "Before generic Goal routing, honor an explicit Auto Research product "
+                    "request. If the visible arguments explicitly request using or starting "
+                    "`Auto Research`, or explicitly invoke the `auto-research` command, pass "
+                    "the complete visible request unchanged as one shell-escaped argument to "
+                    f'`{cli_bin} auto-research start "<complete visible $ARGUMENTS>" '
+                    "--execute` and follow that command's launcher or gate output. Do not run "
+                    "`start-goal` first, and do not infer this route from generic words such "
+                    "as research, wish, or a PR URL alone. For example, `使用 Auto Research，"
+                    "许愿……` is an explicit Auto Research request and must take this route."
+                ),
                 _loopx_start_goal_arguments_instruction(
                     cli_bin=cli_bin,
                     host_surface=None,
@@ -326,7 +337,7 @@ def materialize_loopx_entry_skill(
             "This entry skill is installed for the exact current host "
             f"`{host_surface}`; do not infer or substitute another host surface."
         )
-        instructions[2] = _loopx_start_goal_arguments_instruction(
+        instructions[3] = _loopx_start_goal_arguments_instruction(
             cli_bin=cli_bin,
             host_surface=host_surface,
         )

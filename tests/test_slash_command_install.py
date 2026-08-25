@@ -53,6 +53,21 @@ def test_host_materialization_installs_generated_loopx_entry_skill(
     assert "`ordered_steps` and `goal_start_contract` as authoritative" in skill_text
     assert "surface the exact pasteable gate" in skill_text
     assert "follow its exact CLI `interaction_contract` or quota command first" in skill_text
+    explicit_auto_research = (
+        "If the visible arguments explicitly request using or starting "
+        "`Auto Research`, or explicitly invoke the `auto-research` command"
+    )
+    assert explicit_auto_research in skill_text
+    assert (
+        '`loopx auto-research start "<complete visible $ARGUMENTS>" --execute`'
+        in skill_text
+    )
+    assert "Do not run `start-goal` first" in skill_text
+    assert "research, wish, or a PR URL alone" in skill_text
+    assert "`使用 Auto Research，许愿……` is an explicit Auto Research request" in skill_text
+    assert skill_text.index(explicit_auto_research) < skill_text.index(
+        "start-goal --guided"
+    )
     assert "reuse the packet's verified thread binding" not in skill_text
     assert "capability show <capability-id> --format json" not in skill_text
     assert "Chat/model summaries are not durable state" not in skill_text
@@ -82,6 +97,14 @@ def test_host_materialization_can_bind_exact_managed_agent_surface(
     assert "`ordered_steps` and `goal_start_contract` as authoritative" in skill_text
     assert "never infer a route" in skill_text
     assert "follow its exact CLI `interaction_contract` or quota command first" in skill_text
+    assert (
+        "If the visible arguments explicitly request using or starting "
+        "`Auto Research`, or explicitly invoke the `auto-research` command"
+    ) in skill_text
+    assert (
+        '`loopx auto-research start "<complete visible $ARGUMENTS>" --execute`'
+        in skill_text
+    )
     assert "current Todo evidence and the next executable Todo" not in skill_text
     assert "generic Todos remain scheduling records" not in skill_text
 
