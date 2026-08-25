@@ -74,18 +74,23 @@ aggregate's `authority_revision` and from each todo's lease epoch; none of these
 three version domains is derived from another.
 
 The storage provider deterministically serializes and stores the opaque
-aggregate and returns CAS outcomes.
-`CoordinationAuthority` remains responsible for request validation, authority
-revision, claim/lease transitions, request-digest binding, and the original
-domain receipt. The provider must not inspect an operation receipt or invent
+aggregate and returns CAS outcomes. The production
+`loopx.control_plane.coordination` modules (`head` codec plus the
+`CoordinationAuthorityExecutor`) are responsible for request validation,
+authority revision, claim/lease transitions, request-digest binding, and the
+original domain receipt; this directory no longer carries a second reference
+authority. The provider must not inspect an operation receipt or invent
 lease, gate, quota, or scheduling decisions.
 
 ## Files
 
 - `provider.py`: `NoKVCoordinationProvider`, which maps an opaque per-goal
-  aggregate to NoKV path generation CAS, plus `CoordinationAuthority`, which
-  constructs the aggregate and its receipt index.
-- `probes.py`: deterministic contract regressions. Only the checks in the
+  aggregate to NoKV path generation CAS. It serializes through the
+  production canonical head codec, so the adapter cannot fork the
+  digest/parity basis.
+- `probes.py`: deterministic contract regressions driven by the production
+  executor and head codec; every claim/CAS probe round-trips its persisted
+  head through the production `validated_head`. Only the checks in the
   [evidence note](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0-evidence.zh-CN.md)
   are merge evidence for the revised receipt contract.
 
@@ -98,11 +103,18 @@ The provider mapping is pinned to NoKV
 publication `operation_id` and `artifact_revision_id` inputs; `read` and
 `stat` return the path `generation` the adapter treats as
 `provider_generation`. Since NoKV 0.11.0 the SDK raises `FileNotFoundError`
-for a missing path and `FileExistsError` for a create-only collision (earlier
-SDKs raised `RuntimeError` for both); the adapter classifies both generations
-by exception class first and by message token second, and
-`contract.nokv_adapter_exception_mapping` pins that classification offline
-with a fake client that raises the 0.11.0 exception classes.
+for a missing path and `FileExistsError` for a create-only collision; every
+other client failure is a `RuntimeError`. The adapter classifies by
+exception class only: `FileNotFoundError` is the one missing signal, and any
+other client failure on a read path raises the typed
+`ProviderUnavailableError` instead of masquerading as an uninitialized goal
+or escaping as a bare `RuntimeError`. Error prose is never a channel - real
+non-missing failures carry messages such as `invalid root route: root
+placement does not exist` - and pre-0.11 SDKs, which signalled missing with
+such prose, cannot route the post-#465 control plane and are outside the
+pinned baseline. `contract.nokv_adapter_exception_mapping` pins the
+classification offline with fake clients that raise the 0.11.0 exception
+classes and the real outage message shapes.
 
 The mapping was exercised once by hand against a live NoKV stack at that
 pin (etcd, an S3-compatible object store, `nokv serve`, and `nokv-python`

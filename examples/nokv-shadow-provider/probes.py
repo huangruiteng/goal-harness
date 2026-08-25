@@ -1,14 +1,21 @@
 """Deterministic probes for the coordination authority proof.
 
-Run ``python probes.py contract`` without NoKV or external services.  The
-claim/CAS probes do not qualify NoKV restart, recovery, GC, HA, or a live
-deployment.  The durable-completion probes are the read-side comparison
-registered by RFC shared-goal-authority-state-provider-v0 (later runtime
-qualification slice): they prove the provider byte-CAS can hold and read back
-a post-completion head whose durable records project to the same typed
-continuation outcomes (``successor | no_followup | active_goal``, fail-closed
-on contradiction/dangling) as the LoopX projection seam.  They do not
-implement or qualify the atomic ``complete_todo_with_successor`` write side.
+Run ``python probes.py contract`` without NoKV or external services.  Every
+claim/CAS probe drives the production Stage 2 modules
+(``loopx.control_plane.coordination.head`` and ``.executor``) - there is no
+second reference authority - and finishes by round-tripping its persisted
+head through the production ``validated_head``, so a probe that passes is
+evidence about the exact code the runtime ships.  The claim/CAS probes do
+not qualify NoKV restart, recovery, GC, HA, or a live deployment.  The
+durable-completion probes are the read-side comparison registered by RFC
+shared-goal-authority-state-provider-v0 (later runtime qualification slice):
+they prove the provider byte-CAS can hold and read back a post-completion
+head whose durable records project to the same typed continuation outcomes
+(``successor | no_followup | active_goal``, fail-closed on
+contradiction/dangling) as the LoopX projection seam.  Because completion is
+a later slice, those evolved heads deliberately carry fields outside the v0
+closed set and are not v0-validated.  They do not implement or qualify the
+atomic ``complete_todo_with_successor`` write side.
 """
 
 from __future__ import annotations
@@ -28,6 +35,15 @@ sys.path.insert(
     ),
 )
 
+from loopx.control_plane.coordination.executor import (  # noqa: E402
+    CoordinationAuthorityExecutor,
+    EnvelopeError,
+    sample_claim_envelope,
+)
+from loopx.control_plane.coordination.head import (  # noqa: E402
+    bootstrap_head,
+    validated_head,
+)
 from loopx.control_plane.todos.completion_state import (  # noqa: E402
     completion_continuation_for_write,
 )
@@ -36,10 +52,9 @@ from loopx.control_plane.todos.durable_completion import (  # noqa: E402
 )
 
 from provider import (  # noqa: E402
-    CoordinationAuthority,
     NoKVCoordinationProvider,
-    bootstrap_aggregate,
-    sample_envelope,
+    ProviderProtocolError,
+    ProviderUnavailableError,
 )
 
 
@@ -141,10 +156,6 @@ class DeterministicProvider:
             return {"result": "applied", "provider_generation": generation}
 
 
-def fixed_clock(value: float):
-    return lambda: value
-
-
 def initial_todo(
     allowed_agents=None,
     dependencies_satisfied: bool = True,
@@ -170,14 +181,11 @@ def initial_todo(
 
 
 def bootstrap(provider, goal_id: str, todo_ids) -> int:
-    head = bootstrap_aggregate(
+    head = bootstrap_head(
         goal_id,
         {todo_id: initial_todo() for todo_id in todo_ids},
     )
-    result = provider.compare_and_put(
-        0,
-        head,
-    )
+    result = provider.compare_and_put(0, head)
     assert result["result"] == "applied", result
     return result["provider_generation"]
 
@@ -187,6 +195,17 @@ def load_head(provider, goal_id: str):
     return provider.load()
 
 
+def authority(provider, goal_id: str, when: float) -> CoordinationAuthorityExecutor:
+    return CoordinationAuthorityExecutor(provider, goal_id=goal_id, now=lambda: when)
+
+
+def assert_production_valid(provider, goal_id: str) -> None:
+    """The persisted probe artifact must pass the production validator."""
+
+    head, _generation = provider.load()
+    validated_head(head, goal_id=goal_id)
+
+
 def assert_exact_replay(first: dict, replay: dict) -> None:
     assert first["result"] == "applied", first
     assert replay["result"] == "already_applied", replay
@@ -194,17 +213,33 @@ def assert_exact_replay(first: dict, replay: dict) -> None:
 
 
 def claim(operation_id: str, goal_id: str, todo_id: str, **values) -> dict:
-    return sample_envelope(
-        operation_id=operation_id,
+    expected_preconditions = values.pop("expected_preconditions", None)
+    if expected_preconditions is None:
+        expected_preconditions = {
+            "authorization_projection_revision": 3,
+            "authorization_projection_digest": "sha256:bootstrap-auth",
+            "dependency_revision": 12,
+            "gate_revision": 5,
+        }
+    envelope = sample_claim_envelope(
         goal_id=goal_id,
+        operation_id=operation_id,
+        agent_id=values.pop("agent_id", "agent-a"),
+        device_id=values.pop("device_id", "dev-laptop"),
         todo_id=todo_id,
-        **values,
+        expected_todo_revision=values.pop("expected_todo_revision", 7),
+        expected_preconditions=expected_preconditions,
+        lease_ttl_seconds=values.pop("lease_ttl_seconds", 600),
+        transport=values.pop("transport", None),
     )
+    if values:
+        raise TypeError(f"unknown claim kwargs: {sorted(values)}")
+    return envelope
 
 
 def assert_bootstrap_rejected(todo: dict, message: str | None = None) -> None:
     try:
-        bootstrap_aggregate("goal-private", {"todo-private": todo})
+        bootstrap_head("goal-private", {"todo-private": todo})
     except ValueError as exc:
         if message is not None:
             assert message in str(exc)
@@ -214,14 +249,13 @@ def assert_bootstrap_rejected(todo: dict, message: str | None = None) -> None:
 
 def probe_bootstrap_and_preconditions() -> None:
     provider = DeterministicProvider()
-    authority = CoordinationAuthority(provider, "goal-preconditions", fixed_clock(1000))
-    uninitialized = authority.apply(
+    uninitialized = authority(provider, "goal-preconditions", 1000).apply(
         claim("op-uninitialized", "goal-preconditions", "todo-known")
     )
     assert uninitialized["result"] == "failed"
     assert uninitialized["reason"] == "coordination_head_uninitialized"
 
-    initial_head = bootstrap_aggregate(
+    initial_head = bootstrap_head(
         "goal-preconditions",
         {
             "todo-known": initial_todo(),
@@ -232,19 +266,16 @@ def probe_bootstrap_and_preconditions() -> None:
     bootstrap_result = provider.compare_and_put(0, initial_head)
     assert bootstrap_result["result"] == "applied"
     initial_generation = bootstrap_result["provider_generation"]
-    missing = authority.apply(claim("op-missing", "goal-preconditions", "todo-missing"))
-    stale = authority.apply(
+    executor = authority(provider, "goal-preconditions", 1000)
+    missing = executor.apply(claim("op-missing", "goal-preconditions", "todo-missing"))
+    stale = executor.apply(
         claim("op-stale", "goal-preconditions", "todo-known", expected_todo_revision=6)
     )
-    expected_preconditions = initial_todo()["eligibility"]
     expected_preconditions = {
-        field: expected_preconditions[field]
-        for field in (
-            "authorization_projection_revision",
-            "authorization_projection_digest",
-            "dependency_revision",
-            "gate_revision",
-        )
+        "authorization_projection_revision": 3,
+        "authorization_projection_digest": "sha256:bootstrap-auth",
+        "dependency_revision": 12,
+        "gate_revision": 5,
     }
     stale_values = {
         "authorization_projection_revision": 2,
@@ -256,22 +287,22 @@ def probe_bootstrap_and_preconditions() -> None:
     for field, stale_value in stale_values.items():
         preconditions = copy.deepcopy(expected_preconditions)
         preconditions[field] = stale_value
-        changed_preconditions.append(authority.apply(claim(
+        changed_preconditions.append(executor.apply(claim(
             f"op-stale-{field}",
             "goal-preconditions",
             "todo-known",
             expected_preconditions=preconditions,
         )))
-    ineligible = authority.apply(claim(
+    ineligible = executor.apply(claim(
         "op-ineligible",
         "goal-preconditions",
         "todo-known",
         agent_id="agent-not-allowed",
     ))
-    dependency_blocked = authority.apply(
+    dependency_blocked = executor.apply(
         claim("op-dependency-blocked", "goal-preconditions", "todo-dependency-blocked")
     )
-    gate_blocked = authority.apply(
+    gate_blocked = executor.apply(
         claim("op-gate-blocked", "goal-preconditions", "todo-gate-blocked")
     )
     head, generation = load_head(provider, "goal-preconditions")
@@ -293,6 +324,7 @@ def probe_bootstrap_and_preconditions() -> None:
     assert gate_blocked["result"] == "rejected" and gate_blocked["reason"] == "gate_closed"
     assert head["authority_revision"] == 0 and head["receipt_index"] == {}
     assert generation == initial_generation
+    assert_production_valid(provider, "goal-preconditions")
     private_todo = initial_todo()
     private_todo["raw_todo_body"] = "must not enter the shared head"
     assert_bootstrap_rejected(private_todo, "fields do not match v0")
@@ -316,19 +348,18 @@ def probe_bootstrap_and_preconditions() -> None:
         dependency_and_gate_checked=True,
         bootstrap_privacy_allowlist_checked=True,
         repository_metadata_checked=True,
+        production_validator_round_trip=True,
     )
 
 
 def probe_a_b_replay_a() -> None:
     provider = DeterministicProvider()
     bootstrap(provider, "goal-review", ["todo-review", "todo-followup"])
-    authority = CoordinationAuthority(provider, "goal-review", fixed_clock(1100))
+    executor = authority(provider, "goal-review", 1100)
     envelope_a = claim("op-review-a", "goal-review", "todo-review")
-    first_a = authority.apply(envelope_a)
-    first_b = authority.apply(claim("op-followup-b", "goal-review", "todo-followup"))
-    replay_a = CoordinationAuthority(provider, "goal-review", fixed_clock(9000)).apply(
-        envelope_a
-    )
+    first_a = executor.apply(envelope_a)
+    first_b = executor.apply(claim("op-followup-b", "goal-review", "todo-followup"))
+    replay_a = authority(provider, "goal-review", 9000).apply(envelope_a)
     head, generation = load_head(provider, "goal-review")
     assert first_b["result"] == "applied"
     assert_exact_replay(first_a, replay_a)
@@ -337,6 +368,7 @@ def probe_a_b_replay_a() -> None:
         "original_receipt"
     ]
     assert len(head["receipt_index"]) == 2
+    assert_production_valid(provider, "goal-review")
     out(
         "contract.a_success_b_advance_replay_a",
         ok=True,
@@ -352,33 +384,34 @@ def probe_a_b_replay_a() -> None:
 def probe_operation_identity() -> None:
     provider = DeterministicProvider()
     bootstrap(provider, "goal-digest", ["todo-original", "todo-mutated"])
-    authority = CoordinationAuthority(provider, "goal-digest", fixed_clock(1200))
+    executor = authority(provider, "goal-digest", 1200)
     original = claim(
         "op-stable",
         "goal-digest",
         "todo-original",
         transport={"attempt": 1, "trace_id": "trace-a"},
     )
-    first = authority.apply(original)
+    first = executor.apply(original)
     transport_retry = copy.deepcopy(original)
     transport_retry["transport"] = {"attempt": 2, "trace_id": "trace-b"}
-    assert_exact_replay(first, authority.apply(transport_retry))
+    assert_exact_replay(first, executor.apply(transport_retry))
 
     changed = copy.deepcopy(original)
     changed["command"]["todo_id"] = "todo-mutated"
-    mismatch = authority.apply(changed)
+    mismatch = executor.apply(changed)
     assert mismatch["result"] == "rejected"
     assert mismatch["reason"] == "operation_identity_mismatch"
     unknown = copy.deepcopy(original)
     unknown["unexpected_semantic_field"] = True
     try:
-        authority.apply(unknown)
-    except ValueError as exc:
+        executor.apply(unknown)
+    except EnvelopeError as exc:
         assert "unknown command envelope fields" in str(exc)
     else:
         raise AssertionError("unknown semantic field was ignored")
     head, _ = load_head(provider, "goal-digest")
     assert len(head["receipt_index"]) == 1
+    assert_production_valid(provider, "goal-digest")
     out(
         "contract.operation_identity",
         ok=True,
@@ -393,14 +426,10 @@ def probe_competing_claims() -> None:
         provider.arm_load_barrier(2)
 
         def run(index: int):
-            return CoordinationAuthority(
-                provider,
-                goal_id,
-                fixed_clock(1300 + index),
-            ).apply(envelopes[index])
+            return authority(provider, goal_id, 1300 + index).apply(envelopes[index])
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            return list(executor.map(run, range(2)))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            return list(pool.map(run, range(2)))
 
     same_provider = DeterministicProvider(generation_step=23)
     bootstrap(same_provider, "goal-race", ["todo-one-winner"])
@@ -430,6 +459,7 @@ def probe_competing_claims() -> None:
     assert set(head["coordination"]["leases"]) == {"todo-one-winner"}
     assert head["coordination"]["leases"]["todo-one-winner"]["owner"] == winner
     assert generation == 46
+    assert_production_valid(same_provider, "goal-race")
 
     independent_provider = DeterministicProvider(generation_step=29)
     bootstrap(independent_provider, "goal-independent", ["todo-a", "todo-b"])
@@ -477,16 +507,15 @@ def probe_competing_claims() -> None:
         "original_receipt"
     ]["todo_id"] == "todo-b"
     assert independent_generation == 87
-    replayed = CoordinationAuthority(
-        independent_provider,
-        "goal-independent",
-        fixed_clock(9000),
-    ).apply(independent_envelopes[0])
+    replayed = authority(independent_provider, "goal-independent", 9000).apply(
+        independent_envelopes[0]
+    )
     assert_exact_replay(independent_results[0], replayed)
     assert load_head(independent_provider, "goal-independent") == (
         independent_head,
         independent_generation,
     )
+    assert_production_valid(independent_provider, "goal-independent")
     out(
         "contract.competing_claims",
         ok=True,
@@ -504,9 +533,7 @@ def probe_crash_windows_and_ambiguity() -> None:
     bootstrap(provider, "goal-faults", ["todo-before", "todo-after", "todo-ambiguous"])
     before = claim("op-before", "goal-faults", "todo-before")
     provider.arm_fault("failed_before")
-    failed = CoordinationAuthority(provider, "goal-faults", fixed_clock(1400)).apply(
-        before
-    )
+    failed = authority(provider, "goal-faults", 1400).apply(before)
     assert failed["result"] == "failed"
     assert failed["reason"] == "provider_failed_before_cas"
     head, generation = load_head(provider, "goal-faults")
@@ -514,7 +541,7 @@ def probe_crash_windows_and_ambiguity() -> None:
     assert generation == 17
     provider.arm_fault("crash_before")
     try:
-        CoordinationAuthority(provider, "goal-faults", fixed_clock(1400)).apply(before)
+        authority(provider, "goal-faults", 1400).apply(before)
     except SimulatedCrash:
         pass
     else:
@@ -526,60 +553,55 @@ def probe_crash_windows_and_ambiguity() -> None:
     after = claim("op-after", "goal-faults", "todo-after")
     provider.arm_fault("crash_after")
     try:
-        CoordinationAuthority(provider, "goal-faults", fixed_clock(1500)).apply(after)
+        authority(provider, "goal-faults", 1500).apply(after)
     except SimulatedCrash:
         pass
     else:
         raise AssertionError("after-CAS crash was not injected")
     committed, committed_generation = load_head(provider, "goal-faults")
     durable_receipt = committed["receipt_index"]["op-after"]["original_receipt"]
-    replay = CoordinationAuthority(provider, "goal-faults", fixed_clock(9000)).apply(after)
+    replay = authority(provider, "goal-faults", 9000).apply(after)
     assert replay["result"] == "already_applied"
     assert replay["original_receipt"] == durable_receipt
     assert load_head(provider, "goal-faults") == (committed, committed_generation)
 
     ambiguous = claim("op-ambiguous", "goal-faults", "todo-ambiguous")
     provider.arm_fault("ambiguous_after")
-    reconciled = CoordinationAuthority(provider, "goal-faults", fixed_clock(1600)).apply(
-        ambiguous
-    )
+    reconciled = authority(provider, "goal-faults", 1600).apply(ambiguous)
     final_head, _ = load_head(provider, "goal-faults")
     assert reconciled["result"] == "already_applied"
     assert final_head["authority_revision"] == 2 and len(final_head["receipt_index"]) == 2
+    assert_production_valid(provider, "goal-faults")
 
     ambiguous_before_provider = DeterministicProvider()
     bootstrap(ambiguous_before_provider, "goal-ambiguous-before", ["todo-target"])
     before_head = load_head(ambiguous_before_provider, "goal-ambiguous-before")
     ambiguous_before_provider.arm_fault("ambiguous_before")
-    unproved = CoordinationAuthority(
-        ambiguous_before_provider,
-        "goal-ambiguous-before",
-        fixed_clock(1650),
-    ).apply(claim("op-unproved", "goal-ambiguous-before", "todo-target"))
+    unproved = authority(ambiguous_before_provider, "goal-ambiguous-before", 1650).apply(
+        claim("op-unproved", "goal-ambiguous-before", "todo-target")
+    )
     assert unproved["result"] == "failed"
     assert unproved["reason"] == "provider_outcome_unproved"
     assert load_head(ambiguous_before_provider, "goal-ambiguous-before") == before_head
+    assert_production_valid(ambiguous_before_provider, "goal-ambiguous-before")
 
     ambiguous_advance_provider = DeterministicProvider()
     bootstrap(ambiguous_advance_provider, "goal-ambiguous-advance", ["todo-target"])
     ambiguous_advance_provider.arm_fault("ambiguous_with_unrelated_advance")
-    retried = CoordinationAuthority(
-        ambiguous_advance_provider,
-        "goal-ambiguous-advance",
-        fixed_clock(1675),
+    retried = authority(
+        ambiguous_advance_provider, "goal-ambiguous-advance", 1675
     ).apply(claim("op-retried", "goal-ambiguous-advance", "todo-target"))
     retried_head, _ = load_head(ambiguous_advance_provider, "goal-ambiguous-advance")
     assert retried["result"] == "applied"
     assert retried_head["authority_revision"] == 1
     assert set(retried_head["receipt_index"]) == {"op-retried"}
+    assert_production_valid(ambiguous_advance_provider, "goal-ambiguous-advance")
 
     ambiguous_committed_provider = DeterministicProvider()
     bootstrap(ambiguous_committed_provider, "goal-ambiguous-committed", ["todo-target"])
     ambiguous_committed_provider.arm_fault("ambiguous_after_with_unrelated_advance")
-    recovered = CoordinationAuthority(
-        ambiguous_committed_provider,
-        "goal-ambiguous-committed",
-        fixed_clock(1685),
+    recovered = authority(
+        ambiguous_committed_provider, "goal-ambiguous-committed", 1685
     ).apply(claim("op-recovered", "goal-ambiguous-committed", "todo-target"))
     recovered_head, _ = load_head(
         ambiguous_committed_provider,
@@ -588,20 +610,20 @@ def probe_crash_windows_and_ambiguity() -> None:
     assert recovered["result"] == "already_applied"
     assert recovered_head["authority_revision"] == 1
     assert set(recovered_head["receipt_index"]) == {"op-recovered"}
+    assert_production_valid(ambiguous_committed_provider, "goal-ambiguous-committed")
 
     contention_provider = DeterministicProvider()
     bootstrap(contention_provider, "goal-contention", ["todo-target"])
     contention_provider.arm_contention(8)
-    exhausted = CoordinationAuthority(
-        contention_provider,
-        "goal-contention",
-        fixed_clock(1700),
-    ).apply(claim("op-contention", "goal-contention", "todo-target"))
+    exhausted = authority(contention_provider, "goal-contention", 1700).apply(
+        claim("op-contention", "goal-contention", "todo-target")
+    )
     contention_head, _ = load_head(contention_provider, "goal-contention")
     assert exhausted["result"] == "failed"
     assert exhausted["reason"] == "provider_contention_exhausted"
     assert "op-contention" not in contention_head["receipt_index"]
     assert contention_head["coordination"]["todos"]["todo-target"]["status"] == "open"
+    assert_production_valid(contention_provider, "goal-contention")
     out(
         "contract.crash_windows_and_ambiguity",
         ok=True,
@@ -620,15 +642,16 @@ def probe_crash_windows_and_ambiguity() -> None:
 def probe_version_domains_and_retain_all() -> None:
     provider = DeterministicProvider(generation_step=101)
     bootstrap(provider, "goal-versions", ["todo-a", "todo-b"])
-    authority = CoordinationAuthority(provider, "goal-versions", fixed_clock(1700))
-    first = authority.apply(claim("op-a", "goal-versions", "todo-a"))
-    second = authority.apply(claim("op-b", "goal-versions", "todo-b"))
+    executor = authority(provider, "goal-versions", 1700)
+    first = executor.apply(claim("op-a", "goal-versions", "todo-a"))
+    second = executor.apply(claim("op-b", "goal-versions", "todo-b"))
     head, generation = load_head(provider, "goal-versions")
     assert generation == 303 and head["authority_revision"] == 2
     assert first["original_receipt"]["lease_epoch"] == 1
     assert second["original_receipt"]["lease_epoch"] == 1
     assert head["receipt_retention"] == {"mode": "retain_all_v0"}
     assert len(head["receipt_index"]) == 2
+    assert_production_valid(provider, "goal-versions")
     out(
         "contract.version_domains_and_retain_all",
         ok=True,
@@ -815,7 +838,7 @@ class FakeNoKVClient:
 
     It raises the exception classes the SDK raises since NoKV 0.11.0
     (``nokv-python`` maps ``NotFound`` to ``FileNotFoundError`` and
-    ``AlreadyExists`` to ``FileExistsError``; other RPC failures stay
+    ``AlreadyExists`` to ``FileExistsError``; every other client failure stays
     ``RuntimeError``).  Generations restart at 1 per path lifetime and every
     replacement advances by one, like the live workspace.
     """
@@ -823,6 +846,7 @@ class FakeNoKVClient:
     def __init__(self):
         self.paths: dict[tuple[str, str], tuple[bytes, int]] = {}
         self.stat_failure: Exception | None = None
+        self.read_failure: Exception | None = None
 
     def stat(self, workbench: str, path: str) -> dict:
         if self.stat_failure is not None:
@@ -835,6 +859,9 @@ class FakeNoKVClient:
         return {"generation": generation}
 
     def read(self, workbench: str, path: str) -> dict:
+        if self.read_failure is not None:
+            failure, self.read_failure = self.read_failure, None
+            raise failure
         try:
             data, generation = self.paths[(workbench, path)]
         except KeyError:
@@ -863,18 +890,21 @@ class FakeNoKVClient:
 
 
 def probe_nokv_adapter_exception_mapping() -> None:
-    """The NoKV byte-CAS adapter must classify SDK exceptions into RFC verbs.
+    """The NoKV byte-CAS adapter classifies SDK failures by exception class only.
 
-    ``load`` returns ``(None, 0)`` for an uninitialized head, and
-    ``compare_and_put`` returns typed ``applied | conflict | ambiguous | failed``
-    for every SDK outcome it can observe: it never leaks ``FileNotFoundError``,
-    ``FileExistsError``, or ``RuntimeError`` to the authority.
+    ``load`` returns ``(None, 0)`` only for the SDK's typed missing signal
+    (``FileNotFoundError``); any other client failure raises the typed
+    ``ProviderUnavailableError`` instead of masquerading as an uninitialized
+    goal or escaping as a bare ``RuntimeError``.  ``compare_and_put`` reports
+    typed ``applied | conflict | ambiguous | failed`` for every SDK outcome:
+    error prose is never a channel, because real non-missing failures carry
+    messages such as ``invalid root route: root placement does not exist``.
     """
 
     client = FakeNoKVClient()
     goal_id = "adapter-mapping"
     provider = NoKVCoordinationProvider(client, "wb-adapter", goal_id)
-    head = bootstrap_aggregate(goal_id, {})
+    head = bootstrap_head(goal_id, {})
 
     assert provider.load() == (None, 0)
     created = provider.compare_and_put(0, head)
@@ -909,21 +939,74 @@ def probe_nokv_adapter_exception_mapping() -> None:
     assert failed["result"] == "failed", failed
     assert provider.load() == (advanced, 2)
 
-    # legacy SDKs raised RuntimeError for a missing path; both spellings stay classified
+    # A routing outage whose message carries a not-found token must classify
+    # as unavailable, never as missing: (None, 0) would tell the authority
+    # the goal is uninitialized and authorize a bootstrap-create during an
+    # outage.  This is the real string shape ClientError::InvalidRoute
+    # produces through the 0.11 SDK.
+    routing_outage = RuntimeError("invalid root route: root placement does not exist")
+    client.read_failure = routing_outage
+    try:
+        provider.load()
+    except ProviderUnavailableError as exc:
+        assert "root placement does not exist" in str(exc)
+    else:
+        raise AssertionError("routing outage was classified as missing")
+
+    # The same routing outage during the CAS pre-check is a typed failed
+    # verdict, never the conflict-or-create path a misclassified generation 0
+    # would take.
+    client.stat_failure = RuntimeError(
+        "logical shard LogicalShardId([34]) was not found"
+    )
+    outage_verdict = provider.compare_and_put(2, advanced)
+    assert outage_verdict["result"] == "failed", outage_verdict
+    assert "was not found" in outage_verdict["error"]
+
+    # A token-free outage is the same typed unavailable, not a bare
+    # RuntimeError leak.
+    client.read_failure = RuntimeError("connection refused by endpoint")
+    try:
+        provider.load()
+    except ProviderUnavailableError:
+        pass
+    else:
+        raise AssertionError("token-free outage did not raise typed unavailable")
+
+    # Pre-0.11 SDKs signalled missing with RuntimeError prose.  They cannot
+    # route the post-#465 control plane and are outside the pinned baseline,
+    # so that prose now classifies as unavailable rather than missing.
     class LegacyClient(FakeNoKVClient):
         def read(self, workbench: str, path: str) -> dict:
             if (workbench, path) not in self.paths:
                 raise RuntimeError("workspace request failed: path not found")
             return super().read(workbench, path)
 
-        def stat(self, workbench: str, path: str) -> dict:
-            if (workbench, path) not in self.paths:
-                raise RuntimeError("workspace request failed: path not found")
-            return super().stat(workbench, path)
-
     legacy = NoKVCoordinationProvider(LegacyClient(), "wb-legacy", goal_id)
-    assert legacy.load() == (None, 0)
-    assert legacy.compare_and_put(0, head)["result"] == "applied"
+    try:
+        legacy.load()
+    except ProviderUnavailableError:
+        pass
+    else:
+        raise AssertionError("legacy prose was still classified as missing")
+
+    # Corrupt persisted bytes and unserializable heads stay typed too, in
+    # parity with the file provider's seam contract.
+    corrupt_client = FakeNoKVClient()
+    corrupt_client.paths[("wb-corrupt", f"goals/{goal_id}/coordination-head.json")] = (
+        b"{not json",
+        3,
+    )
+    corrupt = NoKVCoordinationProvider(corrupt_client, "wb-corrupt", goal_id)
+    try:
+        corrupt.load()
+    except ProviderProtocolError:
+        pass
+    else:
+        raise AssertionError("corrupt persisted bytes escaped untyped")
+    unserializable = provider.compare_and_put(2, {"x": float("nan")})
+    assert unserializable["result"] == "failed", unserializable
+    assert "serializable" in unserializable["error"]
 
     out(
         "contract.nokv_adapter_exception_mapping",
@@ -932,7 +1015,11 @@ def probe_nokv_adapter_exception_mapping() -> None:
         create_only_race_typed=True,
         stale_generation_typed=True,
         pre_publish_failure_typed=True,
-        legacy_runtime_error_still_classified=True,
+        routing_outage_not_missing=True,
+        outage_raises_typed_unavailable=True,
+        legacy_prose_unsupported=True,
+        corrupt_bytes_typed=True,
+        unserializable_head_typed_failed=True,
     )
 
 
@@ -955,6 +1042,13 @@ def run_contract() -> None:
     out("contract.summary", ok=True, probes=len(PROBES))
 
 
+def main() -> int:
+    if len(sys.argv) != 2 or sys.argv[1] != "contract":
+        print("usage: python probes.py contract", file=sys.stderr)
+        return 2
+    run_contract()
+    return 0
+
+
 if __name__ == "__main__":
-    command = sys.argv[1] if len(sys.argv) > 1 else "contract"
-    {"contract": run_contract}[command]()
+    sys.exit(main())

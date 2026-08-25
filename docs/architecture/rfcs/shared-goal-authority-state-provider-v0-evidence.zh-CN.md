@@ -35,7 +35,10 @@
 python3 examples/nokv-shadow-provider/probes.py contract
 ```
 
-命令退出码为 `0`，并逐项报告以下九个通过的合同探针：
+命令退出码为 `0`，并逐项报告以下九个通过的合同探针。自 Stage 2 切片合并
+后，claim/CAS 探针全部由生产 `CoordinationAuthorityExecutor` 与生产 head
+编解码驱动（不再存在第二套参考 authority），且每个探针的持久 head 都经
+生产 `validated_head` 回环校验：
 
 - `contract.bootstrap_and_preconditions`；
 - `contract.a_success_b_advance_replay_a`；
@@ -43,9 +46,10 @@ python3 examples/nokv-shadow-provider/probes.py contract
 - `contract.competing_claims`；
 - `contract.crash_windows_and_ambiguity`；
 - `contract.version_domains_and_retain_all`；
-- `contract.nokv_adapter_exception_mapping`（NoKV adapter 把 0.11.0 SDK 的
-  `FileNotFoundError` / `FileExistsError` / `RuntimeError` 全部映射为类型化
-  provider 结果，不向 authority 泄露异常）；
+- `contract.nokv_adapter_exception_mapping`（NoKV adapter 仅按异常类分类：
+  `FileNotFoundError` 是唯一的 missing 信号；其余客户端失败在读路径抛类型化
+  `ProviderUnavailableError`、在 CAS 前置为类型化 `failed`，携带 not-found
+  文案的路由故障不再被误判为未初始化）；
 - `contract.durable_completion_projection`；
 - `contract.durable_completion_fail_closed`（含显式 `completion_continuation`
   缺失或矛盾时的 fail-closed）。

@@ -59,14 +59,17 @@ def _build_authority_boundary_table() -> list[dict[str, Any]]:
                 "authority_revision, todo_revision, lease_epoch, "
                 "receipt_index, eligibility projections"
             ),
-            "shipped": False,
+            "shipped": True,
             "shipped_equivalent": (
-                "NoKV shadow provider (examples/nokv-shadow-provider/) -- "
-                "reference proof only, not wired into LoopX runtime"
+                "loopx.control_plane.coordination.head (production "
+                "loopx_coordination_head_v0 codec) + file/NoKV providers "
+                "behind one CAS seam -- coverage-only, not yet the runtime "
+                "source of truth"
             ),
             "gap": (
-                "No production coordination_head module exists; the shadow "
-                "provider CoordinationAuthority is a contract example"
+                "Production callers still write Markdown/lease files; "
+                "promotion to canonical waits on the Stage 3 gates "
+                "(retention, lineage fence, lease lifecycle)"
             ),
         },
         {
