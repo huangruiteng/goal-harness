@@ -1367,6 +1367,16 @@ def test_planning_horizon_scenario_requires_bounded_semantic_readback(
             False,
             ["action_oracle:settlement_suffix_mismatch"],
         ),
+        (
+            ("inspect", "writeback", "test", "writeback", "spend"),
+            False,
+            ["action_oracle:premature_settlement_action:writeback"],
+        ),
+        (
+            ("inspect", "spend", "test", "writeback", "spend"),
+            False,
+            ["action_oracle:premature_settlement_action:spend"],
+        ),
     ],
     ids=(
         "bounded-read",
@@ -1374,6 +1384,8 @@ def test_planning_horizon_scenario_requires_bounded_semantic_readback(
         "premature-edit",
         "missing-test",
         "reversed-settlement",
+        "premature-writeback",
+        "premature-spend",
     ),
 )
 def test_planning_horizon_action_oracle_grades_semantic_stages(

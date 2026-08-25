@@ -20,6 +20,11 @@ def planning_horizon_regression_gate_failures(
         failures.append("action_oracle:test_must_precede_settlement")
     if list(actions[-2:]) != ["writeback", "spend"]:
         failures.append("action_oracle:settlement_suffix_mismatch")
+    premature_settlement = sorted({"writeback", "spend"} & set(actions[:-2]))
+    failures.extend(
+        f"action_oracle:premature_settlement_action:{kind}"
+        for kind in premature_settlement
+    )
     forbidden = sorted({"edit", "notify", "stop", "wait"} & set(actions))
     failures.extend(f"action_oracle:forbidden_action:{kind}" for kind in forbidden)
     return failures

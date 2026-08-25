@@ -311,7 +311,8 @@ a correct semantic echo does not excuse skipping the required first inspection.
 The planning-horizon oracle grades semantic stages rather than one memorized
 trajectory: inspection must come first, the selected regression test must run
 before the final `writeback, spend` suffix, and an `edit` cannot be assumed
-before test evidence exists. A bounded intervening read remains valid.
+before test evidence exists. No writeback or spend may occur before that final
+settlement suffix. A bounded intervening read remains valid.
 Receipts retain only the declared field names and digests plus bounded,
 allowlisted action-kind sequences, never raw commands or model responses. Its
 fixed catalog covers ten core decisions:
@@ -386,9 +387,11 @@ twice. The oracle validates exact source semantics before provider spend. The
 five real-tool scenarios then prove their complete state-to-action paths:
 hermetic Goal state, production heartbeat prompt, real quota output, model-
 selected tool action, real readback, and a bounded semantic receipt. The
-planning-horizon packet-interpretation case also requires the bounded
-ten-field semantic contract; this proves the model observed the exact strategic
-chain rather than only preserving the local decision. The remaining live turn
+planning-horizon packet-interpretation case also requires the bounded,
+scenario-local `planning_horizon` semantic contract; this proves the model
+observed the exact strategic chain rather than only preserving the local
+decision, without coupling the proof to unrelated peer or scheduler fields.
+The remaining live turn
 actor cases read the default full quota packet directly and must preserve the
 runtime-facing decision, selected todo, user gate, execution obligation,
 delivery boundary, quiet-wait rule, and ordered action kinds. They are not asked
