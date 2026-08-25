@@ -161,15 +161,20 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
                 "Visible command arguments: `$ARGUMENTS`.",
                 "Identify the exact current host surface (codex-app, codex-app-ssh, codex-ide-plugin, codex-cli-tui, opencode, opencode2, traex-cli, pi, gemini-cli, cursor-agent, zcode, agy, deepseek-harness, or ark-managed-agent).",
                 (
-                    "Before generic Goal routing, honor an explicit Auto Research product "
-                    "request. If the visible arguments explicitly request using or starting "
-                    "`Auto Research`, or explicitly invoke the `auto-research` command, pass "
-                    "the complete visible request unchanged as one shell-escaped argument to "
+                    "Before generic Goal routing, check only for an explicit leading Auto "
+                    "Research selector. Use the Auto Research route only when the trimmed "
+                    "visible arguments begin with `使用 Auto Research`, `启动 Auto Research`, "
+                    "`Use Auto Research`, `Start Auto Research`, or the literal "
+                    "`auto-research` command token. In that case, pass the complete visible "
+                    "request unchanged as one shell-escaped argument to "
                     f'`{cli_bin} auto-research start "<complete visible $ARGUMENTS>" '
                     "--execute` and follow that command's launcher or gate output. Do not run "
-                    "`start-goal` first, and do not infer this route from generic words such "
-                    "as research, wish, or a PR URL alone. For example, `使用 Auto Research，"
-                    "许愿……` is an explicit Auto Research request and must take this route."
+                    "`start-goal` first for that exact prefix. Otherwise always use the normal "
+                    "`start-goal` route, including when Auto Research is merely discussed "
+                    "later in the request or when the text only contains generic words such "
+                    "as research, wish, or a PR URL. For example, `使用 Auto Research，许愿……` "
+                    "takes the Auto Research route, while `评估是否应该使用 Auto Research` stays "
+                    "on the normal Goal route."
                 ),
                 _loopx_start_goal_arguments_instruction(
                     cli_bin=cli_bin,

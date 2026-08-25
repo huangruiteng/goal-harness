@@ -54,17 +54,26 @@ def test_host_materialization_installs_generated_loopx_entry_skill(
     assert "surface the exact pasteable gate" in skill_text
     assert "follow its exact CLI `interaction_contract` or quota command first" in skill_text
     explicit_auto_research = (
-        "If the visible arguments explicitly request using or starting "
-        "`Auto Research`, or explicitly invoke the `auto-research` command"
+        "Use the Auto Research route only when the trimmed visible arguments "
+        "begin with `使用 Auto Research`"
     )
     assert explicit_auto_research in skill_text
+    for prefix in (
+        "`启动 Auto Research`",
+        "`Use Auto Research`",
+        "`Start Auto Research`",
+        "the literal `auto-research` command token",
+    ):
+        assert prefix in skill_text
     assert (
         '`loopx auto-research start "<complete visible $ARGUMENTS>" --execute`'
         in skill_text
     )
-    assert "Do not run `start-goal` first" in skill_text
-    assert "research, wish, or a PR URL alone" in skill_text
-    assert "`使用 Auto Research，许愿……` is an explicit Auto Research request" in skill_text
+    assert "Do not run `start-goal` first for that exact prefix" in skill_text
+    assert "Otherwise always use the normal `start-goal` route" in skill_text
+    assert "research, wish, or a PR URL" in skill_text
+    assert "`使用 Auto Research，许愿……` takes the Auto Research route" in skill_text
+    assert "`评估是否应该使用 Auto Research` stays on the normal Goal route" in skill_text
     assert skill_text.index(explicit_auto_research) < skill_text.index(
         "start-goal --guided"
     )
@@ -98,13 +107,14 @@ def test_host_materialization_can_bind_exact_managed_agent_surface(
     assert "never infer a route" in skill_text
     assert "follow its exact CLI `interaction_contract` or quota command first" in skill_text
     assert (
-        "If the visible arguments explicitly request using or starting "
-        "`Auto Research`, or explicitly invoke the `auto-research` command"
+        "Use the Auto Research route only when the trimmed visible arguments "
+        "begin with `使用 Auto Research`"
     ) in skill_text
     assert (
         '`loopx auto-research start "<complete visible $ARGUMENTS>" --execute`'
         in skill_text
     )
+    assert "Otherwise always use the normal `start-goal` route" in skill_text
     assert "current Todo evidence and the next executable Todo" not in skill_text
     assert "generic Todos remain scheduling records" not in skill_text
 
