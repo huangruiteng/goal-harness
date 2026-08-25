@@ -102,5 +102,24 @@ def action_portfolio_schema_versions(value: Any) -> list[str]:
     return sorted(versions)
 
 
+def planning_horizon_schema_versions(value: Any) -> list[str]:
+    versions: set[str] = set()
+
+    def collect(current: Any) -> None:
+        if isinstance(current, dict):
+            for key, child in current.items():
+                if key == "planning_horizon" and isinstance(child, dict):
+                    schema_version = child.get("schema_version")
+                    if isinstance(schema_version, str) and schema_version:
+                        versions.add(schema_version)
+                collect(child)
+        elif isinstance(current, list):
+            for child in current:
+                collect(child)
+
+    collect(value)
+    return sorted(versions)
+
+
 def markdown_headings(text: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if _MARKDOWN_HEADING.match(line)]

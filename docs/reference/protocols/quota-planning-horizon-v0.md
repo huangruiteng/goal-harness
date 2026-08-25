@@ -1,0 +1,151 @@
+# quota_planning_horizon_v0
+
+`quota_planning_horizon_v0` is the bounded, read-only context that lets an
+agent reason beyond one locally selected Todo without inlining LoopX's full
+Todo store or task graph. It is present on the default `quota should-run` path
+only when the current selected work has typed lineage, waiting/blocking,
+scheduled-observation, or goal-acceptance context. Flat runnable alternatives
+remain solely in `action_portfolio`, avoiding a duplicate hot-path view.
+
+The problem it addresses is narrower than scheduling. A selected regression
+gate can be locally runnable while the strategic path also contains a facts
+source, policy decision, runtime admission, and per-target validation. Showing
+only the gate, or only two alternative actions, can make a model optimize the
+visible leaf. The planning horizon makes that bounded chain visible. It does
+not silently replace the selected Todo.
+
+## Ownership
+
+- Existing Todo, claim, capability, goal-frontier, and event-ledger contracts
+  remain authoritative.
+- Python adapts those already-derived facts into one typed request. It does not
+  infer hierarchy from Todo prose.
+- The TypeScript work-item reducer validates identities, de-duplicates facts,
+  derives typed lineage/resume/route relations, orders context, applies limits,
+  and emits completeness metadata.
+- Effect Program transports the completed observation into TurnEnvelope. It
+  does not own Todo dependency, resume, or action-selection semantics.
+- `selected_todo` and `action_portfolio` remain the only action-selection
+  authorities. Planning-horizon items are context until the agent performs the
+  existing explicit selection/re-entry flow.
+
+## Shape
+
+```json
+{
+  "schema_version": "quota_planning_horizon_v0",
+  "mode": "read_only",
+  "goal_id": "loopx-meta",
+  "agent_id": "codex-main-control",
+  "selected_todo_id": "todo_regression_gate",
+  "selection_contract": {
+    "selected_todo_authority": "$.selected_todo",
+    "action_choice_authority": "$.action_portfolio",
+    "horizon_changes_selection": false,
+    "explicit_selection_required_for_other_work": true
+  },
+  "work_items": [],
+  "relations": [],
+  "acceptance_gaps": [],
+  "attention_todo_ids": [],
+  "completeness": {
+    "schema_version": "quota_planning_horizon_completeness_v0",
+    "source_context_todo_count": 8,
+    "candidate_input_count": 7,
+    "source_unrepresented_todo_count": 1,
+    "omitted_candidate_todo_count": 2,
+    "omitted_relation_count": 1,
+    "omitted_acceptance_gap_count": 1,
+    "compact_field_truncation_count": 0,
+    "complete": false
+  },
+  "detail_refs": {
+    "selected_todo": {
+      "schema_version": "todo_detail_ref_v0",
+      "goal_id": "loopx-meta",
+      "role": "agent",
+      "todo_id": "todo_regression_gate",
+      "projection": "todo_detail_cold_path_v0"
+    },
+    "agent_todos": "quota should-run --include-detail agent-todos",
+    "task_graph": "status --include-task-graph"
+  }
+}
+```
+
+## Bounds And Ordering
+
+The v0 reducer accepts at most 32 source candidates and projects at most:
+
+- 5 Todo context items;
+- 8 typed relations;
+- 2 goal acceptance gaps;
+- 3 `attention_todo_ids`.
+
+The selected Todo is first. Typed relatives of the selected Todo are next,
+ordered outward through the relation graph. Unrelated waiting, blocked, or
+scheduled context follows before higher-priority and other runnable
+alternatives; the action portfolio already owns flat alternative choice. This
+ordering helps the agent reconstruct a strategic chain while keeping the
+selected Todo identity stable.
+
+`planning_state` is one of `selected`, `runnable`, `waiting`, `blocked`,
+`scheduled`, or `context`. `context_reasons` explains why a non-selected item
+was retained, for example `related_to_selected`,
+`higher_priority_than_selected`, or `runnable_alternative`.
+
+Every omitted source, candidate, relation, gap, or compacted text field is
+counted. `complete=true` is valid only when all of those counts are zero. A
+consumer must follow `detail_refs` when the answer depends on omitted context;
+it must not treat the five visible items as the entire Goal.
+`source_context_todo_count` counts current open plus deferred Todos; completed
+history is intentionally outside this planning view.
+
+## Relation Semantics
+
+The v0 relation kinds are:
+
+- `successor`: derived from `successor_todo_ids`, with
+  `enforcement=lineage_only`;
+- `unblocks`: derived from `unblocks_todo_id`, with typed lifecycle semantics;
+- `resumes_when`: derived from `resume_when`, with typed condition semantics;
+- `superseded_by`: persisted lineage only;
+- `routes_via`: a read-only reference to the existing route id/key.
+
+The distinction between lineage and enforcement is intentional. A successor
+link is not upgraded into a hard dependency merely because the planning view
+can draw a chain. v0 does not infer `depends_on` from phrases such as "after",
+"requires", or "blocked by". A future hard dependency requires a separate
+typed Todo contract and transition policy.
+
+## Effect Program Boundary
+
+Effect Program gains one nullable `planning_horizon` observation so every host
+that consumes TurnEnvelope can receive the same domain-owned projection. This
+is a transport extension, not a generic planning reducer. Todo resume remains
+Todo-local reducer/ACK semantics, and quota selection remains in its existing
+typed boundaries.
+
+TurnEnvelope action-signature coverage advances to
+`turn_envelope_action_dimensions_v3` when the horizon is present. CLI
+differential qualification recognizes only the paired migration
+`none -> quota_planning_horizon_v0` and v0/v1/v2 action coverage to v3. That
+transition receives one bounded JSON growth allowance. Once v0 is in the base,
+ordinary hot-path growth limits apply again.
+
+## Acceptance Checks
+
+A conforming implementation must prove:
+
+- the TypeScript reducer owns validation, ordering, de-duplication, and bounds;
+- the Python adapter consumes existing typed facts and creates no second store;
+- the horizon never changes `selected_todo` or action-portfolio eligibility;
+- typed successor/resume/route relations survive the default compact path;
+- prose-only dependency claims create no relation;
+- truncation and source incompleteness are explicit;
+- the selected Todo detail and optional full task graph remain reachable;
+- full quota and TurnEnvelope action signatures cover the same horizon;
+- deterministic mutation tests reject a missing or producer-drifted horizon
+  before live-model spend;
+- live model evidence is retained only as bounded receipts, never raw prompts,
+  responses, credentials, or local paths.

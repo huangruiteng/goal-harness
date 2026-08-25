@@ -16,7 +16,8 @@ decision owner or recompute any route.
 The default projection retains:
 
 - `decision`, `should_run`, `effective_action`, and `recommended_action`;
-- selected todo, bounded `action_portfolio`, and execution obligation;
+- selected todo, bounded `action_portfolio`, read-only `planning_horizon`, and
+  execution obligation;
 - interaction mode, user channel, and executable agent/CLI actions;
 - scheduler action and autonomous-replan authority;
 - the compact vision decision, trigger kinds, required reads, and judge result;
@@ -33,6 +34,16 @@ bounded growth allowance for this additive portfolio. The allowance applies
 only while a v0/v1 baseline migrates to v2, remains a review signal, and still
 fails above 1,280 characters/bytes, 36 lines, or 896 compact characters. Once
 v2 is the baseline, the ordinary hot-path growth limits apply again.
+
+`quota_planning_horizon_v0` is likewise action-bearing context rather than
+diagnostic noise. The compact path preserves its bounded Todo chain, typed
+relations, attention ids, completeness counters, and cold-path refs unchanged.
+Its `turn_envelope_action_dimensions_v3` migration receives one JSON-only
+allowance of 3,200 characters/bytes, 84 lines, or 2,800 compact characters.
+That allowance applies only to `none -> quota_planning_horizon_v0` together
+with v0/v1/v2 action coverage moving to v3. Once v3 is the baseline, ordinary
+growth limits resume. The horizon remains read-only and never replaces
+`selected_todo` or explicit action-portfolio selection.
 
 Repeated vision audits use `$.vision_continuation_audit` as the canonical
 projection. Candidate lists and peer action lists retain counts and point to
@@ -51,7 +62,12 @@ Model qualification is one-arm and actual-default. The shipped
 not the unprojected in-memory decision, to the Doubao actor. Its independent
 source oracle must still observe the expected selected todo, user gate,
 execution obligation, scheduler route, and vision/replan behavior on every
-repeat. A dedicated compaction-regression scenario must exceed the JSON hot-path
+repeat. The planning-horizon scenario additionally starts from fixed typed
+facts, validates the complete strategic relation chain independently of the
+producer, and requires bounded model readback of the horizon before selected
+work. Removing the horizon, breaking a middle relation, or drifting both the
+producer and compact packet fails before provider spend. A dedicated
+compaction-regression scenario must exceed the JSON hot-path
 budget before projection, fit within the budget afterward, preserve the exact
 source-derived semantic contract, and preserve the model's route. Two additional
 over-budget scenarios repeat clean selected-work and blocking-gate contracts

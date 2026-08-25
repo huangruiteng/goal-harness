@@ -360,6 +360,19 @@ preemption defers the request and leaves the receipt identity-less. Delivery and
 quota spend remain disabled until binding succeeds. A single-candidate response
 keeps the direct execution path and does not add an extra selection round trip.
 
+When the selected Todo has meaningful strategic context, the same default
+response may include `planning_horizon.schema_version=
+quota_planning_horizon_v0`. It carries at most five selected/related/runnable
+or higher-priority waiting Todos, eight typed lineage/resume/route relations,
+two goal acceptance gaps, and explicit completeness counters. The horizon is a
+read-only steering input: `selection_contract.horizon_changes_selection=false`
+and action authority remains `selected_todo` plus `action_portfolio`. If the
+horizon exposes a better runnable item, the agent still uses the existing
+candidate discovery and explicit selection re-entry. If it is truncated, the
+agent follows its Todo-detail or task-graph cold-path reference before treating
+the visible slice as exhaustive. See
+[`quota_planning_horizon_v0`](reference/protocols/quota-planning-horizon-v0.md).
+
 Blocked candidates retain typed `resolution_bindings` even when another todo is
 runnable. Each binding names the capability, its resolution owner, and the
 exact `blocked_todo_ids`. The interaction contract turns an owner-held binding

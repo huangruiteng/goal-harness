@@ -8,6 +8,7 @@ from ..quota.turn_envelope import (
     ACTION_SIGNATURE_COVERAGE_V0,
     ACTION_SIGNATURE_COVERAGE_V1,
     ACTION_SIGNATURE_COVERAGE_V2,
+    ACTION_SIGNATURE_COVERAGE_V3,
 )
 
 
@@ -17,6 +18,7 @@ CLI_OUTPUT_DIFFERENTIAL_SCHEMA_VERSION = "loopx_cli_output_differential_v0"
 ACTION_PORTFOLIO_SCHEMA_VERSION_V0 = "quota_action_portfolio_v0"
 ACTION_PORTFOLIO_SCHEMA_VERSION_V1 = "quota_action_portfolio_v1"
 ACTION_PORTFOLIO_SCHEMA_VERSION_V2 = "quota_action_portfolio_v2"
+PLANNING_HORIZON_SCHEMA_VERSION_V0 = "quota_planning_horizon_v0"
 
 Metric = Literal["chars", "utf8_bytes", "lines", "compact_payload_chars"]
 
@@ -113,6 +115,17 @@ _ACTION_PORTFOLIO_V0_MIGRATION_GROWTH_ALLOWANCE: dict[Metric, int] = {
     "compact_payload_chars": 1_280,
 }
 
+# quota_planning_horizon_v0 adds one bounded read-only strategic context to the
+# default agent path and TurnEnvelope. This allowance applies only while the
+# schema and action-signature coverage move to v0/v3; after merge the candidate
+# becomes the new baseline and ordinary growth limits apply again.
+_PLANNING_HORIZON_V0_MIGRATION_GROWTH_ALLOWANCE: dict[Metric, int] = {
+    "chars": 3_200,
+    "utf8_bytes": 3_200,
+    "lines": 84,
+    "compact_payload_chars": 2_800,
+}
+
 
 def _rows_by_id(receipt: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if receipt.get("schema_version") != CLI_OUTPUT_PROBE_SCHEMA_VERSION:
@@ -158,6 +171,9 @@ def _action_signature_migration(
         (ACTION_SIGNATURE_COVERAGE_V0, ACTION_SIGNATURE_COVERAGE_V1),
         (ACTION_SIGNATURE_COVERAGE_V0, ACTION_SIGNATURE_COVERAGE_V2),
         (ACTION_SIGNATURE_COVERAGE_V1, ACTION_SIGNATURE_COVERAGE_V2),
+        (ACTION_SIGNATURE_COVERAGE_V0, ACTION_SIGNATURE_COVERAGE_V3),
+        (ACTION_SIGNATURE_COVERAGE_V1, ACTION_SIGNATURE_COVERAGE_V3),
+        (ACTION_SIGNATURE_COVERAGE_V2, ACTION_SIGNATURE_COVERAGE_V3),
     }
     if not (
         isinstance(base_coverages, list)
@@ -202,6 +218,20 @@ def _action_portfolio_schema_migration(
     return None
 
 
+def _planning_horizon_schema_migration(
+    base: dict[str, Any], candidate: dict[str, Any]
+) -> str | None:
+    base_versions = tuple(base.get("planning_horizon_schema_versions") or [])
+    candidate_versions = tuple(
+        candidate.get("planning_horizon_schema_versions") or []
+    )
+    if base_versions == () and candidate_versions == (
+        PLANNING_HORIZON_SCHEMA_VERSION_V0,
+    ):
+        return f"none -> {PLANNING_HORIZON_SCHEMA_VERSION_V0}"
+    return None
+
+
 def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
     row_id = str(base["row_id"])
     failures: list[str] = []
@@ -229,6 +259,14 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
         if portfolio_schema_changed
         else None
     )
+    base_horizon_versions = base.get("planning_horizon_schema_versions")
+    candidate_horizon_versions = candidate.get("planning_horizon_schema_versions")
+    horizon_schema_changed = base_horizon_versions != candidate_horizon_versions
+    horizon_schema_migration = (
+        _planning_horizon_schema_migration(base, candidate)
+        if horizon_schema_changed
+        else None
+    )
     portfolio_growth_migration = bool(
         output_format == "json"
         and (
@@ -237,6 +275,18 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
                 signature_migration
                 and signature_migration.endswith(
                     f" -> {ACTION_SIGNATURE_COVERAGE_V2}"
+                )
+            )
+        )
+    )
+    horizon_growth_migration = bool(
+        output_format == "json"
+        and (
+            horizon_schema_migration
+            or (
+                signature_migration
+                and signature_migration.endswith(
+                    f" -> {ACTION_SIGNATURE_COVERAGE_V3}"
                 )
             )
         )
@@ -262,6 +312,11 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
             allowance = max(
                 allowance,
                 _ACTION_PORTFOLIO_V0_MIGRATION_GROWTH_ALLOWANCE[metric],
+            )
+        if horizon_growth_migration:
+            allowance = max(
+                allowance,
+                _PLANNING_HORIZON_V0_MIGRATION_GROWTH_ALLOWANCE[metric],
             )
         deltas[metric] = delta
         allowances[metric] = allowance
@@ -298,6 +353,13 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
         else:
             review_signals.append(
                 f"action_portfolio schema migrated: {portfolio_schema_migration}"
+            )
+    if horizon_schema_changed:
+        if horizon_schema_migration is None:
+            failures.append("planning_horizon schema coverage changed")
+        else:
+            review_signals.append(
+                f"planning_horizon schema migrated: {horizon_schema_migration}"
             )
 
     return {

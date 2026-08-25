@@ -43,7 +43,7 @@ def _compact_candidate(value: Mapping[str, Any]) -> dict[str, Any] | None:
     return compact
 
 
-def _runnable_candidates(
+def quota_runnable_action_candidates(
     *,
     agent_id: str,
     agent_todo_summary: Mapping[str, Any] | None,
@@ -149,7 +149,7 @@ def build_quota_action_portfolio(
             {
                 "schema_version": ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION,
                 "primary": compact_primary,
-                "candidates": _runnable_candidates(
+                "candidates": quota_runnable_action_candidates(
                     agent_id=safe_agent_id,
                     agent_todo_summary=agent_todo_summary,
                     capability_gate=capability_gate,

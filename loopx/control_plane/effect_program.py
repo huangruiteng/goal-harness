@@ -116,6 +116,7 @@ class EffectObservation:
     effective_action: str
     recommended_action: str
     action_portfolio: Mapping[str, Any] | None = None
+    planning_horizon: Mapping[str, Any] | None = None
     protocol_summary: str | None = None
 
 
@@ -624,6 +625,11 @@ def _effect_turn_from_payload(payload: Any) -> EffectTurn:
             action_portfolio=(
                 dict(observation["action_portfolio"])
                 if isinstance(observation.get("action_portfolio"), Mapping)
+                else None
+            ),
+            planning_horizon=(
+                dict(observation["planning_horizon"])
+                if isinstance(observation.get("planning_horizon"), Mapping)
                 else None
             ),
             protocol_summary=(

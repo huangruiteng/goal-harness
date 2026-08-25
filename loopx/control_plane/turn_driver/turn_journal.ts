@@ -189,6 +189,7 @@ export function interpretTurnJournalEffect(
         ? "Retain the terminal Turn journal tombstone."
         : "Inspect the structured Turn journal violations before replay.",
       action_portfolio: null,
+      planning_horizon: null,
       protocol_summary: replayLegal
         ? "Turn journal replay is legal and effect-free."
         : `Turn journal replay is blocked by ${violations.length} structured violation(s).`,

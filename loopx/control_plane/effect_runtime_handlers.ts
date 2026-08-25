@@ -84,6 +84,7 @@ import {
   projectQuotaActionPortfolio,
   qualifyActionSelection,
 } from "./work_items/action_portfolio.ts";
+import { projectQuotaPlanningHorizon } from "./work_items/planning_horizon.ts";
 import {
   validateInteractionProjectionHookInvocation,
   validateInteractionProjectionHookRegistration,
@@ -290,6 +291,7 @@ export function createEffectRuntimeHandlers(
     ["turn.delivery_route.evaluate", evaluateDeliveryRoute],
     ["work_item.action_portfolio.project", projectQuotaActionPortfolio],
     ["work_item.action_selection.qualify", qualifyActionSelection],
+    ["work_item.planning_horizon.project", projectQuotaPlanningHorizon],
     ["goal.vision_checkpoint.evaluate", buildVisionCheckpoint],
     ["agent.delivery_workspace.evaluate", evaluateDeliveryWorkspace],
     [

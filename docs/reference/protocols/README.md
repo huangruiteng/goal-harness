@@ -18,6 +18,7 @@ scanning a chronological list.
 - [`loopx_goal_command_v0`](loopx-goal-command-v0.md): LoopX goal command v0
 - [`loopx_turn_v0`](loopx-turn-v0.md): LoopX Turn v0
 - [`quota_cli_hot_path_compaction_v0`](quota-cli-hot-path-compaction-v0.md): Quota CLI hot-path compaction v0
+- [`quota_planning_horizon_v0`](quota-planning-horizon-v0.md): Bounded agent planning horizon v0
 - [`rollback_packet_v0`](rollback-packet-v0.md): Rollback packet v0
 - [`task_graph_projection_v0`](task-graph-projection-v0.md): Task graph projection v0
 - [`todo_detail_cold_path_v0`](todo-detail-cold-path-v0.md): Todo detail cold path v0

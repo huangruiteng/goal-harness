@@ -16,6 +16,8 @@ The default `quota should-run` output remains unchanged. The v0 envelope keeps:
 - the selected todo, claim, and effective action;
 - the bounded action portfolio when the agent must choose among multiple
   admitted actions before delivery;
+- the bounded read-only planning horizon when selected work has strategic
+  Todo, relation, or goal-acceptance context;
 - concrete user actions and gate reasons;
 - required reads;
 - write scope, approvals, guards, workspace/capability gates, and stop rule;
@@ -35,11 +37,19 @@ Action-signature coverage is versioned independently from the envelope schema.
 `turn_envelope_action_dimensions_v0` covers the original action projection;
 `turn_envelope_action_dimensions_v1` additionally covers a blocking user
 gate's `response_plan`; `turn_envelope_action_dimensions_v2` additionally signs
-`action.action_portfolio`. Base/head qualification accepts a declared coverage
-migration as a review signal. Its bounded, JSON-only v2 migration budget applies
-only when a v0/v1 baseline moves to v2; ordinary growth limits resume once v2
-is the baseline. A digest change without a supported coverage migration, or a
-v2 portfolio above that one-version budget, still fails closed.
+`action.action_portfolio`; `turn_envelope_action_dimensions_v3` additionally
+signs `action.planning_horizon`. Base/head qualification accepts a declared
+coverage migration as a review signal. The bounded, JSON-only v2 and v3
+migration budgets apply only to their named schema transitions; ordinary
+growth limits resume once the new version is the baseline. A digest change
+without a supported coverage migration, or a projection above its one-version
+budget, still fails closed.
+
+`quota_planning_horizon_v0` remains advisory even when carried by the envelope.
+Its `selection_contract` points back to `selected_todo` and `action_portfolio`,
+and `horizon_changes_selection=false`. Effect Program transports this
+observation; the TypeScript work-item reducer owns its ordering and bounds.
+See [`quota_planning_horizon_v0`](quota-planning-horizon-v0.md).
 
 For `quota_action_portfolio_v2`, the envelope carries the recommendation and
 bounded, non-exhaustive `suggested_actions`, but neither is a settlement

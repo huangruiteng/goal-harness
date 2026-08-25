@@ -49,6 +49,7 @@ export interface EffectObservation<Decision extends string> {
   effective_action: string;
   recommended_action: string;
   action_portfolio: JsonObject | null;
+  planning_horizon: JsonObject | null;
   protocol_summary: string | null;
 }
 
@@ -292,6 +293,7 @@ export function interpretQuotaShouldRunPacket(
   const gate = asObject(packet.capability_gate);
   const protocol = asObject(packet.protocol_action_packet);
   const actionPortfolio = asObject(packet.action_portfolio);
+  const planningHorizon = asObject(packet.planning_horizon);
   return {
     request: {
       kind: "quota_should_run",
@@ -316,6 +318,8 @@ export function interpretQuotaShouldRunPacket(
       recommended_action: truthyString(packet.recommended_action),
       action_portfolio:
         Object.keys(actionPortfolio).length > 0 ? actionPortfolio : null,
+      planning_horizon:
+        Object.keys(planningHorizon).length > 0 ? planningHorizon : null,
       protocol_summary: nullableTruthyString(protocol.summary),
     },
     next_effect: {
@@ -375,6 +379,7 @@ export function interpretTurnResultPacket(
       recommended_action:
         truthyString(packet.recommended_action) || "settle the turn receipt",
       action_portfolio: null,
+      planning_horizon: null,
       protocol_summary: nullableTruthyString(packet.summary),
     },
     next_effect: {
