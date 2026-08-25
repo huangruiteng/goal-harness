@@ -123,7 +123,7 @@ function candidate(value: unknown, label: string): HorizonCandidate {
 }
 
 function priorityRank(value: unknown): number {
-  const match = /^P(\d+)/i.exec(String(value ?? ""));
+  const match = /^P(\d+)/i.exec(typeof value === "string" ? value : "");
   return match ? Number(match[1]) : 1_000;
 }
 
@@ -147,59 +147,64 @@ function relationKey(value: HorizonRelation): string {
   return `${value.from_todo_id}\u0000${value.relation}\u0000${value.to_ref}`;
 }
 
-function relations(candidates: readonly HorizonCandidate[]): HorizonRelation[] {
+function candidateRelations(item: HorizonCandidate): HorizonRelation[] {
   const projected: HorizonRelation[] = [];
-  const seen = new Set<string>();
-  const add = (value: HorizonRelation) => {
-    const key = relationKey(value);
-    if (!seen.has(key)) {
-      seen.add(key);
-      projected.push(value);
-    }
-  };
-  for (const item of candidates) {
-    for (const successor of new Set(item.successor_todo_ids)) {
-      if (successor !== item.todo_id) {
-        add({
-          from_todo_id: item.todo_id,
-          to_ref: successor,
-          relation: "successor",
-          enforcement: "lineage_only",
-        });
-      }
-    }
-    if (item.unblocks_todo_id && item.unblocks_todo_id !== item.todo_id) {
-      add({
+  for (const successor of new Set(item.successor_todo_ids)) {
+    if (successor !== item.todo_id) {
+      projected.push({
         from_todo_id: item.todo_id,
-        to_ref: item.unblocks_todo_id,
-        relation: "unblocks",
-        enforcement: "typed_lifecycle",
-      });
-    }
-    if (item.resume_when) {
-      add({
-        from_todo_id: item.todo_id,
-        to_ref: item.resume_when,
-        relation: "resumes_when",
-        enforcement: "typed_condition",
-      });
-    }
-    if (item.superseded_by && item.superseded_by !== item.todo_id) {
-      add({
-        from_todo_id: item.todo_id,
-        to_ref: item.superseded_by,
-        relation: "superseded_by",
+        to_ref: successor,
+        relation: "successor",
         enforcement: "lineage_only",
       });
     }
-    const routeRef = item.route_id || item.route_key;
-    if (routeRef) {
-      add({
-        from_todo_id: item.todo_id,
-        to_ref: `route:${routeRef}`,
-        relation: "routes_via",
-        enforcement: "read_only_context",
-      });
+  }
+  if (item.unblocks_todo_id && item.unblocks_todo_id !== item.todo_id) {
+    projected.push({
+      from_todo_id: item.todo_id,
+      to_ref: item.unblocks_todo_id,
+      relation: "unblocks",
+      enforcement: "typed_lifecycle",
+    });
+  }
+  if (item.resume_when) {
+    projected.push({
+      from_todo_id: item.todo_id,
+      to_ref: item.resume_when,
+      relation: "resumes_when",
+      enforcement: "typed_condition",
+    });
+  }
+  if (item.superseded_by && item.superseded_by !== item.todo_id) {
+    projected.push({
+      from_todo_id: item.todo_id,
+      to_ref: item.superseded_by,
+      relation: "superseded_by",
+      enforcement: "lineage_only",
+    });
+  }
+  const routeRef = item.route_id || item.route_key;
+  if (routeRef) {
+    projected.push({
+      from_todo_id: item.todo_id,
+      to_ref: `route:${routeRef}`,
+      relation: "routes_via",
+      enforcement: "read_only_context",
+    });
+  }
+  return projected;
+}
+
+function relations(candidates: readonly HorizonCandidate[]): HorizonRelation[] {
+  const projected: HorizonRelation[] = [];
+  const seen = new Set<string>();
+  for (const item of candidates) {
+    for (const value of candidateRelations(item)) {
+      const key = relationKey(value);
+      if (!seen.has(key)) {
+        seen.add(key);
+        projected.push(value);
+      }
     }
   }
   return projected;
@@ -410,7 +415,9 @@ export function projectQuotaPlanningHorizon(value: unknown): JsonObject | null {
   });
   const projectedRelations = relevantRelations.slice(0, MAX_PROJECTED_RELATIONS);
   const rawGaps = Array.isArray(request.acceptance_gaps) ? request.acceptance_gaps : [];
-  const compactGaps = rawGaps.map(compactAcceptanceGap);
+  const compactGaps = rawGaps.map((gap, index) =>
+    compactAcceptanceGap(gap, index)
+  );
   const projectedGaps = compactGaps
     .slice(0, MAX_PROJECTED_ACCEPTANCE_GAPS)
     .map(({ truncated: _truncated, ...gap }) => gap);

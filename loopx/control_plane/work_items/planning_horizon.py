@@ -40,6 +40,31 @@ def _compact_context_candidate(
     return compact_todo_summary_item(dict(value), text=text)
 
 
+def _context_candidate_sources(
+    *,
+    selected: Mapping[str, Any],
+    runnable: list[dict[str, Any]],
+    agent_todo_summary: Mapping[str, Any] | None,
+    blocked_priority_fallback: Mapping[str, Any] | None,
+) -> list[Any]:
+    sources: list[Any] = [selected, *runnable]
+    if isinstance(agent_todo_summary, Mapping):
+        sources.extend(
+            value
+            for lane in _CONTEXT_LANES
+            for value in (
+                agent_todo_summary.get(lane)
+                if isinstance(agent_todo_summary.get(lane), list)
+                else []
+            )
+        )
+    if isinstance(blocked_priority_fallback, Mapping):
+        blocked_items = blocked_priority_fallback.get("blocked_items")
+        if isinstance(blocked_items, list):
+            sources.extend(blocked_items)
+    return sources
+
+
 def _context_candidates(
     *,
     selected: Mapping[str, Any],
@@ -53,16 +78,12 @@ def _context_candidates(
         agent_todo_summary=agent_todo_summary,
         capability_gate=capability_gate,
     )
-    sources: list[Any] = [selected, *runnable]
-    if isinstance(agent_todo_summary, Mapping):
-        for lane in _CONTEXT_LANES:
-            values = agent_todo_summary.get(lane)
-            if isinstance(values, list):
-                sources.extend(values)
-    if isinstance(blocked_priority_fallback, Mapping):
-        blocked_items = blocked_priority_fallback.get("blocked_items")
-        if isinstance(blocked_items, list):
-            sources.extend(blocked_items)
+    sources = _context_candidate_sources(
+        selected=selected,
+        runnable=runnable,
+        agent_todo_summary=agent_todo_summary,
+        blocked_priority_fallback=blocked_priority_fallback,
+    )
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
     for value in sources:
@@ -77,6 +98,22 @@ def _context_candidates(
         seen.add(todo_id)
         candidates.append(compact)
     return candidates, [str(item["todo_id"]) for item in runnable]
+
+
+def _source_context_count(summary: Mapping[str, Any] | None) -> int:
+    if not isinstance(summary, Mapping):
+        return 0
+    counts = (summary.get("open_count"), summary.get("deferred_count"))
+    return sum(value for value in counts if type(value) is int and value >= 0)
+
+
+def _frontier_acceptance_gaps(
+    projection: Mapping[str, Any] | None,
+) -> list[Any]:
+    if not isinstance(projection, Mapping):
+        return []
+    acceptance_gaps = projection.get("acceptance_gaps")
+    return acceptance_gaps if isinstance(acceptance_gaps, list) else []
 
 
 def build_quota_planning_horizon(
@@ -104,20 +141,8 @@ def build_quota_planning_horizon(
         blocked_priority_fallback=blocked_priority_fallback,
         agent_id=safe_agent_id,
     )
-    source_context_count = 0
-    if isinstance(agent_todo_summary, Mapping):
-        open_count = agent_todo_summary.get("open_count")
-        deferred_count = agent_todo_summary.get("deferred_count")
-        if type(open_count) is int and open_count >= 0:
-            source_context_count += open_count
-        if type(deferred_count) is int and deferred_count >= 0:
-            source_context_count += deferred_count
-    acceptance_gaps = (
-        goal_frontier_projection.get("acceptance_gaps")
-        if isinstance(goal_frontier_projection, Mapping)
-        and isinstance(goal_frontier_projection.get("acceptance_gaps"), list)
-        else []
-    )
+    source_context_count = _source_context_count(agent_todo_summary)
+    acceptance_gaps = _frontier_acceptance_gaps(goal_frontier_projection)
     try:
         projected = effect_runtime_result(
             "work_item.planning_horizon.project",

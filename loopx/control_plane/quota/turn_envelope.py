@@ -793,6 +793,19 @@ def _action_projection(
     return projection
 
 
+def _action_signature_coverage(
+    envelope: Mapping[str, Any], response_plan: Any
+) -> str:
+    action = _mapping(envelope.get("action"))
+    if isinstance(action.get("planning_horizon"), Mapping):
+        return ACTION_SIGNATURE_COVERAGE_V3
+    if isinstance(action.get("action_portfolio"), Mapping):
+        return ACTION_SIGNATURE_COVERAGE_V2
+    if isinstance(response_plan, Mapping):
+        return ACTION_SIGNATURE_COVERAGE_V1
+    return ACTION_SIGNATURE_COVERAGE_V0
+
+
 def turn_envelope_action_signature_document(envelope: Mapping[str, Any]) -> dict[str, Any]:
     fields = (
         "agent_id",
@@ -812,19 +825,7 @@ def turn_envelope_action_signature_document(envelope: Mapping[str, Any]) -> dict
         "task_orchestration_contract",
     )
     response_plan = envelope.get("response_plan")
-    coverage = (
-        ACTION_SIGNATURE_COVERAGE_V3
-        if isinstance(
-            _mapping(envelope.get("action")).get("planning_horizon"), Mapping
-        )
-        else ACTION_SIGNATURE_COVERAGE_V2
-        if isinstance(
-            _mapping(envelope.get("action")).get("action_portfolio"), Mapping
-        )
-        else ACTION_SIGNATURE_COVERAGE_V1
-        if isinstance(response_plan, Mapping)
-        else ACTION_SIGNATURE_COVERAGE_V0
-    )
+    coverage = _action_signature_coverage(envelope, response_plan)
     signature = {
         "schema_version": ACTION_SIGNATURE_SCHEMA_VERSION,
         "coverage": coverage,

@@ -461,9 +461,10 @@ def test_semantic_contract_subset_grades_only_declared_fields() -> None:
 def test_semantic_contract_subset_rejects_invalid_coverage(
     fields: tuple[str, ...], message: str
 ) -> None:
+    packet = _full_packet()
     with pytest.raises(ValueError, match=message):
         build_model_behavior_actor_request(
-            _full_packet(),
+            packet,
             qualification_id="case-semantic-subset-invalid-001",
             arm="full_packet",
             semantic_contract_required=True,
