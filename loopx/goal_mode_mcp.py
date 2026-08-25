@@ -7,7 +7,14 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
+
+try:  # pydantic ships with the FastMCP extra; base installs have no pydantic.
+    from pydantic import Strict
+except ImportError:  # pragma: no cover - exercised on base installs only
+    class Strict:  # type: ignore[no-redef]
+        """Inert stand-in so the shared annotation still evaluates without
+        pydantic; FastMCP cannot run on such an install anyway."""
 
 from .control_plane.host_adapter_settlement import (
     HostTodoSettlementRequest,
@@ -16,6 +23,13 @@ from .control_plane.host_adapter_settlement import (
 
 
 ContextResolver = Callable[[], dict[str, Any] | None]
+
+# The one boundary type for a caller-supplied lease version. FastMCP validates
+# tool arguments with pydantic, and lax pydantic coerces JSON true to 1 before
+# any loopx code runs, so strictness must live in the annotation itself; the
+# control-plane method and the FastMCP wrapper share this alias so the two
+# signatures cannot drift.
+ExpectedTaskLeaseVersion = Annotated[int, Strict()] | None
 
 
 @dataclass(frozen=True)
@@ -163,7 +177,7 @@ class GoalModeMCPControlPlane:
         evidence: str,
         next_agent_todo: str = "",
         task_lease_idempotency_key: str = "",
-        task_lease_expected_version: int | None = None,
+        task_lease_expected_version: ExpectedTaskLeaseVersion = None,
         no_follow_up: bool = False,
     ) -> str:
         goal_id, _ = self.context()
@@ -257,7 +271,7 @@ def create_fastmcp_server(
         evidence: str,
         next_agent_todo: str = "",
         task_lease_idempotency_key: str = "",
-        task_lease_expected_version: int | None = None,
+        task_lease_expected_version: ExpectedTaskLeaseVersion = None,
         no_follow_up: bool = False,
     ) -> str:
         """Complete one verified todo, write follow-up state, then spend quota."""

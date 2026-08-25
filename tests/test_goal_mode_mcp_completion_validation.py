@@ -122,3 +122,33 @@ def test_mcp_complete_task_fails_closed_on_failing_declared_validation(
     assert "spend-slot" not in output
     assert "refresh-state" not in output
     assert _agent_todo_status(state, todo_id) != "done"
+
+def test_expected_lease_version_annotation_rejects_bool_at_the_boundary() -> None:
+    """FastMCP validates tool arguments with pydantic, and lax pydantic
+    coerces JSON ``true`` to ``1`` BEFORE any loopx code runs - by the time
+    the lease CAS compares versions the bool is indistinguishable from a
+    legitimate 1.  The boundary annotation is therefore the only place the
+    rejection can happen, and it is single-sourced so the control-plane
+    method and the FastMCP wrapper cannot drift."""
+
+    import pydantic
+
+    from loopx import goal_mode_mcp
+
+    adapter = pydantic.TypeAdapter(goal_mode_mcp.ExpectedTaskLeaseVersion)
+    for disguised in (True, False):
+        try:
+            adapter.validate_python(disguised)
+        except pydantic.ValidationError:
+            pass
+        else:
+            raise AssertionError(f"bool {disguised} was coerced to an int")
+    assert adapter.validate_python(7) == 7
+    assert adapter.validate_python(None) is None
+
+    import typing
+
+    hints = typing.get_type_hints(
+        goal_mode_mcp.GoalModeMCPControlPlane.complete_task, include_extras=True
+    )
+    assert hints["task_lease_expected_version"] == goal_mode_mcp.ExpectedTaskLeaseVersion
