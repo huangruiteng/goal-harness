@@ -408,6 +408,101 @@ def test_required_semantic_contract_keeps_only_aligned_digests() -> None:
     assert "Implement one bounded" not in encoded
 
 
+def test_semantic_contract_subset_grades_only_declared_fields() -> None:
+    full = _full_packet()
+    full["planning_horizon"] = {
+        "schema_version": "quota_planning_horizon_v0",
+        "selected_todo_id": "todo_fixture001",
+        "work_items": [{"todo_id": "todo_fixture001"}],
+        "relations": [],
+        "completeness": {"complete": True},
+    }
+
+    def actor(request: Mapping[str, Any]) -> dict[str, Any]:
+        semantics = model_behavior_semantic_contract_from_packet(
+            request["packet"],
+            arm=str(request["arm"]),
+        )
+        assert request["response_contract"]["semantic_contract_fields"] == [
+            "planning_horizon"
+        ]
+        return {
+            "schema_version": MODEL_BEHAVIOR_ACTOR_RESULT_SCHEMA_VERSION,
+            "actor_ref": "fixture-model-v1",
+            "decision": _decision(
+                semantic_contract={"planning_horizon": semantics["planning_horizon"]}
+            ),
+            "tool_calls": [],
+        }
+
+    result = run_model_behavior_qualification_pair(
+        full,
+        build_turn_envelope(full),
+        qualification_id="case-semantic-subset-001",
+        actor=actor,
+        semantic_contract_required=True,
+        semantic_contract_fields=("planning_horizon",),
+    )
+
+    assert result["equivalent"] is True
+    assert result["semantic_contract_complete"] is True
+    assert result["semantic_contract_fields"] == ["planning_horizon"]
+    assert result["semantic_contract_drift"] == {}
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        ((), "must not be empty"),
+        (("planning_horizon", "planning_horizon"), "duplicate"),
+        (("planning_horizon", "future_field"), "unknown"),
+    ],
+)
+def test_semantic_contract_subset_rejects_invalid_coverage(
+    fields: tuple[str, ...], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        build_model_behavior_actor_request(
+            _full_packet(),
+            qualification_id="case-semantic-subset-invalid-001",
+            arm="full_packet",
+            semantic_contract_required=True,
+            semantic_contract_fields=fields,
+        )
+
+
+def test_paired_receipts_fail_closed_when_semantic_coverage_differs() -> None:
+    full_receipt = run_model_behavior_qualification_arm(
+        _full_packet(),
+        qualification_id="case-semantic-coverage-drift-001",
+        arm="full_packet",
+        actor=lambda request: {
+            "schema_version": MODEL_BEHAVIOR_ACTOR_RESULT_SCHEMA_VERSION,
+            "actor_ref": "fixture-model-v1",
+            "decision": _decision(
+                semantic_contract={
+                    "planning_horizon": model_behavior_semantic_contract_from_packet(
+                        request["packet"], arm=str(request["arm"])
+                    )["planning_horizon"]
+                }
+            ),
+            "tool_calls": [],
+        },
+        semantic_contract_required=True,
+        semantic_contract_fields=("planning_horizon",),
+    )
+    candidate_receipt = dict(full_receipt)
+    candidate_receipt["semantic_contract_fields"] = ["scheduler_action"]
+
+    result = compare_model_behavior_receipts(full_receipt, candidate_receipt)
+
+    assert result["equivalent"] is False
+    assert result["semantic_contract_fields"] == []
+    assert result["safety_violations"] == [
+        "semantic_contract_coverage_mismatch"
+    ]
+
+
 def test_semantic_contract_preserves_peer_identity_and_continuation() -> None:
     full = _full_packet()
     full["selected_todo"]["continuation_policy"] = "same_agent_non_delivery"
@@ -429,6 +524,62 @@ def test_semantic_contract_preserves_peer_identity_and_continuation() -> None:
     }
     assert full_semantics["peer_route"] == expected
     assert candidate_semantics["peer_route"] == expected
+
+
+def test_semantic_contract_preserves_bounded_planning_horizon_relations() -> None:
+    full = _full_packet()
+    full["planning_horizon"] = {
+        "schema_version": "quota_planning_horizon_v0",
+        "selected_todo_id": "todo_fixture001",
+        "work_items": [
+            {"todo_id": "todo_fixture001"},
+            {"todo_id": "todo_context001"},
+        ],
+        "attention_todo_ids": ["todo_context001"],
+        "relations": [
+            {
+                "from_todo_id": "todo_context001",
+                "relation": "successor",
+                "to_ref": "todo_fixture001",
+                "enforcement": "lineage_only",
+            }
+        ],
+        "completeness": {
+            "complete": False,
+            "omitted_candidate_todo_count": 1,
+        },
+        "detail_refs": {"agent_todos": "quota should-run --include-detail agent-todos"},
+    }
+
+    full_semantics = model_behavior_semantic_contract_from_packet(
+        full,
+        arm="full_packet",
+    )["planning_horizon"]
+    candidate_semantics = model_behavior_semantic_contract_from_packet(
+        build_turn_envelope(full),
+        arm="candidate_packet",
+    )["planning_horizon"]
+
+    assert candidate_semantics == full_semantics
+    assert full_semantics == {
+        "present": True,
+        "selected_todo_id": "todo_fixture001",
+        "visible_todo_ids": ["todo_fixture001", "todo_context001"],
+        "attention_todo_ids": ["todo_context001"],
+        "relation_kinds": ["successor"],
+        "relation_count": 1,
+        "relations": [
+            {
+                "from_todo_id": "todo_context001",
+                "relation": "successor",
+                "to_ref": "todo_fixture001",
+                "enforcement": "lineage_only",
+            }
+        ],
+        "complete": False,
+        "truncated": True,
+        "detail_refs": {"agent_todos": "quota should-run --include-detail agent-todos"},
+    }
 
 
 def test_same_wrong_semantics_in_both_arms_fail_source_alignment() -> None:

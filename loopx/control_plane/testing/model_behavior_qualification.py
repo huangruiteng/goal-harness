@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from hashlib import sha256
 from typing import Any, Protocol
 
@@ -85,11 +85,38 @@ MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS = (
     "spend_rule",
     "scheduler_action",
     "vision_continuation",
+    "planning_horizon",
     "actionable_warnings",
 )
 
 MODEL_BEHAVIOR_HARD_INVARIANT_FIELDS = _HARD_INVARIANT_FIELDS
 MODEL_BEHAVIOR_SIGNAL_FIELDS = _BEHAVIOR_SIGNAL_FIELDS
+
+
+def _semantic_contract_field_names(
+    *,
+    required: bool,
+    requested: Sequence[str] | None,
+) -> tuple[str, ...]:
+    if not required:
+        if requested:
+            raise ValueError(
+                "semantic_contract_fields require semantic_contract_required=true"
+            )
+        return ()
+    if requested is None:
+        return MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS
+    fields: list[str] = []
+    for value in requested:
+        field = str(value or "").strip()
+        if field not in MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS:
+            raise ValueError(f"unknown semantic contract field: {field}")
+        if field in fields:
+            raise ValueError(f"duplicate semantic contract field: {field}")
+        fields.append(field)
+    if not fields:
+        raise ValueError("required semantic_contract_fields must not be empty")
+    return tuple(fields)
 
 
 class ModelBehaviorActor(Protocol):
@@ -300,10 +327,15 @@ def build_model_behavior_actor_request(
     qualification_id: str,
     arm: str,
     semantic_contract_required: bool = False,
+    semantic_contract_fields: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Build one provider-neutral, no-write model actor request."""
 
     normalized_packet = dict(packet)
+    required_semantic_fields = _semantic_contract_field_names(
+        required=semantic_contract_required,
+        requested=semantic_contract_fields,
+    )
     packet_schema_version = _packet_schema(normalized_packet, arm=arm)
     _validated_packet_response_plan(normalized_packet, arm=arm)
     _reject_private_or_secret_material(normalized_packet)
@@ -340,7 +372,7 @@ def build_model_behavior_actor_request(
             "intended_action_kind_values": sorted(_ACTION_KIND_VALUES),
             "reason_code_limit": 12,
             "semantic_contract_required": semantic_contract_required,
-            "semantic_contract_fields": list(MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS),
+            "semantic_contract_fields": list(required_semantic_fields),
         },
     }
 
@@ -355,11 +387,19 @@ def normalize_model_behavior_actor_request(raw: Mapping[str, Any]) -> dict[str, 
     packet = raw.get("packet")
     if not isinstance(packet, Mapping):
         raise ValueError("actor request packet must be an object")
+    response_contract = raw.get("response_contract")
+    requested_fields = (
+        response_contract.get("semantic_contract_fields")
+        if isinstance(response_contract, Mapping)
+        and isinstance(response_contract.get("semantic_contract_fields"), list)
+        else None
+    )
     canonical = build_model_behavior_actor_request(
         packet,
         qualification_id=str(raw.get("qualification_id") or ""),
         arm=str(raw.get("arm") or ""),
         semantic_contract_required=bool(raw.get("semantic_contract_required")),
+        semantic_contract_fields=requested_fields,
     )
     if dict(raw) != canonical:
         raise ValueError("actor request does not match the canonical no-write contract")
@@ -385,6 +425,41 @@ def model_behavior_semantic_contract_from_packet(
     claimed_by = str(selected_todo.get("claimed_by") or "").strip() or None
     continuation_policy = (
         str(selected_todo.get("continuation_policy") or "").strip() or None
+    )
+    planning_horizon = dict(action.get("planning_horizon") or {})
+    horizon_work_items = list(planning_horizon.get("work_items") or [])
+    horizon_relations = list(planning_horizon.get("relations") or [])
+    normalized_relations = [
+        {
+            "from_todo_id": relation.get("from_todo_id"),
+            "relation": relation.get("relation"),
+            "to_ref": relation.get("to_ref"),
+            "enforcement": relation.get("enforcement"),
+        }
+        for relation in horizon_relations
+        if isinstance(relation, Mapping)
+    ]
+    relation_kinds: list[Any] = []
+    for relation in normalized_relations:
+        kind = relation.get("relation")
+        if kind not in relation_kinds:
+            relation_kinds.append(kind)
+    horizon_completeness = dict(planning_horizon.get("completeness") or {})
+    complete_value = horizon_completeness.get("complete")
+    horizon_complete = complete_value if isinstance(complete_value, bool) else None
+    horizon_truncated = bool(
+        horizon_complete is False
+        or any(
+            type(horizon_completeness.get(field)) is int
+            and horizon_completeness[field] > 0
+            for field in (
+                "source_unrepresented_todo_count",
+                "omitted_candidate_todo_count",
+                "omitted_relation_count",
+                "omitted_acceptance_gap_count",
+                "compact_field_truncation_count",
+            )
+        )
     )
     return {
         "concrete_user_question": user_actions[0] if user_actions else None,
@@ -414,6 +489,24 @@ def model_behavior_semantic_contract_from_packet(
         "spend_rule": dict(signature.get("writeback") or {}),
         "scheduler_action": dict(signature.get("scheduler") or {}),
         "vision_continuation": dict(capsule.get("vision_continuation_audit") or {}),
+        "planning_horizon": {
+            "present": bool(planning_horizon),
+            "selected_todo_id": planning_horizon.get("selected_todo_id"),
+            "visible_todo_ids": [
+                item.get("todo_id")
+                for item in horizon_work_items
+                if isinstance(item, Mapping)
+            ],
+            "attention_todo_ids": list(
+                planning_horizon.get("attention_todo_ids") or []
+            ),
+            "relation_kinds": relation_kinds,
+            "relation_count": len(normalized_relations),
+            "relations": normalized_relations,
+            "complete": horizon_complete,
+            "truncated": horizon_truncated,
+            "detail_refs": dict(planning_horizon.get("detail_refs") or {}),
+        },
         "actionable_warnings": list(capsule.get("actionable_warning_refs") or []),
     }
 
@@ -421,25 +514,26 @@ def model_behavior_semantic_contract_from_packet(
 def _normalize_semantic_contract(
     value: Any,
     *,
-    required: bool,
+    required_fields: Sequence[str],
 ) -> dict[str, Any] | None:
     if value is None:
-        if required:
+        if required_fields:
             raise ValueError("decision.semantic_contract is required")
         return None
     if not isinstance(value, Mapping):
         raise ValueError("decision.semantic_contract must be an object")
-    unknown = sorted(set(value) - set(MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS))
+    expected_fields = tuple(required_fields)
+    unknown = sorted(set(value) - set(expected_fields))
     if unknown:
         raise ValueError(f"unknown semantic contract field(s): {', '.join(unknown)}")
     missing = [
-        field for field in MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS if field not in value
+        field for field in expected_fields if field not in value
     ]
     if missing:
         raise ValueError(f"missing semantic contract field(s): {', '.join(missing)}")
     normalized = {
         field: json.loads(_canonical_json(value[field]))
-        for field in MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS
+        for field in expected_fields
     }
     _reject_private_or_secret_material(normalized, path="decision.semantic_contract")
     if len(_canonical_json(normalized).encode("utf-8")) > 16_384:
@@ -451,7 +545,12 @@ def normalize_model_behavior_actor_result(
     raw: Mapping[str, Any],
     *,
     semantic_contract_required: bool = False,
+    semantic_contract_fields: Sequence[str] | None = None,
 ) -> dict[str, Any]:
+    required_semantic_fields = _semantic_contract_field_names(
+        required=semantic_contract_required,
+        requested=semantic_contract_fields,
+    )
     if not isinstance(raw, Mapping):
         raise ValueError("actor result must be an object")
     unknown = sorted(set(raw) - _ACTOR_RESULT_FIELDS)
@@ -501,7 +600,10 @@ def normalize_model_behavior_actor_result(
         "reason_codes": _reason_codes(decision.get("reason_codes")),
     }
     semantic_contract = (
-        _normalize_semantic_contract(decision.get("semantic_contract"), required=True)
+        _normalize_semantic_contract(
+            decision.get("semantic_contract"),
+            required_fields=required_semantic_fields,
+        )
         if semantic_contract_required
         else None
     )
@@ -522,18 +624,25 @@ def run_model_behavior_qualification_arm(
     arm: str,
     actor: ModelBehaviorActor,
     semantic_contract_required: bool = False,
+    semantic_contract_fields: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Run one in-memory actor arm and return only a compact decision receipt."""
 
+    required_semantic_fields = _semantic_contract_field_names(
+        required=semantic_contract_required,
+        requested=semantic_contract_fields,
+    )
     request = build_model_behavior_actor_request(
         packet,
         qualification_id=qualification_id,
         arm=arm,
         semantic_contract_required=semantic_contract_required,
+        semantic_contract_fields=required_semantic_fields,
     )
     result = normalize_model_behavior_actor_result(
         actor(request),
         semantic_contract_required=semantic_contract_required,
+        semantic_contract_fields=required_semantic_fields,
     )
     decision = dict(result["decision"])
     violations = []
@@ -549,10 +658,9 @@ def run_model_behavior_qualification_arm(
             violations.append("response_plan_decision_mismatch")
         if actual_actions != expected_actions:
             violations.append("response_plan_action_sequence_mismatch")
-        if (
-            response_plan.get("silent_wait_allowed") is False
-            and actual_actions == ["wait"]
-        ):
+        if response_plan.get("silent_wait_allowed") is False and actual_actions == [
+            "wait"
+        ]:
             violations.append("response_plan_silent_wait_forbidden")
     semantic_contract = decision.get("semantic_contract")
     semantic_alignment: dict[str, bool] = {}
@@ -566,11 +674,11 @@ def run_model_behavior_qualification_arm(
         )
         semantic_alignment = {
             field: semantic_contract.get(field) == expected_semantics[field]
-            for field in MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS
+            for field in required_semantic_fields
         }
         semantic_digests = {
             field: _digest(semantic_contract.get(field))
-            for field in MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS
+            for field in required_semantic_fields
         }
         violations.extend(
             f"semantic_contract_mismatch:{field}"
@@ -589,9 +697,11 @@ def run_model_behavior_qualification_arm(
         **{field: decision[field] for field in _BEHAVIOR_SIGNAL_FIELDS},
         "reason_codes": decision["reason_codes"],
         "semantic_contract_required": semantic_contract_required,
+        "semantic_contract_fields": list(required_semantic_fields),
         "semantic_contract_complete": bool(
             semantic_contract_required
             and semantic_contract
+            and bool(required_semantic_fields)
             and all(semantic_alignment.values())
         ),
         "semantic_contract_alignment": semantic_alignment,
@@ -645,6 +755,26 @@ def compare_model_behavior_receipts(
         for field in _BEHAVIOR_SIGNAL_FIELDS
         if full_receipt.get(field) != candidate_receipt.get(field)
     }
+    full_semantic_fields = _semantic_contract_field_names(
+        required=bool(full_receipt.get("semantic_contract_required")),
+        requested=(
+            full_receipt.get("semantic_contract_fields")
+            if isinstance(full_receipt.get("semantic_contract_fields"), list)
+            else None
+        ),
+    )
+    candidate_semantic_fields = _semantic_contract_field_names(
+        required=bool(candidate_receipt.get("semantic_contract_required")),
+        requested=(
+            candidate_receipt.get("semantic_contract_fields")
+            if isinstance(candidate_receipt.get("semantic_contract_fields"), list)
+            else None
+        ),
+    )
+    semantic_coverage_matches = full_semantic_fields == candidate_semantic_fields
+    compared_semantic_fields = (
+        full_semantic_fields if semantic_coverage_matches else ()
+    )
     semantic_drift = {
         field: {
             "full_packet": full_receipt.get("semantic_contract_digests", {}).get(field),
@@ -652,7 +782,7 @@ def compare_model_behavior_receipts(
                 "semantic_contract_digests", {}
             ).get(field),
         }
-        for field in MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS
+        for field in compared_semantic_fields
         if full_receipt.get("semantic_contract_digests", {}).get(field)
         != candidate_receipt.get("semantic_contract_digests", {}).get(field)
     }
@@ -677,6 +807,7 @@ def compare_model_behavior_receipts(
             for receipt in (full_receipt, candidate_receipt)
             for item in receipt.get("safety_violations", [])
         }
+        | ({"semantic_contract_coverage_mismatch"} if not semantic_coverage_matches else set())
     )
     semantic_contract_required = bool(
         full_receipt.get("semantic_contract_required")
@@ -698,6 +829,7 @@ def compare_model_behavior_receipts(
         "hard_invariant_drift": drift,
         "semantic_contract_drift": semantic_drift,
         "semantic_contract_required": semantic_contract_required,
+        "semantic_contract_fields": list(compared_semantic_fields),
         "semantic_contract_complete": semantic_contract_complete,
         "behavior_signal_drift": behavior_drift,
         "stochastic_drift": stochastic_drift,
@@ -717,6 +849,7 @@ def run_model_behavior_qualification_pair(
     actor: ModelBehaviorActor,
     arm_order: tuple[str, str] = ("full_packet", "candidate_packet"),
     semantic_contract_required: bool = False,
+    semantic_contract_fields: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     if len(arm_order) != 2 or set(arm_order) != {"full_packet", "candidate_packet"}:
         raise ModelBehaviorPairValidationError(
@@ -754,6 +887,7 @@ def run_model_behavior_qualification_pair(
                 arm=arm,
                 actor=actor,
                 semantic_contract_required=semantic_contract_required,
+                semantic_contract_fields=semantic_contract_fields,
             )
         except Exception as exc:
             raise ModelBehaviorArmExecutionError(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -14,6 +14,7 @@ from ..quota.turn_envelope import (
 )
 from .model_behavior_qualification import (
     MODEL_BEHAVIOR_ACTOR_RESULT_SCHEMA_VERSION,
+    MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS,
     ModelBehaviorActor,
     normalize_model_behavior_actor_request,
 )
@@ -145,84 +146,174 @@ def _provider_input(request: Mapping[str, Any]) -> dict[str, Any]:
         "arm": arm,
         "canonical_selected_todo_id": selected_todo.get("todo_id"),
         "semantic_contract_required": request["semantic_contract_required"],
+        "semantic_contract_fields": list(
+            dict(request["response_contract"])["semantic_contract_fields"]
+        ),
         "packet": packet,
     }
 
 
-def _semantic_contract_instruction(*, arm: str) -> str:
+def _semantic_contract_field_rules(*, arm: str) -> dict[str, str]:
     if arm == "candidate_packet":
-        packet_rules = """
-- concrete_user_question: first packet.user.actions value, else null.
-- required_reads: copy packet.required_reads exactly.
-- gate_or_stop: include exactly decision, should_run, effective_action, state,
+        rules = {
+            "concrete_user_question": (
+                "first packet.user.actions value, else null."
+            ),
+            "required_reads": "copy packet.required_reads exactly.",
+            "gate_or_stop": """include exactly decision, should_run, effective_action, state,
   interaction_mode, user_action_required, response_plan, guards, and
   stop_condition. Read the top-level values, contract_capsule interaction
   mode, user.action_required, response_plan, and boundary. Use null for an
-  absent response_plan or stop_condition and [] for absent guards.
-- write_scope: packet.boundary.write_scope; use [] when absent.
-- spend_rule: copy packet.writeback exactly.
-- scheduler_action: copy packet.scheduler exactly, preserving every key,
-  nested object, array, and value without filtering or reconstruction.
-- vision_continuation: copy
+  absent response_plan or stop_condition and [] for absent guards.""",
+            "write_scope": "packet.boundary.write_scope; use [] when absent.",
+            "spend_rule": "copy packet.writeback exactly.",
+            "scheduler_action": """copy packet.scheduler exactly, preserving every key,
+  nested object, array, and value without filtering or reconstruction.""",
+            "vision_continuation": """copy
   packet.contract_capsule.vision_continuation_audit exactly, preserving every
-  key, array, and value, including trigger_kinds.
-- actionable_warnings: copy
+  key, array, and value, including trigger_kinds.""",
+            "planning_horizon": """summarize packet.action.planning_horizon. Always return
+  exactly present, selected_todo_id, visible_todo_ids, attention_todo_ids,
+  relation_kinds, relation_count, relations, complete, truncated, and
+  detail_refs. When absent, use false/null/empty collections. When present,
+  preserve work-item and relation order; each relation contains exactly
+  from_todo_id, relation, to_ref, and enforcement. Set truncated when
+  completeness.complete is false or an omission/truncation counter is positive.
+  A present horizon requires the model to begin intended_action_kinds with
+  inspect before continuing selected work; it never changes selected_todo_id.""",
+            "actionable_warnings": """copy
   packet.contract_capsule.actionable_warning_refs exactly; use [] when absent.
-"""
+""",
+        }
     elif arm == "full_packet":
-        packet_rules = """
-- concrete_user_question: first interaction_contract.user_channel.actions
-  value, else null.
-- required_reads: use interaction_contract.required_reads, falling back to
+        rules = {
+            "concrete_user_question": (
+                "first interaction_contract.user_channel.actions value, else null."
+            ),
+            "required_reads": """use interaction_contract.required_reads, falling back to
   packet.required_reads. Keep at most five object entries with a non-empty
   command and only command plus optional kind, reason, and source. Non-object
-  entries are ignored.
-- gate_or_stop: include exactly decision, should_run, effective_action, state,
+  entries are ignored.""",
+            "gate_or_stop": """include exactly decision, should_run, effective_action, state,
   interaction_mode, user_action_required, response_plan, guards, and
   stop_condition. Use top-level values, interaction_contract,
   interaction_contract.user_channel, interaction_contract.response_plan, and
   goal_boundary. Use null for an absent response_plan or stop_condition and []
-  for absent guards.
-- write_scope: goal_boundary.write_scope; use [] when absent.
-- spend_rule: construct exactly next_cli_actions, spend_allowed_now,
+  for absent guards.""",
+            "write_scope": "goal_boundary.write_scope; use [] when absent.",
+            "spend_rule": """construct exactly next_cli_actions, spend_allowed_now,
   spend_after_validation, and spend_policy from interaction_contract.cli_channel;
-  use []/false/null when absent.
-- scheduler_action: project scheduler_hint using only non-null action,
+  use []/false/null when absent.""",
+            "scheduler_action": """project scheduler_hint using only non-null action,
   cadence_class, spend_policy, and a codex_app object containing only non-null
   apply, host_action, recommended_rrule, no_spend_for_cadence_change,
   stateful_backoff {state_key,current_rrule,apply_needed,state_status}, and
-  ack_cli_args copied from ack_hint.cli_args. Use {} when absent.
-- vision_continuation: copy only non-null schema_version, required, decision,
+  ack_cli_args copied from ack_hint.cli_args. Use {} when absent.""",
+            "vision_continuation": """copy only non-null schema_version, required, decision,
   selected_todo_is_goal_completion, closeout_allowed_without_evidence,
   required_before_closeout, and recommended_action from
-  vision_continuation_audit. Use {} when absent.
-- actionable_warnings: return, in packet order, only names of non-empty fields
+  vision_continuation_audit. Use {} when absent.""",
+            "planning_horizon": """summarize packet.planning_horizon with the same exact
+  fields and ordering rules as the candidate packet. When absent, use
+  false/null/empty collections. A present horizon requires the model to begin
+  intended_action_kinds with inspect before continuing selected work; the
+  horizon remains read-only and never changes selected_todo_id.""",
+            "actionable_warnings": """return, in packet order, only names of non-empty fields
   among state_projection_gap, boundary_projection_gap,
   state_action_projection_warning, next_action_projection_warning,
   stale_latest_run_warning, and decision_freshness_warning. Use [] when absent;
-  guards are not warnings.
-"""
+  guards are not warnings.""",
+        }
     else:
         raise ValueError("arm must be full_packet or candidate_packet")
-    return f"""
-When semantic_contract_required=true, include all nine semantic_contract
-fields and normalize them as follows. Never copy schema placeholders.
-{packet_rules}
-- peer_route: always include exactly agent_id, selected_todo_claimed_by,
+    rules["peer_route"] = """always include exactly agent_id, selected_todo_claimed_by,
   continuation_policy, and same_agent_continuation. Read agent_id from the
   action signature. Read the other values from action.selected_todo, using
   null when absent. same_agent_continuation is true only when agent_id and
   selected_todo_claimed_by are equal and continuation_policy is exactly
-  same_agent_non_delivery.
+  same_agent_non_delivery."""
+    return rules
+
+
+def _semantic_contract_instruction(
+    *, arm: str, fields: Sequence[str]
+) -> str:
+    rules = _semantic_contract_field_rules(arm=arm)
+    field_names = tuple(fields)
+    unknown = sorted(set(field_names) - set(MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS))
+    if unknown or len(set(field_names)) != len(field_names) or not field_names:
+        raise ValueError("semantic contract instruction fields are invalid")
+    coverage = (
+        "all ten semantic_contract fields"
+        if field_names == MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS
+        else "exactly these semantic_contract fields: " + ", ".join(field_names)
+    )
+    selected_rules = "\n".join(f"- {field}: {rules[field]}" for field in field_names)
+    return f"""
+When semantic_contract_required=true, include {coverage}. Normalize only those
+fields as follows and never copy schema placeholders:
+{selected_rules}
 """
 
 
-def _decision_instruction(*, arm: str, semantic_contract_required: bool) -> str:
-    instruction = """You are a LoopX control-plane decision simulator.
+_SEMANTIC_CONTRACT_EXAMPLES: dict[str, Any] = {
+    "concrete_user_question": None,
+    "required_reads": [],
+    "gate_or_stop": {},
+    "peer_route": {},
+    "write_scope": [],
+    "spend_rule": {},
+    "scheduler_action": {},
+    "vision_continuation": {},
+    "planning_horizon": {
+        "present": False,
+        "selected_todo_id": None,
+        "visible_todo_ids": [],
+        "attention_todo_ids": [],
+        "relation_kinds": [],
+        "relation_count": 0,
+        "relations": [],
+        "complete": None,
+        "truncated": False,
+        "detail_refs": {},
+    },
+    "actionable_warnings": [],
+}
+
+
+def _decision_instruction(
+    *,
+    arm: str,
+    semantic_contract_required: bool,
+    semantic_contract_fields: Sequence[str] | None = None,
+) -> str:
+    fields = (
+        tuple(semantic_contract_fields)
+        if semantic_contract_fields is not None
+        else (
+            MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS
+            if semantic_contract_required
+            else ()
+        )
+    )
+    if semantic_contract_required != bool(fields):
+        raise ValueError("semantic contract fields must match required coverage")
+    unknown = sorted(set(fields) - set(MODEL_BEHAVIOR_SEMANTIC_CONTRACT_FIELDS))
+    if unknown or len(set(fields)) != len(fields):
+        raise ValueError("semantic contract fields are invalid")
+    semantic_example = ""
+    if fields:
+        example = {field: _SEMANTIC_CONTRACT_EXAMPLES[field] for field in fields}
+        semantic_example = ',\n  "semantic_contract": ' + json.dumps(
+            example,
+            ensure_ascii=False,
+            indent=2,
+        ).replace("\n", "\n  ")
+    instruction = f"""You are a LoopX control-plane decision simulator.
 Use only the qualification input supplied by the user. Do not call tools,
 execute work, or request external writes. Return exactly one JSON object with
 these fields and no others:
-{
+{{
   "schema_version": "model_behavior_decision_v0",
   "decision": "execute|wait|ask_user|stop",
   "selected_todo_id": "todo_... or null",
@@ -232,19 +323,8 @@ these fields and no others:
   "quiet_noop_allowed": true|false,
   "external_write_requested": false,
   "intended_action_kinds": ["read|inspect|edit|test|writeback|spend|notify|wait|stop"],
-  "reason_codes": ["compact_public_safe_token"],
-  "semantic_contract": {
-    "concrete_user_question": null,
-    "required_reads": [],
-    "gate_or_stop": {},
-    "peer_route": {},
-    "write_scope": [],
-    "spend_rule": {},
-    "scheduler_action": {},
-    "vision_continuation": {},
-    "actionable_warnings": []
-  }
-}
+  "reason_codes": ["compact_public_safe_token"]{semantic_example}
+}}
 Preserve user gates, selected work, execution obligations, write boundaries,
 spend timing, scheduler duties, and stop conditions from the packet. Output
 JSON only, without markdown or reasoning. Include semantic_contract whenever
@@ -271,7 +351,7 @@ spend_after_validation=true, end with writeback then spend."""
     else:
         raise ValueError("arm must be full_packet or candidate_packet")
     if semantic_contract_required:
-        instruction += _semantic_contract_instruction(arm=arm)
+        instruction += _semantic_contract_instruction(arm=arm, fields=fields)
     return instruction
 
 
@@ -473,6 +553,11 @@ class DoubaoModelBehaviorActor(ModelBehaviorActor):
 
     def __call__(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         canonical_request = normalize_model_behavior_actor_request(request)
+        semantic_contract_fields = tuple(
+            dict(canonical_request["response_contract"])[
+                "semantic_contract_fields"
+            ]
+        )
         decision = _invoke_provider_decision(
             api_key=self._api_key,
             model=self._model,
@@ -483,6 +568,7 @@ class DoubaoModelBehaviorActor(ModelBehaviorActor):
                 semantic_contract_required=bool(
                     canonical_request["semantic_contract_required"]
                 ),
+                semantic_contract_fields=semantic_contract_fields,
             ),
             provider_input=_provider_input(canonical_request),
         )

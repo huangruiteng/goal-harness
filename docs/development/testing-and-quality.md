@@ -388,7 +388,7 @@ python3 scripts/qualify-doubao-capability-monitor-repair-tool-live.py \
 ```
 
 The regular live suite is
-`actual_default_model_behavior_portfolio_v0`: eighteen one-arm scenarios and two
+`actual_default_model_behavior_portfolio_v0`: nineteen one-arm scenarios and two
 attempts each. Its selected-Todo case starts from a production thin heartbeat,
 executes real quota, and requires the model to perform the selected Todo's
 read-only target action. Its required-vision replan case independently builds a
@@ -401,7 +401,11 @@ routing, same-agent continuation, final human gate, healthy continuation, and
 projection repair. One effect-settlement scenario covers terminal closeout.
 Two action-portfolio scenarios require a runnable fallback to replace either a
 future monitor or a typed external wait while preserving the unavailable P0
-context. Three composition scenarios check vision/monitor/peer replan
+context. One planning-horizon scenario requires the model to inspect a bounded
+typed strategic chain before running the selected regression gate. Its
+scenario-local semantic contract contains only `planning_horizon`; unrelated
+peer and scheduler fields remain covered by deterministic contracts. Three
+composition scenarios check vision/monitor/peer replan
 precedence, non-blocking user notice plus ready-successor execution, and
 capability-bridge repair before monitor fallback. Three compaction scenarios
 check the JSON budget and source-derived semantic parity, then repeat clean
@@ -413,20 +417,22 @@ scenario has an independent deterministic source oracle derived before CLI
 projection; every repeat must pass and hard actor errors are not retried. The
 remaining live turn actor cases consume the default CLI hot-path
 `quota should-run` projection used by Codex App automation and return
-runtime-facing decisions rather than echoing the testing-only nine-field
-semantic contract. The suite has 36 bounded scenario attempts. Five scenarios
+runtime-facing decisions rather than echoing a global testing-only semantic
+contract. The suite has 38 bounded scenario attempts. Five scenarios
 exercise real tool loops; their per-scenario provider-call ceilings are owned by
 the corresponding typed behavior harnesses instead of being duplicated here.
 Exact scheduler, vision, writeback, and warning fields stay in deterministic
 action-signature coverage; pair mode keeps TurnEnvelope semantic extraction for
 explicit packet differentials or outcome claims.
 
-常规 live suite 是 `actual_default_model_behavior_portfolio_v0`：18 个 one-arm
+常规 live suite 是 `actual_default_model_behavior_portfolio_v0`：19 个 one-arm
 场景，每个重复 2 次。9 个 core-contract 场景覆盖正常接入、agent 身份与
 goal 选择、selected todo、peer 身份路由、same-agent 续接、最终 human gate、
 健康继续和 projection repair；1 个 effect-settlement 场景覆盖 terminal closeout；
 2 个 action-portfolio 场景分别证明 future monitor 和 typed external wait 不会压住
-可运行 fallback，同时仍保留不可运行的 P0 上下文；3 个组合场景覆盖
+可运行 fallback，同时仍保留不可运行的 P0 上下文；1 个 planning-horizon 场景要求
+模型先检查有界的 typed strategic chain，再运行被选中的 regression gate；该场景只回读
+`planning_horizon`，不会把无关的 peer/scheduler 字段混进 oracle。3 个组合场景覆盖
 vision/monitor/peer replan 优先级、非阻塞
 user notice 与 ready successor 并存，以及 capability-bridge re-entry 必须先于 monitor
 fallback；3 个 compaction 场景覆盖 JSON 预算与 source-derived 语义一致，并分别让正常
@@ -447,7 +453,7 @@ scoped-gate successor 场景也从 hermetic Goal 与正式 heartbeat 开始：�
 其他 turn 场景仍属于
 packet interpretation。scheduler、vision、writeback 与
 warning 的精确字段继续由 action-signature 确定性覆盖；pair 中的 TurnEnvelope 只用于
-明确的 packet 差分或结果提升声明。全套是 36 个有界 scenario attempt；5 个真实工具
+明确的 packet 差分或结果提升声明。全套是 38 个有界 scenario attempt；5 个真实工具
 场景的 provider 调用上限由各自 typed behavior harness 持有，本文不再复制易漂移的总数。
 
 For onboarding packets, the suite uses the shipped guided packet builder and

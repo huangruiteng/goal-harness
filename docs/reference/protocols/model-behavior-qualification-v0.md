@@ -69,9 +69,17 @@ names, safety codes, and receipt digests. It excludes packets, prompts, raw
 responses, and conversations. Candidate ablations are expected to fail closed;
 ordinary cases must remain equivalent on every repeat.
 
-Coverage is explicit. Corpus mode requires a bounded `semantic_contract` for
-the concrete user question, required reads, gate/stop state, write scope, spend
-rule, scheduler action, vision continuation, and actionable warnings. The core
+Coverage is explicit and scenario-owned. Corpus mode requires the complete
+ten-field `semantic_contract`: concrete user question, required reads,
+gate/stop state, peer route, write scope, spend rule, scheduler action, vision
+continuation, planning horizon, and actionable warnings. A focused live
+scenario may declare a non-empty field subset when its oracle exercises only
+that domain; undeclared fields are rejected rather than silently ignored. The
+planning-horizon strategic-context scenario therefore asks the model only for
+`planning_horizon`, instead of coupling that proof to unrelated peer or
+scheduler reconstruction. The horizon summary retains presence,
+selected/visible/attention Todo ids, ordered typed relations,
+completeness/truncation, and cold-path refs. The core
 derives the expected contract independently from each arm's packet and compares
 the model result with that source before comparing arms. Two arms that repeat
 the same wrong or incomplete interpretation therefore fail source alignment.
@@ -297,7 +305,12 @@ scenarios still feed the live actor the same default full quota packet consumed
 by Codex App automation, because their current proof is packet interpretation
 rather than tool execution. Onboarding scenarios use the shipped guided-
 onboarding packet. The suite does not introduce a third model protocol or
-retain a retired product arm. Its fixed catalog covers ten core decisions:
+retain a retired product arm. A scenario that declares semantic fields must
+both reconstruct those typed fields and follow its independent action oracle;
+a correct semantic echo does not excuse skipping the required first inspection.
+Receipts retain only the declared field names and digests plus bounded,
+allowlisted action-kind sequences, never raw commands or model responses. Its
+fixed catalog covers ten core decisions:
 
 1. the normal guided onboarding packet selects `connect_if_needed`;
 2. an unresolved agent identity selects `select_agent_identity`;
@@ -321,19 +334,27 @@ It also carries two action-portfolio decisions:
     `monitor_changed` condition stays visible while the compact default packet
     selects the independent fallback and includes its bounded continuation.
 
+It also carries one planning-horizon decision:
+
+13. fixed typed facts connect the facts source, allowlist policy, runtime
+    admission, per-model tests, and selected regression gate. An independent
+    source oracle validates the exact middle relations before provider spend;
+    the model must return the bounded horizon semantics and begin with
+    `inspect` before continuing the still-authoritative selected Todo.
+
 It then carries three control-plane composition decisions. These are not wider
 snapshots; each packet is generated through the production quota, interaction,
 and scheduler paths and deliberately contains competing signals:
 
-13. two equivalent typed observations select autonomous replan; quota
+14. two equivalent typed observations select autonomous replan; quota
     host-projects the compact evidence ledger, the model reads the real
     uncovered frontier/source, and it persists a semantic delta. A runnable
     successor is one exact-obligation Todo transition with an immediate turn
     boundary, not a read-plus-ACK sequence;
-14. an open user notice coexists with a ready deferred successor, so the model
+15. an open user notice coexists with a ready deferred successor, so the model
     must surface the notice and execute the successor replan rather than treat
     every `user_action_required` value as a blocking gate;
-15. unavailable capability blocks the visible advancement, while an incomplete
+16. unavailable capability blocks the visible advancement, while an incomplete
     monitor schedule remains as a fallback, so the agent must verify the
     capability at the blocked Todo's real callsite and re-enter quota in the
     same heartbeat rather than create a repair Todo, wait on or update the
@@ -341,12 +362,12 @@ and scheduler paths and deliberately contains competing signals:
 
 Three compaction scenarios exercise the actual default CLI projection:
 
-16. an over-budget packet preserves its selected todo and execute route after
+17. an over-budget packet preserves its selected todo and execute route after
     repeated candidate, warning, and peer diagnostics move to cold paths;
-17. the same selected-work contract is presented once cleanly and once with
+18. the same selected-work contract is presented once cleanly and once with
     over-budget omitted diagnostics, and both must produce the same hard
     behavior fields;
-18. the same blocking user gate is presented cleanly and with over-budget
+19. the same blocking user gate is presented cleanly and with over-budget
     omitted diagnostics, and both must still select `ask_user`.
 
 The portfolio evaluates four bounded contrast groups over those scenario
@@ -361,19 +382,21 @@ twice. The oracle validates exact source semantics before provider spend. The
 five real-tool scenarios then prove their complete state-to-action paths:
 hermetic Goal state, production heartbeat prompt, real quota output, model-
 selected tool action, real readback, and a bounded semantic receipt. The
-remaining live turn
+planning-horizon packet-interpretation case also requires the bounded
+ten-field semantic contract; this proves the model observed the exact strategic
+chain rather than only preserving the local decision. The remaining live turn
 actor cases read the default full quota packet directly and must preserve the
 runtime-facing decision, selected todo, user gate, execution obligation,
 delivery boundary, quiet-wait rule, and ordered action kinds. They are not asked
-to echo the testing-only nine-field semantic contract, but they also must not be
+to echo the testing-only semantic contract, but they also must not be
 described as tool-behavior proof. Exact
 scheduler, vision, writeback, and warning projections remain deterministic
 action-signature tests; explicit pair/corpus mode retains TurnEnvelope and
 semantic-contract extraction when a packet differential is the thing under
 test. All attempts must align. Actor or transport errors are not retried
 automatically; the portfolio fails closed and stops further calls. The catalog
-has 36 bounded scenario attempts. With the bounded per-scenario tool budgets,
-the maximum regular run is 96 provider turns.
+has 38 bounded scenario attempts. With the bounded per-scenario tool budgets,
+the maximum regular run is 98 provider turns.
 Generic full-versus-candidate pair mode remains available only
 for temporary sensitive differentials or explicit stable-versus-candidate
 outcome claims, not as a permanent regular-behavior baseline.

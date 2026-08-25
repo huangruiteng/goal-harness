@@ -101,6 +101,8 @@ def test_semantic_instruction_preserves_candidate_scheduler_and_vision_exactly()
     assert "without filtering or reconstruction" in instruction
     assert "packet.contract_capsule.vision_continuation_audit exactly" in instruction
     assert "including trigger_kinds" in instruction
+    assert "summarize packet.action.planning_horizon" in instruction
+    assert "begin intended_action_kinds with inspect" in instruction
     assert "full packet" not in instruction
 
 
@@ -113,7 +115,24 @@ def test_semantic_instruction_is_arm_scoped() -> None:
 
     assert "first interaction_contract.user_channel.actions value" in full_instruction
     assert "project scheduler_hint" in full_instruction
+    assert "summarize packet.planning_horizon" in full_instruction
     assert "copy packet.scheduler exactly" not in full_instruction
+
+
+def test_planning_horizon_instruction_excludes_unrelated_semantic_fields() -> None:
+    instruction = " ".join(
+        _decision_instruction(
+            arm="full_packet",
+            semantic_contract_required=True,
+            semantic_contract_fields=("planning_horizon",),
+        ).split()
+    )
+
+    assert "exactly these semantic_contract fields: planning_horizon" in instruction
+    assert "summarize packet.planning_horizon" in instruction
+    assert '"planning_horizon"' in instruction
+    assert "peer_route" not in instruction
+    assert "scheduler_action" not in instruction
 
 
 def test_direct_actor_uses_canonical_endpoint_without_tools_or_raw_retention() -> None:
@@ -164,6 +183,7 @@ def test_direct_actor_uses_canonical_endpoint_without_tools_or_raw_retention() -
         "arm": "candidate_packet",
         "canonical_selected_todo_id": "todo_fixture001",
         "semantic_contract_required": False,
+        "semantic_contract_fields": [],
         "packet": {
             "schema_version": "loopx_turn_envelope_v0",
             "action": {"selected_todo": {"todo_id": "todo_fixture001"}},
@@ -268,8 +288,16 @@ def test_actor_sanitizes_unexpected_transport_errors() -> None:
             "provider_authentication_failed",
             "Doubao actor authentication failed; refresh ARK_API_KEY before retrying",
         ),
-        (403, "provider_http_error", "Doubao actor request failed with HTTP status 403"),
-        (429, "provider_http_error", "Doubao actor request failed with HTTP status 429"),
+        (
+            403,
+            "provider_http_error",
+            "Doubao actor request failed with HTTP status 403",
+        ),
+        (
+            429,
+            "provider_http_error",
+            "Doubao actor request failed with HTTP status 429",
+        ),
     ],
 )
 def test_direct_transport_classifies_http_errors_without_exposing_response(
