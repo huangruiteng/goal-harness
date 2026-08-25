@@ -402,7 +402,10 @@ projection repair. One effect-settlement scenario covers terminal closeout.
 Two action-portfolio scenarios require a runnable fallback to replace either a
 future monitor or a typed external wait while preserving the unavailable P0
 context. One planning-horizon scenario requires the model to inspect a bounded
-typed strategic chain before running the selected regression gate. Its
+typed strategic chain before running the selected regression gate. Its action
+oracle checks the ordered semantic stages rather than one exact trajectory:
+bounded reads may intervene, but test must precede final writeback/spend and an
+edit cannot be assumed before evidence. Its
 scenario-local semantic contract contains only `planning_horizon`; unrelated
 peer and scheduler fields remain covered by deterministic contracts. Three
 composition scenarios check vision/monitor/peer replan
@@ -432,7 +435,9 @@ goal 选择、selected todo、peer 身份路由、same-agent 续接、最终 hum
 2 个 action-portfolio 场景分别证明 future monitor 和 typed external wait 不会压住
 可运行 fallback，同时仍保留不可运行的 P0 上下文；1 个 planning-horizon 场景要求
 模型先检查有界的 typed strategic chain，再运行被选中的 regression gate；该场景只回读
-`planning_horizon`，不会把无关的 peer/scheduler 字段混进 oracle。3 个组合场景覆盖
+`planning_horizon`，不会把无关的 peer/scheduler 字段混进 oracle；action oracle 验证
+有序语义阶段而不是背诵唯一轨迹：中间允许有界只读动作，但测试必须先于最终
+writeback/spend，且不能在拿到测试证据前预设 edit。3 个组合场景覆盖
 vision/monitor/peer replan 优先级、非阻塞
 user notice 与 ready successor 并存，以及 capability-bridge re-entry 必须先于 monitor
 fallback；3 个 compaction 场景覆盖 JSON 预算与 source-derived 语义一致，并分别让正常

@@ -308,6 +308,10 @@ onboarding packet. The suite does not introduce a third model protocol or
 retain a retired product arm. A scenario that declares semantic fields must
 both reconstruct those typed fields and follow its independent action oracle;
 a correct semantic echo does not excuse skipping the required first inspection.
+The planning-horizon oracle grades semantic stages rather than one memorized
+trajectory: inspection must come first, the selected regression test must run
+before the final `writeback, spend` suffix, and an `edit` cannot be assumed
+before test evidence exists. A bounded intervening read remains valid.
 Receipts retain only the declared field names and digests plus bounded,
 allowlisted action-kind sequences, never raw commands or model responses. Its
 fixed catalog covers ten core decisions:
