@@ -51,7 +51,10 @@ provider-neutral turn_start dispatch
 Running the hook after quota selection is incorrect because fresh steering can
 arrive after ordinary work has already been chosen. Returning raw content in
 the public hook result is also incorrect because shared registries and Turn
-journals are public-safe control-plane surfaces.
+journals are public-safe control-plane surfaces. CLI request validation runs
+before hook dispatch, so an invalid quota request performs no provider read or
+owner-private write; a valid request still dispatches the hook before status
+collection and quota selection.
 
 ## Failure and replay
 
