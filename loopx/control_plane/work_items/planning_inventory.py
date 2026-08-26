@@ -34,7 +34,7 @@ def compact_planning_candidate(
     text = protocol_action_text(value.get("text"), limit=500)
     if not todo_id or not text:
         return None
-    compact = compact_todo_summary_item(dict(value), text=text)
+    compact = dict(compact_todo_summary_item(dict(value), text=text))
     for field in (
         "source",
         "selected_by",
