@@ -29,6 +29,13 @@ def register_bootstrap_connect_command(subparsers: argparse._SubParsersAction) -
         help="Create a new forked goal id instead of reusing an existing global goal route.",
     )
     bootstrap_parser.add_argument("--objective", default=DEFAULT_OBJECTIVE, help="Initial goal objective.")
+    bootstrap_parser.add_argument(
+        "--display-name",
+        help=(
+            "Public-safe dashboard title for this goal. Defaults to a scrubbed "
+            "summary of --objective when omitted."
+        ),
+    )
     bootstrap_parser.add_argument("--domain", default=DEFAULT_DOMAIN, help="Goal domain label.")
     bootstrap_parser.add_argument("--role", choices=["controller", "subagent"], default="controller")
     bootstrap_parser.add_argument("--parent-goal-id", help="Parent goal id when --role subagent.")
@@ -223,6 +230,7 @@ def handle_bootstrap_connect_command(
             onboarding_max_status_paths=args.onboarding_max_status_paths,
             onboarding_max_top_level_files=args.onboarding_max_top_level_files,
             preserve_todos=bool(args.preserve_todos),
+            display_name=args.display_name,
             force=args.force,
             dry_run=args.dry_run,
             sync_global=not bool(args.no_global_sync),

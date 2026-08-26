@@ -176,6 +176,13 @@ def register_start_goal_command(subparsers: argparse._SubParsersAction) -> None:
             "Todos executed in coherent evidence-driven turn slices."
         ),
     )
+    start_goal_parser.add_argument(
+        "--display-name",
+        help=(
+            "Public-safe dashboard title for this goal. Defaults to a scrubbed "
+            "summary of the goal text when connect/bootstrap runs."
+        ),
+    )
     goal_input_group = start_goal_parser.add_mutually_exclusive_group(required=True)
     goal_input_group.add_argument(
         "--goal-text",
@@ -331,6 +338,7 @@ def handle_start_goal_command(
             available_capabilities=args.available_capabilities,
             capability_route=capability_route,
             fine_grained=fine_grained,
+            display_name=getattr(args, "display_name", None),
             include_command_pack_detail=bool(args.include_command_pack_detail),
             runtime_root_arg=runtime_root_arg,
         )

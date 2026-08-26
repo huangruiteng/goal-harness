@@ -6,6 +6,7 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from .control_plane.runtime.public_safety import public_safe_compact_text
 from .control_plane.runtime.time import now_local_iso
 from .control_plane.todos.active_state_editing import (
     TODO_SECTION_HEADINGS,
@@ -39,6 +40,22 @@ from .todos import add_todo_to_lines
 
 DEFAULT_OBJECTIVE = "Improve this project through bounded, verified goal segments."
 DEFAULT_DOMAIN = "project-goal-control-plane"
+GOAL_DISPLAY_NAME_LIMIT = 120
+
+
+def derive_public_goal_display_name(
+    objective: str | None,
+    *,
+    explicit: str | None = None,
+) -> str | None:
+    """Return a public-safe dashboard title derived from goal text."""
+
+    candidate = str(explicit or "").strip() or str(objective or "").strip()
+    if not candidate:
+        return None
+    return public_safe_compact_text(candidate, limit=GOAL_DISPLAY_NAME_LIMIT)
+
+
 GENERIC_ONBOARDING_ADAPTER_KINDS = frozenset(
     {"generic_project_goal_v0", "read_only_project_map_v0"}
 )
@@ -741,6 +758,10 @@ def bootstrap_project(
     if runtime_root:
         registry["common_runtime_root"] = str(runtime_root)
 
+    resolved_display_name = derive_public_goal_display_name(
+        objective,
+        explicit=display_name,
+    )
     goal_entry = build_goal_entry(
         project=project,
         goal_id=goal_id,
@@ -757,7 +778,7 @@ def bootstrap_project(
         allowed_domains=allowed_domains or [],
         write_scope=write_scope or [],
         execution_profile=execution_profile,
-        display_name=display_name,
+        display_name=resolved_display_name,
     )
     registry, registry_goal_action = merge_goal(registry, goal_entry, force=force)
 
@@ -957,6 +978,7 @@ def bootstrap_project(
         "dry_run": dry_run,
         "project": str(project),
         "goal_id": goal_id,
+        "display_name": resolved_display_name,
         "registry": str(registry_path),
         "state_file": str(state_file),
         "goal_doc": str(goal_doc) if goal_doc else None,

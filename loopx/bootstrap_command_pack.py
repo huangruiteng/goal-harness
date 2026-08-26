@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent_registry import registered_agent_ids_for_goal
-from .bootstrap import default_goal_id
+from .bootstrap import default_goal_id, derive_public_goal_display_name
 from .capabilities.issue_fix.candidate_preflight import (
     candidate_preflight_input_contract,
 )
@@ -685,6 +685,7 @@ def _goal_start_bootstrap_command(
     cli_bin: str,
     runtime_root: str | None,
     fine_grained: bool,
+    display_name: str | None = None,
 ) -> str:
     objective = goal_text or "<exact /loopx goal text>"
     lines = [
@@ -693,11 +694,17 @@ def _goal_start_bootstrap_command(
         "  --project . \\",
         f"  --goal-id {shell_arg(goal_id)} \\",
         f"  --objective {shell_arg(objective)} \\",
-        f"  --adapter-kind {shell_arg(DEFAULT_HANDOFF_ADAPTER_KIND)} \\",
-        f"  --adapter-status {shell_arg(DEFAULT_HANDOFF_ADAPTER_STATUS)} \\",
-        "  --no-onboarding-scan \\",
-        "  --codex-app-heartbeat ask",
     ]
+    if display_name:
+        lines.append(f"  --display-name {shell_arg(display_name)} \\")
+    lines.extend(
+        [
+            f"  --adapter-kind {shell_arg(DEFAULT_HANDOFF_ADAPTER_KIND)} \\",
+            f"  --adapter-status {shell_arg(DEFAULT_HANDOFF_ADAPTER_STATUS)} \\",
+            "  --no-onboarding-scan \\",
+            "  --codex-app-heartbeat ask",
+        ]
+    )
     if fine_grained:
         lines[-1] += " \\"
         lines.append("  --fine-grained")
@@ -766,6 +773,7 @@ def build_loopx_bootstrap_command_pack(
     available_capabilities: list[str] | None = None,
     capability_route: str | None = None,
     fine_grained: bool = False,
+    display_name: str | None = None,
     resolve_linked_worktree_alias: bool = True,
     runtime_root_arg: str | None = None,
 ) -> dict[str, Any]:
@@ -900,6 +908,10 @@ def build_loopx_bootstrap_command_pack(
         cli_bin=cli_bin,
         runtime_root=command_runtime_root,
         fine_grained=fine_grained,
+        display_name=derive_public_goal_display_name(
+            normalized_goal_text,
+            explicit=display_name,
+        ),
     )
     goal_start_plan_prompt = build_goal_start_prompt(
         goal_text=normalized_goal_text,
@@ -1395,6 +1407,7 @@ def build_start_goal_guided_packet(
     available_capabilities: list[str] | None = None,
     capability_route: str | None = None,
     fine_grained: bool = False,
+    display_name: str | None = None,
     include_command_pack_detail: bool = False,
     runtime_root_arg: str | None = None,
 ) -> dict[str, Any]:
@@ -1427,6 +1440,7 @@ def build_start_goal_guided_packet(
         available_capabilities=available_capabilities,
         capability_route=capability_route,
         fine_grained=fine_grained,
+        display_name=display_name,
         resolve_linked_worktree_alias=False,
         runtime_root_arg=runtime_root_arg,
     )
