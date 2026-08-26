@@ -78,6 +78,10 @@ class DeterministicProvider:
         self._barrier_loads_left = 0
         self._fault = None
         self._contention_advances = 0
+        self.identity = "probe:store"
+
+    def store_identity(self) -> str:
+        return self.identity
 
     def arm_load_barrier(self, parties: int) -> None:
         self._barrier = threading.Barrier(parties)
@@ -184,6 +188,7 @@ def bootstrap(provider, goal_id: str, todo_ids) -> int:
     head = bootstrap_head(
         goal_id,
         {todo_id: initial_todo() for todo_id in todo_ids},
+        store_binding=provider.store_identity(),
     )
     result = provider.compare_and_put(0, head)
     assert result["result"] == "applied", result
@@ -239,7 +244,7 @@ def claim(operation_id: str, goal_id: str, todo_id: str, **values) -> dict:
 
 def assert_bootstrap_rejected(todo: dict, message: str | None = None) -> None:
     try:
-        bootstrap_head("goal-private", {"todo-private": todo})
+        bootstrap_head("goal-private", {"todo-private": todo}, store_binding="probe:store")
     except ValueError as exc:
         if message is not None:
             assert message in str(exc)
@@ -262,6 +267,7 @@ def probe_bootstrap_and_preconditions() -> None:
             "todo-dependency-blocked": initial_todo(dependencies_satisfied=False),
             "todo-gate-blocked": initial_todo(gates_open=False),
         },
+        store_binding=provider.store_identity(),
     )
     bootstrap_result = provider.compare_and_put(0, initial_head)
     assert bootstrap_result["result"] == "applied"
@@ -904,7 +910,7 @@ def probe_nokv_adapter_exception_mapping() -> None:
     client = FakeNoKVClient()
     goal_id = "adapter-mapping"
     provider = NoKVCoordinationProvider(client, "wb-adapter", goal_id)
-    head = bootstrap_head(goal_id, {})
+    head = bootstrap_head(goal_id, {}, store_binding="probe:adapter")
 
     assert provider.load() == (None, 0)
     created = provider.compare_and_put(0, head)
