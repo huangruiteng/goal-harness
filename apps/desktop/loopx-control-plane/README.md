@@ -15,6 +15,14 @@ desktop release workflow succeeds:
 The desktop shell still depends on a local `loopx` command at runtime. Install
 or update the LoopX CLI first, then open the desktop app.
 
+Official macOS release artifacts must be signed with an Apple Developer ID
+certificate and notarized before upload. Maintainers configure
+`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`,
+`APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` as GitHub Actions secrets.
+Pull requests still build unsigned preview artifacts, but the release workflow
+fails closed when those secrets are unavailable rather than publishing a DMG
+that macOS Gatekeeper rejects.
+
 ## Runtime Model
 
 The shell:
@@ -91,6 +99,11 @@ npm run build
 `src-tauri/target/release/bundle/`. The release workflow builds macOS `.dmg`
 and `.app.zip` artifacts on macOS, Windows `.msi` and `.exe` artifacts on
 Windows, and uploads them to the GitHub Release that triggered the workflow.
+It notarizes both the app and its disk image, then validates macOS code
+signing, Gatekeeper assessment, and both stapled tickets before upload. A
+separate `DESKTOP-SHA256SUMS` manifest covers all desktop artifacts attached
+by the workflow, and release builds use the Git tag as the desktop bundle
+version.
 
 ## Disable Or Remove
 

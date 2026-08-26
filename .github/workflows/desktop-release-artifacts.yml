@@ -7,6 +7,7 @@ on:
       - "apps/desktop/loopx-control-plane/**"
       - "apps/presentation/dashboard/**"
       - "examples/desktop-icon-alpha-smoke.py"
+      - "examples/desktop-release-workflow-smoke.py"
   release:
     types: [published]
   workflow_dispatch:
@@ -92,9 +93,97 @@ jobs:
       - name: Validate desktop icon background
         run: python examples/desktop-icon-alpha-smoke.py
 
-      - name: Build desktop bundles
+      - name: Validate desktop release workflow
+        if: github.event_name == 'pull_request'
+        run: python examples/desktop-release-workflow-smoke.py
+
+      - name: Build unsigned desktop preview bundles
+        if: github.event_name == 'pull_request'
         working-directory: apps/desktop/loopx-control-plane
         run: npm run build -- --bundles ${{ matrix.bundles }} --no-sign
+
+      - name: Build signed macOS release bundles
+        if: github.event_name != 'pull_request' && runner.os == 'macOS'
+        working-directory: apps/desktop/loopx-control-plane
+        env:
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for name in \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            KEYCHAIN_PASSWORD \
+            APPLE_ID \
+            APPLE_PASSWORD \
+            APPLE_TEAM_ID
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error title=Missing Apple signing secret::${name} is required for a macOS desktop release"
+              exit 1
+            fi
+          done
+          release_version="${RELEASE_TAG#v}"
+          if [[ ! "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error title=Invalid desktop release version::${RELEASE_TAG} is not a supported release tag"
+            exit 1
+          fi
+          npm run build -- --bundles ${{ matrix.bundles }} \
+            --config "{\"version\":\"${release_version}\"}"
+
+      - name: Notarize macOS disk image
+        if: github.event_name != 'pull_request' && runner.os == 'macOS'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          dmg_path="$(find apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "${dmg_path}"
+          xcrun notarytool submit "${dmg_path}" \
+            --apple-id "${APPLE_ID}" \
+            --password "${APPLE_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --wait
+          xcrun stapler staple "${dmg_path}"
+
+      - name: Build Windows release bundles
+        if: github.event_name != 'pull_request' && runner.os == 'Windows'
+        working-directory: apps/desktop/loopx-control-plane
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+        run: |
+          set -euo pipefail
+          release_version="${RELEASE_TAG#v}"
+          if [[ ! "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error title=Invalid desktop release version::${RELEASE_TAG} is not a supported release tag"
+            exit 1
+          fi
+          npm run build -- --bundles ${{ matrix.bundles }} --no-sign \
+            --config "{\"version\":\"${release_version}\"}"
+
+      - name: Verify signed and notarized macOS bundles
+        if: github.event_name != 'pull_request' && runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/macos/LoopX.app"
+          dmg_path="$(find apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "${dmg_path}"
+          codesign --verify --deep --strict --verbose=2 "${app_path}"
+          spctl --assess --type execute --verbose=4 "${app_path}"
+          xcrun stapler validate "${app_path}"
+          codesign --verify --deep --strict --verbose=2 "${dmg_path}"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "${dmg_path}"
+          xcrun stapler validate "${dmg_path}"
+          hdiutil verify "${dmg_path}"
 
       - name: Collect macOS desktop bundles
         if: runner.os == 'macOS'
@@ -104,8 +193,8 @@ jobs:
           mkdir -p dist/desktop
           cp apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/dmg/*.dmg dist/desktop/
           ditto -c -k --keepParent \
-            "apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/macos/Loopx.app" \
-            "dist/desktop/Loopx.app.zip"
+            "apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/macos/LoopX.app" \
+            "dist/desktop/LoopX.app.zip"
 
       - name: Collect Windows desktop bundles
         if: runner.os == 'Windows'
@@ -143,6 +232,17 @@ jobs:
           pattern: loopx-*
           path: dist/desktop
           merge-multiple: true
+
+      - name: Generate desktop checksums
+        run: |
+          set -euo pipefail
+          cd dist/desktop
+          find . -maxdepth 1 -type f ! -name DESKTOP-SHA256SUMS -printf '%f\n' \
+            | LC_ALL=C sort \
+            | while IFS= read -r artifact; do sha256sum "${artifact}"; done \
+            > DESKTOP-SHA256SUMS
+          test -s DESKTOP-SHA256SUMS
+          sha256sum --check DESKTOP-SHA256SUMS
 
       - name: Resolve release identity
         id: identity
