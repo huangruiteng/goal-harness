@@ -42,6 +42,11 @@ promote a proposal beyond that status.
 
 ## Drafts Under Review
 
+- [Provider-Neutral Post-Writeback Capability Hooks v0](provider-neutral-post-writeback-capability-hooks-v0.md)
+  ([中文版](provider-neutral-post-writeback-capability-hooks-v0.zh-CN.md)):
+  dispatch installed capability policy only after a committed durable receipt,
+  record typed idempotent intents in an isolated sidecar, and keep primary
+  settlement, capability policy, and external effect authority separate.
 - [Research Exploration Control Plane v0](research-exploration-control-plane-v0.md)
   ([中文版](research-exploration-control-plane-v0.zh-CN.md)): evolve a typed
   research frontier across coverage, closure, and explicit composition while
