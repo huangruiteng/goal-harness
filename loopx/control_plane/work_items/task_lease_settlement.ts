@@ -190,14 +190,17 @@ function normalizeInput(
 function shellArgument(value: string | number): string {
   const rendered = String(value);
   if (/^[A-Za-z0-9_./:@*?=-]+$/u.test(rendered)) return rendered;
-  return `'${rendered.replaceAll("'", `'\"'\"'`)}'`;
+  const escaped = rendered.replaceAll("'", "'\"'\"'");
+  return "'" + escaped + "'";
 }
 
 function settlementPlan(
   identity: SettlementIdentity,
   input: TaskLeaseAcquireInput,
 ): SettlementPlan {
-  const scopes = [...new Set(input.write_scopes)].sort();
+  const scopes = [...new Set(input.write_scopes)].sort((left, right) =>
+    left.localeCompare(right)
+  );
   const ttl = input.ttl_seconds ?? 2700;
   const command = [
     "loopx task-lease acquire",

@@ -68,20 +68,23 @@ def _decode_task_lease_result(
     )
 
 
-def _provider_result(
+def _optional_provider_integer(value: object, label: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(f"TypeScript task-lease {label} shape mismatch")
+    return value
+
+
+def _decode_provider_effect(
     provider_effect: Mapping[str, Any],
-    *,
-    registry_path: Path,
-    runtime_root: Path,
-    acquire: bool,
-) -> dict[str, Any]:
+) -> tuple[str, Mapping[str, Any], list[str], int | None, int | None]:
     if (
         provider_effect.get("step_kind") != "durable_writeback"
         or provider_effect.get("action") != "acquire"
         or not isinstance(provider_effect.get("effect_id"), str)
     ):
         raise RuntimeError("TypeScript task-lease provider effect shape mismatch")
-    effect_id = str(provider_effect["effect_id"])
     parameters = _require_mapping(
         provider_effect.get("parameters"),
         "provider parameters",
@@ -91,16 +94,32 @@ def _provider_result(
         not isinstance(scope, str) for scope in write_scopes
     ):
         raise RuntimeError("TypeScript task-lease write scopes shape mismatch")
-    ttl_seconds = parameters.get("ttl_seconds")
-    expected_version = parameters.get("expected_version")
-    if ttl_seconds is not None and (
-        isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int)
-    ):
-        raise RuntimeError("TypeScript task-lease ttl shape mismatch")
-    if expected_version is not None and (
-        isinstance(expected_version, bool) or not isinstance(expected_version, int)
-    ):
-        raise RuntimeError("TypeScript task-lease expected version shape mismatch")
+    return (
+        str(provider_effect["effect_id"]),
+        parameters,
+        list(write_scopes),
+        _optional_provider_integer(parameters.get("ttl_seconds"), "ttl"),
+        _optional_provider_integer(
+            parameters.get("expected_version"),
+            "expected version",
+        ),
+    )
+
+
+def _provider_result(
+    provider_effect: Mapping[str, Any],
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    acquire: bool,
+) -> dict[str, Any]:
+    (
+        effect_id,
+        parameters,
+        write_scopes,
+        ttl_seconds,
+        expected_version,
+    ) = _decode_provider_effect(provider_effect)
     lease_path = task_lease_path(
         runtime_root=runtime_root,
         goal_id=str(parameters.get("goal_id") or ""),
