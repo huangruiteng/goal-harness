@@ -24,10 +24,12 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .authority_core import (
+    CoordinationSnapshot,
     DecisionOutcome,
     LeaseAcquireCommand,
     LeaseReleaseCommand,
     LeaseRenewCommand,
+    LeaseSnapshot,
     LifecycleGrant,
     TodoAction,
     TodoMutationCommand,
@@ -505,36 +507,11 @@ class CoordinationAuthorityExecutor:
         actor = request["actor"]["agent_id"]
         snapshot = claim_snapshot_for_todo(head, todo_id)
 
-        # Composition order is fixed by the Stage 1 core: the lease is minted
-        # first, then the claim passes the hard-lease holder gate against the
-        # freshly minted lease. Claim-first would silently bypass the
-        # Appendix B invariant that ownership changes require the holder.
-        acquire_plan = decide(
-            snapshot,
-            LeaseAcquireCommand(
-                owner=actor,
-                idempotency_key=_lease_id(request["operation_id"]),
-                ttl_seconds=command["lease_ttl_seconds"],
-            ),
+        core_lease = self._acquire_and_claim(
+            snapshot, actor, request["operation_id"], command["lease_ttl_seconds"]
         )
-        if acquire_plan.outcome is not DecisionOutcome.APPLY:
-            return _classified(acquire_plan)
-        assert acquire_plan.next_snapshot is not None
-
-        claim_plan = decide(
-            acquire_plan.next_snapshot,
-            TodoMutationCommand(
-                action=TodoAction.CLAIM,
-                actor_agent_id=actor,
-                requested_claimed_by=actor,
-                ownership_mutation=True,
-            ),
-        )
-        if claim_plan.outcome is not DecisionOutcome.APPLY:
-            return _classified(claim_plan)
-        assert claim_plan.next_snapshot is not None
-        core_lease = claim_plan.next_snapshot.lease
-        assert core_lease is not None
+        if isinstance(core_lease, dict):
+            return core_lease
 
         now = float(self.now())
         expires_at = _format_time(now + command["lease_ttl_seconds"])
@@ -681,6 +658,81 @@ class CoordinationAuthorityExecutor:
 
         return float(self.now()) < _parse_time(lease["expires_at"])
 
+    def _held_lease_context(
+        self,
+        head: dict[str, Any],
+        command: dict[str, Any],
+        actor: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], CoordinationSnapshot] | dict[str, Any]:
+        """Adjudicate the opening every holder verb shares.
+
+        Renew, release, and complete all face the same sequence: todo
+        prechecks, the stale-lease fence, the live holder gate, then a
+        snapshot carrying the authority's own liveness verdict for the core
+        to adjudicate against. Returns (todo, lease, snapshot) or the typed
+        non-apply dict.
+        """
+
+        todo, rejection = self._todo_prechecks(head, command)
+        if rejection is not None:
+            return rejection
+        assert todo is not None
+        lease, rejection = self._lease_fence(head, command)
+        if rejection is not None:
+            return rejection
+        assert lease is not None
+        rejection = self._holder_gate(lease, actor)
+        if rejection is not None:
+            return rejection
+        snapshot = claim_snapshot_for_todo(
+            head, command["todo_id"], lease_active=self._lease_is_active(lease)
+        )
+        return todo, lease, snapshot
+
+    @staticmethod
+    def _acquire_and_claim(
+        snapshot: CoordinationSnapshot,
+        actor: str,
+        operation_id: str,
+        ttl_seconds: int,
+    ) -> LeaseSnapshot | dict[str, Any]:
+        """Mint a lease, then claim under it - the shared ownership tail.
+
+        Composition order is fixed by the Stage 1 core: the lease is minted
+        first, then the claim passes the hard-lease holder gate against the
+        freshly minted lease. Claim-first would silently bypass the
+        Appendix B invariant that ownership changes require the holder.
+        Reclaim reuses this tail unchanged, so a reclaimed lease passes the
+        same true holder gate as any first claim.
+        """
+
+        acquire_plan = decide(
+            snapshot,
+            LeaseAcquireCommand(
+                owner=actor,
+                idempotency_key=_lease_id(operation_id),
+                ttl_seconds=ttl_seconds,
+            ),
+        )
+        if acquire_plan.outcome is not DecisionOutcome.APPLY:
+            return _classified(acquire_plan)
+        assert acquire_plan.next_snapshot is not None
+        claim_plan = decide(
+            acquire_plan.next_snapshot,
+            TodoMutationCommand(
+                action=TodoAction.CLAIM,
+                actor_agent_id=actor,
+                requested_claimed_by=actor,
+                ownership_mutation=True,
+            ),
+        )
+        if claim_plan.outcome is not DecisionOutcome.APPLY:
+            return _classified(claim_plan)
+        assert claim_plan.next_snapshot is not None
+        core_lease = claim_plan.next_snapshot.lease
+        assert core_lease is not None
+        return core_lease
+
     def _next_head_for(
         self,
         head: dict[str, Any],
@@ -724,22 +776,11 @@ class CoordinationAuthorityExecutor:
         request_digest: str,
     ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         command = request["command"]
-        todo, rejection = self._todo_prechecks(head, command)
-        if rejection is not None:
-            return rejection
-        assert todo is not None
-        lease, rejection = self._lease_fence(head, command)
-        if rejection is not None:
-            return rejection
-        assert lease is not None
         actor = request["actor"]["agent_id"]
-        rejection = self._holder_gate(lease, actor)
-        if rejection is not None:
-            return rejection
-        active = self._lease_is_active(lease)
-        snapshot = claim_snapshot_for_todo(
-            head, command["todo_id"], lease_active=active
-        )
+        context = self._held_lease_context(head, command, actor)
+        if isinstance(context, dict):
+            return context
+        _todo, lease, snapshot = context
         plan = decide(
             snapshot,
             LeaseRenewCommand(
@@ -777,22 +818,11 @@ class CoordinationAuthorityExecutor:
         request_digest: str,
     ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         command = request["command"]
-        todo, rejection = self._todo_prechecks(head, command)
-        if rejection is not None:
-            return rejection
-        assert todo is not None
-        lease, rejection = self._lease_fence(head, command)
-        if rejection is not None:
-            return rejection
-        assert lease is not None
         actor = request["actor"]["agent_id"]
-        rejection = self._holder_gate(lease, actor)
-        if rejection is not None:
-            return rejection
-        active = self._lease_is_active(lease)
-        snapshot = claim_snapshot_for_todo(
-            head, command["todo_id"], lease_active=active
-        )
+        context = self._held_lease_context(head, command, actor)
+        if isinstance(context, dict):
+            return context
+        _todo, lease, snapshot = context
         # Release is the holder giving up early, so the claim is cleared
         # first while the holder gate is still real; an expired lease is
         # resolved by reclaim, not release (the core rejects the clear).
@@ -899,31 +929,14 @@ class CoordinationAuthorityExecutor:
         if clear_plan.outcome is not DecisionOutcome.APPLY:
             return _classified(clear_plan)
         assert clear_plan.next_snapshot is not None
-        acquire_plan = decide(
+        core_lease = self._acquire_and_claim(
             clear_plan.next_snapshot,
-            LeaseAcquireCommand(
-                owner=actor,
-                idempotency_key=_lease_id(request["operation_id"]),
-                ttl_seconds=command["lease_ttl_seconds"],
-            ),
+            actor,
+            request["operation_id"],
+            command["lease_ttl_seconds"],
         )
-        if acquire_plan.outcome is not DecisionOutcome.APPLY:
-            return _classified(acquire_plan)
-        assert acquire_plan.next_snapshot is not None
-        claim_plan = decide(
-            acquire_plan.next_snapshot,
-            TodoMutationCommand(
-                action=TodoAction.CLAIM,
-                actor_agent_id=actor,
-                requested_claimed_by=actor,
-                ownership_mutation=True,
-            ),
-        )
-        if claim_plan.outcome is not DecisionOutcome.APPLY:
-            return _classified(claim_plan)
-        assert claim_plan.next_snapshot is not None
-        core_lease = claim_plan.next_snapshot.lease
-        assert core_lease is not None
+        if isinstance(core_lease, dict):
+            return core_lease
         expires_at = _format_time(now + command["lease_ttl_seconds"])
         next_head, receipt = self._next_head_for(
             head,
@@ -958,14 +971,13 @@ class CoordinationAuthorityExecutor:
         request_digest: str,
     ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         command = request["command"]
-        todo, rejection = self._todo_prechecks(head, command)
-        if rejection is not None:
-            return rejection
-        assert todo is not None
-        lease, rejection = self._lease_fence(head, command)
-        if rejection is not None:
-            return rejection
-        assert lease is not None
+        actor = request["actor"]["agent_id"]
+        context = self._held_lease_context(head, command, actor)
+        if isinstance(context, dict):
+            return context
+        todo, lease, snapshot = context
+        # Ownership is adjudicated before payload semantics: a non-holder
+        # learns nothing about successor-id availability.
         for successor in command["successor_todo_ids"]:
             if successor in head["coordination"]["todos"]:
                 return {
@@ -973,14 +985,6 @@ class CoordinationAuthorityExecutor:
                     "reason": "successor_todo_exists",
                     "successor_todo_id": successor,
                 }
-        actor = request["actor"]["agent_id"]
-        rejection = self._holder_gate(lease, actor)
-        if rejection is not None:
-            return rejection
-        active = self._lease_is_active(lease)
-        snapshot = claim_snapshot_for_todo(
-            head, command["todo_id"], lease_active=active
-        )
         plan = decide(
             snapshot,
             TodoMutationCommand(
