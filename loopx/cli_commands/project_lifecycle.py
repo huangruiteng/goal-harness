@@ -179,6 +179,14 @@ def _inline_agent_vision_packet(args: argparse.Namespace) -> dict[str, object] |
     return packet
 
 
+def _reject_non_standard_json_constant(name: str) -> object:
+    # json.loads would otherwise accept NaN/Infinity/-Infinity, which json.dump
+    # then re-emits as non-standard JSON that breaks strict ledger consumers.
+    raise ValueError(
+        f"--usage-json must be strict JSON; non-standard constant {name} is not allowed"
+    )
+
+
 def _inline_progress_observation(
     args: argparse.Namespace,
 ) -> dict[str, object] | None:
@@ -470,8 +478,9 @@ def register_project_lifecycle_commands(
             "Inline JSON object with a provider-neutral per-run usage "
             "measurement: input_tokens, output_tokens, provider, model, "
             "source_snapshot_id, plus optional cache_tokens/cost_usd/"
-            "duration_ms. Malformed or negative usage fails the refresh "
-            "closed. Cannot be combined with --usage-codex-session."
+            "duration_ms. Must be strict JSON; malformed, negative, or "
+            "non-finite usage fails the refresh closed. Cannot be combined "
+            "with --usage-codex-session."
         ),
     )
     refresh_state_parser.add_argument(
@@ -660,7 +669,10 @@ def handle_project_lifecycle_command(
             progress_observation = _inline_progress_observation(args)
             usage_measurement: dict[str, object] | None = None
             if getattr(args, "usage_json", None):
-                loaded_usage = json.loads(args.usage_json)
+                loaded_usage = json.loads(
+                    args.usage_json,
+                    parse_constant=_reject_non_standard_json_constant,
+                )
                 if not isinstance(loaded_usage, dict):
                     raise ValueError("--usage-json must be a JSON object")
                 usage_measurement = loaded_usage

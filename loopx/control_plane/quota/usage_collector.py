@@ -12,13 +12,14 @@ This module owns both sides of the seam described in
   remains the single source of truth; there is no second usage store.
 
 Missing measurements stay omitted (unknown), never coerced to zero.
-Malformed, negative, reset, or out-of-order observations fail closed with a
-typed error. Prompts, completions, tool output, credentials, provider payloads,
+Malformed, negative, non-finite, reset, or out-of-order observations fail
+closed with a typed error. Prompts, completions, tool output, credentials, provider payloads,
 and anything that reconstructs a conversation are never captured.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, MutableMapping
 
@@ -58,6 +59,8 @@ class UsageSample:
 def _require_non_negative_int(value: Any, *, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise UsageRowError(f"usage.{field} must be a non-negative number")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise UsageRowError(f"usage.{field} must be finite")
     if float(value) != int(value):
         raise UsageRowError(f"usage.{field} must be a whole number")
     coerced = int(value)
@@ -78,6 +81,8 @@ def _optional_non_negative_float(value: Any, *, field: str) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise UsageRowError(f"usage.{field} must be a non-negative number")
     coerced = float(value)
+    if not math.isfinite(coerced):
+        raise UsageRowError(f"usage.{field} must be finite")
     if coerced < 0:
         raise UsageRowError(f"usage.{field} must be non-negative")
     return coerced

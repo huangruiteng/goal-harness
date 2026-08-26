@@ -483,6 +483,40 @@ def test_build_compact_usage_row_same_snapshot_id_without_prior_labels_fails_clo
         )
 
 
+@pytest.mark.parametrize(
+    "bad_cost", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"]
+)
+def test_build_compact_usage_row_rejects_non_finite_cost(bad_cost: float) -> None:
+    # NaN/Infinity would survive json.dumps as non-standard JSON and poison
+    # aggregation, so they must fail closed at intake instead.
+    with pytest.raises(UsageRowError, match="cost_usd must be finite"):
+        build_compact_usage_row(
+            input_tokens=10,
+            output_tokens=5,
+            cost_usd=bad_cost,
+            provider="codex",
+            model="codex-1",
+            source_snapshot_id="snap-nonfinite-cost",
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_tokens", [float("nan"), float("inf")], ids=["nan", "inf"]
+)
+def test_build_compact_usage_row_rejects_non_finite_token_counts(
+    bad_tokens: float,
+) -> None:
+    # Must raise the typed UsageRowError, not leak int()'s ValueError/OverflowError.
+    with pytest.raises(UsageRowError, match="input_tokens must be finite"):
+        build_compact_usage_row(
+            input_tokens=bad_tokens,  # type: ignore[arg-type]
+            output_tokens=5,
+            provider="codex",
+            model="codex-1",
+            source_snapshot_id="snap-nonfinite-tokens",
+        )
+
+
 def test_build_compact_usage_row_fails_closed_on_cumulative_reset() -> None:
     previous = {
         "source_snapshot_id": "snap-1",
