@@ -139,14 +139,16 @@ export const sampleGoalChannelProjection: GoalChannelProjection = {
   display_name: "Demo Goal Channel",
   generated_at: "2026-06-20T08:04:00Z",
   latest_status: "safe_side_path_running",
-  waiting_on: "codex",
-  next_action: "Render the read-only channel projection and keep the event ledger as truth.",
+  waiting_on: "capability",
+  next_action:
+    "Keep the leased delivery claim visible, wait on the missing capability, repair workspace drift, then write a durable outcome.",
   source_refs: {
     status_generated_at: "2026-06-20T08:01:00Z",
     active_state_updated_at: "2026-06-20T08:00:00Z",
     latest_run_generated_at: "2026-06-20T08:02:00Z",
     review_packet_generated_at: "2026-06-20T08:03:00Z",
     event_ledger_source: "run_history",
+    latest_delivery_outcome: "outcome_progress",
   },
   decision_frame: {
     user_action_required: true,
@@ -172,6 +174,8 @@ export const sampleGoalChannelProjection: GoalChannelProjection = {
       todo_id: "todo_user_decision",
       priority: "P0",
       status: "open",
+      task_class: "user_gate",
+      action_kind: "approve_route",
       title: "Decide whether the gated delivery route may continue.",
     },
   ],
@@ -182,7 +186,26 @@ export const sampleGoalChannelProjection: GoalChannelProjection = {
       status: "open",
       claimed_by: "codex-main-control",
       task_class: "advancement_task",
+      action_kind: "delivery",
       title: "Keep the primary delivery route visible while it waits.",
+    },
+    {
+      todo_id: "todo_capability_wait",
+      priority: "P0",
+      status: "waiting",
+      claimed_by: "codex-capability",
+      task_class: "advancement_task",
+      action_kind: "capability_wait",
+      title: "Wait for the missing worker_bridge capability before resuming delivery.",
+    },
+    {
+      todo_id: "todo_workspace_repair",
+      priority: "P1",
+      status: "open",
+      claimed_by: "codex-workspace",
+      task_class: "advancement_task",
+      action_kind: "workspace_repair",
+      title: "Repair the stale writable worktree before the next bounded write.",
     },
     {
       todo_id: "todo_side_fixture",
@@ -190,6 +213,7 @@ export const sampleGoalChannelProjection: GoalChannelProjection = {
       status: "open",
       claimed_by: "codex-side-bypass",
       task_class: "advancement_task",
+      action_kind: "frontstage_render",
       title: "Render the productization frontstage fixture.",
     },
   ],
@@ -200,12 +224,34 @@ export const sampleGoalChannelProjection: GoalChannelProjection = {
       status: "action_required",
       blocks: ["todo_user_decision"],
     },
+    {
+      gate_id: "capability_gate_worker_bridge",
+      kind: "capability_wait",
+      status: "waiting",
+      blocks: ["todo_capability_wait", "todo_primary_route"],
+    },
   ],
   active_leases: [
     {
       owner_agent: "codex-main-control",
-      status: "soft_claim",
+      status: "hard_lease",
       todo_id: "todo_primary_route",
+      lease_until: "2026-06-20T09:00:00Z",
+      write_scope: ["apps/presentation/dashboard/src/views/frontstage-page.tsx"],
+    },
+    {
+      owner_agent: "codex-capability",
+      status: "soft_claim",
+      todo_id: "todo_capability_wait",
+      lease_until: "2026-06-20T08:30:00Z",
+      write_scope: ["docs/product/roadmaps/frontstage-channel-lease-roadmap.md"],
+    },
+    {
+      owner_agent: "codex-workspace",
+      status: "soft_claim",
+      todo_id: "todo_workspace_repair",
+      lease_until: "2026-06-20T08:20:00Z",
+      write_scope: ["worktree"],
     },
     {
       owner_agent: "codex-side-bypass",
@@ -226,9 +272,24 @@ export const sampleGoalChannelProjection: GoalChannelProjection = {
   ],
   recent_events: [
     {
+      generated_at: "2026-06-20T08:03:00Z",
+      classification: "delivery_outcome",
+      summary: "latest delivery_outcome=outcome_progress stays visible without browser write authority",
+    },
+    {
       generated_at: "2026-06-20T08:02:00Z",
       classification: "validated_progress",
       summary: "frontstage fixture rendered from compact projection",
+    },
+    {
+      generated_at: "2026-06-20T08:01:00Z",
+      classification: "capability_wait",
+      summary: "worker_bridge missing; capability-wait blocks primary delivery",
+    },
+    {
+      generated_at: "2026-06-20T07:55:00Z",
+      classification: "workspace_repair",
+      summary: "writable worktree marked stale; repair before the next scoped write",
     },
     {
       generated_at: "2026-06-20T07:50:00Z",

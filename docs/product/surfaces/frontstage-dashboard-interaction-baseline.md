@@ -106,6 +106,8 @@ The route currently exposes these durable anchors:
   `frontstage-artifacts`, and `frontstage-timeline` for the operator workspace.
 - `frontstage-budget-governance` for the ops budget, cadence, no-spend control,
   and evidence-link contract.
+- `frontstage-operator-state-legibility` for outcome, lease, capability-wait,
+  and workspace-repair scanability on the read-only ops board.
 - `frontstage-showcase-motion-beam` and `frontstage-state-flow-beam` for
   human-gate and state-flow animation checks.
 - `frontstage-self-iteration-timeline`, `frontstage-self-iteration-lane`,

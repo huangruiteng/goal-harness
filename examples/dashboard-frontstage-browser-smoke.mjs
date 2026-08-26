@@ -21,7 +21,9 @@ const showcaseCatalogPath = resolve(repoRoot, "docs/showcases/showcase-catalog.j
 const visualOutputDir = resolve(repoRoot, "output/playwright/dashboard-frontstage-visual-acceptance");
 const port = Number(process.env.LOOPX_DASHBOARD_FRONTSTAGE_SMOKE_PORT ?? "5197");
 const showcaseCatalog = JSON.parse(readFileSync(showcaseCatalogPath, "utf8"));
-const publicShowcaseCaseCount = showcaseCatalog.cases.filter((item) => item.frontend_card).length;
+const publicShowcaseCases = showcaseCatalog.cases.filter((item) => item.frontend_card);
+const publicShowcaseCaseCount = publicShowcaseCases.length;
+const firstPublicShowcaseTitle = publicShowcaseCases[0]?.title ?? "";
 const allShowcaseCasesText = `Showing ${publicShowcaseCaseCount} of ${publicShowcaseCaseCount} public-safe cases`;
 const selfIterationFilterText = `Showing 1 of ${publicShowcaseCaseCount} public-safe cases`;
 const fakePrivateTrapMarkers = [
@@ -705,8 +707,10 @@ async function main() {
       }
       const spotlight = desktopPage.locator('[data-testid="frontstage-showcase-spotlight"]');
       const initialSpotlightText = await spotlight.innerText();
-      if (!initialSpotlightText.includes("Overnight PR batch with reviewable control")) {
-        throw new Error("Showcase spotlight did not default to the first public case");
+      if (!firstPublicShowcaseTitle || !initialSpotlightText.includes(firstPublicShowcaseTitle)) {
+        throw new Error(
+          `Showcase spotlight did not default to the first public case (${firstPublicShowcaseTitle || "missing title"})`,
+        );
       }
       await desktopPage
         .locator('[data-testid="frontstage-showcase-motion-card"]')

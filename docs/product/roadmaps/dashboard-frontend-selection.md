@@ -186,7 +186,9 @@ selection/filter/search, and truth contract. This route is where Multica-style
 agent-board density belongs; the existing Python/HTML renderer should stay a
 no-build diagnostic fallback. The next slices should be quality work: visual
 acceptance, richer public-safe fixtures, and operator onboarding details rather
-than another base renderer.
+than another base renderer. The ops board now keeps outcome, lease,
+capability-wait, and workspace-repair states legible from the local demo
+fixture without granting browser write authority.
 The durable interaction baseline is tracked in
 `docs/product/surfaces/frontstage-dashboard-interaction-baseline.md`, including the
 showcase/homepage versus ops/control-plane split.
