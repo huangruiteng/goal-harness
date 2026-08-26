@@ -65,6 +65,10 @@ jobs:
           npm run typecheck:control-plane
           npm run test:control-plane
 
+      - name: Qualify the Personal Workspace contract smoke
+        run: >-
+          node apps/presentation/dashboard/src/features/personal-workspace/personal-workspace-contract.test.mjs
+
       - name: Lint test suite
         run: >-
           python -m ruff check

@@ -263,7 +263,7 @@ assert.match(page, /当前本地工作区（未绑定 Repository）/, "Create Go
 assert.doesNotMatch(model, /kind: "agent"/, "The drawer model omits the read-only Agent settings variant");
 assert.match(
   dashboard,
-  /statusRequestActive = Boolean\(activeStatusRequestUrl\) && Boolean\(loadError && requestedStatusUrl\)/,
+  /statusRequestActive = source\.kind === "example"[\s\S]*?&& Boolean\(activeStatusRequestUrl\)[\s\S]*?&& Boolean\(loadError && requestedStatusUrl\)/,
   "Initial load and refresh keep the workspace shell visible, while failed authoritative status requests surface recovery",
 );
 
