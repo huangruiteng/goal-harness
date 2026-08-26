@@ -198,7 +198,29 @@ def build_compact_usage_row(
     if previous_snapshot is not None:
         previous_id = str(previous_snapshot.get("source_snapshot_id") or "").strip()
         if previous_id and previous_id == snapshot_id:
-            # Idempotent replay of the same cumulative snapshot identity.
+            # Same snapshot identity is only an idempotent replay when the full
+            # cumulative observation (counters and binding labels) is unchanged.
+            # A reused, corrupt, or out-of-order identity carrying different
+            # numbers must fail closed instead of silently zeroing real usage.
+            prior = _snapshot_counters(previous_snapshot, label="previous_snapshot")
+            mismatched = sorted(
+                field
+                for field in (*_REQUIRED_TOKEN_FIELDS, *_OPTIONAL_INT_FIELDS, *_OPTIONAL_FLOAT_FIELDS)
+                if current[field] != prior[field]
+            )
+            prior_labels = {
+                field: str(previous_snapshot.get(field) or "").strip()
+                for field in _LABEL_FIELDS
+            }
+            if prior_labels["provider"] != provider_label:
+                mismatched.append("provider")
+            if prior_labels["model"] != model_label:
+                mismatched.append("model")
+            if mismatched:
+                raise UsageRowError(
+                    "usage.source_snapshot_id replayed with a different cumulative "
+                    "observation (" + ", ".join(mismatched) + ")"
+                )
             kind = "delta"
             current = {
                 "input_tokens": 0,

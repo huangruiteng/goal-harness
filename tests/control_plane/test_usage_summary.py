@@ -377,6 +377,8 @@ def test_build_compact_usage_row_idempotent_replay_same_snapshot() -> None:
         "cache_tokens": 10,
         "cost_usd": 0.1,
         "duration_ms": 1000,
+        "provider": "codex",
+        "model": "codex-1",
     }
     row = build_compact_usage_row(
         input_tokens=100,
@@ -395,6 +397,90 @@ def test_build_compact_usage_row_idempotent_replay_same_snapshot() -> None:
     assert row["cache_tokens"] == 0
     assert row["cost_usd"] == 0.0
     assert row["duration_ms"] == 0
+
+
+def test_build_compact_usage_row_same_snapshot_id_different_counters_fails_closed() -> None:
+    previous = {
+        "source_snapshot_id": "snap-9",
+        "input_tokens": 100,
+        "output_tokens": 40,
+        "cache_tokens": 10,
+        "cost_usd": 0.1,
+        "duration_ms": 1000,
+        "provider": "codex",
+        "model": "codex-1",
+    }
+    with pytest.raises(UsageRowError, match="different cumulative observation.*input_tokens"):
+        build_compact_usage_row(
+            input_tokens=150,
+            output_tokens=40,
+            cache_tokens=10,
+            cost_usd=0.1,
+            duration_ms=1000,
+            provider="codex",
+            model="codex-1",
+            source_snapshot_id="snap-9",
+            previous_snapshot=previous,
+        )
+
+
+def test_build_compact_usage_row_same_snapshot_id_optional_presence_change_fails_closed() -> None:
+    previous = {
+        "source_snapshot_id": "snap-9",
+        "input_tokens": 100,
+        "output_tokens": 40,
+        "cache_tokens": 10,
+        "provider": "codex",
+        "model": "codex-1",
+    }
+    with pytest.raises(UsageRowError, match="different cumulative observation.*cache_tokens"):
+        build_compact_usage_row(
+            input_tokens=100,
+            output_tokens=40,
+            cache_tokens=None,
+            provider="codex",
+            model="codex-1",
+            source_snapshot_id="snap-9",
+            previous_snapshot=previous,
+        )
+
+
+def test_build_compact_usage_row_same_snapshot_id_different_labels_fails_closed() -> None:
+    previous = {
+        "source_snapshot_id": "snap-9",
+        "input_tokens": 100,
+        "output_tokens": 40,
+        "provider": "codex",
+        "model": "codex-1",
+    }
+    with pytest.raises(UsageRowError, match="different cumulative observation.*model"):
+        build_compact_usage_row(
+            input_tokens=100,
+            output_tokens=40,
+            provider="codex",
+            model="codex-2",
+            source_snapshot_id="snap-9",
+            previous_snapshot=previous,
+        )
+
+
+def test_build_compact_usage_row_same_snapshot_id_without_prior_labels_fails_closed() -> None:
+    # A same-id basis that never recorded its binding labels cannot prove the
+    # replay is identical, so it must not be treated as a zero-delta replay.
+    previous = {
+        "source_snapshot_id": "snap-9",
+        "input_tokens": 100,
+        "output_tokens": 40,
+    }
+    with pytest.raises(UsageRowError, match="different cumulative observation"):
+        build_compact_usage_row(
+            input_tokens=100,
+            output_tokens=40,
+            provider="codex",
+            model="codex-1",
+            source_snapshot_id="snap-9",
+            previous_snapshot=previous,
+        )
 
 
 def test_build_compact_usage_row_fails_closed_on_cumulative_reset() -> None:
