@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +103,38 @@ class FileCoordinationProvider:
         self._lock_timeout_seconds = lock_timeout_seconds
         digest = hashlib.sha256(goal_id.encode("utf-8")).hexdigest()[:16]
         self._document = self.directory / f"coordination-head-{digest}.json"
+        self._identity_path = self.directory / "store-identity"
+
+    def store_identity(self) -> str:
+        """The stable identity of this store lineage (Stage 3 binding fence).
+
+        Minted once per directory with an exclusive create; every later call
+        (and every competing creator) reads the same value. A copy of the
+        documents into a fresh directory yields a NEW identity, so a head
+        bound to the original lineage is detectable there.
+        """
+
+        try:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(
+                self._identity_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
+            )
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise ProviderProtocolError(
+                f"store identity is unavailable: {exc}"
+            ) from exc
+        else:
+            try:
+                os.write(descriptor, f"file:{uuid.uuid4().hex}".encode("ascii"))
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        identity = self._identity_path.read_text(encoding="ascii").strip()
+        if not identity:
+            raise ProviderProtocolError("store identity file is empty")
+        return identity
 
     def _read_envelope(self) -> tuple[dict[str, Any] | None, int]:
         try:

@@ -87,6 +87,42 @@ class NoKVCoordinationProvider:
         self.workbench = workbench
         self.goal_id = goal_id
         self.head_path = f"goals/{goal_id}/coordination-head.json"
+        self._store_identity: str | None = None
+
+    def store_identity(self) -> str:
+        """The stable identity of this store lineage (Stage 3 binding fence).
+
+        NoKV assigns every workbench incarnation a never-reused 32-hex
+        ``workspace_incarnation_id`` that is permanently claimed server-side;
+        a restore lands in a NEW workbench with a NEW incarnation, so a head
+        bound to ``workbench:incarnation`` detects the restored lineage
+        before any write. The identity is immutable for the life of the
+        workbench, so one successful lookup is cached.
+        """
+
+        if self._store_identity is not None:
+            return self._store_identity
+        cursor = None
+        try:
+            while True:
+                page = self.client.find_workspaces(cursor=cursor, limit=100)
+                for entry in page.get("workspaces", []):
+                    workspace = entry.get("workspace") or {}
+                    if workspace.get("workbench") == self.workbench:
+                        incarnation = workspace.get("workspace_incarnation_id")
+                        if isinstance(incarnation, str) and incarnation:
+                            self._store_identity = (
+                                f"nokv:{self.workbench}:{incarnation}"
+                            )
+                            return self._store_identity
+                cursor = page.get("cursor") or page.get("next_cursor")
+                if not cursor:
+                    break
+        except self._CLIENT_ERRORS as exc:
+            raise ProviderUnavailableError(str(exc)) from exc
+        raise ProviderProtocolError(
+            f"workbench {self.workbench!r} has no visible incarnation identity"
+        )
 
     def load(self):
         """Return ``(aggregate | None, provider_generation)``."""

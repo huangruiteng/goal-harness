@@ -24,6 +24,7 @@ def head(revision: int = 0) -> dict:
         "schema_version": "loopx_coordination_head_v0",
         "goal_id": "goal-a",
         "handoff_mode": "hard_lease",
+        "store_binding": "test:store",
         "authority_revision": revision,
         "coordination": {"todos": {}, "leases": {}},
         "receipt_index": {},
