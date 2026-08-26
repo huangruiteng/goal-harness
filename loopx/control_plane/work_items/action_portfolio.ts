@@ -8,10 +8,11 @@ import {
 } from "../runtime_decode.ts";
 
 import type { JsonObject } from "../effect_program.ts";
+import { decodeTodoPlanningInventory } from "./planning_inventory.ts";
 
 export const ACTION_PORTFOLIO_SCHEMA_VERSION = "quota_action_portfolio_v2";
 export const ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION =
-  "quota_action_portfolio_request_v0";
+  "quota_action_portfolio_request_v1";
 export const ACTION_SELECTION_QUALIFICATION_SCHEMA_VERSION =
   "action_selection_qualification_v0";
 export const ACTION_SELECTION_QUALIFICATION_REQUEST_SCHEMA_VERSION =
@@ -147,7 +148,16 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
       `action_portfolio_request.schema_version must be ${ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION}`,
     );
   }
-  const primary = actionCandidate(request.primary, "action_portfolio_request.primary");
+  const inventory = decodeTodoPlanningInventory(request.planning_inventory);
+  const primaryValue = inventory.items.find(
+    (item) => item.todo_id === inventory.selected_todo_id,
+  );
+  if (!primaryValue) {
+    throw new EffectRuntimeRequestError(
+      "action_portfolio_request.planning_inventory must include selected_todo_id",
+    );
+  }
+  const primary = actionCandidate(primaryValue, "action_portfolio_request.primary");
   requireRunnableAdvancement(primary, "action_portfolio_request.primary");
   const maximum = request.max_alternative_actions === undefined
     ? 2
@@ -161,7 +171,7 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
     );
   }
 
-  const rawCandidates = Array.isArray(request.candidates) ? request.candidates : [];
+  const rawCandidates = inventory.items.filter((item) => item.runnable_candidate);
   const seen = new Set<string>([candidateIdentity(primary)]);
   const alternativeActions: ActionCandidate[] = [];
   for (const [index, rawCandidate] of rawCandidates.entries()) {
@@ -180,9 +190,9 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
     if (alternativeActions.length >= maximum) break;
   }
 
-  const rawUnavailable = Array.isArray(request.unavailable_higher_priority)
-    ? request.unavailable_higher_priority
-    : [];
+  const rawUnavailable = inventory.items.filter(
+    (item) => item.unavailable_higher_priority,
+  );
   const unavailableHigherPriority: ActionCandidate[] = [];
   const seenUnavailable = new Set<string>();
   for (const [index, rawCandidate] of rawUnavailable.entries()) {

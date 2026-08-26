@@ -96,9 +96,10 @@ from ..todos.user_gate import (
     build_user_todo_notification as _build_user_todo_notification,
 )
 from ..todos.write_hint import build_todo_write_hint
-from ..work_items.action_portfolio import build_quota_action_portfolio
 from ..work_items.action_portfolio import qualify_action_selection
-from ..work_items.planning_horizon import build_quota_planning_horizon
+from ..work_items.planning_projection import (
+    build_quota_planning_projections,
+)
 from ..work_items.execution_obligation import build_execution_obligation
 from ..work_items.goal_route_hint import build_goal_route_hint
 from ..work_items.interaction_contract import (
@@ -699,50 +700,30 @@ class _QuotaDecisionRoute:
     payload_work_lane_contract: dict[str, Any] | None
 
 
-def _project_quota_action_portfolio(
+def _planning_projections(
     prepared: _QuotaDecisionPreparation,
     route: _QuotaDecisionRoute,
-) -> dict[str, Any] | None:
-    if (
-        not route.should_run
-        or not route.normal_delivery_allowed
-        or prepared.receipt_bound_todo_id is not None
-        or prepared.requested_action_todo_id is not None
-        or route.receipt_bound_replan_decision
-        or prepared.agent_monitor_only
-    ):
-        return None
-    return build_quota_action_portfolio(
-        primary=route.agent_lane_next_action,
-        agent_id=normalize_todo_claimed_by(
-            (prepared.agent_identity or {}).get("agent_id")
-        ),
-        agent_todo_summary=prepared.agent_todo_summary,
-        capability_gate=prepared.capability_gate,
-        blocked_priority_fallback=prepared.blocked_priority_fallback,
+    *,
+    include_detail: bool,
+) -> dict[str, Any]:
+    projection_enabled = bool(
+        route.should_run
+        and route.normal_delivery_allowed
+        and prepared.receipt_bound_todo_id is None
+        and prepared.requested_action_todo_id is None
+        and not route.receipt_bound_replan_decision
+        and not prepared.agent_monitor_only
     )
-
-
-def _project_quota_planning_horizon(
-    prepared: _QuotaDecisionPreparation,
-    route: _QuotaDecisionRoute,
-) -> dict[str, Any] | None:
-    if (
-        not route.should_run
-        or not route.normal_delivery_allowed
-        or prepared.receipt_bound_todo_id is not None
-        or prepared.requested_action_todo_id is not None
-        or route.receipt_bound_replan_decision
-        or prepared.agent_monitor_only
-    ):
-        return None
-    return build_quota_planning_horizon(
+    return build_quota_planning_projections(
+        projection_enabled=projection_enabled,
+        include_detail=include_detail,
         goal_id=prepared.safe_goal_id,
         selected=route.agent_lane_next_action,
         agent_id=normalize_todo_claimed_by(
             (prepared.agent_identity or {}).get("agent_id")
         ),
         agent_todo_summary=prepared.agent_todo_summary,
+        agent_todo_source_items=prepared.agent_todo_planning_source_items,
         capability_gate=prepared.capability_gate,
         blocked_priority_fallback=prepared.blocked_priority_fallback,
         goal_frontier_projection=prepared.goal_frontier_projection,
@@ -1109,6 +1090,7 @@ def _build_quota_should_run_payload(
     route: _QuotaDecisionRoute,
     *,
     turn_instance_id: str | None = None,
+    include_agent_todo_detail: bool = False,
 ) -> dict[str, Any]:
     agent_scope_action = _agent_scope_frontier_action(route.effective_action)
     execution_obligation = _execution_obligation(
@@ -1276,12 +1258,13 @@ def _build_quota_should_run_payload(
         payload["selected_todo"] = selected_todo_projection
     elif route.receipt_bound_replan_decision:
         payload["selected_todo"] = None
-    action_portfolio = _project_quota_action_portfolio(prepared, route)
-    if action_portfolio is not None:
-        payload["action_portfolio"] = action_portfolio
-    planning_horizon = _project_quota_planning_horizon(prepared, route)
-    if planning_horizon is not None:
-        payload["planning_horizon"] = planning_horizon
+    payload.update(
+        _planning_projections(
+            prepared,
+            route,
+            include_detail=include_agent_todo_detail,
+        )
+    )
     _attach_truthy_fields(
         payload,
         agent_lane_frontier_hint=route.agent_lane_frontier_hint,

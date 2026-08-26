@@ -929,6 +929,13 @@ def test_quota_cli_keeps_full_agent_todo_diagnostics_on_explicit_cold_path(
     detail_payload = json.loads(detail_text)
     default_summary = default_payload["agent_todo_summary"]
     detail_summary = detail_payload["agent_todo_summary"]
+    assert "agent_todo_planning_inventory" not in default_payload
+    detail_inventory = detail_payload["agent_todo_planning_inventory"]
+    assert detail_inventory["schema_version"] == (
+        "todo_planning_inventory_detail_v0"
+    )
+    assert detail_inventory["item_detail_ref"] == "$.agent_todo_summary"
+    assert detail_inventory["items"]
     assert default_summary["payload_compaction"]["schema_version"] == (
         "quota_cli_todo_summary_compaction_v0"
     )

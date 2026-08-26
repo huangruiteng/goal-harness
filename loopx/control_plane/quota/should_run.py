@@ -234,6 +234,7 @@ def build_quota_should_run(
     agent_id: str | None = None,
     available_capabilities: Any = None,
     include_scheduler_detail: bool = False,
+    include_agent_todo_detail: bool = False,
     codex_app_current_rrule: Any = None,
     codex_app_automation_id: Any = None,
     scheduler_execution_context: (
@@ -321,6 +322,7 @@ def build_quota_should_run(
             prepared,
             route,
             turn_instance_id=turn_instance_id,
+            include_agent_todo_detail=include_agent_todo_detail,
         )
     if health_item:
         return {

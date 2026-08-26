@@ -451,6 +451,10 @@ def handle_quota_command(
                 agent_id=args.agent_id,
                 available_capabilities=args.available_capabilities,
                 include_scheduler_detail="scheduler" in detail_sections,
+                include_agent_todo_detail=(
+                    "agent-todos" in detail_sections
+                    and not bool(getattr(args, "turn_envelope", False))
+                ),
                 codex_app_current_rrule=args.codex_app_current_rrule,
                 registry_path=registry_path,
                 runtime_root=runtime_root,
@@ -540,6 +544,10 @@ def handle_quota_command(
                             agent_id=args.agent_id,
                             available_capabilities=args.available_capabilities,
                             include_scheduler_detail="scheduler" in detail_sections,
+                            include_agent_todo_detail=(
+                                "agent-todos" in detail_sections
+                                and not bool(getattr(args, "turn_envelope", False))
+                            ),
                             codex_app_current_rrule=args.codex_app_current_rrule,
                             registry_path=registry_path,
                             runtime_root=runtime_root,

@@ -5,6 +5,7 @@ import re
 from typing import Any, Callable
 
 from ..runtime.time import now_utc_iso
+from ..todos.summary_item import todo_planning_source_items
 
 TASK_GRAPH_PROJECTION_SCHEMA_VERSION = "task_graph_projection_v0"
 TASK_GRAPH_SOURCE_OF_TRUTH = [
@@ -259,11 +260,8 @@ def _task_graph_collect_todo_items(
 ) -> dict[str, dict[str, Any]]:
     if not isinstance(todos_summary, dict):
         return {}
-    items = todos_summary.get("items")
-    if not isinstance(items, list):
-        return {}
     by_id: dict[str, dict[str, Any]] = {}
-    for raw in items:
+    for raw in todo_planning_source_items(todos_summary, include_terminal=True):
         if not isinstance(raw, dict):
             continue
         tid = raw.get("todo_id")
@@ -277,9 +275,7 @@ def _task_graph_source_items_truncated(
 ) -> bool:
     if not isinstance(todos_summary, dict):
         return False
-    items = todos_summary.get("items")
-    if not isinstance(items, list):
-        return False
+    items = todo_planning_source_items(todos_summary, include_terminal=True)
     try:
         total_count = int(todos_summary.get("total_count") or 0)
     except (TypeError, ValueError):

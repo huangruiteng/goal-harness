@@ -1,68 +1,30 @@
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString,
-  requireInteger,
   requireJsonObject,
   requireNonEmptyString,
-  requireStringArray,
 } from "../runtime_decode.ts";
+import {
+  decodeTodoPlanningInventory,
+  relationKey,
+  todoRef,
+  type PlanningInventoryItem,
+  type PlanningInventoryRelation,
+  type PlanningState,
+} from "./planning_inventory.ts";
 
 import type { JsonObject } from "../effect_program.ts";
 
 export const PLANNING_HORIZON_SCHEMA_VERSION = "quota_planning_horizon_v0";
 export const PLANNING_HORIZON_REQUEST_SCHEMA_VERSION =
-  "quota_planning_horizon_request_v0";
+  "quota_planning_horizon_request_v1";
 
-const MAX_SOURCE_ITEMS = 32;
 const MAX_PROJECTED_ITEMS = 5;
 const MAX_PROJECTED_RELATIONS = 8;
 const MAX_PROJECTED_ACCEPTANCE_GAPS = 2;
 const ITEM_TEXT_LIMIT = 180;
 const CONTEXT_TEXT_LIMIT = 140;
 const ACCEPTANCE_TEXT_LIMIT = 220;
-const TODO_ID = /^todo_[A-Za-z0-9_-]{3,80}$/;
-
-type PlanningState =
-  | "selected"
-  | "runnable"
-  | "waiting"
-  | "blocked"
-  | "scheduled"
-  | "context";
-
-interface HorizonCandidate extends JsonObject {
-  todo_id: string;
-  text: string;
-  priority?: string;
-  status?: string;
-  task_class?: string;
-  action_kind?: string;
-  continuation_hint?: string;
-  resume_when?: string;
-  resume_ready?: boolean;
-  next_due_at?: string;
-  unblocks_todo_id?: string;
-  successor_todo_ids: string[];
-  superseded_by?: string;
-  route_id?: string;
-  route_key?: string;
-  index?: number;
-}
-
-interface HorizonRelation extends JsonObject {
-  from_todo_id: string;
-  to_ref: string;
-  relation: "successor" | "unblocks" | "resumes_when" | "superseded_by" | "routes_via";
-  enforcement: "lineage_only" | "typed_lifecycle" | "typed_condition" | "read_only_context";
-}
-
-function todoId(value: unknown, label: string): string {
-  const normalized = requireNonEmptyString(value, label);
-  if (!TODO_ID.test(normalized)) {
-    throw new EffectRuntimeRequestError(`${label} must be a public Todo id`);
-  }
-  return normalized;
-}
 
 function compactText(value: unknown, limit: number): { text: string; truncated: boolean } {
   const normalized = requireNonEmptyString(value, "planning horizon text")
@@ -74,153 +36,14 @@ function compactText(value: unknown, limit: number): { text: string; truncated: 
   };
 }
 
-function optionalTodoId(value: unknown, label: string): string | undefined {
-  const normalized = optionalNonEmptyString(value, label);
-  return normalized === null ? undefined : todoId(normalized, label);
-}
-
-function candidate(value: unknown, label: string): HorizonCandidate {
-  const raw = requireJsonObject(value, label);
-  const result: HorizonCandidate = {
-    todo_id: todoId(raw.todo_id, `${label}.todo_id`),
-    text: requireNonEmptyString(raw.text, `${label}.text`),
-    successor_todo_ids: [],
-  };
-  for (const field of [
-    "priority",
-    "status",
-    "task_class",
-    "action_kind",
-    "continuation_hint",
-    "resume_when",
-    "next_due_at",
-    "route_id",
-    "route_key",
-  ] as const) {
-    const normalized = optionalNonEmptyString(raw[field], `${label}.${field}`);
-    if (normalized !== null) result[field] = normalized;
-  }
-  for (const field of ["unblocks_todo_id", "superseded_by"] as const) {
-    const normalized = optionalTodoId(raw[field], `${label}.${field}`);
-    if (normalized !== undefined) result[field] = normalized;
-  }
-  if (raw.successor_todo_ids !== null && raw.successor_todo_ids !== undefined) {
-    result.successor_todo_ids = requireStringArray(
-      raw.successor_todo_ids,
-      `${label}.successor_todo_ids`,
-    ).map((item, index) => todoId(item, `${label}.successor_todo_ids[${index}]`));
-  }
-  if (raw.resume_ready !== null && raw.resume_ready !== undefined) {
-    if (typeof raw.resume_ready !== "boolean") {
-      throw new EffectRuntimeRequestError(`${label}.resume_ready must be a boolean`);
-    }
-    result.resume_ready = raw.resume_ready;
-  }
-  if (raw.index !== null && raw.index !== undefined) {
-    result.index = requireInteger(raw.index, `${label}.index`);
-  }
-  return result;
-}
-
 function priorityRank(value: unknown): number {
   const match = /^P(\d+)/i.exec(typeof value === "string" ? value : "");
   return match ? Number(match[1]) : 1_000;
 }
 
-function planningState(
-  item: HorizonCandidate,
-  selectedTodoId: string,
-  runnableTodoIds: ReadonlySet<string>,
-): PlanningState {
-  if (item.todo_id === selectedTodoId) return "selected";
-  if (runnableTodoIds.has(item.todo_id)) return "runnable";
-  if (item.status === "blocked") return "blocked";
-  if (item.resume_when && item.resume_ready !== true) return "waiting";
-  if (item.status === "deferred") return "waiting";
-  if (item.task_class === "continuous_monitor" && item.next_due_at) {
-    return "scheduled";
-  }
-  return "context";
-}
-
-function relationKey(value: HorizonRelation): string {
-  return `${value.from_todo_id}\u0000${value.relation}\u0000${value.to_ref}`;
-}
-
-function candidateRelations(item: HorizonCandidate): HorizonRelation[] {
-  const projected: HorizonRelation[] = [];
-  for (const successor of new Set(item.successor_todo_ids)) {
-    if (successor !== item.todo_id) {
-      projected.push({
-        from_todo_id: item.todo_id,
-        to_ref: successor,
-        relation: "successor",
-        enforcement: "lineage_only",
-      });
-    }
-  }
-  if (item.unblocks_todo_id && item.unblocks_todo_id !== item.todo_id) {
-    projected.push({
-      from_todo_id: item.todo_id,
-      to_ref: item.unblocks_todo_id,
-      relation: "unblocks",
-      enforcement: "typed_lifecycle",
-    });
-  }
-  if (item.resume_when) {
-    projected.push({
-      from_todo_id: item.todo_id,
-      to_ref: item.resume_when,
-      relation: "resumes_when",
-      enforcement: "typed_condition",
-    });
-  }
-  if (item.superseded_by && item.superseded_by !== item.todo_id) {
-    projected.push({
-      from_todo_id: item.todo_id,
-      to_ref: item.superseded_by,
-      relation: "superseded_by",
-      enforcement: "lineage_only",
-    });
-  }
-  const routeRef = item.route_id || item.route_key;
-  if (routeRef) {
-    projected.push({
-      from_todo_id: item.todo_id,
-      to_ref: `route:${routeRef}`,
-      relation: "routes_via",
-      enforcement: "read_only_context",
-    });
-  }
-  return projected;
-}
-
-function relations(candidates: readonly HorizonCandidate[]): HorizonRelation[] {
-  const projected: HorizonRelation[] = [];
-  const seen = new Set<string>();
-  for (const item of candidates) {
-    for (const value of candidateRelations(item)) {
-      const key = relationKey(value);
-      if (!seen.has(key)) {
-        seen.add(key);
-        projected.push(value);
-      }
-    }
-  }
-  return projected;
-}
-
-function todoRef(value: string): string | null {
-  if (TODO_ID.test(value)) return value;
-  const separator = value.indexOf(":");
-  if (separator < 0) return null;
-  const suffix = value.slice(separator + 1);
-  return TODO_ID.test(suffix) ? suffix : null;
-}
-
 function connectedDistances(
   selectedTodoId: string,
-  values: readonly HorizonRelation[],
+  values: readonly PlanningInventoryRelation[],
 ): Map<string, number> {
   const adjacency = new Map<string, Set<string>>();
   const connect = (left: string, right: string) => {
@@ -249,7 +72,7 @@ function connectedDistances(
 }
 
 function contextReasons(
-  item: HorizonCandidate,
+  item: PlanningInventoryItem,
   state: PlanningState,
   selectedPriority: number,
   distance: number | undefined,
@@ -305,36 +128,18 @@ export function projectQuotaPlanningHorizon(value: unknown): JsonObject | null {
       `planning_horizon_request.schema_version must be ${PLANNING_HORIZON_REQUEST_SCHEMA_VERSION}`,
     );
   }
-  const goalId = requireNonEmptyString(request.goal_id, "planning_horizon_request.goal_id");
-  const agentId = requireNonEmptyString(request.agent_id, "planning_horizon_request.agent_id");
-  const selected = candidate(request.selected_todo, "planning_horizon_request.selected_todo");
-  const sourceContextCount = requireInteger(
-    request.source_context_todo_count,
-    "planning_horizon_request.source_context_todo_count",
+  const inventory = decodeTodoPlanningInventory(request.planning_inventory);
+  const goalId = inventory.goal_id;
+  const agentId = inventory.agent_id;
+  const selected = inventory.items.find(
+    (item) => item.todo_id === inventory.selected_todo_id,
   );
-  if (sourceContextCount < 0) {
+  if (!selected) {
     throw new EffectRuntimeRequestError(
-      "planning_horizon_request.source_context_todo_count must be non-negative",
+      "planning_horizon_request.planning_inventory must include selected_todo_id",
     );
   }
-  const rawCandidates = Array.isArray(request.candidates) ? request.candidates : [];
-  if (rawCandidates.length > MAX_SOURCE_ITEMS) {
-    throw new EffectRuntimeRequestError(
-      `planning_horizon_request.candidates must contain at most ${MAX_SOURCE_ITEMS} items`,
-    );
-  }
-  const byId = new Map<string, HorizonCandidate>([[selected.todo_id, selected]]);
-  for (const [index, raw] of rawCandidates.entries()) {
-    const item = candidate(raw, `planning_horizon_request.candidates[${index}]`);
-    if (!byId.has(item.todo_id)) byId.set(item.todo_id, item);
-  }
-  const runnableTodoIds = new Set(
-    requireStringArray(
-      request.runnable_todo_ids ?? [],
-      "planning_horizon_request.runnable_todo_ids",
-    ).map((item, index) => todoId(item, `planning_horizon_request.runnable_todo_ids[${index}]`)),
-  );
-  const sourceRelations = relations([...byId.values()]);
+  const sourceRelations = inventory.relations;
   const distances = connectedDistances(selected.todo_id, sourceRelations);
   const selectedPriority = priorityRank(selected.priority);
   const strategicContextStates = new Set<PlanningState>([
@@ -342,17 +147,17 @@ export function projectQuotaPlanningHorizon(value: unknown): JsonObject | null {
     "blocked",
     "scheduled",
   ]);
-  const ordered = [...byId.values()].sort((left, right) => {
+  const ordered = [...inventory.items].sort((left, right) => {
     const leftDistance = distances.get(left.todo_id);
     const rightDistance = distances.get(right.todo_id);
-    const bucket = (item: HorizonCandidate, distance: number | undefined) => {
+    const bucket = (item: PlanningInventoryItem, distance: number | undefined) => {
       if (item.todo_id === selected.todo_id) return 0;
       if (distance !== undefined) return 1;
-      if (strategicContextStates.has(planningState(item, selected.todo_id, runnableTodoIds))) {
+      if (strategicContextStates.has(item.planning_state)) {
         return 2;
       }
       if (priorityRank(item.priority) < selectedPriority) return 3;
-      if (runnableTodoIds.has(item.todo_id)) return 4;
+      if (item.runnable_candidate) return 4;
       return 5;
     };
     return (
@@ -364,12 +169,13 @@ export function projectQuotaPlanningHorizon(value: unknown): JsonObject | null {
     );
   });
   const projectedItems = ordered.slice(0, MAX_PROJECTED_ITEMS).map((item) => {
-    const state = planningState(item, selected.todo_id, runnableTodoIds);
+    const state = item.planning_state;
     const text = compactText(item.text, ITEM_TEXT_LIMIT);
     const projected: JsonObject = {
       todo_id: item.todo_id,
       text: text.text,
       planning_state: state,
+      claim_state: item.claim_state,
       context_reasons: contextReasons(
         item,
         state,
@@ -377,9 +183,13 @@ export function projectQuotaPlanningHorizon(value: unknown): JsonObject | null {
         distances.get(item.todo_id),
       ),
     };
+    if (item.claim_required_before_work) {
+      projected.claim_required_before_work = true;
+    }
     for (const field of ["priority", "action_kind"] as const) {
       if (item[field] !== undefined) projected[field] = item[field];
     }
+    if (item.claimed_by) projected.claimed_by = item.claimed_by;
     if (item.task_class && item.task_class !== "advancement_task") {
       projected.task_class = item.task_class;
     }
@@ -396,14 +206,14 @@ export function projectQuotaPlanningHorizon(value: unknown): JsonObject | null {
     const target = todoRef(relation.to_ref);
     return projectedIds.has(relation.from_todo_id) || (target !== null && projectedIds.has(target));
   }).sort((left, right) => {
-    const relationRank = (relation: HorizonRelation) => ({
+    const relationRank = (relation: PlanningInventoryRelation) => ({
       successor: 0,
       unblocks: 1,
       superseded_by: 2,
       resumes_when: 3,
       routes_via: 4,
     })[relation.relation];
-    const distance = (relation: HorizonRelation) => {
+    const distance = (relation: PlanningInventoryRelation) => {
       const target = todoRef(relation.to_ref);
       return Math.min(
         distances.get(relation.from_todo_id) ?? 1_000,
@@ -421,8 +231,12 @@ export function projectQuotaPlanningHorizon(value: unknown): JsonObject | null {
   const projectedGaps = compactGaps
     .slice(0, MAX_PROJECTED_ACCEPTANCE_GAPS)
     .map(({ truncated: _truncated, ...gap }) => gap);
-  const sourceUnrepresented = Math.max(0, sourceContextCount - byId.size);
-  const omittedItems = Math.max(0, byId.size - projectedItems.length);
+  const inventoryCompleteness = inventory.completeness;
+  const sourceContextCount = Number(inventoryCompleteness.source_context_todo_count ?? 0);
+  const sourceUnrepresented = Number(
+    inventoryCompleteness.source_unrepresented_todo_count ?? 0,
+  );
+  const omittedItems = Math.max(0, inventory.items.length - projectedItems.length);
   const omittedRelations = Math.max(0, sourceRelations.length - projectedRelations.length);
   const omittedGaps = Math.max(0, compactGaps.length - projectedGaps.length);
   const compactFieldTruncationCount =
@@ -432,7 +246,7 @@ export function projectQuotaPlanningHorizon(value: unknown): JsonObject | null {
     compactGaps.length > 0 ||
     ordered.some((item) =>
       item.todo_id !== selected.todo_id &&
-      strategicContextStates.has(planningState(item, selected.todo_id, runnableTodoIds))
+      strategicContextStates.has(item.planning_state)
     );
   if (!addsStrategicContext) {
     return null;
@@ -463,13 +277,14 @@ export function projectQuotaPlanningHorizon(value: unknown): JsonObject | null {
     completeness: {
       schema_version: "quota_planning_horizon_completeness_v0",
       source_context_todo_count: sourceContextCount,
-      candidate_input_count: byId.size,
+      candidate_input_count: inventory.items.length,
       source_unrepresented_todo_count: sourceUnrepresented,
+      planning_inventory_complete: inventoryCompleteness.complete === true,
       omitted_candidate_todo_count: omittedItems,
       omitted_relation_count: omittedRelations,
       omitted_acceptance_gap_count: omittedGaps,
       compact_field_truncation_count: compactFieldTruncationCount,
-      complete: sourceUnrepresented === 0 && omittedItems === 0 &&
+      complete: inventoryCompleteness.complete === true && sourceUnrepresented === 0 && omittedItems === 0 &&
         omittedRelations === 0 && omittedGaps === 0 && compactFieldTruncationCount === 0,
     },
     detail_refs: {
@@ -480,7 +295,8 @@ export function projectQuotaPlanningHorizon(value: unknown): JsonObject | null {
         todo_id: selected.todo_id,
         projection: "todo_detail_cold_path_v0",
       },
-      agent_todos: "quota should-run --include-detail agent-todos",
+      agent_todos: `quota should-run --goal-id ${goalId} --agent-id ${agentId} --include-detail agent-todos`,
+      full_todo_list: `todo list --goal-id ${goalId} --role agent --status open --agent-id ${agentId}`,
       task_graph: "status --include-task-graph",
     },
   };

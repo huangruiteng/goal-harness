@@ -549,7 +549,12 @@ def test_semantic_contract_preserves_bounded_planning_horizon_relations() -> Non
             "complete": False,
             "omitted_candidate_todo_count": 1,
         },
-        "detail_refs": {"agent_todos": "quota should-run --include-detail agent-todos"},
+        "detail_refs": {
+            "agent_todos": (
+                "quota should-run --goal-id fixture-goal --agent-id "
+                "codex-fixture --include-detail agent-todos"
+            )
+        },
     }
 
     full_semantics = model_behavior_semantic_contract_from_packet(
@@ -591,7 +596,12 @@ def test_semantic_contract_rejects_a_dangling_planning_horizon_cold_path() -> No
         "work_items": [{"todo_id": "todo_fixture001"}],
         "relations": [],
         "completeness": {"complete": False, "omitted_candidate_todo_count": 1},
-        "detail_refs": {"agent_todos": "quota should-run --include-detail agent-todos"},
+        "detail_refs": {
+            "agent_todos": (
+                "quota should-run --goal-id fixture-goal --agent-id "
+                "codex-fixture --include-detail agent-todos"
+            )
+        },
     }
     candidate = build_turn_envelope(full)
     candidate.pop("detail_ref")

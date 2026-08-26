@@ -76,6 +76,7 @@ from ..todos.projection import (
     todo_item_task_class as projection_todo_item_task_class,
 )
 from ..todos.quota_summary import (
+    select_planning_inventory_source_items,
     select_quota_todo_source_items,
     select_quota_todo_summary,
     select_task_orchestration_authority_items,
@@ -123,6 +124,7 @@ class _QuotaDecisionPreparation:
     receipt_bound_replay_phase: ReceiptBoundReplayPhase | None
     user_todo_summary: dict[str, Any] | None
     agent_todo_summary: dict[str, Any] | None
+    agent_todo_planning_source_items: list[dict[str, Any]]
     agent_scoped_user_todo_override: dict[str, Any] | None
     goal_boundary: dict[str, Any] | None
     automation_prompt_upgrade: dict[str, Any] | None
@@ -468,6 +470,10 @@ def _prepare_quota_should_run_item(
         item.get("agent_todos"),
         project_asset.get("agent_todos") if project_asset else None,
     )
+    agent_todo_planning_source_items = select_planning_inventory_source_items(
+        item.get("agent_todos"),
+        project_asset.get("agent_todos") if project_asset else None,
+    )
     task_orchestration_agent_items = select_task_orchestration_authority_items(
         item.get("agent_todos"),
         project_asset.get("agent_todos") if project_asset else None,
@@ -779,6 +785,7 @@ def _prepare_quota_should_run_item(
         receipt_bound_replay_phase=receipt_bound_replay_phase,
         user_todo_summary=user_todo_summary,
         agent_todo_summary=agent_todo_summary,
+        agent_todo_planning_source_items=agent_todo_planning_source_items,
         agent_scoped_user_todo_override=agent_scoped_user_todo_override,
         goal_boundary=goal_boundary,
         automation_prompt_upgrade=automation_prompt_upgrade,

@@ -5,6 +5,12 @@ import {
   PLANNING_HORIZON_REQUEST_SCHEMA_VERSION,
   projectQuotaPlanningHorizon,
 } from "../../loopx/control_plane/work_items/planning_horizon.ts";
+import {
+  TODO_PLANNING_INVENTORY_DETAIL_SCHEMA_VERSION,
+  TODO_PLANNING_INVENTORY_REQUEST_SCHEMA_VERSION,
+  projectTodoPlanningInventory,
+  projectTodoPlanningInventoryDetail,
+} from "../../loopx/control_plane/work_items/planning_inventory.ts";
 
 function todo(
   todoId: string,
@@ -27,16 +33,31 @@ function todo(
 
 function request(overrides: Record<string, unknown> = {}) {
   const selected = todo("todo_regression_gate", 5, "P1");
-  return {
-    schema_version: PLANNING_HORIZON_REQUEST_SCHEMA_VERSION,
-    goal_id: "planning-horizon-fixture",
-    agent_id: "codex-planning",
+  const legacy = {
     selected_todo: selected,
     candidates: [selected],
     runnable_todo_ids: [selected.todo_id],
     source_context_todo_count: 1,
     acceptance_gaps: [],
     ...overrides,
+  };
+  const candidates = legacy.candidates as Array<Record<string, unknown>>;
+  const runnableIds = new Set(legacy.runnable_todo_ids as string[]);
+  return {
+    schema_version: PLANNING_HORIZON_REQUEST_SCHEMA_VERSION,
+    planning_inventory: projectTodoPlanningInventory({
+      schema_version: TODO_PLANNING_INVENTORY_REQUEST_SCHEMA_VERSION,
+      goal_id: "planning-horizon-fixture",
+      agent_id: "codex-planning",
+      selected_todo: legacy.selected_todo,
+      source_items: candidates,
+      runnable_candidates: candidates.filter((item) =>
+        runnableIds.has(String(item.todo_id))
+      ),
+      unavailable_higher_priority: [],
+      source_context_todo_count: legacy.source_context_todo_count,
+    }),
+    acceptance_gaps: legacy.acceptance_gaps,
   };
 }
 
@@ -230,19 +251,77 @@ test("planning horizon keeps waiting context ahead of flat runnable alternatives
   );
 });
 
-test("planning horizon rejects malformed typed identities and unbounded source lists", () => {
+test("planning horizon preserves claim requirements for unclaimed runnable context", () => {
+  const selected = todo("todo_selected001", 3, "P1");
+  const unclaimed = todo("todo_unclaimed001", 1, "P0", { claimed_by: undefined });
+  const waiting = todo("todo_waiting001", 2, "P1", {
+    status: "deferred",
+    resume_when: "pr_merged:owner/repo#123",
+  });
+  const result = projectQuotaPlanningHorizon(request({
+    selected_todo: selected,
+    candidates: [selected, unclaimed, waiting],
+    runnable_todo_ids: [selected.todo_id, unclaimed.todo_id],
+    source_context_todo_count: 3,
+  }));
+  const projected = result?.work_items as Array<Record<string, unknown>>;
+  const unclaimedProjection = projected.find((item) => item.todo_id === unclaimed.todo_id);
+
+  assert.equal(unclaimedProjection?.planning_state, "runnable");
+  assert.equal(unclaimedProjection?.claim_state, "unclaimed");
+  assert.equal(unclaimedProjection?.claim_required_before_work, true);
+});
+
+test("planning inventory detail reuses Todo rows without duplicating their payload", () => {
+  const selected = todo("todo_selected001", 2, "P1", {
+    required_capabilities: ["network"],
+    required_write_scopes: ["artifacts/**"],
+  });
+  const unclaimed = todo("todo_unclaimed001", 1, "P0", {
+    claimed_by: undefined,
+  });
+  const inventory = (request({
+    selected_todo: selected,
+    candidates: [selected, unclaimed],
+    runnable_todo_ids: [selected.todo_id, unclaimed.todo_id],
+    source_context_todo_count: 2,
+  }).planning_inventory);
+  const detail = projectTodoPlanningInventoryDetail(inventory);
+  const items = detail.items as Array<Record<string, unknown>>;
+
+  assert.equal(detail.schema_version, TODO_PLANNING_INVENTORY_DETAIL_SCHEMA_VERSION);
+  assert.equal(detail.item_detail_ref, "$.agent_todo_summary");
+  assert.equal(items[1].claim_state, "unclaimed");
+  assert.equal(items[1].claim_required_before_work, true);
+  assert.equal("text" in items[0], false);
+  assert.equal("required_capabilities" in items[0], false);
+  assert.equal("required_write_scopes" in items[0], false);
+});
+
+test("planning horizon rejects malformed identities but degrades bounded source overflow", () => {
   assert.throws(
     () => projectQuotaPlanningHorizon(request({
       candidates: [{ todo_id: "not-a-todo", text: "Malformed." }],
     })),
     /public Todo id/,
   );
-  assert.throws(
-    () => projectQuotaPlanningHorizon(request({
-      candidates: Array.from({ length: 33 }, (_, index) =>
-        todo(`todo_overflow${index}`, index, "P2")
-      ),
-    })),
-    /at most 32 items/,
+  const selected = todo("todo_selected001", 40, "P2");
+  const monitors = Array.from({ length: 33 }, (_, index) =>
+    todo(`todo_overflow${index}`, index, "P2", {
+      task_class: "continuous_monitor",
+      next_due_at: "2099-01-01T00:00:00Z",
+    })
+  );
+  const result = projectQuotaPlanningHorizon(request({
+    selected_todo: selected,
+    candidates: [selected, ...monitors],
+    runnable_todo_ids: [selected.todo_id],
+    source_context_todo_count: 34,
+  }));
+
+  assert.equal((result?.work_items as unknown[]).length, 5);
+  assert.equal(
+    (result?.completeness as Record<string, unknown>).omitted_candidate_todo_count,
+    29,
   );
 });

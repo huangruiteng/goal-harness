@@ -102,6 +102,13 @@ TODO_SUMMARY_SOURCE_KEYS = (
     "items",
 )
 
+TODO_PLANNING_SOURCE_KEYS = (
+    "items",
+    "deferred_items",
+    "blocker_items",
+    "monitor_open_items",
+)
+
 
 def compact_todo_summary_item(
     item: dict[str, Any],
@@ -226,3 +233,46 @@ def todo_summary_source_items(value: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             open_items.append(compact)
     return open_items
+
+
+def todo_planning_source_items(
+    value: dict[str, Any],
+    *,
+    include_terminal: bool = False,
+) -> list[dict[str, Any]]:
+    """Return canonical Todo state rows shared by planning read models.
+
+    Unlike presentation-lane expansion, these four sources correspond to
+    distinct Todo domain states. They preserve waiting/blocking/scheduled nodes
+    that may sit outside the status ``items`` budget without making every
+    consumer rediscover visibility-lane policy.
+    """
+
+    planning_items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for key in TODO_PLANNING_SOURCE_KEYS:
+        source_items = value.get(key) if isinstance(value.get(key), list) else []
+        for item in source_items:
+            if not isinstance(item, dict) or (
+                not include_terminal and item.get("status") == "done"
+            ):
+                continue
+            todo_id = normalize_todo_id(item.get("todo_id"))
+            if include_terminal and todo_id is None:
+                legacy_todo_id = str(item.get("todo_id") or "").strip()
+                todo_id = (
+                    legacy_todo_id
+                    if legacy_todo_id.startswith("todo_")
+                    else None
+                )
+            text = str(item.get("text") or "").strip()
+            if not todo_id or not text or todo_id in seen:
+                continue
+            seen.add(todo_id)
+            compact = compact_todo_summary_item(item, text=text)
+            if include_terminal:
+                for field in ("evidence", "note", "last_actor_agent_id"):
+                    if item.get(field) is not None:
+                        compact[field] = item[field]
+            planning_items.append(compact)
+    return planning_items
