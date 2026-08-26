@@ -2187,14 +2187,31 @@ captured. There is no second usage ledger — run history plus this typed row is
 the single source of truth.
 
 Hosts and writers ingest usage through
-`loopx.control_plane.quota.usage_collector.ingest_usage_into_run_record` (wired
-into `write_reserved_run_artifacts`). Cumulative host snapshots are converted to
-non-negative deltas at that producer boundary and bound to
-`usage.source_snapshot_id` so replay of the same snapshot identity is idempotent.
-Missing optional measurements stay omitted (unknown) rather than zero-filled.
-Malformed, negative, reset, or out-of-order observations fail closed with a typed
-`UsageRowError`; they are never clamped or silently dropped. Quota/attempt
-accounting rows are not reinterpreted as token or dollar usage.
+`loopx.control_plane.quota.usage_collector.ingest_usage_into_run_record`, wired
+into `write_reserved_run_artifacts` and into the `refresh-state` run-write
+path. The first shipped measurement source is the Codex CLI session rollout:
+`loopx refresh-state --usage-codex-session <rollout.jsonl>` reads only the
+newest aggregate `token_count` totals, the model id, the session id, and event
+timestamps — never prompts, completions, or tool output. The session must be
+bound explicitly; there is no automatic session discovery, because guessing a
+concurrent session risks attributing one session's spend to another run. A
+host that measures usage itself can instead pass one finished per-run
+measurement with `--usage-json`. Without either flag, usage stays unknown.
+
+Cumulative host snapshots are converted to non-negative deltas at that
+producer boundary: the last accepted cumulative observation (all counters plus
+`provider`/`model`) is persisted as the goal's private
+`runs/usage_snapshot.json` state and used as the next delta basis, and each
+observation is bound to `usage.source_snapshot_id`. Replaying the same
+snapshot identity with an identical observation is an idempotent zero delta;
+the same identity carrying any different counter or binding label fails closed
+instead of silently zeroing real usage. A new session starts a fresh absolute
+observation rather than a bogus reset error. Missing optional measurements
+stay omitted (unknown) rather than zero-filled. Malformed, negative, reset, or
+out-of-order observations fail closed with a typed `UsageRowError`; they are
+never clamped or silently dropped, and a failed usage observation blocks the
+whole refresh append. Quota/attempt accounting rows are not reinterpreted as
+token or dollar usage.
 
 The typed compact usage row currently reports:
 

@@ -1,0 +1,421 @@
+"""End-to-end producer regression for the GH-C95 cost ledger.
+
+Proves that a shipped host measurement source (a Codex session rollout) lands
+as a typed ``run_usage_v0`` row on the real ``refresh-state`` run-write path,
+that the goal's ``usage_summary`` becomes non-zero, that replaying the same
+cumulative snapshot never double-counts, and that a grown rollout books only
+the non-negative increment.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from loopx.control_plane.quota.codex_session_usage import (
+    CodexSessionUsageError,
+    load_usage_snapshot,
+    previous_snapshot_for_observation,
+    read_codex_session_usage,
+    store_usage_snapshot,
+    usage_snapshot_path,
+)
+from loopx.control_plane.quota.usage_summary import build_usage_summary
+from loopx.control_plane.runtime.time import parse_timestamp
+from loopx.state_refresh import refresh_state_run
+
+GOAL_ID = "codex-usage-fixture"
+SESSION_ID = "019f0000-aaaa-bbbb-cccc-000000000001"
+MODEL = "gpt-fixture-1"
+
+
+def _rollout_event(
+    timestamp: str,
+    *,
+    input_tokens: int,
+    cached_input_tokens: int,
+    output_tokens: int,
+) -> str:
+    totals = {
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "cache_write_input_tokens": 0,
+        "output_tokens": output_tokens,
+        "reasoning_output_tokens": 0,
+        "total_tokens": input_tokens + output_tokens,
+    }
+    return json.dumps(
+        {
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "total_token_usage": totals,
+                    "last_token_usage": totals,
+                    "model_context_window": 400000,
+                },
+            },
+        }
+    )
+
+
+def _rollout_header() -> list[str]:
+    return [
+        json.dumps(
+            {
+                "timestamp": "2026-08-26T01:00:00.000Z",
+                "type": "session_meta",
+                "payload": {
+                    "session_id": SESSION_ID,
+                    "timestamp": "2026-08-26T01:00:00.000Z",
+                    "cwd": "/tmp/fixture-project",
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "timestamp": "2026-08-26T01:00:01.000Z",
+                "type": "turn_context",
+                "payload": {"turn_id": "turn-1", "model": MODEL},
+            }
+        ),
+    ]
+
+
+def _write_rollout(path: Path, lines: list[str]) -> Path:
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _fixture_rollout(tmp_path: Path) -> Path:
+    lines = [
+        *_rollout_header(),
+        _rollout_event(
+            "2026-08-26T01:05:00.000Z",
+            input_tokens=1200,
+            cached_input_tokens=200,
+            output_tokens=300,
+        ),
+    ]
+    return _write_rollout(tmp_path / "rollout-fixture.jsonl", lines)
+
+
+def test_read_codex_session_usage_extracts_cumulative_totals(tmp_path: Path) -> None:
+    observation = read_codex_session_usage(_fixture_rollout(tmp_path))
+    assert observation["input_tokens"] == 1200
+    assert observation["output_tokens"] == 300
+    assert observation["cache_tokens"] == 200
+    assert observation["provider"] == "codex"
+    assert observation["model"] == MODEL
+    assert observation["session_id"] == SESSION_ID
+    assert observation["source_snapshot_id"] == (
+        f"codex:{SESSION_ID}:2026-08-26T01:05:00.000Z"
+    )
+    assert observation["measurement_kind"] == "absolute"
+    assert observation["duration_ms"] == 300_000
+    assert "cost_usd" not in observation  # unmeasured stays unknown, not zero
+
+
+def test_read_codex_session_usage_tolerates_torn_trailing_line(tmp_path: Path) -> None:
+    lines = [
+        *_rollout_header(),
+        _rollout_event(
+            "2026-08-26T01:05:00.000Z",
+            input_tokens=10,
+            cached_input_tokens=0,
+            output_tokens=5,
+        ),
+        '{"timestamp":"2026-08-26T01:06:00.000Z","type":"event_msg","payl',
+    ]
+    observation = read_codex_session_usage(
+        _write_rollout(tmp_path / "rollout-torn.jsonl", lines)
+    )
+    assert observation["input_tokens"] == 10
+
+
+def test_read_codex_session_usage_fails_closed_without_token_counts(
+    tmp_path: Path,
+) -> None:
+    path = _write_rollout(tmp_path / "rollout-empty.jsonl", _rollout_header())
+    with pytest.raises(CodexSessionUsageError, match="no token_count"):
+        read_codex_session_usage(path)
+
+
+def test_read_codex_session_usage_fails_closed_without_session_meta(
+    tmp_path: Path,
+) -> None:
+    lines = [
+        _rollout_event(
+            "2026-08-26T01:05:00.000Z",
+            input_tokens=10,
+            cached_input_tokens=0,
+            output_tokens=5,
+        )
+    ]
+    path = _write_rollout(tmp_path / "rollout-no-meta.jsonl", lines)
+    with pytest.raises(CodexSessionUsageError, match="session_meta"):
+        read_codex_session_usage(path)
+
+
+def test_read_codex_session_usage_fails_closed_on_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(CodexSessionUsageError, match="cannot read"):
+        read_codex_session_usage(tmp_path / "missing.jsonl")
+
+
+def test_usage_snapshot_roundtrip_and_session_scoping(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    assert load_usage_snapshot(runs_dir) is None
+    observation = read_codex_session_usage(_fixture_rollout(tmp_path))
+    store_usage_snapshot(runs_dir, observation)
+    snapshot = load_usage_snapshot(runs_dir)
+    assert snapshot is not None
+    assert snapshot["input_tokens"] == 1200
+    assert snapshot["provider"] == "codex"
+    assert snapshot["model"] == MODEL
+    assert previous_snapshot_for_observation(snapshot, observation) is snapshot
+    other_session = dict(observation, session_id="other-session")
+    assert previous_snapshot_for_observation(snapshot, other_session) is None
+
+
+def test_corrupt_usage_snapshot_fails_closed(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    usage_snapshot_path(runs_dir).write_text("{not json", encoding="utf-8")
+    with pytest.raises(CodexSessionUsageError, match="corrupt"):
+        load_usage_snapshot(runs_dir)
+
+
+def _goal_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
+    project = tmp_path / "project"
+    state = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    state.parent.mkdir(parents=True)
+    state.write_text("# Active Goal State\n", encoding="utf-8")
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": str(state.relative_to(project)),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    runtime_root = tmp_path / "runtime"
+    return registry_path, project, runtime_root
+
+
+def _refresh(
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    project: Path,
+    usage_codex_session: Path | None = None,
+    usage_measurement: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return refresh_state_run(
+        registry_path=registry_path,
+        runtime_root_override=str(runtime_root),
+        goal_id=GOAL_ID,
+        project=project,
+        state_file=None,
+        classification="state_refreshed",
+        recommended_action="Observe the usage fixture.",
+        usage_codex_session=usage_codex_session,
+        usage_measurement=usage_measurement,
+        dry_run=False,
+        sync_global=False,
+    )
+
+
+def _index_runs(runtime_root: Path) -> list[dict[str, Any]]:
+    index_path = runtime_root / "goals" / GOAL_ID / "runs" / "index.jsonl"
+    return [
+        json.loads(line)
+        for line in index_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _summary_totals(runtime_root: Path) -> dict[str, Any]:
+    runs = _index_runs(runtime_root)
+    for run in runs:
+        run.setdefault("goal_id", GOAL_ID)
+    summary = build_usage_summary({"runs": runs}, parse_timestamp=parse_timestamp)
+    return summary["totals"]
+
+
+def test_refresh_state_codex_session_produces_non_zero_usage_summary(
+    tmp_path: Path,
+) -> None:
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    rollout = _fixture_rollout(tmp_path)
+
+    payload = _refresh(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        usage_codex_session=rollout,
+    )
+    assert payload["ok"] is True
+    assert payload["usage"]["schema_version"] == "run_usage_v0"
+
+    runs = _index_runs(runtime_root)
+    assert len(runs) == 1
+    usage = runs[0]["usage"]
+    assert usage["input_tokens"] == 1200
+    assert usage["output_tokens"] == 300
+    assert usage["cache_tokens"] == 200
+    assert usage["provider"] == "codex"
+    assert usage["model"] == MODEL
+
+    totals = _summary_totals(runtime_root)
+    assert totals["input_tokens_24h"] == 1200
+    assert totals["output_tokens_24h"] == 300
+    assert totals["cache_tokens_24h"] == 200
+    assert totals["duration_ms_24h"] == 300_000
+
+
+def test_refresh_state_replaying_same_snapshot_does_not_double_count(
+    tmp_path: Path,
+) -> None:
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    rollout = _fixture_rollout(tmp_path)
+
+    for _ in range(2):
+        payload = _refresh(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            project=project,
+            usage_codex_session=rollout,
+        )
+        assert payload["ok"] is True
+
+    runs = _index_runs(runtime_root)
+    assert len(runs) == 2
+    replay_usage = runs[1]["usage"]
+    assert replay_usage["measurement_kind"] == "delta"
+    assert replay_usage["input_tokens"] == 0
+    assert replay_usage["output_tokens"] == 0
+
+    totals = _summary_totals(runtime_root)
+    assert totals["input_tokens_24h"] == 1200
+    assert totals["output_tokens_24h"] == 300
+
+
+def test_refresh_state_books_only_the_cumulative_increment(tmp_path: Path) -> None:
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    rollout = _fixture_rollout(tmp_path)
+    _refresh(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        usage_codex_session=rollout,
+    )
+
+    with rollout.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _rollout_event(
+                "2026-08-26T01:10:00.000Z",
+                input_tokens=2000,
+                cached_input_tokens=350,
+                output_tokens=450,
+            )
+            + "\n"
+        )
+    _refresh(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        usage_codex_session=rollout,
+    )
+
+    runs = _index_runs(runtime_root)
+    increment = runs[1]["usage"]
+    assert increment["measurement_kind"] == "delta"
+    assert increment["input_tokens"] == 800
+    assert increment["output_tokens"] == 150
+    assert increment["cache_tokens"] == 150
+    assert increment["duration_ms"] == 300_000
+
+    totals = _summary_totals(runtime_root)
+    assert totals["input_tokens_24h"] == 2000
+    assert totals["output_tokens_24h"] == 450
+
+
+def test_refresh_state_without_usage_flags_keeps_usage_unknown(
+    tmp_path: Path,
+) -> None:
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    payload = _refresh(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+    )
+    assert payload["ok"] is True
+    assert "usage" not in payload
+    runs = _index_runs(runtime_root)
+    assert "usage" not in runs[0]
+    assert not usage_snapshot_path(
+        runtime_root / "goals" / GOAL_ID / "runs"
+    ).exists()
+
+
+def test_refresh_state_accepts_typed_host_measurement(tmp_path: Path) -> None:
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    payload = _refresh(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        usage_measurement={
+            "input_tokens": 42,
+            "output_tokens": 7,
+            "provider": "fixture-host",
+            "model": "fixture-model",
+            "source_snapshot_id": "host-measured-1",
+        },
+    )
+    assert payload["ok"] is True
+    runs = _index_runs(runtime_root)
+    assert runs[0]["usage"]["input_tokens"] == 42
+    assert runs[0]["usage"]["provider"] == "fixture-host"
+
+
+def test_refresh_state_rejects_combined_usage_inputs(tmp_path: Path) -> None:
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    with pytest.raises(ValueError, match="cannot be combined"):
+        _refresh(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            project=project,
+            usage_codex_session=_fixture_rollout(tmp_path),
+            usage_measurement={"input_tokens": 1, "output_tokens": 1},
+        )
+
+
+def test_refresh_state_fails_closed_on_malformed_rollout_without_appending(
+    tmp_path: Path,
+) -> None:
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    bad_rollout = _write_rollout(
+        tmp_path / "rollout-bad.jsonl", _rollout_header()
+    )
+    with pytest.raises(CodexSessionUsageError, match="no token_count"):
+        _refresh(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            project=project,
+            usage_codex_session=bad_rollout,
+        )
+    index_path = runtime_root / "goals" / GOAL_ID / "runs" / "index.jsonl"
+    assert not index_path.exists()

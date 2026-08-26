@@ -28,6 +28,13 @@ from .control_plane.quota.settlement import (
     resolve_settlement_delivery_workspace_causality,
     settlement_result_payload,
 )
+from .control_plane.quota.codex_session_usage import (
+    load_usage_snapshot,
+    previous_snapshot_for_observation,
+    read_codex_session_usage,
+    store_usage_snapshot,
+)
+from .control_plane.quota.usage_collector import ingest_usage_into_run_record
 from .control_plane.work_items.repair_delta import (
     REPAIR_DELTA_CONTRACT_SCHEMA_VERSION as REPAIR_DELTA_CONTRACT_SCHEMA_VERSION,
     REPAIR_DELTA_KIND_CHOICES as REPAIR_DELTA_KIND_CHOICES,
@@ -864,11 +871,15 @@ def refresh_state_run(
     progress_observation: dict[str, Any] | None = None,
     completion_todo_id: str | None = None,
     completion_turn_key: str | None = None,
+    usage_measurement: dict[str, Any] | None = None,
+    usage_codex_session: Path | None = None,
     dry_run: bool,
     sync_global: bool = True,
 ) -> dict[str, Any]:
     safe_goal_id = validate_goal_id_path_segment(goal_id)
     validate_public_safe_text("classification", classification)
+    if usage_measurement is not None and usage_codex_session is not None:
+        raise ValueError("--usage-json cannot be combined with --usage-codex-session")
     normalized_agent_id = (agent_id or "").strip()
     normalized_agent_lane = (agent_lane or "").strip()
     normalized_replan_obligation_id = normalize_todo_replan_obligation_id(
@@ -1308,6 +1319,30 @@ def refresh_state_run(
         dry_run=dry_run,
         autonomous_replan_recorded_requested=bool(autonomous_replan_recorded),
     )
+    # GH-C95 producer boundary: attach the typed run_usage_v0 row before the
+    # durable record and index rows are written, so malformed or negative usage
+    # fails the whole refresh instead of entering run history.
+    usage_observation: dict[str, Any] | None = None
+    if usage_codex_session is not None:
+        usage_observation = read_codex_session_usage(usage_codex_session)
+        ingest_usage_into_run_record(
+            record,
+            {
+                key: value
+                for key, value in usage_observation.items()
+                if key != "session_id"
+            },
+            previous_snapshot=previous_snapshot_for_observation(
+                load_usage_snapshot(runs_dir), usage_observation
+            ),
+            index_record=index_record,
+        )
+    elif usage_measurement is not None:
+        ingest_usage_into_run_record(
+            record, usage_measurement, index_record=index_record
+        )
+    if isinstance(record.get("usage"), dict):
+        payload["usage"] = dict(record["usage"])
     if dry_run:
         expected_write_scopes = ["runtime_history"]
         if active_state_next_action_update and active_state_next_action_update.get("would_update"):
@@ -1365,6 +1400,10 @@ def refresh_state_run(
         markdown_path.write_text(render_state_refresh_markdown(payload) + "\n", encoding="utf-8")
         with index_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+        if usage_observation is not None:
+            # Persist the accepted cumulative observation as the next delta
+            # basis only after the run row it funded is durably appended.
+            store_usage_snapshot(runs_dir, usage_observation)
     if sync_global and route_status in {"missing", "ambiguous"}:
         payload["ok"] = False
         payload["partial_write"] = not dry_run

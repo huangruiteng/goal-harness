@@ -454,6 +454,27 @@ def register_project_lifecycle_commands(
         ),
     )
     refresh_state_parser.add_argument(
+        "--usage-codex-session",
+        help=(
+            "Path to the local Codex session rollout JSONL that produced this "
+            "run. Only aggregate token_count totals, the model id, and event "
+            "timestamps are read; prompts, completions, and tool output never "
+            "enter run history. The session must be bound explicitly; when the "
+            "rollout is unknown, omit the flag and usage stays unknown. Cannot "
+            "be combined with --usage-json."
+        ),
+    )
+    refresh_state_parser.add_argument(
+        "--usage-json",
+        help=(
+            "Inline JSON object with a provider-neutral per-run usage "
+            "measurement: input_tokens, output_tokens, provider, model, "
+            "source_snapshot_id, plus optional cache_tokens/cost_usd/"
+            "duration_ms. Malformed or negative usage fails the refresh "
+            "closed. Cannot be combined with --usage-codex-session."
+        ),
+    )
+    refresh_state_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the refresh payload without appending.",
@@ -637,6 +658,12 @@ def handle_project_lifecycle_command(
                 agent_vision_packet = inline_agent_vision_packet
                 merge_agent_vision_patch = True
             progress_observation = _inline_progress_observation(args)
+            usage_measurement: dict[str, object] | None = None
+            if getattr(args, "usage_json", None):
+                loaded_usage = json.loads(args.usage_json)
+                if not isinstance(loaded_usage, dict):
+                    raise ValueError("--usage-json must be a JSON object")
+                usage_measurement = loaded_usage
         except Exception as exc:
             payload = {
                 "ok": False,
@@ -684,6 +711,12 @@ def handle_project_lifecycle_command(
                 merge_agent_vision_patch=merge_agent_vision_patch,
                 vision_unchanged_reason=args.vision_unchanged_reason,
                 progress_observation=progress_observation,
+                usage_measurement=usage_measurement,
+                usage_codex_session=(
+                    Path(args.usage_codex_session).expanduser()
+                    if getattr(args, "usage_codex_session", None)
+                    else None
+                ),
                 dry_run=bool(args.dry_run),
                 sync_global=not bool(args.no_global_sync),
             )
