@@ -89,6 +89,7 @@ from .control_plane.todos.completion_validation_accountability import (
 DEFAULT_REFRESH_CLASSIFICATION = "state_refreshed"
 DEFAULT_REFRESH_ACTION = "inspect refreshed active goal state and continue the next bounded progress segment"
 RECOMMENDED_ACTION_SOURCE_EXPLICIT = "explicit_arg"
+RECOMMENDED_ACTION_SOURCE_AGENT_LANE_SELECTED_TODO = "agent_lane_selected_todo"
 RECOMMENDED_ACTION_SOURCE_ACTIVE_NEXT_ACTION = "active_state_next_action"
 RECOMMENDED_ACTION_SOURCE_AGENT_TODO_FALLBACK = "agent_todo_fallback"
 RECOMMENDED_ACTION_SOURCE_DEFAULT = "default_refresh_action"
@@ -332,7 +333,9 @@ def todo_priority_rank(action: str) -> int:
     return int(match.group("rank"))
 
 
-def first_open_agent_todo_action(state_text: str) -> str | None:
+def first_open_agent_todo_action(
+    state_text: str, *, claimed_by: str | None = None
+) -> str | None:
     lines = extract_section_lines(state_text, "Agent Todo", limit=512)
     advancement_candidates: list[tuple[int, int, str]] = []
     fallback_candidates: list[tuple[int, int, str]] = []
@@ -348,6 +351,8 @@ def first_open_agent_todo_action(state_text: str) -> str | None:
         except ValueError:
             continue
         metadata = todo_metadata(lines, index)
+        if claimed_by and metadata.get("claimed_by") != claimed_by:
+            continue
         if metadata.get("task_class") == TODO_TASK_CLASS_ADVANCEMENT:
             advancement_candidates.append((todo_priority_rank(action), index, action))
             continue
@@ -385,7 +390,19 @@ def section_list_items(lines: list[str]) -> list[str]:
     return items
 
 
-def derive_recommended_action_with_source(state_text: str) -> tuple[str, str]:
+def derive_recommended_action_with_source(
+    state_text: str, *, agent_id: str | None = None
+) -> tuple[str, str]:
+    # Agent-scoped refresh: the lane's own selected Todo is authoritative and
+    # must not be shadowed by the shared global Next Action written by a peer
+    # agent lane (issue #3685). The shared section stays a labeled fallback.
+    agent_lane_action = (
+        first_open_agent_todo_action(state_text, claimed_by=agent_id)
+        if agent_id
+        else None
+    )
+    if agent_lane_action:
+        return agent_lane_action, RECOMMENDED_ACTION_SOURCE_AGENT_LANE_SELECTED_TODO
     lines = extract_section_lines(state_text, "Next Action", limit=RECOMMENDED_ACTION_SECTION_LINE_LIMIT)
     for index, line in enumerate(lines):
         action = first_action_item(lines, index)
@@ -1142,7 +1159,9 @@ def refresh_state_run(
         action = recommended_action
         recommended_action_source = RECOMMENDED_ACTION_SOURCE_EXPLICIT
     else:
-        action, recommended_action_source = derive_recommended_action_with_source(state_text)
+        action, recommended_action_source = derive_recommended_action_with_source(
+            state_text, agent_id=normalized_agent_id or None
+        )
     validate_local_control_text("recommended_action", action)
     requested_classification = classification
     replan_qualification = qualify_refresh_replan_writeback(
