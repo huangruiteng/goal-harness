@@ -151,3 +151,15 @@ The capability keeps a deliberately narrow write boundary:
 Without `--refresh-remotes`, fetch or update source refs through the
 repository's normal workflow before running `status` or `sync`. Human review
 and aggregate merge authority remain outside this capability.
+
+## Validate
+
+```bash
+python3 examples/integration-branch-cli-smoke.py
+python3 -m pytest -q tests/capabilities/test_integration_branch.py
+```
+
+The public CLI smoke and focused pytest cover ignored plan state, read-only
+preview, ordered source updates, reviewed-candidate adoption, and local-only
+fail-closed dirty/conflict cases. They do not fetch, push, rewrite source
+branches, or change protected bases.
