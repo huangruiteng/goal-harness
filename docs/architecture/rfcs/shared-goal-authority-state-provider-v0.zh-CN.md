@@ -378,15 +378,65 @@ dependency、gate revision 与 digest。
 自己的 target todo 与命名 precondition 决定是否内部 rebase，而不能仅因另一个独立
 todo 已提交就要求调用方重新发一条 operation。
 
-未知 command type fail closed。`renew_lease`、`release_lease`、过期 lease reclaim、
-stale-fence writeback 校验、`complete_todo_with_successor`、transfer 或 delegated
-assignment、任意 todo/gate mutation、quota reservation 与 external effect，都需要
-后续 runtime 合同与 qualification。Production shared mode 前必须完成 renew/release/
-reclaim 与 stale-fence 校验；此处省略是 scope control，不代表 claim-only runtime 已
-完整。非空 write scope 与跨 todo scope-overlap 拒绝同样需要后续 command contract
-与 qualification。只有 source completion、successor creation/assignment、evidence
-pointer 与 receipt 能 atomic commit 时，completion 加 successor creation 才可进入
-后续切片。
+未知 command type fail closed。transfer 或 delegated assignment、任意 todo/gate
+mutation、quota reservation 与 external effect 仍需要后续 runtime 合同与
+qualification；非空 write scope 与跨 todo scope-overlap 拒绝同样需要后续 command
+contract 与 qualification。下面的可恢复执行动词是 Stage 3 切片；第 5 节的步骤
+1-4 与 7-10（identity、digest、replay、CAS、reload、rebase、budget）对每个动词
+原样适用，只有每动词的前置条件与迁移（步骤 5-6）不同。
+
+### 5.2 `renew_work`
+
+必填字段：`todo_id`、`expected_todo_revision`、`lease_id`、
+`expected_lease_epoch`、`lease_ttl_seconds`。调用方出示自认持有的栅栏；缺席
+lease、lease id 或 epoch 不符（typed `stale_lease_fence`）、调用方不是记录的
+持有者（typed `not_lease_holder`）、以及 authority 自己的时钟已判过期的 lease
+（typed `lease_not_active`，见 6.4）均被拒绝。被接受的续约用 authority 时钟延展
+`expires_at`，lease id 与 epoch 不变，并同时推进 `authority_revision` 与目标
+`todo_revision`：有效期是被 revision 覆盖的事实，携带续约前观测的 reclaim 会
+冲突，而不是搭内部 rebase 穿过去。
+
+### 5.3 `release_work`
+
+必填字段：`todo_id`、`expected_todo_revision`、`lease_id`、
+`expected_lease_epoch`。release 是持有者提前放弃，因此只在 lease 仍活跃时有效：
+在真实 holder gate 下清除 claim，并在同一迁移里退租。被接受的迁移清空
+`claimed_by`、删除 lease 条目并推进两个 revision，而 todo 的 `last_lease_epoch`
+水位保持不变——在共享聚合里水位就是终结记录，下一次 claim 必须严格高于它铸造，
+release 因此不可能 A/B/A。过期的 lease 不可 release，它的归宿是 reclaim。
+
+### 5.4 `reclaim_work`
+
+必填字段：`todo_id`、`expected_todo_revision`、`expected_preconditions`、
+`lease_ttl_seconds`。reclaim 是对合格 agent 的常设委托：当 authority 自己的时钟
+看到记录的 lease 已过期至少一个 reclaim 宽限窗（见 6.4），目标
+`allowed_agent_ids` 里的任何 agent 都可接管。authority 裁决过期并合成委托；核心
+随后经由最小特权步骤执行其余全部规则——在委托下清除陈旧 claim，然后走与首次
+claim 完全相同的组合，新 lease 因此通过同一个真实 holder gate。被接受的迁移铸造
+下一个 lease epoch、把接管者设为 claimant、推进两个 revision 与水位，receipt 记录
+被替代的 owner 与 epoch。仍在有效期或宽限窗内的 lease 是 typed
+`lease_not_reclaimable`；无人认领的 todo 是 typed `todo_not_claimed`（请用
+`claim_work`）。
+
+### 5.5 `complete_work`
+
+必填字段：`todo_id`、`expected_todo_revision`、`lease_id`、
+`expected_lease_epoch`、`no_followup`、`successor_todo_ids`、`evidence`。完成
+要求活跃的 lease 栅栏：核心的 terminal gate 校验调用方是 claimant 且持有出示的
+栅栏，过期或被替代的栅栏与其他陈旧写入一样 typed 拒绝。一次被接受的迁移同时落
+账所有事实：todo 变为持久 `done` 并携带显式 `completion_continuation`（由记录
+字段导出：`no_followup` | `successor` | `active_goal`，两者同置与本地写入一样被
+拒）、lease 退役、声明的 successor 以 open、无人认领、revision 0 的形态继承父
+项执行上下文被创建，可选的 evidence pointer（§1.1 的 opaque `pointer`、
+`digest`、`privacy_class`，绝不是 body）落在完成记录上。持久记录逐字段满足本地
+durable-completion 投影 seam，两个世界读同一份真相。
+
+### 5.6 stale-fence 规则
+
+每个携带栅栏的动词出示 `(lease_id, expected_lease_epoch)`。与记录的 lease 不符
+的栅栏是终态 typed 拒绝——`stale_lease_fence`——并且绝不被内部 rebase 重试穿越：
+无论多少无关命令推进聚合，被替代执行者的写入始终被拒。这一条加上每次接管都铸
+新 epoch，就是 Stage 3 horizon 证明"被替代的执行者无法写回"的机制。
 
 ## 6. 谁做判断，谁负责保存
 
@@ -452,6 +502,30 @@ LoopX authority revision。
 对 NoKV 而言，它的 document generation 只实现 `provider_generation`。LoopX
 authority 继续负责另外两个版本域与 document 内的 receipt。
 
+### 6.4 过期裁决与绑定围栏
+
+墙钟事实只有一个裁判：正在应用命令的 authority，用它自己的时钟对照已 load head
+的 `expires_at`。调用方对时间的看法只是请求动机，绝不是证据；核心保持无时钟，
+只接收裁决后的 active/expired 结论。renew、release、complete 要求裁决时 lease
+活跃。reclaim 额外要求 lease 已过期至少一个可配置的宽限窗，其下限是部署内端点
+间的最大预期时钟偏差；生效的宽限值是 executor 声明的参数，而正确性从不依赖
+它——即使自认还活着的持有者也会被 reclaim 铸出的 epoch 栅栏挡住，偏差只可能推迟
+接管，绝不可能弄脏接管。又因续约推进 `todo_revision`（5.2 节），有效期同样被
+revision 覆盖，reclaim 借并发续约的 rebase 穿越通道被双重关死。
+
+store-lineage 绑定围栏关闭 Stage 2 状态中量化过的 restore 隐患：仅靠
+`provider_generation` 无法承载生命周期身份。provider 合同新增一个只读动词
+`store_identity() -> str`，返回该存储血统的稳定身份：NoKV adapter 绑定
+`workbench` 加服务端为每个 workbench 化身铸造、永不复用的
+`workspace_incarnation_id`；file provider 为每个目录以独占创建铸一个身份文件。
+`bootstrap` 把身份嵌进 head（`store_binding`），authority 在 loaded head 的绑定
+与 provider 身份不符时拒绝一切命令——typed `store_lineage_mismatch`——并在每次
+reload 后复查。restore 因此保存冻结字节与血统而不授予在场权威，正如 Stage 1
+边界所要求；晋升恢复态需要显式、经评审的 re-bootstrap 铸造新绑定。已知残余：
+file 存储目录的逐字节拷贝会连身份文件一起拷走，故 file provider 的围栏只在拷贝
+排除身份文件时才检测得到迁移；NoKV 的化身身份没有这个缺口，是共享部署的权威
+围栏。
+
 ## 7. 回执先全部保留，压缩以后再谈
 
 v0 使用 `retain_all_v0`：任何已提交 receipt-index entry 都不得 GC、过期或从
@@ -465,6 +539,34 @@ history，也不得从当前 head 重建 receipt。
 有界 retention window、receipt segmentation 或 external receipt ledger 都需要后续
 RFC：它必须保持 atomic proof，并定义窗口之外的行为。在此之前，compaction 可以
 重写字节，但必须携带完整 receipt index。
+
+### 7.1 拟议修正：封存回执段（owner 决策，Q5）
+
+单 CAS 文档里的 `retain_all_v0` 撑不到多 agent canary：Stage 2 实测每 receipt
+约 750 字节、120 个 receipt 内 claim 延迟涨约 7 倍、累计重发布平方增长。Stage 3
+又新增四个写 receipt 的动词，增长率只会更差。上文那句已明确要求 receipt 离开单
+文档前必须有经评审的修正案；本小节就是该修正案，附证据提出，**尚未生效**。
+
+设计（在 live NoKV 栈上与两个替代方案各跑 150 笔迁移对比）：head 保留一个有界
+receipt 窗口；窗口写满时，authority 把它封存为兄弟路径
+（`goals/<goal>/receipts/segment-<seq>.json`）上的不可变回执段对象，经 artifact
+路径 create-only 发布，**先于**将封存回执从 head 删除并把 `{path, sha256,
+count}` 追加进段链的那次 CAS——即 §1.1 的 artifact-first 次序，head 绝不引用未
+持久发布的字节。每条已提交 receipt 保持可验证：replay 先查窗口、再解引用段链；
+段缺失或摘要不符是 provider-protocol violation 并 fail closed，即 §7 fail-closed
+规则的段级形态。NoKV 的发布语义让封存免费获得 exactly-once：`operation_id` 与
+`artifact_revision_id` 是 root 级唯一并带不可变输入重放，段发布与 head CAS 之间
+崩溃后的重试是幂等重放（已 live 验证）——但两个 id **必须**由 workbench、path、
+内容共同导出，否则第二条血统复用同一推导会被判 id 重用而拒绝。
+
+实测裁决（debug 栈，相对数字）：封存段让 head 缩小 19 倍（150 receipt 时 5.8
+KiB 对 112 KiB）、累计发布字节少 7.5 倍、每笔延迟保持平坦而 retain_all 持续增
+长，代价是 +3% provider 往返；恢复已封存回执约 160 ms 对 in-head 约 43 ms。
+receipt-per-object 替代方案被全面支配：每笔迁移多付一次对象发布（全程约 2 倍
+延迟），head 还要经指针索引线性增长。窗口大小是部署参数；实测值为 16。
+
+在 owner 接受本修正案（§12 Q5）之前，`retain_all_v0` 继续生效，Stage 3 动词原样
+运行其上。
 
 ## 8. 默认本地模式不变，共享模式必须显式迁移
 
@@ -670,6 +772,40 @@ Stage 3 必须尊重而非重新发现的实测边界：
   有界重试是安全的；v0 是否采纳该活性修正是 owner 决策，在此记录而非静默
   实现。
 
+#### Stage 3 切片状态（2026-08-26）
+
+可恢复执行 horizon 行已以增量方式存在于本分支：§5.2-5.5 的四个动词与 5.6 的
+stale-fence 规则、6.4 的过期裁决与 store-lineage 绑定围栏、按动词的 receipt
+schema、head 编解码的条件完成校验（status 词表钉为 open|done，此前未校验）、
+以及拒绝"正确栅栏落错人手"的 holder gate。所有领域决策仍委托 Stage 1 core；
+reclaim 组合经对真实 core 的三方案 battery 选出（朴素 acquire-first 组合死于
+owner_conflicts_with_claim；胜出形态先做最小特权的委托 unclaim、再走普通 claim
+组合，新 lease 因此通过真实 holder gate）。
+
+Live 资格验证（单节点 NoKV dev 栈，0.11.0 release wheel）：十二个共享场景行在
+file 与 NoKV provider 上逐行一致，含 renew、带宽限窗的 reclaim（记录被替代
+owner）、被替代执行者写入被终态栅栏、以及 completion 原子创建可认领
+successor；一个 NoKV 专属行对**真实** commit/snapshot/restore 证明绑定围栏——
+恢复出的 workbench 以 store_lineage_mismatch 拒绝一切命令，原 workbench 照常服
+务。对 serving owner 的 SIGKILL 于生命周期中段注入后约 61 秒恢复（60 秒会话租
+约排空）：head 字节级一致、续约 receipt 经全新 executor 精确重放、崩溃后的
+reclaim/栅栏/completion 链在重开的存储上走完。时钟边界测试逐边钉住宽限窗。
+
+实测门禁更新：
+
+- 并发包络（较 Stage 2 数字增长）：本栈上 K 个独立 claim 到 K=8 全部成功
+  （K=2/4/8 的 p50 为 2.8 / 10.2 / 50.7 秒）；K=16 放行 8 个，其余在 8 次尝试
+  预算上 typed 失败，尾延迟约 150 秒。canary 的受支持包络声明为 K<=8 加上实测
+  延迟曲线。
+- 留存：§7.1 的封存段修正案已附 live 对比证据提出（head 缩小 19 倍、重发布少
+  7.5 倍、延迟平坦、+3% 往返、已封存回执恢复约 160 ms）；切片本身在 owner 决
+  定 Q5 之前运行于 retain_all_v0。
+- 独立复跑暴露两个 NoKV 存储面缺陷，均如实上报而非静默绕过：(a) 重开抖动可把
+  logical-shard recovery publication 楔死在死租约的 epoch 上，此后所有接管尝试
+  恒以 "stale lease" 被拒，需运维介入；(b) SIGKILL 落在元数据写窗口内可损坏存
+  储 manifest（FileBlobStore duplicate slot），重开永不成功——两种情况下上层协
+  调语义保持正确（无假权威），但可用性在任何生产 canary 前依赖这两处修复。
+
 ### P0：合同与 deterministic proof
 
 - 本 ownership matrix 与显式 shared-mode boundary；
@@ -700,7 +836,10 @@ Stage 3 必须尊重而非重新发现的实测边界：
 ## 12. 还需要 Owner 决定什么
 
 1. 下一个 runtime slice 是否先闭合 renew/release/reclaim 与 stale fencing，还是与
-   atomic complete-with-successor 一起 qualification？
+   atomic complete-with-successor 一起 qualification？*拟议答案（Stage 3 切片）：
+   一起交付、内部有序——lifecycle 动词先落进命令面，completion 原样复用其栅栏机
+   制；完成记录必须满足本地 durable-completion 投影 seam，而后者在本地侧已是经
+   评审的合同。*
 2. 哪些紧凑的 project-registry authorization field 构成 versioned authority input，
    谁可以发布新的 authorization projection？
 3. 第一次 shared-mode write 后，reviewed rollback/export procedure 是什么？

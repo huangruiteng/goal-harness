@@ -440,17 +440,86 @@ serially through `provider_generation`. A CAS loser decides whether to rebase
 from its target todo and named preconditions, rather than requiring a caller to
 mint a new operation merely because an independent todo committed first.
 
-Unknown command types fail closed. `renew_lease`, `release_lease`, expired-lease
-reclaim, stale-fence writeback validation, `complete_todo_with_successor`,
-transfer or delegated assignment, arbitrary todo/gate mutation, quota
-reservation, and external effects require later runtime contracts and
-qualification. Renew/release/reclaim and stale-fence validation are required
-before production shared-mode operation; their omission here is scope control,
-not a claim that a claim-only runtime is complete. Non-empty write scopes and
-cross-todo scope-overlap rejection likewise require a later command contract and
-qualification. Completion plus successor
-creation may join a later slice only when source completion, successor
-creation/assignment, evidence pointer, and receipt commit atomically.
+Unknown command types fail closed. Transfer or delegated assignment,
+arbitrary todo/gate mutation, quota reservation, and external effects still
+require later runtime contracts and qualification. Non-empty write scopes and
+cross-todo scope-overlap rejection likewise require a later command contract
+and qualification. The recoverable-execution verbs below are the Stage 3
+slice; steps 1 through 4 and 7 through 10 of Section 5 (identity, digest,
+replay, CAS, reload, rebase, budget) apply to every verb unchanged, and only
+the per-verb preconditions and transition (steps 5 and 6) differ.
+
+### 5.2 `renew_work`
+
+Required fields: `todo_id`, `expected_todo_revision`, `lease_id`,
+`expected_lease_epoch`, `lease_ttl_seconds`. The caller presents the fence it
+believes it holds; the authority rejects a missing lease, a fence whose
+lease id or epoch differs (typed `stale_lease_fence`), a caller that is not
+the recorded holder (typed `not_lease_holder`), and a lease the authority's
+own clock has already seen expire (typed `lease_not_active`; see Section
+6.4). An accepted renewal extends `expires_at` from the authority clock,
+keeps the lease id and epoch unchanged, and advances both
+`authority_revision` and the target `todo_revision`: the validity interval
+is a revision-covered fact, so a reclaim built on pre-renewal observations
+conflicts instead of surviving the internal rebase.
+
+### 5.3 `release_work`
+
+Required fields: `todo_id`, `expected_todo_revision`, `lease_id`,
+`expected_lease_epoch`. Release is the holder giving up early, so it is
+valid only while the lease is still active: the claim is cleared under the
+live holder gate and the lease is released in the same transition. The
+accepted transition clears `claimed_by`, deletes the lease entry, and
+advances both revisions, while the todo's `last_lease_epoch` watermark is
+retained unchanged - in the shared aggregate the watermark IS the terminal
+record, so the next claim mints strictly above it and release can never
+A/B/A. An expired lease is not releasable; its resolution belongs to
+reclaim.
+
+### 5.4 `reclaim_work`
+
+Required fields: `todo_id`, `expected_todo_revision`,
+`expected_preconditions`, `lease_ttl_seconds`. Reclaim is a standing
+delegation to eligible agents: when the authority's own clock has seen the
+recorded lease expired for at least the reclaim grace window (Section 6.4),
+any agent in the target's `allowed_agent_ids` may take the work over. The
+authority adjudicates expiry and synthesizes the delegation; the core then
+enforces everything else through the minimal privileged step - clear the
+stale claim under the delegation, then run the ordinary claim composition,
+so the new lease passes the same holder gate as any first claim. The
+accepted transition mints the next lease epoch, sets the reclaiming agent
+as claimant, advances both revisions and the watermark, and the receipt
+records the superseded owner and epoch. A lease inside its validity or
+grace window is typed `lease_not_reclaimable`; an unclaimed todo is typed
+`todo_not_claimed` (use `claim_work`).
+
+### 5.5 `complete_work`
+
+Required fields: `todo_id`, `expected_todo_revision`, `lease_id`,
+`expected_lease_epoch`, `no_followup`, `successor_todo_ids`, `evidence`.
+Completion requires the active lease fence: the core's terminal gate
+verifies the caller is the claimant and the holder of the presented fence,
+and an expired or superseded fence is typed exactly like every other
+stale write. One accepted transition records everything at once: the todo
+becomes durably `done` with an explicit `completion_continuation` derived
+from the recorded fields (`no_followup` | `successor` | `active_goal`,
+with both-set combinations refused exactly like the local write), the
+lease retires, declared successors are created as open, unclaimed,
+revision-zero todos inheriting the parent's execution context, and the
+optional evidence pointer - an opaque `pointer`, `digest`, and
+`privacy_class` per Section 1.1, never a body - lands on the completed
+record. The persisted record satisfies the local durable-completion
+projection seam field for field, so both worlds read one truth.
+
+### 5.6 The stale-fence rule
+
+Every fence-carrying verb presents `(lease_id, expected_lease_epoch)`. A
+presented fence that does not match the recorded lease is a terminal typed
+rejection - `stale_lease_fence` - and is never retried past by the internal
+rebase: a superseded executor's writes stay rejected no matter how many
+unrelated commands advance the aggregate. This, plus epoch minting on every
+takeover, is the mechanism behind the Stage 3 horizon proof that a
+superseded executor cannot write back.
 
 ## 6. Who Decides and Who Stores
 
@@ -521,6 +590,42 @@ For NoKV, its document generation implements `provider_generation` only. The
 LoopX authority remains responsible for the other two domains and for the
 receipt stored inside the document.
 
+### 6.4 Expiry adjudication and the binding fence
+
+Wall-clock facts have exactly one judge: the authority that is applying a
+command, reading the loaded head's `expires_at` against its own clock. A
+caller's opinion of time is request motivation, never evidence; the core
+stays clockless and receives only the adjudicated active/expired verdict.
+Renewal, release, and completion require the lease to be active at
+adjudication time. Reclaim additionally requires the lease to have been
+expired for at least a configurable grace window whose lower bound is the
+maximum expected clock skew between endpoints in the deployment; the grace
+in force is the executor's declared parameter, and correctness never
+depends on it - even a holder that believes itself alive is fenced by the
+epoch the reclaim minted, so skew can only delay a takeover, never corrupt
+one. Because renewal advances `todo_revision` (Section 5.2), the validity
+interval is also revision-covered, closing the rebase path a reclaim could
+otherwise ride across a concurrent renewal.
+
+The store-lineage binding fence closes the restore hazard measured in the
+Stage 2 status: `provider_generation` alone cannot carry lifecycle
+identity. The provider contract gains one read-only verb,
+`store_identity() -> str`, returning a stable identity for the store
+lineage: the NoKV adapter binds `workbench` plus the never-reused
+`workspace_incarnation_id` the service mints per workbench incarnation; the
+file provider mints an exclusive-create identity file per directory.
+`bootstrap` embeds the identity in the head (`store_binding`), and the
+authority refuses every command - typed `store_lineage_mismatch` - whenever
+the loaded head's binding differs from the provider's identity, re-checking
+after every reload. A restore therefore preserves frozen bytes and lineage
+without granting live authority, exactly as the Stage 1 boundary requires;
+promoting restored state needs an explicit, reviewed re-bootstrap that
+mints a new binding. Known residual: a byte-for-byte copy of a file-backed
+store directory copies the identity file with it, so the file provider's
+fence detects relocation only when the identity file is excluded from the
+copy; the NoKV incarnation identity has no such gap and is the
+authoritative fence for shared deployments.
+
 ## 7. Keep Every Receipt First; Compact Later
 
 v0 uses `retain_all_v0`: no committed receipt-index entry may be garbage
@@ -536,6 +641,46 @@ A bounded retention window, receipt segmentation, or external receipt ledger
 requires a later RFC that preserves atomic proof and defines behavior outside
 the window. Until then, compaction may rewrite bytes but must carry the complete
 receipt index forward.
+
+### 7.1 Proposed amendment: sealed receipt segments (owner decision, Q5)
+
+`retain_all_v0` in one CAS document cannot reach a multi-agent canary: the
+Stage 2 measurements showed ~750 bytes per receipt, a ~7x claim-latency
+growth across 120 receipts, and quadratic cumulative republish. Stage 3
+adds four more receipt-writing verbs, so the growth rate only worsens. The
+sentence above deliberately requires a reviewed amendment before receipts
+may leave the single document; this subsection is that amendment, proposed
+with evidence and NOT yet in force.
+
+Design (measured against two alternatives on a live NoKV stack, 150
+transitions each): the head keeps a bounded receipt window; when the window
+fills, the authority seals it into an immutable receipt-segment object at a
+sibling path (`goals/<goal>/receipts/segment-<seq>.json`), published
+create-only through the artifact path BEFORE the CAS that drops the sealed
+receipts from the head and appends `{path, sha256, count}` to a segment
+chain - the artifact-first order of Section 1.1, so the head never
+references bytes that were not durably published. Every committed receipt
+stays verifiable: replay looks in the window first, then dereferences the
+chain; a missing or digest-mismatched segment is a provider-protocol
+violation and fails closed, the segment-level form of the Section 7
+fail-closed rule. NoKV's publication semantics make sealing exactly-once
+for free: `operation_id` and `artifact_revision_id` are root-scoped-unique
+with immutable-input replay, so a seal retried after a crash between the
+segment publish and the head CAS replays idempotently (verified live) -
+but both ids MUST derive from workbench, path, and content, or a second
+lineage reusing the same derivation is rejected as id reuse.
+
+Measured verdict (debug stack, relative numbers): sealed segments keep the
+head 19x smaller (5.8 KiB vs 112 KiB at 150 receipts), publish 7.5x fewer
+cumulative bytes, and hold per-transition latency flat where retain_all
+grows, for +3% provider round trips; recovering an already-sealed receipt
+costs ~160 ms versus ~43 ms in-head. The receipt-per-object alternative is
+dominated: it pays an extra object publish on every transition (about 2x
+latency throughout) and still grows the head linearly through its pointer
+index. Window size is a deployment parameter; 16 was measured.
+
+Until the owner accepts this amendment (Section 12 Q5), `retain_all_v0`
+remains in force and the Stage 3 verbs ship on it unchanged.
 
 ## 8. Local Mode Stays the Default; Shared Mode Is an Explicit Migration
 
@@ -788,6 +933,55 @@ Measured boundaries Stage 3 must respect rather than rediscover:
   would be safe; whether v0 adopts that liveness amendment is an owner
   decision recorded here, not silently implemented.
 
+#### Stage 3 slice status (2026-08-26)
+
+The recoverable-execution horizon row exists on this branch, additively:
+the four verbs of Sections 5.2-5.5 with the stale-fence rule of 5.6, the
+expiry adjudication and store-lineage binding fence of 6.4, per-verb
+receipt schemas, conditional completion validation in the head codec
+(status vocabulary pinned to open|done, previously unvalidated), and the
+holder gate that refuses a correct fence in the wrong hands. Every domain
+decision remains delegated to the Stage 1 core; the reclaim composition
+was selected by a three-way battery against the real core (the naive
+acquire-first composition dies on owner_conflicts_with_claim; the chosen
+form does the minimal delegated unclaim and then the ordinary claim
+composition, so the new lease passes the true holder gate).
+
+Live qualification (single-node NoKV dev stack, 0.11.0 release wheel):
+twelve shared scenario rows identical across the file and NoKV providers,
+including renew, grace-window reclaim with the superseded owner recorded,
+the superseded executor's writes terminally fenced, and completion
+creating a claimable successor atomically; one NoKV-specific row proves
+the binding fence against a REAL commit/snapshot/restore - the restored
+workbench refuses every command with store_lineage_mismatch while the
+original keeps serving. A SIGKILL of the serving owner mid-lifecycle
+recovered in ~61 s (60 s session lease drain): the head byte-identical,
+the renewal receipt replayed exactly through a fresh executor, and the
+post-crash reclaim/fence/completion chain completed on the reopened
+store. Clock-boundary tests pin the grace window edge for edge.
+
+Measured gates, updated:
+
+- Concurrency envelope (grown from the Stage 2 numbers): K independent
+  claims all succeed through K=8 on this stack (p50 2.8 s / 10.2 s /
+  50.7 s at K=2/4/8); K=16 admits 8 and fails the rest typed on the
+  8-attempt budget with ~150 s tails. The supported envelope declaration
+  for a canary is K<=8 with the measured latency curve.
+- Retention: the Section 7.1 sealed-segment amendment is proposed with
+  live comparative evidence (19x smaller head, 7.5x less republish, flat
+  latency, +3% round trips, ~160 ms sealed-receipt recovery); the slice
+  itself ships on retain_all_v0 until the owner decides Q5.
+- Two NoKV storage-plane defects surfaced by the independent reruns and
+  are reported upstream rather than worked around silently: (a) reopen
+  thrash can wedge logical-shard recovery publication at a dead lease's
+  epoch, leaving every later takeover attempt rejected with "stale
+  lease" until operator intervention; (b) a SIGKILL landing inside the
+  metadata write window can corrupt the store manifest
+  (FileBlobStore duplicate slot) so no reopen ever succeeds - the
+  coordination layer above stays correct in both cases (no false
+  authority), but availability depends on these fixes before any
+  production canary.
+
 ### P0: contract and deterministic proof
 
 - this ownership matrix and explicit shared-mode boundary;
@@ -820,7 +1014,11 @@ Measured boundaries Stage 3 must respect rather than rediscover:
 
 1. Should the next runtime slice first close renew/release/reclaim and stale
    fencing, or qualify that lifecycle together with atomic
-   complete-with-successor?
+   complete-with-successor? *Proposed answer (Stage 3 slice): together,
+   sequenced internally - the lifecycle verbs land first in the command
+   surface and completion reuses their fence machinery unchanged; the
+   completed record must satisfy the local durable-completion projection
+   seam, which is already the reviewed contract on the local side.*
 2. Which compact project-registry authorization fields form the versioned
    authority input, and who may publish a new authorization projection?
 3. What is the reviewed rollback/export procedure after the first shared-mode
