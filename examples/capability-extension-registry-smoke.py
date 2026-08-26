@@ -76,7 +76,6 @@ next_real_step = "Keep explicit enablement bounded."
         "content-ops",
         "value-connectors",
         "explore",
-        "auto-research",
         "deep-research",
         "public-safe-outbound",
         "connector-registry",

@@ -8,8 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "loopx" / "cli.py"
-MODULE = ROOT / "loopx" / "cli_commands" / "multi_agent.py"
-INIT = ROOT / "loopx" / "cli_commands" / "__init__.py"
+MODULE = ROOT / "demo" / "multi_agent_cli.py"
 
 
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
@@ -39,16 +38,17 @@ def require_success(result: subprocess.CompletedProcess[str]) -> str:
 def main() -> None:
     cli_source = CLI.read_text(encoding="utf-8")
     module_source = MODULE.read_text(encoding="utf-8")
-    init_source = INIT.read_text(encoding="utf-8")
 
     require("multi_agent.py" not in cli_source, "cli.py should not embed multi-agent module details")
     require(
-        "register_multi_agent_commands(sub, add_subcommand_format)" in cli_source,
-        "cli.py did not register multi-agent commands",
+        '("multi-agent", "demo.multi_agent_cli", "register_multi_agent_commands")'
+        in cli_source,
+        "cli.py did not register the source-checkout multi-agent demo",
     )
-    require("handle_multi_agent_command(" in cli_source, "cli.py did not dispatch multi-agent commands")
-    require("register_multi_agent_commands" in init_source, "__init__ omitted multi-agent registration")
-    require("handle_multi_agent_command" in init_source, "__init__ omitted multi-agent handler")
+    require(
+        "from demo.multi_agent_cli import handle_multi_agent_command" in cli_source,
+        "cli.py did not dispatch the source-checkout multi-agent demo",
+    )
 
     for marker in (
         "register_multi_agent_commands",
