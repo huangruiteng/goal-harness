@@ -21,6 +21,10 @@ from loopx.control_plane.turn_driver.transaction import (
     TRANSACTION_PHASES,
     build_loopx_turn_transaction_plan,
 )
+from loopx.control_plane.work_items import task_lease_settlement
+from loopx.control_plane.work_items.task_lease_settlement import (
+    execute_task_lease_settlement,
+)
 
 EXPECTED_TRANSACTION_PHASES = (
     "host_execute",
@@ -320,10 +324,6 @@ def test_failure_short_circuits_every_later_effect(
 
 # ── Task-lease fault/replay scenarios ──────────────────────────────────
 
-from loopx.control_plane.work_items.task_lease_settlement import (  # noqa: E402
-    execute_task_lease_settlement,
-)
-
 TASK_LEASE_FAULT_GOAL = "task-lease-fault-goal"
 TASK_LEASE_FAULT_AGENT = "task-lease-fault-agent"
 TASK_LEASE_FAULT_TODO = "todo_lease_fault"
@@ -386,14 +386,6 @@ def test_task_lease_acquire_idempotent_replay(
 
     with (
         patch(
-            "loopx.control_plane.work_items.task_lease_settlement.require_task_lease_owner_allowed",
-            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
-        ),
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
-            return_value=[],
-        ),
-        patch(
             "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
             return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
         ),
@@ -419,6 +411,60 @@ def test_task_lease_acquire_idempotent_replay(
     assert "idempotent" in second_statuses
 
 
+def test_task_lease_retries_after_provider_commit_before_final_reduction(
+    tmp_path: Path,
+) -> None:
+    """A lost final reduction replays through the provider's same-key fence."""
+
+    registry_path = tmp_path / "registry.json"
+    _write_task_lease_fault_registry(registry_path)
+    runtime_root = tmp_path / "runtime"
+    real_reduce = task_lease_settlement._reduce_task_lease_acquire
+    dropped = False
+
+    def drop_first_final(params: Mapping[str, Any]) -> dict[str, Any]:
+        nonlocal dropped
+        result = real_reduce(params)
+        if params.get("phase") == "finalize" and not dropped:
+            dropped = True
+            raise RuntimeError("simulated response loss after provider commit")
+        return result
+
+    common = {
+        "registry_path": registry_path,
+        "runtime_root": runtime_root,
+        "goal_id": TASK_LEASE_FAULT_GOAL,
+        "owner": TASK_LEASE_FAULT_AGENT,
+        "todo_id": TASK_LEASE_FAULT_TODO,
+        "idempotency_key": TASK_LEASE_FAULT_KEY,
+        "write_scopes": ["docs/**"],
+        "ttl_seconds": 600,
+    }
+    with (
+        patch(
+            "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
+            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.active_conflicts",
+            return_value=[],
+        ),
+        patch.object(
+            task_lease_settlement,
+            "_reduce_task_lease_acquire",
+            side_effect=drop_first_final,
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="simulated response loss"):
+            execute_task_lease_settlement(**common)
+        replay = execute_task_lease_settlement(**common)
+
+    assert replay.failure is None
+    assert replay.value is not None
+    assert {receipt.status for receipt in replay.receipts} == {"idempotent"}
+    assert len({receipt.effect_id for receipt in replay.receipts}) == 1
+
+
 def test_task_lease_validation_fails_before_acquire(
     tmp_path: Path,
 ) -> None:
@@ -428,14 +474,6 @@ def test_task_lease_validation_fails_before_acquire(
     runtime_root = tmp_path / "runtime"
 
     with (
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.require_task_lease_owner_allowed",
-            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
-        ),
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
-            return_value=[],
-        ),
         patch(
             "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
             return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
@@ -472,14 +510,6 @@ def test_task_lease_acquire_failure_short_circuits(
     runtime_root = tmp_path / "runtime"
 
     with (
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.require_task_lease_owner_allowed",
-            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
-        ),
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
-            return_value=[],
-        ),
         patch(
             "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
             return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
@@ -534,14 +564,6 @@ def test_task_lease_same_key_different_params_rejected(
 
     with (
         patch(
-            "loopx.control_plane.work_items.task_lease_settlement.require_task_lease_owner_allowed",
-            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
-        ),
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
-            return_value=[],
-        ),
-        patch(
             "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
             return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
         ),
@@ -592,14 +614,6 @@ def test_task_lease_effect_id_consistency(
     runtime_root = tmp_path / "runtime"
 
     with (
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.require_task_lease_owner_allowed",
-            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
-        ),
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
-            return_value=[],
-        ),
         patch(
             "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
             return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},

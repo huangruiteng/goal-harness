@@ -80,6 +80,7 @@ import {
   projectReplanSettlementContract,
   projectTodoLifecycleSettlementReentry,
 } from "./work_items/replan_settlement.ts";
+import { reduceTaskLeaseAcquire } from "./work_items/task_lease_settlement.ts";
 import {
   projectQuotaActionPortfolio,
   qualifyActionSelection,
@@ -451,6 +452,7 @@ export function createEffectRuntimeHandlers(
       ),
     ],
     ["turn.settlement.reduce", reduceTurnSettlementTransaction],
+    ["task_lease.acquire.reduce", reduceTaskLeaseAcquire],
     ["work_item.replan_settlement.project", projectReplanSettlementContract],
     [
       "work_item.replan_settlement.reentry",

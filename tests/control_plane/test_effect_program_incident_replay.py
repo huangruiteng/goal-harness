@@ -245,14 +245,6 @@ def _replay_task_lease(
 
     with (
         patch(
-            "loopx.control_plane.work_items.task_lease_settlement.require_task_lease_owner_allowed",
-            return_value={"status": "open", "claimed_by": AGENT_ID},
-        ),
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
-            return_value=[],
-        ),
-        patch(
             "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
             return_value={"status": "open", "claimed_by": AGENT_ID},
         ),

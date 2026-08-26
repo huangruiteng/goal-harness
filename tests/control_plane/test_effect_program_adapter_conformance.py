@@ -14,6 +14,7 @@ from loopx.control_plane.effect_program import (
     SettlementResult,
     SettlementStepKind,
 )
+from loopx.control_plane.effect_runtime import effect_runtime_result
 from loopx.control_plane.quota.settlement import (
     build_codex_app_settlement_plan,
     require_settlement_spend,
@@ -30,9 +31,8 @@ from loopx.control_plane.turn_driver.transaction import (
     build_loopx_turn_transaction_plan,
 )
 from loopx.control_plane.work_items.task_lease_settlement import (
-    build_task_lease_settlement_plan,
-    commit_task_lease_acquire,
-    resolve_task_lease_validation,
+    TASK_LEASE_ACQUIRE_TRANSACTION_SCHEMA_VERSION,
+    execute_task_lease_settlement,
 )
 from loopx.rollout_event_log import rollout_event_log_path
 
@@ -316,63 +316,31 @@ def _run_task_lease_adapter(runtime_root: Path, scenario: str) -> AdapterObserva
         else TASK_LEASE_IDEMPOTENCY_KEY
     )
 
-    # Build the plan with a valid idempotency key so construction does not crash.
-    # The invalid idempotency key is only injected at settlement execution time.
-    plan = build_task_lease_settlement_plan(
-        goal_id=TASK_LEASE_GOAL_ID,
-        owner=TASK_LEASE_AGENT_ID,
-        todo_id=TASK_LEASE_TODO_ID,
-        idempotency_key=TASK_LEASE_IDEMPOTENCY_KEY,
-        write_scopes=["docs/**"],
-        ttl_seconds=600,
-    ).as_dict()
-
+    projected = effect_runtime_result(
+        "task_lease.acquire.reduce",
+        {
+            "schema_version": TASK_LEASE_ACQUIRE_TRANSACTION_SCHEMA_VERSION,
+            "phase": "preflight",
+            "goal_id": TASK_LEASE_GOAL_ID,
+            "owner": TASK_LEASE_AGENT_ID,
+            "todo_id": TASK_LEASE_TODO_ID,
+            "idempotency_key": TASK_LEASE_IDEMPOTENCY_KEY,
+            "write_scopes": ["docs/**"],
+            "ttl_seconds": 600,
+            "expected_version": None,
+        },
+    )
+    assert isinstance(projected, Mapping)
+    plan = projected.get("settlement_plan")
+    assert isinstance(plan, Mapping)
     acquire = scenario != "writeback_failure"
-
-    calls: list[SettlementStepKind] = []
-
-    def observed_validation(
-        registry_path: Path,
-        runtime_root: Path,
-        goal_id: str,
-        owner: str,
-        todo_id: str,
-        idempotency_key: str,
-        write_scopes: list[str] | None = None,
-    ) -> SettlementResult[SettlementIdentity]:
-        result = resolve_task_lease_validation(
-            registry_path=registry_path,
-            runtime_root=runtime_root,
-            goal_id=goal_id,
-            owner=owner,
-            todo_id=todo_id,
-            idempotency_key=idempotency_key,
-            write_scopes=write_scopes,
-        )
-        return result
-
-    def observed_acquire(
-        identity: SettlementIdentity,
-    ) -> SettlementResult[dict[str, Any]]:
-        calls.append(SettlementStepKind.DURABLE_WRITEBACK)
-        return commit_task_lease_acquire(
-            identity,
-            registry_path=registry_path,
-            runtime_root=runtime_root,
-            write_scopes=["docs/**"],
-            ttl_seconds=600,
-            acquire=acquire,
-        )
+    calls = (
+        []
+        if scenario == "invalid_identity"
+        else [SettlementStepKind.DURABLE_WRITEBACK]
+    )
 
     with (
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.require_task_lease_owner_allowed",
-            return_value={"status": "open", "claimed_by": TASK_LEASE_AGENT_ID},
-        ),
-        patch(
-            "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
-            return_value=[],
-        ),
         patch(
             "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
             return_value={"status": "open", "claimed_by": TASK_LEASE_AGENT_ID},
@@ -382,7 +350,7 @@ def _run_task_lease_adapter(runtime_root: Path, scenario: str) -> AdapterObserva
             return_value=[],
         ),
     ):
-        result = observed_validation(
+        result = execute_task_lease_settlement(
             registry_path=registry_path,
             runtime_root=runtime_root,
             goal_id=TASK_LEASE_GOAL_ID,
@@ -390,7 +358,9 @@ def _run_task_lease_adapter(runtime_root: Path, scenario: str) -> AdapterObserva
             todo_id=TASK_LEASE_TODO_ID,
             idempotency_key=idempotency_key,
             write_scopes=["docs/**"],
-        ).bind(observed_acquire)
+            ttl_seconds=600,
+            acquire=acquire,
+        )
 
     return AdapterObservation(result, tuple(calls), plan)
 

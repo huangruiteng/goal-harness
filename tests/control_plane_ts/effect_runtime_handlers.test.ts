@@ -50,3 +50,23 @@ test("runtime boundary rejects malformed journal inspection request", async () =
     /request schema mismatch/,
   );
 });
+
+test("runtime boundary dispatches the task-lease acquire transaction", async () => {
+  const result = await dispatchEffectRuntimeMethod(
+    handlers,
+    "task_lease.acquire.reduce",
+    {
+      schema_version: "loopx_task_lease_acquire_transaction_v0",
+      phase: "preflight",
+      goal_id: "lease-goal",
+      owner: "lease-agent",
+      todo_id: "todo_lease_item",
+      idempotency_key: "lease-turn",
+      write_scopes: [],
+      ttl_seconds: null,
+      expected_version: null,
+    },
+  ) as Record<string, unknown>;
+  assert.equal(result.decision, "execute");
+  assert.ok(result.provider_effect);
+});

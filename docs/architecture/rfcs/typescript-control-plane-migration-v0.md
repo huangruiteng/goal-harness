@@ -237,7 +237,8 @@ domains would now increase total complexity.
 
 Select by deletion leverage and runtime traffic, not by ease of translation.
 The shipped Turn settlement, quota delivery-routing, Todo-completion,
-scheduler-heartbeat, and quota-spend commit cutovers establish the pattern.
+scheduler-heartbeat, quota-spend commit, and task-lease acquire cutovers
+establish the pattern.
 Subsequent candidates must name a remaining transaction and its deletion
 leverage; remaining quota settlement readback is eligible only when it can
 retire or materially shrink the facade rather than add another leaf handler.
@@ -285,6 +286,13 @@ shipped Stage 2B cutovers are in place:
   Python retains `should-run`/settlement fact projection plus one coarse
   transport call and the legacy kernel index lock; it no longer constructs or
   writes the spend event.
+- Task-lease acquire: TypeScript owns identity normalization, settlement-plan
+  projection, provider failure classification, ordered receipt construction,
+  and the canonical result. Python invokes the existing atomic provider between
+  one preflight and one final reduction; the provider retains the per-goal lock,
+  owner eligibility, conflict, compare-and-swap, idempotency, and lease-file
+  durability checks. Invalid identities stop before the provider, while a
+  crash/retry after the provider re-enters its same-key idempotent path.
 
 The quota-spend cutover removes the Python spend-event builder and three-file
 writer. Its bounded facade exits when the quota CLI and remaining run-index
@@ -296,9 +304,12 @@ leaves. The remaining Python Todo facade owns transport, external command
 execution, source compare-and-swap, legacy response projection, and the actual
 Markdown/event write. It exits when those writers and the CLI move into the
 native TS transaction. The remaining fine-grained Turn facade exits after
-quota, host-adapter, and task-lease callers move to their own coarse
-transactions. Vision checkpointing remains a separate refresh/writeback
-transaction because it does not share the delivery-selection lifecycle phase.
+quota and host-adapter callers move to their own coarse transactions. The
+task-lease Python facade now contains only transport, the atomic provider, and
+legacy CLI projection; it exits when lease persistence and the task-lease CLI
+run in the native TS transaction. Vision checkpointing remains a separate
+refresh/writeback transaction because it does not share the delivery-selection
+lifecycle phase.
 
 ### Stage 3 — CLI and App convergence
 

@@ -205,10 +205,10 @@ leaf pattern 会增加总复杂度。
 ### Stage 2B — 完整 transaction cutover（进行中）
 
 按删除杠杆与 runtime traffic 选切口，而不是按翻译难度选。已经交付的 Turn
-settlement、quota delivery routing、Todo completion、scheduler heartbeat 与 quota
-spend commit cutover 建立了这一模式。后续候选必须明确剩余 transaction 及其删除
-杠杆；剩余 quota settlement readback 只有在能退出或显著收窄 facade，而不是再增加
-leaf handler 时才适合迁移。
+settlement、quota delivery routing、Todo completion、scheduler heartbeat、quota
+spend commit 与 task-lease acquire cutover 建立了这一模式。后续候选必须明确剩余
+transaction 及其删除杠杆；剩余 quota settlement readback 只有在能退出或显著收窄
+facade，而不是再增加 leaf handler 时才适合迁移。
 
 每完成一笔 transaction，就用 native TS semantic/invariant test 加一个持久的
 end-to-end adapter contract，替换 migration-only characterization worker 与 Python
@@ -246,6 +246,12 @@ window 仍需 differential proof 时才保留 characterization corpus；引入�
   截断 JSONL 尾行，其他损坏仍然 fail closed。
   Python 只保留 `should-run`/settlement fact projection、一次 coarse transport call 与
   legacy kernel index lock；它不再构造或写入 spend event。
+- Task-lease acquire：TypeScript 拥有 identity normalization、settlement plan
+  projection、provider failure classification、ordered receipt construction 与
+  canonical result。Python 在一次 preflight 与一次 final reduction 之间调用现有
+  atomic provider；provider 继续拥有 per-goal lock、owner eligibility、conflict、
+  compare-and-swap、idempotency 与 lease-file durability check。无效 identity 会在
+  provider 前停止；provider 后发生 crash/retry 时则重入同 key 的幂等路径。
 
 Quota-spend cutover 删除了 Python spend-event builder 与三文件 writer。它的 bounded
 facade 会在 quota CLI 和剩余 run-index writer 进程内执行 transaction 后退出；在此
@@ -254,9 +260,11 @@ lock。Todo cutover 删除了 Python state-evaluation dataclass、local identity
 replay helper，以及这些 implementation leaf 的 public runtime handler。剩余 Python
 Todo facade 只拥有 transport、external command execution、source compare-and-swap、
 legacy response projection 与实际 Markdown/event write；当 writer 与 CLI 进入 native
-TS transaction 后即可退出。剩余细粒度 Turn facade 则在 quota、host-adapter 与
-task-lease caller 进入各自 coarse transaction 后退出。Vision checkpointing 属于
-不同的 refresh/writeback 生命周期阶段，因此继续作为独立 transaction。
+TS transaction 后即可退出。剩余细粒度 Turn facade 则在 quota 与 host-adapter
+caller 进入各自 coarse transaction 后退出。Task-lease Python facade 现在只包含
+transport、atomic provider 与 legacy CLI projection；当 lease persistence 与
+task-lease CLI 在 native TS transaction 中运行时即可退出。Vision checkpointing
+属于不同的 refresh/writeback 生命周期阶段，因此继续作为独立 transaction。
 
 ### Stage 3 — CLI 与 App 汇合
 
