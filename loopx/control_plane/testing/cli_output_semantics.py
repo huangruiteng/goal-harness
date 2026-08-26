@@ -83,13 +83,13 @@ def action_signature_coverages(value: Any) -> list[str]:
     return sorted(coverages)
 
 
-def action_portfolio_schema_versions(value: Any) -> list[str]:
+def _schema_versions_for_key(value: Any, key: str) -> list[str]:
     versions: set[str] = set()
 
     def collect(current: Any) -> None:
         if isinstance(current, dict):
-            for key, child in current.items():
-                if key == "action_portfolio" and isinstance(child, dict):
+            for child_key, child in current.items():
+                if child_key == key and isinstance(child, dict):
                     schema_version = child.get("schema_version")
                     if isinstance(schema_version, str) and schema_version:
                         versions.add(schema_version)
@@ -100,25 +100,18 @@ def action_portfolio_schema_versions(value: Any) -> list[str]:
 
     collect(value)
     return sorted(versions)
+
+
+def action_portfolio_schema_versions(value: Any) -> list[str]:
+    return _schema_versions_for_key(value, "action_portfolio")
 
 
 def planning_horizon_schema_versions(value: Any) -> list[str]:
-    versions: set[str] = set()
+    return _schema_versions_for_key(value, "planning_horizon")
 
-    def collect(current: Any) -> None:
-        if isinstance(current, dict):
-            for key, child in current.items():
-                if key == "planning_horizon" and isinstance(child, dict):
-                    schema_version = child.get("schema_version")
-                    if isinstance(schema_version, str) and schema_version:
-                        versions.add(schema_version)
-                collect(child)
-        elif isinstance(current, list):
-            for child in current:
-                collect(child)
 
-    collect(value)
-    return sorted(versions)
+def planning_inventory_detail_schema_versions(value: Any) -> list[str]:
+    return _schema_versions_for_key(value, "agent_todo_planning_inventory")
 
 
 def markdown_headings(text: str) -> list[str]:

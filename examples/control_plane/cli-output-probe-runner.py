@@ -94,6 +94,11 @@ def _receipt_row(
             if isinstance(payload, dict)
             else []
         ),
+        "planning_inventory_detail_schema_versions": (
+            semantics.planning_inventory_detail_schema_versions(payload)
+            if isinstance(payload, dict)
+            else []
+        ),
     }
 
 

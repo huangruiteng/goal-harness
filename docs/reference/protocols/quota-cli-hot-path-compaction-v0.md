@@ -55,6 +55,12 @@ agent --status open --agent-id ...` command remains the complete source read.
 Inventory overflow must become explicit incompleteness, not a quota failure or
 an unbounded default packet.
 
+The additive `none -> todo_planning_inventory_detail_v0` migration has a
+JSON-only allowance of 1,280 characters/bytes, 36 lines, and 1,024 compact
+characters. It applies only when the probe observes that exact schema change on
+the explicit detail variants. Unknown schemas and larger growth fail closed;
+once v0 is in the base, ordinary cold-path limits resume.
+
 Repeated vision audits use `$.vision_continuation_audit` as the canonical
 projection. Candidate lists and peer action lists retain counts and point to
 `--include-detail agent-todos`. The complete vision audit is available through

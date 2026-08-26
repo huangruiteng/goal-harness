@@ -19,6 +19,9 @@ ACTION_PORTFOLIO_SCHEMA_VERSION_V0 = "quota_action_portfolio_v0"
 ACTION_PORTFOLIO_SCHEMA_VERSION_V1 = "quota_action_portfolio_v1"
 ACTION_PORTFOLIO_SCHEMA_VERSION_V2 = "quota_action_portfolio_v2"
 PLANNING_HORIZON_SCHEMA_VERSION_V0 = "quota_planning_horizon_v0"
+PLANNING_INVENTORY_DETAIL_SCHEMA_VERSION_V0 = (
+    "todo_planning_inventory_detail_v0"
+)
 
 Metric = Literal["chars", "utf8_bytes", "lines", "compact_payload_chars"]
 
@@ -124,6 +127,17 @@ _PLANNING_HORIZON_V0_MIGRATION_GROWTH_ALLOWANCE: dict[Metric, int] = {
     "utf8_bytes": 3_200,
     "lines": 84,
     "compact_payload_chars": 2_800,
+}
+
+# todo_planning_inventory_detail_v0 adds planning/claim semantics only to the
+# explicit agent-Todo detail variants. The allowance is bound to the declared
+# none-to-v0 schema migration; after merge the ordinary cold-path budget
+# applies again.
+_PLANNING_INVENTORY_DETAIL_V0_MIGRATION_GROWTH_ALLOWANCE: dict[Metric, int] = {
+    "chars": 1_280,
+    "utf8_bytes": 1_280,
+    "lines": 36,
+    "compact_payload_chars": 1_024,
 }
 
 
@@ -232,6 +246,22 @@ def _planning_horizon_schema_migration(
     return None
 
 
+def _planning_inventory_detail_schema_migration(
+    base: dict[str, Any], candidate: dict[str, Any]
+) -> str | None:
+    base_versions = tuple(
+        base.get("planning_inventory_detail_schema_versions") or []
+    )
+    candidate_versions = tuple(
+        candidate.get("planning_inventory_detail_schema_versions") or []
+    )
+    if base_versions == () and candidate_versions == (
+        PLANNING_INVENTORY_DETAIL_SCHEMA_VERSION_V0,
+    ):
+        return f"none -> {PLANNING_INVENTORY_DETAIL_SCHEMA_VERSION_V0}"
+    return None
+
+
 def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
     row_id = str(base["row_id"])
     failures: list[str] = []
@@ -267,6 +297,20 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
         if horizon_schema_changed
         else None
     )
+    base_inventory_detail_versions = base.get(
+        "planning_inventory_detail_schema_versions"
+    )
+    candidate_inventory_detail_versions = candidate.get(
+        "planning_inventory_detail_schema_versions"
+    )
+    inventory_detail_schema_changed = (
+        base_inventory_detail_versions != candidate_inventory_detail_versions
+    )
+    inventory_detail_schema_migration = (
+        _planning_inventory_detail_schema_migration(base, candidate)
+        if inventory_detail_schema_changed
+        else None
+    )
     portfolio_growth_migration = bool(
         output_format == "json"
         and (
@@ -290,6 +334,9 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
                 )
             )
         )
+    )
+    inventory_detail_growth_migration = bool(
+        output_format == "json" and inventory_detail_schema_migration
     )
 
     deltas: dict[str, int | None] = {}
@@ -317,6 +364,13 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
             allowance = max(
                 allowance,
                 _PLANNING_HORIZON_V0_MIGRATION_GROWTH_ALLOWANCE[metric],
+            )
+        if inventory_detail_growth_migration:
+            allowance = max(
+                allowance,
+                _PLANNING_INVENTORY_DETAIL_V0_MIGRATION_GROWTH_ALLOWANCE[
+                    metric
+                ],
             )
         deltas[metric] = delta
         allowances[metric] = allowance
@@ -360,6 +414,14 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
         else:
             review_signals.append(
                 f"planning_horizon schema migrated: {horizon_schema_migration}"
+            )
+    if inventory_detail_schema_changed:
+        if inventory_detail_schema_migration is None:
+            failures.append("planning inventory detail schema coverage changed")
+        else:
+            review_signals.append(
+                "planning inventory detail schema migrated: "
+                f"{inventory_detail_schema_migration}"
             )
 
     return {
