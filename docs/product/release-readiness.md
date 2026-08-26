@@ -28,7 +28,13 @@ loopx update check
 loopx update plan
 loopx update apply
 loopx doctor
+loopx extension doctor --all-enabled --execute
 ```
+
+After `loopx update apply`, revalidate enabled extensions with
+`loopx extension doctor --all-enabled --execute`. Stale extension readiness
+recovers on the next apply or doctor cycle; use per-extension doctor output for
+repair details. See [Extension lifecycle](../reference/extensions.md#runtime-lifecycle).
 
 For a pip or pipx distribution, apply delegates to that owner. For an archive
 snapshot, apply uses the public `stable` ref by default and preserves atomic
@@ -628,6 +634,8 @@ Treat these v0.x surfaces as stable enough for user guides, examples, and
 host integrations when their focused smokes pass:
 
 - `loopx doctor`, `loopx update`, `loopx check`, and the no-clone installer;
+- `loopx extension doctor` for enabled-extension readiness after install or
+  update apply;
 - project lifecycle commands: `bootstrap`, `connect`, `status`,
   `refresh-state`, `registry`, and `sync-global`;
 - todo lifecycle commands: `todo add`, `todo claim`, `todo update`,
