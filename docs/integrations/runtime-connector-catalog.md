@@ -59,7 +59,11 @@ default; pass `--wake-cmd` only to trigger a bounded headless turn (for example
 `loopx turn run-once ... --execute`). It cannot type into a visible TUI, so it
 does not replace the interactive host loop. A launchd template ships at
 `examples/external-scheduler-worker.launchd.plist` and the contract is guarded
-by `examples/external-scheduler-worker-smoke.py`.
+by `examples/external-scheduler-worker-smoke.py`. Provider-neutral parity against
+one visible host (Pi) is exercised by
+`examples/host-loop-parity-walkthrough-smoke.py` (signed action, compact Turn
+receipts, independent validation, recoverable timeout, replan, terminal
+no-followup; no raw sessions or host-local paths).
 
 ## External Tool Extension Candidates
 
