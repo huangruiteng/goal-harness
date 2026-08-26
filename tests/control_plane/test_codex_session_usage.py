@@ -23,12 +23,14 @@ from loopx.control_plane.quota.codex_session_usage import (
     store_usage_snapshot,
     usage_snapshot_path,
 )
+from loopx.control_plane.quota.usage_collector import UsageRowError
 from loopx.control_plane.quota.usage_summary import build_usage_summary
 from loopx.control_plane.runtime.time import parse_timestamp
 from loopx.state_refresh import refresh_state_run
 
 GOAL_ID = "codex-usage-fixture"
 SESSION_ID = "019f0000-aaaa-bbbb-cccc-000000000001"
+OTHER_SESSION_ID = "019f0000-aaaa-bbbb-cccc-000000000002"
 MODEL = "gpt-fixture-1"
 
 
@@ -63,14 +65,14 @@ def _rollout_event(
     )
 
 
-def _rollout_header() -> list[str]:
+def _rollout_header(session_id: str = SESSION_ID) -> list[str]:
     return [
         json.dumps(
             {
                 "timestamp": "2026-08-26T01:00:00.000Z",
                 "type": "session_meta",
                 "payload": {
-                    "session_id": SESSION_ID,
+                    "session_id": session_id,
                     "timestamp": "2026-08-26T01:00:00.000Z",
                     "cwd": "/tmp/fixture-project",
                 },
@@ -174,12 +176,29 @@ def test_usage_snapshot_roundtrip_and_session_scoping(tmp_path: Path) -> None:
     store_usage_snapshot(runs_dir, observation)
     snapshot = load_usage_snapshot(runs_dir)
     assert snapshot is not None
-    assert snapshot["input_tokens"] == 1200
-    assert snapshot["provider"] == "codex"
-    assert snapshot["model"] == MODEL
-    assert previous_snapshot_for_observation(snapshot, observation) is snapshot
+    basis = previous_snapshot_for_observation(snapshot, observation)
+    assert basis is not None
+    assert basis["input_tokens"] == 1200
+    assert basis["provider"] == "codex"
+    assert basis["model"] == MODEL
     other_session = dict(observation, session_id="other-session")
     assert previous_snapshot_for_observation(snapshot, other_session) is None
+
+
+def test_usage_snapshot_keeps_independent_per_session_baselines(
+    tmp_path: Path,
+) -> None:
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    session_a = read_codex_session_usage(_fixture_rollout(tmp_path))
+    session_b = dict(session_a, session_id=OTHER_SESSION_ID, input_tokens=50)
+    store_usage_snapshot(runs_dir, session_a)
+    store_usage_snapshot(runs_dir, session_b)
+    snapshot = load_usage_snapshot(runs_dir)
+    basis_a = previous_snapshot_for_observation(snapshot, session_a)
+    basis_b = previous_snapshot_for_observation(snapshot, session_b)
+    assert basis_a is not None and basis_a["input_tokens"] == 1200
+    assert basis_b is not None and basis_b["input_tokens"] == 50
 
 
 def test_corrupt_usage_snapshot_fails_closed(tmp_path: Path) -> None:
@@ -187,6 +206,25 @@ def test_corrupt_usage_snapshot_fails_closed(tmp_path: Path) -> None:
     runs_dir.mkdir()
     usage_snapshot_path(runs_dir).write_text("{not json", encoding="utf-8")
     with pytest.raises(CodexSessionUsageError, match="corrupt"):
+        load_usage_snapshot(runs_dir)
+
+
+def test_single_slot_legacy_usage_snapshot_fails_closed(tmp_path: Path) -> None:
+    # The pre-release single-slot layout cannot express per-session baselines;
+    # rebasing against it could double-count, so it must not be read silently.
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    usage_snapshot_path(runs_dir).write_text(
+        json.dumps(
+            {
+                "schema_version": "goal_usage_snapshot_v0",
+                "session_id": SESSION_ID,
+                "input_tokens": 1200,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CodexSessionUsageError, match="unknown schema"):
         load_usage_snapshot(runs_dir)
 
 
@@ -351,6 +389,92 @@ def test_refresh_state_books_only_the_cumulative_increment(tmp_path: Path) -> No
     totals = _summary_totals(runtime_root)
     assert totals["input_tokens_24h"] == 2000
     assert totals["output_tokens_24h"] == 450
+
+
+def test_refresh_state_interleaved_sessions_do_not_double_count(
+    tmp_path: Path,
+) -> None:
+    """A returning session must rebase against its own baseline (A, B, A)."""
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    rollout_a = _write_rollout(
+        tmp_path / "rollout-a.jsonl",
+        [
+            *_rollout_header(),
+            _rollout_event(
+                "2026-08-26T01:05:00.000Z",
+                input_tokens=100,
+                cached_input_tokens=0,
+                output_tokens=10,
+            ),
+        ],
+    )
+    rollout_b = _write_rollout(
+        tmp_path / "rollout-b.jsonl",
+        [
+            *_rollout_header(session_id=OTHER_SESSION_ID),
+            _rollout_event(
+                "2026-08-26T01:06:00.000Z",
+                input_tokens=50,
+                cached_input_tokens=0,
+                output_tokens=5,
+            ),
+        ],
+    )
+
+    for rollout in (rollout_a, rollout_b):
+        _refresh(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            project=project,
+            usage_codex_session=rollout,
+        )
+    with rollout_a.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _rollout_event(
+                "2026-08-26T01:10:00.000Z",
+                input_tokens=150,
+                cached_input_tokens=0,
+                output_tokens=15,
+            )
+            + "\n"
+        )
+    _refresh(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=project,
+        usage_codex_session=rollout_a,
+    )
+
+    runs = _index_runs(runtime_root)
+    assert len(runs) == 3
+    returning = runs[2]["usage"]
+    assert returning["measurement_kind"] == "delta"
+    assert returning["input_tokens"] == 50  # 150 cumulative - 100 own baseline
+    assert returning["output_tokens"] == 5
+
+    totals = _summary_totals(runtime_root)
+    assert totals["input_tokens_24h"] == 200  # 150 (A) + 50 (B), never 300
+    assert totals["output_tokens_24h"] == 20
+
+
+def test_refresh_state_rejects_non_finite_measurement(tmp_path: Path) -> None:
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    with pytest.raises(UsageRowError, match="finite"):
+        _refresh(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            project=project,
+            usage_measurement={
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "provider": "fixture-host",
+                "model": "fixture-model",
+                "source_snapshot_id": "host-measured-nan",
+                "cost_usd": float("nan"),
+            },
+        )
+    index_path = runtime_root / "goals" / GOAL_ID / "runs" / "index.jsonl"
+    assert not index_path.exists()
 
 
 def test_refresh_state_without_usage_flags_keeps_usage_unknown(

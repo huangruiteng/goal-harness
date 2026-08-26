@@ -500,7 +500,7 @@ treated as compact protocol or run-history projections, not as the ledger
 itself, authoritative billing telemetry, or a release operation source.
 `usage_summary` carries aggregate token/cost/duration when runs report a typed
 `run_usage_v0` usage row, but it remains a run-history proxy, not billing of
-record. Malformed or negative usage fails closed at ingest/read rather than
+record. Malformed, negative, or non-finite usage fails closed at ingest/read rather than
 appearing as zeros. A missing `status_contract` means an older status producer;
 loopback dashboards should surface that as a daemon freshness warning rather
 than silently hiding newer panels.
@@ -2199,19 +2199,23 @@ host that measures usage itself can instead pass one finished per-run
 measurement with `--usage-json`. Without either flag, usage stays unknown.
 
 Cumulative host snapshots are converted to non-negative deltas at that
-producer boundary: the last accepted cumulative observation (all counters plus
-`provider`/`model`) is persisted as the goal's private
-`runs/usage_snapshot.json` state and used as the next delta basis, and each
-observation is bound to `usage.source_snapshot_id`. Replaying the same
+producer boundary: each session's last accepted cumulative observation (all
+counters plus `provider`/`model`) is persisted, keyed by session id, in the
+goal's private `runs/usage_snapshot.json` state (`goal_usage_snapshot_v1`) and
+used as that session's next delta basis, and each observation is bound to
+`usage.source_snapshot_id`. Baselines are per session, so interleaved sessions
+never rebase against each other: a returning session books only its own
+increment instead of re-booking its full cumulative total. Replaying the same
 snapshot identity with an identical observation is an idempotent zero delta;
 the same identity carrying any different counter or binding label fails closed
 instead of silently zeroing real usage. A new session starts a fresh absolute
 observation rather than a bogus reset error. Missing optional measurements
-stay omitted (unknown) rather than zero-filled. Malformed, negative, reset, or
-out-of-order observations fail closed with a typed `UsageRowError`; they are
-never clamped or silently dropped, and a failed usage observation blocks the
-whole refresh append. Quota/attempt accounting rows are not reinterpreted as
-token or dollar usage.
+stay omitted (unknown) rather than zero-filled. Malformed, negative,
+non-finite (`NaN`/`Infinity`, rejected both at the typed builder and at the
+strict-JSON `--usage-json` boundary), reset, or out-of-order observations fail
+closed with a typed `UsageRowError`; they are never clamped or silently
+dropped, and a failed usage observation blocks the whole refresh append.
+Quota/attempt accounting rows are not reinterpreted as token or dollar usage.
 
 The typed compact usage row currently reports:
 

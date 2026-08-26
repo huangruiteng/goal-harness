@@ -17,7 +17,10 @@ Cumulative-to-delta conversion happens at the run-write boundary: the caller
 persists each accepted observation with :func:`store_usage_snapshot` and
 passes it back through :func:`previous_snapshot_for_observation` so an
 unchanged rollout replays as a zero delta and a grown rollout books only the
-non-negative increment. Missing optional metrics stay unknown, never zero.
+non-negative increment. Baselines are kept per session id: interleaved
+sessions (A, then B, then A again) each rebase against their own last
+accepted cumulative snapshot, so a returning session never re-books its full
+total as new spend. Missing optional metrics stay unknown, never zero.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ from typing import Any, Mapping
 from .usage_collector import UsageRowError
 
 CODEX_USAGE_PROVIDER = "codex"
-USAGE_SNAPSHOT_SCHEMA_VERSION = "goal_usage_snapshot_v0"
+USAGE_SNAPSHOT_SCHEMA_VERSION = "goal_usage_snapshot_v1"
 USAGE_SNAPSHOT_FILENAME = "usage_snapshot.json"
 _SNAPSHOT_FIELDS = (
     "session_id",
@@ -155,10 +158,12 @@ def usage_snapshot_path(runs_dir: Path) -> Path:
 
 
 def load_usage_snapshot(runs_dir: Path) -> dict[str, Any] | None:
-    """Return the persisted previous cumulative observation, if any.
+    """Return the persisted per-session cumulative baselines, if any.
 
-    A missing snapshot means first observation (absolute intake). A corrupt or
-    unknown-schema snapshot fails closed instead of silently rebasing spend.
+    A missing snapshot means no session has been booked yet, so any session's
+    first observation is an absolute intake. A corrupt or unknown-schema
+    snapshot fails closed instead of silently rebasing spend; the file is
+    private per-goal state and may be deleted to restart absolute intake.
     """
     path = usage_snapshot_path(runs_dir)
     try:
@@ -174,24 +179,36 @@ def load_usage_snapshot(runs_dir: Path) -> dict[str, Any] | None:
     if (
         not isinstance(data, dict)
         or str(data.get("schema_version") or "") != USAGE_SNAPSHOT_SCHEMA_VERSION
+        or not isinstance(data.get("sessions"), dict)
     ):
         raise CodexSessionUsageError(f"usage snapshot state has an unknown schema: {path}")
     return data
 
 
 def store_usage_snapshot(runs_dir: Path, observation: Mapping[str, Any]) -> Path:
-    """Persist the full cumulative observation as the next delta basis.
+    """Persist the observation as its own session's next delta basis.
 
-    The snapshot keeps every counter and binding label (not only the id) so
-    replay of the same identity can be verified field by field.
+    Baselines are grouped by session id: a single shared slot would be
+    overwritten by an interleaved session, making a returning session look
+    brand new and re-booking its full cumulative total as fresh spend. Each
+    entry keeps every counter and binding label (not only the id) so replay
+    of the same identity can be verified field by field.
     """
-    path = usage_snapshot_path(runs_dir)
-    record: dict[str, Any] = {"schema_version": USAGE_SNAPSHOT_SCHEMA_VERSION}
+    session_id = str(observation.get("session_id") or "").strip()
+    if not session_id:
+        raise CodexSessionUsageError("usage observation has no session id to persist")
+    state = load_usage_snapshot(runs_dir) or {
+        "schema_version": USAGE_SNAPSHOT_SCHEMA_VERSION,
+        "sessions": {},
+    }
+    record: dict[str, Any] = {}
     for field in _SNAPSHOT_FIELDS:
         record[field] = observation.get(field)
+    state["sessions"][session_id] = record
+    path = usage_snapshot_path(runs_dir)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(
-        json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     tmp_path.replace(path)
     return path
@@ -201,14 +218,17 @@ def previous_snapshot_for_observation(
     snapshot: Mapping[str, Any] | None,
     observation: Mapping[str, Any],
 ) -> Mapping[str, Any] | None:
-    """Return the delta basis only when it belongs to the same Codex session.
+    """Return the stored delta basis for the observation's own session.
 
-    A new session restarts its cumulative counters from zero, so its first
-    observation must be booked as an absolute intake rather than raising a
-    bogus reset error against another session's basis.
+    Each Codex session counts cumulatively from zero, so the basis must come
+    from the same session: a new session's first observation is an absolute
+    intake, and a returning session rebases against its own last accepted
+    snapshot even when other sessions were booked in between.
     """
     if snapshot is None:
         return None
-    if str(snapshot.get("session_id") or "") != str(observation.get("session_id") or ""):
+    sessions = snapshot.get("sessions")
+    if not isinstance(sessions, Mapping):
         return None
-    return snapshot
+    basis = sessions.get(str(observation.get("session_id") or ""))
+    return basis if isinstance(basis, Mapping) else None
