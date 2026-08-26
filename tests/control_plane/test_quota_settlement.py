@@ -407,11 +407,10 @@ def test_codex_app_actions_preserve_a_concrete_admitted_turn_identity() -> None:
     "profile",
     (
         SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL,
-        SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
         SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
     ),
 )
-def test_native_goal_actions_preserve_visible_goal_spend_attribution(
+def test_unbound_native_goal_actions_preserve_visible_goal_spend_attribution(
     profile: SchedulerRuntimeProfile,
 ) -> None:
     todo_id = "todo_visible_goal"
@@ -437,31 +436,49 @@ def test_native_goal_actions_preserve_visible_goal_spend_attribution(
     assert all("--turn-instance-id" not in command for command in actions)
 
 
-def test_native_goal_rejects_turn_bound_heartbeat_settlement_plan() -> None:
-    settlement_plan = build_codex_app_settlement_plan(
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        todo_id=TODO_ID,
-        scoped_cli_args=f" --agent-id {AGENT_ID}",
-        lifecycle_actor_args=f" --agent-id {AGENT_ID}",
-    ).as_dict()
+def test_unbound_codex_app_ssh_goal_requires_a_guided_turn_before_delivery() -> None:
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": GOAL_ID,
+            "agent_identity": {"agent_id": AGENT_ID},
+            "selected_todo": {"todo_id": TODO_ID},
+        },
+        mode="bounded_delivery",
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE
+        ),
+    )
 
-    with pytest.raises(
-        ValueError,
-        match="native Goal runtime does not accept a Turn-bound settlement plan",
-    ):
-        interaction_next_cli_actions(
-            {
-                "goal_id": GOAL_ID,
-                "agent_identity": {"agent_id": AGENT_ID},
-                "selected_todo": {"todo_id": TODO_ID},
-            },
-            mode="bounded_delivery",
-            scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
-                SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE
-            ),
-            settlement_plan=settlement_plan,
-        )
+    assert len(actions) == 1
+    assert actions[0].startswith("loopx --format json quota should-run")
+    assert "--runtime-profile codex_app_ssh_goal" in actions[0]
+    assert actions[0].endswith("--begin-turn")
+    assert "spend-slot" not in actions[0]
+
+
+def test_turn_bound_codex_app_ssh_goal_preserves_visible_goal_settlement() -> None:
+    turn_instance_id = "guided-start:native-visible-goal"
+
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": GOAL_ID,
+            "agent_identity": {"agent_id": AGENT_ID},
+            "selected_todo": {"todo_id": TODO_ID},
+        },
+        mode="bounded_delivery",
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE
+        ),
+        turn_instance_id=turn_instance_id,
+    )
+
+    assert len(actions) == 2
+    assert actions[0].startswith("loopx refresh-state")
+    assert actions[1].startswith("loopx quota spend-slot")
+    assert "--source visible-goal" in actions[1]
+    for command in actions:
+        assert f"--todo-id {TODO_ID}" in command
+        assert f"--turn-instance-id {turn_instance_id}" in command
 
 
 def test_codex_app_external_observation_settles_only_substantive_writeback() -> None:

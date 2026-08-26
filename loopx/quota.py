@@ -65,6 +65,7 @@ from .control_plane.quota.slot_accounting import (
 )
 from .control_plane.quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
+    TURN_SCOPED_SLOT_SPEND_SOURCES,
 )
 from .control_plane.quota.states import AutomaticTurnPauseCause, QUOTA_STATE_ORDER
 from .control_plane.quota.policy_constants import (
@@ -1207,14 +1208,17 @@ def spend_quota_slot(
                 "effect_ref": normalized_effect_ref,
                 "reason": "quota spend replayed for the same provider effect",
             }
-    if turn_instance_id and source != DEFAULT_SLOT_SPEND_SOURCE:
+    if turn_instance_id and source not in TURN_SCOPED_SLOT_SPEND_SOURCES:
         return {
             "ok": False,
             "mode": "spend-slot",
             "dry_run": not execute,
             "appended": False,
             "goal_id": safe_goal_id,
-            "reason": "turn-scoped settlement is valid only for heartbeat spend",
+            "reason": (
+                "turn-scoped settlement is valid only for heartbeat or "
+                "visible-goal spend"
+            ),
         }
     if (
         not turn_instance_id

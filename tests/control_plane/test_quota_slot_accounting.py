@@ -601,6 +601,79 @@ def test_heartbeat_spend_requires_todo_binding(tmp_path: Path) -> None:
     assert "requires --todo-id todo_selected_binding" in preview["reason"]
 
 
+def test_visible_goal_spend_fails_typed_without_turn_binding(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime"
+    before = _normal_run_before(todo_id="todo_selected_binding")
+
+    preview = build_quota_slot_preview_for_decision(
+        _normal_run_status(runtime),
+        goal_id=GOAL_ID,
+        before=before,
+        after_decision=lambda _: before,
+        quota_status_builder=lambda goal, **_: goal["quota"],
+        self_repair_spend_actions=frozenset(),
+        agent_id=AGENT_A,
+        source="visible-goal",
+    )
+
+    assert preview["ok"] is False
+    assert preview["appended"] is False
+    assert preview["delivery_workspace_causality"] is None
+    assert preview["settlement_result"]["failure"] == {
+        "kind": "identity_mismatch",
+        "step_kind": "validation",
+        "reason": (
+            "visible Goal settlement requires exactly one todo_id or "
+            "replan_obligation_id binding"
+        ),
+        "details": {
+            "source": "visible-goal",
+            "selected_todo_id": "todo_selected_binding",
+            "requested_todo_id": None,
+            "requested_replan_obligation_id": None,
+            "turn_instance_id": None,
+        },
+    }
+
+
+def test_visible_goal_turn_scoped_spend_preserves_settlement_identity(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "runtime"
+    todo_id = "todo_visible_goal_delivery"
+    turn_instance_id = "guided-start:visible-goal-delivery"
+    effect_id = _write_typed_settlement_fixture(
+        runtime,
+        todo_id=todo_id,
+        turn_instance_id=turn_instance_id,
+        workspace_requirement="not_required",
+    )
+    before = _normal_run_before(todo_id=todo_id)
+
+    preview = build_quota_slot_preview_for_decision(
+        _normal_run_status(runtime),
+        goal_id=GOAL_ID,
+        before=before,
+        after_decision=lambda _: {
+            **before,
+            "quota": {**before["quota"], "spent_slots": 1},
+        },
+        quota_status_builder=lambda goal, **_: goal["quota"],
+        self_repair_spend_actions=frozenset(),
+        agent_id=AGENT_A,
+        todo_id=todo_id,
+        turn_instance_id=turn_instance_id,
+        source="visible-goal",
+    )
+
+    assert preview["ok"] is True, preview
+    assert preview["todo_id"] == todo_id
+    assert preview["turn_instance_id"] == turn_instance_id
+    assert preview["settlement_identity"]["effect_id"] == effect_id
+    assert preview["delivery_workspace_causality"]["todo_id"] == todo_id
+    assert preview["delivery_workspace_causality"]["requirement"] == "not_required"
+
+
 def test_heartbeat_spend_rejects_mismatched_todo_binding(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     before = _normal_run_before(todo_id="todo_selected_binding")

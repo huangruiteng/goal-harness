@@ -6,7 +6,10 @@ from ..quota.settlement import (
     build_codex_app_settlement_plan,
     build_turn_scoped_cli_settlement_plan,
 )
-from ..scheduler.execution_context import SchedulerRuntimeProfile
+from ..scheduler.execution_context import (
+    NATIVE_GOAL_RUNTIME_PROFILES,
+    SchedulerRuntimeProfile,
+)
 
 
 def build_accountable_work_item_settlement_plan(
@@ -32,6 +35,21 @@ def build_accountable_work_item_settlement_plan(
             lifecycle_actor_args=lifecycle_actor_args,
             turn_instance_id_ref=normalized_turn_instance_id,
             delivery_boundary=delivery_boundary,
+        )
+    if runtime_profile in NATIVE_GOAL_RUNTIME_PROFILES:
+        normalized_turn_instance_id = normalize_turn_instance_id(turn_instance_id)
+        if normalized_turn_instance_id is None:
+            return None
+        return build_turn_scoped_cli_settlement_plan(
+            goal_id=goal_id,
+            agent_id=agent_id,
+            todo_id=todo_id,
+            replan_obligation_id=replan_obligation_id,
+            scoped_cli_args=scoped_cli_args,
+            lifecycle_actor_args=lifecycle_actor_args,
+            turn_instance_id=normalized_turn_instance_id,
+            delivery_boundary=delivery_boundary,
+            quota_spend_source="visible-goal",
         )
     if runtime_profile is not SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP:
         return None

@@ -29,7 +29,10 @@ from .decision_summary import compact_quota_decision, quota_decision_agent_id
 from .monitor_poll import QUOTA_MONITOR_POLL_CLASSIFICATION
 from .scheduler_ack import QUOTA_SCHEDULER_ACK_CLASSIFICATION
 from .settlement import (
+    SettlementFailureKind,
     SettlementIdentity,
+    SettlementResult,
+    SettlementStepKind,
     infer_persisted_heartbeat_settlement_identity,
     require_settlement_writeback,
     resolve_heartbeat_settlement_identity,
@@ -41,7 +44,12 @@ from .settlement_workspace_causality import (
     missing_delivery_workspace_resolution,
 )
 from .settlement_validation import completion_validation_spend_error
-from .spend_sources import DEFAULT_SLOT_SPEND_SOURCE, VALID_SLOT_SPEND_SOURCES
+from .spend_sources import (
+    DEFAULT_SLOT_SPEND_SOURCE,
+    TURN_SCOPED_SLOT_SPEND_SOURCES,
+    VALID_SLOT_SPEND_SOURCES,
+    VISIBLE_GOAL_SLOT_SPEND_SOURCE,
+)
 from .spend_commit import (
     build_quota_slot_spend_event as build_quota_slot_spend_event,
     record_quota_slot_spend_from_preview as record_quota_slot_spend_from_preview,
@@ -124,11 +132,19 @@ def _resolve_preview_settlement(
     replan_obligation_id: str | None,
     turn_instance_id: str | None,
 ) -> dict[str, Any]:
-    if turn_instance_id and source != DEFAULT_SLOT_SPEND_SOURCE:
-        return {"reason": "turn-scoped settlement is valid only for heartbeat spend"}
+    if turn_instance_id and source not in TURN_SCOPED_SLOT_SPEND_SOURCES:
+        result = SettlementResult.failed(
+            kind=SettlementFailureKind.INVALID_IDENTITY,
+            step_kind=SettlementStepKind.VALIDATION,
+            reason=(
+                "turn-scoped settlement is valid only for heartbeat or "
+                "visible-goal spend"
+            ),
+        )
+        return {"reason": result.failure.reason, "result": result}
     if turn_instance_id and not raw_runtime_root:
         return {"reason": "status payload does not include runtime_root"}
-    if source != DEFAULT_SLOT_SPEND_SOURCE or not raw_runtime_root:
+    if source not in TURN_SCOPED_SLOT_SPEND_SOURCES or not raw_runtime_root:
         return {}
 
     runtime_root = Path(str(raw_runtime_root)).expanduser()
@@ -171,6 +187,54 @@ def _resolve_preview_settlement(
         "delivery_workspace_causality": delivery_workspace_causality,
         "reason": result.failure.reason if result.failure is not None else None,
     }
+
+
+def _unbound_visible_goal_settlement_failure(
+    *,
+    source: str,
+    before: dict[str, Any],
+    requested_todo_id: str | None,
+    requested_replan_obligation_id: str | None,
+    turn_instance_id: str | None,
+) -> SettlementResult[SettlementIdentity] | None:
+    if (
+        source != VISIBLE_GOAL_SLOT_SPEND_SOURCE
+        or before.get("normal_delivery_allowed") is not True
+    ):
+        return None
+    selected = (
+        before.get("selected_todo")
+        if isinstance(before.get("selected_todo"), dict)
+        else {}
+    )
+    selected_todo_id = normalize_todo_id(selected.get("todo_id"))
+    if not selected_todo_id:
+        return None
+    if bool(requested_todo_id) == bool(requested_replan_obligation_id):
+        reason = (
+            "visible Goal settlement requires exactly one todo_id or "
+            "replan_obligation_id binding"
+        )
+    elif not turn_instance_id:
+        reason = (
+            "visible Goal settlement for selected Todo "
+            f"{selected_todo_id} requires turn_instance_id from quota should-run; "
+            "rerun the guard with --begin-turn"
+        )
+    else:
+        return None
+    return SettlementResult.failed(
+        kind=SettlementFailureKind.IDENTITY_MISMATCH,
+        step_kind=SettlementStepKind.VALIDATION,
+        reason=reason,
+        details={
+            "source": source,
+            "selected_todo_id": selected_todo_id,
+            "requested_todo_id": requested_todo_id,
+            "requested_replan_obligation_id": requested_replan_obligation_id,
+            "turn_instance_id": turn_instance_id,
+        },
+    )
 
 
 def _repair_settlement_workspace_causality(
@@ -405,6 +469,33 @@ def build_quota_slot_preview_for_decision(
     normalized_replan_obligation_id = normalize_todo_replan_obligation_id(
         replan_obligation_id
     )
+    unbound_visible_goal_failure = _unbound_visible_goal_settlement_failure(
+        source=source,
+        before=before,
+        requested_todo_id=normalized_todo_id,
+        requested_replan_obligation_id=normalized_replan_obligation_id,
+        turn_instance_id=turn_instance_id,
+    )
+    if unbound_visible_goal_failure is not None:
+        return {
+            "ok": False,
+            "mode": "spend-slot",
+            "dry_run": True,
+            "goal_id": safe_goal_id,
+            "slots": safe_slots,
+            "agent_id": safe_requested_agent_id,
+            "appended": False,
+            "registry_mutated": False,
+            "reason": unbound_visible_goal_failure.failure.reason,
+            "settlement_result": settlement_result_payload(
+                unbound_visible_goal_failure
+            ),
+            "delivery_workspace": None,
+            "delivery_workspace_causality": None,
+            "delivery_workspace_validated": False,
+            "before": before,
+            "after": None,
+        }
     raw_runtime_root = status_payload.get("runtime_root")
     settlement_identity = None
     settlement_result = None

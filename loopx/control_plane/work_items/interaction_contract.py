@@ -16,6 +16,7 @@ from ..quota.settlement import (
 )
 from ..quota.spend_sources import (
     build_quota_spend_action,
+    visible_goal_turn_reentry_action,
 )
 from ..scheduler.execution_context import (
     SchedulerExecutionContextResolution,
@@ -587,11 +588,7 @@ def _turn_scoped_cli_settlement_context(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if selection.action_portfolio_requires_explicit_selection(payload):
         return None, None
-    agent_identity = (
-        payload.get("agent_identity")
-        if isinstance(payload.get("agent_identity"), dict)
-        else {}
-    )
+    agent_identity = payload.get("agent_identity") if isinstance(payload.get("agent_identity"), dict) else {}
     selected_todo = (
         payload.get("selected_todo")
         if isinstance(payload.get("selected_todo"), dict)
@@ -707,11 +704,7 @@ def interaction_next_cli_actions(
     turn_instance_id: str | None = None,
 ) -> list[str]:
     goal_id = str(payload.get("goal_id") or "<GOAL_ID>")
-    agent_identity = (
-        payload.get("agent_identity")
-        if isinstance(payload.get("agent_identity"), dict)
-        else {}
-    )
+    agent_identity = payload.get("agent_identity") if isinstance(payload.get("agent_identity"), dict) else {}
     scoped_cli_args = _scoped_cli_args(
         agent_identity,
         available_capabilities=available_capabilities,
@@ -751,6 +744,10 @@ def interaction_next_cli_actions(
         if scheduler_args
         else "rerun the typed quota_guard from the current host packet"
     )
+    if turn_reentry_action := visible_goal_turn_reentry_action(
+        payload, settlement_plan, scheduler_execution_context, turn_instance_id, typed_quota_guard
+    ):
+        return [turn_reentry_action]
     typed_monitor_poll = (
         f"loopx quota monitor-poll --goal-id {goal_id}{scoped_cli_args}"
         f"{scheduler_args} --execute"

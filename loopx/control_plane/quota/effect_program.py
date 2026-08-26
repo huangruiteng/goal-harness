@@ -69,6 +69,7 @@ def build_codex_app_settlement_plan(
     lifecycle_actor_args: str,
     turn_instance_id_ref: str | None = None,
     delivery_boundary: str | None = None,
+    quota_spend_source: str = "heartbeat",
 ) -> SettlementPlan:
     return build_turn_scoped_cli_settlement_plan(
         goal_id=goal_id,
@@ -79,6 +80,7 @@ def build_codex_app_settlement_plan(
         lifecycle_actor_args=lifecycle_actor_args,
         turn_instance_id=turn_instance_id_ref or "${LOOPX_TURN:?}",
         delivery_boundary=delivery_boundary,
+        quota_spend_source=quota_spend_source,
     )
 
 
@@ -92,11 +94,17 @@ def build_turn_scoped_cli_settlement_plan(
     lifecycle_actor_args: str,
     turn_instance_id: str,
     delivery_boundary: str | None = None,
+    quota_spend_source: str = "heartbeat",
 ) -> SettlementPlan:
     if bool(todo_id) == bool(replan_obligation_id):
         raise ValueError(
             "turn-scoped CLI settlement requires exactly one Todo or autonomous "
             "replan obligation binding"
+        )
+    if quota_spend_source not in {"heartbeat", "visible-goal"}:
+        raise ValueError(
+            "turn-scoped CLI settlement requires quota_spend_source heartbeat "
+            "or visible-goal"
         )
     identity = SettlementIdentity(
         goal_id=goal_id,
@@ -130,7 +138,8 @@ def build_turn_scoped_cli_settlement_plan(
     )
     spend = (
         f"loopx quota spend-slot --goal-id {shlex.quote(goal_id)} --slots 1 "
-        f"--source heartbeat --execute{binding_arg}{turn_arg}{scoped_cli_args}"
+        f"--source {quota_spend_source} --execute{binding_arg}{turn_arg}"
+        f"{scoped_cli_args}"
     )
     effect_ref = "$.identity.effect_id"
     return SettlementPlan(

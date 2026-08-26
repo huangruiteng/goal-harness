@@ -1315,16 +1315,14 @@ def test_guided_start_begins_one_turn_and_executes_returned_selection(
     receipt_identity = selected["heartbeat_receipt"]["settlement_identity"]
     assert receipt_identity["turn_instance_id"] == turn_instance_id
     cli_channel = selected["interaction_contract"]["cli_channel"]
-    if host_surface == "codex-app":
-        settlement_plan = cli_channel["settlement_plan"]
-        assert settlement_plan["identity"] == receipt_identity
-        assert f"--turn-instance-id {turn_instance_id}" in json.dumps(settlement_plan)
-    else:
-        assert "settlement_plan" not in cli_channel
-        assert any(
-            "--source visible-goal" in action
-            for action in cli_channel["next_cli_actions"]
-        )
+    settlement_plan = cli_channel["settlement_plan"]
+    assert settlement_plan["identity"] == receipt_identity
+    assert f"--turn-instance-id {turn_instance_id}" in json.dumps(settlement_plan)
+    expected_source = "heartbeat" if host_surface == "codex-app" else "visible-goal"
+    assert any(
+        f"--source {expected_source}" in action
+        for action in cli_channel["next_cli_actions"]
+    )
     assert _heartbeat_receipt_count(runtime, turn_instance_id) == 2
 
 
@@ -1380,7 +1378,10 @@ def test_visible_goal_continuation_begins_turn_and_executes_returned_selection(
         "turn_instance_id"
     ] == turn_instance_id
     cli_channel = selected["interaction_contract"]["cli_channel"]
-    assert "settlement_plan" not in cli_channel
+    settlement_plan = cli_channel["settlement_plan"]
+    assert settlement_plan["identity"] == selected["heartbeat_receipt"][
+        "settlement_identity"
+    ]
     assert any(
         "--source visible-goal" in action
         for action in cli_channel["next_cli_actions"]
@@ -1421,6 +1422,154 @@ def test_single_todo_guided_start_keeps_direct_delivery_semantics(
     identity = guard["heartbeat_receipt"]["settlement_identity"]
     assert identity["todo_id"] == TODO_ID
     assert identity["turn_instance_id"].startswith("guided-start:")
+    settlement_plan = guard["interaction_contract"]["cli_channel"][
+        "settlement_plan"
+    ]
+    assert settlement_plan["identity"] == identity
+    expected_source = "heartbeat" if host_surface == "codex-app" else "visible-goal"
+    assert expected_source in next(
+        step["command_template"]
+        for step in settlement_plan["ordered_steps"]
+        if step["kind"] == "quota_spend"
+    )
+
+
+def test_visible_goal_refresh_and_spend_preserve_selected_todo_causality(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_read_only_todo(project)
+
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--runtime-profile",
+        "codex_app_ssh_goal",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--begin-turn",
+        "--scan-path",
+        str(project),
+    )
+
+    assert guard_rc == 0, guard
+    identity = guard["heartbeat_receipt"]["settlement_identity"]
+    turn_instance_id = identity["turn_instance_id"]
+    binding = (
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        TODO_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+    )
+    plan = guard["interaction_contract"]["cli_channel"]["settlement_plan"]
+    assert plan["identity"] == identity
+    assert "--source visible-goal" in next(
+        step["command_template"]
+        for step in plan["ordered_steps"]
+        if step["kind"] == "quota_spend"
+    )
+
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--classification",
+        "visible_goal_delivery_validated",
+        "--delivery-batch-scale",
+        "single_surface",
+        "--delivery-outcome",
+        "outcome_progress",
+        *binding,
+        "--no-global-sync",
+        "--suppress-external-sinks",
+    )
+    assert refresh_rc == 0, refresh
+    assert refresh["todo_id"] == TODO_ID
+    assert refresh["turn_instance_id"] == turn_instance_id
+    assert refresh["delivery_workspace_causality"]["todo_id"] == TODO_ID
+    assert refresh["delivery_workspace_causality"]["requirement"] == "not_required"
+
+    spend_rc, spend = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "spend-slot",
+        "--goal-id",
+        GOAL_ID,
+        "--slots",
+        "1",
+        "--source",
+        "visible-goal",
+        "--execute",
+        *binding,
+        "--scan-path",
+        str(project),
+    )
+    assert spend_rc == 0, spend
+    assert spend["todo_id"] == TODO_ID
+    assert spend["turn_instance_id"] == turn_instance_id
+    assert spend["settlement_identity"] == identity
+    assert spend["delivery_workspace_causality"]["todo_id"] == TODO_ID
+    assert spend["delivery_workspace_causality"]["requirement"] == "not_required"
+    assert _spend_run_count(runtime) == 1
+
+
+def test_unbound_visible_goal_spend_returns_typed_mismatch_without_receipt(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--runtime-profile",
+        "codex_app_ssh_goal",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--scan-path",
+        str(project),
+    )
+    assert guard_rc == 0, guard
+    actions = guard["interaction_contract"]["cli_channel"]["next_cli_actions"]
+    assert len(actions) == 1
+    assert actions[0].endswith("--begin-turn")
+    assert all("spend-slot" not in action for action in actions)
+
+    spend_rc, spend = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "spend-slot",
+        "--goal-id",
+        GOAL_ID,
+        "--slots",
+        "1",
+        "--source",
+        "visible-goal",
+        "--execute",
+        "--agent-id",
+        AGENT_ID,
+        "--scan-path",
+        str(project),
+    )
+    assert spend_rc == 1, spend
+    assert spend["appended"] is False
+    assert spend["settlement_result"]["failure"]["kind"] == "identity_mismatch"
+    assert spend["settlement_result"]["failure"]["step_kind"] == "validation"
+    assert spend["delivery_workspace_causality"] is None
+    assert _spend_run_count(runtime) == 0
 
 
 def test_begin_turn_rejects_a_non_receipt_runtime_profile(tmp_path: Path) -> None:
