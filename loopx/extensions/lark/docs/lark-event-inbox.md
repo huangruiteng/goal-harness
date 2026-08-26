@@ -31,6 +31,82 @@ parent sender is the app id of the configured profile. A reply to a person,
 another app, or an unverifiable parent remains captured but does not wake the
 agent. The agent does not need to keep a websocket open.
 
+### Optional turn-start Agent reading hook
+
+Realtime collection is the preferred ingress, but a long-running Agent may also
+need a bounded provider-history tail at the beginning of every LoopX turn. The
+collector config can opt into `turn_start_sync`. This is not a background-only
+sync: it is a pre-decision capability hook with the following ordering:
+
+```text
+turn-start hook
+  -> read one bounded provider page per route
+  -> commit and read back owner-private inbox events and cursor
+  -> recompute quota inbox urgency in the same CLI invocation
+  -> agent_read_required=true when new events were accepted
+  -> selected inbox lane drains private message content before ordinary work
+  -> Agent chooses steering / Goal replan / context capture /
+     continue-current-work / no-follow-up
+  -> durable effect or no-follow-up receipt -> ACK
+```
+
+Core owns the provider-neutral hook registration, output budget, allowed
+owner-private write scopes, failure isolation, and `agent_read_required`
+contract. The Lark extension owns history pagination, provider-envelope
+validation, private cursors, and inbox readback. The CLI composition root runs
+the hook before status/quota projection. Raw content remains only in the local
+inbox and appears to the Agent only through the existing goal-bound
+`drain_command`; it never enters the public Goal registry, hook receipt, or
+quota packet.
+
+The distinction between `empty`, `provider_contract_error`, permission failure,
+and provider unavailability is mandatory. A success envelope whose message list
+does not match the declared provider schema fails closed and cannot be treated
+as an empty inbox. Hook failure is isolated from ordinary Goal state, but it is
+visible in `turn_start_capability_hook_dispatch` and does not claim that Agent
+reading occurred.
+
+The feature is default-off. Enable it only with `configured_chat_all` and
+`material_review.enabled=true` on every route, so every newly accepted message
+enters an Agent semantic-triage lane rather than being synchronized and ignored:
+
+```json
+{
+  "schema_version": "lark_event_collector_config_v1",
+  "enabled": true,
+  "service_name": "loopx-project-context",
+  "identity": "bot",
+  "profile": "project-context-bot",
+  "supervisor": "systemd",
+  "consume_timeout": "30m",
+  "turn_start_sync": {
+    "enabled": true,
+    "initial_lookback_seconds": 900,
+    "overlap_seconds": 5,
+    "page_size": 50
+  },
+  "routes": [
+    {
+      "route_key": "requirements-a",
+      "chat_id": "oc_<local-private-chat-id>",
+      "event_inbox_config": ".loopx/config/lark/requirements-a.json"
+    }
+  ]
+}
+```
+
+Each completed poll opens a new forward window from the previous end with a
+small overlap. Inbox `message_id` deduplication makes the overlap replay-safe.
+When a page reports `has_more`, later turns resume the same private page token
+before opening a new window. The initial lookback is bounded to seven days,
+the overlap to five minutes, and each route reads at most one 50-message page
+per turn. Cursor and single-flight lock identity combine the public-safe route
+key with a digest of the configured profile, chat, inbox config, inbox path,
+and capture scope. Two Agent-scoped collectors may therefore reuse a semantic
+route key without sharing progress or permanently rejecting each other's
+source binding, while duplicate registrations for the same source still share
+one single-flight boundary.
+
 Use `addressed_only` only when direct bot mentions are the entire feedback
 contract. A review or collaboration inbox that accepts non-mention replies to
 bot messages should use `configured_chat_all`: the host collector filters by

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from loopx.cli_commands import lark_inbox
 from loopx.configure_goal import configure_goal
+from loopx.control_plane.operator_inbox_binding import local_private_config_digest
 from loopx.control_plane.quota.goal_boundary import goal_boundary
 from loopx.extensions.lark.routed_inbox import (
     project_routed_lark_event_inbox_urgency,
@@ -262,3 +263,86 @@ def test_agent_scoped_binding_accepts_one_multi_chat_collector_authority(
     serialized = json.dumps(capability)
     assert "oc_public_fixture_alpha" not in serialized
     assert "oc_public_fixture_beta" not in serialized
+
+
+def test_agent_scoped_binding_rebind_writes_when_public_counts_are_unchanged(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    registry_path.parent.mkdir()
+    inbox_relative = ".loopx/config/lark/inbox.json"
+    collector_relative = ".loopx/config/lark/collector.json"
+    config_dir = tmp_path / ".loopx" / "config" / "lark"
+    config_dir.mkdir(parents=True)
+    (tmp_path / inbox_relative).write_text(
+        json.dumps(
+            {
+                "schema_version": "lark_event_inbox_config_v0",
+                "enabled": True,
+                "inbox_dir": ".loopx/inbox/requirements",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / collector_relative).write_text(
+        json.dumps(
+            {
+                "schema_version": "lark_event_collector_config_v1",
+                "enabled": True,
+                "service_name": "loopx-rebind-fixture",
+                "profile": "fixture-bot",
+                "supervisor": "systemd",
+                "routes": [
+                    {
+                        "route_key": "requirements",
+                        "chat_id": "oc_public_fixture",
+                        "event_inbox_config": inbox_relative,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    initial_digest = local_private_config_digest(
+        project=tmp_path,
+        config_path=inbox_relative,
+    )
+    registry_path.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": "goal-rebind",
+                        "repo": str(tmp_path),
+                        "coordination": {"registered_agents": ["agent-context"]},
+                        "control_plane": {
+                            "lark_event_inboxes": {
+                                "agent-context": {
+                                    "enabled": True,
+                                    "config_path": inbox_relative,
+                                    "config_digest": initial_digest,
+                                }
+                            }
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rebound = configure_goal(
+        registry_path=registry_path,
+        goal_id="goal-rebind",
+        lark_event_inbox_config=collector_relative,
+        lark_event_inbox_agent_id="agent-context",
+        execute=True,
+    )
+
+    assert rebound["written"] is True
+    assert rebound["changed_fields"] == ["control_plane"]
+    binding = json.loads(registry_path.read_text(encoding="utf-8"))["goals"][0][
+        "control_plane"
+    ]["lark_event_inboxes"]["agent-context"]
+    assert binding["config_path"] == collector_relative
+    assert binding["config_digest"] != initial_digest

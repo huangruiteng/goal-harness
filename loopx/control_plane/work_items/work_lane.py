@@ -321,11 +321,19 @@ def lark_inbox_reply_due_work_lane_contract(
         ),
         "oldest_pending_age_seconds": urgency.get("oldest_pending_age_seconds"),
         "drain_command": inbox.get("drain_command"),
+        "semantic_triage_required": True,
+        "allowed_dispositions": [
+            "steer_current_turn",
+            "replan_goal",
+            "record_context",
+            "continue_current_work",
+        ],
         "monitor_policy": "durable_effect_then_one_verified_reply_then_ack",
         "action": (
-            "drain the configured Lark inbox before ordinary work; translate the "
-            "direct question, mention, or verified bot reply into a durable effect, "
-            "send exactly one "
+            "drain and read the configured Lark inbox before ordinary work; classify "
+            "the direct question, mention, or verified bot reply as steering, Goal "
+            "replan, context capture, or continue-current-work; commit any required "
+            "durable effect, then send exactly one "
             "source-thread reply with idempotency and readback, then ACK"
         ),
     }
@@ -379,11 +387,21 @@ def operator_inbox_material_review_due_work_lane_contract(
         ),
         "drain_limit": drain_limit,
         "drain_command": drain_command or None,
+        "semantic_triage_required": True,
+        "allowed_dispositions": [
+            "steer_current_turn",
+            "replan_goal",
+            "record_context",
+            "continue_current_work",
+            "no_follow_up",
+        ],
         "monitor_policy": "bounded_effect_or_no_follow_up_receipt_then_ack",
         "action": (
-            f"drain at most {drain_limit} captured operator-inbox materials; "
-            "for each unaddressed message or attachment, write one durable effect "
-            "or explicit no-follow-up receipt, settle it idempotently, and ACK; "
+            f"drain and read at most {drain_limit} captured operator-inbox materials "
+            "before ordinary work; classify each as steering, Goal replan, context "
+            "capture, continue-current-work, or no-follow-up; write the matching "
+            "durable effect or explicit no-follow-up receipt, settle it idempotently, "
+            "and ACK; "
             "do not send a reply unless a separate reply_due item requires one"
         ),
     }

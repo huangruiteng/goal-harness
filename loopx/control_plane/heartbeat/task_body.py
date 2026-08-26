@@ -101,7 +101,7 @@ Before spending delivery compute, make the CLI reachable; set
 
 If that preflight still fails: no work/spend; quiet `DONT_NOTIFY`.
 
-`lark_event_inbox`: `reply_due`: drain -> effect/reply/readback/ACK.
+`agent_read_required`: drain/read/triage before work; settle/ACK.
 
 {USER_TODO_FINAL_MESSAGE_RULE}
 {HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
@@ -313,7 +313,7 @@ If `should_run=false`: follow user channel. `monitor_quiet_skip`: receipt/stall
 done; quiet unless replan; write failure: retry same id. External/wait monitor:
 one read-only poll; new evidence -> writeback/spend. Safe bypass if allowed.
 {SCHEDULER_HINT_THIN_RULE}
-`lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
+`agent_read_required`: drain/read/triage before work; settle/ACK.
 
 If `should_run=true`: fetch compact; use `status --limit 3` and
 `review-packet --handoff-only`. Obey
@@ -377,7 +377,7 @@ Preflight fail: quiet; no work/spend.
 {SCHEDULER_HINT_COMPACT_RULE}
 {HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
 
-`lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
+`agent_read_required`: drain/read/triage before work; settle/ACK.
 
 Output policy: authority=`interaction_contract.user_channel.notify`;
 external=`NOTIFY`; quiet=`DONT_NOTIFY`; quiet_missing_action=`internal_repair`.
@@ -692,7 +692,7 @@ def render_thin_heartbeat_task_body(
 {SCHEDULER_HINT_THIN_RULE}
 {HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
 Done->todo/rationale; guard receipt; 2 stalls->replan.
-`lark_event_inbox`: reply_due; drain_command/reply-readback/ACK.
+`agent_read_required`: drain/read/triage before work; settle/ACK.
 
 P0 blocked: safe P1/P2; monitor quiet/no-spend.
 

@@ -88,16 +88,15 @@ def _scheduler_execution_context_from_args(
     return None
 
 
-def prepare_quota_command_context(
+def validate_quota_command_context_request(
     args: argparse.Namespace,
-    *,
-    registry_path: Path,
-    runtime_root_arg: str | None,
-    status_collector: Callable[..., dict[str, object]] | None = None,
-    operator_inbox_urgency_projector_factory: Callable[
-        ..., Callable[..., dict[str, object]]
-    ],
-) -> QuotaCommandContext:
+) -> tuple[
+    str | None,
+    Mapping[str, object] | SchedulerExecutionContextResolution | None,
+    bool,
+]:
+    """Validate the request before any provider read or local projection write."""
+
     command = args.quota_command
     if bool(getattr(args, "turn_envelope", False)) and command != "should-run":
         raise QuotaCommandValidationError(
@@ -178,11 +177,34 @@ def prepare_quota_command_context(
                 "--begin-turn requires runtime-profile codex_app_heartbeat "
                 "or codex_app_ssh_goal"
             )
-        heartbeat_turn_id = mint_turn_instance_id(prefix="guided-start")
-    if heartbeat_turn_id and command == "should-run" and bool(args.dry_run):
+    if (
+        (heartbeat_turn_id or begin_turn)
+        and command == "should-run"
+        and bool(args.dry_run)
+    ):
         raise QuotaCommandValidationError(
             "turn-scoped `quota should-run` cannot use --dry-run"
         )
+    return heartbeat_turn_id, scheduler_context, begin_turn
+
+
+def prepare_quota_command_context(
+    args: argparse.Namespace,
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    status_collector: Callable[..., dict[str, object]] | None = None,
+    operator_inbox_urgency_projector_factory: Callable[
+        ..., Callable[..., dict[str, object]]
+    ],
+    force_projection_refresh: bool = False,
+) -> QuotaCommandContext:
+    command = args.quota_command
+    heartbeat_turn_id, scheduler_context, begin_turn = (
+        validate_quota_command_context_request(args)
+    )
+    if begin_turn:
+        heartbeat_turn_id = mint_turn_instance_id(prefix="guided-start")
 
     scan_roots = [Path(item).expanduser() for item in args.scan_path]
     if not scan_roots:
@@ -204,7 +226,10 @@ def prepare_quota_command_context(
     )
     status_payload = None
     cache_metadata = None
-    if bool(getattr(args, "use_projection_cache", False)):
+    if (
+        bool(getattr(args, "use_projection_cache", False))
+        and not force_projection_refresh
+    ):
         status_payload, cache_metadata = load_status_projection_cache(
             registry_path=registry_path,
             runtime_root=runtime_root,

@@ -4,7 +4,10 @@ import test from "node:test";
 import {
   CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION,
   INTERACTION_PROJECTION_HOOK_RESULT_SCHEMA_VERSION,
+  TURN_START_HOOK_REGISTRATION_SCHEMA_VERSION,
+  TURN_START_HOOK_RESULT_SCHEMA_VERSION,
   validateInteractionProjectionHookInvocation,
+  validateTurnStartHookInvocation,
 } from "../../loopx/control_plane/capability_hooks.ts";
 
 function registration(overrides: Record<string, unknown> = {}) {
@@ -138,5 +141,100 @@ test("registration denies effects and candidates cannot escape declared slots", 
       result: candidate(status(true), { projection_slot: "other_slot" }),
     }),
     /not registered/,
+  );
+});
+
+function turnStartRegistration(overrides: Record<string, unknown> = {}) {
+  return {
+    schema_version: TURN_START_HOOK_REGISTRATION_SCHEMA_VERSION,
+    hook_id: "operator_inbox.turn_start_sync",
+    capability_id: "operator-inbox",
+    phase: "turn_start",
+    budget: {
+      max_invocations_per_dispatch: 1,
+      max_result_bytes: 16 * 1024,
+    },
+    failure_policy: "isolate",
+    requested_read_scope: ["provider_history"],
+    requested_write_scope: ["owner_private_inbox", "owner_private_cursor"],
+    ...overrides,
+  };
+}
+
+function turnStartResult(overrides: Record<string, unknown> = {}) {
+  return {
+    schema_version: TURN_START_HOOK_RESULT_SCHEMA_VERSION,
+    hook_id: "operator_inbox.turn_start_sync",
+    capability_id: "operator-inbox",
+    phase: "turn_start",
+    status: "observed",
+    observation_count: 2,
+    agent_read_required: true,
+    external_reads_performed: true,
+    local_private_state_mutated: true,
+    private_content_returned: false,
+    provider_payload_returned: false,
+    error_code: null,
+    ...overrides,
+  };
+}
+
+test("turn-start observations require Agent reading without returning private content", () => {
+  const observed = validateTurnStartHookInvocation({
+    registration: turnStartRegistration(),
+    result: turnStartResult(),
+  });
+  assert.equal(observed.status, "observed");
+  assert.equal(observed.agent_read_required, true);
+  assert.equal(observed.observation_count, 2);
+
+  assert.throws(
+    () => validateTurnStartHookInvocation({
+      registration: turnStartRegistration(),
+      result: turnStartResult({ agent_read_required: false }),
+    }),
+    /Agent reading|inconsistent/,
+  );
+  assert.throws(
+    () => validateTurnStartHookInvocation({
+      registration: turnStartRegistration(),
+      result: turnStartResult({ private_content_returned: true }),
+    }),
+    /private provider content/,
+  );
+});
+
+test("turn-start empty, provider failure, and owner-private write scopes stay distinct", () => {
+  const empty = validateTurnStartHookInvocation({
+    registration: turnStartRegistration(),
+    result: turnStartResult({
+      status: "empty",
+      observation_count: 0,
+      agent_read_required: false,
+      local_private_state_mutated: true,
+    }),
+  });
+  assert.equal(empty.status, "empty");
+
+  const failed = validateTurnStartHookInvocation({
+    registration: turnStartRegistration(),
+    result: turnStartResult({
+      status: "failed",
+      observation_count: 0,
+      agent_read_required: false,
+      local_private_state_mutated: false,
+      error_code: "provider_contract_error",
+    }),
+  });
+  assert.equal(failed.error_code, "provider_contract_error");
+
+  assert.throws(
+    () => validateTurnStartHookInvocation({
+      registration: turnStartRegistration({
+        requested_write_scope: ["repository_write"],
+      }),
+      result: turnStartResult(),
+    }),
+    /not owner-private/,
   );
 });

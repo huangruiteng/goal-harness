@@ -65,8 +65,15 @@ from ..quota import (
 )
 from ..status import collect_status
 from ..upgrade import resolve_codex_app_automation_rrule
-from .quota_context import QuotaCommandContext, prepare_quota_command_context
-from .lark_inbox import build_lark_operator_inbox_urgency_projector
+from .lark_inbox import (
+    build_lark_operator_inbox_urgency_projector,
+    dispatch_goal_lark_turn_start_hooks,
+)
+from .quota_context import (
+    QuotaCommandContext,
+    prepare_quota_command_context,
+    validate_quota_command_context_request,
+)
 from .quota_host_poll import attach_host_poll_receipt
 from .quota_monitor_poll import record_quota_monitor_poll_for_cli
 from .quota_registration import (
@@ -401,9 +408,7 @@ def _require_requested_quota_action_selection(
         selected_todo_id != requested_todo_id
         or payload.get("ok") is not True
         or payload.get("should_run") is not True
-        or not (
-            pending_selection_qualified or exact_current_obligation_qualified
-        )
+        or not (pending_selection_qualified or exact_current_obligation_qualified)
     ):
         raise HeartbeatReceiptIdentityConflictError(
             "explicit action selection must name one currently projected "
@@ -427,6 +432,37 @@ def _commit_requested_action_selection(
         selected_todo["selection_binding"] = "heartbeat_receipt"
 
 
+def _dispatch_quota_turn_start_hooks(
+    args: argparse.Namespace,
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+) -> tuple[dict[str, object] | None, bool]:
+    validate_quota_command_context_request(args)
+    if args.quota_command != "should-run":
+        return None, False
+    dispatch = dispatch_goal_lark_turn_start_hooks(
+        registry_path=registry_path,
+        runtime_root_arg=runtime_root_arg,
+        goal_id=args.goal_id,
+        agent_id=args.agent_id,
+    )
+    local_private_state_mutated = any(
+        isinstance(result, Mapping)
+        and result.get("local_private_state_mutated") is True
+        for result in (dispatch.get("results") or [])
+    )
+    return dispatch, local_private_state_mutated
+
+
+def _attach_turn_start_hook_dispatch(
+    payload: dict[str, object],
+    dispatch: Mapping[str, object] | None,
+) -> None:
+    if dispatch and (dispatch.get("registered_count") or dispatch.get("failures")):
+        payload["turn_start_capability_hook_dispatch"] = dict(dispatch)
+
+
 def handle_quota_command(
     args: argparse.Namespace,
     *,
@@ -444,6 +480,11 @@ def handle_quota_command(
     detail_sections: frozenset[str] = frozenset()
     context: QuotaCommandContext | None = None
     try:
+        turn_start_hook_dispatch, turn_start_mutated = _dispatch_quota_turn_start_hooks(
+            args,
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root_arg,
+        )
         context = prepare_quota_command_context(
             args,
             registry_path=registry_path,
@@ -452,6 +493,7 @@ def handle_quota_command(
             operator_inbox_urgency_projector_factory=(
                 build_lark_operator_inbox_urgency_projector
             ),
+            force_projection_refresh=turn_start_mutated,
         )
         heartbeat_turn_id = context.heartbeat_turn_id
         detail_sections = context.detail_sections
@@ -505,6 +547,7 @@ def handle_quota_command(
                 turn_instance_id=heartbeat_turn_id,
                 interaction_projection_hooks=interaction_projection_hooks,
             )
+            _attach_turn_start_hook_dispatch(payload, turn_start_hook_dispatch)
             _require_requested_quota_action_selection(
                 payload,
                 requested_todo_id=_requested_quota_action_todo_id(args),

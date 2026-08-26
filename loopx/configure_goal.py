@@ -1243,6 +1243,11 @@ def configure_goal(
 
     after = _settings_summary(goal)
     changed_fields = _changed_fields(before, after)
+    if goal != before_goal and not changed_fields:
+        # Some local-private control-plane bindings intentionally project only
+        # counts and booleans. Rebinding one enabled provider to another can
+        # therefore preserve the public summary while still requiring a write.
+        changed_fields = ["control_plane"]
     dry_run = not execute
     model_changed = bool(
         before.get("legacy_hierarchy_present")

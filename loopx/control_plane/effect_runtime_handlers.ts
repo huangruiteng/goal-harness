@@ -92,6 +92,8 @@ import {
 import {
   validateInteractionProjectionHookInvocation,
   validateInteractionProjectionHookRegistration,
+  validateTurnStartHookInvocation,
+  validateTurnStartHookRegistration,
 } from "./capability_hooks.ts";
 
 type EffectRuntimeHandler = (params: JsonObject) => unknown | Promise<unknown>;
@@ -370,6 +372,17 @@ export function createEffectRuntimeHandlers(
     [
       "capability_hook.interaction_projection.validate",
       (params) => validateInteractionProjectionHookInvocation({
+        registration: params.registration,
+        result: params.result,
+      }),
+    ],
+    [
+      "capability_hook.turn_start.validate_registration",
+      (params) => validateTurnStartHookRegistration(params.registration),
+    ],
+    [
+      "capability_hook.turn_start.validate",
+      (params) => validateTurnStartHookInvocation({
         registration: params.registration,
         result: params.result,
       }),

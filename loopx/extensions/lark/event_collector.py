@@ -34,6 +34,8 @@ TIMEOUT_RE = re.compile(r"^[1-9][0-9]*(?:s|m|h)$")
 SUPPORTED_SUPERVISORS = {"launchd", "systemd"}
 SUPPORTED_EVENT_KEY = "im.message.receive_v1"
 MAX_ROUTE_COUNT = 50
+TURN_START_SYNC_MAX_LOOKBACK_SECONDS = 7 * 24 * 60 * 60
+TURN_START_SYNC_MAX_OVERLAP_SECONDS = 5 * 60
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -101,6 +103,39 @@ def load_lark_event_collector_config(
     supervisor = str(payload.get("supervisor") or "").strip()
     timeout = str(payload.get("consume_timeout") or "30m").strip()
     lark_cli_bin = str(payload.get("lark_cli_bin") or "lark-cli").strip()
+    raw_turn_start_sync = payload.get("turn_start_sync")
+    if raw_turn_start_sync is not None and not isinstance(raw_turn_start_sync, Mapping):
+        raise TypeError("collector turn_start_sync must be an object")
+    raw_turn_start_sync = (
+        raw_turn_start_sync if isinstance(raw_turn_start_sync, Mapping) else {}
+    )
+    turn_start_sync_enabled = raw_turn_start_sync.get("enabled") is True
+    turn_start_sync_lookback = raw_turn_start_sync.get(
+        "initial_lookback_seconds", 15 * 60
+    )
+    turn_start_sync_overlap = raw_turn_start_sync.get("overlap_seconds", 5)
+    turn_start_sync_page_size = raw_turn_start_sync.get("page_size", 50)
+    for label, value, lower, upper in (
+        (
+            "initial_lookback_seconds",
+            turn_start_sync_lookback,
+            60,
+            TURN_START_SYNC_MAX_LOOKBACK_SECONDS,
+        ),
+        (
+            "overlap_seconds",
+            turn_start_sync_overlap,
+            0,
+            TURN_START_SYNC_MAX_OVERLAP_SECONDS,
+        ),
+        ("page_size", turn_start_sync_page_size, 1, 50),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not lower <= value <= upper
+        ):
+            raise ValueError(f"collector turn_start_sync {label} is invalid")
     if not SERVICE_RE.fullmatch(service_name):
         raise ValueError("service_name must be a lowercase loopx- service token")
     if event_key != SUPPORTED_EVENT_KEY:
@@ -231,6 +266,13 @@ def load_lark_event_collector_config(
         raise ValueError(
             "lark collector profile must match every inbox reply sender_profile"
         )
+    if turn_start_sync_enabled and any(
+        route["inbox"]["material_review"].get("enabled") is not True for route in routes
+    ):
+        raise ValueError(
+            "collector turn_start_sync requires material_review on every route so "
+            "new messages enter an Agent triage lane"
+        )
     return {
         "schema_version": schema_version,
         "enabled": enabled,
@@ -244,6 +286,12 @@ def load_lark_event_collector_config(
         "supervisor": supervisor,
         "consume_timeout": timeout,
         "lark_cli_bin": lark_cli_bin,
+        "turn_start_sync": {
+            "enabled": turn_start_sync_enabled,
+            "initial_lookback_seconds": turn_start_sync_lookback,
+            "overlap_seconds": turn_start_sync_overlap,
+            "page_size": turn_start_sync_page_size,
+        },
         "routes": routes,
     }
 

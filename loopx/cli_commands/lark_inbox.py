@@ -7,6 +7,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..capabilities.issue_fix.provider_hooks import IssueFixReviewerProviderHooks
+from ..control_plane.capability_hooks import (
+    TURN_START_HOOK_RESULT_SCHEMA_VERSION,
+    TurnStartHookRegistration,
+    dispatch_turn_start_hooks,
+)
 from ..control_plane.runtime.goal_project_route import resolve_goal_project_route
 from ..extensions.lark import (
     LARK_COLLECTOR_PERMISSION,
@@ -45,6 +50,7 @@ from ..extensions.lark.routed_inbox import (
     resolve_routed_lark_inbox_config,
     settle_routed_lark_event_inbox_material_review,
 )
+from ..extensions.lark.turn_start_sync import sync_lark_turn_start_inbox
 from ..extensions.runtime import (
     default_extension_state_file,
     resolve_extension_activation,
@@ -319,6 +325,108 @@ def build_lark_operator_inbox_urgency_projector(
         )
 
     return project
+
+
+def build_lark_turn_start_inbox_hook(
+    *,
+    project: str | Path,
+    config_path: str | Path,
+    runtime_root_arg: str | Path | None,
+) -> TurnStartHookRegistration:
+    """Compose the opt-in provider sync behind the shared turn-start phase."""
+
+    def produce() -> dict[str, object]:
+        _resolve_lark_activation(
+            "history-catch-up",
+            runtime_root_arg=(
+                str(runtime_root_arg) if runtime_root_arg is not None else None
+            ),
+        )
+        result = sync_lark_turn_start_inbox(
+            project=project,
+            config_path=config_path,
+        )
+        status = str(result.get("status") or "failed")
+        error_code = result.get("error_code")
+        if error_code in {
+            "provider_contract_error",
+            "inbox_readback_failed",
+            "cursor_readback_failed",
+        }:
+            status = "failed"
+        if status not in {
+            "not_applicable",
+            "observed",
+            "empty",
+            "partial",
+            "unavailable",
+            "failed",
+        }:
+            status = "failed"
+            error_code = "provider_result_unmapped"
+        return {
+            "schema_version": TURN_START_HOOK_RESULT_SCHEMA_VERSION,
+            "hook_id": "lark.turn_start_inbox_sync",
+            "capability_id": "lark-event-inbox",
+            "phase": "turn_start",
+            "status": status,
+            "observation_count": int(result.get("observation_count") or 0),
+            "agent_read_required": bool(
+                int(result.get("observation_count") or 0)
+                and status in {"observed", "partial"}
+            ),
+            "external_reads_performed": (
+                result.get("external_reads_performed") is True
+            ),
+            "local_private_state_mutated": (
+                result.get("local_private_state_mutated") is True
+            ),
+            "private_content_returned": False,
+            "provider_payload_returned": False,
+            "error_code": error_code,
+        }
+
+    return TurnStartHookRegistration(
+        hook_id="lark.turn_start_inbox_sync",
+        capability_id="lark-event-inbox",
+        requested_read_scope=(
+            "provider_group_history",
+            "owner_private_inbox_binding",
+        ),
+        requested_write_scope=(
+            "owner_private_inbox",
+            "owner_private_cursor",
+        ),
+        producer=produce,
+    )
+
+
+def dispatch_goal_lark_turn_start_hooks(
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | Path | None,
+    goal_id: str,
+    agent_id: str | None,
+) -> dict[str, object]:
+    """Resolve one Goal-owned inbox and run its pre-decision sync hook."""
+
+    goal, project, _ = resolve_goal_project_route(
+        registry_path=registry_path,
+        goal_id=goal_id,
+    )
+    config_path = _goal_inbox_config(goal, agent_id=agent_id)
+    registrations = (
+        (
+            build_lark_turn_start_inbox_hook(
+                project=project,
+                config_path=config_path,
+                runtime_root_arg=runtime_root_arg,
+            ),
+        )
+        if config_path
+        else ()
+    )
+    return dispatch_turn_start_hooks(registrations)
 
 
 def build_lark_issue_fix_reviewer_provider_hooks(

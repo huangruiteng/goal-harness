@@ -52,7 +52,10 @@ from ..quota import spend_quota_slot
 from ..state_refresh import refresh_state_run
 from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
 from ..todos import complete_goal_todo, resolve_todo_state_path, update_goal_todo
-from .lark_inbox import build_lark_operator_inbox_urgency_projector
+from .lark_inbox import (
+    build_lark_operator_inbox_urgency_projector,
+    dispatch_goal_lark_turn_start_hooks,
+)
 from .turn_registration import register_turn_commands as register_turn_commands
 from .turn_rendering import (
     render_loopx_turn_execution_markdown as _render_loopx_turn_execution_markdown,
@@ -148,6 +151,12 @@ def handle_turn_command(
             registry_path=registry_path,
             runtime_root_override=runtime_root_arg,
         )
+        turn_start_hook_dispatch = dispatch_goal_lark_turn_start_hooks(
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root,
+            goal_id=args.goal_id,
+            agent_id=args.agent_id,
+        )
         operator_inbox_urgency_projector = build_lark_operator_inbox_urgency_projector(
             runtime_root_arg=runtime_root,
         )
@@ -240,6 +249,10 @@ def handle_turn_command(
             session_binding=session_binding,
             turn_instance_id=args.turn_instance_id,
         )
+        if turn_start_hook_dispatch.get("registered_count") or (
+            turn_start_hook_dispatch.get("failures")
+        ):
+            payload["turn_start_capability_hook_dispatch"] = turn_start_hook_dispatch
         if args.turn_command == "plan":
             if not args.include_transaction_detail:
                 payload.pop("session", None)

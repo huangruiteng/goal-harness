@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 from threading import Event
 
@@ -118,6 +119,15 @@ def test_material_review_projection_is_separate_from_reply_due(tmp_path: Path) -
     assert work_lane_contract_is_operator_inbox_material_review_due(material)
     assert material["drain_limit"] == 3
     assert str(material["drain_command"]).endswith("--limit 3")
+    assert material["semantic_triage_required"] is True
+    assert material["allowed_dispositions"] == [
+        "steer_current_turn",
+        "replan_goal",
+        "record_context",
+        "continue_current_work",
+        "no_follow_up",
+    ]
+    assert "before ordinary work" in str(material["action"])
 
     reply = lark_inbox_reply_due_work_lane_contract(
         _boundary(urgency),
@@ -125,6 +135,14 @@ def test_material_review_projection_is_separate_from_reply_due(tmp_path: Path) -
     )
     assert work_lane_contract_is_lark_inbox_reply_due(reply)
     assert reply["next_lane"] == "operator_inbox_material_review"
+    assert reply["semantic_triage_required"] is True
+    assert reply["allowed_dispositions"] == [
+        "steer_current_turn",
+        "replan_goal",
+        "record_context",
+        "continue_current_work",
+    ]
+    assert "before ordinary work" in str(reply["action"])
 
 
 def test_material_review_no_follow_up_settlement_is_idempotent(tmp_path: Path) -> None:
