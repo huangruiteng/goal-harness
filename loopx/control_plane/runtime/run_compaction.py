@@ -107,6 +107,7 @@ RUN_BASE_COMPACT_FIELDS = (
     "project_map",
     "json_exists",
     "markdown_exists",
+    "usage",
 )
 
 CompactProjection = Callable[[Any], Optional[dict[str, Any]]]
