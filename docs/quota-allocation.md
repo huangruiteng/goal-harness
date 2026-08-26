@@ -373,6 +373,18 @@ agent follows its Todo-detail or task-graph cold-path reference before treating
 the visible slice as exhaustive. See
 [`quota_planning_horizon_v0`](reference/protocols/quota-planning-horizon-v0.md).
 
+Portfolio and horizon do not independently reconstruct the Todo queue. Python
+selects canonical Todo domain-state rows and TypeScript normalizes them once as
+`todo_planning_inventory_v0`. The inventory keeps `planning_state` independent
+from `claim_state`, so an unclaimed runnable item explicitly requires a claim
+before work. `--include-detail agent-todos` exposes the larger bounded
+planning-only lens and points its item details back to `agent_todo_summary`;
+the horizon's `full_todo_list` command reads the complete open agent queue.
+Overflow is reported through completeness counters rather than making the
+read-only quota guard fail. Task graph uses the same canonical Todo rows, while
+extending them with terminal predecessor/evidence rows and remaining an
+agent-neutral read model with separate gate/evidence context.
+
 Blocked candidates retain typed `resolution_bindings` even when another todo is
 runnable. Each binding names the capability, its resolution owner, and the
 exact `blocked_todo_ids`. The interaction contract turns an owner-held binding

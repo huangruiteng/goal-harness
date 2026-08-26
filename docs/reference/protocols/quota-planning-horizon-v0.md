@@ -18,11 +18,17 @@ not silently replace the selected Todo.
 
 - Existing Todo, claim, capability, goal-frontier, and event-ledger contracts
   remain authoritative.
-- Python adapts those already-derived facts into one typed request. It does not
-  infer hierarchy from Todo prose.
-- The TypeScript work-item reducer validates identities, de-duplicates facts,
-  derives typed lineage/resume/route relations, orders context, applies limits,
-  and emits completeness metadata.
+- Python selects one canonical planning source from Todo domain-state rows:
+  `items`, `deferred_items`, `blocker_items`, and `monitor_open_items`. It does
+  not rebuild the source from presentation lanes or infer hierarchy from prose.
+- TypeScript normalizes that source once as `todo_planning_inventory_v0`, with
+  orthogonal planning and claim states, typed relations, action eligibility,
+  and source-completeness metadata. `action_portfolio` and `planning_horizon`
+  are separate lenses over this inventory.
+- `--include-detail agent-todos` exposes a larger planning-only inventory lens
+  beside the bounded Todo summary. `task_graph_projection_v0` reuses the same
+  canonical selector, extends it with terminal predecessor/evidence rows, and
+  remains agent-neutral while adding gate/evidence data.
 - Effect Program transports the completed observation into TurnEnvelope. It
   does not own Todo dependency, resume, or action-selection semantics.
 - `selected_todo` and `action_portfolio` remain the only action-selection
@@ -67,7 +73,8 @@ not silently replace the selected Todo.
       "todo_id": "todo_regression_gate",
       "projection": "todo_detail_cold_path_v0"
     },
-    "agent_todos": "quota should-run --include-detail agent-todos",
+    "agent_todos": "quota should-run --goal-id loopx-meta --agent-id codex-main-control --include-detail agent-todos",
+    "full_todo_list": "todo list --goal-id loopx-meta --role agent --status open --agent-id codex-main-control",
     "task_graph": "status --include-task-graph"
   }
 }
@@ -75,7 +82,10 @@ not silently replace the selected Todo.
 
 ## Bounds And Ordering
 
-The v0 reducer accepts at most 32 source candidates and projects at most:
+The shared inventory accepts at most 128 rows from each adapter lane, retains
+at most 64 normalized Todo items, and reports every overflow as incomplete
+instead of rejecting an otherwise read-only quota decision. The horizon then
+projects at most:
 
 - 5 Todo context items;
 - 8 typed relations;
@@ -90,9 +100,15 @@ ordering helps the agent reconstruct a strategic chain while keeping the
 selected Todo identity stable.
 
 `planning_state` is one of `selected`, `runnable`, `waiting`, `blocked`,
-`scheduled`, or `context`. `context_reasons` explains why a non-selected item
-was retained, for example `related_to_selected`,
-`higher_priority_than_selected`, or `runnable_alternative`.
+`scheduled`, or `context`. It is independent of `claim_state`, which is one of
+`current_agent`, `unclaimed`, or `other_agent`. In particular,
+`planning_state=runnable` plus `claim_state=unclaimed` means that the work can
+advance only after the existing claim flow; the horizon carries
+`claim_required_before_work=true` for selected or runnable unclaimed work.
+`context_reasons`
+explains why a non-selected item was retained, for example
+`related_to_selected`, `higher_priority_than_selected`, or
+`runnable_alternative`.
 
 Every omitted source, candidate, relation, gap, or compacted text field is
 counted. `complete=true` is valid only when all of those counts are zero. A
@@ -100,6 +116,20 @@ consumer must follow `detail_refs` when the answer depends on omitted context;
 it must not treat the five visible items as the entire Goal.
 `source_context_todo_count` counts current open plus deferred Todos; completed
 history is intentionally outside this planning view.
+
+The detail paths have deliberately different scopes:
+
+- `planning_horizon` is the default hot-path summary;
+- `quota should-run ... --include-detail agent-todos` adds
+  `agent_todo_planning_inventory.schema_version=
+  todo_planning_inventory_detail_v0`. It exposes planning/claim state,
+  eligibility flags, relations, and completeness for the larger bounded
+  inventory, while `item_detail_ref=$.agent_todo_summary` avoids duplicating
+  Todo text, scopes, and capabilities;
+- `todo list ... --role agent --status open` reads the complete current Todo
+  source rather than pretending a bounded quota packet is exhaustive;
+- `status --include-task-graph` adds agent-neutral graph, gate, and evidence
+  context.
 
 When the same observation is nested in `loopx_turn_envelope_v0`, the transport
 may replace the repeated `detail_refs` object with
@@ -144,11 +174,19 @@ ordinary hot-path growth limits apply again.
 A conforming implementation must prove:
 
 - the TypeScript reducer owns validation, ordering, de-duplication, and bounds;
-- the Python adapter consumes existing typed facts and creates no second store;
+- the Python adapter consumes canonical Todo state rows and creates no second
+  store or presentation-lane union;
+- portfolio, horizon, and agent-Todo detail consume the same typed inventory;
+- task graph consumes the same canonical Todo selector, plus terminal evidence
+  rows, without acquiring agent-scoped selection or claim authority;
 - the horizon never changes `selected_todo` or action-portfolio eligibility;
+- runnable unclaimed work preserves `claim_required_before_work=true`;
 - typed successor/resume/route relations survive the default compact path;
 - prose-only dependency claims create no relation;
-- truncation and source incompleteness are explicit;
+- source sizes above legacy decoder limits degrade to explicit incompleteness
+  rather than failing quota;
+- truncation and source incompleteness are explicit on both inventory and
+  horizon;
 - the selected Todo detail and optional full task graph remain reachable;
 - full quota and TurnEnvelope action signatures cover the same horizon;
 - deterministic mutation tests reject a missing or producer-drifted horizon

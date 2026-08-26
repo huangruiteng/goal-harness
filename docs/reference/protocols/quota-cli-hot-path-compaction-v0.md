@@ -45,6 +45,16 @@ with v0/v1/v2 action coverage moving to v3. Once v3 is the baseline, ordinary
 growth limits resume. The horizon remains read-only and never replaces
 `selected_todo` or explicit action-portfolio selection.
 
+The hot-path horizon and `--include-detail agent-todos` share the same
+TypeScript-owned `todo_planning_inventory_v0`; they are not aliases. The former
+actively discloses at most five strategic items. The latter adds the larger
+`todo_planning_inventory_detail_v0` lens, including planning state, claim state,
+typed relations, and completeness, while referring to the existing Todo
+summary for repeated item details. A concrete `todo list --goal-id ... --role
+agent --status open --agent-id ...` command remains the complete source read.
+Inventory overflow must become explicit incompleteness, not a quota failure or
+an unbounded default packet.
+
 Repeated vision audits use `$.vision_continuation_audit` as the canonical
 projection. Candidate lists and peer action lists retain counts and point to
 `--include-detail agent-todos`. The complete vision audit is available through

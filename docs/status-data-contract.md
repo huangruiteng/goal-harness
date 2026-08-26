@@ -1310,6 +1310,17 @@ selected Todo. Consumers must use the existing explicit selection re-entry for
 another runnable action and follow `detail_refs` before treating an incomplete
 horizon as exhaustive.
 
+`action_portfolio`, `planning_horizon`, and the explicit agent-Todo detail lens
+derive from one `todo_planning_inventory_v0`. `planning_state` and `claim_state`
+are orthogonal: runnable unclaimed work carries
+`claim_required_before_work=true`, while work claimed by another agent is not
+silently made executable. `quota should-run --include-detail agent-todos`
+exposes the larger bounded `todo_planning_inventory_detail_v0` projection;
+`item_detail_ref=$.agent_todo_summary` avoids copying full Todo payloads. Its
+completeness counters remain authoritative for omissions. Consumers that need
+the complete open source follow `detail_refs.full_todo_list` rather than
+assuming either bounded projection is exhaustive.
+
 Correctly typed future work is handled earlier. A higher-priority
 `continuous_monitor` with a valid future `next_due_at` is not executable; quota
 selects the next ready advancement todo and records the future monitor under

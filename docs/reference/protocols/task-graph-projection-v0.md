@@ -14,6 +14,17 @@ The source of truth remains:
 - quota and status projections;
 - run-history evidence and blocker writebacks.
 
+The graph's Todo nodes are selected from the same canonical domain-state rows
+used to build `todo_planning_inventory_v0`: `items`, `deferred_items`,
+`blocker_items`, and `monitor_open_items`. The graph enables the selector's
+terminal-row extension so completed predecessors and evidence remain visible;
+the planning inventory excludes those rows. This prevents graph, horizon, and
+portfolio consumers from inventing separate visibility-lane unions without
+pretending that every lens has identical scope. It does not make the graph
+agent-scoped: the graph may add gates, evidence, validation, and handoff
+context, but it never assigns `current_agent` claim meaning or owns action
+selection.
+
 The projection may appear under `attention_queue.items[].task_graph_projection`
 in `loopx --format json status --include-task-graph`. Default status output
 keeps this object on the cold path so the dashboard hot path remains within its
