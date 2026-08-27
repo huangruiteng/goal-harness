@@ -456,6 +456,39 @@ def test_unbound_codex_app_ssh_goal_requires_a_guided_turn_before_delivery() -> 
     assert "spend-slot" not in actions[0]
 
 
+def test_unbound_codex_app_ssh_goal_requires_a_guided_turn_before_replan() -> None:
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": GOAL_ID,
+            "agent_identity": {"agent_id": AGENT_ID},
+            "execution_obligation": {
+                "kind": "autonomous_replan_required",
+                "must_attempt_work": True,
+                "delivery_allowed": True,
+            },
+            "replan_action_packet": {
+                "schema_version": "replan_action_packet_v0",
+                "obligation_id": "replan-0000000000000001",
+                "required_outcome": "semantic_delta",
+                "uncovered_frontier": {"required_any_of": ["new_surface"]},
+                "writeback_contract": {},
+                "allowed_terminal": ["blocked"],
+            },
+        },
+        mode="autonomous_replan",
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE
+        ),
+    )
+
+    assert len(actions) == 1
+    assert actions[0].startswith("loopx --format json quota should-run")
+    assert "--runtime-profile codex_app_ssh_goal" in actions[0]
+    assert actions[0].endswith("--begin-turn")
+    assert "refresh-state" not in actions[0]
+    assert "spend-slot" not in actions[0]
+
+
 def test_turn_bound_codex_app_ssh_goal_preserves_visible_goal_settlement() -> None:
     turn_instance_id = "guided-start:native-visible-goal"
 

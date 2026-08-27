@@ -2230,6 +2230,57 @@ def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
     assert _spend_run_count(runtime) == 1
 
 
+def test_unbound_visible_goal_todoless_replan_reenters_through_guided_turn(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_autonomous_replan_fixture(project, runtime, registry_path)
+
+    unbound_rc, unbound = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--runtime-profile",
+        "codex_app_ssh_goal",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--scan-path",
+        str(project),
+    )
+
+    assert unbound_rc == 0, unbound
+    assert unbound["decision"] == "autonomous_replan_required", unbound
+    assert unbound.get("selected_todo") is None, unbound
+    actions = unbound["interaction_contract"]["cli_channel"]["next_cli_actions"]
+    assert len(actions) == 1
+    assert actions[0].endswith("--begin-turn")
+    assert "refresh-state" not in actions[0]
+    assert "spend-slot" not in actions[0]
+
+    bound_rc, bound = _run_generated_cli(
+        actions[0],
+        registry_path=registry_path,
+    )
+
+    assert bound_rc == 0, bound
+    assert bound["decision"] == "autonomous_replan_required", bound
+    assert bound.get("selected_todo") is None, bound
+    obligation_id = bound["replan_action_packet"]["obligation_id"]
+    identity = bound["heartbeat_receipt"]["settlement_identity"]
+    assert identity["binding_kind"] == "autonomous_replan"
+    assert identity["replan_obligation_id"] == obligation_id
+    assert identity["turn_instance_id"].startswith("guided-start:")
+    cli_channel = bound["interaction_contract"]["cli_channel"]
+    assert cli_channel["settlement_plan"]["identity"] == identity
+    assert len(cli_channel["next_cli_actions"]) == 2
+    for command in cli_channel["next_cli_actions"]:
+        assert f"--replan-obligation-id {obligation_id}" in command
+        assert f"--turn-instance-id {identity['turn_instance_id']}" in command
+
+
 def test_todo_bound_autonomous_replan_uses_one_binding_for_refresh_and_spend(
     tmp_path: Path,
 ) -> None:
