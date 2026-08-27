@@ -155,6 +155,11 @@ def test_codex_install_upgrades_managed_loopx_facade(tmp_path: Path) -> None:
     assert "use `codex-ide` for the IDE" not in skill_text
     assert "surface the exact pasteable gate" in skill_text
     assert "follow its exact CLI `interaction_contract` or quota command first" in skill_text
+    assert "treat `--action-kind` as the documented extensible public-safe token" in skill_text
+    assert "do not search the LoopX source for an allowlist" in skill_text
+    assert "never pipe a `--begin-turn` call through `head` or `tail`" in skill_text
+    assert "never rerun `--begin-turn` to recover hidden fields" in skill_text
+    assert "interaction_contract.cli_channel.selection_command" in skill_text
     assert "do not return merely after setup, planning, or claim" not in skill_text
     metadata_text = metadata.read_text(encoding="utf-8")
     assert 'display_name: "LoopX"' in metadata_text
