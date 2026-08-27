@@ -19,6 +19,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -36,9 +37,11 @@ from .authority_core import (
     decide,
 )
 from .head import (
+    HeadMigrationRequired,
     HeadValidationError,
     canonical_head_bytes,
     claim_snapshot_for_todo,
+    evidence_contract_violation,
     validated_head,
 )
 
@@ -90,9 +93,7 @@ _COMMAND_FIELD_SETS = {
         "evidence",
     },
 }
-_EVIDENCE_FIELDS = {"pointer", "digest", "privacy_class"}
 _SUCCESSOR_ID_PATTERN = re.compile(r"^todo_[a-z0-9_-]{3,64}$")
-_EVIDENCE_DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 # Reclaim only takes over once the authority's own clock has seen the lease
 # expired for at least this grace window, bounding clock skew between the
 # superseded holder and the adjudicating authority. Recorded per receipt.
@@ -264,8 +265,40 @@ def sample_work_envelope(
     return envelope
 
 
+def _validated_reclaim_grace(value: Any) -> float:
+    """The grace window is a skew bound: it may only DELAY a takeover.
+
+    A NaN grace makes ``expired_for < grace`` always false so every active
+    lease becomes reclaimable, a negative grace advances the takeover before
+    expiry, and bool is the usual coercion accident - so the configuration
+    boundary rejects everything but a finite non-negative number.
+    """
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(
+            "reclaim_grace_seconds must be a finite non-negative number"
+        )
+    try:
+        grace = float(value)
+    except OverflowError as error:
+        raise ValueError(
+            "reclaim_grace_seconds must be a finite non-negative number"
+        ) from error
+    if not math.isfinite(grace) or grace < 0.0:
+        raise ValueError(
+            "reclaim_grace_seconds must be a finite non-negative number"
+        )
+    return grace
+
+
 class CoordinationAuthorityExecutor:
-    """Apply normalized coordination commands through one provider CAS."""
+    """Apply normalized coordination commands through one provider CAS.
+
+    This executor is the RFC's reference implementation: LoopX's runtime
+    does not construct it yet (coverage-only per the visible governance
+    ledger), and wiring it to a product entry point is a later-stage,
+    owner-gated decision.
+    """
 
     def __init__(
         self,
@@ -278,7 +311,7 @@ class CoordinationAuthorityExecutor:
         self.provider = provider
         self.goal_id = goal_id
         self.now = now
-        self.reclaim_grace_seconds = float(reclaim_grace_seconds)
+        self.reclaim_grace_seconds = _validated_reclaim_grace(reclaim_grace_seconds)
 
     # ---- envelope normalization (RFC section 5) -----------------------------
 
@@ -400,17 +433,11 @@ class CoordinationAuthorityExecutor:
                 "todo completion cannot record both no_followup and a successor"
             )
         if evidence is not None:
-            if not isinstance(evidence, dict) or set(evidence) != _EVIDENCE_FIELDS:
-                raise EnvelopeError("evidence fields do not match v0")
-            if (
-                not isinstance(evidence["pointer"], str)
-                or not evidence["pointer"]
-                or not isinstance(evidence["digest"], str)
-                or _EVIDENCE_DIGEST_PATTERN.fullmatch(evidence["digest"]) is None
-                or not isinstance(evidence["privacy_class"], str)
-                or not evidence["privacy_class"]
-            ):
-                raise EnvelopeError("evidence must carry pointer, digest, privacy_class")
+            # One oracle with head validation: what the boundary refuses,
+            # a stored head can never carry, and vice versa.
+            violation = evidence_contract_violation(evidence)
+            if violation is not None:
+                raise EnvelopeError(violation)
 
     # ---- replay -------------------------------------------------------------
 
@@ -1052,7 +1079,16 @@ class CoordinationAuthorityExecutor:
                 "reason": "coordination_head_uninitialized",
                 "provider_generation": provider_generation,
             }
-        head = validated_head(head, goal_id=self.goal_id)
+        try:
+            head = validated_head(head, goal_id=self.goal_id)
+        except HeadMigrationRequired:
+            # A Stage 2 head is a classification, not a crash: nothing
+            # applies until the explicit migrate_head_v0_to_v1 has run.
+            return {
+                "result": "failed",
+                "reason": "head_schema_migration_required",
+                "provider_generation": provider_generation,
+            }
         fence = self._store_binding_fence(head, provider_generation)
         if fence is not None:
             return fence
@@ -1125,7 +1161,14 @@ class CoordinationAuthorityExecutor:
                     "reason": "coordination_head_missing_after_cas",
                     "provider_generation": latest_generation,
                 }
-            latest = validated_head(latest, goal_id=self.goal_id)
+            try:
+                latest = validated_head(latest, goal_id=self.goal_id)
+            except HeadMigrationRequired:
+                return {
+                    "result": "failed",
+                    "reason": "head_schema_migration_required",
+                    "provider_generation": latest_generation,
+                }
             fence = self._store_binding_fence(latest, latest_generation)
             if fence is not None:
                 return fence
