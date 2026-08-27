@@ -55,20 +55,23 @@ def _build_authority_boundary_table() -> list[dict[str, Any]]:
         {
             "rfc_section": "4 -- Coordination Ledger Shape",
             "proposal": (
-                "loopx_coordination_head_v0: unified aggregate with "
+                "loopx_coordination_head_v1: unified aggregate with "
                 "authority_revision, todo_revision, lease_epoch, "
                 "receipt_index, eligibility projections"
             ),
             "shipped": False,
             "shipped_equivalent": (
-                "loopx.control_plane.coordination head codec + file/NoKV "
-                "providers behind one CAS seam -- coverage-only modules, "
-                "not the runtime source of truth"
+                "loopx.control_plane.coordination head codec + recoverable "
+                "execution reference executor + file/NoKV providers behind "
+                "one CAS seam -- coverage-only modules, not the runtime "
+                "source of truth"
             ),
             "gap": (
                 "Runtime still writes Markdown/lease files; no production "
-                "coordination head document exists, and canonical promotion "
-                "waits on the Stage 3 gates"
+                "coordination head document exists. Stage 3 contract proof is "
+                "complete at the reference boundary; canonical promotion "
+                "still needs migration, writer fencing, authorization, "
+                "provider, rollback, projection, and retention decisions"
             ),
         },
         {

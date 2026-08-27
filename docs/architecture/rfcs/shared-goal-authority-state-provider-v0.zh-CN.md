@@ -211,12 +211,13 @@ owner，新 host 或 extension 也可以新增本地 artifact，而无需修改�
 
 ## 4. 这本协调账里到底放什么
 
-一个 provider key 保存一个 Goal 的 v0 aggregate。以下形状仅作说明：
+一个 provider key 保存一个 Goal 的 aggregate（head schema v1）。以下形状仅作说明：
 
 ```json
 {
-  "schema_version": "loopx_coordination_head_v0",
+  "schema_version": "loopx_coordination_head_v1",
   "goal_id": "shared-rust-review",
+  "store_binding": "nokv:wb-goals:1f2e3d4c...",
   "authority_revision": 43,
   "coordination": {
     "todos": {
@@ -427,8 +428,13 @@ claim 完全相同的组合，新 lease 因此通过同一个真实 holder gate�
 账所有事实：todo 变为持久 `done` 并携带显式 `completion_continuation`（由记录
 字段导出：`no_followup` | `successor` | `active_goal`，两者同置与本地写入一样被
 拒）、lease 退役、声明的 successor 以 open、无人认领、revision 0 的形态继承父
-项执行上下文被创建，可选的 evidence pointer（§1.1 的 opaque `pointer`、
-`digest`、`privacy_class`，绝不是 body）落在完成记录上。持久记录逐字段满足本地
+项执行上下文被创建，可选的 evidence pointer 落在完成记录上。evidence 是一条可
+携带性边界，不是自由文本：`pointer` 必须使用 provider-neutral 的
+`artifact://<public|private>/<opaque-artifact-id>` URI 形状（绝不是主机文件系统
+路径、provider URL、query 或 credential），URI 内的隐私 namespace 必须与同层
+`privacy_class` 相等，`digest` 是 sha256 内容摘要，`privacy_class` 是闭合词表
+`public | private`——按 §1.1，绝不是 body；命令边界与 head 校验通过同一个共享
+oracle 执行这条合同。持久记录逐字段满足本地
 durable-completion 投影 seam，两个世界读同一份真相。
 
 ### 5.6 stale-fence 规则
@@ -508,9 +514,10 @@ authority 继续负责另外两个版本域与 document 内的 receipt。
 的 `expires_at`。调用方对时间的看法只是请求动机，绝不是证据；核心保持无时钟，
 只接收裁决后的 active/expired 结论。renew、release、complete 要求裁决时 lease
 活跃。reclaim 额外要求 lease 已过期至少一个可配置的宽限窗，其下限是部署内端点
-间的最大预期时钟偏差；生效的宽限值是 executor 声明的参数，而正确性从不依赖
-它——即使自认还活着的持有者也会被 reclaim 铸出的 epoch 栅栏挡住，偏差只可能推迟
-接管，绝不可能弄脏接管。又因续约推进 `todo_revision`（5.2 节），有效期同样被
+间的最大预期时钟偏差；生效的宽限值是 executor 声明的参数，且配置边界本身
+fail-closed：只接受有限、非负的数值，因为 NaN、负数或布尔宽限会把接管提前而不
+是推迟。正确性从不依赖宽限值——即使自认还活着的持有者也会被 reclaim 铸出的
+epoch 栅栏挡住，偏差只可能推迟接管，绝不可能弄脏接管。又因续约推进 `todo_revision`（5.2 节），有效期同样被
 revision 覆盖，reclaim 借并发续约的 rebase 穿越通道被双重关死。
 
 store-lineage 绑定围栏关闭 Stage 2 状态中量化过的 restore 隐患：仅靠
@@ -525,6 +532,19 @@ reload 后复查。restore 因此保存冻结字节与血统而不授予在场�
 file 存储目录的逐字节拷贝会连身份文件一起拷走，故 file provider 的围栏只在拷贝
 排除身份文件时才检测得到迁移；NoKV 的化身身份没有这个缺口，是共享部署的权威
 围栏。
+
+加入绑定是一次 schema 变更，不是重释义：head 携带
+`loopx_coordination_head_v1`，而 legacy `loopx_coordination_head_v0` 文档
+（Stage 2 的形状，没有 `store_binding`）被分类为
+`head_schema_migration_required`——typed 失败，绝不是未分类的校验崩溃，也绝不
+会被当作当前文档静默读取。唯一升级路径是显式的 `migrate_head_v0_to_v1` 操作：
+operator 亲证经其评审的存储自身身份（对确认为权威血统的存储调用
+`provider.store_identity()`），再经同一 CAS 写回迁移后的 head。绑定被刻意设计
+为绝不从"head 恰好经由哪个 provider 载入"推断——自动绑定会让 v0 存储的任何恢复
+拷贝为自己授权，而这正是该围栏要防止的捕获。迁移只识别 Stage 2 writer 实际可
+产出的子集：精确 v0 字段集的 `open` todo 与 `claim_work` receipt。旧 v0 validator
+没有钉死 todo status 词表；未知 status 或挂在 v0 token 下的 Stage 3-only 字段因此
+按需人工修复的 corruption fail closed，不会被 grandfather 成新权威。
 
 ## 7. 回执先全部保留，压缩以后再谈
 
@@ -669,6 +689,7 @@ history、quota、scheduler 或 evidence 的通用存储抽象，这些账继续
 
 #### Stage 1 Part 2 边界
 
+Provider-neutral 的纯 authority core 已通过 #3410 合入 `main`。
 这一切片只做行为保持的抽取：把现有 writer 已经执行的 todo lifecycle、task-lease
 lifecycle 与 `handoff_mode` 规则收敛进纯决策 core。Markdown goal state 与
 task-lease 文件仍是 canonical。此次抽取不会为目前没有 revision publisher 的 todo、
@@ -694,8 +715,8 @@ Stage 2 的 aggregate 与 provider shadow。该 aggregate 必须把 `handoff_mod
 lineage，却不会因此获得当前权威；把恢复状态晋升为 live authority head，必须经过
 显式的 lineage 与 binding fence。
 
-File-backed provider shadow 属于 Stage 2；其第一个切片与证据记录在下方的
-Stage 2 状态小节。
+File-backed provider shadow 属于 Stage 2；其第一个切片已通过 #3529 合入
+`main`，证据记录在下方的 Stage 2 状态小节。
 
 完成续接（continuation）的持久化读回
 （`durable_completion.py`：`read_persisted_todo_record` /
@@ -708,7 +729,7 @@ provider-first，且不改变下述 typed outcome 合同。
 
 #### Stage 2 切片状态（2026-08-23）
 
-第一个 Stage 2 切片已经以增量方式存在于本分支：
+第一个 Stage 2 切片已通过 #3529 以增量方式合入 `main`：
 
 - `loopx.control_plane.coordination.head`：`loopx_coordination_head_v0`
   aggregate 编解码。校验对 executor 后续无条件解引用的每个字段都是封闭
@@ -806,6 +827,25 @@ reclaim/栅栏/completion 链在重开的存储上走完。时钟边界测试逐
   储 manifest（FileBlobStore duplicate slot），重开永不成功——两种情况下上层协
   调语义保持正确（无假权威），但可用性在任何生产 canary 前依赖这两处修复。
 
+评审驱动的加固（2026-08-27）：reclaim 宽限配置边界 fail-closed（§6.4；此前
+NaN 或负宽限可夺走活跃 lease）、evidence pointer 收紧为带隐私 namespace 的
+`artifact://` URI 加闭合词表（§5.5；此前主机路径或隐私错配可持久进共享 head）、
+head schema 版本化
+为 `loopx_coordination_head_v1` 并附显式 v0 迁移路径（§6.4；此前 Stage 2 head
+以未分类方式失败）。
+该迁移现在会用 retain-all receipts 重建 Stage 2 的单命令历史：live claim 必须与
+保留的 actor、todo revision、lease id、epoch、expiry 及连续 authority revision
+序列逐项一致。部分损坏或被编辑的 v0 head 因此会按 corruption fail closed，而不会
+获得新 store binding、重用 epoch，或授权一个无 receipt 证明的 holder。
+
+交付边界，明确声明：本切片是 RFC 的参考实现，附确定性与 live 示例证据。尚无
+LoopX 生产入口构造该 executor——这些模块在 visible governance 台账中属
+coverage-only。PR #3669 请求 owner 显式接受这一边界；在该决定产生前，产品 wiring
+仍是合并门禁。真实 caller 依赖下文经评审的 shared-mode migration、本地 writer
+围栏、authorization publisher、provider binding、projection 翻转、rollback 与
+retention 决策，不能用一个会制造第二 writer 的诊断 CLI 代替。本状态节声明的是已
+证明的合同，不是已 ship 的生产能力。
+
 ### P0：合同与 deterministic proof
 
 - 本 ownership matrix 与显式 shared-mode boundary；
@@ -817,15 +857,11 @@ reclaim/栅栏/completion 链在重开的存储上走完。时钟边界测试逐
 - 在所声明证据边界内的 A/B/A、identity mismatch、crash window、eligibility、
   privacy 与 no-GC 检查。
 
-### 后续 runtime qualification 与需 review 的切片
+### 后续 runtime promotion 与需 review 的切片
 
-- Lease renewal、显式 release、过期 lease reclaim 与 stale-fence writeback rejection；
-  production shared mode 前必须完成这些能力；
-- durable completion continuation projection
-  （`successor | no_followup | active_goal`），带 fail-closed 矛盾规则
-  （`no_followup` + successors、悬挂的 declared successor），并由 provider 以相同
-  语义复现；
-- atomic `complete_todo_with_successor` 与 accepted evidence pointer；
+- 显式 shared-mode migration 与 rollback/export、本地 writer 围栏、provider
+  binding、production authorization-projection publisher，以及 provider-first 的
+  status/completion projection；
 - transfer 与受限 delegated assignment；
 - 经 Agent IM 的 delivery/wake integration；
 - 独立 run-history synchronization 与 artifact storage；
@@ -855,11 +891,14 @@ reclaim/栅栏/completion 链在重开的存储上走完。时钟边界测试逐
 Reference provider 与 probe 位于
 `examples/nokv-shadow-provider/`，并有
 [配套证据文档](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md)。本 PR 的
-deterministic candidate 只证明 claim/receipt core：state 与 receipt 的 same-CAS、
-并发 claim、A/B/A 原始 receipt 重放、request-digest mismatch、crash boundary 恢复，
-以及版本域相互独立的示例。它不实现或认证 lease renewal/release/reclaim、
-stale-fence writeback、production authorization-projection publisher、保留 receipt
-的 compaction、默认模式 parity、shared-mode migration 或真实 NoKV restart/recovery。
+deterministic candidate 证明 claim/receipt core 与 Stage 3 reference lifecycle：
+state 与 receipt 的 same-CAS、并发 claim、A/B/A 原始 receipt 重放、
+renew/release/过期 reclaim、stale-fence writeback rejection、原子
+completion/continuation、request-digest mismatch、时钟边界、血统绑定，以及版本域
+相互独立。声明的单节点 live 范围还资格化 file/NoKV parity、restart receipt replay
+与真实 restore-lineage fence。它不实现或认证 production authorization-projection
+publisher、保留 receipt 的 compaction、默认模式 parity、产品 shared-mode
+migration/promotion、service recovery 或 HA。
 因此，
 `python3 examples/nokv-shadow-provider/probes.py contract` 通过并不表示上面的完整 P0
 验收门通过。历史 latency 或 fault 结果只具有参考意义，不构成 durability、recovery、

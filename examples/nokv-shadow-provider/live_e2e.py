@@ -1,4 +1,4 @@
-"""Repeatable live Stage-2 slice: production executor over file and NoKV providers.
+"""Repeatable live Stage-3 lifecycle over file and NoKV providers.
 
 This is the bounded live qualification the direction tracker asks for before
 any provider promotion: the SAME invariant scenarios run against the

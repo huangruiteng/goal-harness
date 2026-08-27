@@ -253,12 +253,13 @@ and `loopx/pi_goal_mode/pi-goal-loop-runtime.mjs`.
 
 ## 4. What Goes Into This Coordination Ledger
 
-One provider key stores one goal's v0 aggregate. The illustrative shape is:
+One provider key stores one goal's aggregate (head schema v1). The illustrative shape is:
 
 ```json
 {
-  "schema_version": "loopx_coordination_head_v0",
+  "schema_version": "loopx_coordination_head_v1",
   "goal_id": "shared-rust-review",
+  "store_binding": "nokv:wb-goals:1f2e3d4c...",
   "authority_revision": 43,
   "coordination": {
     "todos": {
@@ -506,9 +507,15 @@ from the recorded fields (`no_followup` | `successor` | `active_goal`,
 with both-set combinations refused exactly like the local write), the
 lease retires, declared successors are created as open, unclaimed,
 revision-zero todos inheriting the parent's execution context, and the
-optional evidence pointer - an opaque `pointer`, `digest`, and
-`privacy_class` per Section 1.1, never a body - lands on the completed
-record. The persisted record satisfies the local durable-completion
+optional evidence pointer lands on the completed record. Evidence is a
+portability boundary, not free text: the `pointer` must use the
+provider-neutral `artifact://<public|private>/<opaque-artifact-id>` URI
+shape (never a host filesystem path, provider URL, query, or credential),
+the URI privacy namespace must equal the sibling `privacy_class`, the
+`digest` must be a sha256 content digest, and `privacy_class` is the closed
+vocabulary `public | private` - per Section 1.1, never a body. The command
+boundary and head validation enforce this through one shared oracle. The
+persisted record satisfies the local durable-completion
 projection seam field for field, so both worlds read one truth.
 
 ### 5.6 The stale-fence rule
@@ -600,10 +607,13 @@ Renewal, release, and completion require the lease to be active at
 adjudication time. Reclaim additionally requires the lease to have been
 expired for at least a configurable grace window whose lower bound is the
 maximum expected clock skew between endpoints in the deployment; the grace
-in force is the executor's declared parameter, and correctness never
-depends on it - even a holder that believes itself alive is fenced by the
-epoch the reclaim minted, so skew can only delay a takeover, never corrupt
-one. Because renewal advances `todo_revision` (Section 5.2), the validity
+in force is the executor's declared parameter, and the configuration
+boundary is itself fail-closed: only a finite, non-negative number is
+accepted, because a NaN, negative, or boolean grace would advance a
+takeover instead of delaying it. Correctness never
+depends on the grace value - even a holder that believes itself alive is
+fenced by the epoch the reclaim minted, so skew can only delay a takeover,
+never corrupt one. Because renewal advances `todo_revision` (Section 5.2), the validity
 interval is also revision-covered, closing the rebase path a reclaim could
 otherwise ride across a concurrent renewal.
 
@@ -625,6 +635,24 @@ store directory copies the identity file with it, so the file provider's
 fence detects relocation only when the identity file is excluded from the
 copy; the NoKV incarnation identity has no such gap and is the
 authoritative fence for shared deployments.
+
+Adding the binding is a schema change, not a reinterpretation: heads carry
+`loopx_coordination_head_v1`, and a legacy `loopx_coordination_head_v0`
+document (the Stage 2 shape without `store_binding`) is classified as
+`head_schema_migration_required` - a typed failure, never an unclassified
+validation crash, and never silently readable as current. The only upgrade
+path is the explicit `migrate_head_v0_to_v1` operation: an operator attests
+the reviewed store's own identity (`provider.store_identity()` on the store
+they have verified is the authoritative lineage) and writes the migrated
+head back through the same CAS. The binding is deliberately never inferred
+from whichever provider a head happens to be loaded through - an automatic
+binding would let any restored copy of a v0 store authorize itself, which
+is the exact capture this fence exists to prevent. Migration recognizes only
+the Stage 2 writer's actual output subset: `open` todo records and
+`claim_work` receipts with the exact v0 field sets. The old v0 validator did
+not close the todo status vocabulary; unknown status values and Stage 3-only
+fields under a v0 token are therefore treated as corruption requiring manual
+repair, not grandfathered into new authority.
 
 ## 7. Keep Every Receipt First; Compact Later
 
@@ -802,6 +830,7 @@ evidence; those ledgers retain the owners defined in Section 3.
 
 #### Stage 1 Part 2 boundary
 
+The provider-neutral pure authority core is merged on `main` through #3410.
 This slice is a behavior-preserving extraction of a pure decision core for the
 todo lifecycle, task-lease lifecycle, and `handoff_mode` rules that the current
 writers already enforce. Markdown goal state and task-lease files remain
@@ -830,8 +859,9 @@ independent version domains. Likewise, a restore may preserve frozen bytes and
 lineage without granting current authority: promoting restored state to the
 live authority head requires an explicit lineage and binding fence.
 
-The file-backed provider shadow is Stage 2; its first slice and the evidence
-behind it are recorded in the Stage 2 status subsection below.
+The file-backed provider shadow is Stage 2; its first slice is merged on
+`main` through #3529, and the evidence behind it is recorded in the Stage 2
+status subsection below.
 
 Durable completion continuation read-back
 (`durable_completion.py`: `read_persisted_todo_record` /
@@ -846,7 +876,7 @@ flips to provider-first without changing the typed outcome contract below.
 
 #### Stage 2 slice status (2026-08-23)
 
-The first Stage 2 slice exists on this branch, additively:
+The first Stage 2 slice is merged on `main` through #3529, additively:
 
 - `loopx.control_plane.coordination.head`: the `loopx_coordination_head_v0`
   aggregate codec. Validation is closed-set and fail-closed for every field
@@ -982,6 +1012,31 @@ Measured gates, updated:
   authority), but availability depends on these fixes before any
   production canary.
 
+Review-driven hardening (2026-08-27): the reclaim grace configuration
+boundary is fail-closed (Section 6.4; a NaN or negative grace could
+previously take an active lease), evidence uses a privacy-bound
+`artifact://` URI with a closed vocabulary
+(Section 5.5; a host path or privacy mismatch could previously persist into
+the shared head), and the head schema is versioned as
+`loopx_coordination_head_v1` with the explicit v0 migration path
+(Section 6.4; a Stage 2 head previously failed unclassified).
+That migration now reconstructs the Stage 2 single-command history from its
+retain-all receipts: a live claim must match the retained actor, todo revision,
+lease id, epoch, expiry, and contiguous authority revision sequence. A partial
+or edited v0 head therefore fails as corruption instead of gaining a new store
+binding, reusing an epoch, or authorizing an unproved holder.
+
+Delivery boundary, stated explicitly: this slice is the RFC's reference
+implementation with deterministic and live-example evidence. No LoopX
+production entry point constructs the executor yet - the modules are
+coverage-only in the visible governance ledger. PR #3669 asks the owner to
+accept that boundary explicitly; absent that decision, production wiring is
+still a merge gate. A real caller requires the reviewed shared-mode migration,
+local-writer fence, authorization publisher, provider binding, projection
+flip, rollback, and retention decisions below - not a diagnostic CLI that
+creates a second writer. This status section claims proven contracts, not a
+shipped production capability.
+
 ### P0: contract and deterministic proof
 
 - this ownership matrix and explicit shared-mode boundary;
@@ -994,15 +1049,11 @@ Measured gates, updated:
 - A/B/A, identity-mismatch, crash-window, eligibility, privacy, and no-GC
   checks within the stated evidence boundary.
 
-### Later runtime qualification and reviewed slices
+### Later runtime promotion and reviewed slices
 
-- lease renewal, explicit release, expired-lease reclaim, and stale-fence
-  writeback rejection, all required before production shared mode;
-- durable completion continuation projection
-  (`successor | no_followup | active_goal`) with fail-closed contradiction
-  rules (`no_followup` + successors, dangling declared successor), reproduced
-  by the provider with identical semantics;
-- atomic `complete_todo_with_successor` and accepted evidence pointers;
+- an explicit shared-mode migration and rollback/export operation, local
+  writer fencing, provider binding, a production authorization-projection
+  publisher, and provider-first status/completion projections;
 - transfer and restricted delegated assignment;
 - delivery/wake integration through Agent IM;
 - independent run-history synchronization and artifact storage;
@@ -1036,13 +1087,16 @@ The reference provider and probes live in
 `examples/nokv-shadow-provider/`,
 with a companion
 [`evidence document`](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md).
-The deterministic candidate in this PR proves only the claim/receipt core:
-same-CAS state plus receipt, competing claims, A/B/A original-receipt replay,
-request-digest mismatch, crash-boundary recovery, and distinct version-domain
-examples. It does not implement or qualify lease renewal/release/reclaim,
-stale-fence writeback, a production authorization-projection publisher,
-receipt-preserving compaction, default-mode parity, shared-mode migration, or
-live NoKV restart/recovery. Passing
+The deterministic candidate in this PR proves the claim/receipt core plus the
+Stage 3 reference lifecycle: same-CAS state plus receipt, competing claims,
+A/B/A original-receipt replay, renew/release/expired reclaim, stale-fence
+writeback rejection, atomic completion/continuation, request-digest mismatch,
+clock boundaries, lineage binding, and distinct version domains. The stated
+single-node live scope additionally qualifies file/NoKV parity, restart receipt
+replay, and a real restore-lineage fence. It does not implement or qualify a
+production authorization-projection publisher, receipt-preserving compaction,
+default-mode parity, product shared-mode migration/promotion, service recovery,
+or HA. Passing
 `python3 examples/nokv-shadow-provider/probes.py contract` is therefore not a
 claim that the complete P0 acceptance gate above passes. Historical latency or
 fault results are informative only; they are not a durability, recovery, HA,
