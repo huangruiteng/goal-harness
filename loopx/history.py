@@ -118,10 +118,13 @@ def write_reserved_run_artifacts(
     payload["index_path"] = str(index_path)
     if isinstance(record.get("usage"), dict):
         payload["usage"] = dict(record["usage"])
-    json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    json_path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
     markdown_path.write_text(render_markdown(payload) + "\n", encoding="utf-8")
     with index_path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+        f.write(json.dumps(index_record, ensure_ascii=False, allow_nan=False) + "\n")
 
 
 def validate_goal_id_path_segment(goal_id: str) -> str:

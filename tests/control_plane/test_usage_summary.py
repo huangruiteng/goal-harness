@@ -91,6 +91,23 @@ def test_collect_usage_for_run_fails_closed_without_schema_version() -> None:
         )
 
 
+def test_collect_usage_for_run_fails_closed_on_non_finite_cost() -> None:
+    with pytest.raises(UsageRowError, match="cost_usd must be finite"):
+        collect_usage_for_run({"usage": _usage(cost_usd=float("nan"))})
+
+
+def test_build_usage_summary_fails_closed_on_non_finite_persisted_cost() -> None:
+    # A non-finite value that somehow reached a persisted row must abort
+    # aggregation, never propagate into summary totals.
+    run = _run(
+        "g1",
+        generated_at=datetime.now(timezone.utc),
+        usage=_usage(cost_usd=float("inf")),
+    )
+    with pytest.raises(UsageRowError, match="cost_usd must be finite"):
+        build_usage_summary({"runs": [run]}, parse_timestamp=_identity_parse)
+
+
 def test_collect_usage_for_run_normalizes_fields() -> None:
     sample = collect_usage_for_run({"usage": _usage()})
     assert sample == UsageSample(
