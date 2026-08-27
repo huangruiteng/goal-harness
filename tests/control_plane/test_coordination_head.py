@@ -1,4 +1,4 @@
-"""The RFC ``loopx_coordination_head_v0`` aggregate: schema, canonical bytes, adapters.
+"""The RFC ``loopx_coordination_head_v1`` aggregate: schema, canonical bytes, adapters.
 
 Stage 2 slice: the head is the one CAS document a coordination provider stores.
 This file pins the aggregate contract before any executor logic exists.
@@ -66,7 +66,7 @@ def head() -> dict:
 
 def test_bootstrap_head_matches_rfc_shape() -> None:
     built = head()
-    assert built["schema_version"] == HEAD_SCHEMA_VERSION == "loopx_coordination_head_v0"
+    assert built["schema_version"] == HEAD_SCHEMA_VERSION == "loopx_coordination_head_v1"
     assert built["goal_id"] == "goal-a"
     assert built["handoff_mode"] == "hard_lease"
     assert built["store_binding"] == "test:store"
@@ -138,6 +138,10 @@ def test_bootstrap_rejects_bool_eligibility_revision() -> None:
 
 def leased_head() -> dict:
     built = head()
+    built["coordination"]["todos"]["todo-1"].update(
+        claimed_by="agent-a",
+        last_lease_epoch=7,
+    )
     built["coordination"]["leases"]["todo-1"] = {
         "lease_id": "lease_abc",
         "owner": "agent-a",
@@ -171,6 +175,35 @@ def test_validated_head_rejects_corrupt_lease_records(mutate, match) -> None:
     assert validated_head(leased_head(), goal_id="goal-a")
     broken = leased_head()
     mutate(broken["coordination"]["leases"]["todo-1"])
+    with pytest.raises(HeadValidationError, match=match):
+        validated_head(broken, goal_id="goal-a")
+
+
+@pytest.mark.parametrize(
+    ("corruption", "match"),
+    [
+        ("missing_lease", "claimed todo.*active lease"),
+        ("unclaimed_with_lease", "unclaimed todo.*active lease"),
+        ("owner_mismatch", "owner.*claimed_by"),
+        ("epoch_mismatch", "lease_epoch.*watermark"),
+    ],
+)
+def test_validated_head_binds_claim_to_its_live_lease(
+    corruption: str,
+    match: str,
+) -> None:
+    broken = leased_head()
+    todo_record = broken["coordination"]["todos"]["todo-1"]
+    lease_record = broken["coordination"]["leases"]["todo-1"]
+    if corruption == "missing_lease":
+        del broken["coordination"]["leases"]["todo-1"]
+    elif corruption == "unclaimed_with_lease":
+        todo_record["claimed_by"] = None
+    elif corruption == "owner_mismatch":
+        lease_record["owner"] = "agent-b"
+    else:
+        todo_record["last_lease_epoch"] = 6
+
     with pytest.raises(HeadValidationError, match=match):
         validated_head(broken, goal_id="goal-a")
 

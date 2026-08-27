@@ -21,7 +21,7 @@ from loopx.control_plane.coordination.file_provider import (
 
 def head(revision: int = 0) -> dict:
     return {
-        "schema_version": "loopx_coordination_head_v0",
+        "schema_version": "loopx_coordination_head_v1",
         "goal_id": "goal-a",
         "handoff_mode": "hard_lease",
         "store_binding": "test:store",

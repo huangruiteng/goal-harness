@@ -12,7 +12,9 @@ the store-lineage binding fence, and the aggregate writeback.
 from __future__ import annotations
 
 import copy
+import json
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +24,14 @@ from loopx.control_plane.coordination.executor import (
     sample_claim_envelope,
     sample_work_envelope,
 )
-from loopx.control_plane.coordination.head import bootstrap_head, validated_head
+from loopx.control_plane.coordination.head import (
+    HeadMigrationRequired,
+    HeadValidationError,
+    bootstrap_head,
+    head_digest,
+    migrate_head_v0_to_v1,
+    validated_head,
+)
 from loopx.control_plane.todos.durable_completion import (
     project_durable_completion_outcome,
 )
@@ -423,7 +432,7 @@ def complete_command(*, revision, fence, no_followup=False, successors=(),
 def test_complete_with_successor_is_one_atomic_transition() -> None:
     provider, clock, executor, fence = claimed_fixture()
     evidence = {
-        "pointer": "artifact://runs/run-1/report",
+        "pointer": "artifact://public/runs/run-1/report",
         "digest": "sha256:" + "a" * 64,
         "privacy_class": "public",
     }
@@ -685,3 +694,353 @@ def test_full_lifecycle_chain_with_exact_receipt_replay() -> None:
     for operation_id, original in replays.items():
         entry = head["receipt_index"][operation_id]["original_receipt"]
         assert entry == original["original_receipt"], operation_id
+
+
+# ---- reclaim grace configuration boundary -----------------------------------
+
+
+def test_illegal_reclaim_grace_is_rejected_at_construction() -> None:
+    # NaN makes `expired_for < grace` always false (every active lease
+    # becomes reclaimable); negative grace advances the takeover before
+    # expiry; bool is the classic coercion accident. All fail closed.
+    provider = FakeProvider()
+    for bad in (
+        float("nan"), float("inf"), float("-inf"), -1, -0.001, True, False,
+        "30", None, 10**400,
+    ):
+        with pytest.raises(ValueError):
+            executor_for(provider, Clock(), reclaim_grace_seconds=bad)
+
+
+def test_zero_grace_is_legal_but_never_reclaims_an_active_lease() -> None:
+    provider, clock, executor, fence = claimed_fixture(ttl=600)
+    zero = executor_for(provider, clock, reclaim_grace_seconds=0)
+    # The clock has not advanced: the 600s lease is fully active, and the
+    # smallest accepted grace still refuses the takeover.
+    grab = verb(zero, "agent-b", "op-grab-active", reclaim_command(revision=8))
+    assert grab["result"] == "rejected"
+    assert grab["reason"] == "lease_not_reclaimable"
+    assert head_of(provider)["coordination"]["leases"]["todo-1"]["owner"] == "agent-a"
+
+
+# ---- evidence portability boundary ------------------------------------------
+
+
+GOOD_DIGEST = "sha256:" + "a" * 64
+
+
+def test_evidence_rejects_host_paths_and_unknown_privacy_classes() -> None:
+    provider, clock, executor, fence = claimed_fixture()
+    rejected = [
+        # The reviewer's exact reproduction: an absolute local path with a
+        # typo'd privacy class must never enter the shared head.
+        {"pointer": "/private/example/secret.log", "digest": GOOD_DIGEST,
+         "privacy_class": "publci"},
+        {"pointer": "/private/example/secret.log", "digest": GOOD_DIGEST,
+         "privacy_class": "public"},
+        {"pointer": "file:///private/example/secret.log",
+         "digest": GOOD_DIGEST, "privacy_class": "private"},
+        {"pointer": "FILE:///etc/passwd", "digest": GOOD_DIGEST,
+         "privacy_class": "private"},
+        {"pointer": "c:\\runs\\report.log", "digest": GOOD_DIGEST,
+         "privacy_class": "public"},
+        {"pointer": "runs/report.log", "digest": GOOD_DIGEST,
+         "privacy_class": "public"},
+        {"pointer": "~/report.log", "digest": GOOD_DIGEST,
+         "privacy_class": "public"},
+        {"pointer": "artifact://public/runs/run-1/report", "digest": GOOD_DIGEST,
+         "privacy_class": "PUBLIC"},
+        {"pointer": "artifact://public/runs/run-1/report", "digest": GOOD_DIGEST,
+         "privacy_class": "internal"},
+        {"pointer": "artifact://public/runs/run-1/report", "digest": GOOD_DIGEST,
+         "privacy_class": ""},
+    ]
+    for evidence in rejected:
+        with pytest.raises(EnvelopeError):
+            verb(executor, "agent-a", "op-bad-evidence", complete_command(
+                revision=8, fence=fence, evidence=evidence,
+            ))
+    # Nothing above may have landed: the todo is still open and claimed.
+    head = head_of(provider)
+    assert head["coordination"]["todos"]["todo-1"]["status"] == "open"
+
+    accepted = verb(executor, "agent-a", "op-good-evidence", complete_command(
+        revision=8, fence=fence, no_followup=True, evidence={
+            "pointer": "artifact://private/nokv/wb-goals/goal-a/report",
+            "digest": GOOD_DIGEST, "privacy_class": "private",
+        },
+    ))
+    assert accepted["result"] == "applied", accepted
+
+
+def test_head_with_a_host_path_evidence_pointer_fails_closed() -> None:
+    provider, clock, executor, fence = claimed_fixture()
+    done = verb(executor, "agent-a", "op-done-evidence", complete_command(
+        revision=8, fence=fence, no_followup=True, evidence={
+            "pointer": "artifact://public/runs/run-1/report",
+            "digest": GOOD_DIGEST, "privacy_class": "public",
+        },
+    ))
+    assert done["result"] == "applied", done
+    head = head_of(provider)
+    validated_head(head, goal_id="goal-a")
+    # The boundary and head validation are one oracle: a pointer the
+    # envelope refuses can never validate out of a stored head either.
+    corrupted = copy.deepcopy(head)
+    corrupted["coordination"]["todos"]["todo-1"]["evidence"]["pointer"] = (
+        "/private/example/secret.log"
+    )
+    with pytest.raises(HeadValidationError):
+        validated_head(corrupted, goal_id="goal-a")
+
+
+def test_evidence_pointer_binds_its_declared_privacy_class() -> None:
+    provider, clock, executor, fence = claimed_fixture()
+    rejected = [
+        # An arbitrary URI scheme is not a reviewed artifact contract.
+        {"pointer": "https://localhost/private/report", "privacy_class": "public"},
+        {"pointer": "nokv://private-workbench/secret", "privacy_class": "public"},
+        {"pointer": "artifact:/etc/passwd", "privacy_class": "private"},
+        # The URI's typed privacy namespace and the sibling enum must agree.
+        {"pointer": "artifact://private/runs/secret", "privacy_class": "public"},
+        {"pointer": "artifact://public/runs/report", "privacy_class": "private"},
+        # Opaque ids stay bounded and cannot smuggle traversal or URI metadata.
+        {"pointer": "artifact://public/../secret", "privacy_class": "public"},
+        {"pointer": "artifact://public/report?format=json", "privacy_class": "public"},
+    ]
+    for index, item in enumerate(rejected):
+        with pytest.raises(EnvelopeError):
+            verb(
+                executor,
+                "agent-a",
+                f"op-evidence-privacy-{index}",
+                complete_command(
+                    revision=8,
+                    fence=fence,
+                    evidence={"digest": GOOD_DIGEST, **item},
+                ),
+            )
+
+    for index, evidence in enumerate(
+        (
+            {
+                "pointer": "artifact://public/runs/run-1/report",
+                "digest": GOOD_DIGEST,
+                "privacy_class": "public",
+            },
+            {
+                "pointer": "artifact://private/nokv/wb-goals/goal-a/report",
+                "digest": GOOD_DIGEST,
+                "privacy_class": "private",
+            },
+        )
+    ):
+        isolated_provider, isolated_clock, isolated_executor, isolated_fence = (
+            claimed_fixture()
+        )
+        accepted = verb(
+            isolated_executor,
+            "agent-a",
+            f"op-evidence-valid-{index}",
+            complete_command(
+                revision=8,
+                fence=isolated_fence,
+                no_followup=True,
+                evidence=evidence,
+            ),
+        )
+        assert accepted["result"] == "applied", accepted
+
+
+# ---- legacy v0 heads and the explicit store-binding migration ---------------
+
+
+def legacy_v0_head() -> dict:
+    """The exact Stage 2 shape: today's head minus the store binding."""
+
+    head = bootstrap_head(
+        "goal-a", {"todo-1": todo()}, store_binding="test:store",
+    )
+    del head["store_binding"]
+    head["schema_version"] = "loopx_coordination_head_v0"
+    return head
+
+
+def frozen_stage2_claimed_head() -> dict:
+    fixture_path = (
+        Path(__file__).parents[1]
+        / "fixtures"
+        / "coordination_head_stage2_v0_claimed.json"
+    )
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
+
+
+def test_a_legacy_v0_head_is_classified_not_crashed() -> None:
+    provider = FakeProvider()
+    assert provider.compare_and_put(0, legacy_v0_head())["result"] == "applied"
+    executor = executor_for(provider, Clock())
+    outcome = claim(executor, "agent-a", "todo-1", "op-on-legacy")
+    assert outcome == {
+        "result": "failed",
+        "reason": "head_schema_migration_required",
+        "provider_generation": 1,
+    }
+    with pytest.raises(HeadMigrationRequired):
+        validated_head(legacy_v0_head(), goal_id="goal-a")
+
+
+def test_only_a_valid_stage2_v0_head_is_classified_as_migratable() -> None:
+    valid = legacy_v0_head()
+    with pytest.raises(HeadMigrationRequired):
+        validated_head(valid, goal_id="goal-a")
+
+    corruptions = []
+    wrong_goal = copy.deepcopy(valid)
+    wrong_goal["goal_id"] = "goal-other"
+    corruptions.append(wrong_goal)
+    missing_field = copy.deepcopy(valid)
+    del missing_field["receipt_index"]
+    corruptions.append(missing_field)
+    extra_field = copy.deepcopy(valid)
+    extra_field["unreviewed"] = True
+    corruptions.append(extra_field)
+    smuggled_binding = copy.deepcopy(valid)
+    smuggled_binding["store_binding"] = "smuggled:binding"
+    corruptions.append(smuggled_binding)
+
+    for corrupted in corruptions:
+        with pytest.raises(HeadValidationError) as exc_info:
+            validated_head(corrupted, goal_id="goal-a")
+        assert not isinstance(exc_info.value, HeadMigrationRequired)
+
+
+def test_stage3_fields_cannot_be_smuggled_under_the_legacy_v0_token() -> None:
+    provider, _clock, executor, fence = claimed_fixture()
+    completed = verb(
+        executor,
+        "agent-a",
+        "op-stage3-done",
+        complete_command(revision=8, fence=fence, no_followup=True),
+    )
+    assert completed["result"] == "applied"
+    stage3_shaped_v0 = head_of(provider)
+    stage3_shaped_v0["schema_version"] = "loopx_coordination_head_v0"
+    del stage3_shaped_v0["store_binding"]
+    with pytest.raises(HeadValidationError) as exc_info:
+        validated_head(stage3_shaped_v0, goal_id="goal-a")
+    assert not isinstance(exc_info.value, HeadMigrationRequired)
+
+    provider2, _clock2, executor2, _fence2 = claimed_fixture()
+    non_claim_receipt_v0 = head_of(provider2)
+    non_claim_receipt_v0["schema_version"] = "loopx_coordination_head_v0"
+    del non_claim_receipt_v0["store_binding"]
+    receipt = non_claim_receipt_v0["receipt_index"]["op-claim"][
+        "original_receipt"
+    ]
+    receipt["command"] = "renew_work"
+    with pytest.raises(HeadValidationError) as exc_info:
+        validated_head(non_claim_receipt_v0, goal_id="goal-a")
+    assert not isinstance(exc_info.value, HeadMigrationRequired)
+
+
+def test_explicit_migration_upgrades_a_v0_head_end_to_end() -> None:
+    provider = FakeProvider()
+    assert provider.compare_and_put(0, legacy_v0_head())["result"] == "applied"
+    # The operator path: load, attest the reviewed store's own identity,
+    # migrate, and write back through the same CAS.
+    stale, generation = provider.load()
+    migrated = migrate_head_v0_to_v1(
+        stale, goal_id="goal-a", store_binding=provider.store_identity(),
+    )
+    assert migrated["schema_version"] == "loopx_coordination_head_v1"
+    assert stale.get("store_binding") is None  # input is never mutated
+    assert provider.compare_and_put(generation, migrated)["result"] == "applied"
+    executor = executor_for(provider, Clock())
+    first = claim(executor, "agent-a", "todo-1", "op-post-migration")
+    assert first["result"] == "applied", first
+
+
+def test_frozen_stage2_claimed_head_migrates_without_rewriting_history() -> None:
+    legacy = frozen_stage2_claimed_head()
+    assert head_digest(legacy) == (
+        "sha256:a10866d23d0d61b8352163ef64c93b05656c6bc8717b2a944ba987dd5444aee6"
+    )
+    with pytest.raises(HeadMigrationRequired):
+        validated_head(legacy, goal_id="goal-a")
+
+    provider = FakeProvider()
+    migrated = migrate_head_v0_to_v1(
+        legacy,
+        goal_id="goal-a",
+        store_binding=provider.store_identity(),
+    )
+    assert migrated["receipt_index"] == legacy["receipt_index"]
+    assert migrated["coordination"] == legacy["coordination"]
+    assert provider.compare_and_put(0, migrated)["result"] == "applied"
+
+    renewed = verb(
+        executor_for(provider, Clock()),
+        "agent-a",
+        "op-after-stage2-migration",
+        {
+            "type": "renew_work",
+            "todo_id": "todo-1",
+            "expected_todo_revision": 8,
+            "lease_id": "lease_8c5b438a43110ce57000c32a",
+            "expected_lease_epoch": 7,
+            "lease_ttl_seconds": 600,
+        },
+    )
+    assert renewed["result"] == "applied", renewed
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "lease_watermark",
+        "unproved_owner",
+        "unproved_expiry",
+        "authority_revision",
+        "missing_lease",
+        "unclaimed_with_lease",
+    ],
+)
+def test_legacy_migration_requires_a_receipt_proved_live_claim(
+    corruption: str,
+) -> None:
+    legacy = frozen_stage2_claimed_head()
+    todo_record = legacy["coordination"]["todos"]["todo-1"]
+    lease_record = legacy["coordination"]["leases"]["todo-1"]
+    if corruption == "lease_watermark":
+        todo_record["last_lease_epoch"] = 6
+    elif corruption == "unproved_owner":
+        todo_record["claimed_by"] = "agent-b"
+        lease_record["owner"] = "agent-b"
+    elif corruption == "unproved_expiry":
+        lease_record["expires_at"] = "2027-01-15T09:10:00.000Z"
+    elif corruption == "authority_revision":
+        legacy["authority_revision"] = 0
+    elif corruption == "missing_lease":
+        del legacy["coordination"]["leases"]["todo-1"]
+    else:
+        todo_record["claimed_by"] = None
+
+    with pytest.raises(HeadValidationError) as exc_info:
+        validated_head(legacy, goal_id="goal-a")
+    assert not isinstance(exc_info.value, HeadMigrationRequired)
+
+
+def test_migration_refuses_anything_but_a_clean_v0_document() -> None:
+    v1 = bootstrap_head("goal-a", {"todo-1": todo()}, store_binding="test:store")
+    with pytest.raises(HeadValidationError):
+        migrate_head_v0_to_v1(v1, goal_id="goal-a", store_binding="test:store")
+    already_bound = legacy_v0_head()
+    already_bound["store_binding"] = "smuggled:binding"
+    with pytest.raises(HeadValidationError):
+        migrate_head_v0_to_v1(
+            already_bound, goal_id="goal-a", store_binding="test:store",
+        )
+    with pytest.raises(HeadValidationError):
+        migrate_head_v0_to_v1(
+            legacy_v0_head(), goal_id="goal-a", store_binding="",
+        )
