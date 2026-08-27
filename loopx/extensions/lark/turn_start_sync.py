@@ -17,6 +17,12 @@ from ...file_lock import (
     exclusive_file_lock,
 )
 from .event_collector import _executable_prefix, load_lark_event_collector_config
+from .event_collector_runtime import (
+    _create_lark_event_received_reaction,
+    _delete_lark_event_reaction,
+    _profile_app_id,
+    _sender_identity,
+)
 from .group_history import (
     _canonical_events,
     _page_digest,
@@ -26,6 +32,7 @@ from .group_history import (
     _route_context,
     _verify_inbox_events,
 )
+from .inbox_reactions import ensure_lark_event_inbox_received_reaction
 from .routed_inbox import ingest_routed_lark_event_inbox
 
 CURSOR_SCHEMA_VERSION = "lark_turn_start_sync_cursor_v0"
@@ -225,9 +232,27 @@ def _route_receipt(
             try:
                 payload = json.loads(provider.stdout)
                 messages, has_more, next_page_token = _provider_page(payload)
-                events, skipped_count, invalid_count = _canonical_events(
+                command_prefix = _executable_prefix(lark_cli_executable)
+                profile_app_id = (
+                    _profile_app_id(
+                        runner=runner,
+                        command_prefix=command_prefix,
+                        profile=str(config["profile"]),
+                    )
+                    if any(
+                        _sender_identity(message)[0] == "app" for message in messages
+                    )
+                    else None
+                )
+                (
+                    events,
+                    skipped_count,
+                    invalid_count,
+                    self_message_skipped_count,
+                ) = _canonical_events(
                     messages,
                     chat_id=str(route["chat_id"]),
+                    profile_app_id=profile_app_id,
                 )
             except (json.JSONDecodeError, TypeError, ValueError):
                 return {
@@ -268,6 +293,40 @@ def _route_receipt(
                     "external_read_performed": True,
                     "local_private_state_mutated": bool(ingest["write_performed"]),
                 }
+            # Retry every provider-visible pending event in the overlap page,
+            # not only files first accepted by this ingress. The shared
+            # receipt/settlement boundary makes cross-ingress duplicates
+            # idempotent and lets a transient provider failure recover on the
+            # next bounded history pass.
+            reaction_results = [
+                ensure_lark_event_inbox_received_reaction(
+                    project=config["project"],
+                    config_path=route["event_inbox_config_ref"],
+                    event=event,
+                    create_reaction=lambda message_id, emoji_type: (
+                        _create_lark_event_received_reaction(
+                            {"message_id": message_id},
+                            runner=runner,
+                            command_prefix=command_prefix,
+                            profile=str(config["profile"]),
+                            emoji_type=emoji_type,
+                        )
+                    ),
+                    delete_reaction=lambda message_id, reaction_id: (
+                        _delete_lark_event_reaction(
+                            runner=runner,
+                            command_prefix=command_prefix,
+                            profile=str(config["profile"]),
+                            message_id=message_id,
+                            reaction_id=reaction_id,
+                        )
+                    ),
+                )
+                for event in events
+            ]
+            reaction_failures = [
+                result for result in reaction_results if result["ok"] is not True
+            ]
             updated = {
                 **state,
                 "next_page_token": next_page_token,
@@ -294,14 +353,31 @@ def _route_receipt(
                     "local_private_state_mutated": bool(ingest["write_performed"]),
                 }
             return {
-                "ok": True,
-                "status": "page_pending" if has_more else "synced",
-                "error_code": None,
+                "ok": not reaction_failures,
+                "status": (
+                    "received_reaction_failed"
+                    if reaction_failures
+                    else "page_pending"
+                    if has_more
+                    else "synced"
+                ),
+                "error_code": (
+                    "received_reaction_failed" if reaction_failures else None
+                ),
                 "accepted_count": int(ingest["accepted_count"]),
                 "duplicate_count": int(ingest["duplicate_count"]),
                 "skipped_count": skipped_count,
+                "self_message_skipped_count": self_message_skipped_count,
                 "verified_count": verified_count,
                 "external_read_performed": True,
+                "received_reaction_count": sum(
+                    int(result["created_count"]) for result in reaction_results
+                ),
+                "received_reaction_failure_count": len(reaction_failures),
+                "external_writes_performed": any(
+                    result["external_writes_performed"] is True
+                    for result in reaction_results
+                ),
                 "local_private_state_mutated": True,
             }
     except LockAcquireTimeoutError:
@@ -337,6 +413,8 @@ def sync_lark_turn_start_inbox(
             "observation_count": 0,
             "agent_read_required": False,
             "external_reads_performed": False,
+            "external_writes_performed": False,
+            "self_message_skipped_count": 0,
             "local_private_state_mutated": False,
             "error_code": None,
             "private_content_returned": False,
@@ -384,6 +462,19 @@ def sync_lark_turn_start_inbox(
         "agent_read_required": bool(observation_count),
         "external_reads_performed": any(
             receipt.get("external_read_performed") is True for receipt in receipts
+        ),
+        "received_reaction_count": sum(
+            int(receipt.get("received_reaction_count") or 0) for receipt in receipts
+        ),
+        "received_reaction_failure_count": sum(
+            int(receipt.get("received_reaction_failure_count") or 0)
+            for receipt in receipts
+        ),
+        "self_message_skipped_count": sum(
+            int(receipt.get("self_message_skipped_count") or 0) for receipt in receipts
+        ),
+        "external_writes_performed": any(
+            receipt.get("external_writes_performed") is True for receipt in receipts
         ),
         "local_private_state_mutated": any(
             receipt.get("local_private_state_mutated") is True for receipt in receipts

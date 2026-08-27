@@ -378,6 +378,9 @@ def build_lark_turn_start_inbox_hook(
             "external_reads_performed": (
                 result.get("external_reads_performed") is True
             ),
+            "external_writes_performed": (
+                result.get("external_writes_performed") is True
+            ),
             "local_private_state_mutated": (
                 result.get("local_private_state_mutated") is True
             ),
@@ -396,6 +399,7 @@ def build_lark_turn_start_inbox_hook(
         requested_write_scope=(
             "owner_private_inbox",
             "owner_private_cursor",
+            "provider_message_reaction",
         ),
         producer=produce,
     )

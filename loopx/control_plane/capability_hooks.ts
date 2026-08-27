@@ -59,6 +59,7 @@ const TURN_START_RESULT_FIELDS = new Set([
   "observation_count",
   "agent_read_required",
   "external_reads_performed",
+  "external_writes_performed",
   "local_private_state_mutated",
   "private_content_returned",
   "provider_payload_returned",
@@ -67,6 +68,7 @@ const TURN_START_RESULT_FIELDS = new Set([
 const TURN_START_WRITE_SCOPES = new Set([
   "owner_private_inbox",
   "owner_private_cursor",
+  "provider_message_reaction",
 ]);
 const TURN_START_STATUSES = new Set([
   "not_applicable",
@@ -287,7 +289,7 @@ export function validateTurnStartHookRegistration(
     8,
   );
   if (writeScope.some((scope) => !TURN_START_WRITE_SCOPES.has(scope))) {
-    throw new Error("turn-start hook requested_write_scope is not owner-private");
+    throw new Error("turn-start hook requested_write_scope is not admitted");
   }
   const budget = requiredObject(registration.budget, "turn-start hook budget");
   requireExactFields(budget, BUDGET_FIELDS, "turn-start hook budget");
@@ -346,6 +348,7 @@ export function validateTurnStartHookInvocation(input: {
   for (const field of [
     "agent_read_required",
     "external_reads_performed",
+    "external_writes_performed",
     "local_private_state_mutated",
     "private_content_returned",
     "provider_payload_returned",
@@ -362,6 +365,12 @@ export function validateTurnStartHookInvocation(input: {
     registration.requested_write_scope.length === 0
   ) {
     throw new Error("turn-start hook mutated undeclared local-private state");
+  }
+  if (
+    result.external_writes_performed &&
+    !registration.requested_write_scope.includes("provider_message_reaction")
+  ) {
+    throw new Error("turn-start hook performed an undeclared external write");
   }
   const errorCode = result.error_code;
   if (errorCode !== null && (typeof errorCode !== "string" || !TOKEN_RE.test(errorCode))) {
@@ -385,6 +394,7 @@ export function validateTurnStartHookInvocation(input: {
     observationCount !== 0 ||
     result.agent_read_required ||
     result.external_reads_performed ||
+    result.external_writes_performed ||
     result.local_private_state_mutated ||
     errorCode !== null
   )) {
