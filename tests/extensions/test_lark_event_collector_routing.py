@@ -324,7 +324,7 @@ def test_cli_drain_accepts_routed_collector_config(
     assert rendered[0]["extension_activation"] == {"enabled": True}
 
 
-def test_runtime_consumes_once_and_routes_each_chat_to_its_own_inbox(
+def test_runtime_collector_captures_without_provider_acknowledgement(
     tmp_path: Path,
 ) -> None:
     project, collector, first_chat, second_chat = _two_route_config(tmp_path)

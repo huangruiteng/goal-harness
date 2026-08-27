@@ -374,6 +374,10 @@ def _route_receipt(
                     int(result["created_count"]) for result in reaction_results
                 ),
                 "received_reaction_failure_count": len(reaction_failures),
+                "read_ack_attempt_count": sum(
+                    int(result["read_ack_attempted"] is True)
+                    for result in reaction_results
+                ),
                 "external_writes_performed": any(
                     result["external_writes_performed"] is True
                     for result in reaction_results
@@ -436,10 +440,21 @@ def sync_lark_turn_start_inbox(
         for route in config["routes"]
     ]
     failures = [receipt for receipt in receipts if receipt["ok"] is not True]
+    # A realtime collector may have persisted a message before this hook sees
+    # the same provider-history item.  In that case accepted_count is zero,
+    # but the first read-ack attempt still proves that this turn newly read the
+    # pending message into the Agent processing chain.  Within one route every
+    # newly accepted event is also an ACK candidate when ACKs are configured,
+    # so max() counts the union without double-counting the same message.
     observation_count = sum(
-        int(receipt.get("accepted_count") or 0) for receipt in receipts
+        max(
+            int(receipt.get("accepted_count") or 0),
+            int(receipt.get("read_ack_attempt_count") or 0),
+        )
+        for receipt in receipts
     )
-    if failures and observation_count:
+    agent_read_required = bool(observation_count)
+    if failures and agent_read_required:
         status = "partial"
         error_code = "route_sync_partial"
     elif failures and len(failures) == len(receipts):
@@ -448,7 +463,7 @@ def sync_lark_turn_start_inbox(
     elif failures:
         status = "partial"
         error_code = "route_sync_partial"
-    elif observation_count:
+    elif agent_read_required:
         status = "observed"
         error_code = None
     else:
@@ -459,7 +474,7 @@ def sync_lark_turn_start_inbox(
         "schema_version": SYNC_SCHEMA_VERSION,
         "status": status,
         "observation_count": observation_count,
-        "agent_read_required": bool(observation_count),
+        "agent_read_required": agent_read_required,
         "external_reads_performed": any(
             receipt.get("external_read_performed") is True for receipt in receipts
         ),

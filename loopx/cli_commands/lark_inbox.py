@@ -24,7 +24,6 @@ from ..extensions.lark import (
 from ..extensions.lark.event_collector import (
     inspect_lark_event_collector,
     install_lark_event_collector,
-    load_lark_event_collector_config,
     plan_lark_event_collector,
 )
 from ..extensions.lark.event_collector_runtime import run_lark_event_collector
@@ -280,21 +279,6 @@ def _required_extension_permissions(command: str) -> tuple[str, ...]:
     return (LARK_COLLECTOR_PERMISSION,)
 
 
-def _collector_permissions(
-    *, project: str | Path, config_path: str | Path
-) -> tuple[str, ...]:
-    config = load_lark_event_collector_config(
-        project=project,
-        config_path=config_path,
-    )
-    if any(
-        route["inbox"]["reply"].get("received_reaction_emoji")
-        for route in config["routes"]
-    ):
-        return (LARK_COLLECTOR_PERMISSION, LARK_REPLY_PERMISSION)
-    return (LARK_COLLECTOR_PERMISSION,)
-
-
 def _resolve_lark_activation(
     command: str,
     *,
@@ -372,7 +356,7 @@ def build_lark_turn_start_inbox_hook(
             "status": status,
             "observation_count": int(result.get("observation_count") or 0),
             "agent_read_required": bool(
-                int(result.get("observation_count") or 0)
+                result.get("agent_read_required") is True
                 and status in {"observed", "partial"}
             ),
             "external_reads_performed": (
@@ -520,17 +504,6 @@ def handle_lark_inbox_command(
             args.lark_inbox_command,
             runtime_root_arg=runtime_root_arg,
         )
-        if args.lark_inbox_command.startswith("collector-"):
-            required_permissions = _collector_permissions(
-                project=args.project,
-                config_path=args.config,
-            )
-            if len(required_permissions) > 1:
-                activation = resolve_extension_activation(
-                    LARK_EXTENSION_ID,
-                    state_file=default_extension_state_file(runtime_root_arg),
-                    required_permissions=required_permissions,
-                )
         if args.lark_inbox_command == "drain":
             payload = inspect_routed_lark_event_inbox(
                 project=project,

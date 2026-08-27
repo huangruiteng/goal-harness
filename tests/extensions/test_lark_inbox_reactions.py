@@ -40,6 +40,8 @@ def _fixture(tmp_path: Path, *, lifecycle: bool = True) -> tuple[Path, Path, Pat
                 "processing_reaction_emoji": "OnIt",
             }
         )
+    else:
+        reply["received_reaction_emoji"] = ""
     config.write_text(
         json.dumps(
             {
@@ -121,7 +123,9 @@ class ReactionRunner:
         raise AssertionError(call)
 
 
-def test_received_reaction_boundary_is_typed_and_idempotent(tmp_path: Path) -> None:
+def test_received_reaction_boundary_acknowledges_pending_message_once(
+    tmp_path: Path,
+) -> None:
     config, inbox, project = _fixture(tmp_path)
     created: list[tuple[str, str]] = []
 
@@ -132,10 +136,7 @@ def test_received_reaction_boundary_is_typed_and_idempotent(tmp_path: Path) -> N
     def delete(_message_id: str, _reaction_id: str) -> bool:
         return True
 
-    event = {
-        "message_id": "om_reaction_fixture",
-        "mentions": [{"name": "Project Review Bot"}],
-    }
+    event = {"message_id": "om_reaction_fixture"}
     first = ensure_lark_event_inbox_received_reaction(
         project=project,
         config_path=config,
@@ -163,7 +164,7 @@ def test_received_reaction_boundary_is_typed_and_idempotent(tmp_path: Path) -> N
     )
 
 
-def test_received_reaction_boundary_ignores_unrelated_typed_mention(
+def test_received_reaction_boundary_is_independent_of_attention_kind(
     tmp_path: Path,
 ) -> None:
     config, _inbox, project = _fixture(tmp_path)
@@ -182,8 +183,9 @@ def test_received_reaction_boundary_ignores_unrelated_typed_mention(
         delete_reaction=lambda _message_id, _reaction_id: True,
     )
 
-    assert result["status"] == "not_addressed"
-    assert created == []
+    assert result["status"] == "received"
+    assert result["captured_pending"] is True
+    assert created == [("om_reaction_fixture", "Get")]
 
 
 def test_received_reaction_boundary_does_not_react_after_settlement(
@@ -851,7 +853,7 @@ def test_processing_config_requires_distinct_received_reaction(
     else:
         raise AssertionError("equal lifecycle reactions must fail closed")
 
-    payload["reply"].pop("received_reaction_emoji")
+    payload["reply"]["received_reaction_emoji"] = ""
     payload["reply"]["processing_reaction_emoji"] = "OnIt"
     config.write_text(json.dumps(payload), encoding="utf-8")
     try:
@@ -860,6 +862,24 @@ def test_processing_config_requires_distinct_received_reaction(
         assert "requires received_reaction_emoji" in str(exc)
     else:
         raise AssertionError("processing without received must fail closed")
+
+
+def test_received_reaction_defaults_to_get_and_can_be_explicitly_disabled(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path)
+    payload = json.loads(config.read_text(encoding="utf-8"))
+    payload["reply"].pop("received_reaction_emoji")
+    payload["reply"].pop("processing_reaction_emoji")
+    config.write_text(json.dumps(payload), encoding="utf-8")
+
+    defaulted = load_lark_event_inbox_config(project=project, config_path=config)
+    assert defaulted["reply"]["received_reaction_emoji"] == "Get"
+
+    payload["reply"]["received_reaction_emoji"] = ""
+    config.write_text(json.dumps(payload), encoding="utf-8")
+    disabled = load_lark_event_inbox_config(project=project, config_path=config)
+    assert disabled["reply"]["received_reaction_emoji"] == ""
 
 
 def test_malformed_receipt_ledger_fails_closed(tmp_path: Path) -> None:

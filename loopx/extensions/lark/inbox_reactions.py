@@ -14,7 +14,6 @@ from ...file_lock import exclusive_file_lock
 from .event_inbox import (
     MESSAGE_ID_PATTERN,
     REACTION_EMOJI_PATTERN,
-    _event_attention_kind,
     _event_from_file,
     _load_processed,
     load_lark_event_inbox_config,
@@ -363,29 +362,12 @@ def _captured_pending_message(*, inbox: Path, message_id: str) -> bool:
     )
 
 
-def _typed_lark_event_attention_kind(
-    event: Mapping[str, Any], *, bot_display_name: str
-) -> str | None:
-    """Return only provider-typed mention or verified reply attention."""
-
-    attention_kind = _event_attention_kind(
-        event,
-        bot_display_name=bot_display_name,
-        capture_scope="configured_chat_all",
-    )
-    if attention_kind == "reply_to_bot":
-        return attention_kind
-    if attention_kind is not None and ("mentions" in event or "mentioned" in event):
-        return attention_kind
-    return None
-
-
 def _received_reaction_result(
     *,
     status: str,
     ok: bool,
     configured: bool,
-    addressed: bool,
+    captured_pending: bool,
     created_count: int = 0,
     external_writes_performed: bool | None = None,
     blocker: str | None = None,
@@ -395,7 +377,8 @@ def _received_reaction_result(
         "schema_version": "lark_event_inbox_received_reaction_v0",
         "status": status,
         "configured": configured,
-        "addressed": addressed,
+        "captured_pending": captured_pending,
+        "read_ack_attempted": status in {"received", "failed", "receipt_failed"},
         "created_count": created_count,
         "external_writes_performed": (
             created_count > 0
@@ -419,11 +402,12 @@ def ensure_lark_event_inbox_received_reaction_locked(
     create_reaction: ReactionCreator,
     delete_reaction: ReactionDeleter,
 ) -> dict[str, Any]:
-    """Idempotently ACK one captured, provider-addressed message.
+    """Idempotently acknowledge one message read by the turn-start hook.
 
-    The caller owns the per-message reaction lock.  This boundary is shared by
-    realtime collection and bounded history sync so receipt semantics do not
-    depend on which ingress first captured the message.
+    The caller owns the per-message reaction lock.  The message may have been
+    captured by any ingress, but only Agent turn-start consumption invokes this
+    boundary.  Attention classification remains independent and decides reply
+    priority rather than whether the read acknowledgement is written.
     """
 
     message_id = str(event.get("message_id") or "").strip()
@@ -445,25 +429,14 @@ def ensure_lark_event_inbox_received_reaction_locked(
                 status="not_configured",
                 ok=True,
                 configured=False,
-                addressed=False,
-            )
-        attention_kind = _typed_lark_event_attention_kind(
-            event,
-            bot_display_name=str(reply.get("bot_display_name") or ""),
-        )
-        if attention_kind is None:
-            return _received_reaction_result(
-                status="not_addressed",
-                ok=True,
-                configured=True,
-                addressed=False,
+                captured_pending=False,
             )
         if not _captured_pending_message(inbox=inbox, message_id=message_id):
             return _received_reaction_result(
                 status="already_settled",
                 ok=True,
                 configured=True,
-                addressed=True,
+                captured_pending=False,
             )
         receipts = lark_inbox_reaction_receipts(
             inbox=inbox,
@@ -474,14 +447,14 @@ def ensure_lark_event_inbox_received_reaction_locked(
                 status="already_received",
                 ok=True,
                 configured=True,
-                addressed=True,
+                captured_pending=True,
             )
         if receipts.get("processing") is not None:
             return _received_reaction_result(
                 status="already_processing",
                 ok=True,
                 configured=True,
-                addressed=True,
+                captured_pending=True,
             )
         reaction_id = create_reaction(message_id, emoji_type)
         if reaction_id is None:
@@ -489,7 +462,7 @@ def ensure_lark_event_inbox_received_reaction_locked(
                 status="failed",
                 ok=False,
                 configured=True,
-                addressed=True,
+                captured_pending=True,
                 blocker="lark_inbox_received_reaction_create_failed",
             )
         try:
@@ -506,7 +479,7 @@ def ensure_lark_event_inbox_received_reaction_locked(
                 status="receipt_failed",
                 ok=False,
                 configured=True,
-                addressed=True,
+                captured_pending=True,
                 created_count=int(not cleaned_up),
                 external_writes_performed=True,
                 blocker=(
@@ -519,7 +492,7 @@ def ensure_lark_event_inbox_received_reaction_locked(
             status="received",
             ok=True,
             configured=True,
-            addressed=True,
+            captured_pending=True,
             created_count=1,
         )
 
@@ -532,7 +505,7 @@ def ensure_lark_event_inbox_received_reaction(
     create_reaction: ReactionCreator,
     delete_reaction: ReactionDeleter,
 ) -> dict[str, Any]:
-    """Lock and ACK one captured pending message through the shared boundary."""
+    """Lock and ACK one turn-start-read pending message."""
 
     config = load_lark_event_inbox_config(project=project, config_path=config_path)
     if not config["enabled"]:

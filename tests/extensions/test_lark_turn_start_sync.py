@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from loopx.cli_commands import lark_inbox as lark_inbox_cli
+from loopx.control_plane.capability_hooks import dispatch_turn_start_hooks
 from loopx.control_plane.work_items.work_lane import (
     operator_inbox_material_review_due_work_lane_contract,
 )
@@ -54,7 +56,6 @@ def _project(
                         "sender_identity": "bot",
                         "bot_display_name": "Fixture Bot",
                         "chat_id": "oc_fixture",
-                        "received_reaction_emoji": "Get",
                     }
                     if received_reaction
                     else {"enabled": False}
@@ -268,13 +269,14 @@ def test_turn_start_sync_captures_then_requires_same_turn_agent_read(
     assert "before ordinary work" in str(lane["action"])
 
 
-def test_turn_start_sync_acknowledges_typed_mention_once(tmp_path: Path) -> None:
+def test_turn_start_sync_acknowledges_ordinary_pending_message_once_by_default(
+    tmp_path: Path,
+) -> None:
     project, config = _project(tmp_path, received_reaction=True)
     message = {
-        "message_id": "om_typed_mention",
+        "message_id": "om_ordinary_pending",
         "create_time": "2026-08-26T09:59:00Z",
-        "content": "@Fixture Bot please take a look.",
-        "mentions": [{"name": "Fixture Bot"}],
+        "content": "Please keep the current investigation moving.",
         "deleted": False,
     }
     first = ReactionPageRunner([_page(message)])
@@ -294,7 +296,7 @@ def test_turn_start_sync_acknowledges_typed_mention_once(tmp_path: Path) -> None
     assert (
         lark_inbox_reaction_receipts(
             inbox=inbox,
-            message_id="om_typed_mention",
+            message_id="om_ordinary_pending",
         )["received"]["emoji_type"]
         == "Get"
     )
@@ -312,6 +314,104 @@ def test_turn_start_sync_acknowledges_typed_mention_once(tmp_path: Path) -> None
     assert not any("reactions" in call for call in duplicate.calls)
 
 
+def test_turn_start_sync_acknowledges_message_previously_captured_by_collector(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project, config = _project(tmp_path, received_reaction=True)
+    message = {
+        "message_id": "om_collector_captured",
+        "create_time": "2026-08-26T09:59:00Z",
+        "content": "Collector stored this before the Agent turn began.",
+        "deleted": False,
+    }
+    inbox = project / ".loopx/inbox/requirements"
+    inbox.mkdir(parents=True)
+    (inbox / "om_collector_captured.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "lark_event_inbox_event_v0",
+                "event_id": "om_collector_captured",
+                **message,
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = ReactionPageRunner([_page(message)])
+
+    result = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=runner,
+        now=FIRST_NOW,
+    )
+
+    assert result["status"] == "observed"
+    assert result["observation_count"] == 1
+    assert result["agent_read_required"] is True
+    assert result["received_reaction_count"] == 1
+    assert result["external_writes_performed"] is True
+    assert any("reactions" in call for call in runner.calls)
+
+    monkeypatch.setattr(
+        lark_inbox_cli,
+        "_resolve_lark_activation",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        lark_inbox_cli,
+        "sync_lark_turn_start_inbox",
+        lambda **_kwargs: result,
+    )
+    dispatch = dispatch_turn_start_hooks(
+        [
+            lark_inbox_cli.build_lark_turn_start_inbox_hook(
+                project=project,
+                config_path=config,
+                runtime_root_arg=None,
+            )
+        ]
+    )
+    assert dispatch["failures"] == []
+    assert dispatch["results"][0]["observation_count"] == 1
+    assert dispatch["results"][0]["agent_read_required"] is True
+
+
+def test_turn_start_sync_respects_explicit_received_reaction_disable(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path, received_reaction=True)
+    inbox_config = project / ".loopx/config/inbox.json"
+    payload = json.loads(inbox_config.read_text(encoding="utf-8"))
+    payload["reply"]["received_reaction_emoji"] = ""
+    inbox_config.write_text(json.dumps(payload), encoding="utf-8")
+    runner = ReactionPageRunner(
+        [
+            _page(
+                {
+                    "message_id": "om_reaction_disabled",
+                    "create_time": "2026-08-26T09:59:00Z",
+                    "content": "Read this without a provider acknowledgement.",
+                    "deleted": False,
+                }
+            )
+        ]
+    )
+
+    result = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=runner,
+        now=FIRST_NOW,
+    )
+
+    assert result["observation_count"] == 1
+    assert result["agent_read_required"] is True
+    assert result["received_reaction_count"] == 0
+    assert result["external_writes_performed"] is False
+    assert not any("reactions" in call for call in runner.calls)
+
+
 def test_turn_start_sync_reports_reaction_write_failure_without_losing_message(
     tmp_path: Path,
 ) -> None:
@@ -322,8 +422,7 @@ def test_turn_start_sync_reports_reaction_write_failure_without_losing_message(
                 {
                     "message_id": "om_reaction_failure",
                     "create_time": "2026-08-26T09:59:00Z",
-                    "content": "@Fixture Bot please take a look.",
-                    "mentions": [{"name": "Fixture Bot"}],
+                    "content": "Please take a look.",
                     "deleted": False,
                 }
             )
@@ -353,8 +452,7 @@ def test_turn_start_sync_retries_reaction_for_overlapping_pending_duplicate(
     message = {
         "message_id": "om_reaction_retry",
         "create_time": "2026-08-26T09:59:00Z",
-        "content": "@Fixture Bot please retry the acknowledgement.",
-        "mentions": [{"name": "Fixture Bot"}],
+        "content": "Please retry the acknowledgement.",
         "deleted": False,
     }
     failed = sync_lark_turn_start_inbox(
@@ -373,8 +471,9 @@ def test_turn_start_sync_retries_reaction_for_overlapping_pending_duplicate(
         now=SECOND_NOW,
     )
 
-    assert retried["status"] == "empty"
-    assert retried["observation_count"] == 0
+    assert retried["status"] == "observed"
+    assert retried["observation_count"] == 1
+    assert retried["agent_read_required"] is True
     assert retried["received_reaction_count"] == 1
     assert retried["external_writes_performed"] is True
     assert any("reactions" in call for call in retry_runner.calls)
@@ -421,9 +520,16 @@ def test_turn_start_sync_excludes_verified_profile_self_message(
     assert result["status"] == "observed"
     assert result["observation_count"] == 1
     assert result["self_message_skipped_count"] == 1
+    assert result["received_reaction_count"] == 1
     inbox = project / ".loopx/inbox/requirements"
     assert not (inbox / "om_self_delivery.json").exists()
     assert (inbox / "om_human_follow_up.json").is_file()
+    assert set(
+        lark_inbox_reaction_receipts(
+            inbox=inbox,
+            message_id="om_human_follow_up",
+        )
+    ) == {"received"}
 
 
 def test_completed_sync_opens_a_new_overlapping_tail_window(tmp_path: Path) -> None:
