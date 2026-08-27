@@ -16,7 +16,9 @@ provider hook runs before status and quota projection. It may perform bounded
 external reads, mutate declared owner-private inbox/cursor state, and—only when
 the provider registration explicitly requests `provider_message_reaction`—add
 one idempotent acknowledgement reaction to a captured, still-pending,
-provider-typed mention or verified reply. The
+human-authored message that the hook has read into the Agent's turn-start
+processing chain. This read acknowledgement is independent of mention, reply,
+question, and other attention classifications. The
 public result contains counts, booleans, status, and an error code; it cannot
 contain message content, provider payloads, credentials, destinations, profile
 names, or private cursor values.
@@ -44,7 +46,7 @@ to a durable effect receipt before inbox ACK.
 ```text
 provider-neutral turn_start dispatch
   -> provider read + owner-private commit/readback
-  -> optional typed-address acknowledgement + private reaction receipt
+  -> optional pending-message read acknowledgement + private reaction receipt
   -> fresh status + quota projection
   -> inbox lane preempts ordinary work when agent_read_required
   -> private drain into the active Agent turn
@@ -69,6 +71,10 @@ collection and quota selection.
 - provider permission and availability failures remain typed and isolated.
 - duplicate hook identities run once; duplicate messages collapse by provider
   message identity, and a private reaction receipt prevents duplicate ACKs.
+- collector-only capture performs no provider write. The acknowledgement is
+  admitted only after the turn-start hook reads and confirms a pending message.
+- attention classification affects scheduling and reply policy, never whether
+  a successfully read pending message receives the acknowledgement.
 - a provider-owned self-message filter may run before inbox ingestion only from
   a typed sender and an exact identity verified for the configured profile;
   unresolved identity fails open to capture and cannot use display-name or body
@@ -83,6 +89,7 @@ The hook grants no repository, production, outbound-message, or arbitrary
 external-write authority. Its only allowed local writes are the registered
 owner-private inbox and cursor scopes. Its only admitted external write is the
 explicit `provider_message_reaction` scope: one configured reaction on a
-captured, still-pending typed mention or verified reply. The public receipt
+captured, still-pending message read by the Agent turn-start hook. Realtime
+collection cannot consume that scope. The public receipt
 must expose `external_writes_performed`; provider or private-receipt failure is
 `partial`, never a false success, and cannot discard the captured inbox event.

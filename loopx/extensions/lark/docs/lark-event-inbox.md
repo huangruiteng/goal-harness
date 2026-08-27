@@ -42,9 +42,9 @@ sync: it is a pre-decision capability hook with the following ordering:
 turn-start hook
   -> read one bounded provider page per route
   -> commit and read back owner-private inbox events and cursor
-  -> optionally ACK a provider-typed mention with one idempotent reaction
+  -> ACK each newly read pending human message with one idempotent reaction
   -> recompute quota inbox urgency in the same CLI invocation
-  -> agent_read_required=true when new events were accepted
+  -> agent_read_required=true when pending messages were newly read by the hook
   -> selected inbox lane drains private message content before ordinary work
   -> Agent chooses steering / Goal replan / context capture /
      continue-current-work / no-follow-up
@@ -201,25 +201,33 @@ messages; use `configured_chat_all` for complete collaboration threads:
     "sender_identity": "bot",
     "bot_display_name": "Project Review Bot",
     "chat_id": "oc_<local-private-chat-id>",
-    "received_reaction_emoji": "Get",
     "processing_reaction_emoji": "OnIt"
   }
 }
 ```
 
-`reply.received_reaction_emoji` is optional and belongs to the same explicit
-sender boundary as source-thread replies. When configured, realtime collection
-and turn-start history sync share one receipt-backed boundary that adds the
-reaction only after an event is accepted into the inbox, remains pending, and
-is classified from provider-typed evidence as a direct mention or verified
-reply to the configured bot. Failed reactions are retried idempotently from
-bounded overlap pages while the message remains pending. The reaction is a
-best-effort receipt: provider failure increments compact failure accounting but
-does not discard the inbox event or grant execution authority. Ordinary group
-conversation does not receive the reaction.
+For every reply-enabled Inbox, a missing `reply.received_reaction_emoji`
+defaults to `Get`. Set it explicitly to the empty string to disable this
+provider write. The reaction belongs to the same explicit sender boundary as
+source-thread replies, but only the Agent's turn-start hook may create it:
+realtime collection persists events without reacting, and the hook writes the
+reaction only after it has read and confirmed a still-pending human message.
+The receipt therefore means "read into the Agent processing chain"; it does not
+mean "collector stored the event", "the Bot was mentioned", "a reply is due",
+or "processing completed". Mention, reply, question, and material-review
+classification remain independent scheduling and response decisions.
+
+Failed reactions are retried idempotently from bounded overlap pages while the
+message remains pending. The reaction is a best-effort receipt: provider
+failure increments compact failure accounting but does not discard the Inbox
+event or grant execution authority. A private receipt prevents overlap replay
+from creating a second reaction, and settled or verified Bot-authored messages
+never receive one.
 
 `reply.processing_reaction_emoji` is optional and requires a distinct
-`received_reaction_emoji`. When both are configured, the host should run
+received reaction. The default `Get` satisfies that requirement; when the read
+acknowledgement is explicitly disabled, processing reaction must also be
+disabled. When both are configured, the host should run
 `lark-inbox processing` immediately before interpreting an actionable item.
 LoopX first adds the processing reaction and then removes the received
 reaction. A verified source-thread reply removes any remaining lifecycle
