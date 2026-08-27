@@ -10,18 +10,17 @@ the non-negative increment.
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import loopx.state_refresh as state_refresh_module
 from loopx.control_plane.quota.codex_session_usage import (
     CodexSessionUsageError,
-    load_usage_snapshot,
-    previous_snapshot_for_observation,
     read_codex_session_usage,
-    store_usage_snapshot,
-    usage_snapshot_path,
+    session_usage_baseline,
 )
 from loopx.control_plane.quota.usage_collector import UsageRowError
 from loopx.control_plane.quota.usage_summary import build_usage_summary
@@ -139,6 +138,32 @@ def test_read_codex_session_usage_tolerates_torn_trailing_line(tmp_path: Path) -
     assert observation["input_tokens"] == 10
 
 
+def test_read_codex_session_usage_fails_closed_on_corrupt_middle_line(
+    tmp_path: Path,
+) -> None:
+    # A malformed line followed by valid events is file damage, not a torn
+    # tail: parsing on could silently accept a stale cumulative snapshot.
+    lines = [
+        *_rollout_header(),
+        _rollout_event(
+            "2026-08-26T01:05:00.000Z",
+            input_tokens=100,
+            cached_input_tokens=0,
+            output_tokens=10,
+        ),
+        '{"timestamp":"2026-08-26T01:06:00.000Z","type":"event_msg","payl',
+        _rollout_event(
+            "2026-08-26T01:07:00.000Z",
+            input_tokens=200,
+            cached_input_tokens=0,
+            output_tokens=20,
+        ),
+    ]
+    path = _write_rollout(tmp_path / "rollout-corrupt-middle.jsonl", lines)
+    with pytest.raises(CodexSessionUsageError, match="line 4 is corrupt"):
+        read_codex_session_usage(path)
+
+
 def test_read_codex_session_usage_fails_closed_without_token_counts(
     tmp_path: Path,
 ) -> None:
@@ -168,64 +193,107 @@ def test_read_codex_session_usage_fails_closed_on_missing_file(tmp_path: Path) -
         read_codex_session_usage(tmp_path / "missing.jsonl")
 
 
-def test_usage_snapshot_roundtrip_and_session_scoping(tmp_path: Path) -> None:
-    runs_dir = tmp_path / "runs"
-    runs_dir.mkdir()
-    assert load_usage_snapshot(runs_dir) is None
-    observation = read_codex_session_usage(_fixture_rollout(tmp_path))
-    store_usage_snapshot(runs_dir, observation)
-    snapshot = load_usage_snapshot(runs_dir)
-    assert snapshot is not None
-    basis = previous_snapshot_for_observation(snapshot, observation)
-    assert basis is not None
-    assert basis["input_tokens"] == 1200
-    assert basis["provider"] == "codex"
-    assert basis["model"] == MODEL
-    other_session = dict(observation, session_id="other-session")
-    assert previous_snapshot_for_observation(snapshot, other_session) is None
+def _index_row(
+    *,
+    generated_at: str,
+    source_snapshot_id: str,
+    input_tokens: int,
+    output_tokens: int,
+    measurement_kind: str,
+    cache_tokens: int | None = None,
+    duration_ms: int | None = None,
+) -> str:
+    usage: dict[str, Any] = {
+        "schema_version": "run_usage_v0",
+        "measurement_kind": measurement_kind,
+        "source_snapshot_id": source_snapshot_id,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "provider": "codex",
+        "model": MODEL,
+    }
+    if cache_tokens is not None:
+        usage["cache_tokens"] = cache_tokens
+    if duration_ms is not None:
+        usage["duration_ms"] = duration_ms
+    return json.dumps(
+        {
+            "generated_at": generated_at,
+            "classification": "state_refreshed",
+            "json_path": f"runs/{generated_at}.json",
+            "markdown_path": f"runs/{generated_at}.md",
+            "usage": usage,
+        }
+    )
 
 
-def test_usage_snapshot_keeps_independent_per_session_baselines(
+def test_session_usage_baseline_missing_index_means_first_observation(
     tmp_path: Path,
 ) -> None:
-    runs_dir = tmp_path / "runs"
-    runs_dir.mkdir()
-    session_a = read_codex_session_usage(_fixture_rollout(tmp_path))
-    session_b = dict(session_a, session_id=OTHER_SESSION_ID, input_tokens=50)
-    store_usage_snapshot(runs_dir, session_a)
-    store_usage_snapshot(runs_dir, session_b)
-    snapshot = load_usage_snapshot(runs_dir)
-    basis_a = previous_snapshot_for_observation(snapshot, session_a)
-    basis_b = previous_snapshot_for_observation(snapshot, session_b)
-    assert basis_a is not None and basis_a["input_tokens"] == 1200
-    assert basis_b is not None and basis_b["input_tokens"] == 50
+    assert session_usage_baseline(tmp_path / "index.jsonl", SESSION_ID) is None
 
 
-def test_corrupt_usage_snapshot_fails_closed(tmp_path: Path) -> None:
-    runs_dir = tmp_path / "runs"
-    runs_dir.mkdir()
-    usage_snapshot_path(runs_dir).write_text("{not json", encoding="utf-8")
-    with pytest.raises(CodexSessionUsageError, match="corrupt"):
-        load_usage_snapshot(runs_dir)
-
-
-def test_single_slot_legacy_usage_snapshot_fails_closed(tmp_path: Path) -> None:
-    # The pre-release single-slot layout cannot express per-session baselines;
-    # rebasing against it could double-count, so it must not be read silently.
-    runs_dir = tmp_path / "runs"
-    runs_dir.mkdir()
-    usage_snapshot_path(runs_dir).write_text(
-        json.dumps(
-            {
-                "schema_version": "goal_usage_snapshot_v0",
-                "session_id": SESSION_ID,
-                "input_tokens": 1200,
-            }
-        ),
+def test_session_usage_baseline_telescopes_only_its_own_session_rows(
+    tmp_path: Path,
+) -> None:
+    index_path = tmp_path / "index.jsonl"
+    index_path.write_text(
+        "\n".join(
+            [
+                _index_row(
+                    generated_at="2026-08-26T01:05:00",
+                    source_snapshot_id=f"codex:{SESSION_ID}:t1",
+                    measurement_kind="absolute",
+                    input_tokens=100,
+                    output_tokens=10,
+                    cache_tokens=20,
+                    duration_ms=1000,
+                ),
+                _index_row(
+                    generated_at="2026-08-26T01:06:00",
+                    source_snapshot_id=f"codex:{OTHER_SESSION_ID}:t1",
+                    measurement_kind="absolute",
+                    input_tokens=50,
+                    output_tokens=5,
+                ),
+                _index_row(
+                    generated_at="2026-08-26T01:07:00",
+                    source_snapshot_id=f"codex:{SESSION_ID}:t2",
+                    measurement_kind="delta",
+                    input_tokens=40,
+                    output_tokens=4,
+                    cache_tokens=10,
+                    duration_ms=500,
+                ),
+                json.dumps({"generated_at": "2026-08-26T01:08:00"}),
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
-    with pytest.raises(CodexSessionUsageError, match="unknown schema"):
-        load_usage_snapshot(runs_dir)
+    basis = session_usage_baseline(index_path, SESSION_ID)
+    assert basis is not None
+    assert basis["input_tokens"] == 140
+    assert basis["output_tokens"] == 14
+    assert basis["cache_tokens"] == 30
+    assert basis["duration_ms"] == 1500
+    assert basis["cost_usd"] is None
+    assert basis["source_snapshot_id"] == f"codex:{SESSION_ID}:t2"
+    assert basis["provider"] == "codex"
+    assert basis["model"] == MODEL
+
+    other = session_usage_baseline(index_path, OTHER_SESSION_ID)
+    assert other is not None
+    assert other["input_tokens"] == 50
+
+
+def test_session_usage_baseline_fails_closed_on_corrupt_index_row(
+    tmp_path: Path,
+) -> None:
+    index_path = tmp_path / "index.jsonl"
+    index_path.write_text('{"generated_at": "2026-08-26T01:05:00"\n', encoding="utf-8")
+    with pytest.raises(CodexSessionUsageError, match="row 1 is corrupt"):
+        session_usage_baseline(index_path, SESSION_ID)
 
 
 def _goal_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -349,6 +417,10 @@ def test_refresh_state_replaying_same_snapshot_does_not_double_count(
     totals = _summary_totals(runtime_root)
     assert totals["input_tokens_24h"] == 1200
     assert totals["output_tokens_24h"] == 300
+    # The appended index row is the basis advancement itself: there is no
+    # second snapshot state file that a crash between writes could leave stale.
+    runs_dir = runtime_root / "goals" / GOAL_ID / "runs"
+    assert not (runs_dir / "usage_snapshot.json").exists()
 
 
 def test_refresh_state_books_only_the_cumulative_increment(tmp_path: Path) -> None:
@@ -457,6 +529,86 @@ def test_refresh_state_interleaved_sessions_do_not_double_count(
     assert totals["output_tokens_24h"] == 20
 
 
+def test_refresh_state_concurrent_same_session_bookings_do_not_double_count(
+    tmp_path: Path,
+) -> None:
+    """The booking lock serializes basis read + append: exactly one non-zero booking."""
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+    rollout = _fixture_rollout(tmp_path)
+    errors: list[Exception] = []
+    barrier = threading.Barrier(2)
+
+    def _book() -> None:
+        try:
+            barrier.wait(timeout=10)
+            _refresh(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                project=project,
+                usage_codex_session=rollout,
+            )
+        except Exception as exc:  # noqa: BLE001 - surfaced via assertion below
+            errors.append(exc)
+
+    workers = [threading.Thread(target=_book) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=30)
+    assert errors == []
+
+    runs = _index_runs(runtime_root)
+    assert len(runs) == 2
+    booked_inputs = sorted(run["usage"]["input_tokens"] for run in runs)
+    assert booked_inputs == [0, 1200]  # one absolute intake, one zero-delta replay
+
+    totals = _summary_totals(runtime_root)
+    assert totals["input_tokens_24h"] == 1200
+    assert totals["output_tokens_24h"] == 300
+
+
+def test_refresh_state_never_persists_non_finite_usage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Durable run rows are strict JSON even if a future producer bug slips NaN through."""
+    registry_path, project, runtime_root = _goal_fixture(tmp_path)
+
+    def _inject_nan(
+        record: dict[str, Any],
+        measurement: dict[str, Any] | None = None,
+        *,
+        previous_snapshot: Any = None,
+        index_record: dict[str, Any] | None = None,
+    ) -> None:
+        poisoned = {
+            "schema_version": "run_usage_v0",
+            "measurement_kind": "absolute",
+            "source_snapshot_id": "poisoned",
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "provider": "codex",
+            "model": MODEL,
+            "cost_usd": float("nan"),
+        }
+        record["usage"] = poisoned
+        if index_record is not None:
+            index_record["usage"] = dict(poisoned)
+
+    monkeypatch.setattr(
+        state_refresh_module, "ingest_usage_into_run_record", _inject_nan
+    )
+    with pytest.raises(ValueError, match="JSON compliant"):
+        _refresh(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            project=project,
+            usage_measurement={"input_tokens": 1, "output_tokens": 1},
+        )
+    index_path = runtime_root / "goals" / GOAL_ID / "runs" / "index.jsonl"
+    assert not index_path.exists()
+
+
 def test_refresh_state_rejects_non_finite_measurement(tmp_path: Path) -> None:
     registry_path, project, runtime_root = _goal_fixture(tmp_path)
     with pytest.raises(UsageRowError, match="finite"):
@@ -490,9 +642,6 @@ def test_refresh_state_without_usage_flags_keeps_usage_unknown(
     assert "usage" not in payload
     runs = _index_runs(runtime_root)
     assert "usage" not in runs[0]
-    assert not usage_snapshot_path(
-        runtime_root / "goals" / GOAL_ID / "runs"
-    ).exists()
 
 
 def test_refresh_state_accepts_typed_host_measurement(tmp_path: Path) -> None:

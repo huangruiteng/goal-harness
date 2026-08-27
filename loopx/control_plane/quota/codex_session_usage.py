@@ -13,39 +13,34 @@ cwd and mtime) risks attributing one concurrent session's spend to another
 run, and a wrong attribution is worse than an unknown one. Automatic
 discovery, if ever added, needs its own explicitly reviewed contract.
 
-Cumulative-to-delta conversion happens at the run-write boundary: the caller
-persists each accepted observation with :func:`store_usage_snapshot` and
-passes it back through :func:`previous_snapshot_for_observation` so an
-unchanged rollout replays as a zero delta and a grown rollout books only the
-non-negative increment. Baselines are kept per session id: interleaved
-sessions (A, then B, then A again) each rebase against their own last
-accepted cumulative snapshot, so a returning session never re-books its full
-total as new spend. Missing optional metrics stay unknown, never zero.
+Cumulative-to-delta conversion happens at the run-write boundary. The delta
+basis is not a second state file: :func:`session_usage_baseline` reconstructs
+each session's last accepted cumulative observation from the run index itself
+(telescoping absolute + delta sums per session id), so the durable row append
+is the single commit point that also advances the basis. A crash or retry can
+never leave the basis behind the ledger — replaying the same rollout books an
+idempotent zero delta, a grown rollout books only the non-negative increment,
+and interleaved sessions (A, then B, then A again) each rebase against their
+own baseline. Callers must hold the per-goal usage booking lock (see
+:func:`usage_booking_lock_target`) across basis read + row append so two
+concurrent bookings cannot fund two deltas from one stale basis. Missing
+optional metrics stay unknown, never zero.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, MutableMapping
 
-from .usage_collector import UsageRowError
+from ..runtime.run_index_duplicates import index_identity
+from .usage_collector import UsageRowError, ingest_usage_into_run_record
 
 CODEX_USAGE_PROVIDER = "codex"
-USAGE_SNAPSHOT_SCHEMA_VERSION = "goal_usage_snapshot_v1"
-USAGE_SNAPSHOT_FILENAME = "usage_snapshot.json"
-_SNAPSHOT_FIELDS = (
-    "session_id",
-    "source_snapshot_id",
-    "input_tokens",
-    "output_tokens",
-    "cache_tokens",
-    "cost_usd",
-    "duration_ms",
-    "provider",
-    "model",
-)
+USAGE_BOOKING_LOCK_TARGET = "usage_booking"
+_BASELINE_INT_FIELDS = ("input_tokens", "output_tokens", "cache_tokens", "duration_ms")
 
 
 class CodexSessionUsageError(UsageRowError):
@@ -86,16 +81,24 @@ def read_codex_session_usage(rollout_path: Path) -> dict[str, Any]:
     model = ""
     last_totals: Mapping[str, Any] | None = None
     last_totals_at = ""
-    for line in raw_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    lines = [
+        (number, text)
+        for number, text in enumerate(raw_text.splitlines(), start=1)
+        if text.strip()
+    ]
+    for position, (line_number, line) in enumerate(lines):
         try:
-            item = json.loads(line)
-        except json.JSONDecodeError:
-            # The Codex CLI appends to the rollout while sessions run; a torn
-            # trailing line is not an integrity failure for earlier events.
-            continue
+            item = json.loads(line.strip())
+        except json.JSONDecodeError as exc:
+            if position == len(lines) - 1:
+                # The Codex CLI appends to the rollout while sessions run; only
+                # a torn final line is concurrent-write noise. A malformed line
+                # with valid events after it means the file itself is damaged,
+                # and parsing on could book a stale cumulative snapshot.
+                continue
+            raise CodexSessionUsageError(
+                f"codex session rollout line {line_number} is corrupt: {path}"
+            ) from exc
         if not isinstance(item, dict):
             continue
         kind = str(item.get("type") or "")
@@ -153,82 +156,127 @@ def read_codex_session_usage(rollout_path: Path) -> dict[str, Any]:
     return observation
 
 
-def usage_snapshot_path(runs_dir: Path) -> Path:
-    return Path(runs_dir) / USAGE_SNAPSHOT_FILENAME
+def usage_booking_lock_target(runs_dir: Path) -> Path:
+    """Return the per-goal lock target serializing usage basis read + append."""
+    return Path(runs_dir) / USAGE_BOOKING_LOCK_TARGET
 
 
-def load_usage_snapshot(runs_dir: Path) -> dict[str, Any] | None:
-    """Return the persisted per-session cumulative baselines, if any.
+def book_codex_session_usage(
+    record: MutableMapping[str, Any],
+    rollout_path: Path,
+    index_path: Path,
+    *,
+    index_record: MutableMapping[str, Any] | None = None,
+) -> None:
+    """Read the rollout and ingest its typed usage row onto the run record.
 
-    A missing snapshot means no session has been booked yet, so any session's
-    first observation is an absolute intake. A corrupt or unknown-schema
-    snapshot fails closed instead of silently rebasing spend; the file is
-    private per-goal state and may be deleted to restart absolute intake.
+    The delta basis is the session's ledger baseline from ``index_path``.
+    Callers must hold the usage booking lock across this call and the run row
+    append it funds, so concurrent bookings serialize on one basis.
     """
-    path = usage_snapshot_path(runs_dir)
+    observation = read_codex_session_usage(rollout_path)
+    ingest_usage_into_run_record(
+        record,
+        {key: value for key, value in observation.items() if key != "session_id"},
+        previous_snapshot=session_usage_baseline(
+            index_path, str(observation.get("session_id") or "")
+        ),
+        index_record=index_record,
+    )
+
+
+def _booked_usage_number(
+    value: Any, *, field: str, line_number: int, index_path: Path
+) -> int | float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or value < 0
+    ):
+        raise CodexSessionUsageError(
+            f"run index row {line_number} has an invalid booked usage.{field}: {index_path}"
+        )
+    return value
+
+
+def session_usage_baseline(
+    index_path: Path, session_id: str
+) -> dict[str, Any] | None:
+    """Reconstruct the session's last accepted cumulative observation.
+
+    The run index append is the ledger's single commit point: a usage booking
+    exists exactly when its row is durable. Summing the session's absolute and
+    delta rows telescopes back to the last accepted cumulative observation, so
+    there is no second basis state that a crash between writes could leave
+    stale. ``None`` means the session has never been booked (absolute intake).
+    Corrupt index rows fail closed: skipping a booked row would shrink the
+    basis and double-book real spend. Callers must hold the usage booking lock
+    while reading the basis and appending the row it funds.
+    """
+    sid = str(session_id or "").strip()
+    if not sid:
+        raise CodexSessionUsageError("usage observation has no session id")
+    prefix = f"{CODEX_USAGE_PROVIDER}:{sid}:"
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = index_path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None
     except OSError as exc:
-        raise CodexSessionUsageError(f"usage snapshot state is unreadable: {path}") from exc
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise CodexSessionUsageError(f"usage snapshot state is corrupt: {path}") from exc
-    if (
-        not isinstance(data, dict)
-        or str(data.get("schema_version") or "") != USAGE_SNAPSHOT_SCHEMA_VERSION
-        or not isinstance(data.get("sessions"), dict)
-    ):
-        raise CodexSessionUsageError(f"usage snapshot state has an unknown schema: {path}")
-    return data
+        raise CodexSessionUsageError(
+            f"cannot read run index for the usage basis: {exc}"
+        ) from exc
 
-
-def store_usage_snapshot(runs_dir: Path, observation: Mapping[str, Any]) -> Path:
-    """Persist the observation as its own session's next delta basis.
-
-    Baselines are grouped by session id: a single shared slot would be
-    overwritten by an interleaved session, making a returning session look
-    brand new and re-booking its full cumulative total as fresh spend. Each
-    entry keeps every counter and binding label (not only the id) so replay
-    of the same identity can be verified field by field.
-    """
-    session_id = str(observation.get("session_id") or "").strip()
-    if not session_id:
-        raise CodexSessionUsageError("usage observation has no session id to persist")
-    state = load_usage_snapshot(runs_dir) or {
-        "schema_version": USAGE_SNAPSHOT_SCHEMA_VERSION,
-        "sessions": {},
+    int_totals: dict[str, int | None] = {field: None for field in _BASELINE_INT_FIELDS}
+    cost_total: float | None = None
+    last_usage: Mapping[str, Any] | None = None
+    seen_rows: set[tuple[str, str, str]] = set()
+    for line_number, line in enumerate(raw.splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise CodexSessionUsageError(
+                f"run index row {line_number} is corrupt: {index_path}"
+            ) from exc
+        if not isinstance(row, dict):
+            continue
+        usage = row.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        if not str(usage.get("source_snapshot_id") or "").startswith(prefix):
+            continue
+        identity = index_identity(row)
+        if identity in seen_rows:
+            continue
+        seen_rows.add(identity)
+        for field in _BASELINE_INT_FIELDS:
+            value = usage.get(field)
+            if value is None:
+                continue
+            booked = _booked_usage_number(
+                value, field=field, line_number=line_number, index_path=index_path
+            )
+            int_totals[field] = int(int_totals[field] or 0) + int(booked)
+        cost = usage.get("cost_usd")
+        if cost is not None:
+            booked_cost = _booked_usage_number(
+                cost, field="cost_usd", line_number=line_number, index_path=index_path
+            )
+            cost_total = float(cost_total or 0.0) + float(booked_cost)
+        last_usage = usage
+    if last_usage is None:
+        return None
+    return {
+        "session_id": sid,
+        "source_snapshot_id": str(last_usage.get("source_snapshot_id") or ""),
+        "input_tokens": int_totals["input_tokens"],
+        "output_tokens": int_totals["output_tokens"],
+        "cache_tokens": int_totals["cache_tokens"],
+        "cost_usd": cost_total,
+        "duration_ms": int_totals["duration_ms"],
+        "provider": last_usage.get("provider"),
+        "model": last_usage.get("model"),
     }
-    record: dict[str, Any] = {}
-    for field in _SNAPSHOT_FIELDS:
-        record[field] = observation.get(field)
-    state["sessions"][session_id] = record
-    path = usage_snapshot_path(runs_dir)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    tmp_path.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    tmp_path.replace(path)
-    return path
-
-
-def previous_snapshot_for_observation(
-    snapshot: Mapping[str, Any] | None,
-    observation: Mapping[str, Any],
-) -> Mapping[str, Any] | None:
-    """Return the stored delta basis for the observation's own session.
-
-    Each Codex session counts cumulatively from zero, so the basis must come
-    from the same session: a new session's first observation is an absolute
-    intake, and a returning session rebases against its own last accepted
-    snapshot even when other sessions were booked in between.
-    """
-    if snapshot is None:
-        return None
-    sessions = snapshot.get("sessions")
-    if not isinstance(sessions, Mapping):
-        return None
-    basis = sessions.get(str(observation.get("session_id") or ""))
-    return basis if isinstance(basis, Mapping) else None

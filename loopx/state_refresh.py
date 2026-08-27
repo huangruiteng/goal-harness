@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -29,10 +30,8 @@ from .control_plane.quota.settlement import (
     settlement_result_payload,
 )
 from .control_plane.quota.codex_session_usage import (
-    load_usage_snapshot,
-    previous_snapshot_for_observation,
-    read_codex_session_usage,
-    store_usage_snapshot,
+    book_codex_session_usage,
+    usage_booking_lock_target,
 )
 from .control_plane.quota.usage_collector import ingest_usage_into_run_record
 from .control_plane.work_items.repair_delta import (
@@ -1321,89 +1320,86 @@ def refresh_state_run(
     )
     # GH-C95 producer boundary: attach the typed run_usage_v0 row before the
     # durable record and index rows are written, so malformed or negative usage
-    # fails the whole refresh instead of entering run history.
-    usage_observation: dict[str, Any] | None = None
-    if usage_codex_session is not None:
-        usage_observation = read_codex_session_usage(usage_codex_session)
-        ingest_usage_into_run_record(
-            record,
-            {
-                key: value
-                for key, value in usage_observation.items()
-                if key != "session_id"
-            },
-            previous_snapshot=previous_snapshot_for_observation(
-                load_usage_snapshot(runs_dir), usage_observation
-            ),
-            index_record=index_record,
-        )
-    elif usage_measurement is not None:
-        ingest_usage_into_run_record(
-            record, usage_measurement, index_record=index_record
-        )
-    if isinstance(record.get("usage"), dict):
-        payload["usage"] = dict(record["usage"])
-    if dry_run:
-        expected_write_scopes = ["runtime_history"]
-        if active_state_next_action_update and active_state_next_action_update.get("would_update"):
-            expected_write_scopes.insert(0, "active_state")
-        if sync_global and route_status in {"resolved", "single_runtime"}:
-            expected_write_scopes.append("global_registry")
-        if shared_runtime_root:
-            expected_write_scopes.append("shared_runtime_projection")
-        patch_parts = [f"append refresh-state run classification={classification}"]
-        if active_state_next_action_update:
-            if active_state_next_action_update.get("would_update"):
-                patch_parts.append("preview active-state Next Action update")
-            else:
-                patch_parts.append("preserve active-state Next Action")
-        if sync_global and route_status in {"resolved", "single_runtime"}:
-            patch_parts.append("sync public-safe registry projection")
-        elif sync_global:
-            patch_parts.append(f"block global sync on {route_status} runtime projection route")
-        if shared_runtime_root:
-            patch_parts.append("project compact refresh to registered shared runtime")
-        payload["local_state_write_correctness"] = build_local_state_write_correctness_dry_run_packet(
-            goal_id=safe_goal_id,
-            writer_id=normalized_agent_id or "loopx.refresh-state",
-            write_class="refresh_state",
-            state_text=expected_write_state_text,
-            target_refs={
-                "state_file_ref": "registry.goal.state_file",
-                "run_history_ref": "runtime.goal.runs",
-                "index_ref": "runtime.goal.runs.index",
-                "global_registry_ref": (
-                    "runtime.registry.global"
-                    if sync_global and route_status in {"resolved", "single_runtime"}
-                    else None
-                ),
-                "shared_runtime_projection_ref": (
-                    "shared_runtime.goal.runs.index" if shared_runtime_root else None
-                ),
-            },
-            patch_summary="; ".join(patch_parts),
-            expected_write_scopes=expected_write_scopes,
-            lease_ref=None,
-            projection_status_surface=f"refresh-state dry-run: {classification}",
-        )
-    if not dry_run:
-        runs_dir.mkdir(parents=True, exist_ok=True)
-        json_path, markdown_path = reserve_unique_run_paths(runs_dir, generated_at)
-        index_record["json_path"] = str(json_path)
-        index_record["markdown_path"] = str(markdown_path)
-        payload["json_path"] = str(json_path)
-        payload["markdown_path"] = str(markdown_path)
-        json_path.write_text(
-            json.dumps(record, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        markdown_path.write_text(render_state_refresh_markdown(payload) + "\n", encoding="utf-8")
-        with index_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
-        if usage_observation is not None:
-            # Persist the accepted cumulative observation as the next delta
-            # basis only after the run row it funded is durably appended.
-            store_usage_snapshot(runs_dir, usage_observation)
+    # fails the whole refresh instead of entering run history. The booking lock
+    # spans ledger-basis read + row append so concurrent refreshes cannot fund
+    # two deltas from one stale basis; the appended row advances the basis.
+    with ExitStack() as usage_booking_guard:
+        if usage_codex_session is not None:
+            if not dry_run:
+                runs_dir.mkdir(parents=True, exist_ok=True)
+                usage_booking_guard.enter_context(
+                    exclusive_file_lock(
+                        usage_booking_lock_target(runs_dir),
+                        agent_id=normalized_agent_id or None,
+                        operation="refresh-state-usage-booking",
+                    )
+                )
+            book_codex_session_usage(
+                record, usage_codex_session, index_path, index_record=index_record
+            )
+        elif usage_measurement is not None:
+            ingest_usage_into_run_record(
+                record, usage_measurement, index_record=index_record
+            )
+        if isinstance(record.get("usage"), dict):
+            payload["usage"] = dict(record["usage"])
+        if dry_run:
+            expected_write_scopes = ["runtime_history"]
+            if active_state_next_action_update and active_state_next_action_update.get("would_update"):
+                expected_write_scopes.insert(0, "active_state")
+            if sync_global and route_status in {"resolved", "single_runtime"}:
+                expected_write_scopes.append("global_registry")
+            if shared_runtime_root:
+                expected_write_scopes.append("shared_runtime_projection")
+            patch_parts = [f"append refresh-state run classification={classification}"]
+            if active_state_next_action_update:
+                if active_state_next_action_update.get("would_update"):
+                    patch_parts.append("preview active-state Next Action update")
+                else:
+                    patch_parts.append("preserve active-state Next Action")
+            if sync_global and route_status in {"resolved", "single_runtime"}:
+                patch_parts.append("sync public-safe registry projection")
+            elif sync_global:
+                patch_parts.append(f"block global sync on {route_status} runtime projection route")
+            if shared_runtime_root:
+                patch_parts.append("project compact refresh to registered shared runtime")
+            payload["local_state_write_correctness"] = build_local_state_write_correctness_dry_run_packet(
+                goal_id=safe_goal_id,
+                writer_id=normalized_agent_id or "loopx.refresh-state",
+                write_class="refresh_state",
+                state_text=expected_write_state_text,
+                target_refs={
+                    "state_file_ref": "registry.goal.state_file",
+                    "run_history_ref": "runtime.goal.runs",
+                    "index_ref": "runtime.goal.runs.index",
+                    "global_registry_ref": (
+                        "runtime.registry.global"
+                        if sync_global and route_status in {"resolved", "single_runtime"}
+                        else None
+                    ),
+                    "shared_runtime_projection_ref": (
+                        "shared_runtime.goal.runs.index" if shared_runtime_root else None
+                    ),
+                },
+                patch_summary="; ".join(patch_parts),
+                expected_write_scopes=expected_write_scopes,
+                lease_ref=None,
+                projection_status_surface=f"refresh-state dry-run: {classification}",
+            )
+        if not dry_run:
+            runs_dir.mkdir(parents=True, exist_ok=True)
+            json_path, markdown_path = reserve_unique_run_paths(runs_dir, generated_at)
+            index_record["json_path"] = str(json_path)
+            index_record["markdown_path"] = str(markdown_path)
+            payload["json_path"] = str(json_path)
+            payload["markdown_path"] = str(markdown_path)
+            json_path.write_text(
+                json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            markdown_path.write_text(render_state_refresh_markdown(payload) + "\n", encoding="utf-8")
+            with index_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(index_record, ensure_ascii=False, allow_nan=False) + "\n")
     if sync_global and route_status in {"missing", "ambiguous"}:
         payload["ok"] = False
         payload["partial_write"] = not dry_run
