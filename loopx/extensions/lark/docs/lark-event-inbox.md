@@ -42,6 +42,7 @@ sync: it is a pre-decision capability hook with the following ordering:
 turn-start hook
   -> read one bounded provider page per route
   -> commit and read back owner-private inbox events and cursor
+  -> optionally ACK a provider-typed mention with one idempotent reaction
   -> recompute quota inbox urgency in the same CLI invocation
   -> agent_read_required=true when new events were accepted
   -> selected inbox lane drains private message content before ordinary work
@@ -51,7 +52,8 @@ turn-start hook
 ```
 
 Core owns the provider-neutral hook registration, output budget, allowed
-owner-private write scopes, failure isolation, and `agent_read_required`
+owner-private write scopes, the narrow `provider_message_reaction` external
+write scope, failure isolation, and `agent_read_required`
 contract. The Lark extension owns history pagination, provider-envelope
 validation, private cursors, and inbox readback. The CLI composition root runs
 the hook before status/quota projection. Raw content remains only in the local
@@ -206,12 +208,15 @@ messages; use `configured_chat_all` for complete collaboration threads:
 ```
 
 `reply.received_reaction_emoji` is optional and belongs to the same explicit
-sender boundary as source-thread replies. When configured, the collector adds
-that reaction only after an event is accepted into the inbox and classified as
-a direct mention, direct question, or verified reply to the configured bot.
-The reaction is a best-effort receipt: provider failure increments compact
-failure accounting but does not discard the inbox event or grant execution
-authority. Ordinary group conversation does not receive the reaction.
+sender boundary as source-thread replies. When configured, realtime collection
+and turn-start history sync share one receipt-backed boundary that adds the
+reaction only after an event is accepted into the inbox, remains pending, and
+is classified from provider-typed evidence as a direct mention or verified
+reply to the configured bot. Failed reactions are retried idempotently from
+bounded overlap pages while the message remains pending. The reaction is a
+best-effort receipt: provider failure increments compact failure accounting but
+does not discard the inbox event or grant execution authority. Ordinary group
+conversation does not receive the reaction.
 
 `reply.processing_reaction_emoji` is optional and requires a distinct
 `received_reaction_emoji`. When both are configured, the host should run
@@ -325,8 +330,13 @@ Missing `lark-cli` produces a non-blocking install hint. Reply-target
 verification also requires the configured bot to read messages in the selected
 chat. Bot-identity group-history catch-up requires the application scopes
 `im:message.group_msg` and `im:message.group_msg.include_bot:read`; the latter
-keeps Bot-authored messages in the paginated result. When the Bot list-messages
-history path reports provider error `230027`, LoopX must surface both scopes
+keeps Bot-authored messages in the provider result. Before inbox ingestion,
+realtime collection and bounded history sync both compare a provider-typed
+`app` sender with the exact app identity verified for the configured profile.
+An exact self match is counted and skipped; other apps and unresolved
+identities remain visible so an identity lookup failure cannot silently lose a
+message. When the Bot list-messages history path reports provider error `230027`,
+LoopX must surface both scopes
 and an official API page bound to the selected App id. The operator enables
 the application scopes and publishes a new App
 version; this is not a user OAuth login. These requirements belong to the
@@ -519,7 +529,9 @@ or NDJSON into the generic importer:
 Ingest validates ids and schema, deduplicates by `message_id`, writes only to
 the configured local-private inbox, and returns counts rather than message
 content. It does not acknowledge imported messages; the domain agent must still
-write each actionable effect before ACK.
+write each actionable effect before ACK. Provider-backed realtime and history
+ingress also report `self_message_skipped_count`; raw generic imports cannot
+claim this verification because they do not own the configured Bot identity.
 
 Reviewer notification dedupe uses durable lifecycle receipts first, then exact
 PR-link evidence in the persisted `configured_chat_all` inbox, and finally a

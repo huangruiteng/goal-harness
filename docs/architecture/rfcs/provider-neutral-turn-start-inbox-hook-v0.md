@@ -13,7 +13,10 @@
 
 LoopX adds a provider-neutral `turn_start` capability-hook phase. An enabled
 provider hook runs before status and quota projection. It may perform bounded
-external reads and mutate only declared owner-private inbox/cursor state. The
+external reads, mutate declared owner-private inbox/cursor state, and—only when
+the provider registration explicitly requests `provider_message_reaction`—add
+one idempotent acknowledgement reaction to a captured, still-pending,
+provider-typed mention or verified reply. The
 public result contains counts, booleans, status, and an error code; it cannot
 contain message content, provider payloads, credentials, destinations, profile
 names, or private cursor values.
@@ -41,6 +44,7 @@ to a durable effect receipt before inbox ACK.
 ```text
 provider-neutral turn_start dispatch
   -> provider read + owner-private commit/readback
+  -> optional typed-address acknowledgement + private reaction receipt
   -> fresh status + quota projection
   -> inbox lane preempts ordinary work when agent_read_required
   -> private drain into the active Agent turn
@@ -64,7 +68,11 @@ collection and quota selection.
   declared schema; it must never degrade to `empty`.
 - provider permission and availability failures remain typed and isolated.
 - duplicate hook identities run once; duplicate messages collapse by provider
-  message identity.
+  message identity, and a private reaction receipt prevents duplicate ACKs.
+- a provider-owned self-message filter may run before inbox ingestion only from
+  a typed sender and an exact identity verified for the configured profile;
+  unresolved identity fails open to capture and cannot use display-name or body
+  heuristics.
 - provider-local cursors are single-flight and advance only after inbox and
   cursor readback.
 - `partial` multi-route success still requires Agent reading for accepted
@@ -73,4 +81,8 @@ collection and quota selection.
 
 The hook grants no repository, production, outbound-message, or arbitrary
 external-write authority. Its only allowed local writes are the registered
-owner-private inbox and cursor scopes.
+owner-private inbox and cursor scopes. Its only admitted external write is the
+explicit `provider_message_reaction` scope: one configured reaction on a
+captured, still-pending typed mention or verified reply. The public receipt
+must expose `external_writes_performed`; provider or private-receipt failure is
+`partial`, never a false success, and cannot discard the captured inbox event.
