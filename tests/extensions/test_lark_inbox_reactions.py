@@ -8,9 +8,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from loopx.extensions.lark.event_inbox import load_lark_event_inbox_config
 from loopx.extensions.lark.inbox_reactions import (
     complete_lark_event_inbox_reactions,
+    ensure_lark_event_inbox_received_reaction,
     lark_inbox_reaction_receipts,
     mark_lark_event_inbox_processing,
     record_lark_inbox_reaction,
@@ -116,6 +119,134 @@ class ReactionRunner:
                 "stderr": "",
             }
         raise AssertionError(call)
+
+
+def test_received_reaction_boundary_is_typed_and_idempotent(tmp_path: Path) -> None:
+    config, inbox, project = _fixture(tmp_path)
+    created: list[tuple[str, str]] = []
+
+    def create(message_id: str, emoji_type: str) -> str:
+        created.append((message_id, emoji_type))
+        return "reaction_Get"
+
+    def delete(_message_id: str, _reaction_id: str) -> bool:
+        return True
+
+    event = {
+        "message_id": "om_reaction_fixture",
+        "mentions": [{"name": "Project Review Bot"}],
+    }
+    first = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event=event,
+        create_reaction=create,
+        delete_reaction=delete,
+    )
+    duplicate = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event=event,
+        create_reaction=create,
+        delete_reaction=delete,
+    )
+
+    assert first["status"] == "received"
+    assert duplicate["status"] == "already_received"
+    assert created == [("om_reaction_fixture", "Get")]
+    assert (
+        lark_inbox_reaction_receipts(
+            inbox=inbox,
+            message_id="om_reaction_fixture",
+        )["received"]["reaction_id"]
+        == "reaction_Get"
+    )
+
+
+def test_received_reaction_boundary_ignores_unrelated_typed_mention(
+    tmp_path: Path,
+) -> None:
+    config, _inbox, project = _fixture(tmp_path)
+    created: list[tuple[str, str]] = []
+
+    result = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event={
+            "message_id": "om_reaction_fixture",
+            "mentions": [{"name": "Another Bot"}],
+        },
+        create_reaction=lambda message_id, emoji_type: (
+            created.append((message_id, emoji_type)) or "reaction_Get"
+        ),
+        delete_reaction=lambda _message_id, _reaction_id: True,
+    )
+
+    assert result["status"] == "not_addressed"
+    assert created == []
+
+
+def test_received_reaction_boundary_does_not_react_after_settlement(
+    tmp_path: Path,
+) -> None:
+    config, inbox, project = _fixture(tmp_path)
+    (inbox / "processed.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "lark_event_inbox_processed_v0",
+                "message_ids": ["om_reaction_fixture"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    created: list[tuple[str, str]] = []
+
+    result = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event={
+            "message_id": "om_reaction_fixture",
+            "mentions": [{"name": "Project Review Bot"}],
+        },
+        create_reaction=lambda message_id, emoji_type: (
+            created.append((message_id, emoji_type)) or "reaction_Get"
+        ),
+        delete_reaction=lambda _message_id, _reaction_id: True,
+    )
+
+    assert result["status"] == "already_settled"
+    assert result["external_writes_performed"] is False
+    assert created == []
+
+
+def test_received_reaction_receipt_failure_reports_provider_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, _inbox, project = _fixture(tmp_path)
+    deleted: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "loopx.extensions.lark.inbox_reactions.record_lark_inbox_reaction",
+        lambda **_kwargs: (_ for _ in ()).throw(OSError("fixture receipt failure")),
+    )
+
+    result = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event={
+            "message_id": "om_reaction_fixture",
+            "mentions": [{"name": "Project Review Bot"}],
+        },
+        create_reaction=lambda _message_id, _emoji_type: "reaction_Get",
+        delete_reaction=lambda message_id, reaction_id: (
+            deleted.append((message_id, reaction_id)) or True
+        ),
+    )
+
+    assert result["status"] == "receipt_failed"
+    assert result["blocker"] == "lark_inbox_received_reaction_receipt_failed"
+    assert result["created_count"] == 0
+    assert result["external_writes_performed"] is True
+    assert deleted == [("om_reaction_fixture", "reaction_Get")]
 
 
 class ReplyRunner:

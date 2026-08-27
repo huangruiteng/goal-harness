@@ -14,7 +14,10 @@ from loopx.extensions.lark.event_collector import (
     load_lark_event_collector_config,
     plan_lark_event_collector,
 )
-from loopx.extensions.lark.event_collector_runtime import run_lark_event_collector
+from loopx.extensions.lark.event_collector_runtime import (
+    _is_profile_self_message,
+    run_lark_event_collector,
+)
 from loopx.extensions.lark.event_inbox import inspect_lark_event_inbox
 from loopx.extensions.lark.routed_inbox import (
     acknowledge_routed_lark_event_inbox,
@@ -237,6 +240,29 @@ def test_jq_projection_filters_one_stream_to_all_configured_chats() -> None:
     assert '.chat_id == "oc_public_fixture_beta"' in projection
     assert " or " in projection
     assert "chat_id:.chat_id" in projection
+    assert "sender_type:(.sender_type // .sender.sender_type)" in projection
+    assert "sender_id:(.sender_id // .sender.id // .sender.sender_id)" in projection
+
+
+def test_self_message_match_requires_typed_app_and_exact_verified_identity() -> None:
+    identity = "cli_public_fixture_bot"
+
+    assert _is_profile_self_message(
+        {"sender_type": "app", "sender_id": identity},
+        profile_app_id=identity,
+    )
+    assert not _is_profile_self_message(
+        {"sender_type": "user", "sender_id": identity},
+        profile_app_id=identity,
+    )
+    assert not _is_profile_self_message(
+        {"sender_type": "app", "sender_id": identity},
+        profile_app_id=None,
+    )
+    assert not _is_profile_self_message(
+        {"sender_type": "app", "sender_id": "cli_public_fixture_other"},
+        profile_app_id=identity,
+    )
 
 
 def test_cli_drain_accepts_routed_collector_config(
@@ -373,6 +399,7 @@ def test_runtime_consumes_once_and_routes_each_chat_to_its_own_inbox(
         "reply_to_bot_count": 0,
         "received_reaction_count": 0,
         "received_reaction_failure_count": 0,
+        "self_message_skipped_count": 0,
         "external_writes_performed": False,
         "profile_identity_checked": False,
         "profile_identity_verified": False,
@@ -454,6 +481,70 @@ def test_runtime_consumes_once_and_routes_each_chat_to_its_own_inbox(
         )["pending_count"]
         == 1
     )
+
+
+def test_runtime_excludes_only_verified_profile_self_messages(tmp_path: Path) -> None:
+    project, collector, first_chat, _second_chat = _two_route_config(tmp_path)
+    profile_app_id = "cli_public_fixture_bot"
+    events = [
+        {
+            "schema_version": "lark_event_inbox_event_v0",
+            "event_id": "evt-self",
+            "message_id": "om_public_self",
+            "create_time": "2026-08-25T00:00:00Z",
+            "content": "Bot delivery status",
+            "chat_id": first_chat,
+            "sender_type": "app",
+            "sender_id": profile_app_id,
+        },
+        {
+            "schema_version": "lark_event_inbox_event_v0",
+            "event_id": "evt-other-app",
+            "message_id": "om_public_other_app",
+            "create_time": "2026-08-25T00:01:00Z",
+            "content": "@Shared Context Bot please review",
+            "chat_id": first_chat,
+            "sender_type": "app",
+            "sender_id": "cli_public_fixture_other",
+            "mentions": [{"name": "Shared Context Bot"}],
+        },
+    ]
+    runtime_cli = tmp_path / "runtime-lark-cli-self-filter"
+    runtime_cli.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        f"events = {events!r}\n"
+        "for event in events:\n"
+        "    print(json.dumps(event), flush=True)\n",
+        encoding="utf-8",
+    )
+    runtime_cli.chmod(0o755)
+
+    def identity_runner(
+        argv: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
+        assert "whoami" in argv
+        return subprocess.CompletedProcess(
+            args=argv,
+            returncode=0,
+            stdout=json.dumps({"appId": profile_app_id}),
+            stderr="",
+        )
+
+    result = run_lark_event_collector(
+        project=project,
+        config_path=collector,
+        lark_cli_executable=str(runtime_cli),
+        runner=identity_runner,
+    )
+
+    assert result["self_message_skipped_count"] == 1
+    assert result["captured_count"] == 1
+    assert result["profile_identity_checked"] is True
+    assert result["profile_identity_verified"] is True
+    inbox = project / ".loopx/inbox/requirements-alpha"
+    assert not (inbox / "om_public_self.json").exists()
+    assert (inbox / "om_public_other_app.json").is_file()
 
 
 @pytest.mark.parametrize("tampered_route_key", [None, "requirements-beta"])

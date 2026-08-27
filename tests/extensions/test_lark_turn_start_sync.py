@@ -13,6 +13,7 @@ from loopx.control_plane.work_items.work_lane import (
 )
 from loopx.extensions.lark import turn_start_sync as turn_start_sync_module
 from loopx.extensions.lark.event_collector import load_lark_event_collector_config
+from loopx.extensions.lark.inbox_reactions import lark_inbox_reaction_receipts
 from loopx.extensions.lark.routed_inbox import project_routed_lark_event_inbox_urgency
 from loopx.extensions.lark.turn_start_sync import sync_lark_turn_start_inbox
 
@@ -20,7 +21,12 @@ FIRST_NOW = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
 SECOND_NOW = datetime(2026, 8, 26, 10, 5, tzinfo=UTC)
 
 
-def _project(tmp_path: Path, *, material_review: bool = True) -> tuple[Path, Path]:
+def _project(
+    tmp_path: Path,
+    *,
+    material_review: bool = True,
+    received_reaction: bool = False,
+) -> tuple[Path, Path]:
     project = tmp_path / "project"
     project.mkdir()
     subprocess.run(
@@ -41,7 +47,18 @@ def _project(tmp_path: Path, *, material_review: bool = True) -> tuple[Path, Pat
                 "inbox_dir": ".loopx/inbox/requirements",
                 "capture_scope": "configured_chat_all",
                 "material_review": {"enabled": material_review, "drain_limit": 20},
-                "reply": {"enabled": False},
+                "reply": (
+                    {
+                        "enabled": True,
+                        "sender_profile": "fixture-bot",
+                        "sender_identity": "bot",
+                        "bot_display_name": "Fixture Bot",
+                        "chat_id": "oc_fixture",
+                        "received_reaction_emoji": "Get",
+                    }
+                    if received_reaction
+                    else {"enabled": False}
+                ),
             }
         ),
         encoding="utf-8",
@@ -147,6 +164,47 @@ class PageRunner:
         )
 
 
+class ReactionPageRunner(PageRunner):
+    def __init__(
+        self,
+        pages: Sequence[dict[str, object]],
+        *,
+        fail_reaction: bool = False,
+    ) -> None:
+        super().__init__(pages)
+        self.fail_reaction = fail_reaction
+        self.profile_app_id = "cli_fixture_bot"
+
+    def __call__(
+        self, argv: Sequence[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        call = list(argv)
+        if "whoami" in call:
+            self.calls.append(call)
+            return subprocess.CompletedProcess(
+                args=call,
+                returncode=0,
+                stdout=json.dumps({"appId": self.profile_app_id}),
+                stderr="",
+            )
+        if "reactions" not in call:
+            return super().__call__(argv, **kwargs)
+        self.calls.append(call)
+        if self.fail_reaction:
+            return subprocess.CompletedProcess(
+                args=call,
+                returncode=1,
+                stdout=json.dumps({"ok": False}),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            args=call,
+            returncode=0,
+            stdout=json.dumps({"ok": True, "data": {"reaction_id": "reaction_Get"}}),
+            stderr="",
+        )
+
+
 def _page(*messages: dict[str, object]) -> dict[str, object]:
     return {
         "messages": list(messages),
@@ -208,6 +266,164 @@ def test_turn_start_sync_captures_then_requires_same_turn_agent_read(
     assert lane["semantic_triage_required"] is True
     assert "replan_goal" in lane["allowed_dispositions"]
     assert "before ordinary work" in str(lane["action"])
+
+
+def test_turn_start_sync_acknowledges_typed_mention_once(tmp_path: Path) -> None:
+    project, config = _project(tmp_path, received_reaction=True)
+    message = {
+        "message_id": "om_typed_mention",
+        "create_time": "2026-08-26T09:59:00Z",
+        "content": "@Fixture Bot please take a look.",
+        "mentions": [{"name": "Fixture Bot"}],
+        "deleted": False,
+    }
+    first = ReactionPageRunner([_page(message)])
+
+    result = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=first,
+        now=FIRST_NOW,
+    )
+
+    assert result["status"] == "observed"
+    assert result["received_reaction_count"] == 1
+    assert result["received_reaction_failure_count"] == 0
+    assert result["external_writes_performed"] is True
+    inbox = project / ".loopx/inbox/requirements"
+    assert (
+        lark_inbox_reaction_receipts(
+            inbox=inbox,
+            message_id="om_typed_mention",
+        )["received"]["emoji_type"]
+        == "Get"
+    )
+
+    duplicate = ReactionPageRunner([_page(message)])
+    duplicate_result = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=duplicate,
+        now=SECOND_NOW,
+    )
+
+    assert duplicate_result["status"] == "empty"
+    assert duplicate_result["received_reaction_count"] == 0
+    assert not any("reactions" in call for call in duplicate.calls)
+
+
+def test_turn_start_sync_reports_reaction_write_failure_without_losing_message(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path, received_reaction=True)
+    runner = ReactionPageRunner(
+        [
+            _page(
+                {
+                    "message_id": "om_reaction_failure",
+                    "create_time": "2026-08-26T09:59:00Z",
+                    "content": "@Fixture Bot please take a look.",
+                    "mentions": [{"name": "Fixture Bot"}],
+                    "deleted": False,
+                }
+            )
+        ],
+        fail_reaction=True,
+    )
+
+    result = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=runner,
+        now=FIRST_NOW,
+    )
+
+    assert result["status"] == "partial"
+    assert result["observation_count"] == 1
+    assert result["agent_read_required"] is True
+    assert result["received_reaction_count"] == 0
+    assert result["received_reaction_failure_count"] == 1
+    assert (project / ".loopx/inbox/requirements/om_reaction_failure.json").is_file()
+
+
+def test_turn_start_sync_retries_reaction_for_overlapping_pending_duplicate(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path, received_reaction=True)
+    message = {
+        "message_id": "om_reaction_retry",
+        "create_time": "2026-08-26T09:59:00Z",
+        "content": "@Fixture Bot please retry the acknowledgement.",
+        "mentions": [{"name": "Fixture Bot"}],
+        "deleted": False,
+    }
+    failed = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=ReactionPageRunner([_page(message)], fail_reaction=True),
+        now=FIRST_NOW,
+    )
+
+    assert failed["status"] == "partial"
+    retry_runner = ReactionPageRunner([_page(message)])
+    retried = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=retry_runner,
+        now=SECOND_NOW,
+    )
+
+    assert retried["status"] == "empty"
+    assert retried["observation_count"] == 0
+    assert retried["received_reaction_count"] == 1
+    assert retried["external_writes_performed"] is True
+    assert any("reactions" in call for call in retry_runner.calls)
+
+
+def test_turn_start_sync_excludes_verified_profile_self_message(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path, received_reaction=True)
+    runner = ReactionPageRunner(
+        [
+            _page(
+                {
+                    "message_id": "om_self_delivery",
+                    "create_time": "2026-08-26T09:58:00Z",
+                    "content": "Bot delivery status",
+                    "sender": {
+                        "sender_type": "app",
+                        "id": "cli_fixture_bot",
+                    },
+                    "deleted": False,
+                },
+                {
+                    "message_id": "om_human_follow_up",
+                    "create_time": "2026-08-26T09:59:00Z",
+                    "content": "Please keep investigating",
+                    "sender": {
+                        "sender_type": "user",
+                        "id": "ou_fixture_user",
+                    },
+                    "deleted": False,
+                },
+            )
+        ]
+    )
+
+    result = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=runner,
+        now=FIRST_NOW,
+    )
+
+    assert result["status"] == "observed"
+    assert result["observation_count"] == 1
+    assert result["self_message_skipped_count"] == 1
+    inbox = project / ".loopx/inbox/requirements"
+    assert not (inbox / "om_self_delivery.json").exists()
+    assert (inbox / "om_human_follow_up.json").is_file()
 
 
 def test_completed_sync_opens_a_new_overlapping_tail_window(tmp_path: Path) -> None:

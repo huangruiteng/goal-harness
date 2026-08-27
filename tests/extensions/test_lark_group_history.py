@@ -103,6 +103,30 @@ class PageRunner:
         )
 
 
+class IdentityPageRunner(PageRunner):
+    def __init__(
+        self,
+        pages: Sequence[dict[str, object]],
+        *,
+        profile_app_id: str,
+    ) -> None:
+        super().__init__(pages)
+        self.profile_app_id = profile_app_id
+
+    def __call__(
+        self, argv: Sequence[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if "whoami" in argv:
+            self.calls.append(list(argv))
+            return subprocess.CompletedProcess(
+                args=list(argv),
+                returncode=0,
+                stdout=json.dumps({"appId": self.profile_app_id}),
+                stderr="",
+            )
+        return super().__call__(argv, **kwargs)
+
+
 def _message(
     message_id: str,
     content: str,
@@ -235,6 +259,40 @@ def test_execute_commits_inbox_before_advancing_cursor(tmp_path: Path) -> None:
         "requirements-a",
         "requirements-a",
     ]
+
+
+def test_history_catch_up_excludes_verified_profile_self_message(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path)
+    runner = IdentityPageRunner(
+        [
+            {
+                "messages": [
+                    {
+                        **_message("om_history_self", "Bot delivery status"),
+                        "sender": {
+                            "sender_type": "app",
+                            "id": "cli_fixture_bot",
+                        },
+                    },
+                    _message("om_history_human", "Human follow-up"),
+                ],
+                "total": 2,
+                "has_more": False,
+                "page_token": None,
+            }
+        ],
+        profile_app_id="cli_fixture_bot",
+    )
+
+    receipt = _catch_up(project, config, runner, execute=True)
+
+    assert receipt["accepted_count"] == 1
+    assert receipt["self_message_skipped_count"] == 1
+    inbox = project / ".loopx/inbox/requirements-a"
+    assert not (inbox / "om_history_self.json").exists()
+    assert (inbox / "om_history_human.json").is_file()
 
 
 def test_history_preserves_structured_negative_mention_evidence(

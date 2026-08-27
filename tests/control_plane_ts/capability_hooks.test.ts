@@ -171,6 +171,7 @@ function turnStartResult(overrides: Record<string, unknown> = {}) {
     observation_count: 2,
     agent_read_required: true,
     external_reads_performed: true,
+    external_writes_performed: false,
     local_private_state_mutated: true,
     private_content_returned: false,
     provider_payload_returned: false,
@@ -235,6 +236,26 @@ test("turn-start empty, provider failure, and owner-private write scopes stay di
       }),
       result: turnStartResult(),
     }),
-    /not owner-private/,
+    /not admitted/,
   );
+
+  assert.throws(
+    () => validateTurnStartHookInvocation({
+      registration: turnStartRegistration(),
+      result: turnStartResult({ external_writes_performed: true }),
+    }),
+    /undeclared external write/,
+  );
+
+  const reacted = validateTurnStartHookInvocation({
+    registration: turnStartRegistration({
+      requested_write_scope: [
+        "owner_private_inbox",
+        "owner_private_cursor",
+        "provider_message_reaction",
+      ],
+    }),
+    result: turnStartResult({ external_writes_performed: true }),
+  });
+  assert.equal(reacted.external_writes_performed, true);
 });
