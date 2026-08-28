@@ -18,15 +18,15 @@ from .executor import (
     LOOPX_TURN_HOST_REQUEST_SCHEMA_VERSION,
     LOOPX_TURN_JOURNAL_INSPECTION_SCHEMA_VERSION,
     LOOPX_TURN_TASK_VALIDATION_SCHEMA_VERSION,
-    TurnRecoveryBlockedError,
     build_loopx_turn_command_validator,
     build_loopx_turn_host_request,
     inspect_loopx_turn_journal,
-    load_loopx_turn_plan_from_journal,
     normalize_host_argv,
     run_loopx_turn_once,
     validate_loopx_turn_host_result,
 )
+from .journal_store import load_loopx_turn_plan_from_journal
+from .recovery import TurnRecoveryBlockedError
 from .loop_controller import (
     BOUNDED_TURN_BUDGET_SCHEMA_VERSION,
     LOOP_CONTROLLER_DISPOSITION_SCHEMA_VERSION,
