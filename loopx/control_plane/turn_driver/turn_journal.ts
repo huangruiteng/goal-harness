@@ -2,7 +2,13 @@ import transactionContract from "../turn_transaction_contract.json" with {
   type: "json",
 };
 
-import type { EffectTurn } from "../effect_program.ts";
+import {
+  SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+  SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+  SETTLEMENT_PLAN_SCHEMA_VERSION,
+  settlementIdentityFromPlan,
+  type EffectTurn,
+} from "../effect_program.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 
 export const TURN_JOURNAL_INSPECTION_SCHEMA_VERSION =
@@ -122,6 +128,41 @@ function identityState(
   }
   if (isValidIdentity(expected)) observed.push(expected);
   return [complete, complete && new Set(observed).size === 1];
+}
+
+function typedSettlementIdentityState(
+  transaction: JsonObject,
+  settlement: JsonObject,
+  identity: JsonObject,
+): [valid: boolean, turnInstanceMatches: boolean] {
+  if (
+    settlement.schema_version !== SETTLEMENT_PLAN_SCHEMA_VERSION ||
+    ![
+      SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+      SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+    ].includes(String(identity.schema_version))
+  ) {
+    return [false, false];
+  }
+  const parsed = settlementIdentityFromPlan(transaction);
+  if (parsed.failure !== null || parsed.value === null) return [false, false];
+  if (
+    identity.schema_version === SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION &&
+    (
+      identity.binding_kind !== parsed.value.binding_kind ||
+      identity.binding_id !== parsed.value.binding_id
+    )
+  ) {
+    return [false, false];
+  }
+  const expectedTurnInstance = isValidIdentity(transaction.turn_instance_id)
+    ? transaction.turn_instance_id
+    : transaction.turn_key;
+  return [
+    true,
+    isValidIdentity(expectedTurnInstance) &&
+      parsed.value.turn_instance_id === expectedTurnInstance,
+  ];
 }
 
 function stringifyPhase(value: unknown): string {
@@ -380,30 +421,18 @@ export function interpretTurnJournalEffect(
     ],
     request.turn_key,
   );
-  const [, recoveryGoalMatches] = identityState(
-    [journal.goal_id, envelope.goal_id],
-    [],
-    request.goal_id,
-  );
-  const [, recoveryOwnerMatches] = identityState(
-    [envelope.agent_id],
-    [],
-    request.agent_id,
-  );
-  const [, recoveryTurnKeyMatches] = identityState(
-    [journal.turn_key, transaction.turn_key],
-    [
-      [Object.hasOwn(hostResult, "turn_key"), hostResult.turn_key],
-      [Object.hasOwn(receipt, "turn_key"), receipt.turn_key],
-    ],
-    request.turn_key,
-  );
+  const [settlementIdentityValid, settlementTurnInstanceMatches] =
+    typedSettlementIdentityState(transaction, settlement, identity);
 
   const violations: string[] = [];
   if (!goalComplete) violations.push("goal_identity_missing");
   else if (!goalMatches) violations.push("goal_mismatch");
   if (!ownerComplete) violations.push("owner_identity_missing");
   else if (!ownerMatches) violations.push("owner_mismatch");
+  if (!settlementIdentityValid) violations.push("settlement_identity_invalid");
+  else if (!settlementTurnInstanceMatches) {
+    violations.push("settlement_turn_instance_mismatch");
+  }
   if (!turnKeyComplete) violations.push("turn_key_identity_missing");
   else if (!turnKeyMatches) violations.push("turn_key_mismatch");
 
@@ -433,9 +462,11 @@ export function interpretTurnJournalEffect(
 
   const replayLegal = violations.length === 0;
   const journalConsistent =
-    recoveryGoalMatches &&
-    recoveryOwnerMatches &&
-    recoveryTurnKeyMatches &&
+    goalMatches &&
+    ownerMatches &&
+    settlementIdentityValid &&
+    settlementTurnInstanceMatches &&
+    turnKeyMatches &&
     phasesFormOrderedPrefix &&
     supportedJournalStatuses.has(journalStatus);
   const decision = replayLegal ? "replay_legal" : "replay_blocked";
