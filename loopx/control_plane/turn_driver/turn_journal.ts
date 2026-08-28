@@ -130,11 +130,29 @@ function identityState(
   return [complete, complete && new Set(observed).size === 1];
 }
 
+function selectedTurnTodoId(envelope: JsonObject): string | null {
+  const orchestration = asObject(envelope.task_orchestration_contract);
+  const primaryTodoId = typeof orchestration.primary_todo_id === "string"
+    ? orchestration.primary_todo_id.trim()
+    : "";
+  if (
+    orchestration.schema_version === "task_orchestration_contract_v2" &&
+    orchestration.mode === "adaptive" &&
+    primaryTodoId
+  ) {
+    return primaryTodoId;
+  }
+  const action = asObject(envelope.action);
+  const selectedTodo = asObject(action.selected_todo);
+  return isValidIdentity(selectedTodo.todo_id) ? selectedTodo.todo_id : null;
+}
+
 function typedSettlementIdentityState(
+  envelope: JsonObject,
   transaction: JsonObject,
   settlement: JsonObject,
   identity: JsonObject,
-): [valid: boolean, turnInstanceMatches: boolean] {
+): [valid: boolean, turnInstanceMatches: boolean, bindingMatches: boolean] {
   if (
     settlement.schema_version !== SETTLEMENT_PLAN_SCHEMA_VERSION ||
     ![
@@ -142,10 +160,12 @@ function typedSettlementIdentityState(
       SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION,
     ].includes(String(identity.schema_version))
   ) {
-    return [false, false];
+    return [false, false, false];
   }
   const parsed = settlementIdentityFromPlan(transaction);
-  if (parsed.failure !== null || parsed.value === null) return [false, false];
+  if (parsed.failure !== null || parsed.value === null) {
+    return [false, false, false];
+  }
   if (
     identity.schema_version === SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION &&
     (
@@ -153,15 +173,20 @@ function typedSettlementIdentityState(
       identity.binding_id !== parsed.value.binding_id
     )
   ) {
-    return [false, false];
+    return [false, false, false];
   }
   const expectedTurnInstance = isValidIdentity(transaction.turn_instance_id)
     ? transaction.turn_instance_id
     : transaction.turn_key;
+  const selectedTodoId = selectedTurnTodoId(envelope);
   return [
     true,
     isValidIdentity(expectedTurnInstance) &&
       parsed.value.turn_instance_id === expectedTurnInstance,
+    selectedTodoId !== null &&
+      parsed.value.binding_kind === "todo" &&
+      parsed.value.todo_id === selectedTodoId &&
+      parsed.value.binding_id === selectedTodoId,
   ];
 }
 
@@ -421,8 +446,11 @@ export function interpretTurnJournalEffect(
     ],
     request.turn_key,
   );
-  const [settlementIdentityValid, settlementTurnInstanceMatches] =
-    typedSettlementIdentityState(transaction, settlement, identity);
+  const [
+    settlementIdentityValid,
+    settlementTurnInstanceMatches,
+    settlementBindingMatches,
+  ] = typedSettlementIdentityState(envelope, transaction, settlement, identity);
 
   const violations: string[] = [];
   if (!goalComplete) violations.push("goal_identity_missing");
@@ -432,6 +460,9 @@ export function interpretTurnJournalEffect(
   if (!settlementIdentityValid) violations.push("settlement_identity_invalid");
   else if (!settlementTurnInstanceMatches) {
     violations.push("settlement_turn_instance_mismatch");
+  }
+  if (settlementIdentityValid && !settlementBindingMatches) {
+    violations.push("settlement_binding_mismatch");
   }
   if (!turnKeyComplete) violations.push("turn_key_identity_missing");
   else if (!turnKeyMatches) violations.push("turn_key_mismatch");
@@ -466,6 +497,7 @@ export function interpretTurnJournalEffect(
     ownerMatches &&
     settlementIdentityValid &&
     settlementTurnInstanceMatches &&
+    settlementBindingMatches &&
     turnKeyMatches &&
     phasesFormOrderedPrefix &&
     supportedJournalStatuses.has(journalStatus);
