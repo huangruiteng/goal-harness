@@ -244,6 +244,38 @@ test("native replay validates legacy rows by goal and agent", async (t) => {
   }
 });
 
+test("native replay rejects incomplete transaction metadata", async (t) => {
+  for (const quotaSpendCommit of [{}, { effect_id: "" }, { effect_id: null }]) {
+    const runtimeRoot = await tempRuntime(t);
+    const runsDir = join(runtimeRoot, "goals", goalId, "runs");
+    await mkdir(runsDir, { recursive: true });
+    const indexPath = join(runsDir, "index.jsonl");
+    const original = {
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: "codex-main-control",
+      quota_spend_commit: quotaSpendCommit,
+      effect_ref: "incomplete-metadata-effect",
+    };
+    await writeFile(indexPath, `${JSON.stringify(original)}\n`);
+
+    const replay = await evaluateQuotaSpendCommit({
+      schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+      operation: "replay",
+      runtime_root: runtimeRoot,
+      goal_id: goalId,
+      effect_id: "incomplete-metadata-effect",
+      resolved_agent_id: "codex-main-control",
+    });
+
+    assert.equal(replay.status, "conflict");
+    assert.equal(replay.conflict, true);
+    assert.equal(replay.replayed, false);
+    assert.equal(replay.reason_code, "effect_id_conflict");
+    assert.equal(await readFile(indexPath, "utf8"), `${JSON.stringify(original)}\n`);
+  }
+});
+
 test("native replay ignores non-quota rows that reuse an effect identity", async (t) => {
   const runtimeRoot = await tempRuntime(t);
   const runsDir = join(runtimeRoot, "goals", goalId, "runs");

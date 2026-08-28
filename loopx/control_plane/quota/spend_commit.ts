@@ -654,10 +654,9 @@ function resolveEffectIdentity(
   const rawMetadata = record.quota_spend_commit;
   const recordEffect = effectIdentityValue(record.effect_ref);
   const recordReferencesExpected = recordEffect.value === expectedEffectId;
-  const metadata = rawMetadata === undefined || rawMetadata === null
-    ? null
-    : jsonObject(rawMetadata);
-  if (rawMetadata !== undefined && rawMetadata !== null && metadata === null) {
+  const metadataPresent = rawMetadata !== undefined;
+  const metadata = metadataPresent ? jsonObject(rawMetadata) : null;
+  if (metadataPresent && metadata === null) {
     if (!recordReferencesExpected) return { kind: "absent" };
     return {
       kind: "conflict",
@@ -668,7 +667,11 @@ function resolveEffectIdentity(
   const referencesExpected = metadataEffect.value === expectedEffectId ||
     recordReferencesExpected;
   if (!referencesExpected) return { kind: "absent" };
-  if (metadataEffect.malformed || recordEffect.malformed) {
+  if (
+    metadataEffect.malformed ||
+    recordEffect.malformed ||
+    (metadataPresent && metadataEffect.value === null)
+  ) {
     return {
       kind: "conflict",
       reason: "quota spend index row has malformed effect identity",
