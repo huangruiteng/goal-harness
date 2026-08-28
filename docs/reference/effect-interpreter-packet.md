@@ -73,6 +73,12 @@ plan and its bounded actual status, completed phase ids, and Host-invocation
 boolean. It never contains Host logs, Session content, provider payloads, or
 paths.
 
+Journal consistency is fail-closed over the canonical typed settlement
+identity as well as Journal/envelope lineage and phase ordering. Settlement
+goal, agent, Turn instance, binding, and effect id must all validate and bind to
+the inspected Turn before the shared recovery decision can authorize any
+provider call.
+
 JSON and Markdown render the same projection. They do not expose raw journal,
 plan, host-result, or receipt bodies; request context; capabilities;
 recommended actions; credentials; evidence; or resolved local paths. A

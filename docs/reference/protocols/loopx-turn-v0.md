@@ -269,6 +269,14 @@ alone:
   Journal: `action`, `can_continue`, `resume_from`, `reinvoke_host`, a typed
   `reason`, and the checks that actually participated.
 
+`journal_consistent` also requires a complete canonical typed settlement
+identity. Its goal and agent must match the Journal, envelope, and requested
+owner; its Turn instance must match the transaction; and its binding and effect
+id must validate under the settlement schema. A mismatch therefore produces a
+blocked recovery decision before Host or any settlement provider is called,
+even when the completed phase prefix would otherwise resume at durable
+writeback or a later effect.
+
 For example, an `in_progress` Journal with a saved Host Result has
 `replay_legal=false` but may continue from `validation` without another Host
 call. `scheduler_action_required` continues from `scheduler_apply` and does not
