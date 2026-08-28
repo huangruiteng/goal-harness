@@ -10,6 +10,7 @@ import pytest
 from loopx.control_plane.turn_driver import executor as turn_executor
 from loopx.control_plane.turn_driver import (
     LOOPX_TURN_RESULT_SCHEMA_VERSION,
+    TurnRecoveryBlockedError,
     build_loopx_turn_plan,
     load_loopx_turn_plan_from_journal,
     run_loopx_turn_once,
@@ -1189,6 +1190,108 @@ def test_run_once_recovers_after_process_exit_before_writeback(tmp_path: Path) -
     assert recovered["status"] == "committed"
     assert count_path.read_text(encoding="utf-8") == "1"
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
+
+
+def test_run_once_blocks_drifted_settlement_identity_before_any_provider(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    transaction = plan["transaction"]
+    assert isinstance(transaction, dict)
+    settlement_plan = transaction["settlement_plan"]
+    assert isinstance(settlement_plan, dict)
+    identity = settlement_plan["identity"]
+    assert isinstance(identity, dict)
+    identity["goal_id"] = "other-goal"
+    identity["agent_id"] = "other-agent"
+    identity["effect_id"] = (
+        f"other-goal:other-agent:{identity['todo_id']}:"
+        f"{identity['turn_instance_id']}"
+    )
+    turn_key = str(transaction["turn_key"])
+    runtime_root = tmp_path / "runtime"
+    journal_path = turn_executor.turn_journal_path(
+        runtime_root,
+        goal_id="fixture-goal",
+        turn_key=turn_key,
+    )
+    journal_path.parent.mkdir(parents=True)
+    journal_path.write_text(
+        json.dumps(
+            {
+                "schema_version": LOOPX_TURN_JOURNAL_SCHEMA_VERSION,
+                "goal_id": "fixture-goal",
+                "turn_key": turn_key,
+                "status": "in_progress",
+                "completed_phases": list(TRANSACTION_PHASES[:3]),
+                "plan": plan,
+                "host_result": _host_result(plan),
+                "task_validation": _passing_validator(plan, _host_result(plan)),
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded_plan = load_loopx_turn_plan_from_journal(
+        runtime_root,
+        goal_id="fixture-goal",
+        turn_key=turn_key,
+    )
+    inspected = turn_executor.inspect_loopx_turn_journal(
+        runtime_root,
+        goal_id="fixture-goal",
+        agent_id="codex-fixture",
+        turn_key=turn_key,
+    )
+    assert inspected["violations"] == [
+        "goal_mismatch",
+        "owner_mismatch",
+        "journal_not_terminal",
+    ]
+    assert inspected["journal_consistent"] is False
+    assert inspected["recovery_decision"]["action"] == "blocked"
+
+    calls = {
+        "host": 0,
+        "validation": 0,
+        "writeback": 0,
+        "writeback_readback": 0,
+        "spend": 0,
+        "spend_readback": 0,
+        "scheduler": 0,
+        "terminal_closeout": 0,
+        "terminal_closeout_readback": 0,
+    }
+
+    def unexpected_provider(name: str):
+        def invoke(*_args: object, **_kwargs: object) -> dict[str, object]:
+            calls[name] += 1
+            raise AssertionError(f"{name} provider must not run")
+
+        return invoke
+
+    with pytest.raises(TurnRecoveryBlockedError) as exc_info:
+        run_loopx_turn_once(
+            loaded_plan,
+            host_runner=unexpected_provider("host"),
+            project=tmp_path,
+            runtime_root=runtime_root,
+            goal_id="fixture-goal",
+            timeout_seconds=5,
+            execute=True,
+            task_validator=unexpected_provider("validation"),
+            writeback=unexpected_provider("writeback"),
+            writeback_resolver=unexpected_provider("writeback_readback"),
+            spend=unexpected_provider("spend"),
+            spend_resolver=unexpected_provider("spend_readback"),
+            scheduler=unexpected_provider("scheduler"),
+            terminal_closeout=unexpected_provider("terminal_closeout"),
+            terminal_closeout_resolver=unexpected_provider(
+                "terminal_closeout_readback"
+            ),
+        )
+
+    assert exc_info.value.decision == inspected["recovery_decision"]
+    assert all(count == 0 for count in calls.values())
 
 
 def test_run_once_recovers_saved_host_result_from_validation_without_host_retry(

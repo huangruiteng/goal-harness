@@ -8,6 +8,11 @@ import {
 } from "../../loopx/control_plane/turn_driver/turn_journal.ts";
 
 const turnKey = `sha256:${"a".repeat(64)}`;
+const todoId = "todo_fixture0001";
+
+function effectId(goalId: string, agentId: string): string {
+  return `${goalId}:${agentId}:${todoId}:${turnKey}`;
+}
 
 function request(status = "committed"): TurnJournalInspectionRequest {
   return {
@@ -34,7 +39,15 @@ function request(status = "committed"): TurnJournalInspectionRequest {
         transaction: {
           turn_key: turnKey,
           settlement_plan: {
-            identity: { goal_id: "fixture-goal", agent_id: "fixture-agent" },
+            schema_version: "quota_settlement_plan_v1",
+            identity: {
+              schema_version: "quota_settlement_identity_v0",
+              effect_id: effectId("fixture-goal", "fixture-agent"),
+              goal_id: "fixture-goal",
+              agent_id: "fixture-agent",
+              todo_id: todoId,
+              turn_instance_id: turnKey,
+            },
           },
         },
       },
@@ -139,6 +152,64 @@ test("scheduler recovery resumes only scheduler apply", () => {
   assert.equal(result.recovery_decision.reason, "resume_scheduler");
 });
 
+test("settlement identity drift blocks non-terminal recovery", () => {
+  const input = request("in_progress");
+  input.journal.completed_phases = [
+    "host_execute",
+    "typed_result",
+    "validation",
+  ];
+  const plan = input.journal.plan as Record<string, unknown>;
+  const transaction = plan.transaction as Record<string, unknown>;
+  const settlement = transaction.settlement_plan as Record<string, unknown>;
+  const identity = settlement.identity as Record<string, unknown>;
+  identity.goal_id = "other-goal";
+  identity.agent_id = "other-agent";
+  identity.effect_id = effectId("other-goal", "other-agent");
+
+  const result = interpretTurnJournal(input);
+
+  assert.deepEqual(result.violations, [
+    "goal_mismatch",
+    "owner_mismatch",
+    "journal_not_terminal",
+  ]);
+  assert.equal(result.journal_consistent, false);
+  assert.deepEqual(result.recovery_decision, {
+    schema_version: "loopx_turn_recovery_decision_v0",
+    action: "blocked",
+    can_continue: false,
+    resume_from: null,
+    reinvoke_host: false,
+    reason: "journal_inconsistent",
+    retry_failed: false,
+    checks: [{ kind: "journal_consistency", outcome: "failed" }],
+  });
+});
+
+test("malformed typed settlement identity blocks recovery", () => {
+  const input = request("in_progress");
+  input.journal.completed_phases = [
+    "host_execute",
+    "typed_result",
+    "validation",
+  ];
+  const plan = input.journal.plan as Record<string, unknown>;
+  const transaction = plan.transaction as Record<string, unknown>;
+  const settlement = transaction.settlement_plan as Record<string, unknown>;
+  const identity = settlement.identity as Record<string, unknown>;
+  identity.effect_id = "not-the-canonical-effect-id";
+
+  const result = interpretTurnJournal(input);
+
+  assert.deepEqual(result.violations, [
+    "settlement_identity_invalid",
+    "journal_not_terminal",
+  ]);
+  assert.equal(result.journal_consistent, false);
+  assert.equal(result.recovery_decision.action, "blocked");
+});
+
 test("failed Host recovery uses only the supplied Session Binding check", () => {
   const input = request("failed");
   input.retry_failed = true;
@@ -198,6 +269,7 @@ test("identity and phase violations accumulate in stable order", () => {
   const settlement = (transaction.settlement_plan ?? {}) as Record<string, unknown>;
   const identity = (settlement.identity ?? {}) as Record<string, unknown>;
   identity.agent_id = "other-agent";
+  identity.effect_id = effectId("fixture-goal", "other-agent");
 
   const result = interpretTurnJournal(input);
 

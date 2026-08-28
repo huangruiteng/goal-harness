@@ -41,9 +41,16 @@ def _journal(*, status: str = "committed") -> dict[str, Any]:
             "transaction": {
                 "turn_key": TURN_KEY,
                 "settlement_plan": {
+                    "schema_version": "quota_settlement_plan_v1",
                     "identity": {
+                        "schema_version": "quota_settlement_identity_v0",
+                        "effect_id": (
+                            f"fixture-goal:fixture-agent:todo_fixture0001:{TURN_KEY}"
+                        ),
                         "goal_id": "fixture-goal",
                         "agent_id": "fixture-agent",
+                        "todo_id": "todo_fixture0001",
+                        "turn_instance_id": TURN_KEY,
                     }
                 },
             },
