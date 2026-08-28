@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import math
 from datetime import timedelta
 from typing import Any, Callable
 
 from .spend_sources import VISIBLE_GOAL_SLOT_SPEND_SOURCE
-from .usage_collector import UsageSample, collect_usage_for_run
+from .usage_collector import UsageRowError, UsageSample, collect_usage_for_run
 from ..runtime.time import now_utc
 
 USAGE_PROXY_NOTE = (
@@ -99,10 +100,12 @@ def _accumulate_usage(
         )
         observed_metrics.add(f"cache_tokens_{suffix}")
     if sample.cost_usd is not None:
-        bucket[f"cost_usd_{suffix}"] = (
-            float(bucket.get(f"cost_usd_{suffix}") or 0.0) + sample.cost_usd
-        )
-        observed_metrics.add(f"cost_usd_{suffix}")
+        key = f"cost_usd_{suffix}"
+        accumulated_cost = float(bucket.get(key) or 0.0) + sample.cost_usd
+        if not math.isfinite(accumulated_cost):
+            raise UsageRowError(f"usage summary {key} must be finite")
+        bucket[key] = accumulated_cost
+        observed_metrics.add(key)
     if sample.duration_ms is not None:
         bucket[f"duration_ms_{suffix}"] = (
             int(bucket.get(f"duration_ms_{suffix}") or 0) + sample.duration_ms
@@ -114,7 +117,10 @@ def _round_cost(bucket: dict[str, Any]) -> None:
     for suffix in ("24h", "7d"):
         key = f"cost_usd_{suffix}"
         if key in bucket:
-            bucket[key] = round(float(bucket[key]), 6)
+            rounded_cost = round(float(bucket[key]), 6)
+            if not math.isfinite(rounded_cost):
+                raise UsageRowError(f"usage summary {key} must be finite")
+            bucket[key] = rounded_cost
 
 
 def _strip_unobserved_usage_metrics(

@@ -14,6 +14,7 @@ from loopx.control_plane.quota.usage_collector import (
     ingest_usage_into_run_record,
 )
 from loopx.control_plane.quota.usage_summary import (
+    _accumulate_usage,
     blank_usage_goal,
     build_usage_summary,
 )
@@ -325,6 +326,48 @@ def test_build_usage_summary_rounds_cost_to_avoid_float_drift() -> None:
     }
     summary = build_usage_summary(history, parse_timestamp=_identity_parse)
     assert summary["totals"]["cost_usd_24h"] == 0.3
+
+
+def test_build_usage_summary_fails_closed_when_total_cost_overflows() -> None:
+    now = datetime.now(timezone.utc)
+    history = {
+        "runs": [
+            _run(
+                goal_id,
+                generated_at=now,
+                usage=_usage(
+                    input_tokens=1,
+                    output_tokens=1,
+                    cost_usd=1e308,
+                    source_snapshot_id=f"overflow-{goal_id}",
+                ),
+            )
+            for goal_id in ("g1", "g2")
+        ]
+    }
+
+    with pytest.raises(UsageRowError, match="cost_usd_7d must be finite"):
+        build_usage_summary(history, parse_timestamp=_identity_parse)
+
+
+def test_accumulate_usage_fails_closed_when_goal_cost_overflows() -> None:
+    bucket = blank_usage_goal("g1")
+    sample = UsageSample(
+        input_tokens=1,
+        output_tokens=1,
+        cache_tokens=None,
+        cost_usd=1e308,
+        duration_ms=None,
+        provider="codex",
+        model="codex-1",
+        source_snapshot_id="overflow-goal",
+        measurement_kind="delta",
+    )
+    observed_metrics: set[str] = set()
+    _accumulate_usage(bucket, sample, "24h", observed_metrics)
+
+    with pytest.raises(UsageRowError, match="cost_usd_24h must be finite"):
+        _accumulate_usage(bucket, sample, "24h", observed_metrics)
 
 
 def test_collect_usage_for_run_rejects_bool_tokens() -> None:

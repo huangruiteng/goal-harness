@@ -19,6 +19,7 @@ import pytest
 import loopx.state_refresh as state_refresh_module
 from loopx.control_plane.quota.codex_session_usage import (
     CodexSessionUsageError,
+    book_codex_session_usage,
     read_codex_session_usage,
     session_usage_baseline,
 )
@@ -294,6 +295,62 @@ def test_session_usage_baseline_fails_closed_on_corrupt_index_row(
     index_path.write_text('{"generated_at": "2026-08-26T01:05:00"\n', encoding="utf-8")
     with pytest.raises(CodexSessionUsageError, match="row 1 is corrupt"):
         session_usage_baseline(index_path, SESSION_ID)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error_match"),
+    [
+        ({"input_tokens": 1200.5}, "input_tokens must be a whole number"),
+        ({"duration_ms": 300_000.5}, "duration_ms must be a whole number"),
+        ({"schema_version": None}, "schema_version"),
+        ({"measurement_kind": "estimate"}, "measurement_kind"),
+        ({"provider": "other-provider"}, "provider must be codex"),
+    ],
+    ids=[
+        "fractional-token",
+        "fractional-duration",
+        "missing-schema",
+        "illegal-measurement-kind",
+        "wrong-provider",
+    ],
+)
+def test_book_codex_session_usage_fails_closed_on_invalid_baseline_without_appending(
+    tmp_path: Path,
+    mutation: dict[str, Any],
+    error_match: str,
+) -> None:
+    rollout = _fixture_rollout(tmp_path)
+    index_path = tmp_path / "index.jsonl"
+    persisted_row = json.loads(
+        _index_row(
+            generated_at="2026-08-26T01:05:00",
+            source_snapshot_id=f"codex:{SESSION_ID}:2026-08-26T01:05:00.000Z",
+            measurement_kind="absolute",
+            input_tokens=1200,
+            output_tokens=300,
+            cache_tokens=200,
+            duration_ms=300_000,
+        )
+    )
+    persisted_row["usage"].update(mutation)
+    if "schema_version" in mutation and mutation["schema_version"] is None:
+        persisted_row["usage"].pop("schema_version", None)
+    index_path.write_text(json.dumps(persisted_row) + "\n", encoding="utf-8")
+    index_before_retry = index_path.read_bytes()
+    record: dict[str, Any] = {}
+    index_record: dict[str, Any] = {}
+
+    with pytest.raises(CodexSessionUsageError, match=error_match):
+        book_codex_session_usage(
+            record,
+            rollout,
+            index_path,
+            index_record=index_record,
+        )
+
+    assert index_path.read_bytes() == index_before_retry
+    assert "usage" not in record
+    assert "usage" not in index_record
 
 
 def _goal_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:

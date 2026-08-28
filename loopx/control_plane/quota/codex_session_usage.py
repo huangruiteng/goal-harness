@@ -30,13 +30,16 @@ optional metrics stay unknown, never zero.
 from __future__ import annotations
 
 import json
-import math
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping
+from typing import Any, Mapping, MutableMapping, cast
 
 from ..runtime.run_index_duplicates import index_identity
-from .usage_collector import UsageRowError, ingest_usage_into_run_record
+from .usage_collector import (
+    UsageRowError,
+    ingest_usage_into_run_record,
+    normalize_compact_usage_row,
+)
 
 CODEX_USAGE_PROVIDER = "codex"
 USAGE_BOOKING_LOCK_TARGET = "usage_booking"
@@ -185,21 +188,6 @@ def book_codex_session_usage(
     )
 
 
-def _booked_usage_number(
-    value: Any, *, field: str, line_number: int, index_path: Path
-) -> int | float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(float(value))
-        or value < 0
-    ):
-        raise CodexSessionUsageError(
-            f"run index row {line_number} has an invalid booked usage.{field}: {index_path}"
-        )
-    return value
-
-
 def session_usage_baseline(
     index_path: Path, session_id: str
 ) -> dict[str, Any] | None:
@@ -243,11 +231,25 @@ def session_usage_baseline(
             ) from exc
         if not isinstance(row, dict):
             continue
-        usage = row.get("usage")
-        if not isinstance(usage, dict):
+        raw_usage = row.get("usage")
+        if not isinstance(raw_usage, dict):
             continue
-        if not str(usage.get("source_snapshot_id") or "").startswith(prefix):
+        if not str(raw_usage.get("source_snapshot_id") or "").startswith(prefix):
             continue
+        try:
+            usage = normalize_compact_usage_row(raw_usage)
+        except UsageRowError as exc:
+            raise CodexSessionUsageError(
+                f"run index row {line_number} has invalid usage: {index_path}: {exc}"
+            ) from exc
+        if usage["provider"] != CODEX_USAGE_PROVIDER:
+            raise CodexSessionUsageError(
+                f"run index row {line_number} usage.provider must be codex: {index_path}"
+            )
+        if not str(usage["source_snapshot_id"]).startswith(prefix):
+            raise CodexSessionUsageError(
+                f"run index row {line_number} usage source does not match session: {index_path}"
+            )
         identity = index_identity(row)
         if identity in seen_rows:
             continue
@@ -256,16 +258,10 @@ def session_usage_baseline(
             value = usage.get(field)
             if value is None:
                 continue
-            booked = _booked_usage_number(
-                value, field=field, line_number=line_number, index_path=index_path
-            )
-            int_totals[field] = int(int_totals[field] or 0) + int(booked)
+            int_totals[field] = (int_totals[field] or 0) + cast(int, value)
         cost = usage.get("cost_usd")
         if cost is not None:
-            booked_cost = _booked_usage_number(
-                cost, field="cost_usd", line_number=line_number, index_path=index_path
-            )
-            cost_total = float(cost_total or 0.0) + float(booked_cost)
+            cost_total = (cost_total or 0.0) + cast(float, cost)
         last_usage = usage
     if last_usage is None:
         return None
