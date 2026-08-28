@@ -50,6 +50,7 @@ IDEMPOTENCY_KEY_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 CURSOR_PREFIX = "lark-comment-v0."
 REPLY_CHAIN_PREFIX = "lark-reply-v0."
 MAX_PROVIDER_PAGES = 20
+LARK_APP_VERSION_PAGE_SIZE = 2
 
 CommandRunner = Callable[
     [Sequence[str], Path | None, float | None],
@@ -170,6 +171,69 @@ def _json_output(result: Mapping[str, Any], *, operation: str) -> dict[str, Any]
             code = f"lark_document_comment_{operation}_failed"
         raise LarkDocumentCommentProviderError(code)
     return {str(key): item for key, item in payload.items()}
+
+
+def _command_json_mapping(
+    result: Mapping[str, Any],
+    *,
+    error_code: str,
+    allowed_returncodes: frozenset[int] = frozenset({0}),
+) -> dict[str, Any]:
+    try:
+        returncode = int(result.get("returncode", 1))
+    except (TypeError, ValueError) as exc:
+        raise LarkDocumentCommentProviderError(error_code) from exc
+    try:
+        payload = json.loads(str(result.get("stdout") or ""))
+    except json.JSONDecodeError as exc:
+        raise LarkDocumentCommentProviderError(error_code) from exc
+    if returncode not in allowed_returncodes or not isinstance(payload, Mapping):
+        raise LarkDocumentCommentProviderError(error_code)
+    return {str(key): item for key, item in payload.items()}
+
+
+def _published_tenant_scopes(payload: Mapping[str, Any]) -> list[str]:
+    data = payload.get("data")
+    items = data.get("items") if isinstance(data, Mapping) else None
+    if not isinstance(items, list):
+        raise LarkDocumentCommentProviderError(
+            "lark_document_comment_permission_probe_unknown"
+        )
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise LarkDocumentCommentProviderError(
+                "lark_document_comment_permission_probe_unknown"
+            )
+        publish_time = item.get("publish_time")
+        if item.get("status") != 1 or publish_time is None or publish_time == "":
+            continue
+        raw_scopes = item.get("scopes")
+        if not isinstance(raw_scopes, list):
+            raise LarkDocumentCommentProviderError(
+                "lark_document_comment_permission_probe_unknown"
+            )
+        tenant_scopes: list[str] = []
+        for raw_scope in raw_scopes:
+            if not isinstance(raw_scope, Mapping):
+                raise LarkDocumentCommentProviderError(
+                    "lark_document_comment_permission_probe_unknown"
+                )
+            scope = raw_scope.get("scope")
+            token_types = raw_scope.get("token_types")
+            if not isinstance(scope, str) or not isinstance(token_types, list):
+                raise LarkDocumentCommentProviderError(
+                    "lark_document_comment_permission_probe_unknown"
+                )
+            if any(not isinstance(token_type, str) for token_type in token_types):
+                raise LarkDocumentCommentProviderError(
+                    "lark_document_comment_permission_probe_unknown"
+                )
+            if scope and "tenant" in token_types:
+                tenant_scopes.append(scope)
+        return sorted(set(tenant_scopes))
+    raise LarkDocumentCommentProviderError(
+        "lark_document_comment_permission_probe_unknown"
+    )
 
 
 def _encode_private(prefix: str, value: Mapping[str, Any]) -> str:
@@ -426,7 +490,7 @@ class LarkCliDocumentCommentProvider:
         publication_required: bool = True,
         repair_url: str = LARK_DOCUMENT_COMMENT_REPAIR_URL,
     ) -> dict[str, Any]:
-        """Read exact local scope readiness without returning credentials."""
+        """Read identity-appropriate scope readiness without returning secrets."""
 
         requirements = self.permission_requirements(
             response_enabled=response_enabled,
@@ -440,51 +504,99 @@ class LarkCliDocumentCommentProvider:
                 for scope in requirement["required_scopes"]
             }
         )
-        status_result = self._runner(
-            self._args(["auth", "status", "--json"]),
-            None,
-            self._timeout_seconds,
+        status_payload = _command_json_mapping(
+            self._runner(
+                self._args(["auth", "status", "--json"]),
+                None,
+                self._timeout_seconds,
+            ),
+            error_code="lark_document_comment_permission_probe_invalid",
         )
-        try:
-            status_payload = json.loads(str(status_result.get("stdout") or ""))
-        except json.JSONDecodeError as exc:
-            raise LarkDocumentCommentProviderError(
-                "lark_document_comment_permission_probe_invalid"
-            ) from exc
-        if (
-            not isinstance(status_payload, Mapping)
-            or status_payload.get("identity") != self._identity
-        ):
+        if status_payload.get("identity") != self._identity:
             raise LarkDocumentCommentProviderError(
                 "lark_document_comment_permission_probe_identity_mismatch"
             )
-        result = self._runner(
-            self._args(["auth", "check", "--scope", " ".join(scopes), "--json"]),
-            None,
-            self._timeout_seconds,
-        )
-        try:
-            payload = json.loads(str(result.get("stdout") or ""))
-        except json.JSONDecodeError as exc:
-            raise LarkDocumentCommentProviderError(
-                "lark_document_comment_permission_probe_invalid"
-            ) from exc
-        if not isinstance(payload, Mapping):
-            raise LarkDocumentCommentProviderError(
-                "lark_document_comment_permission_probe_invalid"
+
+        if self._identity == "bot":
+            # ``auth check`` reads only a stored user OAuth token.  Bot scope
+            # evidence instead comes from the current published app-version
+            # ledger, whose tenant scopes are the effective Bot permissions.
+            identity_payload = _command_json_mapping(
+                self._runner(
+                    self._args(["whoami", "--json"]),
+                    None,
+                    self._timeout_seconds,
+                ),
+                error_code="lark_document_comment_permission_probe_unknown",
             )
-        granted = payload.get("granted", [])
-        missing = payload.get("missing", [])
-        if (
-            not isinstance(granted, list)
-            or not isinstance(missing, list)
-            or any(not isinstance(scope, str) for scope in [*granted, *missing])
-            or set(granted).intersection(missing)
-            or set(granted).union(missing) != set(scopes)
-        ):
-            raise LarkDocumentCommentProviderError(
-                "lark_document_comment_permission_probe_invalid"
+            if (
+                identity_payload.get("identity") != "bot"
+                or identity_payload.get("available") is not True
+                or (
+                    self._profile is not None
+                    and identity_payload.get("profile") != self._profile
+                )
+            ):
+                raise LarkDocumentCommentProviderError(
+                    "lark_document_comment_permission_probe_identity_mismatch"
+                )
+            try:
+                app_id = _safe_token(
+                    identity_payload.get("appId"),
+                    field="Lark application id",
+                )
+                app_versions = self._call(
+                    [
+                        "api",
+                        "GET",
+                        (
+                            "/open-apis/application/v6/applications/"
+                            f"{app_id}/app_versions"
+                        ),
+                        "--as",
+                        "bot",
+                        "--params",
+                        json.dumps(
+                            {
+                                "lang": "zh_cn",
+                                "page_size": str(LARK_APP_VERSION_PAGE_SIZE),
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                        "--json",
+                    ],
+                    operation="permission_probe",
+                )
+                granted = _published_tenant_scopes(app_versions)
+            except (ValueError, LarkDocumentCommentProviderError) as exc:
+                raise LarkDocumentCommentProviderError(
+                    "lark_document_comment_permission_probe_unknown"
+                ) from exc
+        else:
+            payload = _command_json_mapping(
+                self._runner(
+                    self._args(
+                        ["auth", "check", "--scope", " ".join(scopes), "--json"]
+                    ),
+                    None,
+                    self._timeout_seconds,
+                ),
+                error_code="lark_document_comment_permission_probe_invalid",
+                allowed_returncodes=frozenset({0, 1}),
             )
+            granted = payload.get("granted", [])
+            missing = payload.get("missing", [])
+            if (
+                not isinstance(granted, list)
+                or not isinstance(missing, list)
+                or any(not isinstance(scope, str) for scope in [*granted, *missing])
+                or set(granted).intersection(missing)
+                or set(granted).union(missing) != set(scopes)
+            ):
+                raise LarkDocumentCommentProviderError(
+                    "lark_document_comment_permission_probe_invalid"
+                )
         return dict(
             evaluate_external_connector_permissions(
                 requirements=requirements,
