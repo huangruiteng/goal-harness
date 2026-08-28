@@ -111,6 +111,48 @@ def test_existing_run_once_markdown_renderer_remains_intact() -> None:
     assert "- quota_spent: True" in rendered
 
 
+def test_inspection_markdown_distinguishes_current_plan_from_last_result() -> None:
+    rendered = turn_command._render_loopx_turn_journal_inspection_markdown(
+        {
+            "ok": True,
+            "decision": "replay_legal",
+            "journal_status": "committed",
+            "replay_legal": True,
+            "goal_matches": True,
+            "owner_matches": True,
+            "turn_key_matches": True,
+            "phases_form_ordered_prefix": True,
+            "completed_phases": COMPLETED_PHASES,
+            "tombstone_retained": True,
+            "violations": [],
+            "journal_consistent": True,
+            "recovery_decision": {
+                "action": "return_existing",
+                "can_continue": False,
+                "resume_from": None,
+                "reinvoke_host": False,
+                "reason": "terminal_result_retained",
+                "checks": [{"kind": "journal_consistency", "outcome": "passed"}],
+            },
+            "last_recovery": {
+                "planned": {"action": "continue", "resume_from": "validation"},
+                "actual": {
+                    "status": "finished",
+                    "journal_status": "committed",
+                    "host_invoked": False,
+                },
+            },
+        }
+    )
+
+    assert "- recovery_action: return_existing" in rendered
+    assert "- last_recovery_plan: continue" in rendered
+    assert "- last_recovery_from: validation" in rendered
+    assert "- last_recovery_actual: finished" in rendered
+    assert "- last_recovery_result_status: committed" in rendered
+    assert "- last_recovery_host_invoked: False" in rendered
+
+
 def test_inspection_returns_versioned_allowlisted_projection_without_mutation(
     tmp_path: Path,
 ) -> None:
@@ -119,7 +161,7 @@ def test_inspection_returns_versioned_allowlisted_projection_without_mutation(
     before_entries = {
         path.relative_to(tmp_path)
         for path in tmp_path.rglob("*")
-        if not path.name.endswith(".lock")
+        if not path.name.endswith((".lock", ".lock.holder.json"))
     }
 
     result = executor.inspect_loopx_turn_journal(
@@ -132,11 +174,11 @@ def test_inspection_returns_versioned_allowlisted_projection_without_mutation(
     after_entries = {
         path.relative_to(tmp_path)
         for path in tmp_path.rglob("*")
-        if not path.name.endswith(".lock")
+        if not path.name.endswith((".lock", ".lock.holder.json"))
     }
     assert result == {
         "ok": True,
-        "schema_version": "loopx_turn_journal_inspection_v0",
+        "schema_version": "loopx_turn_journal_inspection_v1",
         "decision": "replay_legal",
         "journal_status": "committed",
         "replay_legal": True,
@@ -147,6 +189,18 @@ def test_inspection_returns_versioned_allowlisted_projection_without_mutation(
         "completed_phases": COMPLETED_PHASES,
         "tombstone_retained": True,
         "violations": [],
+        "journal_consistent": True,
+        "recovery_decision": {
+            "schema_version": "loopx_turn_recovery_decision_v0",
+            "action": "return_existing",
+            "can_continue": False,
+            "resume_from": None,
+            "reinvoke_host": False,
+            "reason": "terminal_result_retained",
+            "retry_failed": False,
+            "checks": [{"kind": "journal_consistency", "outcome": "passed"}],
+        },
+        "last_recovery": None,
         "effects": [],
     }
     assert journal_path.read_bytes() == before_bytes
@@ -169,6 +223,8 @@ def test_inspection_reports_blocked_journal_as_successful_read(tmp_path: Path) -
     assert result["ok"] is True
     assert result["decision"] == "replay_blocked"
     assert result["replay_legal"] is False
+    assert result["journal_consistent"] is False
+    assert result["recovery_decision"]["action"] == "blocked"
     assert result["violations"] == [
         "completed_phases_not_ordered_prefix",
         "journal_not_terminal",
@@ -246,7 +302,7 @@ def test_inspect_journal_cli_branches_before_live_or_write_paths(
 
     payload = json.loads(raw_output)
     assert exit_code == 0
-    assert payload["schema_version"] == "loopx_turn_journal_inspection_v0"
+    assert payload["schema_version"] == "loopx_turn_journal_inspection_v1"
     assert payload["decision"] == "replay_legal"
     assert payload["effects"] == []
 
@@ -278,11 +334,21 @@ def test_inspect_journal_cli_json_and_markdown_share_allowlisted_projection(
         "completed_phases",
         "tombstone_retained",
         "violations",
+        "journal_consistent",
+        "recovery_decision",
+        "last_recovery",
         "effects",
     }
     assert markdown_output == (
         "# LoopX Turn Journal Inspection\n"
-        "- decision: replay_legal\n"
+        "- recovery_action: return_existing\n"
+        "- recovery_can_continue: False\n"
+        "- recovery_from: None\n"
+        "- recovery_reinvoke_host: False\n"
+        "- recovery_reason: terminal_result_retained\n"
+        "- recovery_checks: journal_consistency:passed\n"
+        "- journal_consistent: True\n"
+        "- replay_decision: replay_legal\n"
         "- journal_status: committed\n"
         "- replay_legal: True\n"
         "- goal_matches: True\n"
@@ -336,7 +402,7 @@ def test_inspect_journal_cli_returns_nonzero_when_inspection_cannot_complete(
     payload = json.loads(raw_output)
     assert exit_code == 1
     assert payload["ok"] is False
-    assert payload["schema_version"] == "loopx_turn_journal_inspection_v0"
+    assert payload["schema_version"] == "loopx_turn_journal_inspection_v1"
     assert error_fragment in payload["error"]
     assert payload["effects"] == []
 
@@ -377,7 +443,7 @@ def test_inspection_has_no_python_fallback_when_typescript_runtime_is_missing(
     assert exit_code == 1
     assert payload == {
         "ok": False,
-        "schema_version": "loopx_turn_journal_inspection_v0",
+        "schema_version": "loopx_turn_journal_inspection_v1",
         "error": "Turn-journal inspection requires Node.js 22.6 or newer",
         "effects": [],
     }
@@ -392,7 +458,7 @@ def test_typescript_runtime_uses_one_typed_rpc_call(
         calls.append((method, params))
         return {
             "ok": True,
-            "schema_version": "loopx_turn_journal_inspection_v0",
+            "schema_version": "loopx_turn_journal_inspection_v1",
             "decision": "replay_legal",
             "journal_status": "committed",
             "replay_legal": True,
@@ -403,6 +469,20 @@ def test_typescript_runtime_uses_one_typed_rpc_call(
             "completed_phases": COMPLETED_PHASES,
             "tombstone_retained": True,
             "violations": [],
+            "journal_consistent": True,
+            "recovery_decision": {
+                "schema_version": "loopx_turn_recovery_decision_v0",
+                "action": "return_existing",
+                "can_continue": False,
+                "resume_from": None,
+                "reinvoke_host": False,
+                "reason": "terminal_result_retained",
+                "retry_failed": False,
+                "checks": [
+                    {"kind": "journal_consistency", "outcome": "passed"}
+                ],
+            },
+            "last_recovery": None,
             "effects": [],
         }
 
@@ -443,7 +523,7 @@ def test_typescript_runtime_rejects_malformed_projection_types(
 ) -> None:
     payload = {
         "ok": True,
-        "schema_version": "loopx_turn_journal_inspection_v0",
+        "schema_version": "loopx_turn_journal_inspection_v1",
         "decision": "replay_legal",
         "journal_status": "committed",
         "replay_legal": "true",
@@ -454,6 +534,18 @@ def test_typescript_runtime_rejects_malformed_projection_types(
         "completed_phases": COMPLETED_PHASES,
         "tombstone_retained": True,
         "violations": [],
+        "journal_consistent": True,
+        "recovery_decision": {
+            "schema_version": "loopx_turn_recovery_decision_v0",
+            "action": "return_existing",
+            "can_continue": False,
+            "resume_from": None,
+            "reinvoke_host": False,
+            "reason": "terminal_result_retained",
+            "retry_failed": False,
+            "checks": [{"kind": "journal_consistency", "outcome": "passed"}],
+        },
+        "last_recovery": None,
         "effects": [],
     }
 

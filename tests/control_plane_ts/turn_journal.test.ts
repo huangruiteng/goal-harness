@@ -67,7 +67,7 @@ test("journal interpretation preserves the canonical Effect Program slots", () =
   assert.deepEqual(turn.next_effect.cli_actions, []);
   assert.deepEqual(interpretTurnJournal(request()), {
     ok: true,
-    schema_version: "loopx_turn_journal_inspection_v0",
+    schema_version: "loopx_turn_journal_inspection_v1",
     decision: "replay_legal",
     journal_status: "committed",
     replay_legal: true,
@@ -86,8 +86,106 @@ test("journal interpretation preserves the canonical Effect Program slots", () =
     ],
     tombstone_retained: true,
     violations: [],
+    journal_consistent: true,
+    recovery_decision: {
+      schema_version: "loopx_turn_recovery_decision_v0",
+      action: "return_existing",
+      can_continue: false,
+      resume_from: null,
+      reinvoke_host: false,
+      reason: "terminal_result_retained",
+      retry_failed: false,
+      checks: [{ kind: "journal_consistency", outcome: "passed" }],
+    },
+    last_recovery: null,
     effects: [],
   });
+});
+
+test("non-terminal replay blocking does not block executor recovery", () => {
+  const input = request("in_progress");
+  input.journal.completed_phases = ["host_execute", "typed_result"];
+
+  const result = interpretTurnJournal(input);
+
+  assert.equal(result.replay_legal, false);
+  assert.equal(result.journal_consistent, true);
+  assert.deepEqual(result.recovery_decision, {
+    schema_version: "loopx_turn_recovery_decision_v0",
+    action: "continue",
+    can_continue: true,
+    resume_from: "validation",
+    reinvoke_host: false,
+    reason: "resume_in_progress",
+    retry_failed: false,
+    checks: [{ kind: "journal_consistency", outcome: "passed" }],
+  });
+});
+
+test("scheduler recovery resumes only scheduler apply", () => {
+  const input = request("scheduler_action_required");
+  input.journal.completed_phases = [
+    "host_execute",
+    "typed_result",
+    "validation",
+    "durable_writeback",
+    "quota_spend",
+  ];
+
+  const result = interpretTurnJournal(input);
+
+  assert.equal(result.recovery_decision.resume_from, "scheduler_apply");
+  assert.equal(result.recovery_decision.reinvoke_host, false);
+  assert.equal(result.recovery_decision.reason, "resume_scheduler");
+});
+
+test("failed Host recovery uses only the supplied Session Binding check", () => {
+  const input = request("failed");
+  input.retry_failed = true;
+  input.journal.completed_phases = [];
+  input.journal.receipt = { turn_key: turnKey, failed_phase: "host_execute" };
+  input.journal.host_recovery = {
+    schema_version: "loopx_turn_host_recovery_v0",
+    kind: "resume_session",
+  };
+  input.session_recovery_check = {
+    kind: "host_session_binding",
+    outcome: "failed",
+    reason: "session_binding_identity_mismatch",
+  };
+
+  const result = interpretTurnJournal(input);
+
+  assert.equal(result.recovery_decision.action, "blocked");
+  assert.equal(result.recovery_decision.reason, "session_binding_identity_mismatch");
+  assert.deepEqual(result.recovery_decision.checks, [
+    { kind: "journal_consistency", outcome: "passed" },
+    {
+      kind: "host_session_binding",
+      outcome: "failed",
+      reason: "session_binding_identity_mismatch",
+    },
+  ]);
+});
+
+test("prepared effects are delegated to the existing provider readback step", () => {
+  const input = request("in_progress");
+  input.journal.completed_phases = ["host_execute", "typed_result", "validation"];
+  input.journal.effect_attempts = {
+    durable_writeback: { status: "prepared", effect_ref: "effect:fixture" },
+  };
+
+  const result = interpretTurnJournal(input);
+
+  assert.equal(result.recovery_decision.reason, "resolve_prepared_effect");
+  assert.deepEqual(result.recovery_decision.checks, [
+    { kind: "journal_consistency", outcome: "passed" },
+    {
+      kind: "prepared_effect_readback",
+      outcome: "required",
+      step_kind: "durable_writeback",
+    },
+  ]);
 });
 
 test("identity and phase violations accumulate in stable order", () => {
