@@ -165,6 +165,28 @@ async function readJsonLines(path: string, schemaVersion?: string): Promise<Json
   return records;
 }
 
+function persistedIdentityMatches(
+  rawIdentity: unknown,
+  expectedEffectId: string,
+): boolean {
+  if (rawIdentity === undefined) return true;
+  const identity = jsonObject(rawIdentity);
+  if (!identity) return false;
+  return optionalString(identity.effect_id) === expectedEffectId;
+}
+
+function quotaSpendMetadataMatches(
+  rawMetadata: unknown,
+  effectRef: string | null,
+  expectedEffectRef: string,
+): boolean {
+  if (rawMetadata === undefined) return true;
+  const metadata = jsonObject(rawMetadata);
+  const metadataEffectId = optionalString(metadata?.effect_id);
+  return metadataEffectId === expectedEffectRef &&
+    (effectRef === null || metadataEffectId === effectRef);
+}
+
 function runEffectMatches(
   run: JsonObject,
   identity: SettlementIdentity,
@@ -172,30 +194,11 @@ function runEffectMatches(
 ): boolean {
   const expectedEffectId = identity.effect_id;
   const expectedEffectRef = `${expectedEffectId}#${stepKind}`;
-  const rawPersistedIdentity = run.settlement_identity;
-  const persistedIdentity = jsonObject(rawPersistedIdentity);
-  const persistedEffectId = optionalString(persistedIdentity?.effect_id);
   const effectRef = optionalString(run.effect_ref);
-  const rawQuotaSpendCommit = run.quota_spend_commit;
-  const quotaSpendCommit = jsonObject(rawQuotaSpendCommit);
-
-  // New rows persist the base identity; legacy quota rows persist only the
-  // step-qualified effect_ref. Any persisted effect metadata must agree.
-  if (
-    rawPersistedIdentity !== undefined && persistedIdentity === null
-  ) return false;
-  if (persistedIdentity !== null && !persistedEffectId) return false;
-  if (persistedEffectId && persistedEffectId !== expectedEffectId) return false;
-  if (effectRef && effectRef !== expectedEffectRef) return false;
-  if (stepKind === "quota_spend" && rawQuotaSpendCommit !== null &&
-      rawQuotaSpendCommit !== undefined) {
-    if (quotaSpendCommit === null) return false;
-    if (typeof quotaSpendCommit.effect_id !== "string" ||
-        !quotaSpendCommit.effect_id.trim()) return false;
-    if (quotaSpendCommit.effect_id.trim() !== expectedEffectRef) return false;
-    if (effectRef && quotaSpendCommit.effect_id.trim() !== effectRef) return false;
-  }
-  return true;
+  return persistedIdentityMatches(run.settlement_identity, expectedEffectId) &&
+    (!effectRef || effectRef === expectedEffectRef) &&
+    (stepKind !== "quota_spend" ||
+      quotaSpendMetadataMatches(run.quota_spend_commit, effectRef, expectedEffectRef));
 }
 
 function details(event: JsonObject | null): JsonObject {
@@ -270,12 +273,12 @@ function findWriteback(
   identity: SettlementIdentity,
 ): JsonObject | null {
   return [...runs].reverse().find((run) =>
-    String(run.goal_id ?? "") === identity.goal_id &&
-    String(run.turn_instance_id ?? "") === identity.turn_instance_id &&
+    optionalString(run.goal_id) === identity.goal_id &&
+    optionalString(run.turn_instance_id) === identity.turn_instance_id &&
     runMatchesBinding(run, identity) &&
     normalizeAgentId(run.agent_id) === identity.agent_id &&
     runEffectMatches(run, identity, "durable_writeback") &&
-    ACCOUNTABLE_DELIVERY_OUTCOMES.has(String(run.delivery_outcome ?? ""))
+    ACCOUNTABLE_DELIVERY_OUTCOMES.has(optionalString(run.delivery_outcome) ?? "")
   ) ?? null;
 }
 
@@ -285,15 +288,15 @@ function findSpend(
 ): JsonObject | null {
   return [...runs].reverse().find((run) =>
     run.classification === "quota_slot_spent" &&
-    String(run.goal_id ?? "") === identity.goal_id &&
+    optionalString(run.goal_id) === identity.goal_id &&
     normalizeAgentId(run.agent_id) === identity.agent_id &&
     (
-      (String(run.turn_instance_id ?? "") === identity.turn_instance_id &&
+      (optionalString(run.turn_instance_id) === identity.turn_instance_id &&
         runMatchesBinding(run, identity) &&
         runEffectMatches(run, identity, "quota_spend")) ||
       // Older quota commit rows predate persisted turn bindings. Their
       // exact effect ref is the durable identity for this replay path.
-      String(run.effect_ref ?? "") === `${identity.effect_id}#quota_spend` &&
+      optionalString(run.effect_ref) === `${identity.effect_id}#quota_spend` &&
         runEffectMatches(run, identity, "quota_spend")
     )
   ) ?? null;
@@ -306,9 +309,9 @@ function findStepEvent(
 ): JsonObject | null {
   return [...events].reverse().find((event) =>
     event.event_kind === eventKind &&
-    String(event.goal_id ?? "") === identity.goal_id &&
-    String(event.agent_id ?? "") === identity.agent_id &&
-    String(event.run_id ?? "") === identity.turn_instance_id &&
+    optionalString(event.goal_id) === identity.goal_id &&
+    optionalString(event.agent_id) === identity.agent_id &&
+    optionalString(event.run_id) === identity.turn_instance_id &&
     String(details(event).settlement_effect_id ?? "") === identity.effect_id
   ) ?? null;
 }

@@ -345,6 +345,7 @@ test("pairs a native spend row only when both persisted effect identities agree"
 });
 
 test("does not pair a spend row with malformed native effect metadata", async () => {
+  const quotaSpendCommit = null;
   const runtimeRoot = await fixture();
   await appendFile(
     join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
@@ -355,7 +356,30 @@ test("does not pair a spend row with malformed native effect metadata", async ()
       todo_id: todoId,
       turn_instance_id: turnId,
       settlement_identity: identity,
-      quota_spend_commit: [],
+      quota_spend_commit: quotaSpendCommit,
+      effect_ref: `${identity.effect_id}#quota_spend`,
+    })}\n`,
+  );
+
+  const result = await readQuotaSettlement(request(runtimeRoot));
+
+  assert.equal((result.spend as any).payload.ok, false);
+  assert.equal((result.spend as any).result.failure.kind, "receipt_missing");
+});
+
+test("does not pair a spend row with non-object native effect metadata", async () => {
+  const quotaSpendCommit: unknown[] = [];
+  const runtimeRoot = await fixture();
+  await appendFile(
+    join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
+    `${JSON.stringify({
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: agentId,
+      todo_id: todoId,
+      turn_instance_id: turnId,
+      settlement_identity: identity,
+      quota_spend_commit: quotaSpendCommit,
       effect_ref: `${identity.effect_id}#quota_spend`,
     })}\n`,
   );

@@ -61,6 +61,10 @@ from .turn_rendering import (
     render_loopx_turn_plan_markdown as _render_loopx_turn_plan_markdown,
 )
 
+EXACT_SETTLEMENT_READBACK_NOT_FOUND = (
+    "exact settlement readback unexpectedly returned not-found"
+)
+
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
     None,
@@ -690,7 +694,7 @@ def handle_turn_command(
                     )
                     if readback is None:
                         raise RuntimeError(
-                            "exact settlement readback unexpectedly returned not-found"
+                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
                         )
                     event = readback.spend_event
                     if event is None:
@@ -782,7 +786,7 @@ def handle_turn_command(
                     )
                     if readback is None:
                         raise RuntimeError(
-                            "exact settlement readback unexpectedly returned not-found"
+                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
                         )
                     run = readback.writeback_run
                     event = readback.writeback_event
@@ -826,7 +830,7 @@ def handle_turn_command(
                     )
                     if readback is None:
                         raise RuntimeError(
-                            "exact settlement readback unexpectedly returned not-found"
+                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
                         )
                     run = readback.spend_run
                     event = readback.spend_event
@@ -874,7 +878,7 @@ def handle_turn_command(
                     )
                     if readback is None:
                         raise RuntimeError(
-                            "exact settlement readback unexpectedly returned not-found"
+                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
                         )
                     event = readback.completion_event
                     completion = terminal_completion_readback()

@@ -1086,17 +1086,13 @@ async function ensureMarkdownArtifact(
   return false;
 }
 
-async function ensureReceiptArtifacts(
+async function readReceiptIndex(
   receipt: QuotaSpendCommitReceipt,
-): Promise<boolean> {
-  let repaired = false;
-  repaired = await ensureJsonArtifact(receipt.json_path, receipt.record) || repaired;
-  repaired = await ensureMarkdownArtifact(receipt.markdown_path, receipt.markdown) || repaired;
+): Promise<{ content: string | null; records: JsonObject[]; repaired: boolean }> {
   const indexBytes = await readOptionalBytes(receipt.index_path);
   let content = indexBytes === null ? null : indexBytes.toString("utf8");
-  let records: JsonObject[];
   try {
-    records = indexRecords(content);
+    return { content, records: indexRecords(content), repaired: false };
   } catch (error) {
     const recovered = indexBytes === null
       ? null
@@ -1109,10 +1105,19 @@ async function ensureReceiptArtifacts(
     if (recovered === null) throw error;
     await atomicWriteText(receipt.index_path, recovered);
     content = recovered;
-    records = indexRecords(content);
-    repaired = true;
+    return { content, records: indexRecords(content), repaired: true };
   }
-  const matchResolution = matchingIndexRecord(records, receipt.effect_id);
+}
+
+async function ensureReceiptArtifacts(
+  receipt: QuotaSpendCommitReceipt,
+): Promise<boolean> {
+  let repaired = false;
+  repaired = await ensureJsonArtifact(receipt.json_path, receipt.record) || repaired;
+  repaired = await ensureMarkdownArtifact(receipt.markdown_path, receipt.markdown) || repaired;
+  const index = await readReceiptIndex(receipt);
+  repaired = index.repaired || repaired;
+  const matchResolution = matchingIndexRecord(index.records, receipt.effect_id);
   if (matchResolution.kind === "conflict") {
     throw new EffectRuntimeRequestError(
       matchResolution.reason,
@@ -1131,7 +1136,7 @@ async function ensureReceiptArtifacts(
       );
     }
   } else {
-    const prefix = content ?? "";
+    const prefix = index.content ?? "";
     if (prefix && !prefix.endsWith("\n")) {
       await atomicWriteText(
         receipt.index_path,
