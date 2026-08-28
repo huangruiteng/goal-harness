@@ -83,6 +83,7 @@ def main() -> int:
         "Implementation Execution Chain",
         "Code Volume And Simplification Review",
         "Scope-Fit And Active Call-Site Gate",
+        "Change Proportionality Gate",
     ):
         assert duplicated_contract_heading not in skill_source, duplicated_contract_heading
 
@@ -245,6 +246,20 @@ def main() -> int:
     ]
     assert scope_fit_reqs, "scope_fit evidence requirement missing from contract"
     assert scope_fit_reqs[0]["required_when"] == "code_change", scope_fit_reqs
+    proportionality_reqs = [
+        req
+        for req in contract.get("evidence_requirements", [])
+        if req.get("evidence_id") == "change_proportionality"
+    ]
+    assert proportionality_reqs, (
+        "change_proportionality evidence requirement missing from contract"
+    )
+    assert proportionality_reqs[0]["required_when"] == "code_change"
+    assert proportionality_reqs[0]["verdict_values"] == [
+        "proportionate",
+        "disproportionate",
+        "not_yet_proven",
+    ]
     code_pr = next(
         (
             p
@@ -257,8 +272,17 @@ def main() -> int:
     assert "scope_fit" in code_pr["review_plan"]["required_evidence_ids"], code_pr[
         "review_plan"
     ]
+    assert "change_proportionality" in code_pr["review_plan"][
+        "required_evidence_ids"
+    ], code_pr["review_plan"]
     assert (
         code_pr["review_plan"]["applicability"]["scope_fit_required"] is True
+    ), code_pr["review_plan"]
+    assert (
+        code_pr["review_plan"]["applicability"][
+            "change_proportionality_required"
+        ]
+        is True
     ), code_pr["review_plan"]
     docs_pr = next(
         (
@@ -270,12 +294,19 @@ def main() -> int:
     )
     assert docs_pr is not None, "fixture must include a docs-only PR"
     assert docs_pr["review_plan"]["applicability"]["scope_fit_required"] is False
+    assert (
+        docs_pr["review_plan"]["applicability"][
+            "change_proportionality_required"
+        ]
+        is False
+    )
     risk_section = next(
         section
         for section in template["sections"]
         if section["label"] == "对主干的风险"
     )
     assert "scope_fit" in risk_section["agent_instruction"], risk_section
+    assert "change_proportionality" in risk_section["agent_instruction"], risk_section
 
     default_payload = json.loads(
         run_cli("--format", "json", "pr-review", "--fixture", str(FIXTURE)).stdout
@@ -575,6 +606,7 @@ def main() -> int:
         "validation_matrix",
         "failure_analysis",
         "code_volume",
+        "change_proportionality",
         "typed_state_rule",
         "domain_neutrality",
         "behavior_change_disclosure",
@@ -597,6 +629,13 @@ def main() -> int:
         "partly_avoidable",
         "not_yet_proven",
     ]
+    assert requirements["change_proportionality"]["verdict_values"] == [
+        "proportionate",
+        "disproportionate",
+        "not_yet_proven",
+    ]
+    assert "green CI" in requirements["change_proportionality"]["rule"]
+    assert "original problem" in requirements["change_proportionality"]["rule"]
     assert "substring denylists" in requirements["typed_state_rule"]["rule"]
     assert "domain-neutral" in requirements["domain_neutrality"]["rule"]
     assert "silent behavior changes" in requirements["behavior_change_disclosure"][
@@ -607,6 +646,9 @@ def main() -> int:
     assert "same-shape batch farming" in requirements["durable_smoke_value"]["rule"]
     assert execution["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert execution["completion_gate"]["stale_head_verdict_allowed"] is False
+    assert execution["completion_gate"]["blocking_evidence_verdicts"] == {
+        "change_proportionality": ["disproportionate", "not_yet_proven"]
+    }
     assert execution["finding_contract"]["findings_first"] is True
     first_plan = first["review_plan"]
     assert first_plan["schema_version"] == "pull_request_review_plan_v1", first_plan
