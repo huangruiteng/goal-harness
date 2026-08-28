@@ -39,6 +39,7 @@ from ..control_plane.turn_driver import (
     LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
     LOOPX_TURN_JOURNAL_INSPECTION_SCHEMA_VERSION,
     LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+    TurnRecoveryBlockedError,
     build_loopx_turn_command_validator,
     build_loopx_turn_plan,
     codex_cli_session_binding,
@@ -129,6 +130,13 @@ def handle_turn_command(
                 goal_id=args.goal_id,
                 agent_id=args.agent_id,
                 turn_key=args.turn_key,
+                retry_failed=bool(args.retry_failed_turn),
+                session_binding_resolver=(
+                    lambda turn_envelope: codex_cli_session_binding(
+                        runtime_root,
+                        turn_envelope,
+                    )
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - typed CLI failure boundary
             payload = {
@@ -989,6 +997,11 @@ def handle_turn_command(
                 "scheduler_acknowledged": False,
                 "quota_spent": False,
             },
+            **(
+                {"recovery_decision": exc.decision}
+                if isinstance(exc, TurnRecoveryBlockedError)
+                else {}
+            ),
         }
     renderer = (
         _render_loopx_turn_execution_markdown
