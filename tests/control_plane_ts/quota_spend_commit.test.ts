@@ -345,6 +345,36 @@ test("native replay ignores conflicting effect identities unrelated to its effec
   assert.equal(replay.payload.replay_found, false);
 });
 
+test("native replay ignores malformed metadata unrelated to its effect", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const runsDir = join(runtimeRoot, "goals", goalId, "runs");
+  await mkdir(runsDir, { recursive: true });
+  const indexPath = join(runsDir, "index.jsonl");
+  await writeFile(
+    indexPath,
+    `${JSON.stringify({
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: "codex-main-control",
+      quota_spend_commit: [],
+      effect_ref: "unrelated-effect",
+    })}\n`,
+  );
+
+  const replay = await evaluateQuotaSpendCommit({
+    schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+    operation: "replay",
+    runtime_root: runtimeRoot,
+    goal_id: goalId,
+    effect_id: "requested-effect",
+    resolved_agent_id: "codex-main-control",
+  });
+
+  assert.equal(replay.status, "preview");
+  assert.equal(replay.conflict, false);
+  assert.equal(replay.payload.replay_found, false);
+});
+
 test("prepared transaction repairs partial artifacts exactly once", async (t) => {
   const runtimeRoot = await tempRuntime(t);
   const params = request(runtimeRoot);

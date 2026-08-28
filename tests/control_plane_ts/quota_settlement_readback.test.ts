@@ -344,6 +344,28 @@ test("pairs a native spend row only when both persisted effect identities agree"
   );
 });
 
+test("does not pair a spend row with malformed native effect metadata", async () => {
+  const runtimeRoot = await fixture();
+  await appendFile(
+    join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
+    `${JSON.stringify({
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: agentId,
+      todo_id: todoId,
+      turn_instance_id: turnId,
+      settlement_identity: identity,
+      quota_spend_commit: [],
+      effect_ref: `${identity.effect_id}#quota_spend`,
+    })}\n`,
+  );
+
+  const result = await readQuotaSettlement(request(runtimeRoot));
+
+  assert.equal((result.spend as any).payload.ok, false);
+  assert.equal((result.spend as any).result.failure.kind, "receipt_missing");
+});
+
 test("rejects a guard bound to another Todo", async () => {
   const runtimeRoot = await fixture();
 

@@ -652,19 +652,21 @@ function resolveEffectIdentity(
   expectedEffectId: string,
 ): EffectIdentityResolution {
   const rawMetadata = record.quota_spend_commit;
+  const recordEffect = effectIdentityValue(record.effect_ref);
+  const recordReferencesExpected = recordEffect.value === expectedEffectId;
   const metadata = rawMetadata === undefined || rawMetadata === null
     ? null
     : jsonObject(rawMetadata);
   if (rawMetadata !== undefined && rawMetadata !== null && metadata === null) {
+    if (!recordReferencesExpected) return { kind: "absent" };
     return {
       kind: "conflict",
       reason: "quota spend index row has malformed effect metadata",
     };
   }
   const metadataEffect = effectIdentityValue(metadata?.effect_id);
-  const recordEffect = effectIdentityValue(record.effect_ref);
   const referencesExpected = metadataEffect.value === expectedEffectId ||
-    recordEffect.value === expectedEffectId;
+    recordReferencesExpected;
   if (!referencesExpected) return { kind: "absent" };
   if (metadataEffect.malformed || recordEffect.malformed) {
     return {
