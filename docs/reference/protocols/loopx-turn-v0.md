@@ -272,10 +272,13 @@ alone:
 `journal_consistent` also requires a complete canonical typed settlement
 identity. Its goal and agent must match the Journal, envelope, and requested
 owner; its Turn instance must match the transaction; and its binding and effect
-id must validate under the settlement schema. A mismatch therefore produces a
-blocked recovery decision before Host or any settlement provider is called,
-even when the completed phase prefix would otherwise resume at durable
-writeback or a later effect.
+id must validate under the settlement schema. A Todo binding must also match
+the envelope's authoritative selected Todo, including the adaptive primary Todo
+override. A mismatch therefore produces a blocked recovery decision before
+Host or any settlement provider is called, even when the completed phase prefix
+would otherwise resume at durable writeback or a later effect. The current Turn
+driver does not produce Todo-less autonomous-replan transaction Journals, so it
+does not infer such a binding without authoritative Turn lineage.
 
 For example, an `in_progress` Journal with a saved Host Result has
 `replay_legal=false` but may continue from `validation` without another Host
