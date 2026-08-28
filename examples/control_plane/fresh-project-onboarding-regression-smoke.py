@@ -6,6 +6,9 @@ Covers:
               so the emitted command is accepted by ``loopx todo add``.
   - Defect 2: ``agent-onboard`` on a project with no ``.loopx/registry.json``
               must return a typed gate, not raise ``FileNotFoundError``.
+  - Guided takeover: when bootstrap already provides a runnable Todo frontier,
+                     authoring is projected as a typed Todo delta instead of an
+                     unconditional ``write_ordered_todos`` step.
 
 See: https://github.com/huangruiteng/loopx/issues/3092
 Fix: https://github.com/huangruiteng/loopx/pull/3093
@@ -172,16 +175,44 @@ def test_guided_template_acceptance(project: Path, goal_id: str) -> None:
     transaction = guided_packet.get("guided_transaction", {})
     ordered_steps = transaction.get("ordered_steps", [])
 
-    # Find the write_ordered_todos step.
+    # Fresh bootstrap currently seeds one runnable advancement Todo. Guided
+    # takeover therefore projects a Todo delta, while older or frontier-free
+    # packets retain the unconditional write_ordered_todos fallback.
     todo_step = next(
         (s for s in ordered_steps if s.get("id") == "write_ordered_todos"),
         None,
     )
-    check("guided packet contains write_ordered_todos step", todo_step is not None)
+    delta_step = next(
+        (s for s in ordered_steps if s.get("id") == "apply_todo_delta"),
+        None,
+    )
+    check(
+        "guided packet contains one Todo authoring step",
+        (todo_step is None) != (delta_step is None),
+    )
 
-    if todo_step:
+    template = ""
+    if delta_step:
+        todo_delta = delta_step.get("todo_delta", {})
+        check(
+            "Todo delta uses the guided takeover schema",
+            todo_delta.get("schema_version") == "loopx_guided_todo_delta_v0",
+        )
+        check(
+            "Todo delta exposes a runnable frontier",
+            todo_delta.get("runnable_frontier_count", 0) >= 1
+            and bool(todo_delta.get("frontier")),
+        )
+        check(
+            "Todo delta keeps reuse and add-new decisions explicit",
+            "reuse" in todo_delta.get("rule", "")
+            and "add_new" in todo_delta.get("rule", ""),
+        )
+        template = delta_step.get("add_new_command_template", "")
+    elif todo_step:
         template = todo_step.get("command_template", "")
 
+    if template:
         # Defect 1 core assertion: template must use --claimed-by, not --agent-id.
         check(
             "template does NOT contain --agent-id",
