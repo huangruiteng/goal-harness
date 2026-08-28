@@ -149,6 +149,22 @@ function request(runtimeRoot: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
+async function appendSpendRun(runtimeRoot: string, extra: Record<string, unknown>) {
+  await appendFile(
+    join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
+    `${JSON.stringify({
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: agentId,
+      todo_id: todoId,
+      turn_instance_id: turnId,
+      settlement_identity: identity,
+      effect_ref: `${identity.effect_id}#quota_spend`,
+      ...extra,
+    })}\n`,
+  );
+}
+
 test("reads the complete receipt chain and workspace causality once", async () => {
   const runtimeRoot = await fixture({
     writeback: true,
@@ -347,19 +363,7 @@ test("pairs a native spend row only when both persisted effect identities agree"
 test("does not pair a spend row with malformed native effect metadata", async () => {
   const quotaSpendCommit = null;
   const runtimeRoot = await fixture();
-  await appendFile(
-    join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
-    `${JSON.stringify({
-      classification: "quota_slot_spent",
-      goal_id: goalId,
-      agent_id: agentId,
-      todo_id: todoId,
-      turn_instance_id: turnId,
-      settlement_identity: identity,
-      quota_spend_commit: quotaSpendCommit,
-      effect_ref: `${identity.effect_id}#quota_spend`,
-    })}\n`,
-  );
+  await appendSpendRun(runtimeRoot, { quota_spend_commit: quotaSpendCommit });
 
   const result = await readQuotaSettlement(request(runtimeRoot));
 
@@ -370,19 +374,7 @@ test("does not pair a spend row with malformed native effect metadata", async ()
 test("does not pair a spend row with non-object native effect metadata", async () => {
   const quotaSpendCommit: unknown[] = [];
   const runtimeRoot = await fixture();
-  await appendFile(
-    join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
-    `${JSON.stringify({
-      classification: "quota_slot_spent",
-      goal_id: goalId,
-      agent_id: agentId,
-      todo_id: todoId,
-      turn_instance_id: turnId,
-      settlement_identity: identity,
-      quota_spend_commit: quotaSpendCommit,
-      effect_ref: `${identity.effect_id}#quota_spend`,
-    })}\n`,
-  );
+  await appendSpendRun(runtimeRoot, { quota_spend_commit: quotaSpendCommit });
 
   const result = await readQuotaSettlement(request(runtimeRoot));
 

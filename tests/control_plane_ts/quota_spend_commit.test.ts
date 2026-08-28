@@ -94,6 +94,31 @@ async function tempRuntime(t: test.TestContext): Promise<string> {
   return runtimeRoot;
 }
 
+function replayRequest(runtimeRoot: string, effectId: string) {
+  return {
+    schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+    operation: "replay",
+    runtime_root: runtimeRoot,
+    goal_id: goalId,
+    effect_id: effectId,
+    resolved_agent_id: "codex-main-control",
+  };
+}
+
+function assertConflictReplay(
+  replay: Record<string, any>,
+  indexPath: string,
+  original: Record<string, unknown>,
+) {
+  assert.equal(replay.status, "conflict");
+  assert.equal(replay.conflict, true);
+  assert.equal(replay.replayed, false);
+  assert.equal(replay.reason_code, "effect_id_conflict");
+  return readFile(indexPath, "utf8").then((value) =>
+    assert.equal(value, `${JSON.stringify(original)}\n`)
+  );
+}
+
 test("preview constructs the typed public-safe spend record without writing", async () => {
   const result = await evaluateQuotaSpendCommit(request(null));
   assert.equal(result.status, "preview");
@@ -268,11 +293,7 @@ test("native replay rejects incomplete transaction metadata", async (t) => {
       resolved_agent_id: "codex-main-control",
     });
 
-    assert.equal(replay.status, "conflict");
-    assert.equal(replay.conflict, true);
-    assert.equal(replay.replayed, false);
-    assert.equal(replay.reason_code, "effect_id_conflict");
-    assert.equal(await readFile(indexPath, "utf8"), `${JSON.stringify(original)}\n`);
+    await assertConflictReplay(replay, indexPath, original);
   }
 });
 
@@ -329,21 +350,12 @@ test("native replay rejects either conflicting effect identity direction", async
     };
     await writeFile(indexPath, `${JSON.stringify(original)}\n`);
 
-    const replay = await evaluateQuotaSpendCommit({
-      schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
-      operation: "replay",
-      runtime_root: runtimeRoot,
-      goal_id: goalId,
-      effect_id: "replay-conflict-effect",
-      resolved_agent_id: "codex-main-control",
-    });
+    const replay = await evaluateQuotaSpendCommit(
+      replayRequest(runtimeRoot, "replay-conflict-effect"),
+    );
 
     assert.equal(label.length > 0, true);
-    assert.equal(replay.status, "conflict");
-    assert.equal(replay.conflict, true);
-    assert.equal(replay.replayed, false);
-    assert.equal(replay.reason_code, "effect_id_conflict");
-    assert.equal(await readFile(indexPath, "utf8"), `${JSON.stringify(original)}\n`);
+    await assertConflictReplay(replay, indexPath, original);
   }
 });
 
