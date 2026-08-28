@@ -288,6 +288,62 @@ test("does not pair a spend run from another settlement effect", async () => {
   assert.equal((result.spend as any).result.failure.kind, "receipt_missing");
 });
 
+test("does not pair a spend run when effect identities conflict either way", async () => {
+  for (const row of [
+    {
+      quota_spend_commit: { effect_id: identity.effect_id },
+      effect_ref: "different-effect#quota_spend",
+    },
+    {
+      quota_spend_commit: { effect_id: "different-effect" },
+      effect_ref: `${identity.effect_id}#quota_spend`,
+    },
+  ]) {
+    const runtimeRoot = await fixture();
+    await appendFile(
+      join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
+      `${JSON.stringify({
+        classification: "quota_slot_spent",
+        goal_id: goalId,
+        agent_id: agentId,
+        todo_id: todoId,
+        turn_instance_id: turnId,
+        ...row,
+      })}\n`,
+    );
+
+    const result = await readQuotaSettlement(request(runtimeRoot));
+
+    assert.equal(result.spend_run, null);
+    assert.equal((result.spend as any).result.failure.kind, "receipt_missing");
+  }
+});
+
+test("pairs a native spend row only when both persisted effect identities agree", async () => {
+  const runtimeRoot = await fixture({ spend: true });
+  await appendFile(
+    join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
+    `${JSON.stringify({
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: agentId,
+      todo_id: todoId,
+      turn_instance_id: turnId,
+      settlement_identity: identity,
+      quota_spend_commit: { effect_id: `${identity.effect_id}#quota_spend` },
+      effect_ref: `${identity.effect_id}#quota_spend`,
+    })}\n`,
+  );
+
+  const result = await readQuotaSettlement(request(runtimeRoot));
+
+  assert.equal((result.spend as any).payload.ok, true);
+  assert.equal(
+    (result.spend_run as any).quota_spend_commit.effect_id,
+    `${identity.effect_id}#quota_spend`,
+  );
+});
+
 test("rejects a guard bound to another Todo", async () => {
   const runtimeRoot = await fixture();
 

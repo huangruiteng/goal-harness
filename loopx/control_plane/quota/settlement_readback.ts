@@ -174,12 +174,27 @@ function runEffectMatches(
   const expectedEffectRef = `${expectedEffectId}#${stepKind}`;
   const persistedIdentity = jsonObject(run.settlement_identity);
   const persistedEffectId = optionalString(persistedIdentity?.effect_id);
+  const quotaSpendCommit = jsonObject(run.quota_spend_commit);
+  const quotaSpendEffectId = quotaSpendCommit === null
+    ? null
+    : optionalString(quotaSpendCommit.effect_id);
   const effectRef = optionalString(run.effect_ref);
 
   // New rows persist the base identity; legacy quota rows persist only the
   // step-qualified effect_ref. Any persisted effect metadata must agree.
   if (persistedEffectId && persistedEffectId !== expectedEffectId) return false;
+  if (
+    stepKind === "quota_spend" &&
+    quotaSpendEffectId &&
+    quotaSpendEffectId !== expectedEffectRef
+  ) return false;
   if (effectRef && effectRef !== expectedEffectRef) return false;
+  if (
+    stepKind === "quota_spend" &&
+    quotaSpendEffectId &&
+    effectRef &&
+    quotaSpendEffectId !== effectRef
+  ) return false;
   return true;
 }
 

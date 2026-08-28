@@ -274,6 +274,77 @@ test("native replay ignores non-quota rows that reuse an effect identity", async
   assert.match(replay.reason, /replay was not found/);
 });
 
+test("native replay rejects either conflicting effect identity direction", async (t) => {
+  for (const [label, row] of [
+    ["metadata-first", {
+      quota_spend_commit: { effect_id: "replay-conflict-effect" },
+      effect_ref: "different-effect",
+    }],
+    ["ref-first", {
+      quota_spend_commit: { effect_id: "different-effect" },
+      effect_ref: "replay-conflict-effect",
+    }],
+  ] as const) {
+    const runtimeRoot = await tempRuntime(t);
+    const runsDir = join(runtimeRoot, "goals", goalId, "runs");
+    await mkdir(runsDir, { recursive: true });
+    const indexPath = join(runsDir, "index.jsonl");
+    const original = {
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: "codex-main-control",
+      ...row,
+    };
+    await writeFile(indexPath, `${JSON.stringify(original)}\n`);
+
+    const replay = await evaluateQuotaSpendCommit({
+      schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+      operation: "replay",
+      runtime_root: runtimeRoot,
+      goal_id: goalId,
+      effect_id: "replay-conflict-effect",
+      resolved_agent_id: "codex-main-control",
+    });
+
+    assert.equal(label.length > 0, true);
+    assert.equal(replay.status, "conflict");
+    assert.equal(replay.conflict, true);
+    assert.equal(replay.replayed, false);
+    assert.equal(replay.reason_code, "effect_id_conflict");
+    assert.equal(await readFile(indexPath, "utf8"), `${JSON.stringify(original)}\n`);
+  }
+});
+
+test("native replay ignores conflicting effect identities unrelated to its effect", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const runsDir = join(runtimeRoot, "goals", goalId, "runs");
+  await mkdir(runsDir, { recursive: true });
+  const indexPath = join(runsDir, "index.jsonl");
+  await writeFile(
+    indexPath,
+    `${JSON.stringify({
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: "codex-main-control",
+      quota_spend_commit: { effect_id: "unrelated-first" },
+      effect_ref: "unrelated-second",
+    })}\n`,
+  );
+
+  const replay = await evaluateQuotaSpendCommit({
+    schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+    operation: "replay",
+    runtime_root: runtimeRoot,
+    goal_id: goalId,
+    effect_id: "requested-effect",
+    resolved_agent_id: "codex-main-control",
+  });
+
+  assert.equal(replay.status, "preview");
+  assert.equal(replay.conflict, false);
+  assert.equal(replay.payload.replay_found, false);
+});
+
 test("prepared transaction repairs partial artifacts exactly once", async (t) => {
   const runtimeRoot = await tempRuntime(t);
   const params = request(runtimeRoot);

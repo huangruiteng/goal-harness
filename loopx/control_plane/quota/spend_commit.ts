@@ -630,17 +630,71 @@ function repairedTruncatedTail(
   return `${validPrefixText}${expectedLine.toString("utf8")}`;
 }
 
+type EffectIdentityResolution =
+  | { kind: "absent" }
+  | { kind: "matched"; record: JsonObject }
+  | { kind: "conflict"; reason: string };
+
+function effectIdentityValue(
+  value: unknown,
+): { value: string | null; malformed: boolean } {
+  if (value === null || value === undefined || value === "") {
+    return { value: null, malformed: false };
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return { value: null, malformed: true };
+  }
+  return { value: value.trim(), malformed: false };
+}
+
+function resolveEffectIdentity(
+  record: JsonObject,
+  expectedEffectId: string,
+): EffectIdentityResolution {
+  const rawMetadata = record.quota_spend_commit;
+  const metadata = rawMetadata === undefined || rawMetadata === null
+    ? null
+    : jsonObject(rawMetadata);
+  if (rawMetadata !== undefined && rawMetadata !== null && metadata === null) {
+    return {
+      kind: "conflict",
+      reason: "quota spend index row has malformed effect metadata",
+    };
+  }
+  const metadataEffect = effectIdentityValue(metadata?.effect_id);
+  const recordEffect = effectIdentityValue(record.effect_ref);
+  const referencesExpected = metadataEffect.value === expectedEffectId ||
+    recordEffect.value === expectedEffectId;
+  if (!referencesExpected) return { kind: "absent" };
+  if (metadataEffect.malformed || recordEffect.malformed) {
+    return {
+      kind: "conflict",
+      reason: "quota spend index row has malformed effect identity",
+    };
+  }
+  if (
+    metadataEffect.value !== null &&
+    recordEffect.value !== null &&
+    metadataEffect.value !== recordEffect.value
+  ) {
+    return {
+      kind: "conflict",
+      reason: "quota spend index row has conflicting effect identities",
+    };
+  }
+  return { kind: "matched", record };
+}
+
 function matchingIndexRecord(
   records: readonly JsonObject[],
   effectId: string,
-): JsonObject | null {
+): EffectIdentityResolution {
   for (const record of [...records].reverse()) {
     if (record.classification !== QUOTA_SLOT_SPENT_CLASSIFICATION) continue;
-    const metadata = jsonObject(record.quota_spend_commit);
-    if (metadata?.effect_id === effectId) return record;
-    if (record.effect_ref === effectId) return record;
+    const resolution = resolveEffectIdentity(record, effectId);
+    if (resolution.kind !== "absent") return resolution;
   }
-  return null;
+  return { kind: "absent" };
 }
 
 async function evaluateQuotaSpendReplay(
@@ -656,10 +710,37 @@ async function evaluateQuotaSpendReplay(
   );
   return await withFileMutationLock(indexPath, async () => {
     const content = await readOptionalText(indexPath);
-    const candidate = matchingIndexRecord(
+    const candidateResolution = matchingIndexRecord(
       indexRecords(content),
       request.effect_id,
     );
+    if (candidateResolution.kind === "conflict") {
+      return {
+        schema_version: QUOTA_SPEND_COMMIT_RESULT_SCHEMA,
+        effect_id: request.effect_id,
+        status: "conflict",
+        written: false,
+        replayed: false,
+        repaired: false,
+        conflict: true,
+        request_digest: sha256(canonicalJson(value)),
+        index_digest: await quotaSpendIndexDigest(indexPath),
+        reason: candidateResolution.reason,
+        record: null,
+        payload: {
+          ok: false,
+          appended: false,
+          replay_found: true,
+          goal_id: request.goal_id,
+          effect_ref: request.effect_id,
+          reason: candidateResolution.reason,
+        },
+        reason_code: "effect_id_conflict",
+      };
+    }
+    const candidate = candidateResolution.kind === "matched"
+      ? candidateResolution.record
+      : null;
     const basePayload: JsonObject = {
       ok: false,
       appended: false,
@@ -1026,7 +1107,16 @@ async function ensureReceiptArtifacts(
     records = indexRecords(content);
     repaired = true;
   }
-  const match = matchingIndexRecord(records, receipt.effect_id);
+  const matchResolution = matchingIndexRecord(records, receipt.effect_id);
+  if (matchResolution.kind === "conflict") {
+    throw new EffectRuntimeRequestError(
+      matchResolution.reason,
+      "effect_id_conflict",
+    );
+  }
+  const match = matchResolution.kind === "matched"
+    ? matchResolution.record
+    : null;
   if (match) {
     const metadata = jsonObject(match.quota_spend_commit);
     if (metadata?.request_digest !== receipt.request_digest) {
@@ -1172,8 +1262,20 @@ export async function evaluateQuotaSpendCommit(
       );
     }
     const currentRecords = indexRecords(currentIndexContent);
-    const duplicate = matchingIndexRecord(currentRecords, request.effect_id);
-    if (duplicate) {
+    const duplicateResolution = matchingIndexRecord(currentRecords, request.effect_id);
+    if (duplicateResolution.kind === "conflict") {
+      return result(
+        request,
+        fingerprint,
+        "conflict",
+        currentDigest,
+        duplicateResolution.reason,
+        null,
+        { ...request.preview, ok: false, appended: false },
+        { reason_code: "effect_id_conflict" },
+      );
+    }
+    if (duplicateResolution.kind === "matched") {
       return result(
         request,
         fingerprint,
