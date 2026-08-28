@@ -56,10 +56,11 @@ const packedStaticEntries = new Set([
   'package/lib/types/goalbar/service.d.ts',
   'package/lib/types/index.d.ts',
   'package/lib/types/init-command.d.ts',
+  'package/lib/types/managed-runtime.d.ts',
   'package/package.json',
 ])
 const packedHashedEntries = [
-  ['CLI chunk', /^package\/lib\/cli-[A-Za-z0-9_-]{8}\.js$/u],
+  ['managed runtime chunk', /^package\/lib\/managed-runtime-[A-Za-z0-9_-]{8}\.js$/u],
   ['Driver chunk', /^package\/lib\/driver-[A-Za-z0-9_-]{8}\.js$/u],
 ]
 
@@ -204,17 +205,38 @@ async function createRealClientModuleSystem(context, staticModules) {
   const sourcePath = appRequire.resolve('@deepseek-ai/dsh-client-modules/client')
   const source = await readFile(sourcePath, 'utf8')
   let handoff
-  context.__ModuleLoader__ = {
+  const registrationTarget = {
+    mode: 'queue',
+    pendingQueue: [],
     load(value) {
       assert.equal(handoff, undefined, 'client-modules registered more than one factory')
       handoff = value
     },
   }
+  context.__ModuleLoader__ = registrationTarget
   vm.runInContext(source, context, { filename: sourcePath })
   assert.equal(handoff?.id, '@deepseek-ai/dsh-client-modules')
   const clientModules = handoff.factory(() => {
     throw new Error('client-modules unexpectedly required a platform module')
   })
+  if (typeof clientModules.createClientModuleSystem === 'function') {
+    return clientModules.createClientModuleSystem(
+      registrationTarget,
+      { id: handoff.id, exports: clientModules },
+      {
+        boot: {
+          rev: 'dsh-loopx-plugin-artifact-smoke',
+          entries: [{
+            id: packageId,
+            url: `/plugins/${packageId}/client.js`,
+            rev: 'dsh-loopx-plugin-artifact-smoke',
+            external: [],
+          }],
+        },
+        staticModules,
+      },
+    )
+  }
   delete context.__ModuleLoader__
   return new clientModules.ClientModuleSystem({
     modules: [],
@@ -385,7 +407,7 @@ async function assertDshDiscovery(root) {
   assert.equal(meta.immediately, false)
   assert.equal(registry.processOne(packageId), true)
   const record = registry.table.get(packageId)
-  assert.equal(record.clientPath, join(root, 'lib', 'client.js'))
+  assert.equal(record.clientPath ?? record.meta?.clientPath, join(root, 'lib', 'client.js'))
   assert.equal(record.entry.id, packageId)
   assert.deepEqual(record.entry.inject, clientInject)
   assert.match(record.entry.rev, /^[0-9a-f]{12}$/u)
@@ -407,7 +429,7 @@ async function assertHostExports(root) {
   ])
   assert.equal(typeof host.apply, 'function')
   assert.equal(host.name, packageId)
-  assert.deepEqual(host.inject, ['agents', 'connection'])
+  assert.deepEqual(host.inject, ['agents', 'connection', 'loopxBootstrap'])
   let handler
   let disposeHost
   let rpcDisposals = 0

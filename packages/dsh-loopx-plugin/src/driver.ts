@@ -12,6 +12,7 @@ import {
   runJsonCommand,
 } from './cli.ts'
 import type { FileRunner, LoopXCommand } from './cli.ts'
+import { resolvePluginLoopXCommand } from './managed-runtime.ts'
 import { goalBarCoordinator } from './goalbar/events.ts'
 import type {
   GoalBarDriverActionReceipt,
@@ -19,7 +20,7 @@ import type {
 } from './goalbar/events.ts'
 
 export const name = 'dsh-loopx-driver'
-export const inject = ['agents']
+export const inject = ['agents', 'loopxBootstrap']
 
 const HOST_SURFACE = 'deepseek-harness-native'
 const RESOLUTION_SCHEMA = 'loopx_thread_agent_binding_resolution_v0'
@@ -113,6 +114,9 @@ type EvaluationPlan = QueuePlan | WaitPlan
 export interface LoopXDriverOptions {
   readonly isLiveAgent: (agent: Agent) => boolean
   readonly runner?: FileRunner | undefined
+  readonly resolveCommand?: (
+    signal: AbortSignal,
+  ) => Promise<LoopXCommand>
   readonly clock?: DriverClock | undefined
   readonly makeTurnInstanceId?: (() => string) | undefined
   readonly retryDelaysMs?: readonly number[] | undefined
@@ -421,6 +425,7 @@ export class LoopXContinuationDriver {
   private readonly states = new Map<Agent, DriverState>()
   private readonly isLiveAgent: (agent: Agent) => boolean
   private readonly runner: FileRunner | undefined
+  private readonly commandResolver: (signal: AbortSignal) => Promise<LoopXCommand>
   private readonly clock: DriverClock
   private readonly makeTurnInstanceId: () => string
   private readonly retryDelaysMs: readonly number[]
@@ -432,6 +437,8 @@ export class LoopXContinuationDriver {
   constructor(options: LoopXDriverOptions) {
     this.isLiveAgent = options.isLiveAgent
     this.runner = options.runner
+    this.commandResolver = options.resolveCommand
+      ?? (signal => resolveLoopXCommand({ runner: this.runner, signal }))
     this.clock = options.clock ?? systemClock
     this.makeTurnInstanceId = options.makeTurnInstanceId
       ?? (() => `dsh-loopx-${randomUUID()}`)
@@ -978,7 +985,7 @@ export class LoopXContinuationDriver {
 
   private async loopXCommand(signal: AbortSignal): Promise<LoopXCommand> {
     if (this.command !== undefined) return this.command
-    const resolved = await resolveLoopXCommand({ runner: this.runner, signal })
+    const resolved = await this.commandResolver(signal)
     if (!signal.aborted) this.command = resolved
     return resolved
   }
@@ -1154,6 +1161,7 @@ export class LoopXContinuationDriver {
 export function apply(ctx: Context): void {
   const driver = new LoopXContinuationDriver({
     isLiveAgent: agent => ctx.agents.get(agent.id) === agent,
+    resolveCommand: signal => resolvePluginLoopXCommand({ signal }),
     runDetached: operation => ctx.agents.withoutInitiator(operation),
     warn: message => { ctx.logger.warn(message) },
   })

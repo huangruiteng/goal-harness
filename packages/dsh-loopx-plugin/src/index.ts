@@ -5,9 +5,10 @@ import {
 } from './goalbar/connection-rpc.ts'
 import { goalBarCoordinator } from './goalbar/events.ts'
 import { createGoalBarService } from './goalbar/service.ts'
+import { resolvePluginLoopXCommand } from './managed-runtime.ts'
 
 export const name = 'dsh-loopx-plugin'
-export const inject = ['agents', 'connection']
+export const inject = ['agents', 'connection', 'loopxBootstrap']
 
 /** Package-root Host plugin: one GoalBar service, never a second Driver. */
 export function apply(ctx: Context): void {
@@ -15,6 +16,7 @@ export function apply(ctx: Context): void {
     const service = createGoalBarService({
       getAgent: sessionId => ctx.agents.get(sessionId as Agent['id']),
       coordinator: goalBarCoordinator,
+      resolveCommand: signal => resolvePluginLoopXCommand({ signal }),
       warn: message => { ctx.logger.warn(message) },
     })
     const disposeRpc = registerGoalBarConnectionRpc(ctx.connection, service)
@@ -58,9 +60,14 @@ export type {
 } from './goalbar/service.ts'
 export { LoopXContinuationDriver } from './driver.ts'
 export type { DriverClock, LoopXDriverOptions } from './driver.ts'
-export { initializeLoopX, LoopXInitError } from './init-command.ts'
+export {
+  initializeLoopX,
+  LoopXInitError,
+} from './init-command.ts'
 export type {
   LoopXInitOptions,
   LoopXInitStage,
   LoopXInitSummary,
 } from './init-command.ts'
+export { resolvePluginLoopXCommand } from './managed-runtime.ts'
+export type { LoopXRuntimeOptions } from './managed-runtime.ts'

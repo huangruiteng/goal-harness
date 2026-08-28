@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -9,8 +12,13 @@ import type {
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { LoopXCliError } from '../src/cli.ts'
 import type { FileRunner } from '../src/cli.ts'
-import { apply, initializeLoopX } from '../src/init-command.ts'
+import {
+  apply,
+  initializeLoopX,
+  registerLoopXInitCommand,
+} from '../src/init-command.ts'
 import type { LoopXInitOptions } from '../src/init-command.ts'
+import { resolvePluginLoopXCommand } from '../src/managed-runtime.ts'
 
 const hostSurface = 'deepseek-harness-native'
 const initSource = 'dsh-loopx-plugin/init-command'
@@ -80,7 +88,7 @@ function commandHarness(
     },
     logger: { warn(message: string) { warnings.push(message) } },
   } as unknown as Context
-  apply(ctx, options)
+  registerLoopXInitCommand(ctx, options)
   if (definition === undefined) throw new Error('loopx-init command was not registered')
   const handler = definition.handler
   const agent = {
@@ -109,7 +117,13 @@ function successfulRunner(options: {
   let inspectCalls = 0
   const runner: FileRunner = async (_file, args) => {
     calls.push([...args])
-    if (args.slice(0, 4).join(' ') === '-m pip install --upgrade') {
+    if (args[0] === '-c') {
+      return { exitCode: 0, stdout: '', stderr: '' }
+    }
+    if (args.join(' ') === '-m pip --version') {
+      return { exitCode: 0, stdout: 'pip fixture', stderr: '' }
+    }
+    if (args.slice(0, 3).join(' ') === '-m pip install') {
       options.events?.push('install-cli')
       cliAvailable = true
       return { exitCode: 0, stdout: 'installed', stderr: '' }
@@ -136,6 +150,88 @@ function successfulRunner(options: {
   }
   return { runner, calls }
 }
+
+async function pluginHarness(options: LoopXInitOptions): Promise<{
+  readonly commands: Map<string, CommandDefinition>
+  readonly services: Map<string, unknown>
+  readonly warnings: string[]
+}> {
+  const commands = new Map<string, CommandDefinition>()
+  const services = new Map<string, unknown>()
+  const warnings: string[] = []
+  const ctx = {
+    commands: {
+      register(definition: CommandDefinition) {
+        commands.set(definition.name, definition)
+        return () => {}
+      },
+    },
+    reflect: {
+      provide(name: string, value: unknown) {
+        services.set(name, value)
+        return () => { services.delete(name) }
+      },
+    },
+    logger: { warn(message: string) { warnings.push(message) } },
+  } as unknown as Context
+  await apply(ctx, options)
+  return { commands, services, warnings }
+}
+
+describe('automatic DSH bootstrap', () => {
+  it('makes LoopX ready before the plugin row finishes loading', async () => {
+    const events: string[] = []
+    const { runner, calls } = successfulRunner({
+      packagedStatus: 'created',
+      events,
+    })
+
+    const harness = await pluginHarness({ runner, skillsDir: '/fixture/skills' })
+
+    expect([...harness.commands.keys()]).toEqual(['loopx-init'])
+    expect(harness.services.get('loopxBootstrap')).toEqual({ state: 'ready' })
+    expect(harness.warnings).toEqual([])
+    expect(events).toEqual([
+      'probe',
+      'inspect-before',
+      'install-skills',
+      'readback',
+    ])
+    expect(calls.filter(args => args.includes('--install'))).toHaveLength(1)
+  })
+
+  it('keeps DSH bootable and the repair command available after a safe startup failure', async () => {
+    const privateFailure = '/fixture/private/automatic-bootstrap-failure'
+    const healthy = successfulRunner({ packagedStatus: 'created' })
+    let fail = true
+    const runner: FileRunner = async (file, args, options) => {
+      if (fail) throw new LoopXCliError('transport', privateFailure, true)
+      return healthy.runner(file, args, options)
+    }
+
+    const harness = await pluginHarness({ runner, skillsDir: '/fixture/skills' })
+
+    expect([...harness.commands.keys()]).toEqual(['loopx-init'])
+    expect(harness.services.get('loopxBootstrap')).toEqual({
+      state: 'failed', stage: 'install_cli', causeKind: 'missing',
+    })
+    expect(harness.warnings).toHaveLength(1)
+    expect(harness.warnings[0]).toContain('stage=install_cli; kind=missing')
+    expect(harness.warnings[0]).toContain('/loopx-init remains available for repair')
+    expect(harness.warnings[0]).not.toContain(privateFailure)
+
+    fail = false
+    const messages: UserMessage[] = []
+    const command = harness.commands.get('loopx-init') as CommandDefinition
+    const result = await command.handler({
+      rawInput: '',
+      signal: new AbortController().signal,
+      agent: { followup(message: UserMessage) { messages.push(message) } } as unknown as Agent,
+    } as CommandInvocation)
+    expect(result.kind).toBe('success')
+    expect(messages).toHaveLength(2)
+  })
+})
 
 describe('/loopx-init implementation', () => {
   it('keeps a compatible CLI and installs plus verifies the DSH skills', async () => {
@@ -172,9 +268,7 @@ describe('/loopx-init implementation', () => {
       skillsChanged: false,
       hostSurface,
     })
-    expect(calls.some(args => args.slice(0, 5).join(' ') === (
-      '-m pip install --upgrade loopx'
-    ))).toBe(false)
+    expect(calls.some(args => args.slice(0, 3).join(' ') === '-m pip install')).toBe(false)
     expect(calls.filter(args => args.includes('--install'))).toHaveLength(1)
     expect(calls.at(-1)).toContain(hostSurface)
   })
@@ -209,7 +303,13 @@ describe('/loopx-init implementation', () => {
     let installed = false
     let pipCalls = 0
     const runner: FileRunner = async (_file, args) => {
-      if (args.slice(0, 4).join(' ') === '-m pip install --upgrade') {
+      if (args[0] === '-c') {
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
+      if (args.join(' ') === '-m pip --version') {
+        return { exitCode: 0, stdout: 'pip fixture', stderr: '' }
+      }
+      if (args.slice(0, 3).join(' ') === '-m pip install') {
         pipCalls += 1
         installed = true
         return { exitCode: 0, stdout: 'installed', stderr: '' }
@@ -236,14 +336,229 @@ describe('/loopx-init implementation', () => {
     expect(pipCalls).toBe(1)
   })
 
+  it('selects an available Python 3.11+ interpreter for install and readback', async () => {
+    const calls: Array<{ readonly file: string; readonly args: readonly string[] }> = []
+    let installed = false
+    const runner: FileRunner = async (file, args) => {
+      calls.push({ file, args: [...args] })
+      if (args[0] === '-c') {
+        return { exitCode: file === 'python3.13' ? 0 : 1, stdout: '', stderr: '' }
+      }
+      if (args.join(' ') === '-m pip --version') {
+        return {
+          exitCode: file === 'python3.13' ? 0 : 1,
+          stdout: file === 'python3.13' ? 'pip fixture' : '',
+          stderr: '',
+        }
+      }
+      if (args.slice(0, 3).join(' ') === '-m pip install') {
+        installed = true
+        return { exitCode: 0, stdout: 'installed', stderr: '' }
+      }
+      if (args.at(-1) === '--version') {
+        if (file !== 'python3.13' || !installed) {
+          throw new LoopXCliError('missing', 'missing', false)
+        }
+        return { exitCode: 0, stdout: 'loopx 0.5.0\n', stderr: '' }
+      }
+      if (args.includes('workflow-skills')) {
+        const operation = args.includes('--install') ? 'install' : 'inspect'
+        return {
+          exitCode: 0,
+          stdout: workflowPayload(operation, false),
+          stderr: '',
+        }
+      }
+      throw new Error(`unexpected argv: ${file} ${args.join(' ')}`)
+    }
+
+    const result = await initializeLoopX({
+      runner,
+      skillsDir: '/fixture/skills',
+      runtimeDir: '/fixture/runtime',
+    })
+
+    expect(result.cliInstalled).toBe(true)
+    expect(calls.some(call => (
+      call.file === 'python3'
+      && call.args[0] === '-c'
+    ))).toBe(true)
+    expect(calls.some(call => (
+      call.file === 'python3.14'
+      && call.args[0] === '-c'
+    ))).toBe(true)
+    expect(calls.some(call => (
+      call.file === 'python3.13'
+      && call.args.slice(0, 3).join(' ') === '-m pip install'
+    ))).toBe(true)
+    const pipCall = calls.find(call => call.args.slice(0, 3).join(' ') === '-m pip install')
+    expect(pipCall?.args).toContain('--target')
+    expect(pipCall?.args.at(-1)).toBe('loopx>=0.5.3')
+    expect(pipCall?.args[pipCall.args.indexOf('--target') + 1]).toBe(
+      '/fixture/runtime/site-packages',
+    )
+    const workflowCalls = calls.filter(call => call.args.includes('workflow-skills'))
+    expect(workflowCalls.every(call => call.file === 'python3.13')).toBe(true)
+    expect(workflowCalls.every(call => (
+      call.args[call.args.indexOf('--cli-bin') + 1]
+        === 'python3.13 /fixture/runtime/loopx_cli.py'
+    ))).toBe(true)
+  })
+
+  it('skips an implicit version-compatible Python that cannot run pip', async () => {
+    const calls: Array<{ readonly file: string; readonly args: readonly string[] }> = []
+    let installed = false
+    const runner: FileRunner = async (file, args) => {
+      calls.push({ file, args: [...args] })
+      if (args.at(-1) === '--version' && args[0] !== '-m') {
+        throw new LoopXCliError('missing', 'missing', false)
+      }
+      if (args[0] === '-c') {
+        return {
+          exitCode: file === 'python3' || file === 'python3.14' ? 0 : 1,
+          stdout: '',
+          stderr: '',
+        }
+      }
+      if (args.join(' ') === '-m pip --version') {
+        return {
+          exitCode: file === 'python3.14' ? 0 : 1,
+          stdout: file === 'python3.14' ? 'pip fixture' : '',
+          stderr: '',
+        }
+      }
+      if (args.slice(0, 3).join(' ') === '-m pip install') {
+        installed = true
+        return { exitCode: 0, stdout: 'installed', stderr: '' }
+      }
+      if (args.at(-1) === '--version') {
+        if (file !== 'python3.14' || !installed) {
+          throw new LoopXCliError('missing', 'missing', false)
+        }
+        return { exitCode: 0, stdout: 'loopx 0.5.3\n', stderr: '' }
+      }
+      if (args.includes('workflow-skills')) {
+        const operation = args.includes('--install') ? 'install' : 'inspect'
+        return {
+          exitCode: 0,
+          stdout: workflowPayload(operation, false),
+          stderr: '',
+        }
+      }
+      throw new Error(`unexpected argv: ${file} ${args.join(' ')}`)
+    }
+
+    const result = await initializeLoopX({
+      runner,
+      skillsDir: '/fixture/skills',
+      runtimeDir: '/fixture/runtime',
+    })
+
+    expect(result.cliInstalled).toBe(true)
+    expect(calls.some(call => (
+      call.file === 'python3'
+      && call.args.join(' ') === '-m pip --version'
+    ))).toBe(true)
+    expect(calls.some(call => (
+      call.file === 'python3'
+      && call.args.slice(0, 3).join(' ') === '-m pip install'
+    ))).toBe(false)
+    expect(calls.some(call => (
+      call.file === 'python3.14'
+      && call.args.slice(0, 3).join(' ') === '-m pip install'
+    ))).toBe(true)
+  })
+
+  it('does not fall back from an explicit Python that cannot run pip', async () => {
+    const calls: Array<{ readonly file: string; readonly args: readonly string[] }> = []
+    const runner: FileRunner = async (file, args) => {
+      calls.push({ file, args: [...args] })
+      if (args.at(-1) === '--version' && args[0] !== '-m') {
+        throw new LoopXCliError('missing', 'missing', false)
+      }
+      if (args[0] === '-c') {
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
+      if (args.join(' ') === '-m pip --version') {
+        return { exitCode: 1, stdout: '', stderr: 'No module named pip' }
+      }
+      throw new Error(`unexpected argv: ${file} ${args.join(' ')}`)
+    }
+
+    await expect(initializeLoopX({
+      runner,
+      pythonBin: '/configured/python',
+      skillsDir: '/fixture/skills',
+    })).rejects.toMatchObject({
+      stage: 'install_cli',
+      causeKind: 'missing',
+    })
+    expect(calls.some(call => call.file === 'python3.14')).toBe(false)
+    expect(calls.some(call => (
+      call.file === '/configured/python'
+      && call.args.join(' ') === '-m pip --version'
+    ))).toBe(true)
+  })
+
+  it('reuses the plugin-owned launcher across runtime consumers and restarts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-loopx-managed-runtime-'))
+    const runtimeDir = join(root, 'runtime')
+    const launcherPath = join(runtimeDir, 'loopx_cli.py')
+    await mkdir(runtimeDir, { recursive: true })
+    await writeFile(launcherPath, '# fixture launcher\n', 'utf8')
+    const calls: Array<{ readonly file: string; readonly args: readonly string[] }> = []
+    const runner: FileRunner = async (file, args) => {
+      calls.push({ file, args: [...args] })
+      if (args.at(-1) === '--version') {
+        if (args[0] !== launcherPath) throw new LoopXCliError('missing', 'missing', false)
+        return { exitCode: 0, stdout: 'loopx 0.5.0\n', stderr: '' }
+      }
+      if (args.includes('workflow-skills')) {
+        const operation = args.includes('--install') ? 'install' : 'inspect'
+        return {
+          exitCode: 0,
+          stdout: workflowPayload(operation, false),
+          stderr: '',
+        }
+      }
+      throw new Error(`unexpected argv: ${file} ${args.join(' ')}`)
+    }
+
+    try {
+      const command = await resolvePluginLoopXCommand({ runner, runtimeDir })
+      expect(command.prefix).toEqual([launcherPath])
+      const result = await initializeLoopX({
+        runner,
+        runtimeDir,
+        skillsDir: join(root, 'skills'),
+      })
+      expect(result.cliInstalled).toBe(false)
+      expect(calls.some(call => (
+        call.args.slice(0, 3).join(' ') === '-m pip install'
+      ))).toBe(false)
+      expect(calls.filter(call => call.args.includes('workflow-skills')).every(call => (
+        call.args[call.args.indexOf('--cli-bin') + 1]
+          === `python3 ${launcherPath}`
+      ))).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('repairs an incompatible existing CLI before mutating skills', async () => {
     let upgraded = false
     let pipCalls = 0
     const runner: FileRunner = async (_file, args) => {
+      if (args[0] === '-c') {
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
+      if (args.join(' ') === '-m pip --version') {
+        return { exitCode: 0, stdout: 'pip fixture', stderr: '' }
+      }
       if (args.at(-1) === '--version') {
         return { exitCode: 0, stdout: 'loopx 0.4.0\n', stderr: '' }
       }
-      if (args.slice(0, 4).join(' ') === '-m pip install --upgrade') {
+      if (args.slice(0, 3).join(' ') === '-m pip install') {
         pipCalls += 1
         upgraded = true
         return { exitCode: 0, stdout: 'upgraded', stderr: '' }
@@ -386,7 +701,7 @@ describe('/loopx-init implementation', () => {
   it('propagates cancellation without running an install fallback', async () => {
     let pipCalls = 0
     const runner: FileRunner = async (_file, args) => {
-      if (args.slice(0, 4).join(' ') === '-m pip install --upgrade') pipCalls += 1
+      if (args.slice(0, 3).join(' ') === '-m pip install') pipCalls += 1
       throw new LoopXCliError('aborted', 'cancelled', false)
     }
 
@@ -478,7 +793,7 @@ describe('/loopx-init followups', () => {
     ['created packaged skill', 'created', 'unchanged'],
     ['updated packaged skill', 'updated', 'unchanged'],
     ['upgraded legacy entry skill', 'unchanged', 'upgraded_legacy_managed'],
-  ] as const)('requires a DSH restart after a %s', async (
+  ] as const)('loads a %s without a DSH restart', async (
     _caseName,
     packagedStatus,
     entryStatus,
@@ -489,10 +804,10 @@ describe('/loopx-init followups', () => {
     const result = await harness.execute()
 
     expect(result.kind).toBe('success')
-    expect(result.text).toContain('Restart DSH once')
+    expect(result.text).toContain('No DSH restart is required')
     expect(harness.messages).toHaveLength(2)
     expect(messageText(harness.messages[1] as UserMessage)).toContain(
-      'restart DSH once',
+      'loaded without a restart',
     )
   })
 
@@ -515,7 +830,7 @@ describe('/loopx-init followups', () => {
       'no DSH restart is required',
     )
     expect(calls.filter(args => (
-      args.slice(0, 4).join(' ') === '-m pip install --upgrade'
+      args.slice(0, 3).join(' ') === '-m pip install'
     ))).toHaveLength(expectedPipCalls)
     expect(calls.filter(args => args.includes('--install'))).toHaveLength(1)
   })
@@ -609,7 +924,7 @@ describe('/loopx-init followups', () => {
         'LoopX ready (loopx 0.5.0).',
         'CLI already compatible.',
         'DSH LoopX skills installed or updated and verified.',
-        'Restart DSH once to reload the changed skills, then use the `loopx` skill with your task.',
+        'No DSH restart is required; use the `loopx` skill with your task.',
       ].join(' '),
     })
     expect(calls.filter(args => args.includes('--install'))).toHaveLength(1)

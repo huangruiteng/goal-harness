@@ -39,10 +39,11 @@ const packedStaticEntries = new Set([
   'package/lib/types/goalbar/service.d.ts',
   'package/lib/types/index.d.ts',
   'package/lib/types/init-command.d.ts',
+  'package/lib/types/managed-runtime.d.ts',
   'package/package.json',
 ])
 const packedHashedEntries = [
-  ['CLI chunk', /^package\/lib\/cli-[A-Za-z0-9_-]{8}\.js$/u],
+  ['managed runtime chunk', /^package\/lib\/managed-runtime-[A-Za-z0-9_-]{8}\.js$/u],
   ['Driver chunk', /^package\/lib\/driver-[A-Za-z0-9_-]{8}\.js$/u],
 ]
 
@@ -160,11 +161,68 @@ async function exerciseInstalled(installed) {
     import(pathToFileURL(requireFromPlugin.resolve('dsh-loopx-plugin/driver')).href),
   ])
   assert.equal(hostModule.name, packageId)
-  assert.deepEqual(hostModule.inject, ['agents', 'connection'])
+  assert.deepEqual(hostModule.inject, ['agents', 'connection', 'loopxBootstrap'])
   assert.equal(typeof hostModule.createGoalBarService, 'function')
   const commands = new Map()
-  initModule.apply({ commands: { register: definition => commands.set(definition.name, definition) } })
+  const services = new Map()
+  const initCalls = []
+  const initWarnings = []
+  await initModule.apply({
+    commands: { register: definition => commands.set(definition.name, definition) },
+    logger: { warn: message => initWarnings.push(message) },
+    reflect: {
+      provide(name, value) {
+        services.set(name, value)
+        return () => services.delete(name)
+      },
+    },
+  }, {
+    skillsDir: join(installed, '.fixture-skills'),
+    runner: async (_file, args, options) => {
+      initCalls.push([...args])
+      if (options.signal?.aborted) {
+        throw new hostModule.LoopXCliError('aborted', 'cancelled', false)
+      }
+      if (args.at(-1) === '--version') {
+        return { exitCode: 0, stdout: 'loopx smoke\n', stderr: '' }
+      }
+      if (args.includes('--install')) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            schema_version: 'loopx_workflow_skill_install_v0',
+            operation: 'install',
+            host_surface: 'deepseek-harness-native',
+            installed: Object.fromEntries([
+              'loopx-project',
+              'loopx-pr-program',
+              'loopx-pr-review',
+              'loopx-doc-registry',
+              'loopx-self-repair',
+            ].map(name => [name, 'unchanged'])),
+            entry: { status: 'unchanged' },
+          }),
+          stderr: '',
+        }
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          schema_version: 'loopx_workflow_skill_install_v0',
+          operation: 'inspect',
+          host_surface: 'deepseek-harness-native',
+          install_required: false,
+        }),
+        stderr: '',
+      }
+    },
+  })
   assert.deepEqual([...commands.keys()], ['loopx-init'])
+  assert.deepEqual(services.get('loopxBootstrap'), { state: 'ready' })
+  assert.equal(initWarnings.length, 0)
+  assert.equal(initCalls.filter(args => args.includes('--install')).length, 1)
   const command = commands.get('loopx-init')
   assert.equal(command.recordInput, false)
   const followups = []
@@ -199,7 +257,7 @@ async function exerciseInstalled(installed) {
     plugin: 'dsh-loopx-plugin/driver',
   })
   assert.equal(typeof driverModule.LoopXContinuationDriver, 'function')
-  assert.equal(driverModule.inject.join(','), 'agents')
+  assert.equal(driverModule.inject.join(','), 'agents,loopxBootstrap')
 
   const runnerCalls = []
   const timerCalls = []
