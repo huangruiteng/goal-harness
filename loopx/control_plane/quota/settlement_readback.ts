@@ -226,10 +226,10 @@ function receiptIdentity(
   }
   if (!todoId && !replanObligationId) return null;
   const identity = settlementIdentity({
-    goal_id: String(event.goal_id ?? "").trim(),
-    agent_id: String(event.agent_id ?? "").trim(),
+    goal_id: optionalString(event.goal_id) ?? "",
+    agent_id: optionalString(event.agent_id) ?? "",
     todo_id: todoId,
-    turn_instance_id: String(event.run_id ?? "").trim(),
+    turn_instance_id: optionalString(event.run_id) ?? "",
     replan_obligation_id: replanObligationId,
   });
   return {
@@ -244,9 +244,9 @@ function effectiveHeartbeatReceipt(
 ): JsonObject | null {
   const matching = events.filter((event) =>
     event.event_kind === "quota_should_run" &&
-    String(event.goal_id ?? "") === identity.goal_id &&
-    String(event.agent_id ?? "") === identity.agent_id &&
-    String(event.run_id ?? "") === identity.turn_instance_id
+    optionalString(event.goal_id) === identity.goal_id &&
+    optionalString(event.agent_id) === identity.agent_id &&
+    optionalString(event.run_id) === identity.turn_instance_id
   );
   if (matching.length === 0) return null;
   const identities = new Map<string, JsonObject>();
@@ -312,7 +312,7 @@ function findStepEvent(
     optionalString(event.goal_id) === identity.goal_id &&
     optionalString(event.agent_id) === identity.agent_id &&
     optionalString(event.run_id) === identity.turn_instance_id &&
-    String(details(event).settlement_effect_id ?? "") === identity.effect_id
+    optionalString(details(event).settlement_effect_id) === identity.effect_id
   ) ?? null;
 }
 
@@ -386,8 +386,8 @@ function inferPersistedIdentity(
   for (const run of [...runs].reverse()) {
     const runAgentId = normalizeAgentId(run.agent_id);
     if (runAgentId && runAgentId !== agentId) continue;
-    const classification = String(run.classification ?? "").trim();
-    const deliveryOutcome = String(run.delivery_outcome ?? "").trim();
+    const classification = optionalString(run.classification) ?? "";
+    const deliveryOutcome = optionalString(run.delivery_outcome) ?? "";
     if (
       classification === "quota_slot_voided" ||
       classification === "quota_scheduler_ack" ||
@@ -479,8 +479,8 @@ function inferPersistedIdentity(
     for (const [field, expected] of Object.entries(expectedIdentity)) {
       const actual = optionalString(persisted[field]);
       if (
-        (allowUnboundBinding && actual !== String(expected)) ||
-        (!allowUnboundBinding && actual && actual !== String(expected))
+        (allowUnboundBinding && actual !== expected) ||
+        (!allowUnboundBinding && actual && actual !== expected)
       ) {
         return failedIdentity(
           `persisted settlement identity mismatch: ${field} is ${actual ?? "missing"} but expected ${expected}`,
@@ -689,9 +689,9 @@ export async function readQuotaSettlement(value: unknown): Promise<JsonObject> {
   const terminalSettlement = settlementBindReduce(settled, terminalCloseout);
   const monitorPoll = [...runs].reverse().find((run) =>
     run.classification === "quota_monitor_poll" &&
-    String(run.goal_id ?? "") === identity.goal_id &&
-    String(run.agent_id ?? "") === identity.agent_id &&
-    String(run.turn_instance_id ?? "") === identity.turn_instance_id &&
+    optionalString(run.goal_id) === identity.goal_id &&
+    optionalString(run.agent_id) === identity.agent_id &&
+    optionalString(run.turn_instance_id) === identity.turn_instance_id &&
     (!identity.todo_id || normalizeTodoId(run.todo_id) === identity.todo_id)
   ) ?? null;
   const nestedCausality = typeof receiptDetails.delivery_workspace_causality === "object" &&

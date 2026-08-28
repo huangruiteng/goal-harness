@@ -417,7 +417,7 @@ function reasonSummary(
     case "capability_repair":
       return `${slots} automatic agent slot(s) completed as capability bridge repair work`;
     case "delivery_completion":
-      return `${slots} automatic agent slot(s) accounted after validated delivery ${String(request.preview.delivery_run_classification ?? "")}`;
+      return `${slots} automatic agent slot(s) accounted after validated delivery ${optionalString(request.preview.delivery_run_classification, "preview.delivery_run_classification") ?? ""}`;
     case "safe_bypass":
       return `${slots} automatic agent slot(s) completed as safe-bypass work`;
   }
@@ -769,8 +769,12 @@ async function evaluateQuotaSpendReplay(
         payload: basePayload,
       };
     }
-    const candidateGoalId = String(candidate.goal_id ?? "").trim();
-    const candidateAgentId = String(candidate.agent_id ?? "").trim();
+    const candidateGoalId = typeof candidate.goal_id === "string"
+      ? candidate.goal_id.trim()
+      : "";
+    const candidateAgentId = typeof candidate.agent_id === "string"
+      ? candidate.agent_id.trim()
+      : "";
     if (
       candidateGoalId !== request.goal_id ||
       !request.resolved_agent_id ||
@@ -1246,7 +1250,7 @@ export async function evaluateQuotaSpendCommit(
         fingerprint,
         repaired ? "repaired" : "replayed",
         await quotaSpendIndexDigest(indexPath),
-        String(replayPayload.reason),
+        optionalString(replayPayload.reason, "replay payload reason") ?? "",
         existingReceipt.record,
         replayPayload,
       );
