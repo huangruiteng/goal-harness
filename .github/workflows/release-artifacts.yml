@@ -147,6 +147,9 @@ jobs:
                   "turn_envelope": {
                       "goal_id": "fixture-goal",
                       "agent_id": "fixture-agent",
+                      "action": {
+                          "selected_todo": {"todo_id": "fixture-todo"},
+                      },
                   },
                   "transaction": {
                       "turn_key": turn_key,

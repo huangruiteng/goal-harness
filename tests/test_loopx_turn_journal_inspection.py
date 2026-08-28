@@ -37,6 +37,9 @@ def _journal(*, status: str = "committed") -> dict[str, Any]:
             "turn_envelope": {
                 "goal_id": "fixture-goal",
                 "agent_id": "fixture-agent",
+                "action": {
+                    "selected_todo": {"todo_id": "todo_fixture0001"},
+                },
             },
             "transaction": {
                 "turn_key": TURN_KEY,

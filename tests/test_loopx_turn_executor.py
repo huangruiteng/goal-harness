@@ -1192,8 +1192,23 @@ def test_run_once_recovers_after_process_exit_before_writeback(tmp_path: Path) -
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
 
 
+@pytest.mark.parametrize(
+    ("drift_kind", "expected_violations"),
+    (
+        (
+            "goal_and_agent",
+            ["goal_mismatch", "owner_mismatch", "journal_not_terminal"],
+        ),
+        (
+            "todo_binding",
+            ["settlement_binding_mismatch", "journal_not_terminal"],
+        ),
+    ),
+)
 def test_run_once_blocks_drifted_settlement_identity_before_any_provider(
     tmp_path: Path,
+    drift_kind: str,
+    expected_violations: list[str],
 ) -> None:
     plan = _plan()
     transaction = plan["transaction"]
@@ -1202,11 +1217,18 @@ def test_run_once_blocks_drifted_settlement_identity_before_any_provider(
     assert isinstance(settlement_plan, dict)
     identity = settlement_plan["identity"]
     assert isinstance(identity, dict)
-    identity["goal_id"] = "other-goal"
-    identity["agent_id"] = "other-agent"
-    identity["effect_id"] = (
-        f"other-goal:other-agent:{identity['todo_id']}:"
-        f"{identity['turn_instance_id']}"
+    if drift_kind == "goal_and_agent":
+        identity["goal_id"] = "other-goal"
+        identity["agent_id"] = "other-agent"
+    else:
+        identity["todo_id"] = "todo_other0002"
+    identity["effect_id"] = ":".join(
+        (
+            str(identity["goal_id"]),
+            str(identity["agent_id"]),
+            str(identity["todo_id"]),
+            str(identity["turn_instance_id"]),
+        )
     )
     turn_key = str(transaction["turn_key"])
     runtime_root = tmp_path / "runtime"
@@ -1242,11 +1264,7 @@ def test_run_once_blocks_drifted_settlement_identity_before_any_provider(
         agent_id="codex-fixture",
         turn_key=turn_key,
     )
-    assert inspected["violations"] == [
-        "goal_mismatch",
-        "owner_mismatch",
-        "journal_not_terminal",
-    ]
+    assert inspected["violations"] == expected_violations
     assert inspected["journal_consistent"] is False
     assert inspected["recovery_decision"]["action"] == "blocked"
 

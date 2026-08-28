@@ -10,8 +10,12 @@ import {
 const turnKey = `sha256:${"a".repeat(64)}`;
 const todoId = "todo_fixture0001";
 
-function effectId(goalId: string, agentId: string): string {
-  return `${goalId}:${agentId}:${todoId}:${turnKey}`;
+function effectId(
+  goalId: string,
+  agentId: string,
+  boundTodoId = todoId,
+): string {
+  return `${goalId}:${agentId}:${boundTodoId}:${turnKey}`;
 }
 
 function request(status = "committed"): TurnJournalInspectionRequest {
@@ -35,7 +39,11 @@ function request(status = "committed"): TurnJournalInspectionRequest {
         "scheduler_ack",
       ],
       plan: {
-        turn_envelope: { goal_id: "fixture-goal", agent_id: "fixture-agent" },
+        turn_envelope: {
+          goal_id: "fixture-goal",
+          agent_id: "fixture-agent",
+          action: { selected_todo: { todo_id: todoId } },
+        },
         transaction: {
           turn_key: turnKey,
           settlement_plan: {
@@ -185,6 +193,57 @@ test("settlement identity drift blocks non-terminal recovery", () => {
     retry_failed: false,
     checks: [{ kind: "journal_consistency", outcome: "failed" }],
   });
+});
+
+test("settlement Todo binding drift blocks non-terminal recovery", () => {
+  const input = request("in_progress");
+  input.journal.completed_phases = [
+    "host_execute",
+    "typed_result",
+    "validation",
+  ];
+  const plan = input.journal.plan as Record<string, unknown>;
+  const transaction = plan.transaction as Record<string, unknown>;
+  const settlement = transaction.settlement_plan as Record<string, unknown>;
+  const identity = settlement.identity as Record<string, unknown>;
+  identity.todo_id = "todo_other0002";
+  identity.effect_id = effectId(
+    "fixture-goal",
+    "fixture-agent",
+    "todo_other0002",
+  );
+
+  const result = interpretTurnJournal(input);
+
+  assert.deepEqual(result.violations, [
+    "settlement_binding_mismatch",
+    "journal_not_terminal",
+  ]);
+  assert.equal(result.journal_consistent, false);
+  assert.equal(result.recovery_decision.action, "blocked");
+  assert.equal(result.recovery_decision.can_continue, false);
+  assert.equal(result.recovery_decision.resume_from, null);
+});
+
+test("adaptive primary Todo is the authoritative recovery binding", () => {
+  const input = request("in_progress");
+  input.journal.completed_phases = ["host_execute", "typed_result"];
+  const plan = input.journal.plan as Record<string, unknown>;
+  const envelope = plan.turn_envelope as Record<string, unknown>;
+  envelope.action = {
+    selected_todo: { todo_id: "todo_stale0002" },
+  };
+  envelope.task_orchestration_contract = {
+    schema_version: "task_orchestration_contract_v2",
+    mode: "adaptive",
+    primary_todo_id: todoId,
+  };
+
+  const result = interpretTurnJournal(input);
+
+  assert.equal(result.journal_consistent, true);
+  assert.equal(result.recovery_decision.action, "continue");
+  assert.equal(result.recovery_decision.resume_from, "validation");
 });
 
 test("malformed typed settlement identity blocks recovery", () => {
