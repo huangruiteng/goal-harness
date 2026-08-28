@@ -366,6 +366,29 @@ test("does not pair a spend row with malformed native effect metadata", async ()
   assert.equal((result.spend as any).result.failure.kind, "receipt_missing");
 });
 
+test("does not pair a spend row with malformed persisted settlement identity", async () => {
+  for (const settlementIdentity of [null, [], "not-an-identity", {}]) {
+    const runtimeRoot = await fixture();
+    await appendFile(
+      join(runtimeRoot, "goals", goalId, "runs", "index.jsonl"),
+      `${JSON.stringify({
+        classification: "quota_slot_spent",
+        goal_id: goalId,
+        agent_id: agentId,
+        todo_id: todoId,
+        turn_instance_id: turnId,
+        settlement_identity: settlementIdentity,
+        effect_ref: `${identity.effect_id}#quota_spend`,
+      })}\n`,
+    );
+
+    const result = await readQuotaSettlement(request(runtimeRoot));
+
+    assert.equal(result.spend_run, null);
+    assert.equal((result.spend as any).result.failure.kind, "receipt_missing");
+  }
+});
+
 test("rejects a guard bound to another Todo", async () => {
   const runtimeRoot = await fixture();
 
