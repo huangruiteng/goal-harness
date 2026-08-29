@@ -528,6 +528,36 @@ metadata. Verification therefore compares the normalized visible-text template
 and requires every mention to resolve to the identity requested at send time.
 A missing, extra, ambiguous, or differently resolved mention remains
 `sent_unverified`; display-name or raw-markup similarity alone is not accepted.
+Notification-style literal `@Name` text is rejected before any provider call;
+resolve the exact chat member and supply a structured `<at ...>` node. The same
+outbound verifier is used by top-level reviewer notifications, so reply and
+proactive-send paths cannot disagree about what constitutes a delivered
+mention. Both paths perform a provider dry-run before sending and verify the
+created message rather than treating its message id as delivery proof.
+
+Use the configured proactive-send surface instead of a raw provider command:
+
+```bash
+loopx lark-inbox send \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --route-key project-feedback \
+  --text '<at open_id="ou_example">Example Reviewer</at> please review' \
+  --provider-preflight
+
+loopx lark-inbox send \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --route-key project-feedback \
+  --text '<at open_id="ou_example">Example Reviewer</at> please review' \
+  --execute
+```
+
+`route_key` selects one isolated requirement/chat binding under a multi-chat
+collector and fails closed when missing or unknown. The top-level send neither
+requires nor fabricates a source message, so its verified placement is always
+`chat_root`; source-message replies continue to preserve source-context
+placement and reaction cleanup.
 
 ## Bounded history reconciliation
 

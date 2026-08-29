@@ -16,6 +16,43 @@ evidence, or recovery authority.
 | `lark-periodic-report-announcement` | Deliver a periodic report while mentioning only recipients selected by its typed audience plan | [`presentation/periodic_report.py`](presentation/periodic_report.py) |
 | `lark-miaoda-html-report` | Publish an already-rendered periodic report to an operator-selected existing Miaoda app | [`presentation/periodic_report.py`](presentation/periodic_report.py) |
 
+Mention-bearing text delivery is owned by the extension's shared outbound
+contract in [`outbound.py`](outbound.py). Inbox replies and reviewer
+notifications use the same structured `<at ...>` construction, provider
+dry-run, and exact readback rule. A visible literal `@Name`, successful message
+creation, or matching display text is not mention-delivery evidence. The
+provider readback must expose exactly the identities requested at send time in
+`mentions[]`; missing, extra, ambiguous, or different identities fail closed.
+Callers that need notification semantics must use these extension surfaces
+instead of invoking a raw `lark-cli` send command.
+
+For an inbox-configured Bot, preview and verify one proactive top-level message
+with the same contract used by replies. A multi-chat collector requires its
+public-safe `route_key`; a single inbox accepts the default route:
+
+```bash
+loopx lark-inbox send \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --route-key project-feedback \
+  --text '<at open_id="ou_example">Example Reviewer</at> please review' \
+  --provider-preflight
+
+loopx lark-inbox send \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --route-key project-feedback \
+  --text '<at open_id="ou_example">Example Reviewer</at> please review' \
+  --execute
+```
+
+The command uses only the owner-local profile and chat already bound to the
+selected inbox route. It resolves every structured identity against exact chat
+membership, performs a provider dry-run, sends idempotently, and reads the
+created message back. It returns no profile, chat id, message body, or raw
+provider payload. Installation and the command itself grant no new Lark scope
+or external-write authority.
+
 The [event inbox guide](docs/lark-event-inbox.md) documents the complete
 collector, processing, reply, reaction, and acknowledgement lifecycle. The
 [Lark Kanban integration guide](../../../docs/integrations/lark-kanban-control-plane-adapter.md)
