@@ -43,10 +43,11 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
             "command": (
                 "loopx pr-review --repo <owner/repo> --state open "
                 "--autonomous-observation --previous-observation-json "
-                "<previous.json> [--handled-exact-head NUMBER@HEAD_OID] "
+                "<previous.json> [--projected-exact-head NUMBER@HEAD_OID] "
+                "[--handled-exact-head NUMBER@HEAD_OID] "
                 "--format json"
             ),
-            "purpose": "Classify a complete queue and advance from explicitly handled exact heads to the next unhandled candidate.",
+            "purpose": "Classify a complete queue, acknowledge durable Todo projections, and advance from handled exact heads.",
             "write_boundary": "reads one caller-supplied local observation; emits a preview only and grants no external authority",
         },
         {
@@ -54,6 +55,7 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
                 "loopx pr-review --repo <owner/repo> --state open "
                 "--autonomous-observation --observation-state-file "
                 "<ignored-local-checkpoint.json> "
+                "[--projected-exact-head NUMBER@HEAD_OID] "
                 "[--handled-exact-head NUMBER@HEAD_OID] --format json"
             ),
             "purpose": "Atomically continue age-fair review scheduling across Codex tasks.",
@@ -77,7 +79,7 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "loopx/capabilities/pr_review_queue/README.md",
         },
         {
-            "schema_version": "pull_request_review_queue_observation_v0",
+            "schema_version": "pull_request_review_queue_observation_v1",
             "module": "loopx.capabilities.pr_review_queue.core",
             "doc": "loopx/capabilities/pr_review_queue/README.md",
         },
@@ -113,7 +115,7 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
         "Fingerprints cover exact head, formal conclusion, next action, check state, draft state, and mergeability for every open PR.",
         "Current-head review_ready_at, not updatedAt, owns age-fair ordering; one new head after REQUEST_CHANGES may use a bounded fast-feedback slot.",
         "A complete exact-head conclusion requires the five Chinese sections, a state-aligned English verdict, and formal state or the verdict-specific titled author-owned fallback.",
-        "One observation emits at most one exact-head advancement Todo preview; unchanged observations emit no duplicate candidate and may advance only from an explicit handled exact-head cursor.",
+        "One observation emits at most one exact-head advancement Todo preview; unchanged observations replay it until explicit durable Todo-projection ACK, then rotate across acknowledged exact heads.",
         "The capability reuses the existing pr-review GitHub scan and normalized packet; review bodies are inspected for format but never emitted or checkpointed.",
         "Candidate selection grants no GitHub review, comment, push, merge, quota, or Todo-write authority; those remain with their existing policy surfaces.",
     ],
