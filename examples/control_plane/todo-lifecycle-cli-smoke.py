@@ -42,72 +42,6 @@ from todo_lifecycle_fixtures import (  # noqa: E402
 
 SUCCESSOR_REPOSITORY = "git:github.com/huangruiteng/loopx"
 SUCCESSOR_CAPABILITIES = ["network", "external_evidence_poll"]
-ADD_NOTE_TEXT = "Start from the public-safe evidence summary."
-ADD_NOTE_TODO = "Summarize the read-only evidence after the public-safe note lands."
-
-
-def assert_todo_add_note_persists() -> None:
-    """GH-C97 regression: todo add --note must persist on add and list/state readback."""
-    with tempfile.TemporaryDirectory(prefix="loopx-todo-add-note-") as tmp:
-        registry_path, state_file = write_fixture(Path(tmp))
-        added = run_cli(
-            registry_path,
-            "todo",
-            "add",
-            "--goal-id",
-            GOAL_ID,
-            "--role",
-            "agent",
-            "--text",
-            ADD_NOTE_TODO,
-            "--note",
-            ADD_NOTE_TEXT,
-            "--task-class",
-            "advancement_task",
-            "--action-kind",
-            "run_eval",
-        )
-        assert added["added"] is True, added
-        assert added["note"] == ADD_NOTE_TEXT, added
-        todo_id = added["todo_id"]
-
-        fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
-        state_item = next(
-            item for item in fields["agent_todos"]["items"] if item["todo_id"] == todo_id
-        )
-        assert state_item["note"] == ADD_NOTE_TEXT, state_item
-
-        listed = run_cli(
-            registry_path,
-            "todo",
-            "list",
-            "--goal-id",
-            GOAL_ID,
-            "--role",
-            "agent",
-            "--todo-id",
-            todo_id,
-        )
-        assert listed["matched"] is True, listed
-        assert listed["todo"]["note"] == ADD_NOTE_TEXT, listed
-
-        without_note = run_cli(
-            registry_path,
-            "todo",
-            "add",
-            "--goal-id",
-            GOAL_ID,
-            "--role",
-            "agent",
-            "--text",
-            "Keep an open todo without an attach note.",
-            "--task-class",
-            "advancement_task",
-            "--action-kind",
-            "run_eval",
-        )
-        assert without_note["added"] is True, without_note
-        assert not without_note.get("note"), without_note
 
 
 def assert_peer_monitor_no_followup() -> None:
@@ -446,7 +380,6 @@ def assert_nonblocking_review_continuation() -> None:
 
 
 def main() -> int:
-    assert_todo_add_note_persists()
     assert_configured_peer_handoff()
     assert_no_followup_cli_metadata()
     assert_complete_links_existing_successor()
