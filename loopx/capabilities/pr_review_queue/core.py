@@ -6,10 +6,11 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-OBSERVATION_SCHEMA_VERSION = "pull_request_review_queue_observation_v0"
+OBSERVATION_SCHEMA_VERSION = "pull_request_review_queue_observation_v1"
 CANDIDATE_SCHEMA_VERSION = "pull_request_review_candidate_v0"
 TODO_PREVIEW_SCHEMA_VERSION = "pull_request_review_todo_preview_v0"
 REVIEW_BACKLOG_SCHEMA_VERSION = "pr_review_queue_backlog_v0"
+PROJECTION_ACK_SEMANTICS = "explicit_v1"
 
 OBSERVATION_STATES = {
     "not_observed",
@@ -115,7 +116,7 @@ def _exact_head_key(number: Any, head_oid: Any) -> str | None:
     return f"{int(number_text)}@{head_text}"
 
 
-def _normalize_handled_exact_heads(value: Any) -> list[str]:
+def _normalize_exact_heads(value: Any, *, label: str) -> list[str]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         return []
     normalized: set[str] = set()
@@ -123,13 +124,13 @@ def _normalize_handled_exact_heads(value: Any) -> list[str]:
         text = str(item or "").strip()
         if "@" not in text:
             raise ValueError(
-                "handled exact head must use NUMBER@HEAD_OID with a 40- or 64-hex head"
+                f"{label} must use NUMBER@HEAD_OID with a 40- or 64-hex head"
             )
         number, head_oid = text.split("@", 1)
         key = _exact_head_key(number, head_oid)
         if key is None:
             raise ValueError(
-                "handled exact head must use NUMBER@HEAD_OID with a 40- or 64-hex head"
+                f"{label} must use NUMBER@HEAD_OID with a 40- or 64-hex head"
             )
         normalized.add(key)
     return sorted(normalized, key=lambda item: (int(item.split("@", 1)[0]), item))
@@ -139,7 +140,9 @@ def _previous_handled_exact_heads(value: Any, *, repository: str) -> list[str]:
     observation = _previous_observation(value)
     if str(observation.get("repository") or "").strip() != repository:
         return []
-    return _normalize_handled_exact_heads(observation.get("handled_exact_heads"))
+    return _normalize_exact_heads(
+        observation.get("handled_exact_heads"), label="handled exact head"
+    )
 
 
 def _previous_candidate_exact_head(value: Any, *, repository: str) -> str | None:
@@ -162,8 +165,17 @@ def _previous_projected_exact_heads(value: Any, *, repository: str) -> list[str]
     observation = _previous_observation(value)
     if str(observation.get("repository") or "").strip() != repository:
         return []
-    return _normalize_handled_exact_heads(
-        observation.get("projected_candidate_exact_heads")
+    if (
+        observation.get("schema_version") != OBSERVATION_SCHEMA_VERSION
+        or observation.get("candidate_projection_ack_semantics")
+        != PROJECTION_ACK_SEMANTICS
+    ):
+        # v0 recorded emission as projection. Replaying those heads is safer than
+        # stranding candidates whose Todo write never completed.
+        return []
+    return _normalize_exact_heads(
+        observation.get("projected_candidate_exact_heads"),
+        label="projected exact head",
     )
 
 
@@ -275,6 +287,7 @@ def build_pull_request_review_queue_observation(
     result_completeness: Mapping[str, Any],
     previous_observation: Mapping[str, Any] | None = None,
     handled_exact_heads: Sequence[str] = (),
+    projected_exact_heads: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Build one read-only observation and at most one exact-head candidate."""
 
@@ -283,7 +296,12 @@ def build_pull_request_review_queue_observation(
     previous_handled = _previous_handled_exact_heads(
         previous_observation, repository=normalized_repository
     )
-    supplied_handled = _normalize_handled_exact_heads(handled_exact_heads)
+    supplied_handled = _normalize_exact_heads(
+        handled_exact_heads, label="handled exact head"
+    )
+    supplied_projected = _normalize_exact_heads(
+        projected_exact_heads, label="projected exact head"
+    )
     allowed_supplied = set(previous_handled)
     previous_candidate = _previous_candidate_exact_head(
         previous_observation, repository=normalized_repository
@@ -294,8 +312,6 @@ def build_pull_request_review_queue_observation(
             repository=normalized_repository,
         )
     )
-    if previous_candidate:
-        previous_projected.add(previous_candidate)
     projected_set = set(previous_projected)
     allowed_supplied.update(previous_projected)
     if previous_candidate:
@@ -308,6 +324,14 @@ def build_pull_request_review_queue_observation(
             "handled exact head must match the prior candidate or a persisted "
             f"handled cursor: {', '.join(unexpected_handled)}"
         )
+    unexpected_projected = [
+        item for item in supplied_projected if item not in allowed_supplied
+    ]
+    if unexpected_projected:
+        raise ValueError(
+            "projected exact head must match the prior candidate or a persisted "
+            f"projection cursor: {', '.join(unexpected_projected)}"
+        )
     handled = sorted(
         {
             *previous_handled,
@@ -316,6 +340,7 @@ def build_pull_request_review_queue_observation(
         key=lambda item: (int(item.split("@", 1)[0]), item),
     )
     handled_set = set(handled)
+    projected_set.update(supplied_projected)
     projected_set = {key for key in projected_set if key not in handled_set}
     projected_sorted = sorted(
         projected_set,
@@ -361,6 +386,7 @@ def build_pull_request_review_queue_observation(
             "handled_exact_head_count": len(handled),
             "projected_candidate_exact_heads": projected_sorted,
             "projected_candidate_count": len(projected_sorted),
+            "candidate_projection_ack_semantics": PROJECTION_ACK_SEMANTICS,
             "selection_policy": (
                 "one fast-feedback selection for a new head after REQUEST_CHANGES; "
                 "otherwise rotate through the age-fair unprojected backlog; exact head required"
@@ -496,8 +522,6 @@ def build_pull_request_review_queue_observation(
         and previous_candidate not in handled_set
     ):
         pending_candidate_exact_head = previous_candidate
-    if candidate_exact_head is not None:
-        projected_set.add(candidate_exact_head)
     projected_sorted = sorted(
         projected_set,
         key=lambda item: (int(item.split("@", 1)[0]), item),
@@ -536,6 +560,7 @@ def build_pull_request_review_queue_observation(
         "handled_exact_head_count": len(active_handled),
         "projected_candidate_exact_heads": projected_sorted,
         "projected_candidate_count": len(projected_sorted),
+        "candidate_projection_ack_semantics": PROJECTION_ACK_SEMANTICS,
         "selection_policy": (
             "one fast-feedback selection for a new head after REQUEST_CHANGES; "
             "otherwise rotate through the age-fair unprojected backlog; exact head required"
