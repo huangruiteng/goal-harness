@@ -126,7 +126,7 @@ merge commit，并重新运行本文矩阵。
 | 模型切换快照 | 已复现设置落盘与新 turn 启动竞态 | UI 显示已选择 B 不足以证明正在运行或重试的 turn 已采用 B；旧 turn 可能继续携带 Auto 快照。需要 durable settings revision / readback 后再启动新 turn |
 | Fast tier 投影 | A/B 既有 readback 通过；Luna/Prefer 显示待统一重验 | Auto、Prefer A、Prefer B、Luna 声明 `fast → priority`；Ark 不声明 Fast。`features.fast_mode = true` 只显示按钮，`service_tier = "default"` 保证默认关闭 |
 | SSH CPA 远端 | reverse-loopback 与 App Server 通过 | 远端只连接 loopback tunnel，不保存本机 OAuth/Ark secret；同一 SSH alias 与同一远端 `CODEX_HOME` 可继续原 task，新建 task 不删除旧 session |
-| CPA upstream review | 三个 PR 已提交、CI 通过 | PR #5220 head `9357def`、PR #5261 head `c8e76e1`、PR #5336 head `a8136d87`；均目标 `dev`、等待 review |
+| CPA upstream review | 三个 PR 已提交、CI 通过 | PR #5220 head `9357def`、PR #5261 head `c8e76e1`、PR #5336 head `3d038a27`；均目标 `dev`、等待 review |
 | 上游回归 | 候选与当前 `dev` 已集成验证 | changed packages、race 与 server build 通过；全仓仅命中既有 `internal/home` 一秒同步 flake，同一失败在干净 `origin/dev` 上 50 次复现 2 次，PR 未改该目录，也不声称该测试通过 |
 | 真实 Ark endpoint qualification | 基础 Responses 与 auto fallback 已通过 | source-built candidate 经隔离 CPA 调用真实 OpenAI-compatible endpoint：HTTP 200、唯一 terminal，output item 严格 `added/done` 配对；额度分类由公开安全的黑盒 fixture 覆盖 |
 | 当前 Codex App | self-use 配置已安装并完成 CLI / App Server readback | 主 App 与 SSH host 都指向 loopback CPA；模型目录变化需要重启或重连对应 App Server 才能刷新 UI cache，旧 task store 不复制、不删除 |
