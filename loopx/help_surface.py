@@ -4,9 +4,8 @@ import re
 from typing import Any
 
 from . import __version__
+from .cli_runtime import GLOBAL_OPTIONS_WITH_EQUALS, GLOBAL_OPTIONS_WITH_VALUE
 
-GLOBAL_OPTIONS_WITH_VALUE = {"--registry", "--runtime-root", "--format"}
-GLOBAL_OPTIONS_WITH_EQUALS = tuple(f"{option}=" for option in sorted(GLOBAL_OPTIONS_WITH_VALUE))
 HELP_FLAGS = {"-h", "--help"}
 
 

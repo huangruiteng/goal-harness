@@ -47,6 +47,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
         "validation_matrix",
         "failure_analysis",
         "code_volume",
+        "change_proportionality",
         "typed_state_rule",
         "domain_neutrality",
         "behavior_change_disclosure",
@@ -67,11 +68,27 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
         "silent behavior changes" in requirements["behavior_change_disclosure"]["rule"]
     )
     assert "must_attempt_work" in requirements["guidance_vs_obligation"]["rule"]
+    proportionality = requirements["change_proportionality"]
+    assert proportionality["required_when"] == "code_change"
+    assert proportionality["verdict_values"] == [
+        "proportionate",
+        "disproportionate",
+        "not_yet_proven",
+    ]
+    assert "smallest_viable_fix" in proportionality["fields"]
+    assert "maintenance_and_migration_cost" in proportionality["fields"]
+    assert "green CI" in proportionality["rule"]
+    assert "original problem" in proportionality["rule"]
     assert contract["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert contract["completion_gate"]["stale_head_verdict_allowed"] is False
+    assert contract["completion_gate"]["blocking_evidence_verdicts"] == {
+        "change_proportionality": ["disproportionate", "not_yet_proven"]
+    }
     assert contract["finding_contract"]["findings_first"] is True
     verdict = contract["verdict_policy"]
     assert verdict["open_pr_blocking_finding"] == "REQUEST_CHANGES"
+    assert "REQUEST_CHANGES" in verdict["open_pr_unresolved_proportionality"]
+    assert "original problem" in verdict["materially_expanded_rereview"]
     assert verdict["open_pr_non_blocking_finding"] == "APPROVE"
     assert verdict["open_pr_no_finding"] == "APPROVE"
     assert "author-owned PR" in verdict["author_owned_no_blocker_fallback"]
@@ -89,6 +106,7 @@ def test_runtime_plan_requires_symbol_map_and_negative_walkthrough() -> None:
     assert plan["applicability"]["code_change"] is True
     assert plan["applicability"]["symbol_map_required"] is True
     assert plan["applicability"]["scope_fit_required"] is True
+    assert plan["applicability"]["change_proportionality_required"] is True
     assert plan["applicability"]["negative_walkthrough_required"] is True
     assert plan["applicability"]["typed_state_rule_required"] is True
     assert plan["applicability"]["behavior_change_disclosure_required"] is True
@@ -96,6 +114,7 @@ def test_runtime_plan_requires_symbol_map_and_negative_walkthrough() -> None:
     assert plan["applicability"]["guidance_vs_obligation_required"] is True
     assert "symbol_map" in plan["required_evidence_ids"]
     assert "scope_fit" in plan["required_evidence_ids"]
+    assert "change_proportionality" in plan["required_evidence_ids"]
     assert "typed_state_rule" in plan["required_evidence_ids"]
     assert "behavior_change_disclosure" in plan["required_evidence_ids"]
     assert "domain_neutrality" in plan["required_evidence_ids"]
@@ -119,12 +138,14 @@ def test_docs_plan_does_not_invent_code_symbols() -> None:
     assert plan["applicability"]["docs_only"] is True
     assert plan["applicability"]["symbol_map_required"] is False
     assert plan["applicability"]["scope_fit_required"] is False
+    assert plan["applicability"]["change_proportionality_required"] is False
     assert plan["applicability"]["typed_state_rule_required"] is False
     assert plan["applicability"]["behavior_change_disclosure_required"] is False
     assert plan["applicability"]["domain_neutrality_required"] is False
     assert plan["applicability"]["guidance_vs_obligation_required"] is False
     assert "symbol_map" not in plan["required_evidence_ids"]
     assert "scope_fit" not in plan["required_evidence_ids"]
+    assert "change_proportionality" not in plan["required_evidence_ids"]
     assert "typed_state_rule" not in plan["required_evidence_ids"]
     assert "domain_neutrality" not in plan["required_evidence_ids"]
     assert "behavior_change_disclosure" not in plan["required_evidence_ids"]

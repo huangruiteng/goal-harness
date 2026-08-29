@@ -45,6 +45,23 @@ describe('runJsonCommand', () => {
     expect(resolved.skillCommand).toBe(`'/opt/Loop X/python'"'"'3' -m loopx.cli`)
   })
 
+  it('prefers a managed launcher and quotes both runtime paths for skills', async () => {
+    const python = "/opt/Python 3/python'3"
+    const launcher = "/opt/DSH LoopX/runtime'1/loopx_cli.py"
+    const resolved = await resolveLoopXCommand({
+      managedLauncher: { path: launcher, pythonBins: [python] },
+      runner: async (file, args) => {
+        expect(file).toBe(python)
+        expect(args).toEqual([launcher, '--version'])
+        return { exitCode: 0, stdout: 'loopx 0.5.2\n', stderr: '' }
+      },
+    })
+
+    expect(resolved.skillCommand).toBe(
+      `'/opt/Python 3/python'"'"'3' '/opt/DSH LoopX/runtime'"'"'1/loopx_cli.py'`,
+    )
+  })
+
   it('retries transport-safe fixed argv without changing the request', async () => {
     const calls: string[][] = []
     const runner: FileRunner = async (_file, args) => {

@@ -36,6 +36,8 @@
     "loopx/control_plane/turn_driver/delivery_continuity.ts",
     "loopx/control_plane/work_items/delivery_outcome.ts",
     "loopx/control_plane/work_items/interaction_contract.ts",
+    "loopx/control_plane/work_items/task_lease_acquire.ts",
+    "loopx/control_plane/work_items/task_lease_acquire_cli.ts",
     "tests/control_plane_ts/effect_program.test.ts",
     "tests/control_plane_ts/effect_runtime_errors.test.ts",
     "tests/control_plane_ts/interaction_contract.test.ts",
@@ -53,6 +55,8 @@
     "tests/control_plane_ts/todo_completion_state.test.ts",
     "tests/control_plane_ts/todo_completion_validation_plan.test.ts",
     "tests/control_plane_ts/todo_next_action.test.ts",
+    "tests/control_plane_ts/task_lease_acquire.test.ts",
+    "tests/control_plane_ts/task_lease_acquire_cli.test.ts",
     "tests/control_plane_ts/turn_journal.test.ts",
     "tests/control_plane_ts/turn_journal_effects.test.ts",
     "tests/control_plane_ts/vision_checkpoint.test.ts"

@@ -56,16 +56,14 @@ def _raw_runtime_response(
     return decoded
 
 
-def test_windows_pid_liveness_uses_a_non_signaling_probe(monkeypatch) -> None:
-    calls: list[int] = []
-    fake_os = SimpleNamespace(name="nt")
+def test_runtime_pid_liveness_delegates_to_shared_non_signaling_probe(monkeypatch) -> None:
+    calls: list[object] = []
 
-    def probe(pid: int) -> bool:
+    def probe(pid: object) -> bool:
         calls.append(pid)
         return True
 
-    monkeypatch.setattr(effect_runtime, "os", fake_os)
-    monkeypatch.setattr(effect_runtime, "_windows_pid_is_alive", probe)
+    monkeypatch.setattr(effect_runtime, "process_is_alive", probe)
 
     assert effect_runtime._pid_is_alive(1234) is True
     assert calls == [1234]

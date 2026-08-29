@@ -50,6 +50,18 @@ export interface LoopXCommand {
   readonly version: string
 }
 
+export interface ManagedLoopXLauncher {
+  readonly path: string
+  readonly pythonBins: readonly string[]
+}
+
+export interface ResolveLoopXCommandOptions {
+  readonly runner?: FileRunner | undefined
+  readonly signal?: AbortSignal | undefined
+  readonly env?: NodeJS.ProcessEnv | undefined
+  readonly managedLauncher?: ManagedLoopXLauncher | undefined
+}
+
 const DEFAULT_TIMEOUT_MS = 20_000
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
 const FORCE_KILL_GRACE_MS = 250
@@ -300,17 +312,28 @@ function shellWord(value: string): string {
 }
 
 /** Resolve the console script first, then the stable Python module fallback. */
-export async function resolveLoopXCommand(options: {
-  readonly runner?: FileRunner | undefined
-  readonly signal?: AbortSignal | undefined
-  readonly env?: NodeJS.ProcessEnv | undefined
-} = {}): Promise<LoopXCommand> {
+export async function resolveLoopXCommand(
+  options: ResolveLoopXCommandOptions = {},
+): Promise<LoopXCommand> {
   const runner = options.runner ?? runFile
   const configured = options.env?.LOOPX_BIN ?? process.env.LOOPX_BIN
   const python = options.env?.PYTHON_BIN ?? process.env.PYTHON_BIN ?? 'python3'
+  const managedLauncher = options.managedLauncher
+  const managedCandidates: Array<Omit<LoopXCommand, 'version'>> = configured
+    || managedLauncher === undefined
+    ? []
+    : [...new Set(managedLauncher.pythonBins)].map(pythonBin => ({
+        file: pythonBin,
+        prefix: [managedLauncher.path],
+        skillCommand: [
+          shellWord(pythonBin),
+          shellWord(managedLauncher.path),
+        ].join(' '),
+      }))
   const candidates: Array<Omit<LoopXCommand, 'version'>> = configured
     ? [{ file: configured, prefix: [], skillCommand: '"$LOOPX_BIN"' }]
     : [
+        ...managedCandidates,
         { file: 'loopx', prefix: [], skillCommand: 'loopx' },
         {
           file: python,

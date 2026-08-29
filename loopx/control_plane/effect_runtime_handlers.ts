@@ -81,12 +81,16 @@ import {
   projectReplanSettlementContract,
   projectTodoLifecycleSettlementReentry,
 } from "./work_items/replan_settlement.ts";
-import { reduceTaskLeaseAcquire } from "./work_items/task_lease_settlement.ts";
 import {
   projectQuotaActionPortfolio,
   qualifyActionSelection,
 } from "./work_items/action_portfolio.ts";
 import { projectQuotaPlanningHorizon } from "./work_items/planning_horizon.ts";
+import {
+  evaluateTaskLeaseAcquireDecision,
+  evaluateTaskLeaseWriteScopesOverlap,
+  executeTaskLeaseAcquire,
+} from "./work_items/task_lease_acquire.ts";
 import {
   projectTodoPlanningInventory,
   projectTodoPlanningInventoryDetail,
@@ -310,6 +314,9 @@ export function createEffectRuntimeHandlers(
     ],
     ["quota.spend.commit", evaluateQuotaSpendCommit],
     ["quota.settlement.read", readQuotaSettlement],
+    ["task_lease.acquire.decide", evaluateTaskLeaseAcquireDecision],
+    ["task_lease.acquire.native", executeTaskLeaseAcquire],
+    ["task_lease.write_scopes.overlap", evaluateTaskLeaseWriteScopesOverlap],
     [
       "effect.program_from_ordered_steps",
       (params) => effectProgramFromOrderedSteps(
@@ -467,7 +474,6 @@ export function createEffectRuntimeHandlers(
       ),
     ],
     ["turn.settlement.reduce", reduceTurnSettlementTransaction],
-    ["task_lease.acquire.reduce", reduceTaskLeaseAcquire],
     ["work_item.replan_settlement.project", projectReplanSettlementContract],
     [
       "work_item.replan_settlement.reentry",

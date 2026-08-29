@@ -490,6 +490,7 @@ def test_legacy_lease_verbs_report_handoff_mode(tmp_path: Path) -> None:
 
     acquired = _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
     assert acquired["handoff_mode"] == HANDOFF_MODE_LEGACY
+    assert "settlement" not in acquired
 
     inspected = inspect_task_lease(
         registry_path=registry,

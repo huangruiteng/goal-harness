@@ -108,7 +108,7 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
     ],
     "docs": ["loopx/capabilities/pr_review_queue/README.md"],
     "boundaries": [
-        "The shared execution contract owns review depth, evidence completeness, exact-head freshness, symbol-map, walkthrough, validation, failure, and code-volume requirements; host skills only route and publish it.",
+        "The shared execution contract owns review depth, evidence completeness, exact-head freshness, symbol-map, walkthrough, validation, failure, code-volume, and change-proportionality requirements; host skills only route and publish it.",
         "A queue is observed only when result_completeness.complete=true; partial or failed reads are not_observed and never count as unchanged.",
         "Fingerprints cover exact head, formal conclusion, next action, check state, draft state, and mergeability for every open PR.",
         "Current-head review_ready_at, not updatedAt, owns age-fair ordering; one new head after REQUEST_CHANGES may use a bounded fast-feedback slot.",

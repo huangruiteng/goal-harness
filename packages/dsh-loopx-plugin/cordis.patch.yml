@@ -9,3 +9,14 @@
 
     - id: loopx-driver
       name: dsh-loopx-plugin/driver
+
+# The browser must not advertise readiness while first-run skill bootstrap is
+# still in flight. A safe bootstrap failure also publishes the service, so DSH
+# remains usable and /loopx-init can repair it.
+- id: webserver
+  name: '@deepseek-ai/dsh-host-webserver'
+  inject: [webStartup, loopxBootstrap]
+
+- id: web-runtime
+  name: '@deepseek-ai/dsh-web-app'
+  inject: [webStartup, loopxBootstrap]

@@ -345,6 +345,44 @@ def test_receipts_are_retained_and_version_domains_are_distinct() -> None:
 # ---- harmony: domain decisions come from the Stage 1 core -------------------
 
 
+def test_lease_acquire_rule_is_owned_by_the_native_decision(monkeypatch) -> None:
+    """The NoKV executor and local file transaction share one acquire rule."""
+
+    calls = []
+
+    def native_decision(method, payload):
+        calls.append((method, payload))
+        return {
+            "outcome": "rejected",
+            "code": "native_rule_probe",
+            "idempotent": False,
+            "next_lease": None,
+            "conflict_indexes": [],
+        }
+
+    monkeypatch.setattr(authority_core, "effect_runtime_result", native_decision)
+    snapshot = authority_core.CoordinationSnapshot(
+        handoff_mode=authority_core.HandoffMode.HARD_LEASE,
+        registered_agents=("agent-a",),
+        todo=authority_core.TodoSnapshot(
+            todo_id="todo-1",
+            status="open",
+            role="agent",
+        ),
+    )
+    plan = authority_core.decide(
+        snapshot,
+        authority_core.LeaseAcquireCommand(
+            owner="agent-a",
+            idempotency_key="lease-a",
+            ttl_seconds=600,
+        ),
+    )
+
+    assert plan.code == "native_rule_probe"
+    assert calls[0][0] == "task_lease.acquire.decide"
+
+
 def test_domain_rules_are_delegated_to_the_stage1_core(monkeypatch) -> None:
     """Flipping one core rule must flip the executor: no duplicated rules."""
 

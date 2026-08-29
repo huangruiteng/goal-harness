@@ -316,10 +316,62 @@ def test_subprocess_adapter_roundtrip_with_fake_host() -> None:
             "--output-last-message" in argv,
             "adapter must read the native structured result file",
         )
+        _assert(
+            "--permission-mode" not in argv,
+            "default adapter invocation must use TraeX's headless policy",
+        )
+        sandbox_index = argv.index("--sandbox")
+        _assert(
+            argv[sandbox_index + 1] == "workspace-write",
+            "default adapter invocation must permit governed workspace writes",
+        )
+
+
+def test_explicit_permission_mode_is_forwarded() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = Path(tmp) / "fake-traex"
+        argv_file = Path(tmp) / "argv.json"
+        block = json.dumps(
+            {
+                "result_kind": "wait",
+                "classification": "permission probe",
+                "summary": "No workspace change requested.",
+                "recommended_action": "none",
+                "next_action": "none",
+                "vision_unchanged_reason": "the objective is unchanged",
+            }
+        )
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, pathlib, sys\n"
+            f"pathlib.Path({str(argv_file)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+            "output_path = pathlib.Path(sys.argv[sys.argv.index('--output-last-message') + 1])\n"
+            f"output_path.write_text({block!r}, encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "traex_turn_host_adapter.py"),
+                "--traex-bin",
+                str(fake),
+                "--permission-mode",
+                "bypass_permissions",
+            ],
+            input=json.dumps(_request()),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        _assert(completed.returncode == 0, "adapter must exit 0: " + completed.stderr)
+        argv = json.loads(argv_file.read_text())
         permission_index = argv.index("--permission-mode")
         _assert(
-            argv[permission_index + 1] == "default",
-            "default adapter invocation must not bypass permissions",
+            argv[permission_index + 1] == "bypass_permissions",
+            "explicit permission mode must be forwarded unchanged",
         )
 
 
@@ -382,6 +434,7 @@ def main() -> int:
         test_missing_result_block_fails_closed_to_wait,
         test_text_fields_are_bounded,
         test_subprocess_adapter_roundtrip_with_fake_host,
+        test_explicit_permission_mode_is_forwarded,
         test_timeout_terminates_traex_descendants,
     ]
     for test in tests:

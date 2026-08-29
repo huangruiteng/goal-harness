@@ -5,6 +5,51 @@ admission, permission, artifact, integrity, and reusable agent-runtime boundarie
 around benchmark experiments. It does not own benchmark-family runners, result
 ledgers, or scoring adapters.
 
+## External-agent phase
+
+A benchmark harness may own the task container and verifier while delegating only
+the agent phase to a preinstalled command. The harness writes an
+`external_agent_request_v1` JSON file containing the task instruction,
+task-visible workspace, and timeout, then invokes:
+
+```bash
+loopx benchmark agent-phase \
+  --request "$LOOPSBENCH_EXTERNAL_AGENT_REQUEST" \
+  --result "$LOOPSBENCH_EXTERNAL_AGENT_RESULT" \
+  --solver-command-json '["<solver>", "<arg>"]' \
+  --execute
+```
+
+The command writes one `external_agent_result_v1` result with hashes and
+bounded lifecycle fields only. It does not provision a task, start Docker,
+access a verifier, calculate a score, upload a result, or grant model or
+credential authority. The solver command is runner-owned and executes in the
+runner-selected current directory; the request workspace must match that
+directory exactly. The solver receives the validated instruction on stdin plus
+only platform lookup, locale, temporary-directory, and phase-specific
+environment variables; ambient credentials are not inherited. This permits a
+direct headless command such as `traex exec --sandbox workspace-write -`
+without a benchmark-specific driver. A provider that needs credentials must
+define a separate explicit authorization contract rather than widening this
+generic boundary.
+
+Execution also requires an `external_agent_containment_v1` request object.
+The runner must own a non-escapable containment such as a container, cgroup v2,
+PID namespace, virtual machine, or Windows Job Object, and declare
+`timeout_owner=runner` plus
+`termination_postcondition=drained_before_result_consumption`. The request must
+also carry a runner-owned `external_agent_containment_verification_v1` receipt
+reference with `status=verified`; an unverified prose declaration is rejected.
+A POSIX process group is not sufficient because the solver can create a new
+session. LoopX validates this contract before launch but does not claim to
+create or inspect the containment, does not enforce the timeout itself, and
+never writes a `solver_timeout` result. On timeout, the runner must destroy its
+containment and read back that it is empty before recording the timeout. After
+any solver result, the runner must likewise drain the containment before
+consuming the result or starting a verifier, because the solver may exit while
+leaving detached descendants behind. A runner without that lifecycle must fail
+closed before invoking `agent-phase`.
+
 ## Source revision admission
 
 A long-running campaign can keep launching from an old installed checkout after

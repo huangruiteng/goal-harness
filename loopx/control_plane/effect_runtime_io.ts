@@ -79,10 +79,18 @@ export async function withFileMutationLock<T>(
     try {
       const handle = await open(lockPath, "wx", 0o600);
       try {
-        await handle.writeFile(JSON.stringify({ pid: process.pid, token }), "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
+        try {
+          await handle.writeFile(
+            JSON.stringify({ pid: process.pid, token }),
+            "utf8",
+          );
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+      } catch (error) {
+        await rm(lockPath, { force: true });
+        throw error;
       }
       break;
     } catch (error) {

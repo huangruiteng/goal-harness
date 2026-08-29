@@ -12,6 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI_PATH = REPO_ROOT / "loopx" / "cli.py"
+CLI_RUNTIME_PATH = REPO_ROOT / "loopx" / "cli_runtime.py"
 INIT_PATH = REPO_ROOT / "loopx" / "cli_commands" / "__init__.py"
 TODO_MODULE = REPO_ROOT / "loopx" / "cli_commands" / "todo.py"
 QUOTA_MODULE = REPO_ROOT / "loopx" / "cli_commands" / "quota.py"
@@ -35,6 +36,7 @@ def assert_contains(text: str, needle: str, label: str) -> None:
 
 def assert_source_shape() -> None:
     cli_text = CLI_PATH.read_text(encoding="utf-8")
+    runtime_text = CLI_RUNTIME_PATH.read_text(encoding="utf-8")
     init_text = INIT_PATH.read_text(encoding="utf-8")
     todo_text = TODO_MODULE.read_text(encoding="utf-8")
     quota_text = QUOTA_MODULE.read_text(encoding="utf-8")
@@ -51,8 +53,11 @@ def assert_source_shape() -> None:
         "cli.py",
     )
     assert_contains(cli_text, "register_quota_command(sub)", "cli.py")
-    assert_contains(cli_text, "handle_todo_command(", "cli.py")
-    assert_contains(cli_text, "handle_quota_command(", "cli.py")
+    assert_contains(cli_text, "dispatch_common_command(", "cli.py")
+    assert "handle_todo_command(" not in cli_text
+    assert "handle_quota_command(" not in cli_text
+    assert_contains(runtime_text, "handle_todo_command(", "cli_runtime.py")
+    assert_contains(runtime_text, "handle_quota_command(", "cli_runtime.py")
     assert_contains(todo_text, "render_todo_markdown", "todo module")
     assert_contains(todo_text, "append_cli_rollout_event", "todo module")
     assert_contains(quota_text, "render_quota_should_run_markdown", "quota module")
