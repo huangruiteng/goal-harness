@@ -1085,7 +1085,7 @@ def collect_doctor(
     typescript_runtime_required = True
     deep_validation = None
     if deep:
-        from .release_candidate import collect_release_candidate_checks
+        from .release_candidate import collect_deep_install_checks
 
         invocation_root_text = os.environ.get("LOOPX_RELEASE_ROOT")
         invocation_root = (
@@ -1093,10 +1093,11 @@ def collect_doctor(
             if invocation_root_text
             else release_root
         )
-        deep_validation = collect_release_candidate_checks(
+        deep_validation = collect_deep_install_checks(
             command_path=command_path,
             package_root=repo_root,
             invocation_root=invocation_root,
+            distribution_root=python_distribution.get("root"),
         )
     checks = [
         {
