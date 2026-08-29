@@ -69,6 +69,23 @@ loopx --format json pr-review --repo owner/repo --state open \
   --previous-observation-json previous.json
 ```
 
+After the selected candidate has been durably materialized as a Todo,
+acknowledge that projection explicitly:
+
+```bash
+loopx --format json pr-review --repo owner/repo --state open \
+  --autonomous-observation \
+  --observation-state-file .local/pr-review-monitor.json \
+  --projected-exact-head 2768@0123456789abcdef0123456789abcdef01234567
+```
+
+Supply `--projected-exact-head` only after the candidate's exact target key has
+been durably materialized as a Todo. Candidate emission is a preview, not a
+projection acknowledgement. Without that explicit ACK, repeated complete polls
+replay the same candidate so a failed or interrupted Todo write cannot strand
+the PR. The option is repeatable and may only acknowledge the prior candidate
+or an already persisted projection cursor.
+
 After the selected candidate has an externally verifiable review or
 merge-readiness result at that exact head, advance the queue with an explicit
 handled cursor:
@@ -94,10 +111,13 @@ head across unchanged and incomplete polls. It is a scheduling cursor only;
 callers still deduplicate Todo creation by exact target key and must not treat
 the cursor as evidence that a review happened.
 
-`projected_candidate_exact_heads` persists every candidate that has been emitted
-but not yet completed. An unchanged poll skips those projected exact heads and
-selects the next unprojected, unhandled PR in the age-fair review sequence, so
-the monitor keeps rotating instead of waiting on one PR.
+`projected_candidate_exact_heads` persists every candidate whose durable Todo
+projection has been explicitly acknowledged but not yet completed. An unchanged
+poll skips those acknowledged exact heads and selects the next unprojected,
+unhandled PR in the age-fair review sequence. Legacy v0 observations treated
+emission as projection; v1 deliberately replays their candidates so stale
+emission cursors cannot strand unreviewed PRs. Todo target-key deduplication
+keeps this recovery idempotent.
 When every actionable PR has already been projected, `candidate` is `None` and
 `pending_candidate_exact_head` remains the last pending cursor. A material
 transition on an already projected exact head still re-selects that head.
@@ -111,16 +131,17 @@ does not grant Todo, review, comment, or merge authority, and callers still
 advance the queue with an explicit handled cursor after exact-head review
 readback.
 
-`pull_request_review_queue_observation_v0` has exactly three observation
+`pull_request_review_queue_observation_v1` has exactly three observation
 states:
 
 - `not_observed`: the source or packet slice was incomplete. Preserve the
   previous baseline and do not claim the queue is unchanged.
 - `observed_unchanged`: a complete observation has the same queue fingerprint.
-  Do not create a duplicate exact-head Todo for a projected candidate. The
-  packet selects the next unprojected, unhandled backlog PR so the queue keeps
-  rotating. An unhandled candidate remains in `projected_candidate_exact_heads`
-  until the caller supplies its completion cursor.
+  An unacknowledged packet candidate is replayed. After the caller supplies its
+  projection ACK, the packet selects the next unprojected, unhandled backlog PR
+  so the queue keeps rotating. An acknowledged unhandled candidate remains in
+  `projected_candidate_exact_heads` until the caller supplies its completion
+  cursor.
 - `material_transition`: a complete observation changed an exact head, review
   conclusion, check state, draft state, mergeability, or open-queue membership.
   A new head following `REQUEST_CHANGES` may use one fast-feedback slot;
