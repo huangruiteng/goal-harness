@@ -151,6 +151,45 @@ def build_scheduler_followup_payload(
         scheduler_context=scheduler_context,
         operator_inbox_urgency_projector=operator_inbox_urgency_projector,
     )
+    receipt_todo_id = (
+        heartbeat_receipt_settlement_todo_id(heartbeat_receipt)
+        if heartbeat_receipt
+        else None
+    )
+    receipt_replan_id = (
+        heartbeat_receipt_settlement_replan_obligation_id(heartbeat_receipt)
+        if heartbeat_receipt
+        else None
+    )
+    if (
+        turn_instance_id
+        and receipt_todo_id is None
+        and receipt_replan_id is not None
+        and before_decision.get("effective_action") == "heartbeat_settled_skip"
+    ):
+        return {
+            "ok": True,
+            "schema_version": "quota_scheduler_followup_settled_replay_v0",
+            "mode": args.quota_command,
+            "goal_id": args.goal_id,
+            "agent_id": args.agent_id,
+            "turn_instance_id": turn_instance_id,
+            "decision": "skip",
+            "should_run": False,
+            "status": "heartbeat_settled_skip",
+            "state": "settled_replay",
+            "reason": (
+                "the receipt-bound heartbeat turn is already settled; "
+                "a fresh turn owns scheduler cadence reconciliation"
+            ),
+            "idempotent_replay": True,
+            "write_performed": False,
+            "appended": False,
+            "registry_mutated": False,
+            "scheduler_state_mutated": False,
+            "quota_spend_performed": False,
+            "delivery_outcome": "surface_only",
+        }
     if args.quota_command == "scheduler-fail-current":
         return record_quota_scheduler_failure_for_decision(
             before_decision,

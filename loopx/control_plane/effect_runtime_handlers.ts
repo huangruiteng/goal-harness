@@ -10,6 +10,7 @@ import {
   settlementIdentityPayload,
   settlementPlanPayload,
   settlementResultPayload,
+  SETTLEMENT_BINDING_KINDS,
   SETTLEMENT_FAILURE_KINDS,
   SETTLEMENT_STEP_KINDS,
   type JsonObject,
@@ -456,6 +457,14 @@ export function createEffectRuntimeHandlers(
     [
       "settlement.receipt_bound_replay_phase",
       (params) => receiptBoundReplayPhase({
+        binding_kind: params.binding_kind === undefined
+          ? undefined
+          : requireStringLiteral(
+            params.binding_kind,
+            SETTLEMENT_BINDING_KINDS,
+            "binding_kind",
+            "binding_kind has an unsupported settlement binding kind",
+          ),
         completion_receipt_present: params.completion_receipt_present === true,
         durable_writeback_present: params.durable_writeback_present === true,
         quota_spend_present: params.quota_spend_present === true,

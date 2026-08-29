@@ -742,6 +742,7 @@ export async function readQuotaSettlement(value: unknown): Promise<JsonObject> {
       quota_spend_present: spend.failure === null,
     }),
     replay_phase: receiptBoundReplayPhase({
+      binding_kind: identity.binding_kind,
       completion_receipt_present: completionEvent !== null,
       durable_writeback_present: writeback.failure === null,
       quota_spend_present: spend.failure === null,

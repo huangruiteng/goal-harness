@@ -58,17 +58,21 @@ def receipt_bound_monitor_phase(
 
 def receipt_bound_replay_phase(
     *,
+    binding_kind: SettlementBindingKind | str | None = None,
     completion_receipt_present: bool,
     durable_writeback_present: bool,
     quota_spend_present: bool,
 ) -> ReceiptBoundReplayPhase | None:
+    params: dict[str, Any] = {
+        "completion_receipt_present": completion_receipt_present,
+        "durable_writeback_present": durable_writeback_present,
+        "quota_spend_present": quota_spend_present,
+    }
+    if binding_kind is not None:
+        params["binding_kind"] = str(binding_kind)
     result = effect_runtime_result(
         "settlement.receipt_bound_replay_phase",
-        {
-            "completion_receipt_present": completion_receipt_present,
-            "durable_writeback_present": durable_writeback_present,
-            "quota_spend_present": quota_spend_present,
-        },
+        params,
     )
     if result is None:
         return None

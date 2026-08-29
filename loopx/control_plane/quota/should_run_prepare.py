@@ -755,9 +755,13 @@ def _prepare_quota_should_run_item(
         goal_status=str(registry_goal.get("status") or ""),
         agent_profile=_quota_agent_profile(agent_identity),
     )
-    replan_obligation = _preserve_receipt_bound_replan_obligation(
-        goal_frontier_context.get("replan_obligation"),
-        receipt_bound_replan_obligation_id
+    replan_obligation = (
+        None
+        if receipt_bound_replay_phase is ReceiptBoundReplayPhase.SETTLED
+        else _preserve_receipt_bound_replan_obligation(
+            goal_frontier_context.get("replan_obligation"),
+            receipt_bound_replan_obligation_id,
+        )
     )
     replan_scope = goal_frontier_context.get("replan_scope") or {}
     goal_frontier_projection = (
