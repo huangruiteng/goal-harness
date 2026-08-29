@@ -23,6 +23,7 @@ from .private_json import write_private_json_atomic
 REACTION_RECEIPTS_SCHEMA_VERSION = "lark_event_inbox_reaction_receipts_v0"
 TURN_START_READS_SCHEMA_VERSION = "lark_event_inbox_turn_start_reads_v0"
 RECEIVED_OPERATION_SCHEMA_VERSION = "lark_event_inbox_received_operation_v0"
+PROCESSED_STATE_FILENAME = "processed.json"
 REACTION_PHASES = {"received", "processing"}
 RECEIVED_OPERATION_PHASES = {"prepared", "created"}
 REACTION_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,200}")
@@ -167,11 +168,15 @@ def lark_inbox_pending_turn_start_read_message_ids(*, inbox: Path) -> list[str]:
     path = _turn_start_reads_path(inbox)
     with exclusive_file_lock(path, operation="lark_inbox_turn_start_reads"):
         message_ids = _load_turn_start_reads(inbox)
-        pending = {
-            message_id
-            for message_id in message_ids
-            if _captured_pending_message(inbox=inbox, message_id=message_id)
+        processed = _load_processed(inbox / PROCESSED_STATE_FILENAME)
+        captured = {
+            str(event["message_id"])
+            for event_path in (inbox.glob("*.json") if inbox.is_dir() else [])
+            if event_path.name != PROCESSED_STATE_FILENAME
+            if (event := _event_from_file(event_path)) is not None
+            if isinstance(event.get("message_id"), str)
         }
+        pending = message_ids.intersection(captured).difference(processed)
         if pending != message_ids:
             write_private_json_atomic(
                 path,
@@ -181,7 +186,12 @@ def lark_inbox_pending_turn_start_read_message_ids(*, inbox: Path) -> list[str]:
                     "updated_at": datetime.now(UTC).isoformat(),
                 },
             )
-        return sorted(pending)
+        receipts = _load_receipts(_receipt_path(inbox))
+        return sorted(
+            message_id
+            for message_id in pending
+            if not REACTION_PHASES.intersection(receipts.get(message_id, {}))
+        )
 
 
 def _load_received_operation(*, inbox: Path, message_id: str) -> dict[str, str] | None:
@@ -494,12 +504,12 @@ def _delete_reaction(
 
 
 def _captured_pending_message(*, inbox: Path, message_id: str) -> bool:
-    if message_id in _load_processed(inbox / "processed.json"):
+    if message_id in _load_processed(inbox / PROCESSED_STATE_FILENAME):
         return False
     return any(
         event.get("message_id") == message_id
         for path in (inbox.glob("*.json") if inbox.is_dir() else [])
-        if path.name != "processed.json"
+        if path.name != PROCESSED_STATE_FILENAME
         if (event := _event_from_file(path)) is not None
     )
 

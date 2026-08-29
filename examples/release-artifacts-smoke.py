@@ -162,6 +162,8 @@ def main() -> int:
         "workflow-skills --install --skills-dir",
         "workflow-skills --uninstall --skills-dir",
         'payload["source"]["kind"] == "python_distribution"',
+        '"schema_version": "quota_settlement_plan_v1"',
+        '"identity": journal_identity.as_dict()',
     )
     for text in required_contract:
         assert text in workflow, text

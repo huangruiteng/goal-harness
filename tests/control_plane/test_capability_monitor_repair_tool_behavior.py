@@ -123,7 +123,13 @@ def test_real_quota_capability_repair_executes_before_monitor_fallback(
     assert fixture.task_body in trigger_message
 
     quota_result = json.loads(requests[1]["messages"][-1]["content"])
-    assert list(quota_result).index("interaction_contract") <= 7
+    quota_keys = list(quota_result)
+    assert (
+        quota_keys.index("heartbeat_receipt")
+        < quota_keys.index("runtime_capability_reentry")
+        < quota_keys.index("interaction_contract")
+        <= 8
+    )
     assert quota_result.get("selected_todo") is None
     assert quota_result["interaction_contract"]["mode"] == (
         "capability_bridge_repair"

@@ -25,6 +25,17 @@ def render_loopx_turn_execution_markdown(payload: dict[str, object]) -> str:
     validation = (
         payload.get("validation") if isinstance(payload.get("validation"), dict) else {}
     )
+    recovery = (
+        payload.get("recovery") if isinstance(payload.get("recovery"), dict) else {}
+    )
+    planned = (
+        recovery.get("planned")
+        if isinstance(recovery.get("planned"), dict)
+        else {}
+    )
+    actual = (
+        recovery.get("actual") if isinstance(recovery.get("actual"), dict) else {}
+    )
     return "\n".join(
         [
             "# LoopX Turn Run Once",
@@ -36,6 +47,18 @@ def render_loopx_turn_execution_markdown(payload: dict[str, object]) -> str:
             f"- host_invoked: {effects.get('host_invoked')}",
             f"- state_written: {effects.get('state_written')}",
             f"- quota_spent: {effects.get('quota_spent')}",
+            *(
+                [
+                    f"- recovery_plan: {planned.get('action')}",
+                    f"- recovery_from: {planned.get('resume_from')}",
+                    f"- recovery_reinvoke_host: {planned.get('reinvoke_host')}",
+                    f"- recovery_reason: {planned.get('reason')}",
+                    f"- recovery_actual: {actual.get('status')}",
+                    f"- recovery_result_status: {actual.get('journal_status')}",
+                ]
+                if planned
+                else []
+            ),
         ]
     )
 
@@ -48,10 +71,58 @@ def render_loopx_turn_journal_inspection_markdown(
         return f"LoopX Turn journal inspection failed: {error}"
     completed_phases = payload.get("completed_phases")
     violations = payload.get("violations")
+    recovery = (
+        payload.get("recovery_decision")
+        if isinstance(payload.get("recovery_decision"), dict)
+        else {}
+    )
+    last_recovery = (
+        payload.get("last_recovery")
+        if isinstance(payload.get("last_recovery"), dict)
+        else {}
+    )
+    last_planned = (
+        last_recovery.get("planned")
+        if isinstance(last_recovery.get("planned"), dict)
+        else {}
+    )
+    last_actual = (
+        last_recovery.get("actual")
+        if isinstance(last_recovery.get("actual"), dict)
+        else {}
+    )
+    checks = recovery.get("checks") if isinstance(recovery.get("checks"), list) else []
+    rendered_checks = ", ".join(
+        ":".join(
+            str(part)
+            for part in (check.get("kind"), check.get("outcome"), check.get("reason"))
+            if part
+        )
+        for check in checks
+        if isinstance(check, dict)
+    )
     return "\n".join(
         [
             "# LoopX Turn Journal Inspection",
-            f"- decision: {payload.get('decision')}",
+            f"- recovery_action: {recovery.get('action')}",
+            f"- recovery_can_continue: {recovery.get('can_continue')}",
+            f"- recovery_from: {recovery.get('resume_from')}",
+            f"- recovery_reinvoke_host: {recovery.get('reinvoke_host')}",
+            f"- recovery_reason: {recovery.get('reason')}",
+            f"- recovery_checks: {rendered_checks or 'none'}",
+            f"- journal_consistent: {payload.get('journal_consistent')}",
+            *(
+                [
+                    f"- last_recovery_plan: {last_planned.get('action')}",
+                    f"- last_recovery_from: {last_planned.get('resume_from')}",
+                    f"- last_recovery_actual: {last_actual.get('status')}",
+                    f"- last_recovery_result_status: {last_actual.get('journal_status')}",
+                    f"- last_recovery_host_invoked: {last_actual.get('host_invoked')}",
+                ]
+                if last_recovery
+                else []
+            ),
+            f"- replay_decision: {payload.get('decision')}",
             f"- journal_status: {payload.get('journal_status')}",
             f"- replay_legal: {payload.get('replay_legal')}",
             f"- goal_matches: {payload.get('goal_matches')}",

@@ -11,6 +11,7 @@ from .agent_registry import (
     agent_profile_for_goal,
     registered_agent_ids_for_goal,
 )
+from .execution_profile import execution_profile_turn_granularity
 from .heartbeat_prompt import build_heartbeat_prompt
 from .history import load_registry
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
@@ -688,6 +689,11 @@ def build_upgrade_plan(
             deferred.append(stage_deferred_goal_summary(goal, state_file))
             continue
         registered_agents = registered_agent_ids_for_goal(goal)
+        turn_granularity = execution_profile_turn_granularity(
+            goal.get("execution_profile")
+            if isinstance(goal.get("execution_profile"), dict)
+            else None
+        )
         prompt_summaries: dict[str, dict[str, Any]] = {}
         installed: dict[str, dict[str, Any]] = {}
         prompt_targets = [
@@ -718,6 +724,7 @@ def build_upgrade_plan(
                 registered_agents=registered_agents or None,
                 available_capabilities=available_capabilities,
                 runtime_profile="codex_app_heartbeat",
+                turn_granularity=turn_granularity,
             )
             summary = prompt_summary(prompt, mode)
             summary["agent_id"] = agent_id

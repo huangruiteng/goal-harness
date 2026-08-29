@@ -660,7 +660,12 @@ def _promote_interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
         return payload
     promoted = {
         key: payload[key]
-        for key in (*_RUNTIME_CAPABILITY_PREFIX_FIELDS, "runtime_capability_reentry")
+        for key in (
+            *_RUNTIME_CAPABILITY_PREFIX_FIELDS,
+            # Keep Turn receipt state ahead of potentially large guidance.
+            "heartbeat_receipt",
+            "runtime_capability_reentry",
+        )
         if key in payload
     }
     promoted["interaction_contract"] = interaction

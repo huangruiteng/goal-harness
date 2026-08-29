@@ -257,12 +257,36 @@ function turnJournalInspectionRequest(
   ) {
     throw new EffectRuntimeRequestError("Turn-journal interpretation request schema mismatch");
   }
+  let sessionRecoveryCheck: TurnJournalInspectionRequest["session_recovery_check"] = null;
+  if (request.session_recovery_check !== null && request.session_recovery_check !== undefined) {
+    const check = requiredObject(
+      request.session_recovery_check,
+      "turn_journal.inspect session_recovery_check",
+    );
+    const kind = requiredString(check.kind, "turn_journal.inspect session_recovery_check.kind");
+    const outcome = requiredString(
+      check.outcome,
+      "turn_journal.inspect session_recovery_check.outcome",
+    );
+    if (kind !== "host_session_binding" || !["passed", "failed"].includes(outcome)) {
+      throw new EffectRuntimeRequestError(
+        "Turn-journal session recovery check is unsupported",
+      );
+    }
+    sessionRecoveryCheck = {
+      kind,
+      outcome: outcome as "passed" | "failed",
+      ...(typeof check.reason === "string" ? { reason: check.reason } : {}),
+    };
+  }
   return {
     schema_version: request.schema_version,
     journal: requiredObject(request.journal, "turn_journal.inspect journal"),
     goal_id: requiredString(request.goal_id, "turn_journal.inspect goal_id"),
     agent_id: requiredString(request.agent_id, "turn_journal.inspect agent_id"),
     turn_key: requiredString(request.turn_key, "turn_journal.inspect turn_key"),
+    retry_failed: request.retry_failed === true,
+    session_recovery_check: sessionRecoveryCheck,
   };
 }
 

@@ -1250,7 +1250,7 @@ def assert_safe_bypass_slot_preview(status_payload: dict) -> None:
         slots=1,
     )
     assert rejected["ok"] is False, rejected
-    assert "accountable delivery writeback" in rejected["reason"], rejected
+    assert "Turn settlement writeback" in rejected["reason"], rejected
 
     with tempfile.TemporaryDirectory(prefix="loopx-safe-bypass-spend-") as tmp:
         runtime_root = Path(tmp)

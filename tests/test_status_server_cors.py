@@ -48,6 +48,12 @@ def test_cors_response_headers_spoofed_loopback_origins_are_rejected(origin: str
     assert cors_response_headers(origin) == {}
 
 
+def test_cors_response_headers_file_scheme_localhost_is_rejected() -> None:
+    # Hostname alone is not enough: only http(s) loopback browser origins may
+    # receive ACAO. A file:// localhost Origin must stay ACAO-free.
+    assert cors_response_headers("file://localhost") == {}
+
+
 def _start_server() -> tuple[StatusHTTPServer, threading.Thread]:
     server = StatusHTTPServer(("127.0.0.1", 0), StatusRequestHandler)
     server.verbose = False

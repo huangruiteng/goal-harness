@@ -74,10 +74,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: frontstage-pages
-  # A stalled Pages deployment previously occupied this group for two days and
-  # starved every later run (all queued runs were cancelled). Pages deploys are
-  # quick and idempotent, so a newer run may safely supersede a stale one.
+  group: frontstage-pages-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'deployment' }}
+  # Keep production deploys in one lane, but isolate each pull request so an
+  # unrelated PR or main push cannot cancel its validation run.
   cancel-in-progress: true
 
 jobs:

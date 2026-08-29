@@ -224,7 +224,14 @@ disabled. Failed reactions are retried from this durable pending-read set while
 the message remains unsettled, including after the bounded history cursor has
 moved beyond the message timestamp. Provider failure increments compact
 failure accounting but does not discard the Inbox event or grant execution
-authority.
+authority. Replay uses one aggregate bounded attempt budget per turn-start
+dispatch. A collector-scoped private cursor rotates route priority across
+dispatches, while each route keeps its own private round-robin message cursor.
+The public receipt exposes only attempt and deferred counts, never cursor or
+message identities. Messages with a durable received/processing receipt are
+skipped without another provider call. A new reply in an old topic has a new
+provider message identity, so the forward history tail captures it independently
+of topic age and acknowledgement backlog.
 
 `reply.processing_reaction_emoji` is optional and requires a distinct
 received reaction. The default `Get` satisfies that requirement; when the read

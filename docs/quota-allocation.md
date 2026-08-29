@@ -216,6 +216,13 @@ from `classification`. New writes should use one of:
 execution-profile hints only as a compatibility fallback for historical runs;
 new control-plane decisions should be driven by the enum above.
 
+An `outcome_gap` does not become delivery progress. It may settle and spend one
+exact Todo-bound Turn only when the same writeback includes a
+`typed_progress_observation_v0` with `result_class=blocked`, the matching
+`work_item_id`, a stable `blocker_id`, and a non-empty array of stable
+`evidence_ids`. Missing schemas, prose-only blockers, malformed evidence, and
+Todo identity mismatches remain fail-closed.
+
 `quota should-run` also separates long-running observation from work that should
 advance the selected goal. When the selected goal's current projection is a
 dependency-only observation, the payload includes `work_lane_contract` with

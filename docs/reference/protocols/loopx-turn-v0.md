@@ -248,7 +248,7 @@ loopx turn inspect-journal \
 
 The command resolves the canonical runtime journal path, reads it under the
 existing journal lock, and projects `interpret_turn_journal` into
-`loopx_turn_journal_inspection_v0`. It branches before status collection,
+`loopx_turn_journal_inspection_v1`. It branches before status collection,
 quota construction, scheduler context, planning, host invocation, settlement,
 spend, or state writeback. Its `effects` field is therefore always an empty
 list.
@@ -259,6 +259,43 @@ requested journal because a selector, file, JSON document, or schema was
 invalid. This surface is diagnostic evidence only: it grants no authority to
 resume, retry, settle, schedule, spend, or write, and it is never an execution
 gate. Settlement replay enforcement remains owned by the Turn executor.
+
+Version 1 separates two questions that version 0 exposed through replay fields
+alone:
+
+- `replay_legal` says whether a terminal Journal can be reinterpreted without
+  effects; it is not recovery permission.
+- `recovery_decision` is the plan the real executor consumes for an existing
+  Journal: `action`, `can_continue`, `resume_from`, `reinvoke_host`, a typed
+  `reason`, and the checks that actually participated.
+
+`journal_consistent` also requires a complete canonical typed settlement
+identity. Its goal and agent must match the Journal, envelope, and requested
+owner; its Turn instance must match the transaction; and its binding and effect
+id must validate under the settlement schema. A Todo binding must also match
+the envelope's authoritative selected Todo, including the adaptive primary Todo
+override. A mismatch therefore produces a blocked recovery decision before
+Host or any settlement provider is called, even when the completed phase prefix
+would otherwise resume at durable writeback or a later effect. The current Turn
+driver does not produce Todo-less autonomous-replan transaction Journals, so it
+does not infer such a binding without authoritative Turn lineage.
+
+For example, an `in_progress` Journal with a saved Host Result has
+`replay_legal=false` but may continue from `validation` without another Host
+call. `scheduler_action_required` continues from `scheduler_apply` and does not
+repeat Host, writeback, or quota spend. A failed Host Session is evaluated only
+when `--retry-failed-turn` is explicit and must pass the current Session Binding
+check. A dangling prepared effect remains owned by the existing provider
+readback protocol; the recovery decision only records that the readback is the
+next required check and does not claim general exactly-once execution.
+
+When an existing Journal is continued, `run-once` persists one bounded
+`loopx_turn_recovery_audit_v0` record. Its `planned` value is the adopted shared
+decision; its `actual` value distinguishes `started` from `finished` and records
+only final Journal status, completed phase ids, and whether this recovery
+invoked Host. `inspect-journal` exposes that record as `last_recovery`. Raw Host
+output, Session data, effect payloads, credentials, and local paths remain
+excluded.
 
 ### User-Gate Quiet Wait
 

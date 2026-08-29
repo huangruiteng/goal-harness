@@ -29,6 +29,8 @@ async function fixture(options: {
   noFollowup?: boolean;
   workspace?: boolean;
   monitor?: boolean;
+  writebackOutcome?: string;
+  progressObservation?: Record<string, unknown>;
 } = {}) {
   const runtimeRoot = await mkdtemp(join(tmpdir(), "loopx-settlement-readback-"));
   const goalRoot = join(runtimeRoot, "goals", goalId);
@@ -72,12 +74,15 @@ async function fixture(options: {
     });
     runs.push({
       classification: "state_refreshed",
-      delivery_outcome: "outcome_progress",
+      delivery_outcome: options.writebackOutcome ?? "outcome_progress",
       goal_id: goalId,
       agent_id: agentId,
       todo_id: todoId,
       turn_instance_id: turnId,
       settlement_identity: identity,
+      ...(options.progressObservation
+        ? { progress_observation: options.progressObservation }
+        : {}),
     });
   }
   if (options.spend) {
@@ -402,6 +407,65 @@ test("does not pair a spend row with malformed persisted settlement identity", a
 
     assert.equal(result.spend_run, null);
     assert.equal((result.spend as any).result.failure.kind, "receipt_missing");
+  }
+});
+
+test("accepts only an attributable typed blocker as an outcome-gap writeback", async () => {
+  const qualifiedRuntime = await fixture({
+    writeback: true,
+    writebackOutcome: "outcome_gap",
+    progressObservation: {
+      schema_version: "typed_progress_observation_v0",
+      result_class: "blocked",
+      work_item_id: todoId,
+      blocker_id: "blocker-runtime-boundary",
+      evidence_ids: ["evidence-runtime-boundary"],
+    },
+  });
+  const qualified = await readQuotaSettlement(request(qualifiedRuntime));
+  assert.equal((qualified.writeback as any).payload.ok, true);
+  assert.equal((qualified.writeback_run as any).delivery_outcome, "outcome_gap");
+
+  const bareRuntime = await fixture({
+    writeback: true,
+    writebackOutcome: "outcome_gap",
+  });
+  const bare = await readQuotaSettlement(request(bareRuntime));
+  assert.equal((bare.writeback as any).payload.ok, false);
+  assert.equal((bare.writeback as any).result.failure.kind, "writeback_missing");
+
+  const mismatchedRuntime = await fixture({
+    writeback: true,
+    writebackOutcome: "outcome_gap",
+    progressObservation: {
+      schema_version: "typed_progress_observation_v0",
+      result_class: "blocked",
+      work_item_id: "todo_other",
+      blocker_id: "blocker-runtime-boundary",
+      evidence_ids: ["evidence-runtime-boundary"],
+    },
+  });
+  const mismatched = await readQuotaSettlement(request(mismatchedRuntime));
+  assert.equal((mismatched.writeback as any).payload.ok, false);
+
+  for (const evidenceIds of [
+    "evidence-runtime-boundary",
+    { evidence: "runtime-boundary" },
+    ["evidence-runtime-boundary", "invalid evidence id"],
+  ]) {
+    const malformedRuntime = await fixture({
+      writeback: true,
+      writebackOutcome: "outcome_gap",
+      progressObservation: {
+        schema_version: "typed_progress_observation_v0",
+        result_class: "blocked",
+        work_item_id: todoId,
+        blocker_id: "blocker-runtime-boundary",
+        evidence_ids: evidenceIds,
+      },
+    });
+    const malformed = await readQuotaSettlement(request(malformedRuntime));
+    assert.equal((malformed.writeback as any).payload.ok, false);
   }
 });
 

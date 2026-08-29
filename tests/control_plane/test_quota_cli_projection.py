@@ -188,6 +188,63 @@ def test_compact_quota_should_run_cli_payload_keeps_decision_lanes_and_counts() 
     assert larger_compact_chars - compact_chars < 200
 
 
+def test_compact_payload_promotes_committed_receipt_before_diagnostics() -> None:
+    receipt = {
+        "status": "replayed",
+        "settlement_identity": {
+            "schema_version": "quota_settlement_identity_v0",
+            "effect_id": "goal:agent:todo:turn",
+            "goal_id": "goal",
+            "agent_id": "agent",
+            "todo_id": "todo",
+            "turn_instance_id": "turn",
+        },
+    }
+    rollout_event = {
+        "schema_version": "quota_rollout_event_v0",
+        "status": "appended",
+    }
+    runtime_capability_reentry = {
+        "schema_version": "runtime_capability_reentry_v0",
+        "candidates": [],
+    }
+    payload = {
+        "ok": True,
+        "status_health_ok": True,
+        "mode": "managed",
+        "goal_id": "goal",
+        "decision": "run",
+        "should_run": True,
+        "diagnostic_blob": "x" * 32_000,
+        "interaction_contract": {
+            "schema_version": "loopx_interaction_contract_v0",
+            "cli_channel": {
+                "runtime_capability_reentry": runtime_capability_reentry,
+            },
+        },
+        "heartbeat_receipt": receipt,
+        "rollout_event": rollout_event,
+    }
+
+    compact = compact_quota_should_run_cli_payload(payload)
+
+    assert list(compact)[:10] == [
+        "ok",
+        "status_health_ok",
+        "mode",
+        "goal_id",
+        "decision",
+        "should_run",
+        "heartbeat_receipt",
+        "runtime_capability_reentry",
+        "interaction_contract",
+        "diagnostic_blob",
+    ]
+    assert compact["heartbeat_receipt"] == receipt
+    assert compact["rollout_event"] == rollout_event
+    assert compact["runtime_capability_reentry"] == runtime_capability_reentry
+
+
 def test_compact_quota_should_run_cli_payload_keeps_active_user_work_and_gate_scope() -> None:
     active_user_actions = [
         {

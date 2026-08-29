@@ -96,3 +96,26 @@ def test_symlink_override_escaping_project_is_rejected(tmp_path: Path) -> None:
             project_override=project,
             state_file_override=inside,
         )
+
+
+def test_prefix_sibling_override_is_rejected(tmp_path: Path) -> None:
+    """Containment must use path hierarchy, not string-prefix matching.
+
+    A sibling directory whose name starts with the project directory name
+    (``proj`` vs ``proj-evil``) would pass a naive ``startswith`` check after
+    resolve, but must still be rejected by ``is_relative_to``.
+    """
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    sibling = tmp_path / "proj-evil" / "ACTIVE_GOAL_STATE.md"
+    sibling.parent.mkdir()
+    sibling.write_text("## Next Action\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="escapes project root"):
+        resolve_goal_state(
+            registry=_registry(project),
+            goal_id="loopx-meta",
+            project_override=project,
+            state_file_override=sibling,
+        )

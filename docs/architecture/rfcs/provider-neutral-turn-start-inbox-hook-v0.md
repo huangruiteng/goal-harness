@@ -78,6 +78,11 @@ collection and quota selection.
 - reaction disablement never cancels the first-read obligation. Failed effects
   retry from the owner-private pending-read set rather than relying on the
   bounded provider overlap window; uncertain effects fail closed before create.
+  Replay is bounded by one aggregate per-dispatch attempt budget. A private
+  collector-scoped cursor rotates route priority across dispatches, while each
+  route keeps a private round-robin message cursor. A large or failing
+  acknowledgement backlog therefore cannot indefinitely block turn admission,
+  and every pending read remains eligible across routes and messages.
 - attention classification affects scheduling and reply policy, never whether
   a successfully read pending message receives the acknowledgement.
 - a provider-owned self-message filter may run before inbox ingestion only from
@@ -85,7 +90,9 @@ collection and quota selection.
   unresolved identity fails open to capture and cannot use display-name or body
   heuristics.
 - provider-local cursors are single-flight and advance only after inbox and
-  cursor readback.
+  cursor readback. History ingestion and acknowledgement replay use independent
+  cursor positions: an old topic's new reply is admitted by its new provider
+  message identity even while older acknowledgement debt remains.
 - `partial` multi-route success still requires Agent reading for accepted
   observations while retaining a compact failure code for the incomplete
   routes.
