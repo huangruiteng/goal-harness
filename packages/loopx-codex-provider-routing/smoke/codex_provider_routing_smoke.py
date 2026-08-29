@@ -32,6 +32,7 @@ def _valid_snapshot() -> dict:
             "auto/gpt-5.6-sol",
             "codex-a/gpt-5.6-sol",
             "codex-b/gpt-5.6-sol",
+            "gpt-5.6-luna",
             "ark/deepseek-v4-flash",
         ],
         "hidden_models": ["gpt-5.6-sol"],
@@ -39,12 +40,14 @@ def _valid_snapshot() -> dict:
             "auto/gpt-5.6-sol": ["text", "image"],
             "codex-a/gpt-5.6-sol": ["text", "image"],
             "codex-b/gpt-5.6-sol": ["text", "image"],
+            "gpt-5.6-luna": ["text", "image"],
             "ark/deepseek-v4-flash": ["text"],
         },
         "fast_models": [
             "auto/gpt-5.6-sol",
             "codex-a/gpt-5.6-sol",
             "codex-b/gpt-5.6-sol",
+            "gpt-5.6-luna",
         ],
         "default_service_tier": "default",
         "endpoint_host": "127.0.0.1",
@@ -73,6 +76,11 @@ def main() -> int:
     assert auto["eligible_candidates"]["text"] == ["codex-a", "codex-b", "ark-text"]
     assert auto["fast_candidates"] == ["codex-a", "codex-b"]
     assert auto["routing_policy"]["session_affinity"] == "hint_revalidated_per_attempt"
+    luna = next(route for route in catalog["routes"] if route["slug"] == "gpt-5.6-luna")
+    assert luna["candidates"] == ["codex-a", "codex-b"]
+    assert luna["eligible_candidates"]["image"] == ["codex-a", "codex-b"]
+    assert luna["reasoning_levels"] == ["low", "medium", "high", "xhigh", "max"]
+    assert luna["fast_candidates"] == ["codex-a", "codex-b"]
 
     leaked = copy.deepcopy(_source())
     leaked["profiles"][0]["access_token"] = "example-sensitive-value"

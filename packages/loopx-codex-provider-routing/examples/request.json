@@ -103,6 +103,28 @@
       },
       {
         "candidates": [
+          "codex-a",
+          "codex-b"
+        ],
+        "display_name": "Luna · GPT-5.6-Luna",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "mode": "auto",
+        "reasoning_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "slug": "gpt-5.6-luna",
+        "supports_fast": true,
+        "visible": true
+      },
+      {
+        "candidates": [
           "ark-text"
         ],
         "display_name": "Ark text fallback",

@@ -166,6 +166,7 @@ flowchart LR
 | `auto/gpt-5.6-sol` | Codex A → B；两个订阅都不可用且尚未提交输出时，文本请求可转 Ark | `text, image`；图片只由 A/B 承担 | 可选，默认关闭 |
 | `codex-a/gpt-5.6-sol` | 手动固定到订阅 A | `text, image` | 可选，默认关闭 |
 | `codex-b/gpt-5.6-sol` | 手动固定到订阅 B | `text, image` | 可选，默认关闭 |
+| [`gpt-5.6-luna`](https://developers.openai.com/codex/models) | Luna；只在 Codex A/B 间路由，不异构降级到 Ark | `text, image`；推理档位为 `low` 至 `max`，不声明 `ultra` | 可选，默认关闭 |
 | `codex-c/gpt-5.6-sol` | 预留；只有第三个订阅真实接入并通过矩阵后才暴露 | 由真实 credential 决定 | 不预声明 |
 | `ark/deepseek-v4-flash` | 手动固定到 Ark DeepSeek V4 Flash | `text` | 不支持 |
 | `gpt-5.6-sol` | 隐藏 compatibility alias；处理 App / host 继承裸 model metadata 的旧 task，实际行为与 Auto 一致 | `text, image` | 可选，默认关闭 |

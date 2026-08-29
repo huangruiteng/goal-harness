@@ -288,6 +288,7 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "auto/gpt-5.6-sol",
         "codex-a/gpt-5.6-sol",
         "codex-b/gpt-5.6-sol",
+        "gpt-5.6-luna",
         "ark/deepseek-v4-flash",
     }
     checks: list[dict[str, Any]] = []
@@ -302,7 +303,7 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     check(
         "visible_routes",
         visible == expected_visible,
-        "selector exposes exactly Auto/A/B/Ark",
+        "selector exposes exactly Auto/A/B/Luna/Ark",
     )
     check(
         "hidden_alias",
@@ -320,9 +321,10 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
                 "auto/gpt-5.6-sol",
                 "codex-a/gpt-5.6-sol",
                 "codex-b/gpt-5.6-sol",
+                "gpt-5.6-luna",
             )
         ),
-        "Auto/A/B declare text and image",
+        "Auto/A/B/Luna declare text and image",
     )
     check(
         "ark_text_only",
@@ -337,8 +339,9 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             "auto/gpt-5.6-sol",
             "codex-a/gpt-5.6-sol",
             "codex-b/gpt-5.6-sol",
+            "gpt-5.6-luna",
         },
-        "Fast is exposed only for Auto/A/B",
+        "Fast is exposed only for Auto/A/B/Luna",
     )
     check(
         "fast_default_off",

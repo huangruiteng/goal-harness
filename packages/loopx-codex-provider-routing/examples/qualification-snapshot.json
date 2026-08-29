@@ -9,7 +9,8 @@
     "fast_models": [
       "auto/gpt-5.6-sol",
       "codex-a/gpt-5.6-sol",
-      "codex-b/gpt-5.6-sol"
+      "codex-b/gpt-5.6-sol",
+      "gpt-5.6-luna"
     ],
     "hidden_models": [
       "gpt-5.6-sol"
@@ -29,6 +30,10 @@
       "codex-b/gpt-5.6-sol": [
         "text",
         "image"
+      ],
+      "gpt-5.6-luna": [
+        "text",
+        "image"
       ]
     },
     "settings_revision_durable": true,
@@ -37,6 +42,7 @@
       "auto/gpt-5.6-sol",
       "codex-a/gpt-5.6-sol",
       "codex-b/gpt-5.6-sol",
+      "gpt-5.6-luna",
       "ark/deepseek-v4-flash"
     ]
   }
