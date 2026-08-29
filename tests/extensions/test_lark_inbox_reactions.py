@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from loopx.extensions.lark.event_inbox import load_lark_event_inbox_config
 from loopx.extensions.lark import inbox_reactions as inbox_reactions_module
+from loopx.extensions.lark.event_inbox import load_lark_event_inbox_config
 from loopx.extensions.lark.inbox_reactions import (
     complete_lark_event_inbox_reactions,
     ensure_lark_event_inbox_received_reaction,
@@ -19,7 +19,10 @@ from loopx.extensions.lark.inbox_reactions import (
     mark_lark_event_inbox_processing,
     record_lark_inbox_reaction,
 )
-from loopx.extensions.lark.inbox_reply import reply_lark_event_inbox
+from loopx.extensions.lark.inbox_reply import (
+    reply_lark_event_inbox,
+    send_lark_inbox_message,
+)
 
 
 def _fixture(tmp_path: Path, *, lifecycle: bool = True) -> tuple[Path, Path, Path]:
@@ -321,12 +324,14 @@ class ReplyRunner:
         fail_reaction_delete: bool = False,
         readback_text: str | None = None,
         readback_mentions: list[dict[str, Any]] | None = None,
+        include_mentioned_member: bool = True,
     ) -> None:
         self.calls: list[list[str]] = []
         self.matching_readback = matching_readback
         self.fail_reaction_delete = fail_reaction_delete
         self.readback_text = readback_text
         self.readback_mentions = readback_mentions
+        self.include_mentioned_member = include_mentioned_member
 
     def __call__(self, args: Sequence[str]) -> dict[str, Any]:
         call = list(args)
@@ -349,6 +354,24 @@ class ReplyRunner:
             }
         if call[3:6] == ["im", "chats", "get"]:
             return {"returncode": 0, "stdout": "{}", "stderr": ""}
+        if "chat.members" in call and "get" in call:
+            return {
+                "returncode": 0,
+                "stdout": json.dumps(
+                    {
+                        "items": [
+                            {
+                                "member_id": (
+                                    "ou_public_reviewer"
+                                    if self.include_mentioned_member
+                                    else "ou_someone_else"
+                                )
+                            }
+                        ]
+                    }
+                ),
+                "stderr": "",
+            }
         if "+messages-reply" in call or "+messages-send" in call:
             if "--dry-run" in call:
                 reply_text = call[call.index("--text") + 1]
@@ -753,6 +776,30 @@ def test_reply_rejects_literal_backslash_n_before_provider(tmp_path: Path) -> No
     assert runner.calls == []
 
 
+def test_reply_rejects_literal_notification_mention_before_provider(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner()
+
+    try:
+        reply_lark_event_inbox(
+            project=project,
+            config_path=config,
+            message_id="om_reaction_fixture",
+            text="@PublicReviewer please review",
+            execute=False,
+            runner=runner,
+        )
+    except ValueError as exc:
+        assert "structured <at ...> node" in str(exc)
+    else:
+        raise AssertionError(
+            "literal notification mention must fail before provider calls"
+        )
+    assert runner.calls == []
+
+
 def test_multiline_readback_must_preserve_line_structure(tmp_path: Path) -> None:
     config, _, project = _fixture(tmp_path, lifecycle=False)
     runner = ReplyRunner(readback_text="line one line two")
@@ -834,6 +881,184 @@ def test_rendered_mention_name_does_not_override_identity_mismatch(
     assert result["ok"] is False
     assert result["status"] == "sent_unverified"
     assert result["reply_verified"] is False
+
+
+def test_structured_mention_requires_exact_chat_member_before_send(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(include_mentioned_member=False)
+
+    result = reply_lark_event_inbox(
+        project=project,
+        config_path=config,
+        message_id="om_reaction_fixture",
+        text='<at open_id="ou_public_reviewer">Public Reviewer</at> please review',
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "gate_required"
+    assert result["blocker"] == "lark_inbox_reply_mention_identity_unresolved"
+    assert not any(
+        "+messages-send" in call or "+messages-reply" in call for call in runner.calls
+    )
+
+
+def test_structured_mention_queries_the_declared_member_identity_kind(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(
+        readback_text="@_user_1 please review",
+        readback_mentions=[
+            {
+                "key": "@_user_1",
+                "name": "Public Reviewer",
+                "id": {"open_id": "ou_public_reviewer"},
+            }
+        ],
+    )
+
+    result = send_lark_inbox_message(
+        project=project,
+        config_path=config,
+        text='<at open_id="ou_public_reviewer">Public Reviewer</at> please review',
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is True
+    member_call = next(call for call in runner.calls if "chat.members" in call)
+    assert member_call[member_call.index("--member-id-type") + 1] == "open_id"
+
+
+def test_plain_reply_rejects_unexpected_provider_mention(tmp_path: Path) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(
+        readback_text="please review",
+        readback_mentions=[
+            {
+                "key": "@_user_1",
+                "name": "Unexpected Reviewer",
+                "id": {"open_id": "ou_unexpected_reviewer"},
+            }
+        ],
+    )
+
+    result = reply_lark_event_inbox(
+        project=project,
+        config_path=config,
+        message_id="om_reaction_fixture",
+        text="please review",
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "sent_unverified"
+    assert result["reply_verified"] is False
+
+
+def test_top_level_send_uses_same_mention_safe_delivery_contract(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(
+        readback_text="@_user_1 please review",
+        readback_mentions=[
+            {
+                "key": "@_user_1",
+                "name": "Public Reviewer",
+                "id": {"open_id": "ou_public_reviewer"},
+            }
+        ],
+    )
+
+    result = send_lark_inbox_message(
+        project=project,
+        config_path=config,
+        text='<at open_id="ou_public_reviewer">Public Reviewer</at> please review',
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is True
+    assert result["schema_version"] == "lark_outbound_message_v0"
+    assert result["status"] == "sent_verified"
+    assert result["placement"] == "chat_root"
+    assert any(
+        "+messages-send" in call and "--dry-run" not in call for call in runner.calls
+    )
+    assert not any("+messages-reply" in call for call in runner.calls)
+
+
+def test_top_level_send_rejects_literal_mention_before_provider(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner()
+
+    with pytest.raises(ValueError, match="structured <at"):
+        send_lark_inbox_message(
+            project=project,
+            config_path=config,
+            text="@PublicReviewer please review",
+            execute=True,
+            runner=runner,
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '<at email="reviewer@example.com">Public Reviewer</at> please review',
+        '<at open_id="ou_public_reviewer">Public Reviewer',
+        "Public Reviewer</at> please review",
+    ],
+)
+def test_top_level_send_rejects_malformed_or_unsupported_mention_nodes(
+    tmp_path: Path,
+    text: str,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner()
+
+    with pytest.raises(ValueError, match="malformed or unsupported <at> node"):
+        send_lark_inbox_message(
+            project=project,
+            config_path=config,
+            text=text,
+            execute=True,
+            runner=runner,
+        )
+
+    assert runner.calls == []
+
+
+def test_top_level_send_rejects_overlong_text_instead_of_truncating_mention(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner()
+    text = (
+        "x" * 1160
+        + '<at open_id="ou_public_reviewer">Public Reviewer</at> please review'
+    )
+
+    with pytest.raises(ValueError, match="exceeds the 1200-character"):
+        send_lark_inbox_message(
+            project=project,
+            config_path=config,
+            text=text,
+            execute=True,
+            runner=runner,
+        )
+
+    assert runner.calls == []
 
 
 def test_unverified_reply_preserves_processing_reaction(tmp_path: Path) -> None:

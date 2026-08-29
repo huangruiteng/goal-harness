@@ -37,7 +37,10 @@ from ..extensions.lark.inbox_reactions import (
     complete_lark_event_inbox_reactions,
     mark_lark_event_inbox_processing,
 )
-from ..extensions.lark.inbox_reply import reply_lark_event_inbox
+from ..extensions.lark.inbox_reply import (
+    reply_lark_event_inbox,
+    send_lark_inbox_message,
+)
 from ..extensions.lark.reviewer_notification import (
     lark_reviewer_notification_sink,
 )
@@ -47,6 +50,7 @@ from ..extensions.lark.routed_inbox import (
     inspect_routed_lark_event_inbox,
     project_routed_lark_event_inbox_urgency,
     resolve_routed_lark_inbox_config,
+    resolve_routed_lark_inbox_route,
     settle_routed_lark_event_inbox_material_review,
 )
 from ..extensions.lark.turn_start_sync import sync_lark_turn_start_inbox
@@ -165,6 +169,26 @@ def register_lark_inbox_commands(
         help="Run identity, membership, and provider dry-run checks without sending.",
     )
     reply.add_argument("--execute", action="store_true")
+    send = sub.add_parser(
+        "send",
+        help=(
+            "Send one verified chat-root message with the inbox-configured bot; "
+            "structured mentions must match provider readback exactly."
+        ),
+    )
+    add_subcommand_format(send)
+    send.add_argument("--project")
+    send.add_argument("--config")
+    send.add_argument("--goal-id")
+    send.add_argument("--agent-id")
+    send.add_argument("--route-key")
+    send.add_argument("--text", required=True)
+    send.add_argument(
+        "--provider-preflight",
+        action="store_true",
+        help="Run identity, membership, mention, and provider dry-run checks.",
+    )
+    send.add_argument("--execute", action="store_true")
     processing = sub.add_parser(
         "processing",
         help=(
@@ -274,7 +298,7 @@ def _required_extension_permissions(command: str) -> tuple[str, ...]:
         return (LARK_INBOX_WRITE_PERMISSION,)
     if command == "history-catch-up":
         return (LARK_COLLECTOR_PERMISSION, LARK_INBOX_WRITE_PERMISSION)
-    if command in {"reply", "processing", "reaction-complete"}:
+    if command in {"reply", "send", "processing", "reaction-complete"}:
         return (LARK_REPLY_PERMISSION,)
     return (LARK_COLLECTOR_PERMISSION,)
 
@@ -484,6 +508,7 @@ def handle_lark_inbox_command(
             "ack",
             "material-review",
             "reply",
+            "send",
             "processing",
             "reaction-complete",
             "ingest",
@@ -543,6 +568,19 @@ def handle_lark_inbox_command(
                 project=project,
                 config_path=routed_config,
                 message_id=args.message_id,
+                text=args.text,
+                execute=args.execute,
+                provider_preflight=args.provider_preflight,
+            )
+        elif args.lark_inbox_command == "send":
+            routed_config = resolve_routed_lark_inbox_route(
+                project=project,
+                config_path=config_path,
+                route_key=args.route_key,
+            )
+            payload = send_lark_inbox_message(
+                project=project,
+                config_path=routed_config,
                 text=args.text,
                 execute=args.execute,
                 provider_preflight=args.provider_preflight,

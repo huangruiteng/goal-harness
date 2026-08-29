@@ -25,6 +25,7 @@ from loopx.extensions.lark.routed_inbox import (
     inspect_routed_lark_event_inbox,
     project_routed_lark_event_inbox_urgency,
     resolve_routed_lark_inbox_config,
+    resolve_routed_lark_inbox_route,
 )
 
 
@@ -158,6 +159,32 @@ def test_v1_plan_binds_one_profile_to_isolated_multi_chat_routes(
     assert second_chat not in serialized
     assert "shared-context-bot" not in serialized
     assert str(project) not in serialized
+
+
+def test_top_level_outbound_route_requires_one_explicit_route_key(
+    tmp_path: Path,
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+
+    resolved = resolve_routed_lark_inbox_route(
+        project=project,
+        config_path=collector,
+        route_key="requirements-beta",
+    )
+
+    assert resolved.endswith("requirements-beta.json")
+    with pytest.raises(ValueError, match="exactly one configured route_key"):
+        resolve_routed_lark_inbox_route(
+            project=project,
+            config_path=collector,
+            route_key=None,
+        )
+    with pytest.raises(ValueError, match="exactly one configured route_key"):
+        resolve_routed_lark_inbox_route(
+            project=project,
+            config_path=collector,
+            route_key="missing-route",
+        )
 
 
 def test_v0_config_is_normalized_to_one_route(tmp_path: Path) -> None:
@@ -321,6 +348,59 @@ def test_cli_drain_accepts_routed_collector_config(
         "requirements-alpha",
         "requirements-beta",
     ]
+    assert rendered[0]["extension_activation"] == {"enabled": True}
+
+
+def test_cli_send_resolves_route_and_forwards_safe_delivery_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+    monkeypatch.setattr(
+        lark_inbox,
+        "_resolve_lark_activation",
+        lambda *_args, **_kwargs: {"enabled": True},
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_send(**kwargs: object) -> dict[str, object]:
+        calls.append(kwargs)
+        return {
+            "ok": True,
+            "schema_version": "lark_outbound_message_v0",
+            "status": "preview_ready",
+            "external_write_performed": False,
+        }
+
+    monkeypatch.setattr(lark_inbox, "send_lark_inbox_message", fake_send)
+    rendered: list[dict[str, object]] = []
+    args = argparse.Namespace(
+        command="lark-inbox",
+        lark_inbox_command="send",
+        project=str(project),
+        config=str(collector),
+        goal_id=None,
+        agent_id=None,
+        route_key="requirements-beta",
+        text='<at open_id="ou_fixture">Fixture Reviewer</at> please review',
+        provider_preflight=True,
+        execute=False,
+    )
+
+    code = lark_inbox.handle_lark_inbox_command(
+        args,
+        registry_path=tmp_path / "registry.json",
+        runtime_root_arg=None,
+        output_format=lambda _args: "json",
+        print_payload=lambda payload, *_args: rendered.append(payload),
+    )
+
+    assert code == 0
+    assert len(calls) == 1
+    assert str(calls[0]["config_path"]).endswith("requirements-beta.json")
+    assert calls[0]["provider_preflight"] is True
+    assert calls[0]["execute"] is False
+    assert rendered[0]["status"] == "preview_ready"
     assert rendered[0]["extension_activation"] == {"enabled": True}
 
 

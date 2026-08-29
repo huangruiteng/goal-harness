@@ -9,21 +9,21 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from loopx.capabilities.issue_fix.reviewer_notification import (  # noqa: E402
-    ISSUE_FIX_REVIEWER_NOTIFICATION_SINKS_INPUT_SCHEMA_VERSION,
-    ISSUE_FIX_REVIEWER_NOTIFICATION_SINKS_RESULT_SCHEMA_VERSION,
-    build_issue_fix_reviewer_notification_sinks_result as build_core_result,
-    with_reviewer_notification_state,
-)
-from examples.issue_fix_reviewer_notification_test_support import (  # noqa: E402
+from examples.issue_fix_reviewer_notification_test_support import (
     build_issue_fix_reviewer_notification_sinks_result,
 )
-
+from loopx.capabilities.issue_fix.reviewer_notification import (
+    ISSUE_FIX_REVIEWER_NOTIFICATION_SINKS_INPUT_SCHEMA_VERSION,
+    ISSUE_FIX_REVIEWER_NOTIFICATION_SINKS_RESULT_SCHEMA_VERSION,
+    with_reviewer_notification_state,
+)
+from loopx.capabilities.issue_fix.reviewer_notification import (
+    build_issue_fix_reviewer_notification_sinks_result as build_core_result,
+)
 
 PRIVATE_PATTERNS = (
     re.compile(r"oc_[A-Za-z0-9_-]+"),
@@ -47,6 +47,8 @@ class FakeSinkRunner:
         member_id: str = "ou_private_member",
         search_returncode: int = 0,
         search_hit: bool = False,
+        preview_matches: bool = True,
+        readback_member_id: str | None = None,
     ) -> None:
         self.send_returncode = send_returncode
         self.verify_returncode = verify_returncode
@@ -57,6 +59,8 @@ class FakeSinkRunner:
         self.member_id = member_id
         self.search_returncode = search_returncode
         self.search_hit = search_hit
+        self.preview_matches = preview_matches
+        self.readback_member_id = readback_member_id
         self.calls: list[list[str]] = []
 
     def __call__(self, args: list[str]) -> dict[str, Any]:
@@ -126,12 +130,22 @@ class FakeSinkRunner:
                     else ""
                 ),
                 "stderr": (
-                    "missing scope search:message"
-                    if self.search_returncode
-                    else ""
+                    "missing scope search:message" if self.search_returncode else ""
                 ),
             }
         if "+messages-send" in command:
+            if "--dry-run" in command:
+                content = command[command.index("--content") + 1]
+                preview_content = (
+                    content if self.preview_matches else '{"text":"wrong"}'
+                )
+                return {
+                    "returncode": 0,
+                    "stdout": json.dumps(
+                        {"api": [{"body": {"content": preview_content}}]}
+                    ),
+                    "stderr": "",
+                }
             return {
                 "returncode": self.send_returncode,
                 "stdout": (
@@ -146,9 +160,20 @@ class FakeSinkRunner:
                 ),
             }
         if "+messages-mget" in command:
-            send_call = next(call for call in self.calls if "+messages-send" in call)
+            send_call = next(
+                call
+                for call in self.calls
+                if "+messages-send" in call and "--dry-run" not in call
+            )
             content = send_call[send_call.index("--content") + 1]
-            text = content if self.include_message_content else "missing"
+            content_payload = json.loads(content)
+            text = (
+                content_payload["text"] if self.include_message_content else "missing"
+            )
+            rendered_text = text.replace(
+                '<at open_id="ou_private_member">Service Owner</at>',
+                "@_user_1",
+            )
             return {
                 "returncode": self.verify_returncode,
                 "stdout": json.dumps(
@@ -156,7 +181,22 @@ class FakeSinkRunner:
                         "items": [
                             {
                                 "message_id": "om_fixture_message",
-                                "body": {"content": text},
+                                "body": {
+                                    "content": json.dumps(
+                                        {"text": rendered_text},
+                                        ensure_ascii=False,
+                                    )
+                                },
+                                "mentions": [
+                                    {
+                                        "key": "@_user_1",
+                                        "name": "Service Owner",
+                                        "id": {
+                                            "open_id": self.readback_member_id
+                                            or "ou_private_member"
+                                        },
+                                    }
+                                ],
                             }
                         ]
                     }
@@ -202,12 +242,18 @@ def fixture(
     }
 
 
+def assert_one_verified_send(calls: list[list[str]]) -> None:
+    send_calls = [call for call in calls if "+messages-send" in call]
+    assert len(send_calls) == 2, calls
+    assert sum("--dry-run" in call for call in send_calls) == 1, calls
+    assert sum("--dry-run" not in call for call in send_calls) == 1, calls
+    assert sum("+messages-mget" in call for call in calls) == 1, calls
+
+
 def reviewer_artifact_application() -> dict[str, Any]:
     return {
         "ok": True,
-        "schema_version": (
-            "issue_fix_reviewer_artifact_reward_memory_application_v0"
-        ),
+        "schema_version": ("issue_fix_reviewer_artifact_reward_memory_application_v0"),
         "surface_id": "reviewer_artifact.summary",
         "reviewer_artifact": {
             "schema_version": "issue_fix_reviewer_artifact_v0",
@@ -264,18 +310,14 @@ def reviewer_notification_policy_application() -> dict[str, Any]:
             "status": "applied",
             "receipt": {
                 "schema_version": "reward_memory_application_receipt_v0",
-                "application_id": (
-                    "issue-fix:reviewer-notification:owner/repo:42"
-                ),
+                "application_id": ("issue-fix:reviewer-notification:owner/repo:42"),
                 "artifact_ref": "github:owner/repo#pr-42",
                 "corpus_id": "reviewer_notification_delivery_policy",
                 "surface_id": "reviewer_notification.before_send",
                 "mode": "function_boundary",
                 "outcome": "applied",
                 "memory_ref_digests": ["0123456789abcdef"],
-                "reasoning_summary": (
-                    "Applied the active reviewer delivery policy."
-                ),
+                "reasoning_summary": ("Applied the active reviewer delivery policy."),
                 "current_artifact_verified": True,
                 "result_readback_verified": True,
                 "model_reasoning_preserved": True,
@@ -334,8 +376,7 @@ def main() -> int:
     )
     assert core_without_provider["ok"] is False, core_without_provider
     assert (
-        core_without_provider["blocker"]
-        == "reviewer_notification_sink_unsupported"
+        core_without_provider["blocker"] == "reviewer_notification_sink_unsupported"
     ), core_without_provider
 
     provider_neutral = build_issue_fix_reviewer_notification_sinks_result(
@@ -391,9 +432,7 @@ def main() -> int:
         runner=missing_memory_runner,
     )
     assert missing_memory["ok"] is False
-    assert missing_memory["blocker"] == (
-        "reward_memory_reviewer_artifact_unverified"
-    )
+    assert missing_memory["blocker"] == ("reward_memory_reviewer_artifact_unverified")
     assert missing_memory["external_writes_performed"] is False
     assert missing_memory_runner.calls == []
 
@@ -484,9 +523,7 @@ def main() -> int:
     assert queued["status"] == "queued_until_window"
     assert queued["external_writes_performed"] is False
     assert queued["notification_verified"] is False
-    assert queued["queued_receipts"][0]["not_before"] == (
-        "2026-07-11T01:00:00Z"
-    )
+    assert queued["queued_receipts"][0]["not_before"] == ("2026-07-11T01:00:00Z")
     assert outside_window_runner.calls == []
     assert_public_safe(queued)
 
@@ -543,7 +580,7 @@ def main() -> int:
         runner=inside_window_runner,
     )
     assert inside_window["status"] == "sent_verified", inside_window
-    assert len(inside_window_runner.calls) == 3
+    assert_one_verified_send(inside_window_runner.calls)
 
     overnight_config = fixture()
     overnight_config["delivery_policy"] = {
@@ -564,7 +601,7 @@ def main() -> int:
         runner=overnight_runner,
     )
     assert overnight["status"] == "sent_verified", overnight
-    assert len(overnight_runner.calls) == 3
+    assert_one_verified_send(overnight_runner.calls)
 
     invalid_window_config = fixture()
     invalid_window_config["delivery_policy"] = {
@@ -608,8 +645,12 @@ def main() -> int:
     assert sent["status"] == "sent_verified"
     assert sent["external_writes_performed"] is True
     assert sent["notification_verified"] is True
-    assert len(runner.calls) == 3
-    send = runner.calls[1]
+    assert_one_verified_send(runner.calls)
+    send = next(
+        call
+        for call in runner.calls
+        if "+messages-send" in call and "--dry-run" not in call
+    )
     assert send[:3] == ["lark-cli", "--profile", "cli-private-profile"]
     assert send[send.index("--as") + 1] == "bot"
     assert send[send.index("--chat-id") + 1] == "oc_private_destination"
@@ -617,10 +658,9 @@ def main() -> int:
     assert provider_key.startswith("loopx-")
     assert len(provider_key) <= 50
     content = send[send.index("--content") + 1]
-    assert "ou_private_member" in content
-    assert (
-        "https://github.com/owner/repo/pull/42" in content
-    )
+    assert '<at open_id=\\"ou_private_member\\">' in content
+    assert "user_id" not in content
+    assert "https://github.com/owner/repo/pull/42" in content
     assert "请帮忙 review PR #42（修复 #40）" in content
     assert "reject file URI for consistency check" in content
     assert "loopx-reviewer-notification" not in content
@@ -642,7 +682,7 @@ def main() -> int:
     )
     assert explicit["ok"] is True, explicit
     assert explicit["results"][0]["reader_identity_verified"] is True
-    assert len(explicit_runner.calls) == 7, explicit_runner.calls
+    assert_one_verified_send(explicit_runner.calls)
     assert explicit["results"][0]["semantic_dedupe_status"] == (
         "configured_chat_no_match"
     )
@@ -654,9 +694,7 @@ def main() -> int:
         "--profile",
         "fixture-sender-profile",
     ]
-    member_read = next(
-        call for call in explicit_runner.calls if "chat.members" in call
-    )
+    member_read = next(call for call in explicit_runner.calls if "chat.members" in call)
     assert member_read[:3] == [
         "lark-cli",
         "--profile",
@@ -713,9 +751,7 @@ def main() -> int:
     assert remote_duplicate["results"][0]["semantic_dedupe_status"] == (
         "configured_chat_match"
     )
-    assert not any(
-        "+messages-send" in call for call in remote_duplicate_runner.calls
-    )
+    assert not any("+messages-send" in call for call in remote_duplicate_runner.calls)
 
     permission_fallback_runner = FakeSinkRunner(search_returncode=1)
     permission_fallback = build_issue_fix_reviewer_notification_sinks_result(
@@ -732,9 +768,7 @@ def main() -> int:
     assert permission_fallback["results"][0]["semantic_dedupe_status"] == (
         "permission_fallback"
     )
-    assert any(
-        "+messages-send" in call for call in permission_fallback_runner.calls
-    )
+    assert any("+messages-send" in call for call in permission_fallback_runner.calls)
 
     inbox_history = fixture(explicit_profiles=True)
     inbox_history["_semantic_history_pr_refs"] = [
@@ -784,9 +818,7 @@ def main() -> int:
         runner=FakeSinkRunner(member_id="ou_private_member_suffix"),
     )
     assert substring_member["ok"] is False, substring_member
-    assert substring_member["blocker"] == (
-        "reviewer_notification_identity_unresolved"
-    )
+    assert substring_member["blocker"] == ("reviewer_notification_identity_unresolved")
     assert substring_member["external_writes_performed"] is False
     assert_public_safe(substring_member)
 
@@ -884,6 +916,36 @@ def main() -> int:
     assert permission["blocker"] == "lark_bot_group_access_required"
     assert permission["external_writes_performed"] is False
     assert_public_safe(permission)
+
+    preview_mismatch = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=fixture(),
+        execute=True,
+        runner=FakeSinkRunner(preview_matches=False),
+    )
+    assert preview_mismatch["ok"] is False
+    assert preview_mismatch["blocker"] == (
+        "lark_notification_provider_preview_mismatch"
+    )
+    assert preview_mismatch["external_writes_performed"] is False
+
+    wrong_mention_readback = build_issue_fix_reviewer_notification_sinks_result(
+        repo="owner/repo",
+        pr_number=42,
+        pr_url="https://github.com/owner/repo/pull/42",
+        author_handle="@current-author",
+        reviewer_handles=["@service-owner"],
+        sinks_input=fixture(),
+        execute=True,
+        runner=FakeSinkRunner(readback_member_id="ou_wrong_member"),
+    )
+    assert wrong_mention_readback["ok"] is False
+    assert wrong_mention_readback["blocker"] == "lark_notification_not_verified"
+    assert wrong_mention_readback["external_writes_performed"] is True
 
     not_verified = build_issue_fix_reviewer_notification_sinks_result(
         repo="owner/repo",
