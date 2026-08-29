@@ -1065,7 +1065,10 @@ def _ensure_turn_settlement_plan(
         host=str(host_fields.get("kind") or "generic-cli"),
         execution_mode=str(host_fields.get("execution_mode") or "isolated-headless"),
         session_action=str(host_fields.get("session_action") or "resume"),
-        turn_instance_id=transaction_plan.get("turn_instance_id"),
+        turn_instance_id=(
+            transaction_plan.get("turn_instance_id")
+            or transaction_plan.get("turn_key")
+        ),
     )
     settlement_plan = built.get("settlement_plan")
     if isinstance(settlement_plan, Mapping):
@@ -1091,7 +1094,6 @@ def _typed_settlement_stage(
     transaction_plan = (
         plan.get("transaction") if isinstance(plan.get("transaction"), Mapping) else {}
     )
-    _ensure_turn_settlement_plan(plan, transaction_plan)
 
     terminal_closeout_required = False
     completion_intent_error: str | None = None
@@ -1312,6 +1314,10 @@ def run_loopx_turn_once(
             "executable": "built-in",
             "kind": str(planned_host.get("kind") or "codex-cli"),
         }
+    transaction_plan = (
+        plan.get("transaction") if isinstance(plan.get("transaction"), dict) else {}
+    )
+    _ensure_turn_settlement_plan(plan, transaction_plan)
     request = build_loopx_turn_host_request(plan)
     empty_effects = {
         "host_invoked": False,

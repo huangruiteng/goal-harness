@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import hashlib
-from pathlib import Path
 from typing import Any
 
 from ..effect_runtime import effect_runtime_result
@@ -161,15 +159,7 @@ def write_turn_journal(
     *,
     expected_effect_id: str | None = None,
 ) -> dict[str, object]:
-    """Atomically checkpoint a Turn journal in the TS Effect runtime."""
-
-    journal_path = Path(path)
-    try:
-        expected_previous_sha256: str | None = hashlib.sha256(
-            journal_path.read_bytes()
-        ).hexdigest()
-    except FileNotFoundError:
-        expected_previous_sha256 = None
+    """Commit a Turn-journal transition through the TS semantic owner."""
 
     payload = effect_runtime_result(
         "turn_journal.write",
@@ -177,7 +167,6 @@ def write_turn_journal(
             "path": path,
             "journal": dict(journal),
             "expected_effect_id": expected_effect_id,
-            "expected_previous_sha256": expected_previous_sha256,
         },
         retry_safe=True,
     )

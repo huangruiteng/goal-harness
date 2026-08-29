@@ -94,8 +94,8 @@ export type TurnJournalEffect = EffectTurn<
   "replay_legal" | "replay_blocked"
 >;
 
-const transactionPhases = Object.freeze([...transactionContract.phases]);
-const supportedJournalStatuses = new Set([
+export const transactionPhases = Object.freeze([...transactionContract.phases]);
+export const supportedJournalStatuses: ReadonlySet<string> = new Set([
   "in_progress",
   "scheduler_action_required",
   "committed",
