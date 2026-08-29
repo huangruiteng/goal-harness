@@ -137,9 +137,18 @@ def test_task_validation_stage_reads_result_kind_through_effect_turn(
     result = _host_result(plan, kind="wait")
     journal = {
         "schema_version": LOOPX_TURN_JOURNAL_SCHEMA_VERSION,
+        "goal_id": "fixture-goal",
+        "turn_key": plan["transaction"]["turn_key"],
         "status": "in_progress",
         "completed_phases": list(TRANSACTION_PHASES[:2]),
+        "plan": plan,
     }
+    journal_path = tmp_path / "journal.json"
+    turn_executor._write_journal(
+        journal_path,
+        {**journal, "completed_phases": []},
+    )
+    turn_executor._write_journal(journal_path, journal)
 
     completed, payload = _task_validation_stage(
         plan,
@@ -147,7 +156,7 @@ def test_task_validation_stage_reads_result_kind_through_effect_turn(
         task_validator=None,
         completed_phases=list(TRANSACTION_PHASES[:2]),
         journal=journal,
-        journal_path=tmp_path / "journal.json",
+        journal_path=journal_path,
         effects={},
     )
 
