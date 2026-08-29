@@ -26,10 +26,12 @@ qualification.
 
 `compile_catalog`
 : Compiles secret-free logical profiles and routes into
-  `codex_provider_routing_catalog_v1`. Auto affinity is only a hint and must be
-  revalidated against required input modalities and service tier on every
-  attempt. With a text-only fallback, image traffic remains eligible only for
-  image-capable profiles and fails closed when none remain.
+  `codex_provider_routing_catalog_v1`. One bounded account ring can back Auto,
+  Prefer A, Prefer B and Luna without presenting separate rings to the user.
+  Route affinity is only a hint and must be revalidated against required input
+  modalities and service tier on every attempt. A terminal text-only fallback
+  can serve compatible Sol requests but cannot receive image history; Luna has
+  no heterogeneous fallback tail.
 
 `qualify_snapshot`
 : Checks the content-free App/CPA readback: visible and hidden routes, input

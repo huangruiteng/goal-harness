@@ -76,11 +76,36 @@ def main() -> int:
     assert auto["eligible_candidates"]["text"] == ["codex-a", "codex-b", "ark-text"]
     assert auto["fast_candidates"] == ["codex-a", "codex-b"]
     assert auto["routing_policy"]["session_affinity"] == "hint_revalidated_per_attempt"
+    assert auto["ring_id"] == "codex-accounts"
+    assert auto["entrypoint"] == "affinity_then_first"
+    assert auto["routing_policy"]["max_cycles"] == 1
+    prefer_a = next(
+        route for route in catalog["routes"] if route["slug"].startswith("codex-a/")
+    )
+    prefer_b = next(
+        route for route in catalog["routes"] if route["slug"].startswith("codex-b/")
+    )
+    assert prefer_a["candidates"] == ["codex-a", "codex-b", "ark-text"]
+    assert prefer_b["candidates"] == ["codex-b", "codex-a", "ark-text"]
+    assert prefer_a["routing_mode"] == prefer_b["routing_mode"] == "preferred"
     luna = next(route for route in catalog["routes"] if route["slug"] == "gpt-5.6-luna")
     assert luna["candidates"] == ["codex-a", "codex-b"]
     assert luna["eligible_candidates"]["image"] == ["codex-a", "codex-b"]
     assert luna["reasoning_levels"] == ["low", "medium", "high", "xhigh", "max"]
     assert luna["fast_candidates"] == ["codex-a", "codex-b"]
+
+    repeated_ring = copy.deepcopy(_source())
+    repeated_ring["rings"][0]["max_cycles"] = 2
+    expect_error(
+        lambda: compile_catalog(repeated_ring), "multi-cycle fallback ring was accepted"
+    )
+
+    overlapping_tail = copy.deepcopy(_source())
+    overlapping_tail["routes"][1]["fallback_tail"] = ["codex-b"]
+    expect_error(
+        lambda: compile_catalog(overlapping_tail),
+        "fallback tail overlapping the account ring was accepted",
+    )
 
     leaked = copy.deepcopy(_source())
     leaked["profiles"][0]["access_token"] = "example-sensitive-value"

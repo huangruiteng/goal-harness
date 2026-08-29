@@ -46,7 +46,7 @@ LoopX 只记录目标、门禁、证据和回滚状态。它不保存 OAuth toke
 
 ### Public PR lineage
 
-以下是截至 2026-08-28 与这套能力直接相关的完整公共 PR 索引。LoopX PR 记录 runbook 与
+以下是截至 2026-08-29 与这套能力直接相关的完整公共 PR 索引。LoopX PR 记录 runbook 与
 SSH 运行面的演进；CPA PR 承载进入在线 data plane 的通用修复。
 
 | Repository | PR | 状态 | 沉淀内容 |
@@ -61,9 +61,11 @@ SSH 运行面的演进；CPA PR 承载进入在线 data plane 的通用修复。
 | LoopX | [#3576](https://github.com/huangruiteng/loopx/pull/3576) | merged | 记录 CPA upstream qualification |
 | LoopX | [#3585](https://github.com/huangruiteng/loopx/pull/3585) | merged | 固化 pinned CPA self-use routing 与回滚边界 |
 | LoopX | [#3665](https://github.com/huangruiteng/loopx/pull/3665) | merged | 沉淀 CPA + Codex App 分层重试与延迟门禁 |
-| LoopX | [#3711](https://github.com/huangruiteng/loopx/pull/3711) | open | 将 runbook、脚本迁移清单、无密配置和资格 contract 升级为独立 extension |
+| LoopX | [#3711](https://github.com/huangruiteng/loopx/pull/3711) | merged | 将 runbook、脚本迁移清单、无密配置和资格 contract 升级为独立 extension |
+| LoopX | [#3737](https://github.com/huangruiteng/loopx/pull/3737) | open | 增加 Luna，并把 A/B 选择收敛为同一账号环的首选入口 |
 | CLIProxyAPI | [#5220](https://github.com/router-for-me/CLIProxyAPI/pull/5220) | open / review required | provider-bound Responses history、`additional_tools` 与 Ark SSE normalizer |
 | CLIProxyAPI | [#5261](https://github.com/router-for-me/CLIProxyAPI/pull/5261) | open / review required | ChatGPT uTLS HTTP/2 连接池、TLS session resumption 与异常重建 |
+| CLIProxyAPI | [#5336](https://github.com/router-for-me/CLIProxyAPI/pull/5336) | open / review required | per-route credential priority；同一 A/B 账号环支持 Prefer A 与 Prefer B 两个入口 |
 
 这个索引只收录直接改变本能力契约、运行面或上游实现的 PR，不扩张成作者的全部 PR 列表。
 新 PR 创建后要在同一 PR 内登记；merge 后把状态和锁定 head/merge commit 一起刷新。
@@ -118,13 +120,13 @@ merge commit，并重新运行本文矩阵。
 | A → B credential failover | loopback 与 live 均通过 | `fill-first`、priority、session affinity 与 commit 前 stream failover 已验证；live auto 请求在 A 建连失败后由 B 完成 |
 | Provider-bound history normalization | candidate、stale-task 与 `additional_tools` 回归通过 | 同 provider 的 A → B 也视为 scope 变化；跨 scope 时移除异源 identity / opaque state，保留可移植 summary、namespace/tool schema 与 tool call/result 因果链；unsupported item 仍返回 typed `409` |
 | Ark Responses SSE lifecycle normalizer | candidate 与真实 endpoint 通过 | 只对显式 `is-compat: true` 的模型启用；原生 Codex stream 保持原字节路径；真实 Ark HTTP/SSE 返回完整 lifecycle |
-| A → B → Ark 组合路径 | loopback 与分层 live 证据通过 | 合成 quota 链 5/5 通过；live A → B 在同一请求完成；隔离禁用 A/B 后 auto 由 Ark 完成并恢复 auth 状态 |
-| Codex App selector projection | 本机与 SSH App Server 通过 | `model/list` 暴露 Auto、A、B、Ark 四个可见 route，并保留隐藏 `gpt-5.6-sol` 兼容 alias；C 不存在 |
-| 图片能力投影 | 正向 E2E 通过，Auto 负向路径有已复现缺口 | Auto、A、B 声明 `text + image`，Ark 保持 `text`；健康 A/B 下图片到达 Codex。A/B 失败后，当前 Auto affinity 可能错误粘到 Ark，尚未做到 modality-aware fail closed |
+| A/B 环 → Ark 组合路径 | loopback 与分层 live 证据通过 | 合成 quota 链 5/5 通过；live A → B 在同一请求完成；隔离禁用 A/B 后 auto 由 Ark 完成并恢复 auth 状态；Prefer B → A 依赖 CPA PR #5336 |
+| Codex App selector projection | contract 已更新；live readback 待 CPA #5336 | 目标 `model/list` 暴露 Auto、Prefer A、Prefer B、Luna、Ark 五个可见 route，并保留隐藏 `gpt-5.6-sol` 兼容 alias；C 不存在 |
+| 图片能力投影 | 正向 E2E 通过，Auto 负向路径有已复现缺口 | Auto、Prefer A、Prefer B、Luna 声明 `text + image`，Ark 保持 `text`；健康 A/B 下图片到达 Codex。A/B 失败后，当前 Auto affinity 可能错误粘到 Ark，尚未做到 modality-aware fail closed |
 | 模型切换快照 | 已复现设置落盘与新 turn 启动竞态 | UI 显示已选择 B 不足以证明正在运行或重试的 turn 已采用 B；旧 turn 可能继续携带 Auto 快照。需要 durable settings revision / readback 后再启动新 turn |
-| Fast tier 投影 | 本机 App Server readback 通过 | Auto、A、B 声明 `fast → priority`；Ark 不声明 Fast。`features.fast_mode = true` 只显示按钮，`service_tier = "default"` 保证默认关闭 |
+| Fast tier 投影 | A/B 既有 readback 通过；Luna/Prefer 显示待统一重验 | Auto、Prefer A、Prefer B、Luna 声明 `fast → priority`；Ark 不声明 Fast。`features.fast_mode = true` 只显示按钮，`service_tier = "default"` 保证默认关闭 |
 | SSH CPA 远端 | reverse-loopback 与 App Server 通过 | 远端只连接 loopback tunnel，不保存本机 OAuth/Ark secret；同一 SSH alias 与同一远端 `CODEX_HOME` 可继续原 task，新建 task 不删除旧 session |
-| CPA upstream review | 两个 PR 已提交、CI 通过 | PR #5220 head `9357def`、PR #5261 head `c8e76e1`；均目标 `dev`、mergeable、等待 review |
+| CPA upstream review | 三个 PR 已提交、CI 通过 | PR #5220 head `9357def`、PR #5261 head `c8e76e1`、PR #5336 head `a8136d87`；均目标 `dev`、等待 review |
 | 上游回归 | 候选与当前 `dev` 已集成验证 | changed packages、race 与 server build 通过；全仓仅命中既有 `internal/home` 一秒同步 flake，同一失败在干净 `origin/dev` 上 50 次复现 2 次，PR 未改该目录，也不声称该测试通过 |
 | 真实 Ark endpoint qualification | 基础 Responses 与 auto fallback 已通过 | source-built candidate 经隔离 CPA 调用真实 OpenAI-compatible endpoint：HTTP 200、唯一 terminal，output item 严格 `added/done` 配对；额度分类由公开安全的黑盒 fixture 覆盖 |
 | 当前 Codex App | self-use 配置已安装并完成 CLI / App Server readback | 主 App 与 SSH host 都指向 loopback CPA；模型目录变化需要重启或重连对应 App Server 才能刷新 UI cache，旧 task store 不复制、不删除 |
@@ -163,10 +165,10 @@ flowchart LR
 
 | 模型 ID | 行为 | 输入能力 | Fast |
 | --- | --- | --- | --- |
-| `auto/gpt-5.6-sol` | Codex A → B；两个订阅都不可用且尚未提交输出时，文本请求可转 Ark | `text, image`；图片只由 A/B 承担 | 可选，默认关闭 |
-| `codex-a/gpt-5.6-sol` | 手动固定到订阅 A | `text, image` | 可选，默认关闭 |
-| `codex-b/gpt-5.6-sol` | 手动固定到订阅 B | `text, image` | 可选，默认关闭 |
-| [`gpt-5.6-luna`](https://developers.openai.com/codex/models) | Luna；只在 Codex A/B 间路由，不异构降级到 Ark | `text, image`；推理档位为 `low` 至 `max`，不声明 `ultra` | 可选，默认关闭 |
+| `auto/gpt-5.6-sol` | 同一 A/B 账号环；已有 task 尊重 affinity，冷启动从 A 开始；A/B 都不可用且尚未提交输出时，兼容文本请求可转 Ark | `text, image`；图片只由 A/B 承担 | 可选，默认关闭 |
+| `codex-a/gpt-5.6-sol` | Sol · Prefer A：A → B → Ark；不是 hard pin | `text, image` | 可选，默认关闭 |
+| `codex-b/gpt-5.6-sol` | Sol · Prefer B：B → A → Ark；不是 hard pin | `text, image` | 可选，默认关闭 |
+| [`gpt-5.6-luna`](https://developers.openai.com/codex/models) | Luna；复用同一个 A/B 账号环，只在 Codex A/B 间路由，不异构降级到 Ark | `text, image`；推理档位为 `low` 至 `max`，不声明 `ultra` | 可选，默认关闭 |
 | `codex-c/gpt-5.6-sol` | 预留；只有第三个订阅真实接入并通过矩阵后才暴露 | 由真实 credential 决定 | 不预声明 |
 | `ark/deepseek-v4-flash` | 手动固定到 Ark DeepSeek V4 Flash | `text` | 不支持 |
 | `gpt-5.6-sol` | 隐藏 compatibility alias；处理 App / host 继承裸 model metadata 的旧 task，实际行为与 Auto 一致 | `text, image` | 可选，默认关闭 |
@@ -174,7 +176,7 @@ flowchart LR
 模型 ID 是路由契约，不是上游真实 model slug。显示名可本地化，但 ID 一经上线应保持稳定，
 否则已有 task 的 model metadata 会产生第二种方言。
 
-当前 self-use build 已完成 Codex 多账号、prefix 固定路由和 Codex → Ark heterogeneous
+当前 self-use build 已完成 Codex 多账号、prefix 路由和 Codex → Ark heterogeneous
 failover 的分层资格验证，因此 `auto/...` 可以在该锁定 commit 上灰度。升级到其他 commit
 时不能继承这个结论，必须重跑后文矩阵。不要用第二层 AgentSwap proxy 假装补齐缺口。
 
@@ -190,8 +192,8 @@ Fast 是一次 turn 的 service tier，不是独立模型。model catalog 需要
 只有用户手动开启 Fast 后，请求才映射为 `priority`。
 
 这里的“开启自动切换开关”不是修改 CPA 的一个全局布尔值，而是让 App selector 暴露并
-允许选择 `auto/...` 虚拟模型。关闭时只暴露显式 `codex-a`、`codex-b` 和 `ark`；打开后
-CPA 才按已验收的 provider pool 执行自动路由。
+允许选择 `auto/...` 虚拟模型。A/B 也不再表示 hard pin，而是同一账号环的两个首选入口；
+只有显式 Ark 仍固定单一 provider。CPA 只按已验收的 provider pool 执行自动路由。
 
 ## CPA：唯一在线 data plane
 
@@ -247,7 +249,7 @@ auth，CPA 与 Codex provider 必须同时配置同一个由 secret store 注入
 
 首轮 qualification 使用 `request-retry / max-retry-credentials / max-retry-interval =
 0 / 0 / 0`。这不等于“完全不 failover”：round 0 仍会把每个 eligible credential 最多
-尝试一次；它只禁止 A → B → Ark 之后再开启额外 retry round，也不等待 cooldown。这样
+尝试一次；它只禁止一次 A/B 环遍历与可选 Ark tail 之后再开启额外 retry round，也不等待 cooldown。这样
 可以先证明一条有限、可解释的路由链，避免同一 credential 被重复尝试。需要额外 round
 时必须单独增加参数并重跑提交边界测试。
 
@@ -284,7 +286,7 @@ credential 遍历之后最多允许十个附加 round；`max-retry-credentials: 
 | 层 | 主要职责 | 允许恢复的边界 |
 | --- | --- | --- |
 | ChatGPT uTLS transport | 复用 HTTP/2 连接和 TLS session；连接已失效时重建 | 响应头之前；只有幂等请求，或带 idempotency key 且 body 可重建的请求，才允许一次快速重放 |
-| CPA | credential / provider 分类、A → B → Ark、首个生成事件前的 in-band 错误吸收 | HTTP 403/408/429/500/502/503/504 与明确的 quota / overload；提交后禁止切换 |
+| CPA | credential / provider 分类、A/B 单圈遍历与可选 Ark tail、首个生成事件前的 in-band 错误吸收 | HTTP 403/408/429/500/502/503/504 与明确的 quota / overload；提交后禁止切换 |
 | Codex App | CPA endpoint 的 request / stream 外层恢复 | 只消费 CPA 最终暴露的失败；不能把已可见的文本、tool call 或 tool result 当成全新请求重放 |
 | LoopX | 记录资格证据、pin、回滚与运维状态 | 不代理模型请求，也不新增第四层 retry |
 
@@ -293,7 +295,7 @@ credential 遍历之后最多允许十个附加 round；`max-retry-credentials: 
 1. DNS、TCP、TLS 或空闲 HTTP/2 连接失效：优先重用连接池；确需重拨时使用已有 TLS
    session。连接级第一次安全重拨立即执行，不先 sleep。
 2. 401：只刷新一次对应 credential；仍失败则标记该 credential 不健康并进入下一项。
-3. quota、overload、429 或可恢复 5xx：只在首个可见生成事件前按 A → B → Ark 切换。
+3. quota、overload、429 或可恢复 5xx：只在首个可见生成事件前遍历一次 A/B 环，再按 route 决定是否进入 Ark tail。
 4. schema / lifecycle 破坏、foreign compaction barrier、不可恢复 4xx：fail closed，不用高
    retry 上限掩盖协议错误。
 5. 已发送文本 delta、tool call 或 tool result：返回明确错误和恢复入口，禁止透明重放。
@@ -403,7 +405,7 @@ request_max_retries = 30
 stream_max_retries = 30
 ```
 
-受控 model catalog 同时描述 Auto、A、B、Ark 四个虚拟模型 ID；未配置的 C 不写入 catalog。
+受控 model catalog 同时描述 Auto、Prefer A、Prefer B、Luna、Ark 五个虚拟模型 ID；未配置的 C 不写入 catalog。
 App 的原生模型下拉框就是唯一手动切换入口。`30 / 30` 只保留 CPA 之外的外层恢复余量；
 credential 遍历、provider 选择和 commit barrier 仍由 CPA 独占。两层都必须遵守前文的
 提交边界和 wall-clock budget，不能无界相乘。不要再让 CC Switch 在 App 运行期间替换
@@ -411,11 +413,10 @@ credential 遍历、provider 选择和 commit barrier 仍由 CPA 独占。两层
 
 受控 catalog 至少要同时验证四类字段：
 
-1. `slug / visibility / priority`：四个可见 route 与一个隐藏 bare compatibility alias；
-2. `input_modalities`：Auto/A/B 为 `text, image`，Ark 为 `text`；
-3. `supported_reasoning_levels`：Auto 至少覆盖 `low / medium / high / xhigh / max`，A/B
-   可额外开放已经验证的更高档；
-4. `additional_speed_tiers / service_tiers`：Auto/A/B 暴露 `fast → priority`，Ark 不暴露，
+1. `slug / visibility / priority`：五个可见 route 与一个隐藏 bare compatibility alias；
+2. `input_modalities`：Auto/Prefer A/Prefer B/Luna 为 `text, image`，Ark 为 `text`；
+3. `supported_reasoning_levels`：Sol 与 Luna 都只声明已验证的 `low / medium / high / xhigh / max`；
+4. `additional_speed_tiers / service_tiers`：Auto/Prefer A/Prefer B/Luna 暴露 `fast → priority`，Ark 不暴露，
    `default_service_tier` 保持空或 default。
 
 App Server 的 `model/list` readback 是 catalog 验收面。只检查 JSON 文件内容不够，因为旧
@@ -447,7 +448,7 @@ service_tier = "default"
 fast_mode = true
 
 [model_providers.local-cpa]
-name = "CPA · Codex A → B → Ark"
+name = "CPA · Codex A/B ring → Ark"
 base_url = "http://127.0.0.1:<REMOTE_CPA_PORT>/v1"
 wire_api = "responses"
 requires_openai_auth = false
@@ -457,7 +458,7 @@ stream_max_retries = 30
 ```
 
 远端默认使用隐藏 `gpt-5.6-sol` compatibility alias，避免旧 task 或跨 host metadata 只保存
-裸 model slug 时回落到未知模型；模型下拉框仍只显示 Auto、A、B、Ark。
+裸 model slug 时回落到未知模型；模型下拉框仍只显示 Auto、Prefer A、Prefer B、Luna、Ark。
 
 SSH host 的 session 安全边界：
 
@@ -473,7 +474,7 @@ SSH host 的 session 安全边界：
 1. `ssh <host-alias>` 能正常进入，远端 login shell 可以找到 `codex`；
 2. `codex --version` 达到锁定版本；
 3. reverse tunnel 两端都只监听 loopback；
-4. App Server `model/list` 返回四个可见 route、隐藏 bare alias、正确图片能力与 Fast tier；
+4. App Server `model/list` 返回五个可见 route、隐藏 bare alias、正确图片能力与 Fast tier；
 5. Auto 发送一张公开安全的测试图片，模型实际返回成功；
 6. 打开一个已有 task，确认历史仍在，再验证 A/B 切换；
 7. 最后才在真实工作 task 上使用。
@@ -658,18 +659,19 @@ in-band SSE error、客户端取消和 handler 自己补出的 lifecycle event�
 
 | 场景 | 验收条件 |
 | --- | --- |
-| Codex A → B → 可选 C | 每次只使用一个真实账号；额度错误触发下一优先级；未配置 C 时跳过而不是创建空 profile；同一 turn 不重复输出 |
+| A/B 单账号环 | Auto/Prefer A/Luna 可走 A → B，Prefer B 可走 B → A；单次最多一圈，每个账号最多一次；同一 turn 不重复输出 |
+| Sol terminal fallback | 只有 A/B 都不可用、请求仍在 commit barrier 前且 modality/tier 兼容时才进入 Ark tail；Ark 不回跳 Codex |
 | GPT → Ark | 消息、reasoning summary、tool call/result 可继续；无 active-item / delta 生命周期警告 |
 | Ark → GPT | 异源 reasoning identity 被剥离；保留 summary；`remote_compaction_v2` 可成功重建窗口 |
 | A/B + `additional_tools` → 另一 scope | namespace 与 tool schema 保留；provider-bound id / opaque state 被剥离；不误报 `unsupported_history_item` |
 | foreign compact → 任意目标 | 明确识别 barrier 并 fork；不发送 opaque foreign blob |
-| 模型下拉框手动切换 | 选中虚拟模型后路由与显示一致，不需要 CC Switch 重启 App |
+| 模型下拉框手动切换 | Prefer A/B 表示首选入口而非 hard pin；显式 Ark 才固定 provider；切换后路由与显示一致，不需要 CC Switch 重启 App |
 | settings apply → turn start | 新 turn 的 receipt 使用已持久化的新 settings revision；并发启动不能捕获旧 Auto snapshot |
 | hidden bare alias | 旧 task 或跨 host metadata 使用 `gpt-5.6-sol` 时按 Auto 路由，不在 selector 重复显示 |
 | Auto / A / B 图片输入 | App admission 通过，图片实际到达 A/B；A/B 均不可用时明确失败，不降级为 Ark 文本请求 |
 | Auto affinity + 图片 + Codex 故障 | 每个 attempt 重算 required modalities；旧 Ark affinity 失效；A/B 无 eligible target 时首字节前返回 typed error |
 | Ark 图片输入 | App 或 provider 明确拒绝；不把 Ark catalog 伪装为 image-capable |
-| Fast tier | Auto/A/B 显示 Fast 按钮，但新 task 默认 `service_tier = "default"`；手动开启后请求才使用 `priority` |
+| Fast tier | Auto/Prefer A/Prefer B/Luna 显示 Fast 按钮，但新 task 默认 `service_tier = "default"`；手动开启后请求才使用 `priority` |
 | SSH host 重连 | 同 alias、同远端 `CODEX_HOME` 下旧 task 可继续；catalog/CLI 刷新不删除或复制 session store |
 | 首字节前 quota / overload | CPA 可重试下一 eligible auth；客户端只看到一条回答 |
 | 空闲 HTTP/2 连接断开 | 下一条安全请求自动重建连接；TLS session 恢复；不重复已提交输出 |
@@ -704,15 +706,15 @@ commit 作为升级候选并重跑 qualification。#5261 在进入 self-use pin 
 
 1. **影子验证（已完成）**：保持现有 App 不变，在隔离 home、loopback fault server 和 stale
    task 上跑完整矩阵。
-2. **单 App / 手动路由（已完成）**：App 指向固定 CPA；开放 `codex-a`、`codex-b`、
-   `ark`，未配置的 `codex-c` 不出现在 selector。
-3. **Codex pool 自动切换（已完成）**：priority + fill-first + affinity 已通过 loopback 与 live
-   A → B；安全回切发生在新 session / turn 边界。
+2. **单 App / 显式路由（已完成旧语义）**：App 指向固定 CPA；开放 A、B、Ark，未配置的
+   C 不出现在 selector；A/B 从 hard pin 升级为 Prefer 入口依赖 #5336。
+3. **Codex 账号环（A → B 已完成，B → A 待 #5336）**：priority + fill-first + affinity 已
+   通过 loopback 与 live A → B；route priority 合入并部署后补 Prefer B → A 资格验证。
 4. **跨 provider 自动切换（self-use 已启用）**：固定 build 已通过 history projection、
    `additional_tools`、Ark SSE、commit barrier、真实 Ark 与故障注入矩阵，文本请求可由
    `auto/...` 降级到 Ark；foreign compaction barrier 仍 fail closed 并走显式 fork。
-5. **本机与 SSH selector（已完成 App Server 资格验证）**：四个可见 selector、hidden bare
-   alias、图片能力和 Fast default-off contract 已进入受控 catalog；每次 catalog 更新后仍要
+5. **本机与 SSH selector（contract 已收敛，live 升级待执行）**：五个可见 selector、hidden
+   bare alias、图片能力和 Fast default-off contract 已进入受控 catalog；#5336 部署后仍要
    重启对应 App Server 并做 UI readback。
 6. **多模态 Auto 负向路径（待修复）**：健康 A/B 的图片 E2E 已通过；modality-aware
    affinity、A/B 全不可用时的 typed fail-closed，以及 settings revision / turn-start 竞态仍要

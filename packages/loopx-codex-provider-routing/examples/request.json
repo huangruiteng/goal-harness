@@ -33,14 +33,23 @@
         "supports_fast": false
       }
     ],
+    "rings": [
+      {
+        "id": "codex-accounts",
+        "max_cycles": 1,
+        "members": [
+          "codex-a",
+          "codex-b"
+        ]
+      }
+    ],
     "routes": [
       {
-        "candidates": [
-          "codex-a",
-          "codex-b",
+        "display_name": "Auto · Sol (A/B → Ark)",
+        "entrypoint": "affinity_then_first",
+        "fallback_tail": [
           "ark-text"
         ],
-        "display_name": "Auto · Codex A → B → text fallback",
         "input_modalities": [
           "text",
           "image"
@@ -53,60 +62,60 @@
           "xhigh",
           "max"
         ],
+        "ring": "codex-accounts",
         "slug": "auto/gpt-5.6-sol",
         "supports_fast": true,
         "visible": true
       },
       {
-        "candidates": [
-          "codex-a"
+        "display_name": "Sol · Prefer A",
+        "entrypoint": "codex-a",
+        "fallback_tail": [
+          "ark-text"
         ],
-        "display_name": "Codex A",
         "input_modalities": [
           "text",
           "image"
         ],
-        "mode": "manual",
+        "mode": "preferred",
         "reasoning_levels": [
           "low",
           "medium",
           "high",
           "xhigh",
-          "max",
-          "ultra"
+          "max"
         ],
+        "ring": "codex-accounts",
         "slug": "codex-a/gpt-5.6-sol",
         "supports_fast": true,
         "visible": true
       },
       {
-        "candidates": [
-          "codex-b"
+        "display_name": "Sol · Prefer B",
+        "entrypoint": "codex-b",
+        "fallback_tail": [
+          "ark-text"
         ],
-        "display_name": "Codex B",
         "input_modalities": [
           "text",
           "image"
         ],
-        "mode": "manual",
+        "mode": "preferred",
         "reasoning_levels": [
           "low",
           "medium",
           "high",
           "xhigh",
-          "max",
-          "ultra"
+          "max"
         ],
+        "ring": "codex-accounts",
         "slug": "codex-b/gpt-5.6-sol",
         "supports_fast": true,
         "visible": true
       },
       {
-        "candidates": [
-          "codex-a",
-          "codex-b"
-        ],
-        "display_name": "Luna · GPT-5.6-Luna",
+        "display_name": "Luna · A/B",
+        "entrypoint": "affinity_then_first",
         "input_modalities": [
           "text",
           "image"
@@ -119,6 +128,7 @@
           "xhigh",
           "max"
         ],
+        "ring": "codex-accounts",
         "slug": "gpt-5.6-luna",
         "supports_fast": true,
         "visible": true

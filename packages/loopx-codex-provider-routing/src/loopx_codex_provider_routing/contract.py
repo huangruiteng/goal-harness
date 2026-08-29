@@ -108,6 +108,46 @@ def _compile_profiles(raw_profiles: Any) -> dict[str, dict[str, Any]]:
     return profiles
 
 
+def _compile_rings(
+    raw_rings: Any, profiles: Mapping[str, Mapping[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    if raw_rings is None:
+        return {}
+    if not isinstance(raw_rings, list):
+        raise ValueError("rings must be a list")
+    rings: dict[str, dict[str, Any]] = {}
+    for index, raw in enumerate(raw_rings):
+        if not isinstance(raw, Mapping):
+            raise TypeError(f"rings[{index}] must be an object")
+        ring_id = _non_empty_string(raw.get("id"), f"rings[{index}].id")
+        if SYMBOLIC_ID_RE.fullmatch(ring_id) is None:
+            raise ValueError(f"ring id must be a public symbolic id: {ring_id}")
+        if ring_id in rings:
+            raise ValueError(f"duplicate ring id: {ring_id}")
+        members = _string_list(raw.get("members"), f"rings[{index}].members")
+        if len(members) < 2:
+            raise ValueError(f"ring {ring_id} needs at least two members")
+        for profile_id in members:
+            if profile_id not in profiles:
+                raise ValueError(
+                    f"ring {ring_id} references unknown profile: {profile_id}"
+                )
+        max_cycles = raw.get("max_cycles")
+        if max_cycles != 1 or isinstance(max_cycles, bool):
+            raise ValueError(f"ring {ring_id} must use exactly one cycle")
+        rings[ring_id] = {
+            "id": ring_id,
+            "members": members,
+            "max_cycles": max_cycles,
+        }
+    return rings
+
+
+def _rotate_members(members: Sequence[str], entrypoint: str) -> list[str]:
+    index = members.index(entrypoint)
+    return list(members[index:]) + list(members[:index])
+
+
 def _eligible_profiles(
     candidates: Sequence[str],
     profiles: Mapping[str, Mapping[str, Any]],
@@ -129,6 +169,7 @@ def _eligible_profiles(
 def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
     reject_private_material(source)
     profiles = _compile_profiles(source.get("profiles"))
+    rings = _compile_rings(source.get("rings"), profiles)
     raw_routes = source.get("routes")
     if not isinstance(raw_routes, list) or not raw_routes:
         raise ValueError("routes must be a non-empty list")
@@ -145,7 +186,7 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError(f"duplicate route slug: {slug}")
         route_ids.add(slug)
         mode = _non_empty_string(raw.get("mode"), f"routes[{index}].mode")
-        if mode not in {"auto", "manual", "alias"}:
+        if mode not in {"auto", "preferred", "manual", "alias"}:
             raise ValueError(f"route {slug} has unsupported mode: {mode}")
         visible = _boolean(raw.get("visible"), f"routes[{index}].visible", default=True)
         display_name = _non_empty_string(
@@ -165,9 +206,52 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
         if not set(reasoning) <= ALLOWED_REASONING_LEVELS:
             raise ValueError(f"route {slug} has unsupported reasoning levels")
 
-        candidates = _string_list(
-            raw.get("candidates", []), f"routes[{index}].candidates"
+        ring_id = raw.get("ring")
+        uses_ring = ring_id is not None
+        fallback_tail = _string_list(
+            raw.get("fallback_tail", []), f"routes[{index}].fallback_tail"
         )
+        entrypoint = raw.get("entrypoint")
+        if uses_ring:
+            ring_id = _non_empty_string(ring_id, f"routes[{index}].ring")
+            if ring_id not in rings:
+                raise ValueError(f"route {slug} references unknown ring: {ring_id}")
+            if mode not in {"auto", "preferred"}:
+                raise ValueError(f"route {slug} cannot use a ring in {mode} mode")
+            if "candidates" in raw:
+                raise ValueError(
+                    f"ring route must derive candidates instead of declaring them: {slug}"
+                )
+            members = rings[ring_id]["members"]
+            if entrypoint is None and mode == "auto":
+                entrypoint = "affinity_then_first"
+            else:
+                entrypoint = _non_empty_string(
+                    entrypoint, f"routes[{index}].entrypoint"
+                )
+            if entrypoint == "affinity_then_first":
+                if mode != "auto":
+                    raise ValueError(
+                        f"preferred route needs an explicit ring member: {slug}"
+                    )
+                ring_candidates = list(members)
+            elif entrypoint in members:
+                ring_candidates = _rotate_members(members, entrypoint)
+            else:
+                raise ValueError(
+                    f"route {slug} entrypoint is not a member of ring {ring_id}"
+                )
+            if set(fallback_tail) & set(members):
+                raise ValueError(f"route {slug} fallback tail overlaps its ring")
+            candidates = ring_candidates + fallback_tail
+        else:
+            if fallback_tail or entrypoint is not None:
+                raise ValueError(
+                    f"non-ring route must not declare entrypoint or fallback tail: {slug}"
+                )
+            candidates = _string_list(
+                raw.get("candidates", []), f"routes[{index}].candidates"
+            )
         for profile_id in candidates:
             if profile_id not in profiles:
                 raise ValueError(
@@ -175,8 +259,10 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
                 )
         if mode == "manual" and len(candidates) != 1:
             raise ValueError(f"manual route must pin exactly one profile: {slug}")
-        if mode == "auto" and len(candidates) < 2:
-            raise ValueError(f"auto route needs at least two candidates: {slug}")
+        if mode in {"auto", "preferred"} and len(candidates) < 2:
+            raise ValueError(f"resilient route needs at least two candidates: {slug}")
+        if mode == "preferred" and not uses_ring:
+            raise ValueError(f"preferred route must reference a ring: {slug}")
         if mode == "alias" and candidates:
             raise ValueError(f"alias route must not declare candidates: {slug}")
 
@@ -188,8 +274,12 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
 
         if mode != "alias":
             priorities = [profiles[profile_id]["priority"] for profile_id in candidates]
-            if mode == "auto" and any(
-                current <= following for current, following in pairwise(priorities)
+            if (
+                mode == "auto"
+                and not uses_ring
+                and any(
+                    current <= following for current, following in pairwise(priorities)
+                )
             ):
                 raise ValueError(f"auto route priorities must strictly descend: {slug}")
             for modality in declared_modalities:
@@ -224,6 +314,9 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
                 "visibility": "visible" if visible else "hidden",
                 "routing_mode": mode,
                 "alias_for": alias_for,
+                "ring_id": ring_id,
+                "entrypoint": entrypoint,
+                "fallback_tail": fallback_tail,
                 "input_modalities": declared_modalities,
                 "reasoning_levels": reasoning,
                 "candidates": candidates,
@@ -248,8 +341,12 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
                     "candidate_filter": "required_modalities_and_service_tier",
                     "on_no_eligible_provider": "fail_closed_before_first_output",
                     "session_affinity": "hint_revalidated_per_attempt"
-                    if mode == "auto"
+                    if mode in {"auto", "preferred"}
                     else "disabled",
+                    "traversal": "one_ring_pass_then_tail"
+                    if uses_ring
+                    else "ordered_candidates_once",
+                    "max_cycles": rings[ring_id]["max_cycles"] if uses_ring else 1,
                     "commit_barrier": "before_first_visible_output_or_tool_call",
                     "foreign_history": "normalize_or_quarantine",
                 },
@@ -278,6 +375,7 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
         "credential_free": True,
         "default_service_tier": "default",
         "profiles": list(profiles.values()),
+        "rings": list(rings.values()),
         "routes": routes,
     }
 
@@ -303,7 +401,7 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     check(
         "visible_routes",
         visible == expected_visible,
-        "selector exposes exactly Auto/A/B/Luna/Ark",
+        "selector exposes exactly Auto/Prefer A/Prefer B/Luna/Ark",
     )
     check(
         "hidden_alias",
@@ -324,7 +422,7 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
                 "gpt-5.6-luna",
             )
         ),
-        "Auto/A/B/Luna declare text and image",
+        "Auto/Prefer A/Prefer B/Luna declare text and image",
     )
     check(
         "ark_text_only",
@@ -341,7 +439,7 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             "codex-b/gpt-5.6-sol",
             "gpt-5.6-luna",
         },
-        "Fast is exposed only for Auto/A/B/Luna",
+        "Fast is exposed only for Auto/Prefer A/Prefer B/Luna",
     )
     check(
         "fast_default_off",
