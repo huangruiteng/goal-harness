@@ -118,7 +118,7 @@ test("receipt-bound monitor settlement phase is derived from typed receipts", ()
   );
 });
 
-test("receipt-bound replay settlement requires completion and the full chain", () => {
+test("receipt-bound replay settlement follows its binding and full chain", () => {
   assert.equal(
     receiptBoundReplayPhase({
       completion_receipt_present: false,
@@ -126,6 +126,33 @@ test("receipt-bound replay settlement requires completion and the full chain", (
       quota_spend_present: true,
     }),
     "open",
+  );
+  assert.equal(
+    receiptBoundReplayPhase({
+      binding_kind: "autonomous_replan",
+      completion_receipt_present: false,
+      durable_writeback_present: false,
+      quota_spend_present: true,
+    }),
+    "open",
+  );
+  assert.equal(
+    receiptBoundReplayPhase({
+      binding_kind: "autonomous_replan",
+      completion_receipt_present: false,
+      durable_writeback_present: true,
+      quota_spend_present: false,
+    }),
+    "settlement_pending",
+  );
+  assert.equal(
+    receiptBoundReplayPhase({
+      binding_kind: "autonomous_replan",
+      completion_receipt_present: false,
+      durable_writeback_present: true,
+      quota_spend_present: true,
+    }),
+    "settled",
   );
   assert.equal(
     receiptBoundReplayPhase({

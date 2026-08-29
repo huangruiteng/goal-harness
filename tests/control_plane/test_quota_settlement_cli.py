@@ -2310,6 +2310,15 @@ def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
     assert plan_identity["binding_id"] == identity["binding_id"]
     assert plan_identity["replan_obligation_id"] == obligation_id
     assert plan_identity["turn_instance_id"] == turn_instance_id
+    original_scheduler_ack_args = guard["scheduler_hint"]["codex_app"][
+        "ack_hint"
+    ]["cli_args"]
+    original_scheduler_ack_args = original_scheduler_ack_args[
+        original_scheduler_ack_args.index("quota"):
+    ]
+    assert original_scheduler_ack_args[:2] == ["quota", "scheduler-ack-current"]
+    assert "--turn-instance-id" in original_scheduler_ack_args
+    assert turn_instance_id in original_scheduler_ack_args
     actions = cli_channel["next_cli_actions"]
     refresh_command = next(action for action in actions if "refresh-state" in action)
     spend_command = next(action for action in actions if "spend-slot" in action)
@@ -2370,6 +2379,76 @@ def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
     assert replay_rc == 0, replay
     assert replay["idempotent_replay"] is True
     assert replay["appended"] is False
+    assert _spend_run_count(runtime) == 1
+
+    settled_rc, settled = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--scan-path",
+        str(project),
+    )
+
+    assert settled_rc == 0, settled
+    assert settled["decision"] == "skip", settled
+    assert settled["effective_action"] == "heartbeat_settled_skip"
+    assert settled["execution_obligation"]["must_attempt_work"] is False
+    assert settled.get("autonomous_replan_obligation") is None
+    assert settled.get("replan_action_packet") is None
+    assert settled["heartbeat_receipt"]["status"] == "replayed"
+    assert settled["heartbeat_receipt"]["settlement_identity"][
+        "binding_kind"
+    ] == "autonomous_replan"
+    assert _spend_run_count(runtime) == 1
+
+    ack_rc, ack = _run_cli(
+        registry_path,
+        runtime,
+        *original_scheduler_ack_args,
+    )
+    assert ack_rc == 0, ack
+    assert ack["ok"] is True
+    assert ack["mode"] == "scheduler-ack-current"
+    assert ack["status"] == "heartbeat_settled_skip"
+    assert ack["idempotent_replay"] is True
+    assert ack["write_performed"] is False
+    assert ack["scheduler_state_mutated"] is False
+    assert ack["quota_spend_performed"] is False
+    assert ack["appended"] is False
+    assert _spend_run_count(runtime) == 1
+
+    fresh_turn_id = "turn-autonomous-replan-settlement-2"
+    fresh_rc, fresh = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        fresh_turn_id,
+        "--scan-path",
+        str(project),
+    )
+
+    assert fresh_rc == 0, fresh
+    assert fresh["decision"] == "skip", fresh
+    assert fresh["effective_action"] == "monitor_quiet_skip"
+    assert fresh["execution_obligation"]["must_attempt_work"] is False
+    assert fresh.get("autonomous_replan_obligation") is None
+    assert fresh.get("replan_action_packet") is None
+    assert fresh["heartbeat_receipt"]["turn_instance_id"] == fresh_turn_id
     assert _spend_run_count(runtime) == 1
 
 

@@ -65,6 +65,26 @@ def test_quota_reexports_the_core_settlement_algebra() -> None:
     assert quota_effect_program.SettlementResult is core_effect_program.SettlementResult
 
 
+def test_autonomous_replan_replay_phase_settles_from_refresh_and_spend() -> None:
+    assert (
+        core_effect_program.receipt_bound_replay_phase(
+            binding_kind=core_effect_program.SettlementBindingKind.AUTONOMOUS_REPLAN,
+            completion_receipt_present=False,
+            durable_writeback_present=True,
+            quota_spend_present=True,
+        )
+        is core_effect_program.ReceiptBoundReplayPhase.SETTLED
+    )
+    assert (
+        core_effect_program.receipt_bound_replay_phase(
+            completion_receipt_present=False,
+            durable_writeback_present=True,
+            quota_spend_present=True,
+        )
+        is core_effect_program.ReceiptBoundReplayPhase.OPEN
+    )
+
+
 def test_settlement_identity_rejects_dual_binding_before_projection() -> None:
     with pytest.raises(ValueError, match="cannot bind both"):
         SettlementIdentity(
