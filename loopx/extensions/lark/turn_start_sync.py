@@ -40,6 +40,7 @@ from .inbox_reactions import (
     lark_inbox_pending_turn_start_read_message_ids,
     record_lark_inbox_turn_start_read,
 )
+from .private_json import write_private_json_atomic
 from .routed_inbox import ingest_routed_lark_event_inbox
 
 CURSOR_SCHEMA_VERSION = "lark_turn_start_sync_cursor_v0"
@@ -131,14 +132,7 @@ def _load_cursor(
 def _write_cursor(path: Path, state: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)
-    temporary = path.with_suffix(".json.tmp")
-    temporary.write_text(
-        json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n",
-        encoding="utf-8",
-    )
-    os.chmod(temporary, 0o600)
-    temporary.replace(path)
-    os.chmod(path, 0o600)
+    write_private_json_atomic(path, state)
 
 
 def _window_state(
