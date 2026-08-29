@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -44,6 +45,7 @@ from .private_json import write_private_json_atomic
 from .routed_inbox import ingest_routed_lark_event_inbox
 
 CURSOR_SCHEMA_VERSION = "lark_turn_start_sync_cursor_v0"
+DISPATCH_CURSOR_SCHEMA_VERSION = "lark_turn_start_dispatch_cursor_v0"
 SYNC_SCHEMA_VERSION = "lark_turn_start_inbox_sync_v0"
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 SOURCE_FINGERPRINT_PATTERN = re.compile(r"^sha256:([0-9a-f]{24})$")
@@ -53,10 +55,13 @@ TURN_START_REACTION_ATTEMPT_LIMIT = 3
 @dataclass
 class _ReactionAttemptBudget:
     remaining: int
+    last_consuming_route_key: str | None = None
 
-    def take(self, requested: int) -> int:
+    def take(self, requested: int, *, route_key: str) -> int:
         granted = min(self.remaining, max(0, requested))
         self.remaining -= granted
+        if granted:
+            self.last_consuming_route_key = route_key
         return granted
 
 
@@ -75,6 +80,72 @@ def _cursor_path(project: Path, *, route_key: str, source_fingerprint: str) -> P
     if not cursor_path.is_relative_to(trusted_root):
         raise ValueError("Lark turn-start sync cursor path escapes its private root")
     return cursor_path
+
+
+def _dispatch_source_fingerprint(config: Mapping[str, Any]) -> str:
+    identity = json.dumps(
+        {
+            "config_path": str(Path(config["config_path"]).resolve()),
+            "profile": str(config["profile"]),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    return f"sha256:{digest}"
+
+
+def _dispatch_cursor_path(project: Path, *, source_fingerprint: str) -> Path:
+    match = SOURCE_FINGERPRINT_PATTERN.fullmatch(source_fingerprint)
+    if match is None:
+        raise ValueError("Lark turn-start dispatch fingerprint is invalid")
+    trusted_root = (
+        project / ".loopx" / "inbox" / ".turn-start" / ".dispatch"
+    ).resolve()
+    cursor_path = (trusted_root / f"{match.group(1)}.json").resolve()
+    if not cursor_path.is_relative_to(trusted_root):
+        raise ValueError("Lark turn-start dispatch cursor escapes its private root")
+    return cursor_path
+
+
+def _load_dispatch_cursor(
+    path: Path, *, source_fingerprint: str
+) -> dict[str, str] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("Lark turn-start dispatch cursor is unreadable") from exc
+    last_route_key = (
+        str(payload.get("last_route_key") or "")
+        if isinstance(payload, Mapping)
+        else ""
+    )
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("schema_version") != DISPATCH_CURSOR_SCHEMA_VERSION
+        or payload.get("source_fingerprint") != source_fingerprint
+        or not ROUTE_KEY_PATTERN.fullmatch(last_route_key)
+    ):
+        raise ValueError("Lark turn-start dispatch cursor schema is invalid")
+    return {
+        "schema_version": DISPATCH_CURSOR_SCHEMA_VERSION,
+        "source_fingerprint": source_fingerprint,
+        "last_route_key": last_route_key,
+    }
+
+
+def _rotate_routes_after(
+    routes: list[Mapping[str, Any]], *, last_route_key: str | None
+) -> list[Mapping[str, Any]]:
+    if not last_route_key:
+        return routes
+    route_keys = [str(route["route_key"]) for route in routes]
+    if last_route_key not in route_keys:
+        return routes
+    start = route_keys.index(last_route_key) + 1
+    return routes[start:] + routes[:start]
 
 
 def _load_cursor(
@@ -177,6 +248,7 @@ def _window_state(
 def _bounded_reaction_message_ids(
     message_ids: list[str],
     *,
+    route_key: str,
     cursor_message_id: str | None,
     budget: _ReactionAttemptBudget,
 ) -> tuple[list[str], int]:
@@ -184,7 +256,7 @@ def _bounded_reaction_message_ids(
 
     if not message_ids:
         return [], 0
-    limit = budget.take(len(message_ids))
+    limit = budget.take(len(message_ids), route_key=route_key)
     if limit == 0:
         return [], len(message_ids)
     start = bisect_right(message_ids, cursor_message_id or "")
@@ -395,6 +467,7 @@ def _route_receipt(
                 reaction_message_ids, reaction_deferred_count = (
                     _bounded_reaction_message_ids(
                         pending_reaction_message_ids,
+                        route_key=route_key,
                         cursor_message_id=(
                             str(state.get("reaction_cursor_message_id") or "") or None
                         ),
@@ -513,6 +586,109 @@ def _route_receipt(
         }
 
 
+def _dispatch_failure(
+    status: str,
+    *,
+    external_read_performed: bool = False,
+    local_private_state_mutated: bool = False,
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "status": status,
+        "error_code": status,
+        "external_read_performed": external_read_performed,
+        "local_private_state_mutated": local_private_state_mutated,
+    }
+
+
+def _dispatch_route_receipts(
+    *,
+    project: str | Path,
+    config_path: str | Path,
+    config: Mapping[str, Any],
+    policy: Mapping[str, Any],
+    observed_at: datetime,
+    lark_cli_executable: str,
+    runner: Runner,
+) -> list[dict[str, Any]]:
+    source_fingerprint = _dispatch_source_fingerprint(config)
+    cursor_path = _dispatch_cursor_path(
+        Path(config["project"]),
+        source_fingerprint=source_fingerprint,
+    )
+    try:
+        lock = exclusive_file_lock(
+            cursor_path,
+            policy=LockAcquisitionPolicy.SINGLE_FLIGHT,
+            operation="lark_turn_start_dispatch",
+        )
+        with lock:
+            try:
+                cursor = _load_dispatch_cursor(
+                    cursor_path,
+                    source_fingerprint=source_fingerprint,
+                )
+            except (OSError, TypeError, ValueError):
+                return [_dispatch_failure("dispatch_cursor_unreadable")]
+            routes = _rotate_routes_after(
+                list(config["routes"]),
+                last_route_key=(cursor or {}).get("last_route_key"),
+            )
+            reaction_budget = _ReactionAttemptBudget(
+                TURN_START_REACTION_ATTEMPT_LIMIT
+            )
+            receipts = [
+                _route_receipt(
+                    project=project,
+                    config_path=config_path,
+                    route_key=str(route["route_key"]),
+                    now=observed_at,
+                    initial_lookback_seconds=int(policy["initial_lookback_seconds"]),
+                    overlap_seconds=int(policy["overlap_seconds"]),
+                    page_size=int(policy["page_size"]),
+                    lark_cli_executable=lark_cli_executable,
+                    runner=runner,
+                    reaction_budget=reaction_budget,
+                )
+                for route in routes
+            ]
+            last_route_key = reaction_budget.last_consuming_route_key
+            if not last_route_key:
+                return receipts
+            updated = {
+                "schema_version": DISPATCH_CURSOR_SCHEMA_VERSION,
+                "source_fingerprint": source_fingerprint,
+                "last_route_key": last_route_key,
+            }
+            try:
+                _write_cursor(cursor_path, updated)
+                readback = _load_dispatch_cursor(
+                    cursor_path,
+                    source_fingerprint=source_fingerprint,
+                )
+                if readback != updated:
+                    raise ValueError(
+                        "Lark turn-start dispatch cursor readback mismatch"
+                    )
+            except (OSError, TypeError, ValueError):
+                receipts.append(
+                    _dispatch_failure(
+                        "dispatch_cursor_readback_failed",
+                        external_read_performed=any(
+                            receipt.get("external_read_performed") is True
+                            for receipt in receipts
+                        ),
+                        local_private_state_mutated=any(
+                            receipt.get("local_private_state_mutated") is True
+                            for receipt in receipts
+                        ),
+                    )
+                )
+            return receipts
+    except LockAcquireTimeoutError:
+        return [_dispatch_failure("sync_already_running")]
+
+
 def sync_lark_turn_start_inbox(
     *,
     project: str | Path,
@@ -544,22 +720,15 @@ def sync_lark_turn_start_inbox(
             "provider_payload_returned": False,
         }
     observed_at = (now or datetime.now(UTC)).astimezone(UTC)
-    reaction_budget = _ReactionAttemptBudget(TURN_START_REACTION_ATTEMPT_LIMIT)
-    receipts = [
-        _route_receipt(
-            project=project,
-            config_path=config_path,
-            route_key=str(route["route_key"]),
-            now=observed_at,
-            initial_lookback_seconds=int(policy["initial_lookback_seconds"]),
-            overlap_seconds=int(policy["overlap_seconds"]),
-            page_size=int(policy["page_size"]),
-            lark_cli_executable=lark_cli_executable,
-            runner=runner,
-            reaction_budget=reaction_budget,
-        )
-        for route in config["routes"]
-    ]
+    receipts = _dispatch_route_receipts(
+        project=project,
+        config_path=config_path,
+        config=config,
+        policy=policy,
+        observed_at=observed_at,
+        lark_cli_executable=lark_cli_executable,
+        runner=runner,
+    )
     failures = [receipt for receipt in receipts if receipt["ok"] is not True]
     # A realtime collector may have persisted a message before this hook sees
     # the same provider-history item. The owner-private read receipt is
