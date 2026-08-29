@@ -330,7 +330,7 @@ def main() -> int:
     assert observed["request"]["autonomous_observation"] is True, observed["request"]
     assert "autonomous_review" in observed["request"]["include"], observed["request"]
     assert (
-        observation["schema_version"] == "pull_request_review_queue_observation_v0"
+        observation["schema_version"] == "pull_request_review_queue_observation_v1"
     ), observation
     assert observation["observation_state"] == "material_transition", observation
     assert observation["candidate_count"] == 1, observation
@@ -359,7 +359,7 @@ def main() -> int:
                 str(previous_path),
             ).stdout
         )
-        progressed = json.loads(
+        acknowledged = json.loads(
             run_cli(
                 "--format",
                 "json",
@@ -371,7 +371,7 @@ def main() -> int:
                 "--autonomous-observation",
                 "--previous-observation-json",
                 str(previous_path),
-                "--handled-exact-head",
+                "--projected-exact-head",
                 "771@7710000000000000000000000000000000000000",
             ).stdout
         )
@@ -381,19 +381,17 @@ def main() -> int:
     assert (
         unchanged["autonomous_review"]["observation_state"] == "observed_unchanged"
     ), unchanged
-    assert unchanged["autonomous_review"]["candidate"]["number"] == 773, unchanged
-    assert (
-        unchanged["autonomous_review"]["projected_candidate_count"] == 2
-    ), unchanged
-    progressed_observation = progressed["autonomous_review"]
+    assert unchanged["autonomous_review"]["candidate"]["number"] == 771, unchanged
+    assert unchanged["autonomous_review"]["projected_candidate_count"] == 0, unchanged
+    progressed_observation = acknowledged["autonomous_review"]
     assert (
         progressed_observation["observation_state"] == "observed_unchanged"
-    ), progressed
-    assert progressed_observation["candidate"]["number"] == 773, progressed
+    ), acknowledged
+    assert progressed_observation["candidate"]["number"] == 773, acknowledged
     assert (
         progressed_observation["projected_candidate_count"] == 1
-    ), progressed
-    assert progressed_observation["handled_exact_head_count"] == 1, progressed
+    ), acknowledged
+    assert progressed_observation["handled_exact_head_count"] == 0, acknowledged
 
     with tempfile.TemporaryDirectory() as temp_dir:
         checkpoint_path = Path(temp_dir) / "monitor.json"
@@ -432,8 +430,26 @@ def main() -> int:
                 str(checkpoint_path),
             ).stdout
         )
-        assert checkpoint_second["autonomous_review"]["candidate"]["number"] == 773
+        assert checkpoint_second["autonomous_review"]["candidate"]["number"] == 771
         assert checkpoint_second["request"]["previous_observation_supplied"] is True
+
+        checkpoint_projected = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "pr-review",
+                "--fixture",
+                str(FIXTURE),
+                "--state",
+                "open",
+                "--autonomous-observation",
+                "--observation-state-file",
+                str(checkpoint_path),
+                "--projected-exact-head",
+                "771@7710000000000000000000000000000000000000",
+            ).stdout
+        )
+        assert checkpoint_projected["autonomous_review"]["candidate"]["number"] == 773
 
         checkpoint_handled = json.loads(
             run_cli(
