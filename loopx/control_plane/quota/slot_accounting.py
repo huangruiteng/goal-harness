@@ -342,19 +342,20 @@ def _is_quota_neutral_state_refresh(run: dict[str, Any]) -> bool:
     )
 
 
-def _latest_unspent_accountable_delivery_run(
+def _latest_unspent_turn_settlement_run(
     runtime_root: Path,
     goal_id: str,
     *,
     agent_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """Return the latest same-agent delivery that still needs accounting.
+    """Return the latest same-agent Turn settlement that still needs accounting.
 
     Unchanged monitor polls, scheduler acknowledgements, and plain state
     refreshes are quota-neutral. They may occur after validation and before
     accounting, so they must not hide the accountable run. A state refresh
-    with an explicit non-accountable delivery outcome and other non-delivery
-    events remain fail closed.
+    with a non-settling delivery outcome and other non-delivery events remain
+    fail closed. A typed blocked ``outcome_gap`` settles the Turn without being
+    reclassified as delivery progress.
     """
 
     safe_agent_id = normalize_todo_claimed_by(agent_id)
@@ -382,7 +383,7 @@ def _latest_unspent_accountable_delivery_run(
             run.get("progress_observation")
             if isinstance(run.get("progress_observation"), dict)
             else None,
-            work_item_id=str(run.get("todo_id") or "") or None,
+            work_item_id=normalize_todo_id(run.get("todo_id")),
         ):
             return run
         return None
@@ -564,7 +565,7 @@ def build_quota_slot_preview_for_decision(
         and before.get("capability_repair_allowed") is True
     )
     delivery_completion_run = delivery_completion_run or (
-        _latest_unspent_accountable_delivery_run(
+        _latest_unspent_turn_settlement_run(
             Path(str(raw_runtime_root)).expanduser(),
             safe_goal_id,
             agent_id=safe_requested_agent_id,
@@ -593,7 +594,7 @@ def build_quota_slot_preview_for_decision(
             "registry_mutated": False,
             "reason": (
                 "safe-bypass quota spend requires a latest "
-                "unspent accountable delivery writeback"
+                "unspent Turn settlement writeback"
             ),
             "before": before,
             "after": None,

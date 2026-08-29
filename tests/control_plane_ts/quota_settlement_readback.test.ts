@@ -234,6 +234,26 @@ test("accepts only an attributable typed blocker as an outcome-gap writeback", a
   });
   const mismatched = await readQuotaSettlement(request(mismatchedRuntime));
   assert.equal((mismatched.writeback as any).payload.ok, false);
+
+  for (const evidenceIds of [
+    "evidence-runtime-boundary",
+    { evidence: "runtime-boundary" },
+    ["evidence-runtime-boundary", "invalid evidence id"],
+  ]) {
+    const malformedRuntime = await fixture({
+      writeback: true,
+      writebackOutcome: "outcome_gap",
+      progressObservation: {
+        schema_version: "typed_progress_observation_v0",
+        result_class: "blocked",
+        work_item_id: todoId,
+        blocker_id: "blocker-runtime-boundary",
+        evidence_ids: evidenceIds,
+      },
+    });
+    const malformed = await readQuotaSettlement(request(malformedRuntime));
+    assert.equal((malformed.writeback as any).payload.ok, false);
+  }
 });
 
 test("rejects a guard bound to another Todo", async () => {

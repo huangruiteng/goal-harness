@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import shlex
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -16,6 +15,7 @@ from ..todos.contract import (
 from .progress_result import (
     PROGRESS_OBSERVATION_SCHEMA_VERSION,
     ProgressResultClass,
+    normalize_progress_identifier,
 )
 
 REPLAN_CONTEXT_SCHEMA_VERSION = "replan_context_v0"
@@ -25,11 +25,6 @@ PROGRESS_REPEAT_TRIGGER_KIND = "typed_progress_repeat"
 PROGRESS_REPEAT_THRESHOLD = 2
 MAX_PROGRESS_EVIDENCE_IDS = 12
 MAX_COVERAGE_LEDGER_ITEMS = 6
-
-# This expression validates opaque public-safe identifiers. It is deliberately
-# not used to classify prose or infer progress semantics.
-_STABLE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
-
 
 SEMANTIC_DIMENSIONS = (
     "surface_id",
@@ -77,7 +72,7 @@ def _stable_id(value: Any, *, field: str, required: bool = False) -> str | None:
         if required:
             raise ValueError(f"{field} is required")
         return None
-    if not _STABLE_ID.fullmatch(normalized):
+    if normalize_progress_identifier(normalized) is None:
         raise ValueError(
             f"{field} must be an opaque 1-128 character public-safe identifier"
         )

@@ -7,6 +7,7 @@ from typing import Any
 from .progress_result import (
     PROGRESS_OBSERVATION_SCHEMA_VERSION,
     ProgressResultClass,
+    normalize_progress_identifier,
 )
 
 
@@ -73,21 +74,25 @@ def qualifies_turn_scoped_blocker_settlement(
     if (
         normalize_delivery_outcome(delivery_outcome) != DeliveryOutcome.OUTCOME_GAP
         or not isinstance(progress_observation, Mapping)
-        or not str(work_item_id or "").strip()
+        or progress_observation.get("schema_version")
+        != PROGRESS_OBSERVATION_SCHEMA_VERSION
+        or not isinstance(progress_observation.get("evidence_ids"), list)
+        or normalize_progress_identifier(work_item_id) is None
     ):
         return False
     observation = dict(progress_observation)
-    if observation.get("schema_version") != PROGRESS_OBSERVATION_SCHEMA_VERSION:
-        return False
+    normalized_work_item_id = normalize_progress_identifier(work_item_id)
     if (
         observation.get("result_class") != ProgressResultClass.BLOCKED.value
-        or not observation.get("blocker_id")
-        or observation.get("work_item_id") != str(work_item_id).strip()
+        or normalize_progress_identifier(observation.get("blocker_id")) is None
+        or normalize_progress_identifier(observation.get("work_item_id"))
+        != normalized_work_item_id
     ):
         return False
     evidence_ids = observation.get("evidence_ids")
-    return isinstance(evidence_ids, list) and any(
-        str(evidence_id or "").strip() for evidence_id in evidence_ids
+    return isinstance(evidence_ids, list) and bool(evidence_ids) and all(
+        normalize_progress_identifier(evidence_id) is not None
+        for evidence_id in evidence_ids
     )
 
 
