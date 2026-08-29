@@ -8,6 +8,10 @@ from typing import Any
 
 from ...history import load_registry
 from ...paths import resolve_runtime_root
+from ..goals.active_state_event_projection import (
+    state_event_log_candidates as _state_event_log_candidates,
+)
+from ..goals.path_resolution import resolve_goal_local_path
 from ..todos.contract import normalize_todo_id
 from ..todos.handoff_mode import HANDOFF_MODE_LEGACY
 from .local_lease_record import TASK_LEASE_SCHEMA_VERSION, TaskLeaseError
@@ -56,8 +60,6 @@ def _task_lease_authority_source_paths(
 ) -> tuple[dict[str, Any] | None, Path | None, list[tuple[str, Path]]]:
     from ...rollout_event_log import rollout_event_log_path
     from ...state_refresh import resolve_goal_state
-    from ...status import state_event_log_candidates
-
     sources: list[tuple[str, Path]] = [("registry", registry_path)]
     goal = _registry_goal(registry, goal_id)
     if goal is None:
@@ -73,7 +75,11 @@ def _task_lease_authority_source_paths(
         return goal, None, sources
     sources.append(("active_state", state_file))
     for index, path in enumerate(
-        state_event_log_candidates(goal, state_path=state_file)
+        _state_event_log_candidates(
+            goal,
+            state_path=state_file,
+            resolve_goal_local_path=resolve_goal_local_path,
+        )
     ):
         sources.append((f"state_event_{index}", path))
     projection_runtime_root = resolve_runtime_root(
