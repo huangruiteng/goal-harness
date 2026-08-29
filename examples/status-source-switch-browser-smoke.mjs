@@ -119,8 +119,10 @@ async function main() {
     await installStatusRoute("http://127.0.0.1:8876/status.json", "8876");
     await installStatusRoute("http://127.0.0.1:8976/status.json", "8976");
 
-    await page.goto(`${appUrl}?statusUrl=/status.json`, { waitUntil: "networkidle" });
+    await page.goto(appUrl, { waitUntil: "networkidle" });
     await page.getByText("Local Goal Only", { exact: true }).first().waitFor({ state: "visible", timeout: 10_000 });
+    if ((state.statusRequestsByPort.get("local") ?? 0) === 0) throw new Error("The bare Dashboard did not request its same-origin /status.json source");
+    if ((state.statusRequestsByPort.get("8766") ?? 0) !== 0) throw new Error("The bare Dashboard bypassed the Vite proxy and requested browser-local port 8766");
     const sourceSelect = page.getByLabel("选择控制面来源");
 
     const remoteAStatusGate = deferred();
