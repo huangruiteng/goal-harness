@@ -35,13 +35,11 @@ from ..control_plane.scheduler.execution_context import (
 )
 from ..control_plane.turn_driver import (
     LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
-    LOOPX_TURN_JOURNAL_INSPECTION_SCHEMA_VERSION,
     LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
     TurnRecoveryBlockedError,
     build_loopx_turn_command_validator,
     build_loopx_turn_plan,
     codex_cli_session_binding,
-    inspect_loopx_turn_journal,
     load_loopx_turn_plan_from_journal,
     run_codex_cli_host,
     run_loopx_turn_once,
@@ -56,11 +54,12 @@ from .lark_inbox import (
     dispatch_goal_lark_turn_start_hooks,
 )
 from .turn_registration import register_turn_commands as register_turn_commands
+from .turn_inspection import handle_turn_journal_inspection
 from .turn_rendering import (
     render_loopx_turn_execution_markdown as _render_loopx_turn_execution_markdown,
-    render_loopx_turn_journal_inspection_markdown as _render_loopx_turn_journal_inspection_markdown,
     render_loopx_turn_plan_markdown as _render_loopx_turn_plan_markdown,
 )
+from .turn_selection import turn_controller_advisory_primary
 
 EXACT_SETTLEMENT_READBACK_NOT_FOUND = (
     "exact settlement readback unexpectedly returned not-found"
@@ -73,44 +72,6 @@ PrintPayload = Callable[
 FormatSelector = Callable[..., str]
 
 
-def _turn_controller_advisory_primary(
-    decision: Mapping[str, Any],
-) -> tuple[str, dict[str, Any]] | None:
-    """Resolve the default for Turn's model-free outer-controller phase."""
-
-    interaction = decision.get("interaction_contract")
-    cli_channel = (
-        interaction.get("cli_channel")
-        if isinstance(interaction, Mapping)
-        else None
-    )
-    if not isinstance(cli_channel, Mapping) or (
-        cli_channel.get("selection_required") is not True
-    ):
-        return None
-    portfolio = decision.get("action_portfolio")
-    if not isinstance(portfolio, Mapping) or (
-        portfolio.get("schema_version") != "quota_action_portfolio_v2"
-    ):
-        raise ValueError(
-            "Turn action selection requires a typed advisory action portfolio"
-        )
-    policy = portfolio.get("selection_policy")
-    primary = portfolio.get("primary")
-    todo_id = (
-        str(primary.get("todo_id") or "").strip()
-        if isinstance(primary, Mapping)
-        else ""
-    )
-    if (
-        not isinstance(policy, Mapping)
-        or policy.get("requires_explicit_turn_binding") is not True
-        or not todo_id
-    ):
-        raise ValueError("Turn advisory action portfolio has no bindable primary")
-    return todo_id, dict(portfolio)
-
-
 def handle_turn_command(
     args: argparse.Namespace,
     *,
@@ -121,38 +82,15 @@ def handle_turn_command(
 ) -> int | None:
     if args.command != "turn":
         return None
-    if args.turn_command == "inspect-journal":
-        try:
-            runtime_root = resolve_status_projection_cache_runtime_root(
-                registry_path=registry_path,
-                runtime_root_override=runtime_root_arg,
-            )
-            payload = inspect_loopx_turn_journal(
-                runtime_root,
-                goal_id=args.goal_id,
-                agent_id=args.agent_id,
-                turn_key=args.turn_key,
-                retry_failed=bool(args.retry_failed_turn),
-                session_binding_resolver=(
-                    lambda turn_envelope: codex_cli_session_binding(
-                        runtime_root,
-                        turn_envelope,
-                    )
-                ),
-            )
-        except Exception as exc:  # noqa: BLE001 - typed CLI failure boundary
-            payload = {
-                "ok": False,
-                "schema_version": LOOPX_TURN_JOURNAL_INSPECTION_SCHEMA_VERSION,
-                "error": str(exc),
-                "effects": [],
-            }
-        print_payload(
-            payload,
-            output_format(args),
-            _render_loopx_turn_journal_inspection_markdown,
-        )
-        return 0 if payload.get("ok") else 1
+    inspection_result = handle_turn_journal_inspection(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=runtime_root_arg,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if inspection_result is not None:
+        return inspection_result
     try:
         scan_roots = [Path(item).expanduser() for item in args.scan_path]
         if not scan_roots:
@@ -205,7 +143,7 @@ def handle_turn_command(
             )
 
         decision = build_turn_decision()
-        controller_default = _turn_controller_advisory_primary(decision)
+        controller_default = turn_controller_advisory_primary(decision)
         if controller_default is not None:
             primary_todo_id, advisory_portfolio = controller_default
             decision = build_turn_decision(

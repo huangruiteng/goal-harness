@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable, Mapping, Sequence
-from importlib import import_module
 from pathlib import Path
 
 from ..capabilities.explore.activation import (
@@ -34,10 +33,6 @@ from ..control_plane.work_items.semantic_replan_writeback import (
 from ..extensions.lark.goal_channel_lifecycle import (
     goal_channel_gate_sync_failure,
     sync_human_gate_after_refresh,
-)
-from ..extensions.runtime import (
-    default_extension_state_file,
-    resolve_extension_activation,
 )
 from ..feedback import (
     LESSON_KINDS,
@@ -70,6 +65,10 @@ from .post_writeback import (
     PostWritebackProjectionBuilder,
     dispatch_committed_cli_post_writeback_hooks,
 )
+from .project_lifecycle_sinks import (
+    apply_external_sink_postcondition,
+    lark_explore_graph_syncer,
+)
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -94,66 +93,6 @@ INLINE_VISION_FIELDS = {
     "vision_dreaming_policy": "dreaming_policy",
     "vision_last_patch": "last_patch_summary",
 }
-
-
-def _lark_explore_graph_syncer(
-    runtime_root_arg: str | None,
-    *,
-    registry_path: Path,
-) -> Callable[..., Mapping[str, object]]:
-    extension_runtime_root = resolve_runtime_root(
-        load_registry(registry_path), runtime_root_arg
-    )
-
-    def sync(**kwargs: object) -> Mapping[str, object]:
-        implementation = import_module(
-            "loopx.extensions.lark.presentation.explore_results"
-        )
-        preview_kwargs = dict(kwargs)
-        preview_kwargs["execute"] = False
-        preview = dict(
-            implementation.sync_issue_fix_explore_on_material_change(
-                **preview_kwargs
-            )
-        )
-        if preview.get("status") in {"not_applicable", "not_configured"}:
-            return preview
-
-        provider = import_module("loopx.extensions.lark")
-        activation = resolve_extension_activation(
-            str(provider.LARK_EXTENSION_ID),
-            state_file=default_extension_state_file(extension_runtime_root),
-            required_permissions=(str(provider.LARK_PROJECTION_SINK_PERMISSION),),
-        )
-        result = (
-            dict(implementation.sync_issue_fix_explore_on_material_change(**kwargs))
-            if kwargs.get("execute")
-            else preview
-        )
-        result["extension_activation"] = activation
-        return result
-
-    return sync
-
-
-def _apply_external_sink_postcondition(
-    payload: dict[str, object],
-    *,
-    sink_result: Mapping[str, object],
-    warning: str,
-    error: str,
-) -> None:
-    postcondition = (
-        sink_result.get("delivery_postcondition")
-        if isinstance(sink_result.get("delivery_postcondition"), Mapping)
-        else {}
-    )
-    if not sink_result.get("enabled") or postcondition.get("satisfied"):
-        return
-    payload.setdefault("warnings", []).append(warning)
-    if postcondition.get("blocks_delivery"):
-        payload["ok"] = False
-        payload["error"] = error
 
 
 def _inline_agent_vision_packet(args: argparse.Namespace) -> dict[str, object] | None:
@@ -915,13 +854,13 @@ def handle_project_lifecycle_command(
                 external_sink_delivery_authorized=not bool(
                     args.suppress_external_sinks
                 ),
-                syncer=_lark_explore_graph_syncer(
+                syncer=lark_explore_graph_syncer(
                     args.runtime_root,
                     registry_path=registry_path,
                 ),
             )
             payload["explore_graph_sync"] = graph_sync
-            _apply_external_sink_postcondition(
+            apply_external_sink_postcondition(
                 payload,
                 sink_result=graph_sync,
                 warning=(
@@ -949,7 +888,7 @@ def handle_project_lifecycle_command(
                     goal_id=args.goal_id,
                 )
             payload["goal_channel_gate_sync"] = gate_sync
-            _apply_external_sink_postcondition(
+            apply_external_sink_postcondition(
                 payload,
                 sink_result=gate_sync,
                 warning=(
