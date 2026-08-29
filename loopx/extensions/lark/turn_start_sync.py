@@ -25,7 +25,7 @@ from .event_collector_runtime import (
     _profile_app_id,
     _sender_identity,
 )
-from .event_inbox import MESSAGE_ID_PATTERN
+from .event_inbox import MESSAGE_ID_PATTERN, ROUTE_KEY_PATTERN
 from .group_history import (
     _canonical_events,
     _page_digest,
@@ -64,17 +64,16 @@ def _timestamp(value: datetime) -> str:
 
 
 def _cursor_path(project: Path, *, route_key: str, source_fingerprint: str) -> Path:
+    if not ROUTE_KEY_PATTERN.fullmatch(route_key):
+        raise ValueError("Lark turn-start sync route key is invalid")
     match = SOURCE_FINGERPRINT_PATTERN.fullmatch(source_fingerprint)
     if match is None:
         raise ValueError("Lark turn-start sync source fingerprint is invalid")
-    return (
-        project
-        / ".loopx"
-        / "inbox"
-        / ".turn-start"
-        / route_key
-        / f"{match.group(1)}.json"
-    )
+    trusted_root = (project / ".loopx" / "inbox" / ".turn-start").resolve()
+    cursor_path = (trusted_root / route_key / f"{match.group(1)}.json").resolve()
+    if not cursor_path.is_relative_to(trusted_root):
+        raise ValueError("Lark turn-start sync cursor path escapes its private root")
+    return cursor_path
 
 
 def _load_cursor(
@@ -200,6 +199,94 @@ def _bounded_reaction_message_ids(
     return selected, len(message_ids) - len(selected)
 
 
+def _read_provider_events(
+    *,
+    runner: Runner,
+    argv: list[str],
+    route_key: str,
+    chat_id: str,
+    command_prefix: list[str],
+    profile: str,
+) -> tuple[dict[str, Any] | None, tuple[list[dict[str, Any]], bool, str | None, int, int]]:
+    """Read and canonicalize one provider page behind a compact failure contract."""
+
+    try:
+        provider = runner(
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return (
+            {
+                "ok": False,
+                "status": "provider_unavailable",
+                "error_code": "provider_unavailable",
+                "external_read_performed": False,
+                "local_private_state_mutated": False,
+            },
+            ([], False, None, 0, 0),
+        )
+    if provider.returncode != 0:
+        failed = _provider_failure(provider, route_key=route_key)
+        return (
+            {
+                "ok": False,
+                "status": str(failed["status"]),
+                "error_code": str(failed["status"]),
+                "external_read_performed": bool(failed["external_read_performed"]),
+                "local_private_state_mutated": False,
+            },
+            ([], False, None, 0, 0),
+        )
+    try:
+        payload = json.loads(provider.stdout)
+        messages, has_more, next_page_token = _provider_page(payload)
+        profile_app_id = (
+            _profile_app_id(
+                runner=runner,
+                command_prefix=command_prefix,
+                profile=profile,
+            )
+            if any(_sender_identity(message)[0] == "app" for message in messages)
+            else None
+        )
+        events, skipped_count, invalid_count, self_message_skipped_count = (
+            _canonical_events(
+                messages,
+                chat_id=chat_id,
+                profile_app_id=profile_app_id,
+            )
+        )
+    except (json.JSONDecodeError, TypeError, ValueError):
+        invalid_count = 1
+        events, has_more, next_page_token = [], False, None
+        skipped_count = self_message_skipped_count = 0
+    if invalid_count:
+        return (
+            {
+                "ok": False,
+                "status": "provider_contract_error",
+                "error_code": "provider_contract_error",
+                "external_read_performed": True,
+                "local_private_state_mutated": False,
+            },
+            ([], False, None, 0, 0),
+        )
+    return (
+        None,
+        (
+            events,
+            has_more,
+            next_page_token,
+            skipped_count,
+            self_message_skipped_count,
+        ),
+    )
+
+
 def _route_receipt(
     *,
     project: str | Path,
@@ -250,72 +337,24 @@ def _route_receipt(
                 state=state,
                 page_size=page_size,
             )
-            try:
-                provider = runner(
-                    argv,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=30,
-                )
-            except (OSError, subprocess.SubprocessError):
-                return {
-                    "ok": False,
-                    "status": "provider_unavailable",
-                    "error_code": "provider_unavailable",
-                    "external_read_performed": False,
-                    "local_private_state_mutated": False,
-                }
-            if provider.returncode != 0:
-                failed = _provider_failure(provider, route_key=route_key)
-                return {
-                    "ok": False,
-                    "status": str(failed["status"]),
-                    "error_code": str(failed["status"]),
-                    "external_read_performed": bool(failed["external_read_performed"]),
-                    "local_private_state_mutated": False,
-                }
-            try:
-                payload = json.loads(provider.stdout)
-                messages, has_more, next_page_token = _provider_page(payload)
-                command_prefix = _executable_prefix(lark_cli_executable)
-                profile_app_id = (
-                    _profile_app_id(
-                        runner=runner,
-                        command_prefix=command_prefix,
-                        profile=str(config["profile"]),
-                    )
-                    if any(
-                        _sender_identity(message)[0] == "app" for message in messages
-                    )
-                    else None
-                )
-                (
-                    events,
-                    skipped_count,
-                    invalid_count,
-                    self_message_skipped_count,
-                ) = _canonical_events(
-                    messages,
-                    chat_id=str(route["chat_id"]),
-                    profile_app_id=profile_app_id,
-                )
-            except (json.JSONDecodeError, TypeError, ValueError):
-                return {
-                    "ok": False,
-                    "status": "provider_contract_error",
-                    "error_code": "provider_contract_error",
-                    "external_read_performed": True,
-                    "local_private_state_mutated": False,
-                }
-            if invalid_count:
-                return {
-                    "ok": False,
-                    "status": "provider_contract_error",
-                    "error_code": "provider_contract_error",
-                    "external_read_performed": True,
-                    "local_private_state_mutated": False,
-                }
+            command_prefix = _executable_prefix(lark_cli_executable)
+            failure, provider_page = _read_provider_events(
+                runner=runner,
+                argv=argv,
+                route_key=route_key,
+                chat_id=str(route["chat_id"]),
+                command_prefix=command_prefix,
+                profile=str(config["profile"]),
+            )
+            if failure is not None:
+                return failure
+            (
+                events,
+                has_more,
+                next_page_token,
+                skipped_count,
+                self_message_skipped_count,
+            ) = provider_page
             newly_missing = [
                 event
                 for event in events
