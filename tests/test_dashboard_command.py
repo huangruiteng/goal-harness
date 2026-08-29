@@ -5,7 +5,9 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -411,6 +413,53 @@ def test_dashboard_launcher_honors_configured_python_runtime(
     commands = python_log.read_text(encoding="utf-8")
     assert "-m loopx.cli serve-status" in commands
     assert "-m loopx.cli chat" in commands
+
+
+def test_dashboard_launcher_preserves_early_service_error_context(
+    tmp_path: Path,
+) -> None:
+    release_root, dashboard_script, fake_bin = _prepare_dashboard_runtime_fixture(
+        tmp_path
+    )
+    python_wrapper = tmp_path / "python-wrapper"
+    python_wrapper.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "-m" && "$*" == *"serve-status"* ]]; then\n'
+        '  echo "distinct status startup failure" >&2\n'
+        "  exit 42\n"
+        "fi\n"
+        'if [[ "$1" == "-m" && "$*" == *" chat "* ]]; then\n'
+        "  while true; do sleep 1; done\n"
+        "fi\n"
+        f'exec "{sys.executable}" "$@"\n',
+        encoding="utf-8",
+    )
+    python_wrapper.chmod(0o755)
+
+    started_at = time.monotonic()
+    completed = subprocess.run(
+        ["bash", str(dashboard_script)],
+        cwd=release_root,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "LOOPX_PYTHON": str(python_wrapper),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=5,
+    )
+    elapsed = time.monotonic() - started_at
+
+    assert completed.returncode == 1
+    assert elapsed < 5
+    assert "distinct status startup failure" in completed.stderr
+    assert (
+        "LoopX status service exited before it became ready (exit status 42)."
+        in completed.stderr
+    )
+    assert "The original service error output is shown above." in completed.stderr
 
 
 def test_dashboard_launcher_selects_a_compatible_nvm_node(
