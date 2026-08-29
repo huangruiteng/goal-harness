@@ -10,7 +10,6 @@ from loopx.control_plane.work_items import task_lease
 from loopx.control_plane.work_items.task_lease import (
     MAX_TASK_LEASE_TTL_SECONDS,
     TaskLeaseError,
-    acquire_task_lease,
     assert_expected_version,
     normalize_idempotency_key,
     normalize_ttl_seconds,
@@ -148,7 +147,7 @@ def test_bool_disguised_lease_integers_fail_closed() -> None:
         assert error.value.code == "corrupt_lease"
 
 
-def test_task_lease_lifecycle_preserves_idempotency_and_versions(
+def test_retained_task_lease_lifecycle_preserves_versions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -165,36 +164,31 @@ def test_task_lease_lifecycle_preserves_idempotency_and_versions(
         "task_lease_owner_constraint",
         lambda *_args, **_kwargs: {"effective": True},
     )
-    monkeypatch.setattr(task_lease, "active_conflicts", lambda **_: [])
     registry_path = tmp_path / "registry.json"
     runtime_root = tmp_path / "runtime"
-    arguments = {
-        "registry_path": registry_path,
-        "runtime_root": runtime_root,
-        "goal_id": "goal-a",
-        "todo_id": "todo_leasea",
-        "owner": "agent-a",
-        "idempotency_key": "turn-1",
-        "ttl_seconds": 120,
-        "write_scopes": ["loopx/**"],
-    }
-
-    acquired = acquire_task_lease(**arguments)
-    assert acquired["acquired"] is True
-    assert acquired["lease"]["version"] == 1
-    assert acquired["lease"]["lease_epoch"] == 1
-    assert acquired["lease"]["expires_at"] == (
-        now + timedelta(seconds=120)
-    ).isoformat().replace("+00:00", "Z")
-
-    repeated = acquire_task_lease(**arguments)
-    assert repeated["idempotent"] is True
-    assert repeated["lease"]["version"] == 1
-    assert repeated["lease"]["lease_epoch"] == 1
-
-    with pytest.raises(TaskLeaseError) as reuse_error:
-        acquire_task_lease(**{**arguments, "ttl_seconds": 600})
-    assert reuse_error.value.code == "idempotency_key_reuse"
+    lease_path = task_lease.task_lease_path(
+        runtime_root=runtime_root,
+        goal_id="goal-a",
+        todo_id="todo_leasea",
+    )
+    task_lease.write_lease(
+        lease_path,
+        task_lease.build_lease(
+            goal_id="goal-a",
+            todo_id="todo_leasea",
+            owner="agent-a",
+            idempotency_key="turn-1",
+            write_scopes=["loopx/**"],
+            acquire_ttl_seconds=120,
+            version=1,
+            lease_epoch=1,
+            acquired_at=now.isoformat().replace("+00:00", "Z"),
+            updated_at=now.isoformat().replace("+00:00", "Z"),
+            expires_at=(now + timedelta(seconds=120))
+            .isoformat()
+            .replace("+00:00", "Z"),
+        ),
+    )
 
     with pytest.raises(TaskLeaseError) as renew_without_version:
         renew_task_lease(
@@ -260,9 +254,9 @@ def test_task_lease_lifecycle_preserves_idempotency_and_versions(
     assert released["lease"]["released_at"] == now.isoformat().replace("+00:00", "Z")
     assert released["lease"]["updated_at"] == released["lease"]["released_at"]
     assert task_lease.lease_is_active(released["lease"], at=now) is False
-    lease_path = Path(str(released["lease_path"]))
-    assert lease_path.exists()
-    assert task_lease.read_lease(lease_path) == released["lease"]
+    persisted_path = Path(str(released["lease_path"]))
+    assert persisted_path.exists()
+    assert task_lease.read_lease(persisted_path) == released["lease"]
 
     replayed_release = release_task_lease(
         runtime_root=runtime_root,
@@ -276,46 +270,23 @@ def test_task_lease_lifecycle_preserves_idempotency_and_versions(
     assert replayed_release["idempotent"] is True
     assert replayed_release["lease"] == released["lease"]
 
-    with pytest.raises(TaskLeaseError) as retired_key:
-        acquire_task_lease(
-            **{
-                **arguments,
-                "owner": "agent-b",
-                "idempotency_key": "turn-2",
-            }
-        )
-    assert retired_key.value.code == "idempotency_key_reuse"
-
-    reacquired = acquire_task_lease(
-        **{
-            **arguments,
-            "owner": "agent-b",
-            "idempotency_key": "turn-3",
-        }
-    )
-    assert reacquired["acquired"] is True
-    assert reacquired["lease"]["version"] == 4
-    assert reacquired["lease"]["lease_epoch"] == 3
-
     with pytest.raises(TaskLeaseError) as missing_version:
         release_task_lease(
             runtime_root=runtime_root,
             goal_id="goal-a",
             todo_id="todo_leasea",
             owner="agent-b",
-            idempotency_key="turn-3",
+            idempotency_key="turn-2",
         )
     assert missing_version.value.code == "version_required"
 
 
-def test_legacy_generation_and_unrelated_ttl_do_not_block_release_or_reacquire(
+def test_legacy_generation_and_unrelated_ttl_do_not_block_release(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = datetime(2026, 7, 13, tzinfo=timezone.utc)
     monkeypatch.setattr(task_lease, "now_utc", lambda: now)
-    monkeypatch.setattr(task_lease, "require_task_lease_owner_allowed", lambda **_: {})
-    monkeypatch.setattr(task_lease, "active_conflicts", lambda **_: [])
     runtime_root = tmp_path / "runtime"
     lease_path = task_lease.task_lease_path(
         runtime_root=runtime_root,
@@ -351,86 +322,3 @@ def test_legacy_generation_and_unrelated_ttl_do_not_block_release_or_reacquire(
         expected_version=7,
     )
     assert released["lease"]["lease_epoch"] == 1
-
-    reacquired = acquire_task_lease(
-        registry_path=tmp_path / "registry.json",
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        todo_id="todo_legacy",
-        owner="agent-a",
-        idempotency_key="new-key",
-        ttl_seconds=120,
-        expected_version=7,
-    )
-    assert reacquired["lease"]["version"] == 8
-    assert reacquired["lease"]["lease_epoch"] == 2
-
-
-def test_corrupt_lease_version_fields_fail_closed(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Hand-corrupted lease records are typed rejections, not silent input.
-
-    Disclosed behavior change of the local-record extraction: an expired
-    record with a negative version was previously accepted (the next acquire
-    kept counting from it), and a non-integer version or replay-fingerprint
-    ``acquire_ttl_seconds`` surfaced as a raw ``ValueError``. Every lease verb
-    now reads these fields through one normalizer that fails closed as
-    ``corrupt_lease``.
-    """
-
-    now = datetime(2026, 7, 13, tzinfo=timezone.utc)
-    monkeypatch.setattr(task_lease, "now_utc", lambda: now)
-    monkeypatch.setattr(task_lease, "require_task_lease_owner_allowed", lambda **_: {})
-    monkeypatch.setattr(task_lease, "active_conflicts", lambda **_: [])
-    runtime_root = tmp_path / "runtime"
-    lease_path = task_lease.task_lease_path(
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        todo_id="todo_corrupt",
-    )
-
-    def record(version: object, *, ttl: object = 120, expired: bool) -> dict[str, Any]:
-        stamp = now - timedelta(seconds=240)
-        expires = now + (timedelta(seconds=-120) if expired else timedelta(seconds=120))
-        return {
-            "schema_version": "task_lease_v0",
-            "goal_id": "goal-a",
-            "todo_id": "todo_corrupt",
-            "owner": "agent-a",
-            "idempotency_key": "stale-key",
-            "write_scopes": [],
-            "acquire_ttl_seconds": ttl,
-            "version": version,
-            "status": "active",
-            "acquired_at": stamp.isoformat().replace("+00:00", "Z"),
-            "updated_at": stamp.isoformat().replace("+00:00", "Z"),
-            "expires_at": expires.isoformat().replace("+00:00", "Z"),
-        }
-
-    def acquire(key: str = "new-key") -> dict[str, Any]:
-        return acquire_task_lease(
-            registry_path=tmp_path / "registry.json",
-            runtime_root=runtime_root,
-            goal_id="goal-a",
-            todo_id="todo_corrupt",
-            owner="agent-a",
-            idempotency_key=key,
-            ttl_seconds=120,
-        )
-
-    task_lease.write_lease(lease_path, record(-5, expired=True))
-    with pytest.raises(TaskLeaseError) as error:
-        acquire()
-    assert error.value.code == "corrupt_lease"
-
-    task_lease.write_lease(lease_path, record("not-a-version", expired=True))
-    with pytest.raises(TaskLeaseError) as error:
-        acquire()
-    assert error.value.code == "corrupt_lease"
-
-    task_lease.write_lease(lease_path, record(7, ttl="not-a-ttl", expired=False))
-    with pytest.raises(TaskLeaseError) as error:
-        acquire(key="stale-key")
-    assert error.value.code == "corrupt_lease"

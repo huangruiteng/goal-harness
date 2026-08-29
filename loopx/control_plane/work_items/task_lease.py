@@ -11,7 +11,7 @@ from ...agent_registry import (
     registered_agent_ids_from_registry,
     require_registered_agent_id,
 )
-from ...file_lock import exclusive_file_lock
+from ...file_lock import exclusive_cross_runtime_file_lock as exclusive_file_lock
 from ...history import load_registry
 from ...paths import resolve_runtime_root
 from ..runtime.time import now_utc as runtime_now_utc
@@ -21,7 +21,6 @@ from ..coordination.authority_core import (
     DecisionOutcome,
     HandoffMode,
     LeaseAction,
-    LeaseAcquireCommand,
     LeaseFence,
     LeaseModeGateCommand,
     LeaseOwnerEligibilityCommand,
@@ -59,7 +58,7 @@ from .local_lease_record import (
     TaskLeaseError,
     assert_expected_version as assert_expected_version,
     build_lease,
-    lease_acquire_ttl_seconds,
+    lease_acquire_ttl_seconds as lease_acquire_ttl_seconds,
     lease_epoch,
     lease_version,
     read_lease,
@@ -670,7 +669,10 @@ def release_verified_task_lease_fence(
     fence["released"] = True
 
 
-def runtime_root_from_registry(registry_path: Path, runtime_root_override: str | None) -> Path:
+def runtime_root_from_registry(
+    registry_path: Path,
+    runtime_root_override: str | None,
+) -> Path:
     registry = load_registry(registry_path)
     return resolve_runtime_root(registry, runtime_root_override)
 
@@ -854,53 +856,6 @@ def write_scopes_overlap(left: list[str], right: list[str]) -> bool:
     return core_write_scopes_overlap(left_scopes, right_scopes)
 
 
-def active_conflicts(
-    *,
-    registry_path: Path,
-    runtime_root: Path,
-    goal_id: str,
-    todo_id: str,
-    write_scopes: list[str],
-    at: datetime,
-) -> list[dict[str, Any]]:
-    conflicts: list[dict[str, Any]] = []
-    registered_agents = registered_agent_ids_from_registry(registry_path, goal_id)
-    lease_dir = task_lease_dir(runtime_root=runtime_root, goal_id=goal_id)
-    if not lease_dir.exists():
-        return conflicts
-    for path in sorted(lease_dir.glob("todo_*.json")):
-        lease = read_lease(path)
-        if not lease_is_active(lease, at=at):
-            continue
-        lease_todo_id = normalize_lease_todo_id(lease.get("todo_id"))
-        if lease_todo_id == todo_id:
-            continue
-        todo = task_lease_todo_projection(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            todo_id=lease_todo_id,
-        )
-        if task_lease_owner_constraint(
-            todo,
-            owner=lease.get("owner"),
-            registered_agents=registered_agents,
-        ).get("effective") is not True:
-            continue
-        if write_scopes_overlap(write_scopes, normalize_required_write_scopes(lease.get("write_scopes"))):
-            conflicts.append(
-                {
-                    "todo_id": lease.get("todo_id"),
-                    "owner": lease.get("owner"),
-                    "expires_at": lease.get("expires_at"),
-                    "version": lease.get("version"),
-                    "lease_epoch": lease_epoch(lease),
-                    "write_scopes": lease.get("write_scopes") or [],
-                    "lease_path": str(path),
-                }
-            )
-    return conflicts
-
-
 def _raise_lease_transition(
     *,
     code: str,
@@ -939,178 +894,40 @@ def acquire_task_lease(
     write_scopes: list[str] | None = None,
     expected_version: int | None = None,
 ) -> dict[str, Any]:
-    goal_id = normalize_goal_id(goal_id)
-    todo_id = normalize_lease_todo_id(todo_id)
-    owner = normalize_owner(owner)
-    idempotency_key = normalize_idempotency_key(idempotency_key)
-    ttl = normalize_ttl_seconds(ttl_seconds)
-    normalized_write_scopes = normalize_required_write_scopes(write_scopes)
-    lease_dir = task_lease_dir(runtime_root=runtime_root, goal_id=goal_id)
-    lock_target = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
-    lease_path = task_lease_path(runtime_root=runtime_root, goal_id=goal_id, todo_id=todo_id)
-    at = now_utc()
-    with exclusive_file_lock(
-        lock_target,
-        agent_id=owner,
-        operation="task_lease_acquire",
-    ):
-        handoff_mode = _require_lease_mutation_allowed_by_handoff_mode(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            action="acquire",
-        )
-        todo = require_task_lease_owner_allowed(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            owner=owner,
-        )
-        registered_agents = registered_agent_ids_from_registry(
-            registry_path,
-            goal_id,
-        )
-        if owner not in registered_agents:
-            # ``require_task_lease_owner_allowed`` already proved this owner.
-            # Preserve that result across a registry reread (and focused
-            # adapters that replace the guard with an equivalent stub).
-            registered_agents.append(owner)
-        existing = read_lease(lease_path)
-        command = LeaseAcquireCommand(
-            owner=owner,
-            idempotency_key=idempotency_key,
-            ttl_seconds=ttl,
-            write_scopes=tuple(normalized_write_scopes),
-            expected_version=expected_version,
-        )
-        snapshot = lease_coordination_snapshot(
-            handoff_mode=handoff_mode,
-            registered_agents=registered_agents,
-            todo=todo,
-            lease=existing,
-            lease_active=lease_is_active(existing, at=at),
-            lease_version=lease_version(existing),
-            lease_epoch=lease_epoch(existing),
-            lease_acquire_ttl_seconds=(
-                lease_acquire_ttl_seconds(existing)
-                if lease_is_active(existing, at=at)
-                and (existing or {}).get("owner") == owner
-                and (existing or {}).get("idempotency_key") == idempotency_key
-                else None
-            ),
-        )
-        transition = decide(snapshot, command)
-        if transition.outcome is DecisionOutcome.NO_CHANGE:
-            return {
-                "ok": True,
-                "schema_version": TASK_LEASE_SCHEMA_VERSION,
-                "action": "acquire",
-                "acquired": False,
-                "idempotent": True,
-                "lease": existing,
-                "lease_path": str(lease_path),
-                "handoff_mode": handoff_mode,
+    from .task_lease_acquire_adapter import execute_native_task_lease_acquire
+
+    payload = execute_native_task_lease_acquire(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        todo_id=todo_id,
+        owner=owner,
+        idempotency_key=idempotency_key,
+        ttl_seconds=ttl_seconds,
+        write_scopes=write_scopes,
+        expected_version=expected_version,
+        _legacy_provider_projection=True,
+    )
+    if payload.get("ok") is not True:
+        error_payload = {
+            key: value
+            for key, value in payload.items()
+            if key
+            not in {
+                "ok",
+                "schema_version",
+                "action",
+                "error",
+                "error_code",
+                "settlement",
             }
-        if transition.outcome is not DecisionOutcome.APPLY:
-            _raise_lease_transition(
-                code=transition.code,
-                action="acquire",
-                lease=existing,
-                lease_path=lease_path,
-                expected_version=expected_version,
-                requested_write_scopes=normalized_write_scopes,
-                requested_ttl_seconds=ttl,
-                idempotency_reuse_kind=(
-                    "retired"
-                    if existing is not None
-                    and not lease_is_active(existing, at=at)
-                    else "acquire_parameters"
-                ),
-            )
-        conflicts = active_conflicts(
-            registry_path=registry_path,
-            runtime_root=runtime_root,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            write_scopes=normalized_write_scopes,
-            at=at,
-        )
-        if conflicts:
-            transition = decide(
-                lease_coordination_snapshot(
-                    handoff_mode=handoff_mode,
-                    registered_agents=registered_agents,
-                    todo=todo,
-                    lease=existing,
-                    lease_active=lease_is_active(existing, at=at),
-                    lease_version=lease_version(existing),
-                    lease_epoch=lease_epoch(existing),
-                    lease_acquire_ttl_seconds=(
-                        lease_acquire_ttl_seconds(existing)
-                        if lease_is_active(existing, at=at)
-                        and (existing or {}).get("owner") == owner
-                        and (existing or {}).get("idempotency_key")
-                        == idempotency_key
-                        else None
-                    ),
-                    conflicts=conflicts,
-                ),
-                command,
-            )
-            if transition.outcome is not DecisionOutcome.APPLY:
-                _raise_lease_transition(
-                    code=transition.code,
-                    action="acquire",
-                    lease=existing,
-                    lease_path=lease_path,
-                    expected_version=expected_version,
-                    requested_write_scopes=normalized_write_scopes,
-                    requested_ttl_seconds=ttl,
-                    conflicts=conflicts,
-                    idempotency_reuse_kind=(
-                        "retired"
-                        if existing is not None
-                        and not lease_is_active(existing, at=at)
-                        else "acquire_parameters"
-                    ),
-                )
-        next_lease = (
-            transition.next_snapshot.lease
-            if transition.next_snapshot is not None
-            else None
-        )
-        if next_lease is None:
-            raise TaskLeaseError(
-                "task lease acquire produced no lease transition",
-                code="authority_transition_invalid",
-            )
-        updated_at = isoformat(at)
-        expires_at = isoformat(at + timedelta(seconds=ttl))
-        lease = build_lease(
-            goal_id=goal_id,
-            todo_id=todo_id,
-            owner=owner,
-            idempotency_key=idempotency_key,
-            write_scopes=normalized_write_scopes,
-            acquire_ttl_seconds=ttl,
-            version=next_lease.version,
-            lease_epoch=next_lease.lease_epoch,
-            acquired_at=updated_at,
-            updated_at=updated_at,
-            expires_at=expires_at,
-        )
-        lease_dir.mkdir(parents=True, exist_ok=True)
-        write_lease(lease_path, lease)
-        return {
-            "ok": True,
-            "schema_version": TASK_LEASE_SCHEMA_VERSION,
-            "action": "acquire",
-            "acquired": True,
-            "idempotent": False,
-            "lease": lease,
-            "lease_path": str(lease_path),
-            "handoff_mode": handoff_mode,
         }
+        raise TaskLeaseError(
+            str(payload.get("error") or "native task lease acquire rejected"),
+            code=str(payload.get("error_code") or "task_lease_acquire_rejected"),
+            payload=error_payload,
+        )
+    return payload
 
 
 def renew_task_lease(

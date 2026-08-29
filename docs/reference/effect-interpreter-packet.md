@@ -34,15 +34,19 @@ journal, stored plan, typed settlement identity, host result, and receipt. It
 also validates that completed phases are an ordered transaction prefix and
 exposes retained `committed`, `stopped`, and `failed` journal tombstones.
 
-`request.context.replay_legal` is the replay-legality signal. Identity,
+`request.context.replay_legal` is only the effect-free terminal replay signal. Identity,
 phase-order, and terminal-status failures appear together as stable typed
 violation values in `request.context.violations`; semantic mismatches return a
 blocked observation instead of raising an exception.
 
-`EffectObservation.should_run` remains false and `EffectNext` remains empty.
-Interpretation therefore grants no authority to execute or retry a Turn,
-schedule work, write state, or spend quota. In particular, failed-journal
-recovery with `retry_failed=True` remains owned by the Turn executor.
+`EffectObservation.should_run` remains false and `EffectNext` remains empty, so
+inspection itself never grants effect authority. The same interpreter also
+projects `recovery_decision`, which is the executor's recovery plan: its action,
+whether continuation is allowed, the phase to resume, whether Host must be
+invoked again, a typed reason, and only the checks that participated. The real
+Turn executor consumes that decision before continuing. `replay_legal=false`
+therefore does not mean that an `in_progress` or `scheduler_action_required`
+journal is unrecoverable.
 
 The public read-only consumer is:
 
@@ -54,19 +58,35 @@ loopx turn inspect-journal \
   --format json
 ```
 
+Add `--retry-failed-turn` to evaluate the same explicit failed-Turn retry used
+by `turn run-once`. When the failed Host recorded `resume_session`, inspection
+performs the current read-only Session Binding check; without an explicit retry
+request, the decision reports `failed_retry_not_requested`.
+
 It resolves only the canonical journal location. There is no arbitrary
 `--journal-path` input. The command validates selectors, takes the existing
 journal lock, schema-checks the stored JSON, and returns the versioned
-`loopx_turn_journal_inspection_v0` projection. That projection allowlists only
-the replay decision, journal status, replay legality, identity-match booleans,
-ordered phase-prefix result, completed phase ids, tombstone retention, typed
-violation ids, and the explicit effect-free marker `effects: []`.
+`loopx_turn_journal_inspection_v1` projection. Version 1 retains every v0 replay
+and integrity field and adds `journal_consistent`, `recovery_decision`, and the
+optional `last_recovery` audit. The audit contains only the adopted public-safe
+plan and its bounded actual status, completed phase ids, and Host-invocation
+boolean. It never contains Host logs, Session content, provider payloads, or
+paths.
+
+Journal consistency is fail-closed over the canonical typed settlement
+identity as well as Journal/envelope lineage and phase ordering. Settlement
+goal, agent, Turn instance, binding, and effect id must all validate and bind to
+the inspected Turn before the shared recovery decision can authorize any
+provider call. In the current Turn driver, the binding is the envelope's
+selected Todo (or adaptive primary Todo override); a different canonical Todo
+identity is still inconsistent and fails closed.
 
 JSON and Markdown render the same projection. They do not expose raw journal,
 plan, host-result, or receipt bodies; request context; capabilities;
 recommended actions; credentials; evidence; or resolved local paths. A
 successfully interpreted `replay_blocked` journal exits zero because replay
-legality is diagnostic data. Invalid selectors, missing journals, malformed
+legality and recoverability are separate diagnostic data. Invalid selectors,
+missing journals, malformed
 JSON, and unsupported schemas exit non-zero.
 
 ## Canonical Example

@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import shlex
 from collections.abc import Iterable, Mapping
-from enum import StrEnum
 from typing import Any
 
 from ...turn_identity import normalize_turn_instance_id
@@ -14,8 +12,12 @@ from ..todos.contract import (
     normalize_todo_task_domain,
     replan_successor_semantic_binding,
 )
+from .progress_result import (
+    PROGRESS_OBSERVATION_SCHEMA_VERSION,
+    ProgressResultClass,
+    normalize_progress_identifier,
+)
 
-PROGRESS_OBSERVATION_SCHEMA_VERSION = "typed_progress_observation_v0"
 REPLAN_CONTEXT_SCHEMA_VERSION = "replan_context_v0"
 REPLAN_CONTEXT_RECEIPT_SCHEMA_VERSION = "replan_context_delivery_receipt_v0"
 REPLAN_ACTION_PACKET_SCHEMA_VERSION = "replan_action_packet_v0"
@@ -23,19 +25,6 @@ PROGRESS_REPEAT_TRIGGER_KIND = "typed_progress_repeat"
 PROGRESS_REPEAT_THRESHOLD = 2
 MAX_PROGRESS_EVIDENCE_IDS = 12
 MAX_COVERAGE_LEDGER_ITEMS = 6
-
-# This expression validates opaque public-safe identifiers. It is deliberately
-# not used to classify prose or infer progress semantics.
-_STABLE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
-
-
-class ProgressResultClass(StrEnum):
-    ADVANCED = "advanced"
-    UNCHANGED = "unchanged"
-    BLOCKED = "blocked"
-    EXPLORATION_EXHAUSTED = "exploration_exhausted"
-    NO_FOLLOWUP = "no_followup"
-
 
 SEMANTIC_DIMENSIONS = (
     "surface_id",
@@ -83,7 +72,7 @@ def _stable_id(value: Any, *, field: str, required: bool = False) -> str | None:
         if required:
             raise ValueError(f"{field} is required")
         return None
-    if not _STABLE_ID.fullmatch(normalized):
+    if normalize_progress_identifier(normalized) is None:
         raise ValueError(
             f"{field} must be an opaque 1-128 character public-safe identifier"
         )

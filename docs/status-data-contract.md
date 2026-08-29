@@ -498,11 +498,12 @@ first-screen UI are `ok`, `contract`, and `attention_queue`.
 `promotion_gate`, `decision_freshness_summary`, and `usage_summary` are optional and should be
 treated as compact protocol or run-history projections, not as the ledger
 itself, authoritative billing telemetry, or a release operation source.
-`usage_summary` carries aggregate token/cost/duration when runs report usage,
-but it remains a run-history proxy, not billing of record. A
-missing `status_contract` means an older status producer; loopback dashboards
-should surface that as a daemon freshness warning rather than silently hiding
-newer panels.
+`usage_summary` carries aggregate token/cost/duration when runs report a typed
+`run_usage_v0` usage row, but it remains a run-history proxy, not billing of
+record. Malformed, negative, or non-finite usage fails closed at ingest/read rather than
+appearing as zeros. A missing `status_contract` means an older status producer;
+loopback dashboards should surface that as a daemon freshness warning rather
+than silently hiding newer panels.
 
 ## Interface Budget Cadence
 
@@ -2220,12 +2221,61 @@ projection and cannot clear the warning.
 ## Usage Summary
 
 `usage_summary` is an optional dashboard-friendly proxy derived from the same
-compact run history. When a run reports usage, the summary carries aggregate
-input/output/cache token counts, an estimated cost, and wall-time duration for
-the goal; runs that report nothing contribute nothing. It remains a proxy, not
-billing telemetry: it still excludes raw thread logs, local project paths,
-private artifact contents, or anything that would require reading a Codex
-session transcript. Only aggregate numeric usage is captured.
+compact run history. When a run carries a typed `run_usage_v0` usage row, the
+summary aggregates input/output token counts and, when measured, cache tokens,
+estimated cost, and wall-time duration for the goal; runs that report nothing
+contribute nothing. It remains a proxy, not billing telemetry: it still excludes
+raw thread logs, local project paths, private artifact contents, or anything that
+would require reading a Codex session transcript. Only aggregate numeric usage is
+captured. There is no second usage ledger — run history plus this typed row is
+the single source of truth.
+
+Hosts and writers ingest usage through
+`loopx.control_plane.quota.usage_collector.ingest_usage_into_run_record`, wired
+into `write_reserved_run_artifacts` and into the `refresh-state` run-write
+path. The first shipped measurement source is the Codex CLI session rollout:
+`loopx refresh-state --usage-codex-session <rollout.jsonl>` reads only the
+newest aggregate `token_count` totals, the model id, the session id, and event
+timestamps — never prompts, completions, or tool output. The session must be
+bound explicitly; there is no automatic session discovery, because guessing a
+concurrent session risks attributing one session's spend to another run. A
+host that measures usage itself can instead pass one finished per-run
+measurement with `--usage-json`. Without either flag, usage stays unknown.
+
+Cumulative host snapshots are converted to non-negative deltas at that
+producer boundary, and the run index append is the single commit point: each
+session's delta basis is reconstructed from its own already-booked rows
+(telescoping absolute + delta sums per session id), not from a second state
+file, so a crash or retry can never leave the basis behind the ledger.
+Baselines are per session and each observation is bound to
+`usage.source_snapshot_id`, so interleaved sessions never rebase against each
+other: a returning session books only its own increment instead of re-booking
+its full cumulative total. Basis read and row append happen under a per-goal
+usage booking lock, so concurrent refreshes cannot fund two deltas from one
+stale basis. Replaying the same snapshot identity with an identical
+observation is an idempotent zero delta; the same identity carrying any
+different counter or binding label fails closed instead of silently zeroing
+real usage. A new session starts a fresh absolute observation rather than a
+bogus reset error. Missing optional measurements stay omitted (unknown)
+rather than zero-filled. Malformed, negative, non-finite (`NaN`/`Infinity`,
+rejected at the typed builder, at the strict-JSON `--usage-json` boundary,
+and again at durable serialization, which forbids non-standard JSON
+constants), reset, or out-of-order observations fail closed with a typed
+`UsageRowError`; they are never clamped or silently dropped, and a failed
+usage observation blocks the whole refresh append. Rollout parsing tolerates
+only a torn final line (concurrent-write noise); a malformed line with valid
+events after it fails closed instead of booking a stale cumulative snapshot.
+Quota/attempt accounting rows are not reinterpreted as token or dollar usage.
+
+The typed compact usage row currently reports:
+
+- `schema_version`: must be `run_usage_v0`
+- `measurement_kind`: `absolute` or `delta`
+- `source_snapshot_id`: stable host/runtime snapshot identity for idempotent
+  replay
+- `input_tokens` / `output_tokens`: required non-negative whole numbers
+- `cache_tokens` / `cost_usd` / `duration_ms`: optional; omitted when unmeasured
+- `provider` / `model`: public-safe runtime labels
 
 The summary currently reports:
 
@@ -2245,12 +2295,13 @@ The summary currently reports:
   blocker, or gate signal.
 - `input_tokens_24h` / `input_tokens_7d`, `output_tokens_24h` /
   `output_tokens_7d`, `cache_tokens_24h` / `cache_tokens_7d`: aggregate token
-  counts for runs that report a normalized `usage` block. Metric fields are
-  omitted for a window with no normalized usage sample; a 24h field can be
-  absent while the corresponding 7d field remains present.
+  counts for runs that report a typed `run_usage_v0` block. Metric fields are
+  omitted for a window (or optional metric) with no measured sample; a 24h field
+  can be absent while the corresponding 7d field remains present.
 - `cost_usd_24h` / `cost_usd_7d`: aggregate estimated cost in USD, rounded to
-  six decimals, computed by the reporting runtime.
-- `duration_ms_24h` / `duration_ms_7d`: aggregate wall-time in milliseconds.
+  six decimals, computed by the reporting runtime when measured.
+- `duration_ms_24h` / `duration_ms_7d`: aggregate wall-time in milliseconds when
+  measured.
 - `project_share_24h`: per-goal share of observed 24h runs, rounded to three
   decimals.
 

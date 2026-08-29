@@ -227,3 +227,17 @@ locators, source bodies, raw chats, provider payloads, or credentials.
 
 For implementation details and invariants, read the
 [Decision Context architecture contract](../../../docs/reference/protocols/decision-context-architecture-v0.md).
+
+## Validate
+
+```bash
+python3 examples/decision-context-contract-smoke.py
+python3 examples/decision-material-walkthrough-smoke.py
+python3 -m pytest -q tests/test_decision_context_material.py
+```
+
+The contract smoke covers Decision Context packet and architecture readback.
+The walkthrough smoke feeds revision-bound evidence into a Material Lifecycle
+rerank preview, keeps stale/conflicting evidence visible, omits source bodies
+and private locators, and leaves apply/cursor commits as separate owner-gated
+actions.

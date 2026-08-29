@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   readFile,
+  mkdir,
   mkdtemp,
   readdir,
   rm,
@@ -91,6 +92,54 @@ async function tempRuntime(t: test.TestContext): Promise<string> {
   const runtimeRoot = await mkdtemp(join(tmpdir(), "loopx-quota-spend-commit-"));
   t.after(() => rm(runtimeRoot, { recursive: true, force: true }));
   return runtimeRoot;
+}
+
+function replayRequest(runtimeRoot: string, effectId: string) {
+  return {
+    schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+    operation: "replay",
+    runtime_root: runtimeRoot,
+    goal_id: goalId,
+    effect_id: effectId,
+    resolved_agent_id: "codex-main-control",
+  };
+}
+
+function assertConflictReplay(
+  replay: Record<string, any>,
+  indexPath: string,
+  original: Record<string, unknown>,
+) {
+  assert.equal(replay.status, "conflict");
+  assert.equal(replay.conflict, true);
+  assert.equal(replay.replayed, false);
+  assert.equal(replay.reason_code, "effect_id_conflict");
+  return readFile(indexPath, "utf8").then((value) =>
+    assert.equal(value, `${JSON.stringify(original)}\n`)
+  );
+}
+
+async function previewForUnrelatedEffect(
+  runtimeRoot: string,
+  quotaSpendCommit: unknown,
+  effectRef: string,
+) {
+  const runsDir = join(runtimeRoot, "goals", goalId, "runs");
+  await mkdir(runsDir, { recursive: true });
+  const indexPath = join(runsDir, "index.jsonl");
+  await writeFile(
+    indexPath,
+    `${JSON.stringify({
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: "codex-main-control",
+      quota_spend_commit: quotaSpendCommit,
+      effect_ref: effectRef,
+    })}\n`,
+  );
+  return evaluateQuotaSpendCommit(
+    replayRequest(runtimeRoot, "requested-effect"),
+  );
 }
 
 test("preview constructs the typed public-safe spend record without writing", async () => {
@@ -201,6 +250,174 @@ test("commit owns JSON, Markdown, index, and exact-effect replay", async (t) => 
   assert.equal(replayed.replayed, true);
   assert.equal(replayed.payload.appended, false);
   assert.equal((await readFile(indexPath, "utf8")).trim().split("\n").length, 1);
+});
+
+test("native replay validates legacy rows by goal and agent", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const runsDir = join(runtimeRoot, "goals", goalId, "runs");
+  await mkdir(runsDir, { recursive: true });
+  await writeFile(
+    join(runsDir, "index.jsonl"),
+    `${JSON.stringify({
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: "codex-main-control",
+      effect_ref: "legacy-effect-1",
+    })}\n`,
+  );
+
+  const replay = await evaluateQuotaSpendCommit({
+    schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+    operation: "replay",
+    runtime_root: runtimeRoot,
+    goal_id: goalId,
+    effect_id: "legacy-effect-1",
+    resolved_agent_id: "codex-main-control",
+  });
+  assert.equal(replay.status, "replayed");
+  assert.equal(replay.payload.idempotent_replay, true);
+
+  for (const resolvedAgentId of [null, "codex-other-control"]) {
+    const rejected = await evaluateQuotaSpendCommit({
+      schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+      operation: "replay",
+      runtime_root: runtimeRoot,
+      goal_id: goalId,
+      effect_id: "legacy-effect-1",
+      resolved_agent_id: resolvedAgentId,
+    });
+    assert.equal(rejected.payload.ok, false);
+    assert.equal(rejected.payload.replay_found, true);
+    assert.match(rejected.reason, /same valid agent identity/);
+  }
+});
+
+test("native replay rejects incomplete transaction metadata", async (t) => {
+  for (const quotaSpendCommit of [{}, { effect_id: "" }, { effect_id: null }]) {
+    const runtimeRoot = await tempRuntime(t);
+    const runsDir = join(runtimeRoot, "goals", goalId, "runs");
+    await mkdir(runsDir, { recursive: true });
+    const indexPath = join(runsDir, "index.jsonl");
+    const original = {
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: "codex-main-control",
+      quota_spend_commit: quotaSpendCommit,
+      effect_ref: "incomplete-metadata-effect",
+    };
+    await writeFile(indexPath, `${JSON.stringify(original)}\n`);
+
+    const replay = await evaluateQuotaSpendCommit({
+      schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+      operation: "replay",
+      runtime_root: runtimeRoot,
+      goal_id: goalId,
+      effect_id: "incomplete-metadata-effect",
+      resolved_agent_id: "codex-main-control",
+    });
+
+    await assertConflictReplay(replay, indexPath, original);
+  }
+});
+
+test("native replay ignores non-quota rows that reuse an effect identity", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const runsDir = join(runtimeRoot, "goals", goalId, "runs");
+  await mkdir(runsDir, { recursive: true });
+  await writeFile(
+    join(runsDir, "index.jsonl"),
+    `${JSON.stringify({
+      classification: "state_refreshed",
+      goal_id: goalId,
+      agent_id: "codex-main-control",
+      effect_ref: "cross-classification-effect",
+      quota_spend_commit: { effect_id: "cross-classification-effect" },
+    })}\n`,
+  );
+
+  const replay = await evaluateQuotaSpendCommit({
+    schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+    operation: "replay",
+    runtime_root: runtimeRoot,
+    goal_id: goalId,
+    effect_id: "cross-classification-effect",
+    resolved_agent_id: "codex-main-control",
+  });
+
+  assert.equal(replay.status, "preview");
+  assert.equal(replay.replayed, false);
+  assert.equal(replay.payload.replay_found, false);
+  assert.match(replay.reason, /replay was not found/);
+});
+
+test("read-only replay misses do not create a runtime directory", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+
+  const replay = await evaluateQuotaSpendCommit({
+    ...replayRequest(runtimeRoot, "missing-effect"),
+    read_only: true,
+  });
+
+  assert.equal(replay.status, "preview");
+  assert.deepEqual(await readdir(runtimeRoot), []);
+});
+
+test("native replay rejects either conflicting effect identity direction", async (t) => {
+  for (const [label, row] of [
+    ["metadata-first", {
+      quota_spend_commit: { effect_id: "replay-conflict-effect" },
+      effect_ref: "different-effect",
+    }],
+    ["ref-first", {
+      quota_spend_commit: { effect_id: "different-effect" },
+      effect_ref: "replay-conflict-effect",
+    }],
+  ] as const) {
+    const runtimeRoot = await tempRuntime(t);
+    const runsDir = join(runtimeRoot, "goals", goalId, "runs");
+    await mkdir(runsDir, { recursive: true });
+    const indexPath = join(runsDir, "index.jsonl");
+    const original = {
+      classification: "quota_slot_spent",
+      goal_id: goalId,
+      agent_id: "codex-main-control",
+      ...row,
+    };
+    await writeFile(indexPath, `${JSON.stringify(original)}\n`);
+
+    const replay = await evaluateQuotaSpendCommit(
+      replayRequest(runtimeRoot, "replay-conflict-effect"),
+    );
+
+    assert.equal(label.length > 0, true);
+    await assertConflictReplay(replay, indexPath, original);
+  }
+});
+
+test("native replay ignores conflicting effect identities unrelated to its effect", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const replay = await previewForUnrelatedEffect(
+    runtimeRoot,
+    { effect_id: "unrelated-first" },
+    "unrelated-second",
+  );
+
+  assert.equal(replay.status, "preview");
+  assert.equal(replay.conflict, false);
+  assert.equal(replay.payload.replay_found, false);
+});
+
+test("native replay ignores malformed metadata unrelated to its effect", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const replay = await previewForUnrelatedEffect(
+    runtimeRoot,
+    [],
+    "unrelated-effect",
+  );
+
+  assert.equal(replay.status, "preview");
+  assert.equal(replay.conflict, false);
+  assert.equal(replay.payload.replay_found, false);
 });
 
 test("prepared transaction repairs partial artifacts exactly once", async (t) => {

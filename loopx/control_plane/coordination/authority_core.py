@@ -1,16 +1,20 @@
-"""Pure coordination decisions shared by the current state writers.
+"""Provider-neutral coordination decisions shared by current state writers.
 
 Adapters normalize their persisted state while holding the existing lock, call
 ``decide``, and only then perform their current write.  A returned transition is
 a proposal, not proof that any write committed.  Durable execution results and
-storage outcomes deliberately live outside this module.
+storage outcomes deliberately live outside this module. Task-lease acquire is
+adapted to the canonical pure TypeScript decision; the remaining command slices
+stay local until their reviewed cutovers.
 """
 
 from __future__ import annotations
 
-import fnmatch
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from typing import Any
+
+from ..effect_runtime import effect_runtime_result
 
 
 DecisionScope = tuple[str, str, str]
@@ -286,60 +290,19 @@ def _lease_is_effective(
     )
 
 
-def _scope_has_glob(scope: str) -> bool:
-    return any(token in scope for token in ("*", "?", "["))
-
-
-def _scope_literal_prefix(scope: str) -> str:
-    indexes = [
-        scope.find(token)
-        for token in ("*", "?", "[")
-        if scope.find(token) >= 0
-    ]
-    return scope[: min(indexes)] if indexes else scope
-
-
-def _scope_pair_overlaps(left: str, right: str) -> bool:
-    if left == right:
-        return True
-    if left in {"*", "**", "./"} or right in {"*", "**", "./"}:
-        return True
-    left_glob, right_glob = _scope_has_glob(left), _scope_has_glob(right)
-    if left_glob and not right_glob:
-        prefix = _scope_literal_prefix(left)
-        return fnmatch.fnmatchcase(right, left) or (
-            prefix.endswith("/") and right.rstrip("/") == prefix.rstrip("/")
-        )
-    if right_glob and not left_glob:
-        prefix = _scope_literal_prefix(right)
-        return fnmatch.fnmatchcase(left, right) or (
-            prefix.endswith("/") and left.rstrip("/") == prefix.rstrip("/")
-        )
-    if left_glob and right_glob:
-        left_prefix = _scope_literal_prefix(left)
-        right_prefix = _scope_literal_prefix(right)
-        return bool(
-            not left_prefix
-            or not right_prefix
-            or left_prefix.startswith(right_prefix)
-            or right_prefix.startswith(left_prefix)
-        )
-    left_root, right_root = left.rstrip("/"), right.rstrip("/")
-    return bool(
-        (left.endswith("/") and right.startswith(left_root + "/"))
-        or (right.endswith("/") and left.startswith(right_root + "/"))
-    )
-
-
 def write_scopes_overlap(
     left: tuple[str, ...] | list[str],
     right: tuple[str, ...] | list[str],
 ) -> bool:
-    """Return whether two already-normalized scope sets overlap."""
+    """Return the canonical native overlap decision for normalized scopes."""
 
-    if not left or not right:
-        return False
-    return any(_scope_pair_overlaps(a, b) for a in left for b in right)
+    payload = effect_runtime_result(
+        "task_lease.write_scopes.overlap",
+        {"left": list(left), "right": list(right)},
+    )
+    if not isinstance(payload, dict) or not isinstance(payload.get("overlap"), bool):
+        raise RuntimeError("native task-lease write-scope decision shape mismatch")
+    return bool(payload["overlap"])
 
 
 def _exact_user_gate_override(
@@ -709,55 +672,127 @@ def _decide_acquire(
     snapshot: CoordinationSnapshot,
     command: LeaseAcquireCommand,
 ) -> TransitionPlan:
-    handoff_rejection = _lease_handoff_rejection(snapshot)
-    if handoff_rejection:
-        return _result(DecisionOutcome.REJECTED, handoff_rejection)
-    owner_rejection = _lease_owner_rejection(snapshot, command.owner)
-    if owner_rejection:
-        return _result(DecisionOutcome.REJECTED, owner_rejection)
+    todo = snapshot.todo
     lease = snapshot.lease
-    if _version_conflict(lease, command.expected_version):
-        return _result(DecisionOutcome.CONFLICT, "version_mismatch")
-    if _lease_is_effective(snapshot, lease):
-        assert lease is not None
-        if lease.owner == command.owner and lease.idempotency_key == command.idempotency_key:
-            matches = set(lease.write_scopes) == set(command.write_scopes)
-            if lease.acquire_ttl_seconds is not None:
-                matches = matches and lease.acquire_ttl_seconds == command.ttl_seconds
-            if not matches:
-                return _result(DecisionOutcome.REJECTED, "idempotency_key_reuse")
-            return _result(
-                DecisionOutcome.NO_CHANGE,
-                "lease_acquire_replay",
-                next_snapshot=snapshot,
-                idempotent=True,
-            )
-        return _result(DecisionOutcome.CONFLICT, "todo_lease_conflict")
-    if lease is not None and lease.present and lease.idempotency_key == command.idempotency_key:
-        return _result(DecisionOutcome.REJECTED, "idempotency_key_reuse")
-    if any(
-        other.active
-        and other.effective
-        and write_scopes_overlap(command.write_scopes, other.write_scopes)
-        for other in snapshot.other_leases
+    payload = effect_runtime_result(
+        "task_lease.acquire.decide",
+        {
+            "handoff_mode": snapshot.handoff_mode.value,
+            "registered_agents": list(snapshot.registered_agents),
+            "todo": (
+                {
+                    "todo_id": todo.todo_id,
+                    "status": todo.status,
+                    "claimed_by": todo.claimed_by,
+                    "excluded_agents": sorted(todo.excluded_agents),
+                }
+                if todo is not None
+                else None
+            ),
+            "lease": (
+                {
+                    "present": lease.present,
+                    "active": lease.active,
+                    "effective": _lease_is_effective(snapshot, lease),
+                    "status": lease.status,
+                    "owner": lease.owner,
+                    "idempotency_key": lease.idempotency_key,
+                    "version": lease.version,
+                    "lease_epoch": lease.lease_epoch,
+                    "write_scopes": list(lease.write_scopes),
+                    "acquire_ttl_seconds": lease.acquire_ttl_seconds,
+                }
+                if lease is not None
+                else None
+            ),
+            "other_leases": [
+                {
+                    "todo_id": other.todo_id,
+                    "active": other.active,
+                    "effective": other.effective,
+                    "write_scopes": list(other.write_scopes),
+                }
+                for other in snapshot.other_leases
+            ],
+            "command": {
+                "owner": command.owner,
+                "idempotency_key": command.idempotency_key,
+                "ttl_seconds": command.ttl_seconds,
+                "write_scopes": list(command.write_scopes),
+                "expected_version": command.expected_version,
+            },
+        },
+    )
+    if not isinstance(payload, dict):
+        raise RuntimeError("native task-lease acquire decision must return an object")
+    raw_outcome = payload.get("outcome")
+    raw_code = payload.get("code")
+    raw_idempotent = payload.get("idempotent")
+    if (
+        not isinstance(raw_outcome, str)
+        or not isinstance(raw_code, str)
+        or not isinstance(raw_idempotent, bool)
     ):
-        return _result(DecisionOutcome.CONFLICT, "write_scope_conflict")
-    previous = lease or LeaseSnapshot()
-    next_lease = LeaseSnapshot(
+        raise RuntimeError("native task-lease acquire decision shape mismatch")
+    try:
+        outcome = DecisionOutcome(raw_outcome)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"native task-lease acquire decision has unsupported outcome: {raw_outcome}"
+        ) from exc
+    next_snapshot: CoordinationSnapshot | None = None
+    if outcome is DecisionOutcome.APPLY:
+        raw_next = payload.get("next_lease")
+        if not isinstance(raw_next, dict):
+            raise RuntimeError("native task-lease acquire apply result omitted next_lease")
+        next_lease = _native_acquire_lease_snapshot(raw_next)
+        next_snapshot = replace(snapshot, lease=next_lease)
+    elif outcome is DecisionOutcome.NO_CHANGE:
+        next_snapshot = snapshot
+    return _result(
+        outcome,
+        raw_code,
+        next_snapshot=next_snapshot,
+        idempotent=raw_idempotent,
+    )
+
+
+def _native_acquire_integer(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RuntimeError(f"native task-lease acquire {label} must be non-negative")
+    return int(value)
+
+
+def _native_acquire_string(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"native task-lease acquire {label} must be non-empty")
+    return value
+
+
+def _native_acquire_lease_snapshot(value: dict[str, Any]) -> LeaseSnapshot:
+    if value.get("present") is not True or value.get("active") is not True:
+        raise RuntimeError("native task-lease acquire apply lease must be active")
+    raw_scopes = value.get("write_scopes")
+    if not isinstance(raw_scopes, list) or any(
+        not isinstance(scope, str) for scope in raw_scopes
+    ):
+        raise RuntimeError("native task-lease acquire write_scopes shape mismatch")
+    return LeaseSnapshot(
         present=True,
         active=True,
-        status="active",
-        owner=command.owner,
-        idempotency_key=command.idempotency_key,
-        version=_actual_version(previous) + 1,
-        lease_epoch=previous.lease_epoch + 1,
-        write_scopes=tuple(command.write_scopes),
-        acquire_ttl_seconds=command.ttl_seconds,
-    )
-    return _result(
-        DecisionOutcome.APPLY,
-        "lease_acquire",
-        next_snapshot=replace(snapshot, lease=next_lease),
+        status=_native_acquire_string(value.get("status"), "status"),
+        owner=_native_acquire_string(value.get("owner"), "owner"),
+        idempotency_key=_native_acquire_string(
+            value.get("idempotency_key"), "idempotency_key"
+        ),
+        version=_native_acquire_integer(value.get("version"), "version"),
+        lease_epoch=_native_acquire_integer(
+            value.get("lease_epoch"), "lease_epoch"
+        ),
+        write_scopes=tuple(raw_scopes),
+        acquire_ttl_seconds=_native_acquire_integer(
+            value.get("acquire_ttl_seconds"), "acquire_ttl_seconds"
+        ),
     )
 
 
@@ -897,12 +932,12 @@ def decide(
 ) -> TransitionPlan:
     """Evaluate one normalized command without reading or writing state."""
 
+    if isinstance(command, LeaseAcquireCommand):
+        return _decide_acquire(snapshot, command)
     if _invalid_lease_snapshot(snapshot.lease):
         return _result(DecisionOutcome.REJECTED, "invalid_lease_snapshot")
     if isinstance(command, TodoMutationCommand):
         return _decide_todo(snapshot, command)
-    if isinstance(command, LeaseAcquireCommand):
-        return _decide_acquire(snapshot, command)
     if isinstance(command, LeaseRenewCommand):
         return _decide_renew(snapshot, command)
     if isinstance(command, LeaseTransferCommand):

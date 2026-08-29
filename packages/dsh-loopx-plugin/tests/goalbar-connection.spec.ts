@@ -235,7 +235,7 @@ describe('package-root GoalBar Host', () => {
     } as unknown as Context
 
     expect(name).toBe('dsh-loopx-plugin')
-    expect(inject).toEqual(['agents', 'connection'])
+    expect(inject).toEqual(['agents', 'connection', 'loopxBootstrap'])
     apply(ctx)
     expect(capture.calls[0]).toMatchObject({
       channel: '/loopx', authority: 'loopback',

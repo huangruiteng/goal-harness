@@ -13,6 +13,7 @@ Guides are task-oriented paths for people starting or operating LoopX.
 - [KunlunCode adapter guide (中文 HTML)](kunluncode-adapter.zh-CN.html)
 - [Auto-research command path](../../demo/auto_research/README.md)
 - [Multi-agent product recipe](multi-agent-product-recipe.md)
+- [Experimental planner-worker mode](planner-worker-experimental.md)
 - [Codex App multi-provider routing extension](../../packages/loopx-codex-provider-routing/README.md)
 - [Codex 多 App 隔离与运维最佳实践（中文）](codex-multi-app-best-practices.zh-CN.md)
 

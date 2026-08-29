@@ -72,6 +72,10 @@ def main() -> int:
         "contents: read",
         "pages: write",
         "id-token: write",
+        "github.event_name == 'pull_request'",
+        "github.event.pull_request.number",
+        "|| 'deployment'",
+        "cancel-in-progress: true",
         'node-version: "20"',
         "npm install -g npm@11",
         "npm ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org",
@@ -124,6 +128,7 @@ def main() -> int:
         "stargazerCount",
         "gh api graphql",
         "pageInfo { hasNextPage endCursor }",
+        "\n  group: frontstage-pages\n",
     ]:
         assert_absent(text, forbidden)
 

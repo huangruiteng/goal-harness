@@ -17,9 +17,7 @@ from ..control_plane.quota.heartbeat_receipt import (
 from ..control_plane.quota.settlement import (
     SettlementIdentity,
     SettlementStepKind,
-    find_quota_spend_run_by_effect_ref,
-    find_settlement_step_event,
-    find_settlement_writeback,
+    read_heartbeat_settlement,
 )
 from ..control_plane.quota.turn_envelope import build_turn_envelope
 from ..control_plane.runtime.status_projection_cache import (
@@ -39,6 +37,7 @@ from ..control_plane.turn_driver import (
     LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
     LOOPX_TURN_JOURNAL_INSPECTION_SCHEMA_VERSION,
     LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+    TurnRecoveryBlockedError,
     build_loopx_turn_command_validator,
     build_loopx_turn_plan,
     codex_cli_session_binding,
@@ -61,6 +60,10 @@ from .turn_rendering import (
     render_loopx_turn_execution_markdown as _render_loopx_turn_execution_markdown,
     render_loopx_turn_journal_inspection_markdown as _render_loopx_turn_journal_inspection_markdown,
     render_loopx_turn_plan_markdown as _render_loopx_turn_plan_markdown,
+)
+
+EXACT_SETTLEMENT_READBACK_NOT_FOUND = (
+    "exact settlement readback unexpectedly returned not-found"
 )
 
 PrintPayload = Callable[
@@ -129,6 +132,13 @@ def handle_turn_command(
                 goal_id=args.goal_id,
                 agent_id=args.agent_id,
                 turn_key=args.turn_key,
+                retry_failed=bool(args.retry_failed_turn),
+                session_binding_resolver=(
+                    lambda turn_envelope: codex_cli_session_binding(
+                        runtime_root,
+                        turn_envelope,
+                    )
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - typed CLI failure boundary
             payload = {
@@ -682,11 +692,19 @@ def handle_turn_command(
                     or spent.get("idempotent_replay")
                     or spent.get("receipt_repair_required")
                 ):
-                    event = find_settlement_step_event(
+                    readback = read_heartbeat_settlement(
                         runtime_root,
-                        settlement_identity,
-                        event_kind="quota_spend",
+                        goal_id=settlement_identity.goal_id,
+                        agent_id=settlement_identity.agent_id,
+                        todo_id=settlement_identity.todo_id,
+                        turn_instance_id=settlement_identity.turn_instance_id,
+                        replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
+                    if readback is None:
+                        raise RuntimeError(
+                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
+                        )
+                    event = readback.spend_event
                     if event is None:
                         append_settlement_event(
                             spent,
@@ -766,12 +784,20 @@ def handle_turn_command(
                         effect_ref,
                         SettlementStepKind.DURABLE_WRITEBACK,
                     )
-                    run = find_settlement_writeback(runtime_root, settlement_identity)
-                    event = find_settlement_step_event(
+                    readback = read_heartbeat_settlement(
                         runtime_root,
-                        settlement_identity,
-                        event_kind="refresh_state",
+                        goal_id=settlement_identity.goal_id,
+                        agent_id=settlement_identity.agent_id,
+                        todo_id=settlement_identity.todo_id,
+                        turn_instance_id=settlement_identity.turn_instance_id,
+                        replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
+                    if readback is None:
+                        raise RuntimeError(
+                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
+                        )
+                    run = readback.writeback_run
+                    event = readback.writeback_event
                     if run is None and event is None:
                         return {"kind": "absent"}
                     if run is None:
@@ -802,16 +828,22 @@ def handle_turn_command(
             def spend_resolver(effect_ref: str) -> dict[str, object]:
                 try:
                     require_effect_ref(effect_ref, SettlementStepKind.QUOTA_SPEND)
-                    run = find_quota_spend_run_by_effect_ref(
+                    readback = read_heartbeat_settlement(
                         runtime_root,
                         goal_id=settlement_identity.goal_id,
-                        effect_ref=effect_ref,
+                        agent_id=settlement_identity.agent_id,
+                        todo_id=settlement_identity.todo_id,
+                        turn_instance_id=settlement_identity.turn_instance_id,
+                        replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
-                    event = find_settlement_step_event(
-                        runtime_root,
-                        settlement_identity,
-                        event_kind="quota_spend",
-                    )
+                    if readback is None:
+                        raise RuntimeError(
+                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
+                        )
+                    run = readback.spend_run
+                    event = readback.spend_event
+                    if run is not None and run.get("effect_ref") != effect_ref:
+                        run = None
                     if run is None and event is None:
                         return {"kind": "absent"}
                     if run is None:
@@ -844,11 +876,19 @@ def handle_turn_command(
                         effect_ref,
                         SettlementStepKind.TERMINAL_CLOSEOUT,
                     )
-                    event = find_settlement_step_event(
+                    readback = read_heartbeat_settlement(
                         runtime_root,
-                        settlement_identity,
-                        event_kind="todo_complete",
+                        goal_id=settlement_identity.goal_id,
+                        agent_id=settlement_identity.agent_id,
+                        todo_id=settlement_identity.todo_id,
+                        turn_instance_id=settlement_identity.turn_instance_id,
+                        replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
+                    if readback is None:
+                        raise RuntimeError(
+                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
+                        )
+                    event = readback.completion_event
                     completion = terminal_completion_readback()
                     if event is None and completion is None:
                         return {"kind": "absent"}
@@ -989,6 +1029,11 @@ def handle_turn_command(
                 "scheduler_acknowledged": False,
                 "quota_spent": False,
             },
+            **(
+                {"recovery_decision": exc.decision}
+                if isinstance(exc, TurnRecoveryBlockedError)
+                else {}
+            ),
         }
     renderer = (
         _render_loopx_turn_execution_markdown

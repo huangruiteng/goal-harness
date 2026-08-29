@@ -66,7 +66,19 @@ def main() -> int:
             },
         )
         (legacy_runtime / "goals" / OLD_GOAL_ID / "rollout-event-log.jsonl").write_text(
-            json.dumps({"goal_id": OLD_GOAL_ID, "event_kind": "quota_should_run"}) + "\n",
+            json.dumps(
+                {
+                    "schema_version": "loopx_rollout_event_v0",
+                    "event_id": "legacy-quota-should-run",
+                    "event_kind": "quota_should_run",
+                    "recorded_at": "2026-01-01T00:00:00+00:00",
+                    "status": "normal_run",
+                    "summary": "legacy quota guard completed",
+                    "goal_id": OLD_GOAL_ID,
+                    "details": {},
+                }
+            )
+            + "\n",
             encoding="utf-8",
         )
         write_json(

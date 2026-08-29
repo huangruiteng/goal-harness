@@ -574,6 +574,15 @@ authorization、dependency 或 gate 域凭空制造 revision；也不会把今�
 claim 与 lease verb 偷换成上文的 atomic `claim_work`。后者属于未来的 shared
 aggregate。
 
+Task-lease acquire 完成 TypeScript cutover 后，这个纯 core 的 acquire 切片由
+`task_lease_acquire.ts` 持有。Python `authority_core` 对该 command 只保留 typed
+adapter：投影 normalized snapshot，调用 `task_lease.acquire.decide`，再重建
+provider-neutral `TransitionPlan`。因此，本地 lease-file transaction 与 Stage 2
+coordination executor 消费同一份 acquire decision；加锁、source 重验、文件持久化、
+provider CAS 与 receipt 构造仍分别属于各自 execution layer。Todo、renew、transfer、
+release、fence 与 handoff-mode 的其余决策继续留在 Python core，直到各自经过 review 的
+TypeScript cutover。
+
 后续 provider 工作必须始终分开三层：
 
 1. `DomainDecision` 只根据显式 coordination snapshot 与 command，纯函数式地给出
@@ -628,7 +637,9 @@ provider-first，且不改变下述 typed outcome 合同。
   `applied`，序列内任何存储故障都报告 `ambiguous`。无法忠实序列化为严格
   JSON 的 head 在任何字节落盘之前报告 typed `failed`。
 - `loopx.control_plane.coordination.executor`：`claim_work` 的第 5 节步骤
-  1-10。所有领域决策都委托给 Stage 1 core；组合顺序是先 lease acquire、再
+  1-10。所有领域决策都委托给 Stage 1 core；其中 lease acquire 通过 typed Python
+  adapter 到达 canonical TypeScript decision，claim decision 仍留在 Python core。
+  组合顺序是先 lease acquire、再
   过 hard-lease holder gate 的 claim——claim-first 或 legacy 模式的组合会
   静默绕过附录 B 的 holder gate（测试钉住了这一点）。`lease_ttl_seconds`
   受本地 task-lease authority 自身上限约束：共享 envelope 铸不出本地合同

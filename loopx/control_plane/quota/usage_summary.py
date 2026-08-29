@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import math
 from datetime import timedelta
 from typing import Any, Callable
 
 from .spend_sources import VISIBLE_GOAL_SLOT_SPEND_SOURCE
-from .usage_collector import UsageSample, collect_usage_for_run
+from .usage_collector import UsageRowError, UsageSample, collect_usage_for_run
 from ..runtime.time import now_utc
 
 USAGE_PROXY_NOTE = (
@@ -79,30 +80,58 @@ def blank_usage_goal(goal_id: str) -> dict[str, Any]:
     }
 
 
-def _accumulate_usage(bucket: dict[str, Any], sample: UsageSample, suffix: str) -> None:
-    bucket[f"input_tokens_{suffix}"] += sample.input_tokens
-    bucket[f"output_tokens_{suffix}"] += sample.output_tokens
-    bucket[f"cache_tokens_{suffix}"] += sample.cache_tokens
-    bucket[f"cost_usd_{suffix}"] += sample.cost_usd
-    bucket[f"duration_ms_{suffix}"] += sample.duration_ms
+def _accumulate_usage(
+    bucket: dict[str, Any],
+    sample: UsageSample,
+    suffix: str,
+    observed_metrics: set[str],
+) -> None:
+    bucket[f"input_tokens_{suffix}"] = (
+        int(bucket.get(f"input_tokens_{suffix}") or 0) + sample.input_tokens
+    )
+    bucket[f"output_tokens_{suffix}"] = (
+        int(bucket.get(f"output_tokens_{suffix}") or 0) + sample.output_tokens
+    )
+    observed_metrics.add(f"input_tokens_{suffix}")
+    observed_metrics.add(f"output_tokens_{suffix}")
+    if sample.cache_tokens is not None:
+        bucket[f"cache_tokens_{suffix}"] = (
+            int(bucket.get(f"cache_tokens_{suffix}") or 0) + sample.cache_tokens
+        )
+        observed_metrics.add(f"cache_tokens_{suffix}")
+    if sample.cost_usd is not None:
+        key = f"cost_usd_{suffix}"
+        accumulated_cost = float(bucket.get(key) or 0.0) + sample.cost_usd
+        if not math.isfinite(accumulated_cost):
+            raise UsageRowError(f"usage summary {key} must be finite")
+        bucket[key] = accumulated_cost
+        observed_metrics.add(key)
+    if sample.duration_ms is not None:
+        bucket[f"duration_ms_{suffix}"] = (
+            int(bucket.get(f"duration_ms_{suffix}") or 0) + sample.duration_ms
+        )
+        observed_metrics.add(f"duration_ms_{suffix}")
 
 
 def _round_cost(bucket: dict[str, Any]) -> None:
     for suffix in ("24h", "7d"):
         key = f"cost_usd_{suffix}"
         if key in bucket:
-            bucket[key] = round(float(bucket[key]), 6)
+            rounded_cost = round(float(bucket[key]), 6)
+            if not math.isfinite(rounded_cost):
+                raise UsageRowError(f"usage summary {key} must be finite")
+            bucket[key] = rounded_cost
 
 
-def _strip_unobserved_usage_windows(
+def _strip_unobserved_usage_metrics(
     bucket: dict[str, Any],
-    observed_windows: set[str],
+    observed_metrics: set[str],
 ) -> None:
     for suffix in ("24h", "7d"):
-        if suffix in observed_windows:
-            continue
         for metric_name in USAGE_METRIC_NAMES:
-            bucket.pop(f"{metric_name}_{suffix}", None)
+            key = f"{metric_name}_{suffix}"
+            if key not in observed_metrics:
+                bucket.pop(key, None)
 
 
 def build_usage_summary(
@@ -134,8 +163,8 @@ def build_usage_summary(
         "duration_ms_7d": 0,
     }
     goals: dict[str, dict[str, Any]] = {}
-    observed_usage_windows: set[str] = set()
-    goal_usage_windows: dict[str, set[str]] = {}
+    observed_usage_metrics: set[str] = set()
+    goal_usage_metrics: dict[str, set[str]] = {}
     sample_count = 0
 
     for run in history.get("runs") or []:
@@ -150,7 +179,9 @@ def build_usage_summary(
         slots = quota_spend_slots(run)
         automation_event = is_automation_run(run)
         progress_signal = is_progress_signal_run(run)
+        # Present-but-illegal usage fails closed inside collect_usage_for_run.
         usage_sample = collect_usage_for_run(run)
+        goal_metrics = goal_usage_metrics.setdefault(goal_id, set())
 
         if generated_at >= cutoff_7d:
             totals["runs_7d"] += 1
@@ -164,10 +195,8 @@ def build_usage_summary(
                 totals["progress_signal_run_count_7d"] += 1
                 goal["progress_signal_run_count_7d"] += 1
             if usage_sample is not None:
-                _accumulate_usage(totals, usage_sample, "7d")
-                _accumulate_usage(goal, usage_sample, "7d")
-                observed_usage_windows.add("7d")
-                goal_usage_windows.setdefault(goal_id, set()).add("7d")
+                _accumulate_usage(totals, usage_sample, "7d", observed_usage_metrics)
+                _accumulate_usage(goal, usage_sample, "7d", goal_metrics)
         if generated_at >= cutoff_24h:
             totals["runs_24h"] += 1
             goal["runs_24h"] += 1
@@ -180,10 +209,8 @@ def build_usage_summary(
                 totals["progress_signal_run_count_24h"] += 1
                 goal["progress_signal_run_count_24h"] += 1
             if usage_sample is not None:
-                _accumulate_usage(totals, usage_sample, "24h")
-                _accumulate_usage(goal, usage_sample, "24h")
-                observed_usage_windows.add("24h")
-                goal_usage_windows.setdefault(goal_id, set()).add("24h")
+                _accumulate_usage(totals, usage_sample, "24h", observed_usage_metrics)
+                _accumulate_usage(goal, usage_sample, "24h", goal_metrics)
 
     if totals["runs_24h"]:
         for goal in goals.values():
@@ -198,18 +225,18 @@ def build_usage_summary(
         key=lambda item: (
             item["runs_24h"],
             item["quota_spend_slots_24h"],
-            item["cost_usd_24h"],
-            item["input_tokens_24h"],
+            float(item.get("cost_usd_24h") or 0.0),
+            int(item.get("input_tokens_24h") or 0),
             item["runs_7d"],
             item["goal_id"],
         ),
         reverse=True,
     )
-    _strip_unobserved_usage_windows(totals, observed_usage_windows)
+    _strip_unobserved_usage_metrics(totals, observed_usage_metrics)
     for goal in goal_rows:
-        _strip_unobserved_usage_windows(
+        _strip_unobserved_usage_metrics(
             goal,
-            goal_usage_windows.get(str(goal.get("goal_id") or ""), set()),
+            goal_usage_metrics.get(str(goal.get("goal_id") or ""), set()),
         )
     return {
         "available": True,

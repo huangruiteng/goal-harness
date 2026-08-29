@@ -84,12 +84,12 @@ def build_review_template(item: Mapping[str, Any]) -> dict[str, Any]:
             _section(
                 "对主干的风险",
                 "250-500字",
-                "Use `failure_analysis`, `walkthroughs.negative`, and `validation_matrix`; trace each finding from triggering state to observed outcome and minimum repair. When `scope_fit` applies, name the active production caller or explicitly record a coverage-only boundary. Surface typed-state-rule, domain-neutrality, behavior-change-disclosure, and guidance-vs-obligation findings when their evidence applies.",
+                "Use `failure_analysis`, `walkthroughs.negative`, and `validation_matrix`; trace each finding from triggering state to observed outcome and minimum repair. When `scope_fit` applies, name the active production caller or explicitly record a coverage-only boundary. When `change_proportionality` applies, compare verified problem impact with mechanism and maintenance cost; a resolved implementation blocker does not justify approval when the full exact-head scope remains disproportionate. Surface typed-state-rule, domain-neutrality, behavior-change-disclosure, and guidance-vs-obligation findings when their evidence applies.",
             ),
             _section(
                 "我的整体评价",
                 "150-300字",
-                "Use `code_volume`, validation results, residual risk, and exact-head freshness to state the verdict and the evidence needed for re-review.",
+                "Use `code_volume`, `change_proportionality`, validation results, residual risk, and exact-head freshness to state the verdict and the evidence needed for re-review.",
             ),
         ],
         "review_order": _review_order(key_files),
@@ -256,6 +256,42 @@ def build_review_execution_contract() -> dict[str, Any]:
                 ],
             },
             {
+                "evidence_id": "change_proportionality",
+                "required_when": "code_change",
+                "verdict_values": [
+                    "proportionate",
+                    "disproportionate",
+                    "not_yet_proven",
+                ],
+                "fields": [
+                    "original_problem",
+                    "frequency_or_severity",
+                    "affected_users_or_operators",
+                    "failure_cost_and_recovery",
+                    "smallest_viable_fix",
+                    "production_mechanism_cost",
+                    "new_state_contract_or_cli_surface",
+                    "maintenance_and_migration_cost",
+                    "alternatives_considered",
+                    "scope_growth_since_initial_review",
+                    "verdict",
+                ],
+                "rule": (
+                    "Judge the full exact-head change against the original "
+                    "user-visible problem, not against how completely the proposed "
+                    "mechanism is implemented. Compare verified frequency, severity, "
+                    "blast radius, and recovery cost with production code, new state, "
+                    "schema, CLI, caller, migration, and long-term maintenance surface. "
+                    "Correctness, green CI, and resolution of earlier review findings "
+                    "are necessary but do not prove positive value. Treat "
+                    "`disproportionate` and `not_yet_proven` as blocking; request the "
+                    "smallest viable fix, deletion, split, or hold. On every materially "
+                    "expanded re-review, reset this assessment from the original problem "
+                    "instead of treating reviewer-requested additions as progress toward "
+                    "approval."
+                ),
+            },
+            {
                 "evidence_id": "typed_state_rule",
                 "required_when": "code_change",
                 "fields": [
@@ -371,10 +407,26 @@ def build_review_execution_contract() -> dict[str, Any]:
             "code_change_symbol_minimum": 2,
             "exact_head_recheck_required": True,
             "stale_head_verdict_allowed": False,
+            "blocking_evidence_verdicts": {
+                "change_proportionality": [
+                    "disproportionate",
+                    "not_yet_proven",
+                ]
+            },
             "required_final_sections": REQUIRED_FINAL_SECTIONS,
         },
         "verdict_policy": {
             "open_pr_blocking_finding": "REQUEST_CHANGES",
+            "open_pr_unresolved_proportionality": (
+                "REQUEST_CHANGES when change_proportionality is disproportionate "
+                "or not_yet_proven; correctness, green CI, and resolved earlier "
+                "findings cannot override this gate"
+            ),
+            "materially_expanded_rereview": (
+                "Reset change_proportionality from the original problem and review "
+                "the full exact head; do not inherit an approval trajectory from "
+                "resolved prior findings"
+            ),
             "open_pr_non_blocking_finding": "APPROVE",
             "open_pr_no_finding": "APPROVE",
             "author_owned_no_blocker_fallback": (
@@ -413,6 +465,7 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
     if code_change:
         required_evidence.insert(3, "symbol_map")
         required_evidence.append("scope_fit")
+        required_evidence.append("change_proportionality")
         required_evidence.append("typed_state_rule")
         required_evidence.append("behavior_change_disclosure")
     if areas & {"product_runtime", "public_entry_or_policy"}:
@@ -438,6 +491,7 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
             "docs_only": docs_only,
             "symbol_map_required": code_change,
             "scope_fit_required": code_change,
+            "change_proportionality_required": code_change,
             "negative_walkthrough_required": bool(areas & NEGATIVE_PATH_AREAS),
             "typed_state_rule_required": code_change,
             "behavior_change_disclosure_required": code_change,

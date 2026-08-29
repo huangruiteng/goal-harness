@@ -299,6 +299,7 @@ def write_registered_fixture(root: Path) -> Path:
                             "registered_agents": [REGISTERED_AGENT_ID],
                             "primary_agent": REGISTERED_AGENT_ID,
                         },
+                        "execution_profile": {"turn_granularity": "fine"},
                         "quota": {"compute": 1.0, "window_hours": 24},
                     }
                 ],
@@ -372,7 +373,9 @@ def assert_registered_agent_activation_is_checked(root: Path) -> None:
         registered_agents=[REGISTERED_AGENT_ID],
         available_capabilities=["network", "external_evidence_poll"],
         runtime_profile="codex_app_heartbeat",
+        turn_granularity="fine",
     )["task_body"]
+    assert "Fine-grained planning contract" in rendered, rendered
     write_registered_codex_app_automation(root / "registered-codex-home", prompt=rendered)
     old_codex_home = os.environ.get("CODEX_HOME")
     os.environ["CODEX_HOME"] = str(root / "registered-codex-home")

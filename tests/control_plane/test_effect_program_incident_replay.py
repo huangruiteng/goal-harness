@@ -4,7 +4,6 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -13,7 +12,7 @@ from loopx.control_plane.effect_program import (
     SettlementStepKind,
 )
 from loopx.control_plane.quota.settlement import (
-    resolve_heartbeat_settlement_identity,
+    read_heartbeat_settlement,
 )
 from loopx.control_plane.turn_driver.settlement import (
     TurnSettlementState,
@@ -22,9 +21,6 @@ from loopx.control_plane.turn_driver.settlement import (
 from loopx.control_plane.turn_driver.transaction import (
     TRANSACTION_PHASES,
     build_loopx_turn_transaction_plan,
-)
-from loopx.control_plane.work_items.task_lease_settlement import (
-    execute_task_lease_settlement,
 )
 from loopx.rollout_event_log import rollout_event_log_path
 
@@ -199,77 +195,17 @@ def _replay_quota(case: Mapping[str, Any], runtime_root: Path) -> dict[str, Any]
         + "\n",
         encoding="utf-8",
     )
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         runtime_root,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         todo_id=TODO_ID,
         turn_instance_id=TURN_ID,
     )
+    assert readback is not None
+    result = readback.identity
     return _observe(result, effect_calls=[], checkpoint_steps=[])
 
-
-def _replay_task_lease(
-    case: Mapping[str, Any],
-    runtime_root: Path,
-) -> dict[str, Any]:
-    case_input = case["input"]
-    assert isinstance(case_input, Mapping)
-    registry_path = runtime_root / "registry.json"
-    registry_path.parent.mkdir(parents=True, exist_ok=True)
-    registry_path.write_text(
-        json.dumps(
-            {
-                "schema_version": "0.1",
-                "goals": [
-                    {
-                        "id": GOAL_ID,
-                        "status": "active",
-                        "repo": str(registry_path.parent),
-                        "state_file": "ACTIVE_GOAL_STATE.md",
-                        "coordination": {
-                            "agent_model": "peer_v1",
-                            "registered_agents": [AGENT_ID],
-                        },
-                    }
-                ],
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    idempotency_key = str(case_input.get("idempotency_key") or TURN_ID)
-    acquire = bool(case_input.get("acquire", True))
-    effect_calls: list[SettlementStepKind] = []
-    checkpoint_steps: list[SettlementStepKind] = []
-
-    with (
-        patch(
-            "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
-            return_value={"status": "open", "claimed_by": AGENT_ID},
-        ),
-        patch(
-            "loopx.control_plane.work_items.task_lease.active_conflicts",
-            return_value=[],
-        ),
-    ):
-        result = execute_task_lease_settlement(
-            registry_path=registry_path,
-            runtime_root=runtime_root,
-            goal_id=GOAL_ID,
-            owner=AGENT_ID,
-            todo_id=TODO_ID,
-            idempotency_key=idempotency_key,
-            write_scopes=["docs/**"],
-            ttl_seconds=600,
-            acquire=acquire,
-        )
-
-    return _observe(
-        result,
-        effect_calls=effect_calls,
-        checkpoint_steps=checkpoint_steps,
-    )
 
 
 def test_incident_replay_corpus_is_small_and_public_safe() -> None:
@@ -303,8 +239,6 @@ def test_generalized_incidents_replay_against_real_adapters(
         observed = _replay_turn_driver(case)
     elif case["adapter"] == "quota":
         observed = _replay_quota(case, tmp_path / str(case["case_id"]))
-    elif case["adapter"] == "task_lease":
-        observed = _replay_task_lease(case, tmp_path / str(case["case_id"]))
     else:
         pytest.fail(f"unsupported incident replay adapter: {case['adapter']}")
 

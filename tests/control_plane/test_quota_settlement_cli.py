@@ -11,6 +11,10 @@ from typing import Any
 import pytest
 
 from loopx.bootstrap_command_pack import build_start_goal_guided_packet
+from loopx.control_plane.work_items.delivery_outcome import (
+    PROGRESS_DELIVERY_OUTCOMES,
+    DeliveryOutcome,
+)
 from loopx.heartbeat_prompt import build_heartbeat_prompt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -574,6 +578,145 @@ def test_gitless_goal_refresh_and_quota_spend_settle_end_to_end(
     assert spend["appended"] is True
     assert spend["delivery_workspace_validated"] is True
     assert spend["delivery_workspace"]["workspace_identity"] == f"loopx:{GOAL_ID}"
+    assert _spend_run_count(runtime) == 1
+
+
+def test_typed_outcome_gap_settles_exact_turn_without_becoming_progress(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(
+        tmp_path,
+        required_capability="filesystem_write",
+    )
+    turn_id = "turn-typed-blocker-settlement"
+    binding = (
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        TODO_ID,
+        "--turn-instance-id",
+        turn_id,
+    )
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        *binding,
+        "--scan-path",
+        str(project),
+        cwd=project,
+    )
+    assert guard_rc == 0, guard
+    assert guard["heartbeat_receipt"]["settlement_identity"]["todo_id"] == TODO_ID
+    assert DeliveryOutcome.OUTCOME_GAP not in PROGRESS_DELIVERY_OUTCOMES
+
+    common_refresh_args = (
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--classification",
+        "typed_blocker_writeback",
+        "--delivery-batch-scale",
+        "single_surface",
+        "--delivery-outcome",
+        "outcome_gap",
+        *binding,
+        "--no-global-sync",
+        "--suppress-external-sinks",
+    )
+    bare_rc, bare = _run_cli(
+        registry_path,
+        runtime,
+        *common_refresh_args,
+        cwd=project,
+    )
+    assert bare_rc == 1, bare
+    assert "typed blocked outcome_gap settlement" in bare["error"]
+    assert _classification_count(runtime, "typed_blocker_writeback") == 0
+
+    surface_args = list(common_refresh_args)
+    outcome_index = surface_args.index("outcome_gap")
+    surface_args[outcome_index] = "surface_only"
+    surface_rc, surface = _run_cli(
+        registry_path,
+        runtime,
+        *surface_args,
+        "--progress-result-class",
+        "blocked",
+        "--progress-blocker-id",
+        "blocker:runtime-boundary",
+        "--progress-evidence-id",
+        "evidence:runtime-boundary",
+        cwd=project,
+    )
+    assert surface_rc == 1, surface
+    assert "typed blocked outcome_gap settlement" in surface["error"]
+
+    mismatch_args = list(common_refresh_args)
+    todo_index = mismatch_args.index(TODO_ID)
+    mismatch_args[todo_index] = ALTERNATIVE_TODO_ID
+    mismatch_rc, mismatch = _run_cli(
+        registry_path,
+        runtime,
+        *mismatch_args,
+        "--progress-result-class",
+        "blocked",
+        "--progress-blocker-id",
+        "blocker:runtime-boundary",
+        "--progress-evidence-id",
+        "evidence:runtime-boundary",
+        cwd=project,
+    )
+    assert mismatch_rc == 1, mismatch
+    assert "settlement binding does not match" in mismatch["error"]
+
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        *common_refresh_args,
+        "--progress-result-class",
+        "blocked",
+        "--progress-blocker-id",
+        "blocker:runtime-boundary",
+        "--progress-evidence-id",
+        "evidence:runtime-boundary",
+        cwd=project,
+    )
+    assert refresh_rc == 0, refresh
+    assert refresh["delivery_outcome"] == "outcome_gap"
+    assert refresh["progress_observation"]["result_class"] == "blocked"
+    assert refresh["progress_observation"]["work_item_id"] == TODO_ID
+    assert [
+        receipt["step_kind"]
+        for receipt in refresh["settlement_result"]["receipts"]
+    ] == ["validation", "durable_writeback"]
+
+    spend_rc, spend = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "spend-slot",
+        "--goal-id",
+        GOAL_ID,
+        "--slots",
+        "1",
+        "--source",
+        "heartbeat",
+        "--execute",
+        *binding,
+        "--scan-path",
+        str(project),
+        cwd=project,
+    )
+    assert spend_rc == 0, spend
+    assert [
+        receipt["step_kind"]
+        for receipt in spend["settlement_result"]["receipts"]
+    ] == ["validation", "durable_writeback", "quota_spend"]
     assert _spend_run_count(runtime) == 1
 
 

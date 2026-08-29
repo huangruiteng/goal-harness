@@ -1,8 +1,7 @@
-"""Provider-neutral Todo settlement orchestration for shipping host adapters."""
+"""Transport adapter for the TypeScript-owned host Todo transaction."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -10,10 +9,25 @@ from enum import StrEnum
 from typing import Any, Protocol
 
 from .effect_program import SettlementIdentity
-from .todos.contract import normalize_todo_id
+from .effect_runtime import EffectRuntimeRejected, effect_runtime_result
 
 
 HOST_ADAPTER_SETTLEMENT_SCHEMA_VERSION = "host_adapter_todo_settlement_v0"
+HOST_TODO_COMPLETION_TRANSACTION_SCHEMA_VERSION = (
+    "loopx_host_todo_completion_transaction_v0"
+)
+HOST_TODO_COMPLETION_REDUCTION_SCHEMA_VERSION = (
+    "loopx_host_todo_completion_reduction_v0"
+)
+_RUNTIME_METHOD = "turn.host_todo_completion.evaluate"
+_STEP_KINDS = (
+    "guard",
+    "lifecycle_completion",
+    "durable_writeback",
+    "quota_spend",
+    "terminal_closeout",
+)
+_MISSING = object()
 
 
 class HostGuardState(StrEnum):
@@ -52,134 +66,252 @@ class HostCliRunner(Protocol):
     ) -> str: ...
 
 
-def host_adapter_turn_instance_id(request: HostTodoSettlementRequest) -> str:
-    """Return a retry-stable public-safe identity for one Todo completion."""
+@dataclass(frozen=True, slots=True)
+class _ProviderStep:
+    step_kind: str
+    args: tuple[str, ...]
+    legacy_args: tuple[str, ...] | None
+    continue_when: Mapping[str, Any] | None
 
-    seed = "\0".join((request.goal_id, request.agent_id, request.todo_id))
-    return "mcp-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
+
+def _request_payload(
+    request: HostTodoSettlementRequest,
+    *,
+    phase: str,
+    provider_outcomes: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": HOST_TODO_COMPLETION_TRANSACTION_SCHEMA_VERSION,
+        "phase": phase,
+        "goal_id": request.goal_id,
+        "agent_id": request.agent_id,
+        "todo_id": request.todo_id,
+        "runtime_profile": request.runtime_profile,
+        "legacy_host_surface": request.legacy_host_surface,
+        "scheduler_owner": request.scheduler_owner,
+        "execution_mode": request.execution_mode,
+        "completion_args": list(request.completion_args),
+        "no_follow_up": request.no_follow_up,
+    }
+    if provider_outcomes is not None:
+        payload["provider_outcomes"] = provider_outcomes
+    return payload
+
+
+def _runtime_reduction(params: Mapping[str, Any], *, phase: str) -> dict[str, Any]:
+    try:
+        value = effect_runtime_result(_RUNTIME_METHOD, params)
+    except EffectRuntimeRejected as exc:
+        raise ValueError(str(exc)) from None
+    if not isinstance(value, Mapping):
+        raise RuntimeError("TypeScript host Todo completion result must be an object")
+    result = dict(value)
+    if (
+        result.get("schema_version") != HOST_TODO_COMPLETION_REDUCTION_SCHEMA_VERSION
+        or result.get("phase") != phase
+    ):
+        raise RuntimeError("TypeScript host Todo completion result shape mismatch")
+    return result
+
+
+def _runtime_identity(value: Any) -> SettlementIdentity:
+    try:
+        return SettlementIdentity.from_runtime_payload(value)
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "TypeScript host Todo completion identity shape mismatch"
+        ) from exc
+
+
+def _prepare(request: HostTodoSettlementRequest) -> dict[str, Any]:
+    result = _runtime_reduction(
+        _request_payload(request, phase="prepare"),
+        phase="prepare",
+    )
+    if (
+        result.get("decision") != "execute"
+        or not isinstance(result.get("identity"), Mapping)
+        or not isinstance(result.get("provider_effect"), Mapping)
+        or result.get("result") is not None
+    ):
+        raise RuntimeError("TypeScript host Todo completion prepare shape mismatch")
+    _runtime_identity(result["identity"])
+    return result
+
+
+def host_adapter_turn_instance_id(request: HostTodoSettlementRequest) -> str:
+    """Read the retry-stable host Turn identity from the TypeScript authority."""
+
+    prepared = _prepare(request)
+    identity = _runtime_identity(prepared["identity"])
+    return identity.turn_instance_id
 
 
 def classify_host_guard_snapshot(value: str) -> HostGuardSelection:
-    """Classify a guard without collapsing terminal and invalid snapshots."""
+    """Project the TypeScript guard classification into the legacy host facade."""
 
-    try:
-        payload = json.loads(value)
-    except json.JSONDecodeError:
-        return HostGuardSelection(
-            HostGuardState.INVALID,
-            reason="quota guard returned malformed JSON",
-        )
-    if not isinstance(payload, Mapping) or payload.get("ok") is not True:
-        reason = (
-            str(payload.get("error") or payload.get("reason") or "")
-            if isinstance(payload, Mapping)
-            else ""
-        )
-        return HostGuardSelection(
-            HostGuardState.INVALID,
-            reason=reason or "quota guard did not return an ok object",
-        )
-    heartbeat_receipt = payload.get("heartbeat_receipt")
-    if isinstance(heartbeat_receipt, Mapping):
-        raw_identity = heartbeat_receipt.get("settlement_identity")
-        if isinstance(raw_identity, Mapping):
-            goal_id = str(raw_identity.get("goal_id") or "").strip()
-            agent_id = str(raw_identity.get("agent_id") or "").strip()
-            todo_id = normalize_todo_id(raw_identity.get("todo_id"))
-            turn_instance_id = str(
-                raw_identity.get("turn_instance_id") or ""
-            ).strip()
-            if not (goal_id and agent_id and todo_id and turn_instance_id):
-                return HostGuardSelection(
-                    HostGuardState.INVALID,
-                    reason="quota guard returned an incomplete settlement identity",
-                )
-            identity = SettlementIdentity(
-                goal_id=goal_id,
-                agent_id=agent_id,
-                todo_id=todo_id,
-                turn_instance_id=turn_instance_id,
-            )
-            if raw_identity.get("effect_id") != identity.effect_id:
-                return HostGuardSelection(
-                    HostGuardState.INVALID,
-                    reason="quota guard returned a mismatched settlement effect id",
-                )
-            return HostGuardSelection(
-                HostGuardState.SELECTED,
-                todo_id=todo_id,
-                settlement_identity=identity,
-            )
-    selected = payload.get("selected_todo")
-    if isinstance(selected, Mapping):
-        todo_id = normalize_todo_id(selected.get("todo_id"))
-        if todo_id:
-            return HostGuardSelection(HostGuardState.SELECTED, todo_id=todo_id)
-        return HostGuardSelection(
-            HostGuardState.INVALID,
-            reason="quota guard selected_todo has no typed todo_id",
-        )
-    if (
-        payload.get("should_run") is False
-        and payload.get("effective_action") == "terminal_no_followup"
-    ):
-        return HostGuardSelection(HostGuardState.TERMINAL_NO_SELECTION)
-    return HostGuardSelection(
-        HostGuardState.INVALID,
-        reason="quota guard has no authoritative Todo selection",
-    )
-
-
-def _json_object(value: str) -> dict[str, Any] | None:
-    try:
-        payload = json.loads(value)
-    except json.JSONDecodeError:
-        return None
-    return dict(payload) if isinstance(payload, Mapping) else None
-
-
-def _blocked_payload(
-    request: HostTodoSettlementRequest,
-    *,
-    stage: str,
-    reason: str,
-    guard_state: HostGuardState | None = None,
-    completion: Mapping[str, Any] | None = None,
-) -> str:
-    payload: dict[str, Any] = {
-        "schema_version": HOST_ADAPTER_SETTLEMENT_SCHEMA_VERSION,
-        "ok": False,
-        "completed": bool(completion and completion.get("completed") is True),
-        "goal_id": request.goal_id,
-        "todo_id": request.todo_id,
-        "settlement_blocked_completion": True,
-        "settlement": {
-            "ok": False,
-            "failed_stage": stage,
-            "reason": reason,
+    result = _runtime_reduction(
+        {
+            "schema_version": HOST_TODO_COMPLETION_TRANSACTION_SCHEMA_VERSION,
+            "phase": "classify_guard",
+            "guard_output": value,
         },
-    }
-    if guard_state is not None:
-        payload["settlement"]["guard_state"] = guard_state.value
-    if completion is not None:
-        payload["completion"] = dict(completion)
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
-
-
-def _identity_matches(
-    payload: Mapping[str, Any],
-    expected: SettlementIdentity,
-) -> bool:
-    identity = payload.get("settlement_identity")
-    if not isinstance(identity, Mapping):
-        return False
-    return (
-        identity.get("goal_id") == expected.goal_id
-        and identity.get("agent_id") == expected.agent_id
-        and identity.get("todo_id") == expected.todo_id
-        and identity.get("turn_instance_id") == expected.turn_instance_id
-        and identity.get("effect_id") == expected.effect_id
+        phase="classify_guard",
     )
+    selection = result.get("selection")
+    if result.get("decision") != "complete" or not isinstance(selection, Mapping):
+        raise RuntimeError("TypeScript host guard classification shape mismatch")
+    try:
+        state = HostGuardState(str(selection.get("state") or ""))
+    except ValueError as exc:
+        raise RuntimeError(
+            "TypeScript host guard classification shape mismatch"
+        ) from exc
+    todo_id = selection.get("todo_id")
+    reason = selection.get("reason")
+    identity = selection.get("settlement_identity")
+    if (
+        not (todo_id is None or isinstance(todo_id, str))
+        or not (reason is None or isinstance(reason, str))
+        or not (identity is None or isinstance(identity, Mapping))
+    ):
+        raise RuntimeError("TypeScript host guard classification shape mismatch")
+    return HostGuardSelection(
+        state=state,
+        todo_id=todo_id,
+        reason=reason,
+        settlement_identity=_runtime_identity(identity)
+        if identity is not None
+        else None,
+    )
+
+
+def _string_tuple(value: Any, *, label: str) -> tuple[str, ...]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) for item in value)
+    ):
+        raise RuntimeError(f"TypeScript host provider {label} shape mismatch")
+    return tuple(value)
+
+
+def _decode_provider_steps(value: Any) -> tuple[_ProviderStep, ...]:
+    if not isinstance(value, Mapping):
+        raise RuntimeError("TypeScript host provider plan shape mismatch")
+    raw_steps = value.get("steps")
+    if (
+        value.get("provider_id") != "loopx_cli"
+        or value.get("kind") != "ordered_cli_sequence"
+        or not isinstance(raw_steps, list)
+        or len(raw_steps) not in {4, 5}
+    ):
+        raise RuntimeError("TypeScript host provider plan shape mismatch")
+    expected = _STEP_KINDS[: len(raw_steps)]
+    steps: list[_ProviderStep] = []
+    for index, raw in enumerate(raw_steps):
+        if not isinstance(raw, Mapping) or raw.get("step_kind") != expected[index]:
+            raise RuntimeError("TypeScript host provider step order mismatch")
+        legacy_value = raw.get("legacy_args")
+        if legacy_value is not None and not isinstance(legacy_value, list):
+            raise RuntimeError("TypeScript host provider legacy_args shape mismatch")
+        condition = raw.get("continue_when")
+        condition_required = index < len(raw_steps) - 1
+        if condition_required != isinstance(condition, Mapping):
+            raise RuntimeError("TypeScript host provider condition shape mismatch")
+        steps.append(
+            _ProviderStep(
+                step_kind=expected[index],
+                args=_string_tuple(raw.get("args"), label="args"),
+                legacy_args=(
+                    _string_tuple(legacy_value, label="legacy_args")
+                    if legacy_value is not None
+                    else None
+                ),
+                continue_when=dict(condition) if condition is not None else None,
+            )
+        )
+    return tuple(steps)
+
+
+def _path_value(payload: Mapping[str, Any], path: Any) -> Any:
+    if not isinstance(path, list) or any(not isinstance(part, str) for part in path):
+        raise RuntimeError("TypeScript host provider condition path shape mismatch")
+    value: Any = payload
+    for part in path:
+        if not isinstance(value, Mapping) or part not in value:
+            return _MISSING
+        value = value[part]
+    return value
+
+
+def _json_equal(left: Any, right: Any) -> bool:
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if left is _MISSING:
+        return False
+    return type(left) is type(right) and left == right
+
+
+def _condition_matches(
+    payload: Mapping[str, Any], condition: Mapping[str, Any]
+) -> bool:
+    kind = condition.get("kind")
+    if kind in {"all", "any"}:
+        children = condition.get("conditions")
+        if not isinstance(children, list) or any(
+            not isinstance(child, Mapping) for child in children
+        ):
+            raise RuntimeError("TypeScript host provider condition shape mismatch")
+        matches = [_condition_matches(payload, child) for child in children]
+        return all(matches) if kind == "all" else any(matches)
+
+    value = _path_value(payload, condition.get("path"))
+    if kind == "equals":
+        return _json_equal(value, condition.get("value"))
+    if kind == "nullish":
+        return value is _MISSING or value is None
+    if kind == "object":
+        return isinstance(value, Mapping)
+    if kind == "not_object":
+        return not isinstance(value, Mapping)
+    if kind == "normalized_string_equals":
+        normalization = condition.get("normalization")
+        if normalization not in {"trim", "trim_lowercase"}:
+            raise RuntimeError("TypeScript host provider normalization is unsupported")
+        candidate = str(value or "").strip()
+        if normalization == "trim_lowercase":
+            candidate = candidate.lower()
+        expected = condition.get("value")
+        return isinstance(expected, str) and candidate == expected
+    raise RuntimeError("TypeScript host provider condition kind is unsupported")
+
+
+def _provider_condition_matches(output: str, condition: Mapping[str, Any]) -> bool:
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(payload, Mapping) and _condition_matches(payload, condition)
+
+
+def _run_provider_plan(
+    steps: tuple[_ProviderStep, ...],
+    *,
+    run_cli: HostCliRunner,
+) -> list[dict[str, str]]:
+    outcomes: list[dict[str, str]] = []
+    for step in steps:
+        output = run_cli(
+            list(step.args),
+            legacy_args=(list(step.legacy_args) if step.legacy_args else None),
+        )
+        outcomes.append({"step_kind": step.step_kind, "output": output})
+        if step.continue_when is not None and not _provider_condition_matches(
+            output, step.continue_when
+        ):
+            break
+    return outcomes
 
 
 def settle_host_todo_completion(
@@ -187,268 +319,26 @@ def settle_host_todo_completion(
     *,
     run_cli: HostCliRunner,
 ) -> str:
-    """Guard, complete, write back, and spend one Todo under one identity."""
+    """Execute one TypeScript-planned host provider sequence and finalize it."""
 
-    turn_instance_id = host_adapter_turn_instance_id(request)
-    expected_identity = SettlementIdentity(
-        goal_id=request.goal_id,
-        agent_id=request.agent_id,
-        todo_id=request.todo_id,
-        turn_instance_id=turn_instance_id,
-    )
-    guard_common = [
-        "quota",
-        "should-run",
-        "--goal-id",
-        request.goal_id,
-        "--agent-id",
-        request.agent_id,
-        "--todo-id",
-        request.todo_id,
-        "--turn-instance-id",
-        turn_instance_id,
-    ]
-    guard_output = run_cli(
-        [*guard_common, "--runtime-profile", request.runtime_profile],
-        legacy_args=[
-            *guard_common,
-            "--host-surface",
-            request.legacy_host_surface,
-            "--scheduler-owner",
-            request.scheduler_owner,
-            "--execution-mode",
-            request.execution_mode,
-        ],
-    )
-    guard = classify_host_guard_snapshot(guard_output)
-    if guard.state is not HostGuardState.SELECTED:
-        return _blocked_payload(
+    prepared = _prepare(request)
+    steps = _decode_provider_steps(prepared["provider_effect"])
+    outcomes = _run_provider_plan(steps, run_cli=run_cli)
+    finalized = _runtime_reduction(
+        _request_payload(
             request,
-            stage="guard",
-            reason=guard.reason or "quota guard has no selected Todo",
-            guard_state=guard.state,
-        )
-    if guard.todo_id != request.todo_id:
-        return _blocked_payload(
-            request,
-            stage="guard",
-            reason=(
-                "quota guard selected a different Todo: expected "
-                f"{request.todo_id}, selected {guard.todo_id}"
-            ),
-            guard_state=guard.state,
-        )
+            phase="finalize",
+            provider_outcomes=outcomes,
+        ),
+        phase="finalize",
+    )
+    result = finalized.get("result")
     if (
-        guard.settlement_identity is not None
-        and guard.settlement_identity != expected_identity
+        finalized.get("decision") not in {"complete", "blocked", "provider_result"}
+        or finalized.get("provider_effect") is not None
+        or not isinstance(finalized.get("identity"), Mapping)
+        or not isinstance(result, Mapping)
+        or dict(finalized["identity"]) != dict(prepared["identity"])
     ):
-        return _blocked_payload(
-            request,
-            stage="guard",
-            reason="quota guard settlement identity does not match the request",
-            guard_state=HostGuardState.INVALID,
-        )
-
-    lifecycle_args = tuple(
-        arg for arg in request.completion_args if arg != "--no-follow-up"
-    )
-    completion_output = run_cli(
-        [*lifecycle_args, "--turn-instance-id", turn_instance_id]
-    )
-    completion = _json_object(completion_output)
-    if completion is None:
-        return _blocked_payload(
-            request,
-            stage="durable_writeback",
-            reason="todo completion returned malformed JSON",
-        )
-    if not (
-        completion.get("ok") is True
-        and completion.get("completed") is True
-        and completion.get("status") == "done"
-    ):
-        # Preserve the completion gate's typed failure payload unchanged.
-        return completion_output
-
-    settlement_result = completion.get("settlement_result")
-    if (
-        not _identity_matches(completion, expected_identity)
-        or not isinstance(settlement_result, Mapping)
-        or settlement_result.get("failure") is not None
-    ):
-        return _blocked_payload(
-            request,
-            stage="durable_writeback",
-            reason="todo completion did not prove the expected settlement identity",
-            completion=completion,
-        )
-
-    writeback_output = run_cli(
-        [
-            "refresh-state",
-            "--goal-id",
-            request.goal_id,
-            "--agent-id",
-            request.agent_id,
-            "--classification",
-            "mcp_completed_turn_writeback",
-            "--delivery-batch-scale",
-            "single_surface",
-            "--delivery-outcome",
-            "outcome_progress",
-            "--todo-id",
-            request.todo_id,
-            "--turn-instance-id",
-            turn_instance_id,
-            "--completion-todo-id",
-            request.todo_id,
-            "--completion-turn-key",
-            expected_identity.effect_id,
-            "--no-global-sync",
-            "--suppress-external-sinks",
-        ]
-    )
-    writeback = _json_object(writeback_output)
-    writeback_result = (
-        writeback.get("settlement_result")
-        if isinstance(writeback, Mapping)
-        else None
-    )
-    if not (
-        isinstance(writeback, Mapping)
-        and writeback.get("ok") is True
-        and _identity_matches(writeback, expected_identity)
-        and isinstance(writeback_result, Mapping)
-        and writeback_result.get("failure") is None
-    ):
-        reason = (
-            str(writeback.get("error") or writeback.get("reason") or "")
-            if isinstance(writeback, Mapping)
-            else ""
-        )
-        return _blocked_payload(
-            request,
-            stage="durable_writeback",
-            reason=(
-                reason
-                or "refresh-state did not prove the expected settlement identity"
-            ),
-            completion=completion,
-        )
-
-    spend_output = run_cli(
-        [
-            "quota",
-            "spend-slot",
-            "--goal-id",
-            request.goal_id,
-            "--slots",
-            "1",
-            "--source",
-            "heartbeat",
-            "--execute",
-            "--agent-id",
-            request.agent_id,
-            "--todo-id",
-            request.todo_id,
-            "--turn-instance-id",
-            turn_instance_id,
-        ]
-    )
-    spend = _json_object(spend_output)
-    spend_result = spend.get("settlement_result") if spend is not None else None
-    spend_committed = bool(
-        isinstance(spend, Mapping)
-        and (
-            spend.get("appended") is True
-            or spend.get("idempotent_replay") is True
-            or spend.get("receipt_repaired") is True
-        )
-    )
-    if not (
-        isinstance(spend, Mapping)
-        and spend.get("ok") is True
-        and spend_committed
-        and _identity_matches(spend, expected_identity)
-        and isinstance(spend_result, Mapping)
-        and spend_result.get("failure") is None
-    ):
-        reason = (
-            str(spend.get("error") or spend.get("reason") or "")
-            if spend is not None
-            else ""
-        )
-        return _blocked_payload(
-            request,
-            stage="quota_spend",
-            reason=reason or "quota spend did not append a receipt",
-            completion=completion,
-        )
-
-    terminal_closeout = None
-    final_completion = completion
-    if request.no_follow_up:
-        terminal_output = run_cli(
-            [*request.completion_args, "--turn-instance-id", turn_instance_id]
-        )
-        terminal_closeout = _json_object(terminal_output)
-        terminal_result = (
-            terminal_closeout.get("settlement_result")
-            if terminal_closeout is not None
-            else None
-        )
-        if not (
-            isinstance(terminal_closeout, Mapping)
-            and terminal_closeout.get("ok") is True
-            and terminal_closeout.get("completed") is True
-            and terminal_closeout.get("status") == "done"
-            and terminal_closeout.get("completion_continuation") == "no_followup"
-            and _identity_matches(terminal_closeout, expected_identity)
-            and isinstance(terminal_result, Mapping)
-            and terminal_result.get("failure") is None
-        ):
-            reason = (
-                str(
-                    terminal_closeout.get("error")
-                    or terminal_closeout.get("reason")
-                    or ""
-                )
-                if isinstance(terminal_closeout, Mapping)
-                else ""
-            )
-            return _blocked_payload(
-                request,
-                stage="terminal_closeout",
-                reason=(
-                    reason
-                    or "Todo terminal closeout did not prove the expected identity"
-                ),
-                completion=completion,
-            )
-        final_completion = terminal_closeout
-
-    settlement_payload = {
-        "ok": True,
-        "guard_state": guard.state.value,
-        "durable_writeback": writeback,
-        "lifecycle_completion": completion,
-        "quota_spend": spend,
-    }
-    if terminal_closeout is not None:
-        settlement_payload["terminal_closeout"] = terminal_closeout
-
-    return json.dumps(
-        {
-            "schema_version": HOST_ADAPTER_SETTLEMENT_SCHEMA_VERSION,
-            "ok": True,
-            "completed": True,
-            "status": "done",
-            "goal_id": request.goal_id,
-            "todo_id": request.todo_id,
-            "settlement_identity": expected_identity.as_dict(),
-            "completion": final_completion,
-            "settlement": settlement_payload,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
+        raise RuntimeError("TypeScript host Todo completion finalize shape mismatch")
+    return json.dumps(dict(result), ensure_ascii=False, sort_keys=True)

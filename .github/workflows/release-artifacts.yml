@@ -123,6 +123,12 @@ jobs:
           from tempfile import TemporaryDirectory
 
           turn_key = "sha256:" + "a" * 64
+          journal_identity = SettlementIdentity(
+              goal_id="fixture-goal",
+              agent_id="fixture-agent",
+              todo_id="fixture-todo",
+              turn_instance_id=turn_key,
+          )
           journal = {
               "schema_version": "loopx_turn_journal_v0",
               "goal_id": "fixture-goal",
@@ -141,14 +147,15 @@ jobs:
                   "turn_envelope": {
                       "goal_id": "fixture-goal",
                       "agent_id": "fixture-agent",
+                      "action": {
+                          "selected_todo": {"todo_id": "fixture-todo"},
+                      },
                   },
                   "transaction": {
                       "turn_key": turn_key,
                       "settlement_plan": {
-                          "identity": {
-                              "goal_id": "fixture-goal",
-                              "agent_id": "fixture-agent",
-                          }
+                          "schema_version": "quota_settlement_plan_v1",
+                          "identity": journal_identity.as_dict(),
                       },
                   },
               },

@@ -127,6 +127,24 @@ maintainer's local automation:
 - todo/writeback smokes cover the validated-work sequence and prove
   monitor-only or stop-only paths do not spend quota.
 
+## Experimental planner-worker mode
+
+Planner-worker is an **opt-in experimental** slice, not a catalog connector and
+not a resident scheduler. One call plans, executes at most one worker step, runs
+caller-approved validation, and returns a typed receipt. Model routes stay
+explicit; cost remains incomplete until pricing is supplied; live providers
+(such as TraeX) stay optional.
+
+Operator guide (provider-neutral fake runtime):
+[Experimental planner-worker mode](../guides/planner-worker-experimental.md).
+
+Public checks:
+
+```bash
+python3 examples/experiments/planner_worker/contract-smoke.py
+python3 examples/experiments/planner_worker/runtime-smoke.py
+```
+
 ## Related Contracts
 
 - [Host mode plan v0](../reference/protocols/host-mode-plan-v0.md)
@@ -138,3 +156,4 @@ maintainer's local automation:
 - [Session runtime to LoopX projection v0](../reference/protocols/session-runtime-loopx-projection-v0.md)
 - [Worker bridge install contract](worker-bridge-install-contract.md)
 - [Quota allocation](../quota-allocation.md)
+- [Experimental planner-worker mode](../guides/planner-worker-experimental.md)

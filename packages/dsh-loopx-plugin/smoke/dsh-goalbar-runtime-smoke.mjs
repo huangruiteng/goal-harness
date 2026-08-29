@@ -60,10 +60,11 @@ const packedStaticEntries = new Set([
   'package/lib/types/goalbar/service.d.ts',
   'package/lib/types/index.d.ts',
   'package/lib/types/init-command.d.ts',
+  'package/lib/types/managed-runtime.d.ts',
   'package/package.json',
 ])
 const packedHashedEntries = [
-  ['CLI chunk', /^package\/lib\/cli-[A-Za-z0-9_-]{8}\.js$/u],
+  ['managed runtime chunk', /^package\/lib\/managed-runtime-[A-Za-z0-9_-]{8}\.js$/u],
   ['Driver chunk', /^package\/lib\/driver-[A-Za-z0-9_-]{8}\.js$/u],
 ]
 
@@ -651,9 +652,32 @@ async function createClientModuleSystem(context, staticModules) {
   const appRequire = createRequire(dshRequire.resolve('@deepseek-ai/dsh-web-app/package.json'))
   const sourcePath = appRequire.resolve('@deepseek-ai/dsh-client-modules/client')
   let loader
-  context.__ModuleLoader__ = { load: value => { loader = value } }
+  const registrationTarget = {
+    mode: 'queue',
+    pendingQueue: [],
+    load: value => { loader = value },
+  }
+  context.__ModuleLoader__ = registrationTarget
   vm.runInContext(await readFile(sourcePath, 'utf8'), context, { filename: sourcePath })
   const exports = loader.factory(() => { throw new Error('unexpected module-system dependency') })
+  if (typeof exports.createClientModuleSystem === 'function') {
+    return exports.createClientModuleSystem(
+      registrationTarget,
+      { id: loader.id, exports },
+      {
+        boot: {
+          rev: 'dsh-loopx-plugin-runtime-smoke',
+          entries: [{
+            id: packageId,
+            url: `/plugins/${packageId}/client.js`,
+            rev: 'dsh-loopx-plugin-runtime-smoke',
+            external: [],
+          }],
+        },
+        staticModules,
+      },
+    )
+  }
   delete context.__ModuleLoader__
   return new exports.ClientModuleSystem({ modules: [], staticModules })
 }
@@ -775,6 +799,21 @@ async function rpc(baseUrl, endpoint, payload, extraHeaders = {}, signal) {
   return { response, body, rpcId }
 }
 
+async function hostRpc(baseUrl, method, payload) {
+  const rpcId = randomUUID()
+  const response = await fetch(`${baseUrl}/api/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId, method, payload }),
+    signal: AbortSignal.timeout(5_000),
+  })
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.rpcId, rpcId)
+  assert.equal(body.result.ok, true, JSON.stringify(body.result.error))
+  return body.result.value
+}
+
 function disconnectableRpc(baseUrl, endpoint, payload) {
   const body = Buffer.from(JSON.stringify({
     type: 'client-request',
@@ -812,7 +851,7 @@ function disconnectableRpc(baseUrl, endpoint, payload) {
 
 async function exerciseRealDshWeb(home, env, cliLog) {
   const output = { text: '' }
-  const child = spawn(dshBin, ['--profile', 'web', '--port', '0'], {
+  const child = spawn(dshBin, ['--profile', 'web', '--port', '0', '--no-open'], {
     cwd: packageRoot,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -823,7 +862,8 @@ async function exerciseRealDshWeb(home, env, cliLog) {
     const index = await fetch(baseUrl, { signal: AbortSignal.timeout(5_000) })
     assert.equal(index.status, 200)
     const html = await index.text()
-    const bootText = html.match(/window\.__DSH_BOOT__ = (\{.*?\})<\/script>/su)?.[1]
+    const bootText = /(?:window\.__DSH_BOOT__|globalThis\["__DSH_BOOT__"\])\s*=\s*(\{.*?\})<\/script>/su
+      .exec(html)?.[1]
     assert(bootText, 'real DSH index omitted the boot manifest')
     const boot = JSON.parse(bootText)
     const row = boot.entries.find(entry => entry.id === packageId)
@@ -841,6 +881,27 @@ async function exerciseRealDshWeb(home, env, cliLog) {
     const clientSource = await bundle.text()
     assert(clientSource.includes('id: "dsh-loopx-plugin"'))
     await materializeServedClient(clientSource)
+
+    const sessionId = 'loopx-bootstrap-readback'
+    const initializationLog = await readFile(cliLog, 'utf8').catch(() => '(no LoopX calls)')
+    assert(
+      await stat(join(env.DSH_AGENTS_HOME, 'skills', 'loopx', 'SKILL.md'))
+        .then(() => true, () => false),
+      `automatic initialization did not create the isolated loopx skill: ${initializationLog}\n${output.text}`,
+    )
+    await hostRpc(baseUrl, 'session.create', { sessionId, cwd: packageRoot })
+    const skillCatalog = await hostRpc(baseUrl, 'skill.list', { sessionId })
+    assert(
+      skillCatalog.skills.some(skill => skill.name === 'loopx'),
+      `automatic initialization did not expose the loopx skill before DSH readiness: ${JSON.stringify(skillCatalog)}\n${output.text}`,
+    )
+
+    const startupCalls = (await readFile(cliLog, 'utf8')).trim().split('\n')
+    assert.equal(startupCalls.length, 4, `unexpected automatic initialization calls: ${startupCalls.join(' | ')}`)
+    assert(startupCalls[0].endsWith('--version'))
+    assert(startupCalls[1].includes('workflow-skills'))
+    assert(startupCalls[2].includes('--install'))
+    assert(startupCalls[3].includes('workflow-skills'))
 
     const malformed = await rpc(baseUrl, 'goalbar/read', { reflected: 'must-not-return' })
     assert.equal(malformed.response.status, 200)
@@ -864,8 +925,8 @@ async function exerciseRealDshWeb(home, env, cliLog) {
     assert.equal(rejected.response.status, 403)
     assert.equal(rejected.body, 'forbidden')
     await new Promise(resolveWait => setTimeout(resolveWait, 150))
-    const logExists = await stat(cliLog).then(() => true, () => false)
-    assert.equal(logExists, false, 'idle real DSH runtime invoked LoopX')
+    const idleCalls = (await readFile(cliLog, 'utf8')).trim().split('\n')
+    assert.deepEqual(idleCalls, startupCalls, 'idle real DSH runtime invoked LoopX after bootstrap')
   } finally {
     await stopChild(child)
   }
@@ -880,7 +941,7 @@ async function main() {
   const home = join(temp, 'dsh-home')
   const tarball = suppliedTarball ?? join(temp, 'dsh-loopx-plugin.tgz')
   const cliLog = join(temp, 'loopx-invocations.log')
-  const fakeLoopX = join(temp, 'loopx-idle-probe')
+  const fakeLoopX = join(temp, 'loopx-bootstrap-probe')
   let installed
   try {
     if (suppliedTarball === undefined) {
@@ -888,13 +949,57 @@ async function main() {
     }
     assert((await stat(tarball)).isFile(), 'packed artifact is unavailable')
     assertPackedArtifact(tarball)
-    await writeFile(fakeLoopX, `#!/usr/bin/env sh\nprintf '%s\\n' "$*" >> "${cliLog}"\nprintf '%s\\n' 'loopx smoke'\n`)
+    await writeFile(fakeLoopX, String.raw`#!/usr/bin/env sh
+set -eu
+printf '%s\n' "$*" >> "${cliLog}"
+case " $* " in
+  *" --version "*)
+    printf '%s\n' 'loopx smoke'
+    exit 0
+    ;;
+esac
+skills_dir=''
+previous=''
+for argument in "$@"; do
+  if [ "$previous" = '--skills-dir' ]; then skills_dir="$argument"; fi
+  previous="$argument"
+done
+case " $* " in
+  *" workflow-skills "*)
+    case " $* " in
+      *" --install "*)
+        for skill in loopx loopx-benchmark loopx-doc-registry loopx-pr-program loopx-pr-review loopx-project loopx-self-repair; do
+          mkdir -p "$skills_dir/$skill"
+          printf '%s\n' '---' "name: \"$skill\"" "description: \"LoopX runtime smoke skill.\"" '---' '' '# LoopX smoke' > "$skills_dir/$skill/SKILL.md"
+        done
+        printf '%s\n' '{"ok":true,"schema_version":"loopx_workflow_skill_install_v0","operation":"install","host_surface":"deepseek-harness-native","installed":{"loopx-benchmark":"created","loopx-doc-registry":"created","loopx-pr-program":"created","loopx-pr-review":"created","loopx-project":"created","loopx-self-repair":"created"},"entry":{"status":"created"}}'
+        ;;
+      *)
+        if [ -f "$skills_dir/loopx/SKILL.md" ]; then required=false; else required=true; fi
+        printf '%s\n' "{\"ok\":true,\"schema_version\":\"loopx_workflow_skill_install_v0\",\"operation\":\"inspect\",\"host_surface\":\"deepseek-harness-native\",\"install_required\":$required}"
+        ;;
+    esac
+    ;;
+  *)
+    printf '%s\n' '{"ok":false,"error":"unexpected smoke command"}'
+    exit 1
+    ;;
+esac
+`)
     await chmod(fakeLoopX, 0o755)
-    const env = { ...process.env, DSH_HOME: home, LOOPX_BIN: fakeLoopX }
+    const env = {
+      ...process.env,
+      DSH_HOME: home,
+      DSH_AGENTS_HOME: join(temp, 'agents'),
+      LOOPX_BIN: fakeLoopX,
+    }
     run(dshBin, [
       'plugin', '--profile', 'web', 'add', tarball,
       '--prefer-offline', '--ignore-scripts',
     ], env)
+    installed = await realpath(join(home, 'profiles', 'web', 'node_modules', packageId))
+    await exerciseRealDshWeb(home, env, cliLog)
+    await exercisePackedService(installed)
     const installedDump = run(dshBin, ['--profile', 'web', '--dump-config'], env)
     let previousRow = -1
     for (const [id, name] of [
@@ -909,9 +1014,8 @@ async function main() {
       )
       previousRow = row
     }
-    installed = await realpath(join(home, 'profiles', 'web', 'node_modules', packageId))
-    await exercisePackedService(installed)
-    await exerciseRealDshWeb(home, env, cliLog)
+    assert.match(installedDump, /id: webserver[\s\S]*inject:\n\s+- webStartup\n\s+- loopxBootstrap/u)
+    assert.match(installedDump, /id: web-runtime[\s\S]*inject:\n\s+- webStartup\n\s+- loopxBootstrap/u)
     run(dshBin, ['plugin', '--profile', 'web', 'remove', packageId], env)
     const dump = run(dshBin, ['--profile', 'web', '--dump-config'], env)
     assert(!dump.includes(packageId), 'profile removal retained a LoopX Loader row')
@@ -920,7 +1024,7 @@ async function main() {
   }
   process.stdout.write([
     'dsh-loopx GoalBar runtime smoke passed',
-    '  real-profile: packed install, boot graph, served/materialized Client, /loopx registration, loopback fence, process teardown, idle no-CLI',
+    '  real-profile: packed install, awaited automatic initialization, immediate /loopx skill readback, boot graph, served/materialized Client, loopback fence, process teardown, idle no-extra-CLI',
     '  packed-rc7-connection: live mid-turn binding, lease revision reconciliation, runtime-only update, pending-watch abort, successful Start/Pause, handler disposal',
     '  client-lifecycle: slot coexistence/session injection plus ordinary-unload and cached-reapply CSS cleanup',
     '  manual-evidence: mounted Client-to-carrier Start/Pause stays in the owner-reviewed packed-browser gate',

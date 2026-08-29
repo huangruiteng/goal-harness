@@ -103,6 +103,12 @@ def write_reserved_run_artifacts(
     payload: dict[str, Any],
     render_markdown: Callable[[dict[str, Any]], str],
 ) -> None:
+    from .control_plane.quota.usage_collector import ingest_usage_into_run_record
+
+    # Producer call site for GH-C95: normalize any compact usage measurement onto
+    # the durable run record and its index row before append. Fail closed here so
+    # malformed or negative usage never enters run history.
+    ingest_usage_into_run_record(record, index_record=index_record)
     json_path, markdown_path = reserve_unique_run_paths(runs_dir, generated_at)
     index_path = runs_dir / "index.jsonl"
     index_record["json_path"] = str(json_path)
@@ -110,10 +116,15 @@ def write_reserved_run_artifacts(
     payload["json_path"] = str(json_path)
     payload["markdown_path"] = str(markdown_path)
     payload["index_path"] = str(index_path)
-    json_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if isinstance(record.get("usage"), dict):
+        payload["usage"] = dict(record["usage"])
+    json_path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
     markdown_path.write_text(render_markdown(payload) + "\n", encoding="utf-8")
     with index_path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
+        f.write(json.dumps(index_record, ensure_ascii=False, allow_nan=False) + "\n")
 
 
 def validate_goal_id_path_segment(goal_id: str) -> str:

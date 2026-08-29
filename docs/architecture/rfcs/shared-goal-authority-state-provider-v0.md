@@ -666,6 +666,17 @@ does not replace today's separate claim and lease verbs with the atomic
 `claim_work` command described above; that command belongs to the future shared
 aggregate.
 
+After the task-lease acquire TypeScript cutover, the acquire portion of this
+pure core is owned by `task_lease_acquire.ts`. The Python `authority_core`
+surface is a typed adapter for that command: it projects a normalized snapshot,
+invokes `task_lease.acquire.decide`, and reconstructs the provider-neutral
+`TransitionPlan`. Both the local lease-file transaction and the Stage 2
+coordination executor therefore consume the same acquire decision; locking,
+source revalidation, file persistence, provider CAS, and receipt construction
+remain in their respective execution layers. The remaining todo, renew,
+transfer, release, fence, and handoff-mode decisions stay in the Python core
+until their own reviewed TypeScript cutovers.
+
 Keep three layers distinct as the provider work proceeds:
 
 1. `DomainDecision` is the pure apply/reject/no-change judgment over an explicit
@@ -731,7 +742,9 @@ The first Stage 2 slice exists on this branch, additively:
   `ambiguous`. A head with no faithful strict-JSON form reports typed
   `failed` before any write reaches disk.
 - `loopx.control_plane.coordination.executor`: Section 5 steps 1-10 for
-  `claim_work`. Every domain decision is delegated to the Stage 1 core; the
+  `claim_work`. Every domain decision is delegated to the Stage 1 core; lease
+  acquire reaches its canonical TypeScript decision through the typed Python
+  adapter, while the claim decision remains in the Python core. The
   composition is lease acquire followed by the hard-lease-gated claim,
   because a claim-first or legacy-mode composition silently bypasses the
   Appendix B holder gate (the tests pin this). `lease_ttl_seconds` is

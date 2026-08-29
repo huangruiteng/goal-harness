@@ -89,5 +89,10 @@ for entry in sys.path:
     filtered_path.append(entry)
 sys.path[:] = [release_root, *filtered_path]
 sys.argv[0] = os.path.join(release_root, "scripts", "loopx")
-runpy.run_module("loopx.cli", run_name="__main__")
+module = (
+    "loopx.entrypoint"
+    if os.path.isfile(os.path.join(release_root, "loopx", "entrypoint.py"))
+    else "loopx.cli"
+)
+runpy.run_module(module, run_name="__main__")
 ' "$@"

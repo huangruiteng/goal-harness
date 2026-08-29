@@ -54,7 +54,6 @@ from .control_plane.quota.scheduler_ack import (
     record_quota_scheduler_ack_for_decision,
 )
 from .control_plane.quota.settlement import (
-    find_quota_spend_run_by_effect_ref,
     read_heartbeat_settlement,
     settlement_result_payload,
 )
@@ -69,6 +68,7 @@ from .control_plane.quota.slot_accounting import (
     record_quota_slot_spend_from_preview,
     record_quota_slot_void_from_preview,
 )
+from .control_plane.quota.spend_commit import replay_quota_spend_by_effect_ref
 from .control_plane.quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
     TURN_SCOPED_SLOT_SPEND_SOURCES,
@@ -1232,15 +1232,15 @@ def spend_quota_slot(
                 "effect_ref": normalized_effect_ref,
                 "reason": "effect-bound quota spend requires runtime_root",
             }
-        prior_effect_run = find_quota_spend_run_by_effect_ref(
+        replay = replay_quota_spend_by_effect_ref(
             Path(str(raw_runtime_root)).expanduser(),
             goal_id=safe_goal_id,
             effect_ref=normalized_effect_ref,
+            agent_id=agent_id,
+            read_only=not execute,
         )
-        if prior_effect_run is not None:
-            prior_agent_id = normalize_todo_claimed_by(prior_effect_run.get("agent_id"))
-            requested_agent_id = normalize_todo_claimed_by(agent_id)
-            if requested_agent_id and prior_agent_id != requested_agent_id:
+        if replay.get("replay_found"):
+            if not replay.get("ok"):
                 return {
                     "ok": False,
                     "mode": "spend-slot",
@@ -1248,7 +1248,9 @@ def spend_quota_slot(
                     "appended": False,
                     "goal_id": safe_goal_id,
                     "effect_ref": normalized_effect_ref,
-                    "reason": "effect_ref already belongs to a different agent",
+                    "reason": (
+                        "effect_ref replay requires the same valid agent identity"
+                    ),
                 }
             return {
                 "ok": True,
@@ -1257,7 +1259,7 @@ def spend_quota_slot(
                 "appended": False,
                 "idempotent_replay": True,
                 "goal_id": safe_goal_id,
-                "agent_id": prior_agent_id or None,
+                "agent_id": replay.get("agent_id"),
                 "effect_ref": normalized_effect_ref,
                 "reason": "quota spend replayed for the same provider effect",
             }

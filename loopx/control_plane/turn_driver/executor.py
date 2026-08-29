@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -21,10 +20,22 @@ from ..goals.goal_vision import normalize_goal_vision_packet
 from ..work_items.delivery_batch_scale import require_delivery_batch_scale
 from ..work_items.delivery_outcome import require_delivery_outcome
 from .driver import selected_turn_todo
+from .journal_store import (
+    LOOPX_TURN_JOURNAL_SCHEMA_VERSION,
+    TURN_KEY_RE,
+    journal_committed_effect_id as _journal_committed_effect_id,
+    load_turn_journal as _load_journal,
+    turn_journal_path,
+    write_turn_journal_checkpoint as _write_journal,
+)
+from .recovery import (
+    assess_existing_turn_recovery,
+    build_turn_recovery_audit,
+    require_turn_recovery_continuation,
+)
 from .session_recovery import (
     SessionBindingResolver,
     build_host_recovery_record,
-    reconcile_failed_turn_retry_request,
     require_host_recovery_kind,
 )
 from .settlement import (
@@ -47,14 +58,8 @@ from .transaction import (
     build_loopx_turn_transaction_plan,
     validate_loopx_turn_receipt,
 )
-from .turn_journal_runtime import (
-    interpret_turn_journal_projection,
-    write_turn_journal,
-)
-
 LOOPX_TURN_HOST_REQUEST_SCHEMA_VERSION = "loopx_turn_host_request_v0"
-LOOPX_TURN_JOURNAL_INSPECTION_SCHEMA_VERSION = "loopx_turn_journal_inspection_v0"
-LOOPX_TURN_JOURNAL_SCHEMA_VERSION = "loopx_turn_journal_v0"
+LOOPX_TURN_JOURNAL_INSPECTION_SCHEMA_VERSION = "loopx_turn_journal_inspection_v1"
 LOOPX_TURN_TASK_VALIDATION_SCHEMA_VERSION = "loopx_turn_task_validation_v0"
 HOST_RESULT_MAX_BYTES = 12_000
 HOST_ARG_MAX_COUNT = 32
@@ -68,8 +73,6 @@ HOST_RESULT_TEXT_LIMITS = (
     ("vision_unchanged_reason", 240),
     ("summary", 400),
 )
-TURN_KEY_RE = re.compile(r"^sha256:(?P<digest>[0-9a-f]{64})$")
-
 MATERIAL_HOST_RESULT_KINDS = {
     LoopXTurnResultKind.VALIDATED_PROGRESS,
     LoopXTurnResultKind.VALIDATED_COMPLETION,
@@ -566,39 +569,14 @@ def build_loopx_turn_command_validator(
     return validate
 
 
-def turn_journal_path(runtime_root: Path, *, goal_id: str, turn_key: str) -> Path:
-    match = TURN_KEY_RE.fullmatch(turn_key)
-    if not match:
-        raise ValueError("turn_key must be a sha256 digest")
-    return runtime_root / "goals" / goal_id / "turns" / f"{match.group('digest')}.json"
-
-
-def _write_journal(path: Path, journal: Mapping[str, Any]) -> None:
-    write_turn_journal(
-        str(path),
-        journal,
-        expected_effect_id=_journal_committed_effect_id(journal),
-    )
-
-
-def _load_journal(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if (
-        not isinstance(value, dict)
-        or value.get("schema_version") != LOOPX_TURN_JOURNAL_SCHEMA_VERSION
-    ):
-        raise ValueError("LoopX Turn journal has an unsupported schema")
-    return value
-
-
 def inspect_loopx_turn_journal(
     runtime_root: Path,
     *,
     goal_id: str,
     agent_id: str,
     turn_key: str,
+    retry_failed: bool = False,
+    session_binding_resolver: SessionBindingResolver | None = None,
 ) -> dict[str, object]:
     """Inspect one canonical Turn journal without granting execution authority."""
 
@@ -622,63 +600,37 @@ def inspect_loopx_turn_journal(
     if journal is None:
         raise ValueError("LoopX Turn journal does not exist")
 
-    return interpret_turn_journal_projection(
+    request: dict[str, Any] = {}
+    session_check = None
+    recovery_error = None
+    assess_session = True
+    if retry_failed and journal.get("status") == "failed":
+        plan = journal.get("plan")
+        if isinstance(plan, Mapping):
+            try:
+                request = build_loopx_turn_host_request(plan)
+            except (TypeError, ValueError) as exc:
+                assess_session = False
+                recovery_error = ValueError("failed-Turn Host request is invalid")
+                session_check = {
+                    "kind": "host_session_binding",
+                    "outcome": "failed",
+                    "reason": "host_request_invalid",
+                }
+                recovery_error.__cause__ = exc
+
+    return assess_existing_turn_recovery(
         journal,
+        request,
         goal_id=safe_goal_id,
         agent_id=agent_id,
         turn_key=turn_key,
-    )
-
-
-def _journal_committed_effect_id(journal: Mapping[str, Any]) -> str | None:
-    """Return the settlement effect id under which the journal was written.
-
-    Legacy journals created before the typed settlement binding have no
-    ``settlement_plan``; callers then cannot prove provenance and the
-    identity cross-check is skipped, preserving legacy resume behavior.
-    """
-
-    stored_plan = journal.get("plan")
-    if not isinstance(stored_plan, Mapping):
-        return None
-    transaction = stored_plan.get("transaction")
-    if not isinstance(transaction, Mapping):
-        return None
-    settlement_plan = transaction.get("settlement_plan")
-    if not isinstance(settlement_plan, Mapping):
-        return None
-    identity = settlement_plan.get("identity")
-    if not isinstance(identity, Mapping):
-        return None
-    effect_id = str(identity.get("effect_id") or "").strip()
-    return effect_id or None
-
-
-def load_loopx_turn_plan_from_journal(
-    runtime_root: Path,
-    *,
-    goal_id: str,
-    turn_key: str,
-) -> dict[str, Any]:
-    path = turn_journal_path(runtime_root, goal_id=goal_id, turn_key=turn_key)
-    with exclusive_file_lock(path):
-        journal = _load_journal(path)
-    if journal is None:
-        raise ValueError("LoopX Turn resume journal does not exist")
-    plan = journal.get("plan")
-    if not isinstance(plan, dict):
-        raise TypeError("LoopX Turn resume journal does not contain a plan")
-    transaction = (
-        plan.get("transaction") if isinstance(plan.get("transaction"), dict) else {}
-    )
-    if transaction.get("turn_key") != turn_key or journal.get("turn_key") != turn_key:
-        raise ValueError("LoopX Turn resume journal has mismatched turn lineage")
-    envelope = (
-        plan.get("turn_envelope") if isinstance(plan.get("turn_envelope"), dict) else {}
-    )
-    if envelope.get("goal_id") != goal_id or journal.get("goal_id") != goal_id:
-        raise ValueError("LoopX Turn resume journal belongs to another goal")
-    return dict(plan)
+        retry_failed=retry_failed,
+        session_binding_resolver=session_binding_resolver,
+        assess_session=assess_session,
+        session_recovery_check=session_check,
+        recovery_error=recovery_error,
+    ).inspection
 
 
 def _receipt(
@@ -849,6 +801,7 @@ def _execution_payload(
     quota_spent = effects.get("quota_spent") is True or "quota_spend" in list(
         journal.get("completed_phases") or []
     )
+    recovery = journal.get("recovery_audit")
     return {
         "ok": journal.get("status")
         in {
@@ -879,6 +832,7 @@ def _execution_payload(
         ),
         **({"todo_completion": todo_completion} if todo_completion else {}),
         **({"reason": journal.get("reason")} if journal.get("reason") else {}),
+        **({"recovery": dict(recovery)} if isinstance(recovery, Mapping) else {}),
     }
 
 
@@ -1390,24 +1344,50 @@ def run_loopx_turn_once(
     journal_path = turn_journal_path(runtime_root, goal_id=goal_id, turn_key=turn_key)
     with exclusive_file_lock(journal_path):
         journal = _load_journal(journal_path)
-        if journal and (
-            journal.get("status") in {"committed", "stopped"}
-            or journal.get("status") == "failed"
-            and not retry_failed
-        ):
-            return _execution_payload(
-                plan,
-                journal,
-                execute=True,
-                replayed=True,
-                effects=empty_effects,
+        recovery_decision: dict[str, Any] | None = None
+        if journal is not None:
+            envelope = (
+                plan.get("turn_envelope")
+                if isinstance(plan.get("turn_envelope"), Mapping)
+                else {}
             )
-        if journal and journal.get("status") == "failed":
-            request = reconcile_failed_turn_retry_request(
-                request,
+            agent_id = str(envelope.get("agent_id") or "")
+            assessment = assess_existing_turn_recovery(
                 journal,
+                request,
+                goal_id=goal_id,
+                agent_id=agent_id,
+                turn_key=turn_key,
+                retry_failed=retry_failed,
                 session_binding_resolver=session_binding_resolver,
             )
+            recovery_decision = assessment.decision
+            action = recovery_decision.get("action")
+            if action == "return_existing":
+                payload = _execution_payload(
+                    plan,
+                    journal,
+                    execute=True,
+                    replayed=True,
+                    effects=empty_effects,
+                )
+                payload["recovery"] = build_turn_recovery_audit(
+                    recovery_decision,
+                    journal,
+                    status="finished",
+                    host_invoked=False,
+                )
+                return payload
+            request = require_turn_recovery_continuation(assessment)
+            journal["recovery_audit"] = build_turn_recovery_audit(
+                recovery_decision,
+                journal,
+                status="started",
+                host_invoked=None,
+            )
+            _write_journal(journal_path, journal)
+
+        if journal and journal.get("status") == "failed":
             receipt = (
                 journal.get("receipt")
                 if isinstance(journal.get("receipt"), dict)
@@ -1442,6 +1422,20 @@ def run_loopx_turn_once(
             _write_journal(journal_path, journal)
 
         effects = dict(empty_effects)
+
+        def finish_recovery(payload: dict[str, Any]) -> dict[str, Any]:
+            if recovery_decision is None:
+                return payload
+            journal["recovery_audit"] = build_turn_recovery_audit(
+                recovery_decision,
+                journal,
+                status="finished",
+                host_invoked=effects.get("host_invoked") is True,
+            )
+            _write_journal(journal_path, journal)
+            payload["recovery"] = dict(journal["recovery_audit"])
+            return payload
+
         result, completed_phases, terminal = _host_result_stage(
             plan,
             request,
@@ -1462,7 +1456,7 @@ def run_loopx_turn_once(
             effects=effects,
         )
         if terminal is not None:
-            return terminal
+            return finish_recovery(terminal)
         assert result is not None
 
         completed_phases, terminal = _task_validation_stage(
@@ -1475,9 +1469,9 @@ def run_loopx_turn_once(
             effects=effects,
         )
         if terminal is not None:
-            return terminal
+            return finish_recovery(terminal)
 
-        return _typed_settlement_stage(
+        return finish_recovery(_typed_settlement_stage(
             plan,
             result,
             completed_phases=completed_phases,
@@ -1495,4 +1489,4 @@ def run_loopx_turn_once(
                 terminal_closeout=terminal_closeout_resolver,
             ),
             scheduler=scheduler,
-        )
+        ))

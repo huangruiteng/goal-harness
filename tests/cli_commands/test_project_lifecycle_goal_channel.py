@@ -192,6 +192,43 @@ def test_refresh_state_forwards_external_sink_suppression(
     assert captured_kwargs["external_sink_delivery_authorized"] is False
 
 
+@pytest.mark.parametrize(
+    "constant", ["NaN", "Infinity", "-Infinity"]
+)
+def test_refresh_state_rejects_non_standard_usage_json_constants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    constant: str,
+) -> None:
+    """--usage-json is strict JSON: NaN/Infinity must fail before any refresh."""
+    captured: dict[str, Any] = {}
+    refresh_calls: list[dict[str, Any]] = []
+
+    def _record_refresh(**kwargs: Any) -> dict[str, Any]:
+        refresh_calls.append(kwargs)
+        return {"ok": True, "appended": True, "dry_run": False}
+
+    monkeypatch.setattr(project_lifecycle, "refresh_state_run", _record_refresh)
+
+    args = _args()
+    args.usage_json = (
+        '{"input_tokens": 1, "output_tokens": 1, "provider": "p", '
+        '"model": "m", "source_snapshot_id": "s", "cost_usd": ' + constant + "}"
+    )
+    result = project_lifecycle.handle_project_lifecycle_command(
+        args,
+        registry_path=tmp_path / ".loopx" / "registry.json",
+        print_payload=lambda payload, fmt, renderer: captured.update(payload),
+        output_format=lambda args: "json",
+        append_cli_rollout_event=lambda *a, **kw: {},
+    )
+
+    assert result == 1
+    assert captured["ok"] is False
+    assert "strict JSON" in captured["error"]
+    assert refresh_calls == []
+
+
 def test_refresh_state_redacts_goal_channel_exception_details(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

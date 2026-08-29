@@ -1,6 +1,7 @@
-# `infer_persisted_heartbeat_settlement_identity` 恢复边界不变量
+# Settlement readback 身份恢复边界不变量
 
-**状态**：已锁定（PR #3360，fail-closed 边界显式化 + 语义测试）。
+**状态**：已锁定（PR #3360，fail-closed 边界显式化 + 语义测试）；当前由
+`read_heartbeat_settlement(..., infer_turn_instance_id=True)` 的聚合读取路径持有。
 
 ## 不变量
 
@@ -10,7 +11,7 @@
 delivery outcome 作为候选。
 
 任何**未知或不完整**的同 agent 非中性记录都不是可穿透的「中性」记录：它构成恢复边界，
-函数在该处 fail-closed（返回 `None`，回退到 frontier 规则），绝不跨越它去恢复更旧的
+读取在该处 fail-closed（返回 `None`，回退到 frontier 规则），绝不跨越它去恢复更旧的
 settlement identity。这与 `slot_accounting._latest_unspent_accountable_delivery_run`
 及 `test_custom_non_neutral_event_still_fails_closed` 的语义一致。
 

@@ -1,6 +1,6 @@
 import { resolveFrontstageOpsStatusUrl } from "./local-status-query";
 
-export const defaultLocalStatusSourceUrl = "http://127.0.0.1:8766/status.json";
+export const defaultLocalStatusSourceUrl = "/status.json";
 export const statusSourceCatalogStorageKey = "loopx-status-source-catalog-v1";
 
 export type StatusSource = {
@@ -137,6 +137,8 @@ export function removeStatusSource(catalog: StatusSourceCatalog, sourceIdToRemov
 
 export function statusSourceForUrl(catalog: StatusSourceCatalog, statusUrl: string, baseHref: string) {
   if (!statusUrl.trim()) return localStatusSource;
+  const resolved = resolveFrontstageOpsStatusUrl(statusUrl, baseHref);
+  if (resolved.source?.isRelative) return localStatusSource;
   let normalized = statusUrl.trim();
   try {
     normalized = new URL(normalized, baseHref).toString();

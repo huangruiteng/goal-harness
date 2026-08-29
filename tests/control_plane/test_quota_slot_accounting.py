@@ -122,6 +122,8 @@ def _run(
     classification: str,
     agent_id: str | None = None,
     delivery_outcome: str | None = None,
+    todo_id: str | None = None,
+    progress_observation: dict[str, Any] | None = None,
     refresh_state: bool = False,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -133,6 +135,10 @@ def _run(
         payload["agent_id"] = agent_id
     if delivery_outcome:
         payload["delivery_outcome"] = delivery_outcome
+    if todo_id:
+        payload["todo_id"] = todo_id
+    if progress_observation:
+        payload["progress_observation"] = progress_observation
     if refresh_state:
         payload.update(
             {
@@ -144,7 +150,23 @@ def _run(
     return payload
 
 
-def test_unchanged_monitor_poll_is_not_accountable_delivery(tmp_path: Path) -> None:
+def _blocked_gap(evidence_ids: object) -> dict[str, Any]:
+    return _run(
+        "2026-01-01T00:01:00+00:00",
+        classification="blocked_writeback",
+        delivery_outcome="outcome_gap",
+        todo_id="todo_exact",
+        progress_observation={
+            "schema_version": "typed_progress_observation_v0",
+            "result_class": "blocked",
+            "work_item_id": "todo_exact",
+            "blocker_id": "blocker:runtime-boundary",
+            "evidence_ids": evidence_ids,
+        },
+    )
+
+
+def test_unchanged_monitor_poll_is_not_turn_settlement(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     _write_run_index(runtime, [_poll("2026-01-01T00:00:00+00:00", material=False)])
 
@@ -152,7 +174,7 @@ def test_unchanged_monitor_poll_is_not_accountable_delivery(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("before_overrides", SAFE_BYPASS_CASES)
-def test_safe_bypass_rejects_no_accountable_writeback(
+def test_safe_bypass_rejects_missing_turn_settlement(
     tmp_path: Path,
     before_overrides: dict[str, Any],
 ) -> None:
@@ -161,9 +183,48 @@ def test_safe_bypass_rejects_no_accountable_writeback(
     preview = _preview(runtime, before_overrides=before_overrides)
 
     assert preview["ok"] is False
-    assert "requires a latest unspent accountable delivery writeback" in preview[
-        "reason"
-    ]
+    assert "requires a latest unspent Turn settlement writeback" in preview["reason"]
+
+
+def test_safe_bypass_accepts_typed_blocker_settlement_without_progress(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "runtime"
+    _write_run_index(
+        runtime,
+        [_blocked_gap(["evidence:runtime-boundary"])],
+    )
+
+    preview = _preview(
+        runtime,
+        before_overrides={"state": "operator_gate", "safe_bypass_allowed": True},
+    )
+
+    assert preview["ok"] is True
+
+
+@pytest.mark.parametrize(
+    "evidence_ids",
+    [
+        "evidence:runtime-boundary",
+        {"evidence:runtime-boundary": True},
+        ["evidence:runtime-boundary", "invalid evidence id"],
+    ],
+)
+def test_safe_bypass_rejects_malformed_blocker_evidence(
+    tmp_path: Path,
+    evidence_ids: object,
+) -> None:
+    runtime = tmp_path / "runtime"
+    _write_run_index(runtime, [_blocked_gap(evidence_ids)])
+
+    preview = _preview(
+        runtime,
+        before_overrides={"state": "operator_gate", "safe_bypass_allowed": True},
+    )
+
+    assert preview["ok"] is False
+    assert "requires a latest unspent Turn settlement writeback" in preview["reason"]
 
 
 @pytest.mark.parametrize("before_overrides", SAFE_BYPASS_CASES)
@@ -929,6 +990,75 @@ def test_implicit_heartbeat_spend_replays_exactly_once_after_frontier_moves(
     assert replay["appended"] is False
     assert replay["idempotent_replay"] is True
     assert replay["turn_instance_id"] == turn_instance_id
+
+
+@pytest.mark.parametrize(
+    "agent_id",
+    [pytest.param(None, id="missing-agent"), pytest.param(AGENT_B, id="other-agent")],
+)
+def test_effect_ref_replay_requires_same_agent_identity(
+    tmp_path: Path,
+    agent_id: str | None,
+) -> None:
+    runtime = tmp_path / "runtime"
+    effect_ref = "provider-effect-replay-1"
+    _write_run_index(
+        runtime,
+        [
+            {
+                **_run(
+                    "2026-01-01T00:01:00+00:00",
+                    classification="quota_slot_spent",
+                    agent_id=AGENT_A,
+                ),
+                "effect_ref": effect_ref,
+            }
+        ],
+    )
+
+    replay = spend_quota_slot(
+        {"runtime_root": str(runtime)},
+        goal_id=GOAL_ID,
+        execute=True,
+        agent_id=agent_id,
+        effect_ref=effect_ref,
+    )
+
+    assert replay["ok"] is False, replay
+    assert replay["appended"] is False
+    assert replay.get("idempotent_replay") is not True
+    assert replay["reason"] == "effect_ref replay requires the same valid agent identity"
+
+
+def test_effect_ref_replay_accepts_same_agent_identity(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime"
+    effect_ref = "provider-effect-replay-2"
+    _write_run_index(
+        runtime,
+        [
+            {
+                **_run(
+                    "2026-01-01T00:01:00+00:00",
+                    classification="quota_slot_spent",
+                    agent_id=AGENT_A,
+                ),
+                "effect_ref": effect_ref,
+            }
+        ],
+    )
+
+    replay = spend_quota_slot(
+        {"runtime_root": str(runtime)},
+        goal_id=GOAL_ID,
+        execute=True,
+        agent_id=AGENT_A,
+        effect_ref=effect_ref,
+    )
+
+    assert replay["ok"] is True, replay
+    assert replay["appended"] is False
+    assert replay["idempotent_replay"] is True
+    assert replay["agent_id"] == AGENT_A
 
 
 def test_turn_scoped_spend_keeps_original_todo_across_successor_reselection(

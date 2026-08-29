@@ -23,12 +23,7 @@ from loopx.control_plane.quota.heartbeat_receipt import (
 )
 from loopx.control_plane.quota.settlement import (
     build_codex_app_settlement_plan,
-    infer_persisted_heartbeat_settlement_identity,
     read_heartbeat_settlement,
-    receipt_bound_monitor_settlement_phase,
-    receipt_bound_replay_settlement_phase,
-    require_settlement_terminal_closeout,
-    resolve_heartbeat_settlement_identity,
     settlement_step_command,
 )
 from loopx.control_plane.quota.settlement_cli import (
@@ -263,7 +258,7 @@ def test_quota_settlement_readback_returns_the_complete_typed_chain(
         ("mismatched", SettlementFailureKind.IDENTITY_MISMATCH),
     ],
 )
-def test_python_settlement_wrappers_fail_closed_for_invalid_or_missing_guard(
+def test_python_settlement_readback_fails_closed_for_invalid_or_missing_guard(
     tmp_path: Path,
     guard_state: str,
     failure_kind: SettlementFailureKind,
@@ -301,26 +296,6 @@ def test_python_settlement_wrappers_fail_closed_for_invalid_or_missing_guard(
     assert readback.identity.failure.kind is failure_kind
     assert readback.monitor_phase is None
     assert readback.replay_phase is None
-    assert (
-        receipt_bound_monitor_settlement_phase(
-            runtime_root,
-            goal_id=GOAL_ID,
-            agent_id=AGENT_ID,
-            todo_id=TODO_ID,
-            turn_instance_id=TURN_ID,
-        )
-        is None
-    )
-    assert (
-        receipt_bound_replay_settlement_phase(
-            runtime_root,
-            goal_id=GOAL_ID,
-            agent_id=AGENT_ID,
-            todo_id=TODO_ID,
-            turn_instance_id=TURN_ID,
-        )
-        is None
-    )
 
 
 def test_terminal_closeout_receipt_rejects_ordinary_completion_event(
@@ -349,8 +324,16 @@ def test_terminal_closeout_receipt_rejects_ordinary_completion_event(
         encoding="utf-8",
     )
 
-    result = require_settlement_terminal_closeout(runtime_root, identity)
+    readback = read_heartbeat_settlement(
+        runtime_root,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        todo_id=TODO_ID,
+        turn_instance_id=TURN_ID,
+    )
 
+    assert readback is not None
+    result = readback.terminal_closeout
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.RECEIPT_MISSING
     assert result.failure.step_kind is SettlementStepKind.TERMINAL_CLOSEOUT
@@ -843,7 +826,7 @@ def test_generic_cli_without_turn_identity_keeps_legacy_unbound_actions() -> Non
 def test_guard_receipt_resolves_stable_settlement_identity(tmp_path: Path) -> None:
     _append_guard_receipt(tmp_path)
 
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -851,6 +834,8 @@ def test_guard_receipt_resolves_stable_settlement_identity(tmp_path: Path) -> No
         turn_instance_id=TURN_ID,
     )
 
+    assert readback is not None
+    result = readback.identity
     assert result.failure is None
     assert result.value is not None
     assert result.value.effect_id == (f"{GOAL_ID}:{AGENT_ID}:{TODO_ID}:{TURN_ID}")
@@ -860,7 +845,7 @@ def test_guard_receipt_resolves_stable_settlement_identity(tmp_path: Path) -> No
 def test_guard_receipt_rejects_different_todo(tmp_path: Path) -> None:
     _append_guard_receipt(tmp_path, todo_id="todo_original")
 
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -868,6 +853,8 @@ def test_guard_receipt_rejects_different_todo(tmp_path: Path) -> None:
         turn_instance_id=TURN_ID,
     )
 
+    assert readback is not None
+    result = readback.identity
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert result.failure.step_kind is SettlementStepKind.VALIDATION
@@ -876,7 +863,7 @@ def test_guard_receipt_rejects_different_todo(tmp_path: Path) -> None:
 def test_guard_receipt_rejects_different_effect_identity(tmp_path: Path) -> None:
     _append_guard_receipt(tmp_path, effect_id="different-effect")
 
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -884,6 +871,8 @@ def test_guard_receipt_rejects_different_effect_identity(tmp_path: Path) -> None
         turn_instance_id=TURN_ID,
     )
 
+    assert readback is not None
+    result = readback.identity
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert "different-effect" in result.failure.reason
@@ -896,7 +885,7 @@ def test_guard_receipt_rejects_corrupted_dual_binding(tmp_path: Path) -> None:
         effect_id=f"{GOAL_ID}:{AGENT_ID}:{TODO_ID}:{TURN_ID}",
     )
 
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -904,6 +893,8 @@ def test_guard_receipt_rejects_corrupted_dual_binding(tmp_path: Path) -> None:
         turn_instance_id=TURN_ID,
     )
 
+    assert readback is not None
+    result = readback.identity
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert "conflicting Todo and autonomous replan bindings" in result.failure.reason
@@ -914,7 +905,7 @@ def test_guard_receipt_returns_typed_failure_for_effect_without_todo(
 ) -> None:
     _append_guard_receipt(tmp_path, todo_id="", effect_id="effect-without-todo")
 
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -922,6 +913,8 @@ def test_guard_receipt_returns_typed_failure_for_effect_without_todo(
         turn_instance_id=TURN_ID,
     )
 
+    assert readback is not None
+    result = readback.identity
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert "effect identity without a Todo" in result.failure.reason
@@ -957,15 +950,18 @@ def test_unbound_visible_goal_recovery_requires_fully_typed_same_agent_run(
         record.pop(missing_field.removeprefix("run_"), None)
     _append_run_index_record(tmp_path, record)
 
-    result = infer_persisted_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         todo_id=None,
+        turn_instance_id=None,
+        infer_turn_instance_id=True,
         allow_unbound_binding=True,
     )
 
-    assert result is not None
+    assert readback is not None
+    result = readback.identity
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
 
@@ -993,14 +989,17 @@ def test_typed_material_poll_is_recovered_not_shadowed(tmp_path: Path) -> None:
         },
     )
 
-    result = infer_persisted_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         todo_id=TODO_ID,
+        turn_instance_id=None,
+        infer_turn_instance_id=True,
     )
 
-    assert result is not None
+    assert readback is not None
+    result = readback.identity
     assert result.value is not None
     assert result.value.turn_instance_id == TURN_ID
 
@@ -1025,11 +1024,13 @@ def test_unknown_non_neutral_record_fails_closed(tmp_path: Path) -> None:
         },
     )
 
-    result = infer_persisted_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         todo_id=TODO_ID,
+        turn_instance_id=None,
+        infer_turn_instance_id=True,
     )
 
-    assert result is None
+    assert readback is None

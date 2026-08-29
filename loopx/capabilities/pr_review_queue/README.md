@@ -167,6 +167,17 @@ typed evidence groups before a verdict:
   regression test;
 - code-volume necessity and the highest-value behavior-preserving
   simplification.
+- change proportionality: compare the verified frequency, severity, blast
+  radius, and recovery cost of the original problem with the production
+  mechanism, new state/contracts/CLI/callers, migration, and long-term
+  maintenance surface. Correctness, green CI, and resolution of earlier
+  findings do not override a `disproportionate` or `not_yet_proven` blocker.
+
+Every materially expanded re-review resets proportionality from the original
+problem and evaluates the full exact head. Reviewer-requested additions are not
+progress toward approval by themselves; the reviewer should request the
+smallest viable fix, deletion, split, or hold when the benefit does not justify
+the accumulated mechanism.
 
 The per-PR `pull_request_review_plan_v1` records the exact target, applicability,
 required evidence ids, and an initially `unverified`

@@ -37,7 +37,12 @@ def main() -> int:
         filtered_path.append(entry)
     sys.path[:] = [str(release_root), *filtered_path]
     sys.argv[0] = str(release_root / "scripts" / "loopx")
-    runpy.run_module("loopx.cli", run_name="__main__")
+    module = (
+        "loopx.entrypoint"
+        if (release_root / "loopx" / "entrypoint.py").is_file()
+        else "loopx.cli"
+    )
+    runpy.run_module(module, run_name="__main__")
     return 0
 
 

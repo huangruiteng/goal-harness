@@ -28,6 +28,7 @@ import {
   receiptBoundMonitorPhase,
   receiptBoundReplayPhase,
 } from "./settlement_phase.ts";
+import { isTurnScopedSettlementOutcome } from "../work_items/delivery_outcome.ts";
 
 export const QUOTA_SETTLEMENT_READBACK_REQUEST_SCHEMA =
   "loopx_quota_settlement_readback_request_v0";
@@ -39,10 +40,6 @@ const TURN_INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const TODO_ID_PATTERN = /^todo_[a-z0-9_-]{3,64}$/;
 const AGENT_ID_PATTERN = /^[a-z][a-z0-9_.:@-]{0,79}$/;
 const REPLAN_OBLIGATION_ID_PATTERN = /^replan-[a-f0-9]{16}$/;
-const ACCOUNTABLE_DELIVERY_OUTCOMES = new Set([
-  "outcome_progress",
-  "primary_goal_outcome",
-]);
 
 interface ReadbackRequest {
   runtime_root: string;
@@ -133,24 +130,72 @@ async function readJsonLines(path: string, schemaVersion?: string): Promise<Json
   let content: string;
   try {
     content = await readFile(path, "utf8");
-  } catch {
-    return [];
+  } catch (error) {
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return [];
+    }
+    throw error;
   }
   const records: JsonObject[] = [];
-  for (const line of content.split(/\r?\n/)) {
+  for (const [index, line] of content.split(/\r?\n/).entries()) {
     if (!line.trim()) continue;
     try {
       const parsed: unknown = JSON.parse(line);
       const record = jsonObject(parsed);
-      if (!record || (schemaVersion !== undefined && record.schema_version !== schemaVersion)) {
-        continue;
+      if (!record) throw new Error("record must be a JSON object");
+      if (schemaVersion !== undefined && record.schema_version !== schemaVersion) {
+        throw new Error(`schema must be ${schemaVersion}`);
       }
       records.push(record);
     } catch {
-      // Legacy readers ignore malformed JSONL rows and continue with valid facts.
+      throw new EffectRuntimeRequestError(
+        `settlement readback line ${index + 1} is malformed`,
+        "malformed_settlement_state",
+      );
     }
   }
   return records;
+}
+
+function persistedIdentityMatches(
+  rawIdentity: unknown,
+  expectedEffectId: string,
+): boolean {
+  if (rawIdentity === undefined) return true;
+  const identity = jsonObject(rawIdentity);
+  if (!identity) return false;
+  return optionalString(identity.effect_id) === expectedEffectId;
+}
+
+function quotaSpendMetadataMatches(
+  rawMetadata: unknown,
+  effectRef: string | null,
+  expectedEffectRef: string,
+): boolean {
+  if (rawMetadata === undefined) return true;
+  const metadata = jsonObject(rawMetadata);
+  const metadataEffectId = optionalString(metadata?.effect_id);
+  return metadataEffectId === expectedEffectRef &&
+    (effectRef === null || metadataEffectId === effectRef);
+}
+
+function runEffectMatches(
+  run: JsonObject,
+  identity: SettlementIdentity,
+  stepKind: "durable_writeback" | "quota_spend",
+): boolean {
+  const expectedEffectId = identity.effect_id;
+  const expectedEffectRef = `${expectedEffectId}#${stepKind}`;
+  const effectRef = optionalString(run.effect_ref);
+  return persistedIdentityMatches(run.settlement_identity, expectedEffectId) &&
+    (!effectRef || effectRef === expectedEffectRef) &&
+    (stepKind !== "quota_spend" ||
+      quotaSpendMetadataMatches(run.quota_spend_commit, effectRef, expectedEffectRef));
 }
 
 function details(event: JsonObject | null): JsonObject {
@@ -178,10 +223,10 @@ function receiptIdentity(
   }
   if (!todoId && !replanObligationId) return null;
   const identity = settlementIdentity({
-    goal_id: String(event.goal_id ?? "").trim(),
-    agent_id: String(event.agent_id ?? "").trim(),
+    goal_id: optionalString(event.goal_id) ?? "",
+    agent_id: optionalString(event.agent_id) ?? "",
     todo_id: todoId,
-    turn_instance_id: String(event.run_id ?? "").trim(),
+    turn_instance_id: optionalString(event.run_id) ?? "",
     replan_obligation_id: replanObligationId,
   });
   return {
@@ -196,9 +241,9 @@ function effectiveHeartbeatReceipt(
 ): JsonObject | null {
   const matching = events.filter((event) =>
     event.event_kind === "quota_should_run" &&
-    String(event.goal_id ?? "") === identity.goal_id &&
-    String(event.agent_id ?? "") === identity.agent_id &&
-    String(event.run_id ?? "") === identity.turn_instance_id
+    optionalString(event.goal_id) === identity.goal_id &&
+    optionalString(event.agent_id) === identity.agent_id &&
+    optionalString(event.run_id) === identity.turn_instance_id
   );
   if (matching.length === 0) return null;
   const identities = new Map<string, JsonObject>();
@@ -225,10 +270,16 @@ function findWriteback(
   identity: SettlementIdentity,
 ): JsonObject | null {
   return [...runs].reverse().find((run) =>
-    String(run.turn_instance_id ?? "") === identity.turn_instance_id &&
+    optionalString(run.goal_id) === identity.goal_id &&
+    optionalString(run.turn_instance_id) === identity.turn_instance_id &&
     runMatchesBinding(run, identity) &&
     normalizeAgentId(run.agent_id) === identity.agent_id &&
-    ACCOUNTABLE_DELIVERY_OUTCOMES.has(String(run.delivery_outcome ?? ""))
+    runEffectMatches(run, identity, "durable_writeback") &&
+    isTurnScopedSettlementOutcome(
+      run.delivery_outcome,
+      run.progress_observation,
+      identity.todo_id,
+    )
   ) ?? null;
 }
 
@@ -238,9 +289,17 @@ function findSpend(
 ): JsonObject | null {
   return [...runs].reverse().find((run) =>
     run.classification === "quota_slot_spent" &&
-    String(run.turn_instance_id ?? "") === identity.turn_instance_id &&
-    runMatchesBinding(run, identity) &&
-    normalizeAgentId(run.agent_id) === identity.agent_id
+    optionalString(run.goal_id) === identity.goal_id &&
+    normalizeAgentId(run.agent_id) === identity.agent_id &&
+    (
+      (optionalString(run.turn_instance_id) === identity.turn_instance_id &&
+        runMatchesBinding(run, identity) &&
+        runEffectMatches(run, identity, "quota_spend")) ||
+      // Older quota commit rows predate persisted turn bindings. Their
+      // exact effect ref is the durable identity for this replay path.
+      optionalString(run.effect_ref) === `${identity.effect_id}#quota_spend` &&
+        runEffectMatches(run, identity, "quota_spend")
+    )
   ) ?? null;
 }
 
@@ -251,10 +310,10 @@ function findStepEvent(
 ): JsonObject | null {
   return [...events].reverse().find((event) =>
     event.event_kind === eventKind &&
-    String(event.goal_id ?? "") === identity.goal_id &&
-    String(event.agent_id ?? "") === identity.agent_id &&
-    String(event.run_id ?? "") === identity.turn_instance_id &&
-    String(details(event).settlement_effect_id ?? "") === identity.effect_id
+    optionalString(event.goal_id) === identity.goal_id &&
+    optionalString(event.agent_id) === identity.agent_id &&
+    optionalString(event.run_id) === identity.turn_instance_id &&
+    optionalString(details(event).settlement_effect_id) === identity.effect_id
   ) ?? null;
 }
 
@@ -329,19 +388,26 @@ function inferPersistedIdentity(
     const runAgentId = normalizeAgentId(run.agent_id);
     if (runAgentId && runAgentId !== agentId) continue;
     const classification = String(run.classification ?? "").trim();
-    const deliveryOutcome = String(run.delivery_outcome ?? "").trim();
     if (
       classification === "quota_slot_voided" ||
       classification === "quota_scheduler_ack" ||
       (classification === "quota_monitor_poll" && run.material_change !== true) ||
       (classification === "state_refreshed" &&
-        !ACCOUNTABLE_DELIVERY_OUTCOMES.has(deliveryOutcome))
+        !isTurnScopedSettlementOutcome(
+          run.delivery_outcome,
+          run.progress_observation,
+          normalizeTodoId(run.todo_id),
+        ))
     ) {
       continue;
     }
     if (
       classification !== "quota_slot_spent" &&
-      !ACCOUNTABLE_DELIVERY_OUTCOMES.has(deliveryOutcome)
+      !isTurnScopedSettlementOutcome(
+        run.delivery_outcome,
+        run.progress_observation,
+        normalizeTodoId(run.todo_id),
+      )
     ) {
       return null;
     }
@@ -421,8 +487,8 @@ function inferPersistedIdentity(
     for (const [field, expected] of Object.entries(expectedIdentity)) {
       const actual = optionalString(persisted[field]);
       if (
-        (allowUnboundBinding && actual !== String(expected)) ||
-        (!allowUnboundBinding && actual && actual !== String(expected))
+        (allowUnboundBinding && actual !== expected) ||
+        (!allowUnboundBinding && actual && actual !== expected)
       ) {
         return failedIdentity(
           `persisted settlement identity mismatch: ${field} is ${actual ?? "missing"} but expected ${expected}`,
@@ -631,9 +697,9 @@ export async function readQuotaSettlement(value: unknown): Promise<JsonObject> {
   const terminalSettlement = settlementBindReduce(settled, terminalCloseout);
   const monitorPoll = [...runs].reverse().find((run) =>
     run.classification === "quota_monitor_poll" &&
-    String(run.goal_id ?? "") === identity.goal_id &&
-    String(run.agent_id ?? "") === identity.agent_id &&
-    String(run.turn_instance_id ?? "") === identity.turn_instance_id &&
+    optionalString(run.goal_id) === identity.goal_id &&
+    optionalString(run.agent_id) === identity.agent_id &&
+    optionalString(run.turn_instance_id) === identity.turn_instance_id &&
     (!identity.todo_id || normalizeTodoId(run.todo_id) === identity.todo_id)
   ) ?? null;
   const nestedCausality = typeof receiptDetails.delivery_workspace_causality === "object" &&

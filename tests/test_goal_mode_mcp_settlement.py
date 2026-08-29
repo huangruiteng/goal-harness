@@ -5,9 +5,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from loopx.control_plane import host_adapter_settlement
 from loopx.control_plane.host_adapter_settlement import (
     HostTodoSettlementRequest,
     host_adapter_turn_instance_id,
+    settle_host_todo_completion,
 )
 from loopx.goal_mode_mcp import GoalModeMCPConfig, GoalModeMCPControlPlane
 from loopx.status import parse_active_state_todos
@@ -16,6 +20,152 @@ from loopx.todos import add_goal_todo
 
 GOAL_ID = "mcp-settlement-fixture"
 AGENT_ID = "claude"
+
+
+def test_host_settlement_adapter_uses_two_runtime_crossings_and_stops_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = HostTodoSettlementRequest(
+        goal_id="goal",
+        agent_id="agent",
+        todo_id="todo_abc123",
+        runtime_profile="claude_code",
+        legacy_host_surface="claude_code",
+        scheduler_owner="agent_cli_loop",
+        execution_mode="interactive",
+        completion_args=("todo", "complete", "todo_abc123"),
+    )
+    identity = {
+        "schema_version": "quota_settlement_identity_v0",
+        "effect_id": "goal:agent:todo_abc123:mcp-turn",
+        "goal_id": "goal",
+        "agent_id": "agent",
+        "todo_id": "todo_abc123",
+        "turn_instance_id": "mcp-turn",
+    }
+    runtime_phases: list[str] = []
+
+    def fake_runtime(_method: str, params: dict[str, object]) -> dict[str, object]:
+        runtime_phases.append(str(params["phase"]))
+        if params["phase"] == "prepare":
+            return {
+                "schema_version": "loopx_host_todo_completion_reduction_v0",
+                "phase": "prepare",
+                "decision": "execute",
+                "identity": identity,
+                "provider_effect": {
+                    "provider_id": "loopx_cli",
+                    "kind": "ordered_cli_sequence",
+                    "steps": [
+                        {
+                            "step_kind": "guard",
+                            "args": ["guard"],
+                            "legacy_args": None,
+                            "continue_when": {
+                                "kind": "equals",
+                                "path": ["ok"],
+                                "value": True,
+                            },
+                        },
+                        {
+                            "step_kind": "lifecycle_completion",
+                            "args": ["complete"],
+                            "legacy_args": None,
+                            "continue_when": {
+                                "kind": "equals",
+                                "path": ["ok"],
+                                "value": True,
+                            },
+                        },
+                        {
+                            "step_kind": "durable_writeback",
+                            "args": ["writeback"],
+                            "legacy_args": None,
+                            "continue_when": {
+                                "kind": "equals",
+                                "path": ["ok"],
+                                "value": True,
+                            },
+                        },
+                        {
+                            "step_kind": "quota_spend",
+                            "args": ["spend"],
+                            "legacy_args": None,
+                            "continue_when": None,
+                        },
+                    ],
+                },
+                "result": None,
+            }
+        assert params["phase"] == "finalize"
+        outcomes = params["provider_outcomes"]
+        assert isinstance(outcomes, list)
+        assert [item["step_kind"] for item in outcomes] == [
+            "guard",
+            "lifecycle_completion",
+        ]
+        return {
+            "schema_version": "loopx_host_todo_completion_reduction_v0",
+            "phase": "finalize",
+            "decision": "provider_result",
+            "identity": identity,
+            "provider_effect": None,
+            "result": json.loads(str(outcomes[-1]["output"])),
+        }
+
+    provider_calls: list[list[str]] = []
+
+    def fake_provider(args: list[str], *, legacy_args: list[str] | None = None) -> str:
+        del legacy_args
+        provider_calls.append(args)
+        return '{"ok": true}' if args == ["guard"] else '{"ok": false}'
+
+    monkeypatch.setattr(host_adapter_settlement, "effect_runtime_result", fake_runtime)
+
+    result = json.loads(settle_host_todo_completion(request, run_cli=fake_provider))
+
+    assert result == {"ok": False}
+    assert runtime_phases == ["prepare", "finalize"]
+    assert provider_calls == [["guard"], ["complete"]]
+
+
+def test_typescript_provider_plan_short_circuits_typed_completion_rejection() -> None:
+    request = HostTodoSettlementRequest(
+        goal_id="goal",
+        agent_id="agent",
+        todo_id="todo_abc123",
+        runtime_profile="claude_code",
+        legacy_host_surface="claude_code",
+        scheduler_owner="agent_cli_loop",
+        execution_mode="interactive",
+        completion_args=("todo", "complete", "todo_abc123"),
+    )
+    provider_calls: list[list[str]] = []
+    rejection = {
+        "ok": False,
+        "completed": False,
+        "status": "open",
+        "reason": "validation failed",
+    }
+
+    def provider(args: list[str], *, legacy_args: list[str] | None = None) -> str:
+        del legacy_args
+        provider_calls.append(args)
+        if args[:2] == ["quota", "should-run"]:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "selected_todo": {"todo_id": request.todo_id.upper()},
+                }
+            )
+        return json.dumps(rejection)
+
+    result = json.loads(settle_host_todo_completion(request, run_cli=provider))
+
+    assert result == rejection
+    assert len(provider_calls) == 2
+    assert provider_calls[0][:2] == ["quota", "should-run"]
+    assert provider_calls[1][:2] == ["todo", "complete"]
 
 
 def _write_fixture(tmp_path: Path) -> tuple[Path, Path]:

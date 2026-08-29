@@ -2,11 +2,17 @@ import transactionContract from "../turn_transaction_contract.json" with {
   type: "json",
 };
 
-import type { EffectTurn } from "../effect_program.ts";
+import {
+  SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+  SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+  SETTLEMENT_PLAN_SCHEMA_VERSION,
+  settlementIdentityFromPlan,
+  type EffectTurn,
+} from "../effect_program.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 
 export const TURN_JOURNAL_INSPECTION_SCHEMA_VERSION =
-  "loopx_turn_journal_inspection_v0";
+  "loopx_turn_journal_inspection_v1";
 
 type JsonObject = Record<string, unknown>;
 
@@ -16,6 +22,37 @@ export interface TurnJournalInspectionRequest {
   goal_id: string;
   agent_id: string;
   turn_key: string;
+  retry_failed?: boolean;
+  session_recovery_check?: TurnRecoveryCheck | null;
+}
+
+export interface TurnRecoveryCheck {
+  kind: "journal_consistency" | "host_session_binding" | "prepared_effect_readback";
+  outcome: "passed" | "failed" | "required";
+  reason?: string;
+  step_kind?: string;
+}
+
+export interface TurnRecoveryDecision {
+  schema_version: "loopx_turn_recovery_decision_v0";
+  action: "continue" | "return_existing" | "blocked";
+  can_continue: boolean;
+  resume_from: string | null;
+  reinvoke_host: boolean;
+  reason: string;
+  retry_failed: boolean;
+  checks: TurnRecoveryCheck[];
+}
+
+export interface TurnRecoveryAudit {
+  schema_version: "loopx_turn_recovery_audit_v0";
+  planned: TurnRecoveryDecision;
+  actual: {
+    status: "started" | "finished";
+    journal_status: string;
+    completed_phases: string[];
+    host_invoked: boolean | null;
+  };
 }
 
 export interface TurnJournalInspection {
@@ -31,6 +68,9 @@ export interface TurnJournalInspection {
   completed_phases: string[];
   tombstone_retained: boolean;
   violations: string[];
+  journal_consistent: boolean;
+  recovery_decision: TurnRecoveryDecision;
+  last_recovery: TurnRecoveryAudit | null;
   effects: [];
 }
 
@@ -44,6 +84,9 @@ export interface TurnJournalEffectContext {
   tombstone_retained: boolean;
   completed_phases: string[];
   violations: string[];
+  journal_consistent: boolean;
+  recovery_decision: TurnRecoveryDecision;
+  last_recovery: TurnRecoveryAudit | null;
 }
 
 export type TurnJournalEffect = EffectTurn<
@@ -52,6 +95,13 @@ export type TurnJournalEffect = EffectTurn<
 >;
 
 const transactionPhases = Object.freeze([...transactionContract.phases]);
+const supportedJournalStatuses = new Set([
+  "in_progress",
+  "scheduler_action_required",
+  "committed",
+  "stopped",
+  "failed",
+]);
 
 function asObject(value: unknown): JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -80,11 +130,287 @@ function identityState(
   return [complete, complete && new Set(observed).size === 1];
 }
 
+function selectedTurnTodoId(envelope: JsonObject): string | null {
+  const orchestration = asObject(envelope.task_orchestration_contract);
+  const primaryTodoId = typeof orchestration.primary_todo_id === "string"
+    ? orchestration.primary_todo_id.trim()
+    : "";
+  if (
+    orchestration.schema_version === "task_orchestration_contract_v2" &&
+    orchestration.mode === "adaptive" &&
+    primaryTodoId
+  ) {
+    return primaryTodoId;
+  }
+  const action = asObject(envelope.action);
+  const selectedTodo = asObject(action.selected_todo);
+  return isValidIdentity(selectedTodo.todo_id) ? selectedTodo.todo_id : null;
+}
+
+function typedSettlementIdentityState(
+  envelope: JsonObject,
+  transaction: JsonObject,
+  settlement: JsonObject,
+  identity: JsonObject,
+): [valid: boolean, turnInstanceMatches: boolean, bindingMatches: boolean] {
+  if (
+    settlement.schema_version !== SETTLEMENT_PLAN_SCHEMA_VERSION ||
+    ![
+      SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+      SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+    ].includes(String(identity.schema_version))
+  ) {
+    return [false, false, false];
+  }
+  const parsed = settlementIdentityFromPlan(transaction);
+  if (parsed.failure !== null || parsed.value === null) {
+    return [false, false, false];
+  }
+  if (
+    identity.schema_version === SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION &&
+    (
+      identity.binding_kind !== parsed.value.binding_kind ||
+      identity.binding_id !== parsed.value.binding_id
+    )
+  ) {
+    return [false, false, false];
+  }
+  const expectedTurnInstance = isValidIdentity(transaction.turn_instance_id)
+    ? transaction.turn_instance_id
+    : transaction.turn_key;
+  const selectedTodoId = selectedTurnTodoId(envelope);
+  return [
+    true,
+    isValidIdentity(expectedTurnInstance) &&
+      parsed.value.turn_instance_id === expectedTurnInstance,
+    selectedTodoId !== null &&
+      parsed.value.binding_kind === "todo" &&
+      parsed.value.todo_id === selectedTodoId &&
+      parsed.value.binding_id === selectedTodoId,
+  ];
+}
+
 function stringifyPhase(value: unknown): string {
   if (value === null) return "None";
   if (value === true) return "True";
   if (value === false) return "False";
   return String(value);
+}
+
+function recoveryResumePhase(
+  journal: JsonObject,
+  completedPhases: string[],
+  journalStatus: string,
+): string | null {
+  const receipt = asObject(journal.receipt);
+  const failedPhase = typeof receipt.failed_phase === "string" ? receipt.failed_phase : "";
+  const validationStage = typeof journal.validation_stage === "string"
+    ? journal.validation_stage
+    : "";
+  if (
+    journalStatus === "failed" &&
+    failedPhase === "validation" &&
+    validationStage !== "task_postcondition"
+  ) {
+    return "host_execute";
+  }
+  if (journalStatus === "failed" && failedPhase === "terminal_closeout") {
+    return "terminal_closeout";
+  }
+  if (journalStatus === "failed" && transactionPhases.includes(failedPhase)) {
+    return failedPhase;
+  }
+  if (journalStatus === "scheduler_action_required") return "scheduler_apply";
+  return transactionPhases[completedPhases.length] ?? null;
+}
+
+function preparedEffectCheck(
+  journal: JsonObject,
+  resumeFrom: string | null,
+): TurnRecoveryCheck | null {
+  if (!resumeFrom) return null;
+  const attempts = asObject(journal.effect_attempts);
+  const attempt = asObject(attempts[resumeFrom]);
+  if (
+    attempt.status !== "prepared" ||
+    typeof attempt.effect_ref !== "string" ||
+    attempt.effect_ref.length === 0
+  ) {
+    return null;
+  }
+  return {
+    kind: "prepared_effect_readback",
+    outcome: "required",
+    step_kind: resumeFrom,
+  };
+}
+
+function recoveryDecision(
+  request: TurnJournalInspectionRequest,
+  journal: JsonObject,
+  completedPhases: string[],
+  journalStatus: string,
+  journalConsistent: boolean,
+): TurnRecoveryDecision {
+  const retryFailed = request.retry_failed === true;
+  const checks: TurnRecoveryCheck[] = [{
+    kind: "journal_consistency",
+    outcome: journalConsistent ? "passed" : "failed",
+  }];
+  const base = {
+    schema_version: "loopx_turn_recovery_decision_v0" as const,
+    retry_failed: retryFailed,
+    checks,
+  };
+  if (!journalConsistent) {
+    return {
+      ...base,
+      action: "blocked",
+      can_continue: false,
+      resume_from: null,
+      reinvoke_host: false,
+      reason: "journal_inconsistent",
+    };
+  }
+  if (["committed", "stopped"].includes(journalStatus)) {
+    return {
+      ...base,
+      action: "return_existing",
+      can_continue: false,
+      resume_from: null,
+      reinvoke_host: false,
+      reason: "terminal_result_retained",
+    };
+  }
+
+  const resumeFrom = recoveryResumePhase(journal, completedPhases, journalStatus);
+  if (journalStatus === "failed" && !retryFailed) {
+    return {
+      ...base,
+      action: "return_existing",
+      can_continue: false,
+      resume_from: resumeFrom,
+      reinvoke_host: false,
+      reason: "failed_retry_not_requested",
+    };
+  }
+
+  if (journalStatus === "failed" && Object.hasOwn(journal, "host_recovery")) {
+    const sessionCheck = request.session_recovery_check;
+    const normalizedCheck: TurnRecoveryCheck = sessionCheck?.kind === "host_session_binding"
+      ? {
+          kind: "host_session_binding",
+          outcome: sessionCheck.outcome,
+          ...(sessionCheck.reason ? { reason: sessionCheck.reason } : {}),
+        }
+      : {
+          kind: "host_session_binding",
+          outcome: "failed",
+          reason: "binding_check_unavailable",
+        };
+    checks.push(normalizedCheck);
+    if (normalizedCheck.outcome !== "passed") {
+      return {
+        ...base,
+        action: "blocked",
+        can_continue: false,
+        resume_from: resumeFrom,
+        reinvoke_host: false,
+        reason: normalizedCheck.reason ?? "host_session_binding_rejected",
+      };
+    }
+  }
+  if (!resumeFrom) {
+    return {
+      ...base,
+      action: "blocked",
+      can_continue: false,
+      resume_from: null,
+      reinvoke_host: false,
+      reason: "recovery_phase_unavailable",
+    };
+  }
+  const preparedCheck = preparedEffectCheck(journal, resumeFrom);
+  if (preparedCheck) checks.push(preparedCheck);
+  return {
+    ...base,
+    action: "continue",
+    can_continue: true,
+    resume_from: resumeFrom,
+    reinvoke_host: ["host_execute", "typed_result"].includes(resumeFrom),
+    reason: preparedCheck
+      ? "resolve_prepared_effect"
+      : journalStatus === "scheduler_action_required"
+        ? "resume_scheduler"
+        : journalStatus === "failed"
+          ? "retry_failed_phase"
+          : "resume_in_progress",
+  };
+}
+
+function projectRecoveryDecision(value: unknown): TurnRecoveryDecision | null {
+  const decision = asObject(value);
+  const action = decision.action;
+  const checks = Array.isArray(decision.checks)
+    ? decision.checks.map((item) => asObject(item))
+    : [];
+  if (
+    decision.schema_version !== "loopx_turn_recovery_decision_v0" ||
+    !["continue", "return_existing", "blocked"].includes(String(action)) ||
+    typeof decision.can_continue !== "boolean" ||
+    !(typeof decision.resume_from === "string" || decision.resume_from === null) ||
+    typeof decision.reinvoke_host !== "boolean" ||
+    typeof decision.reason !== "string" ||
+    typeof decision.retry_failed !== "boolean"
+  ) return null;
+  return {
+    schema_version: "loopx_turn_recovery_decision_v0",
+    action: action as TurnRecoveryDecision["action"],
+    can_continue: decision.can_continue,
+    resume_from: decision.resume_from as string | null,
+    reinvoke_host: decision.reinvoke_host,
+    reason: decision.reason,
+    retry_failed: decision.retry_failed,
+    checks: checks.flatMap((check) => {
+      if (
+        !["journal_consistency", "host_session_binding", "prepared_effect_readback"].includes(
+          String(check.kind),
+        ) ||
+        !["passed", "failed", "required"].includes(String(check.outcome))
+      ) return [];
+      return [{
+        kind: check.kind as TurnRecoveryCheck["kind"],
+        outcome: check.outcome as TurnRecoveryCheck["outcome"],
+        ...(typeof check.reason === "string" ? { reason: check.reason } : {}),
+        ...(typeof check.step_kind === "string" ? { step_kind: check.step_kind } : {}),
+      }];
+    }),
+  };
+}
+
+function projectRecoveryAudit(value: unknown): TurnRecoveryAudit | null {
+  const audit = asObject(value);
+  const planned = projectRecoveryDecision(audit.planned);
+  const actual = asObject(audit.actual);
+  if (
+    audit.schema_version !== "loopx_turn_recovery_audit_v0" ||
+    planned === null ||
+    !["started", "finished"].includes(String(actual.status)) ||
+    typeof actual.journal_status !== "string" ||
+    !Array.isArray(actual.completed_phases) ||
+    !actual.completed_phases.every((phase) => typeof phase === "string") ||
+    !(typeof actual.host_invoked === "boolean" || actual.host_invoked === null)
+  ) return null;
+  return {
+    schema_version: "loopx_turn_recovery_audit_v0",
+    planned,
+    actual: {
+      status: actual.status as "started" | "finished",
+      journal_status: actual.journal_status,
+      completed_phases: [...actual.completed_phases],
+      host_invoked: actual.host_invoked,
+    },
+  };
 }
 
 export function interpretTurnJournalEffect(
@@ -120,12 +446,24 @@ export function interpretTurnJournalEffect(
     ],
     request.turn_key,
   );
+  const [
+    settlementIdentityValid,
+    settlementTurnInstanceMatches,
+    settlementBindingMatches,
+  ] = typedSettlementIdentityState(envelope, transaction, settlement, identity);
 
   const violations: string[] = [];
   if (!goalComplete) violations.push("goal_identity_missing");
   else if (!goalMatches) violations.push("goal_mismatch");
   if (!ownerComplete) violations.push("owner_identity_missing");
   else if (!ownerMatches) violations.push("owner_mismatch");
+  if (!settlementIdentityValid) violations.push("settlement_identity_invalid");
+  else if (!settlementTurnInstanceMatches) {
+    violations.push("settlement_turn_instance_mismatch");
+  }
+  if (settlementIdentityValid && !settlementBindingMatches) {
+    violations.push("settlement_binding_mismatch");
+  }
   if (!turnKeyComplete) violations.push("turn_key_identity_missing");
   else if (!turnKeyMatches) violations.push("turn_key_mismatch");
 
@@ -154,7 +492,23 @@ export function interpretTurnJournalEffect(
   }
 
   const replayLegal = violations.length === 0;
+  const journalConsistent =
+    goalMatches &&
+    ownerMatches &&
+    settlementIdentityValid &&
+    settlementTurnInstanceMatches &&
+    settlementBindingMatches &&
+    turnKeyMatches &&
+    phasesFormOrderedPrefix &&
+    supportedJournalStatuses.has(journalStatus);
   const decision = replayLegal ? "replay_legal" : "replay_blocked";
+  const turnRecoveryDecision = recoveryDecision(
+    request,
+    journal,
+    completedPhases,
+    journalStatus,
+    journalConsistent,
+  );
   return {
     request: {
       kind: "turn_journal",
@@ -172,6 +526,9 @@ export function interpretTurnJournalEffect(
         tombstone_retained: tombstoneRetained,
         completed_phases: completedPhases,
         violations,
+        journal_consistent: journalConsistent,
+        recovery_decision: turnRecoveryDecision,
+        last_recovery: projectRecoveryAudit(journal.recovery_audit),
       },
     },
     interpretation: {
@@ -222,6 +579,9 @@ export function projectTurnJournalInspection(
     completed_phases: context.completed_phases,
     tombstone_retained: context.tombstone_retained,
     violations: context.violations,
+    journal_consistent: context.journal_consistent,
+    recovery_decision: context.recovery_decision,
+    last_recovery: context.last_recovery,
     effects: [],
   };
 }

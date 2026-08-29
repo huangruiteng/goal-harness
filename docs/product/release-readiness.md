@@ -59,6 +59,43 @@ Before promoting a stable install/update recommendation, maintainers must move
 the public `stable` ref to the release commit that passed this gate. Do not
 claim stable-channel readiness while `stable` is missing or stale.
 
+## Atomic Local Promotion Failure Matrix
+
+Local clone installs promote through `scripts/install-local.sh`. Default
+executable swaps are atomic symlink replaces that run only after a candidate
+release directory passes deep `loopx doctor` validation and any required
+workflow-skill preflight. Contributors should treat the matrix below as the
+safe failure contract; do not invent a second promotion path or claim that a
+failed candidate became the live default.
+
+Shipped coverage lives in
+`examples/release/release-promotion-concurrency-smoke.py` (lock, wait, and
+pre-swap rejection) and
+`examples/release/local-install-promotion-boundary-smoke.py` (canary-only
+boundary, explicit override, and skill preflight stop).
+
+| Case | When it happens | Before default symlink swap? | Waiter / recovery behavior | Contributor stop |
+| --- | --- | --- | --- | --- |
+| Promotion guard held | Another install holds `releases/.install-guard` | Yes: waiter has not reserved or swapped yet | Waiter polls the flock; it must not create a competing `.install-lock` while blocked. After the owner unlocks, the waiter acquires the guard and completes | Retry is safe. Do not delete a live guard or force-promote around it |
+| Live legacy lock owner | `releases/.install-lock` names a live PID | Yes: timed-out waiter never reaches candidate build or swap | Waiter times out with `timed out waiting for another local install`; the live owner lock and PID file stay untouched | Stop and wait for the live installer, or ask a maintainer. Do not reap a live owner's lock |
+| Empty or dead legacy lock | Lock directory has no valid live PID | Yes: reaped before a new owner publishes its PID | Waiter reaps the interrupted lock, then acquires ownership and continues | Safe automatic recovery. No maintainer action required |
+| Concurrent same-second install | Two promoted installs race with a shared release-id seed | Partial: each waiter serializes under the guard/lock before its own swap | Each run gets a distinct release directory (`id`, `id-2`, …); one audited default symlink remains after both finish | Treat distinct release ids as expected. Do not hand-edit release directory names mid-install |
+| Incomplete candidate (doctor fail) | Candidate package fails deep doctor or required package-root checks | Yes: candidate directory is removed; previous default target is preserved | No waiter swap occurs. Re-run only after the checkout is complete and doctor-clean | Stop promoting. Fix the checkout; do not set `LOOPX_PROMOTE_DEFAULT=1` to bypass doctor |
+| Skill preflight blocked | Exact-host entry skill cannot be materialized (for example a user-owned colliding skill) | Yes: release candidate is removed; existing default binary stays unchanged | Failure is local to the install attempt; no partial default promotion | Stop. Resolve the skill ownership collision or install without that skill surface before retrying |
+| Untrusted checkout (auto mode) | Checkout is dirty, not on the approved default ref, or otherwise untrusted | Yes for default: installer never builds a promoted release snapshot | Installer exits canary-only (`promotion mode: canary_only_untrusted_checkout`), leaves the existing default executable alone, and may refresh `loopx-canary` | Use `loopx-canary` for validation. Do not set `LOOPX_PROMOTE_DEFAULT=1` unless you are explicitly approving this checkout as a maintainer-owned default |
+| Explicit override | `LOOPX_PROMOTE_DEFAULT=1` on an otherwise untrusted checkout | No: this is the intentional swap path after candidate validation | Promotion is auditable as `explicit_override` in `release.json` and doctor provenance | Contributor boundary ends here. Explicit default promotion, moving public `stable`, tagging, and PyPI publish remain maintainer-only |
+
+Contributor-safe defaults:
+
+- Prefer canary-only installs from ordinary feature checkouts.
+- Treat any failure listed as "before default symlink swap" as proof that the
+  previous default must still be live.
+- When a waiter times out on a live owner, stop; recovery belongs to that
+  owner finishing or a maintainer reclaiming a truly dead lock.
+- Do not document, script, or smoke a contributor path that moves `stable`,
+  publishes packages, or claims default promotion without
+  `LOOPX_PROMOTE_DEFAULT=1` plus an explicit maintainer approval.
+
 ## Merged Is Not Runtime-Active
 
 A post-merge check proves behavior on the tested source commit. It does not

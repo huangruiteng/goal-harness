@@ -19,8 +19,8 @@ writeback). This module pins the missing parity:
   ``_journal_committed_effect_id``, while legacy journals without a typed
   settlement plan skip the cross-check (opt-in seam).
 
-Expectations are derived from the typed settlement contract and the quota
-adapter precedent (``resolve_heartbeat_settlement_identity`` in
+Expectations are derived from the typed settlement contract and the aggregate
+quota readback precedent (``read_heartbeat_settlement`` in
 ``tests/control_plane/test_quota_settlement.py``), not from implementation
 output.
 """

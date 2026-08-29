@@ -62,6 +62,12 @@ def test_validate_worker_command_rejects_env_assignment_and_glob_variants(
         validate_worker_command(command, field="worker_turn_command")
 
 
+def test_validate_worker_command_rejects_input_redirect() -> None:
+    # Output redirect (>) is already covered; input redirect must fail closed too.
+    with pytest.raises(ValueError, match="unsafe shell metacharacters"):
+        validate_worker_command("evil < /tmp/x", field="worker_turn_command")
+
+
 def test_spec_builder_rejects_unsafe_worker_command() -> None:
     spec = {
         "goal_id": "loopx-meta",

@@ -79,7 +79,7 @@ def _build_authority_boundary_table() -> list[dict[str, Any]]:
             ),
             "shipped": False,
             "shipped_equivalent": (
-                "task_lease.py acquire_task_lease (hard fence, file CAS) + "
+                "task_lease_acquire.ts native transaction (hard fence, file CAS) + "
                 "active state claimed_by field (soft claim) -- two separate "
                 "paths with independent versioning"
             ),

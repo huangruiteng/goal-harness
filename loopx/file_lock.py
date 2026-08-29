@@ -14,6 +14,7 @@ import tempfile
 import time
 import importlib
 from typing import Any, Iterator, TextIO
+from uuid import uuid4
 
 try:  # pragma: no cover - exercised on POSIX hosts in integration smokes.
     fcntl: Any = importlib.import_module("fcntl")
@@ -483,3 +484,189 @@ def try_exclusive_file_lock(
                 record=record,
             )
             _release_kernel_lock(lock_file)
+
+
+EFFECT_MUTATION_LOCK_SUFFIX = ".ts-effect.lock"
+EFFECT_MUTATION_INVALID_STALE_SECONDS = 10.0
+
+
+def _effect_mutation_lock_path(path: Path) -> Path:
+    return Path(f"{path}{EFFECT_MUTATION_LOCK_SUFFIX}")
+
+
+def process_is_alive(pid: object) -> bool:
+    """Probe a process without sending signals or console control events."""
+
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return False
+    if os.name == "nt":
+        # Windows signal 0 is CTRL_C_EVENT, not the side-effect-free POSIX
+        # existence probe provided by kill(pid, 0).
+        return _windows_process_is_alive(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as exc:
+        return exc.errno == errno.EPERM
+    return True
+
+
+def _windows_process_is_alive(pid: int) -> bool:
+    """Probe a Windows process without sending a console control event."""
+
+    import ctypes
+    from ctypes import wintypes
+
+    synchronize = 0x00100000
+    wait_timeout = 0x00000102
+    error_access_denied = 5
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    open_process.restype = wintypes.HANDLE
+    wait_for_single_object = kernel32.WaitForSingleObject
+    wait_for_single_object.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    wait_for_single_object.restype = wintypes.DWORD
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+
+    handle = open_process(synchronize, False, pid)
+    if not handle:
+        return bool(getattr(ctypes, "get_last_error")() == error_access_denied)
+    try:
+        return bool(wait_for_single_object(handle, 0) == wait_timeout)
+    finally:
+        close_handle(handle)
+
+
+def _effect_mutation_process_is_alive(pid: object) -> bool:
+    return process_is_alive(pid)
+
+
+def _read_effect_mutation_owner(path: Path) -> dict[str, object] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    pid = payload.get("pid")
+    token = payload.get("token")
+    if (
+        isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or not isinstance(token, str)
+    ):
+        return None
+    return {"pid": pid, "token": token}
+
+
+def _reclaim_stale_effect_mutation_lock(path: Path) -> None:
+    owner = _read_effect_mutation_owner(path)
+    if owner is not None and _effect_mutation_process_is_alive(owner.get("pid")):
+        return
+    if owner is None:
+        try:
+            age_seconds = time.time() - path.stat().st_mtime
+        except OSError:
+            return
+        if age_seconds < EFFECT_MUTATION_INVALID_STALE_SECONDS:
+            return
+    stale_path = path.with_name(f"{path.name}.stale.{uuid4()}")
+    try:
+        path.replace(stale_path)
+    except FileNotFoundError:
+        return
+    stale_path.unlink(missing_ok=True)
+
+
+@contextmanager
+def exclusive_cross_runtime_file_lock(
+    path: Path,
+    *,
+    policy: LockAcquisitionPolicy | str = LockAcquisitionPolicy.MUTATION,
+    timeout_seconds: float | None = None,
+    poll_interval_seconds: float | None = None,
+    agent_id: str | None = None,
+    operation: str | None = None,
+) -> Iterator[Path]:
+    """Hold the TypeScript mutation lock, then the existing Python lock.
+
+    This is a bounded migration lock for state whose writers span both
+    runtimes. TypeScript coordinates through exclusive creation of
+    ``<target>.ts-effect.lock``; Python keeps its kernel lock underneath so
+    existing diagnostics and Python-to-Python exclusion remain unchanged.
+    """
+
+    selected_policy = _policy(policy)
+    defaults = LOCK_POLICIES[selected_policy]
+    timeout = (
+        defaults.timeout_seconds
+        if timeout_seconds is None
+        else max(0.0, timeout_seconds)
+    )
+    poll_interval = (
+        defaults.poll_interval_seconds
+        if poll_interval_seconds is None
+        else max(0.001, poll_interval_seconds)
+    )
+    effect_lock_path = _effect_mutation_lock_path(path)
+    effect_lock_path.parent.mkdir(parents=True, exist_ok=True)
+    token = str(uuid4())
+    started = time.monotonic()
+    started_at = _utc_now_iso()
+    deadline = started + timeout
+    while True:
+        try:
+            descriptor = os.open(
+                effect_lock_path,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                0o600,
+            )
+        except FileExistsError:
+            _reclaim_stale_effect_mutation_lock(effect_lock_path)
+            now = time.monotonic()
+            if now >= deadline:
+                raise _timeout_error(
+                    path,
+                    policy=selected_policy,
+                    timeout_seconds=timeout,
+                    waited_seconds=now - started,
+                    started_at=started_at,
+                    agent_id=agent_id,
+                    operation=operation,
+                ) from None
+            time.sleep(min(poll_interval, max(0.0, deadline - now)))
+            continue
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as lock_file:
+                json.dump(
+                    {"pid": os.getpid(), "token": token},
+                    lock_file,
+                    separators=(",", ":"),
+                )
+                lock_file.flush()
+                os.fsync(lock_file.fileno())
+        except BaseException:
+            effect_lock_path.unlink(missing_ok=True)
+            raise
+        break
+
+    try:
+        with exclusive_file_lock(
+            path,
+            policy=selected_policy,
+            timeout_seconds=timeout,
+            poll_interval_seconds=poll_interval,
+            agent_id=agent_id,
+            operation=operation,
+        ) as lock_path:
+            yield lock_path
+    finally:
+        owner = _read_effect_mutation_owner(effect_lock_path)
+        if owner is not None and owner.get("token") == token:
+            effect_lock_path.unlink(missing_ok=True)

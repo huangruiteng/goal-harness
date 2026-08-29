@@ -221,9 +221,9 @@ specification.
 
 The TypeScript Effect algebra, settlement semantics, Turn-journal
 interpretation, durable checkpoint effect, runtime lifecycle, packaging,
-upgrade fingerprint, and boundary decoder foundation are on `main`. This stage
-is not complete from a cleanup perspective: its Python fine-grained settlement
-surface remains a primary target for the payoff phase.
+upgrade fingerprint, and boundary decoder foundation are on `main`. The Stage 1
+settlement-facade cleanup is complete: Python fine-grained settlement readers
+are removed, while coarse readback/projection remains bounded Stage 2B work.
 
 ### Stage 2A — Bounded rule-owner proofs (shipped; do not repeat as a pattern)
 
@@ -286,13 +286,19 @@ shipped Stage 2B cutovers are in place:
   Python retains `should-run`/settlement fact projection plus one coarse
   transport call and the legacy kernel index lock; it no longer constructs or
   writes the spend event.
-- Task-lease acquire: TypeScript owns identity normalization, settlement-plan
-  projection, provider failure classification, ordered receipt construction,
-  and the canonical result. Python invokes the existing atomic provider between
-  one preflight and one final reduction; the provider retains the per-goal lock,
-  owner eligibility, conflict, compare-and-swap, idempotency, and lease-file
-  durability checks. Invalid identities stop before the provider, while a
-  crash/retry after the provider re-enters its same-key idempotent path.
+- Task-lease acquire: one native TypeScript transaction owns boundary decode,
+  handoff and owner/Todo eligibility, same-Todo and overlapping-write-scope
+  conflicts, compare-and-swap, generation and idempotency rules, the per-goal
+  mutation lock, atomic lease persistence, and the canonical result/receipts.
+  Python projects compact registry, active-state, event-log, and rollout-log
+  facts with before/after source digests, then makes one native transaction call.
+  TypeScript revalidates those sources under the lease lock before the decision
+  and immediately before the write. Retained Python renew, transfer, release,
+  and fence writers acquire the same exclusive-create lock before their legacy
+  kernel lock, so the cutover has one cross-runtime serialization point.
+  The NoKV/shared-goal coordination executor reaches the same pure acquire
+  decision through a typed Python adapter, so the cutover does not leave a
+  second Python acquire rule engine behind the provider seam.
 
 The quota-spend cutover removes the Python spend-event builder and three-file
 writer. Its bounded facade exits when the quota CLI and remaining run-index
@@ -305,11 +311,28 @@ execution, source compare-and-swap, legacy response projection, and the actual
 Markdown/event write. It exits when those writers and the CLI move into the
 native TS transaction. The remaining fine-grained Turn facade exits after
 quota and host-adapter callers move to their own coarse transactions. The
-task-lease Python facade now contains only transport, the atomic provider, and
-legacy CLI projection; it exits when lease persistence and the task-lease CLI
-run in the native TS transaction. Vision checkpointing remains a separate
-refresh/writeback transaction because it does not share the delivery-selection
-lifecycle phase.
+task-lease acquire semantic facade, atomic Python provider, settlement bridge
+operation, and legacy CLI result projection are deleted. Python retains only
+compact source projection, one process transport, and a compatibility import
+for callers that still invoke `acquire_task_lease()`. That compatibility
+surface exits when the top-level LoopX CLI and authority-source adapters run in
+Node. The dual-runtime lock exits after renew, transfer, release, and lease
+fences migrate to the same TypeScript owner. Vision checkpointing remains a
+separate refresh/writeback transaction because it does not share the
+delivery-selection lifecycle phase.
+
+#### Task-lease acquire migration economics
+
+| Field | Receipt |
+| --- | --- |
+| Canonical owner | Before: Python owned the atomic acquire provider and TypeScript reduced settlement around it. After: `task_lease_acquire.ts` owns the complete locked transaction and canonical result. |
+| Legacy semantic code deleted | 973 product LOC: the Python provider/acquire composition and conflict path, the Python↔TS settlement bridge/reducer and handler, and legacy CLI settlement projection. |
+| Bridge code added | About 641 gross product LOC are bounded compatibility code: compact Python authority projection plus one managed-runtime request, the compatibility import, the shared Python/TypeScript lock protocol, and the typed NoKV/coordination decision adapter. The local projection/import exit with the top-level Node CLI; the dual lock exits with the remaining lease writers and fences; the coordination adapter exits when that executor moves to the native runtime. |
+| Cross-runtime calls | Public acquire and replay paths move from two request/response reductions to one native transaction request/response. |
+| Product-code net change | Product code is +2,130/−1,122 LOC, net +1,008. Tests and fixtures are reported separately at +898/−1,081; build configuration is +4. |
+| Migration scaffolding | The task-lease settlement characterization, fault-matrix, incident-replay, and fixture slices were deleted. Native invariant, crash/retry, direct-CLI, adapter, and cross-runtime lock tests replace them; no migration-only worker remains. |
+| Facade exit | The semantic facade, atomic provider, settlement operation, and legacy CLI projection exit in this cutover. Only source/transport compatibility and cross-runtime serialization remain, with the deletion triggers above. |
+| Correctness and performance | The public CLI matched the prior implementation in five acquire/replay/failure scenarios; 20 focused native tests, the 207-test Node suite, 4,615 Python tests (12 skipped), crash/retry and packaged-wheel smokes pass. In a matched 16-sample full-CLI run, happy-path p95 moved from 1,593.7 ms to 1,167.8 ms and replay p95 from 513.3 ms to 445.4 ms; medians were 364.6→425.6 ms and 343.3→351.9 ms respectively. |
 
 ### Stage 3 — CLI and App convergence
 

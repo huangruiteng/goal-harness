@@ -275,7 +275,8 @@ def run_traex(
     workspace: Path,
     schema_path: Path,
     output_path: Path,
-    permission_mode: str,
+    permission_mode: str | None,
+    sandbox: str,
     model: str | None,
     timeout_seconds: float,
     skip_git_repo_check: bool,
@@ -283,7 +284,9 @@ def run_traex(
     argv: list[str] = [traex_bin, "exec"]
     if skip_git_repo_check:
         argv.append("--skip-git-repo-check")
-    argv.extend(["--permission-mode", permission_mode])
+    if permission_mode:
+        argv.extend(["--permission-mode", permission_mode])
+    argv.extend(["--sandbox", sandbox])
     argv.extend(["--output-schema", str(schema_path)])
     argv.extend(["--output-last-message", str(output_path)])
     if model:
@@ -304,9 +307,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--workspace", default=os.getcwd())
     parser.add_argument(
         "--permission-mode",
-        default="default",
-        choices=("default", "auto", "bypass_permissions", "custom"),
-        help="TraeX exec permission mode; defaults to workspace-safe agent permissions",
+        default=None,
+        choices=("bypass_permissions", "custom"),
+        help=(
+            "Explicit TraeX exec permission mode. By default the adapter omits "
+            "this flag so TraeX applies its non-interactive headless policy."
+        ),
+    )
+    parser.add_argument(
+        "--sandbox",
+        default="workspace-write",
+        choices=("read-only", "workspace-write", "danger-full-access"),
+        help="TraeX sandbox; defaults to writes inside the governed workspace.",
     )
     parser.add_argument("-m", "--model", default=None)
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
@@ -353,6 +365,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 schema_path=schema_path,
                 output_path=output_path,
                 permission_mode=args.permission_mode,
+                sandbox=args.sandbox,
                 model=args.model,
                 timeout_seconds=args.timeout_seconds,
                 skip_git_repo_check=args.skip_git_repo_check,
