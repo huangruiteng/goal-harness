@@ -258,6 +258,7 @@ def collect_python_distribution_checks(
 def collect_deep_install_checks(
     *,
     command_path: Path | None,
+    invocation_path: Path | None,
     package_root: Path,
     invocation_root: Path | None,
     distribution_root: str | Path | None,
@@ -266,7 +267,7 @@ def collect_deep_install_checks(
 
     if distribution_root is not None:
         return collect_python_distribution_checks(
-            command_path=command_path,
+            command_path=invocation_path or command_path,
             package_root=Path(distribution_root),
         )
     return collect_release_candidate_checks(

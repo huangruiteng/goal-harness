@@ -6,6 +6,7 @@ import pytest
 
 from loopx.release_candidate import (
     REPRESENTATIVE_DISTRIBUTION_PATHS,
+    collect_deep_install_checks,
     collect_python_distribution_checks,
 )
 
@@ -70,6 +71,49 @@ def test_python_distribution_checks_accept_recorded_console_script_without_sourc
     assert "scripts/loopx" not in payload["representative_cli"]["package_paths"][
         "required"
     ]
+
+
+def test_deep_distribution_checks_prefer_current_invocation_over_path_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_root = tmp_path / "site-packages"
+    invocation_path = tmp_path / "current" / "bin" / "loopx"
+    path_command = tmp_path / "old" / "bin" / "loopx"
+    for command_path in (invocation_path, path_command):
+        command_path.parent.mkdir(parents=True)
+        command_path.touch()
+    _materialize_distribution_paths(package_root)
+    monkeypatch.setattr(
+        "loopx.release_candidate.distribution",
+        lambda _name: _Distribution(invocation_path),
+    )
+    monkeypatch.setattr(
+        "loopx.release_candidate._import_summary",
+        lambda: {"ok": True, "results": {}, "failed": []},
+    )
+    probed_commands: list[Path | None] = []
+    monkeypatch.setattr(
+        "loopx.release_candidate._command_summary",
+        lambda command_path: (
+            probed_commands.append(command_path)
+            or {"ok": True, "results": {}, "failed": []}
+        ),
+    )
+
+    payload = collect_deep_install_checks(
+        command_path=path_command,
+        invocation_path=invocation_path,
+        package_root=package_root,
+        invocation_root=None,
+        distribution_root=package_root,
+    )
+
+    checks = {check["id"]: check for check in payload["checks"]}
+    assert payload["ok"] is True
+    assert checks["command_package_same_distribution"]["ok"] is True
+    assert payload["distribution_command"]["command"] == str(invocation_path)
+    assert probed_commands == [invocation_path]
 
 
 def test_python_distribution_checks_reject_command_from_another_install(

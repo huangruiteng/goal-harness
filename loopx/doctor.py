@@ -185,7 +185,7 @@ def current_script_invocation_path() -> Path | None:
         path = path.resolve()
     except OSError:
         path = path.absolute()
-    if path.exists() and path.name == "loopx":
+    if path.exists() and path.name.lower() in {"loopx", "loopx.exe"}:
         return path
     return None
 
@@ -1095,6 +1095,7 @@ def collect_doctor(
         )
         deep_validation = collect_deep_install_checks(
             command_path=command_path,
+            invocation_path=invocation_path,
             package_root=repo_root,
             invocation_root=invocation_root,
             distribution_root=python_distribution.get("root"),

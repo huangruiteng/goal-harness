@@ -220,7 +220,11 @@ jobs:
           assert payload["source"]["kind"] == "python_distribution", payload
           assert payload["after"]["ready"] is True, payload
           PY
-          "${RUNNER_TEMP}/loopx-wheel/bin/loopx" --format json \
+          conflicting_bin="${RUNNER_TEMP}/loopx-conflicting-bin"
+          mkdir -p "${conflicting_bin}"
+          ln -s /usr/bin/false "${conflicting_bin}/loopx"
+          PATH="${conflicting_bin}:${PATH}" \
+            "${RUNNER_TEMP}/loopx-wheel/bin/loopx" --format json \
             doctor --deep > "${RUNNER_TEMP}/loopx-wheel-doctor.json"
           "${RUNNER_TEMP}/loopx-wheel/bin/python" - \
             "${RUNNER_TEMP}/loopx-wheel-doctor.json" <<'PY'
@@ -231,6 +235,7 @@ jobs:
           payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
           assert payload["ok"] is True, payload
           assert payload["package"]["install_kind"] == "python_distribution", payload
+          assert payload["path"]["loopx"] != payload["path"]["current_invocation"]
           validation = payload["release_candidate"]
           checks = {item["id"]: item for item in validation["checks"]}
           assert validation["schema_version"] == "loopx_python_distribution_checks_v0"
