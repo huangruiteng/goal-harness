@@ -717,7 +717,7 @@ async function evaluateQuotaSpendReplay(
     "runs",
     "index.jsonl",
   );
-  const evaluate = async () => {
+  const evaluate = async (): Promise<QuotaSpendCommitResult> => {
     const content = await readOptionalText(indexPath);
     const candidateResolution = matchingIndexRecord(
       indexRecords(content),
