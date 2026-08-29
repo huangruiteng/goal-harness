@@ -6,7 +6,9 @@ import json
 import os
 import re
 import subprocess
+from bisect import bisect_right
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,7 @@ from .event_collector_runtime import (
     _profile_app_id,
     _sender_identity,
 )
+from .event_inbox import MESSAGE_ID_PATTERN
 from .group_history import (
     _canonical_events,
     _page_digest,
@@ -43,6 +46,17 @@ CURSOR_SCHEMA_VERSION = "lark_turn_start_sync_cursor_v0"
 SYNC_SCHEMA_VERSION = "lark_turn_start_inbox_sync_v0"
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 SOURCE_FINGERPRINT_PATTERN = re.compile(r"^sha256:([0-9a-f]{24})$")
+TURN_START_REACTION_ATTEMPT_LIMIT = 3
+
+
+@dataclass
+class _ReactionAttemptBudget:
+    remaining: int
+
+    def take(self, requested: int) -> int:
+        granted = min(self.remaining, max(0, requested))
+        self.remaining -= granted
+        return granted
 
 
 def _timestamp(value: datetime) -> str:
@@ -95,6 +109,12 @@ def _load_cursor(
         not isinstance(next_page_token, str) or not next_page_token.strip()
     ):
         raise ValueError("Lark turn-start sync cursor page token is invalid")
+    reaction_cursor_message_id = payload.get("reaction_cursor_message_id")
+    if reaction_cursor_message_id is not None and (
+        not isinstance(reaction_cursor_message_id, str)
+        or not MESSAGE_ID_PATTERN.fullmatch(reaction_cursor_message_id)
+    ):
+        raise ValueError("Lark turn-start sync reaction cursor is invalid")
     page_count = payload.get("page_count")
     message_count = payload.get("message_count")
     if (
@@ -143,20 +163,41 @@ def _window_state(
     else:
         start = end - timedelta(seconds=initial_lookback_seconds)
         transition = "initialized"
-    return (
-        {
-            "schema_version": CURSOR_SCHEMA_VERSION,
-            "route_key": route_key,
-            "source_fingerprint": source_fingerprint,
-            "window_start": _timestamp(start),
-            "window_end": _timestamp(end),
-            "next_page_token": None,
-            "page_count": 0,
-            "message_count": 0,
-            "last_page_digest": "",
-        },
-        transition,
-    )
+    state = {
+        "schema_version": CURSOR_SCHEMA_VERSION,
+        "route_key": route_key,
+        "source_fingerprint": source_fingerprint,
+        "window_start": _timestamp(start),
+        "window_end": _timestamp(end),
+        "next_page_token": None,
+        "page_count": 0,
+        "message_count": 0,
+        "last_page_digest": "",
+    }
+    if existing and existing.get("reaction_cursor_message_id"):
+        state["reaction_cursor_message_id"] = str(
+            existing["reaction_cursor_message_id"]
+        )
+    return state, transition
+
+
+def _bounded_reaction_message_ids(
+    message_ids: list[str],
+    *,
+    cursor_message_id: str | None,
+    budget: _ReactionAttemptBudget,
+) -> tuple[list[str], int]:
+    """Select a bounded round-robin slice without exposing private ids."""
+
+    if not message_ids:
+        return [], 0
+    limit = budget.take(len(message_ids))
+    if limit == 0:
+        return [], len(message_ids)
+    start = bisect_right(message_ids, cursor_message_id or "")
+    ordered = message_ids[start:] + message_ids[:start]
+    selected = ordered[:limit]
+    return selected, len(message_ids) - len(selected)
 
 
 def _route_receipt(
@@ -170,6 +211,7 @@ def _route_receipt(
     page_size: int,
     lark_cli_executable: str,
     runner: Runner,
+    reaction_budget: _ReactionAttemptBudget,
 ) -> dict[str, Any]:
     config, route, _, source_fingerprint = _route_context(
         project=project,
@@ -307,8 +349,24 @@ def _route_receipt(
                     )
                     for event in events
                 )
-                reaction_message_ids = lark_inbox_pending_turn_start_read_message_ids(
-                    inbox=route["inbox"]["inbox_path"]
+                reaction_enabled = bool(
+                    route["inbox"]["reply"].get("received_reaction_emoji")
+                )
+                pending_reaction_message_ids = (
+                    lark_inbox_pending_turn_start_read_message_ids(
+                        inbox=route["inbox"]["inbox_path"]
+                    )
+                    if reaction_enabled
+                    else []
+                )
+                reaction_message_ids, reaction_deferred_count = (
+                    _bounded_reaction_message_ids(
+                        pending_reaction_message_ids,
+                        cursor_message_id=(
+                            str(state.get("reaction_cursor_message_id") or "") or None
+                        ),
+                        budget=reaction_budget,
+                    )
                 )
             except (OSError, TypeError, ValueError):
                 return {
@@ -358,6 +416,8 @@ def _route_receipt(
                 "message_count": int(state["message_count"]) + len(events),
                 "last_page_digest": _page_digest(events, next_page_token),
             }
+            if reaction_message_ids:
+                updated["reaction_cursor_message_id"] = reaction_message_ids[-1]
             try:
                 _write_cursor(cursor_path, updated)
                 readback = _load_cursor(
@@ -399,6 +459,7 @@ def _route_receipt(
                     int(result["created_count"]) for result in reaction_results
                 ),
                 "received_reaction_failure_count": len(reaction_failures),
+                "received_reaction_deferred_count": reaction_deferred_count,
                 "read_ack_attempt_count": sum(
                     int(result["read_ack_attempted"] is True)
                     for result in reaction_results
@@ -450,6 +511,7 @@ def sync_lark_turn_start_inbox(
             "provider_payload_returned": False,
         }
     observed_at = (now or datetime.now(UTC)).astimezone(UTC)
+    reaction_budget = _ReactionAttemptBudget(TURN_START_REACTION_ATTEMPT_LIMIT)
     receipts = [
         _route_receipt(
             project=project,
@@ -461,6 +523,7 @@ def sync_lark_turn_start_inbox(
             page_size=int(policy["page_size"]),
             lark_cli_executable=lark_cli_executable,
             runner=runner,
+            reaction_budget=reaction_budget,
         )
         for route in config["routes"]
     ]
@@ -504,6 +567,13 @@ def sync_lark_turn_start_inbox(
         "received_reaction_failure_count": sum(
             int(receipt.get("received_reaction_failure_count") or 0)
             for receipt in receipts
+        ),
+        "received_reaction_deferred_count": sum(
+            int(receipt.get("received_reaction_deferred_count") or 0)
+            for receipt in receipts
+        ),
+        "read_ack_attempt_count": sum(
+            int(receipt.get("read_ack_attempt_count") or 0) for receipt in receipts
         ),
         "self_message_skipped_count": sum(
             int(receipt.get("self_message_skipped_count") or 0) for receipt in receipts

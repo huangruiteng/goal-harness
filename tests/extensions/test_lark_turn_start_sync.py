@@ -525,6 +525,182 @@ def test_turn_start_sync_retries_reaction_from_local_read_beyond_overlap_window(
     assert history_call[history_call.index("--start") + 1] == "2026-08-26T09:59:55Z"
 
 
+def test_turn_start_sync_bounds_failed_reactions_and_resumes_round_robin(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path, received_reaction=True)
+    messages = [
+        {
+            "message_id": f"om_backlog_{index}",
+            "create_time": "2026-08-26T09:59:00Z",
+            "content": f"Pending acknowledgement {index}",
+            "deleted": False,
+        }
+        for index in range(5)
+    ]
+    first_runner = ReactionPageRunner([_page(*messages)], fail_reaction=True)
+
+    first = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=first_runner,
+        now=FIRST_NOW,
+    )
+
+    first_reactions = [
+        call[call.index("--message-id") + 1]
+        for call in first_runner.calls
+        if "reactions" in call
+    ]
+    assert first_reactions == ["om_backlog_0", "om_backlog_1", "om_backlog_2"]
+    assert first["received_reaction_failure_count"] == 3
+    assert first["received_reaction_deferred_count"] == 2
+    assert first["read_ack_attempt_count"] == 3
+
+    second_runner = ReactionPageRunner([_page()], fail_reaction=True)
+    second = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=second_runner,
+        now=SECOND_NOW,
+    )
+
+    second_reactions = [
+        call[call.index("--message-id") + 1]
+        for call in second_runner.calls
+        if "reactions" in call
+    ]
+    assert second_reactions == ["om_backlog_3", "om_backlog_4", "om_backlog_0"]
+    assert second["received_reaction_failure_count"] == 3
+    assert second["received_reaction_deferred_count"] == 2
+    assert second["observation_count"] == 0
+    assert second["agent_read_required"] is False
+    assert "om_backlog_" not in json.dumps(second)
+
+
+def test_turn_start_sync_captures_new_reply_in_an_existing_topic(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path, received_reaction=True)
+    root_id = "om_existing_topic_root"
+    first = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=ReactionPageRunner(
+            [
+                _page(
+                    {
+                        "message_id": root_id,
+                        "root_id": root_id,
+                        "create_time": "2026-08-26T09:59:00Z",
+                        "content": "Existing topic root.",
+                        "deleted": False,
+                    }
+                )
+            ]
+        ),
+        now=FIRST_NOW,
+    )
+    assert first["observation_count"] == 1
+
+    new_reply_id = "om_existing_topic_new_reply"
+    second_runner = ReactionPageRunner(
+        [
+            _page(
+                {
+                    "message_id": new_reply_id,
+                    "root_id": root_id,
+                    "parent_id": root_id,
+                    "create_time": "2026-08-26T10:04:00Z",
+                    "content": "A new reply on the old topic.",
+                    "deleted": False,
+                }
+            )
+        ]
+    )
+    second = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=second_runner,
+        now=SECOND_NOW,
+    )
+
+    assert second["status"] == "observed"
+    assert second["observation_count"] == 1
+    assert second["received_reaction_count"] == 1
+    assert (project / f".loopx/inbox/requirements/{new_reply_id}.json").is_file()
+    assert any(
+        "reactions" in call and new_reply_id in call for call in second_runner.calls
+    )
+
+
+def test_turn_start_sync_shares_reaction_budget_across_routes(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path, received_reaction=True)
+    second_inbox_config = project / ".loopx/config/inbox-second.json"
+    inbox_payload = json.loads(
+        (project / ".loopx/config/inbox.json").read_text(encoding="utf-8")
+    )
+    inbox_payload["inbox_dir"] = ".loopx/inbox/second"
+    inbox_payload["reply"]["chat_id"] = "oc_fixture_second"
+    second_inbox_config.write_text(json.dumps(inbox_payload), encoding="utf-8")
+    collector_payload = json.loads(config.read_text(encoding="utf-8"))
+    collector_payload["routes"].append(
+        {
+            "route_key": "second",
+            "chat_id": "oc_fixture_second",
+            "event_inbox_config": ".loopx/config/inbox-second.json",
+        }
+    )
+    config.write_text(json.dumps(collector_payload), encoding="utf-8")
+    runner = ReactionPageRunner(
+        [
+            _page(
+                {
+                    "message_id": "om_first_route_0",
+                    "create_time": "2026-08-26T09:59:00Z",
+                    "content": "First route message zero.",
+                    "deleted": False,
+                },
+                {
+                    "message_id": "om_first_route_1",
+                    "create_time": "2026-08-26T09:59:01Z",
+                    "content": "First route message one.",
+                    "deleted": False,
+                },
+            ),
+            _page(
+                {
+                    "message_id": "om_second_route_0",
+                    "create_time": "2026-08-26T09:59:02Z",
+                    "content": "Second route message zero.",
+                    "deleted": False,
+                },
+                {
+                    "message_id": "om_second_route_1",
+                    "create_time": "2026-08-26T09:59:03Z",
+                    "content": "Second route message one.",
+                    "deleted": False,
+                },
+            ),
+        ],
+        fail_reaction=True,
+    )
+
+    result = sync_lark_turn_start_inbox(
+        project=project,
+        config_path=config,
+        runner=runner,
+        now=FIRST_NOW,
+    )
+
+    reaction_calls = [call for call in runner.calls if "reactions" in call]
+    assert len(reaction_calls) == turn_start_sync_module.TURN_START_REACTION_ATTEMPT_LIMIT
+    assert result["read_ack_attempt_count"] == 3
+    assert result["received_reaction_deferred_count"] == 1
+
+
 def test_turn_start_sync_excludes_verified_profile_self_message(
     tmp_path: Path,
 ) -> None:
