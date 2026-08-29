@@ -181,20 +181,11 @@ jobs:
           assert readiness["status"] == "ready", readiness
           assert readiness["semantic_probe"] == "passed", readiness
           with TemporaryDirectory() as temporary_directory:
-              effect_id = identity.effect_id
+              effect_id = journal_identity.effect_id
               writable_journal = {
-                  "schema_version": "loopx_turn_journal_v0",
-                  "goal_id": "fixture-goal",
-                  "turn_key": turn_key,
+                  **journal,
                   "status": "in_progress",
-                  "completed_phases": ["host_execute"],
-                  "plan": {
-                      "transaction": {
-                          "settlement_plan": {
-                              "identity": {"effect_id": effect_id}
-                          }
-                      }
-                  },
+                  "completed_phases": [],
               }
               committed = write_turn_journal(
                   str(Path(temporary_directory) / "turn.json"),
