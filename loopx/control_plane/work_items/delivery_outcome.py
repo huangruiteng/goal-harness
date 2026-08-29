@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import Enum
 from typing import Any
+
+from .progress_result import (
+    PROGRESS_OBSERVATION_SCHEMA_VERSION,
+    ProgressResultClass,
+)
 
 
 class DeliveryOutcome(str, Enum):
@@ -49,6 +55,58 @@ FOLLOWTHROUGH_REQUIRED_DELIVERY_OUTCOMES = frozenset(
     }
 )
 PROGRESS_DELIVERY_OUTCOMES = ACCOUNTABLE_DELIVERY_OUTCOMES
+
+
+def qualifies_turn_scoped_blocker_settlement(
+    delivery_outcome: Any,
+    progress_observation: Mapping[str, Any] | None,
+    *,
+    work_item_id: str | None = None,
+) -> bool:
+    """Return whether an outcome gap is a typed, attributable blocker receipt.
+
+    ``outcome_gap`` remains outside the progress outcomes: it can settle one
+    exact Turn only when the same writeback carries a blocked observation with
+    a stable blocker, evidence, and matching work-item identity.
+    """
+
+    if (
+        normalize_delivery_outcome(delivery_outcome) != DeliveryOutcome.OUTCOME_GAP
+        or not isinstance(progress_observation, Mapping)
+        or not str(work_item_id or "").strip()
+    ):
+        return False
+    observation = dict(progress_observation)
+    if observation.get("schema_version") != PROGRESS_OBSERVATION_SCHEMA_VERSION:
+        return False
+    if (
+        observation.get("result_class") != ProgressResultClass.BLOCKED.value
+        or not observation.get("blocker_id")
+        or observation.get("work_item_id") != str(work_item_id).strip()
+    ):
+        return False
+    evidence_ids = observation.get("evidence_ids")
+    return isinstance(evidence_ids, list) and any(
+        str(evidence_id or "").strip() for evidence_id in evidence_ids
+    )
+
+
+def qualifies_turn_scoped_settlement(
+    delivery_outcome: Any,
+    progress_observation: Mapping[str, Any] | None,
+    *,
+    work_item_id: str | None = None,
+) -> bool:
+    """Return whether one delivery record may satisfy a Turn settlement."""
+
+    normalized = normalize_delivery_outcome(delivery_outcome)
+    return normalized in ACCOUNTABLE_DELIVERY_OUTCOMES or (
+        qualifies_turn_scoped_blocker_settlement(
+            normalized,
+            progress_observation,
+            work_item_id=work_item_id,
+        )
+    )
 
 
 def normalize_delivery_outcome(value: Any) -> DeliveryOutcome | None:

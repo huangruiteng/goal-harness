@@ -29,6 +29,8 @@ async function fixture(options: {
   noFollowup?: boolean;
   workspace?: boolean;
   monitor?: boolean;
+  writebackOutcome?: string;
+  progressObservation?: Record<string, unknown>;
 } = {}) {
   const runtimeRoot = await mkdtemp(join(tmpdir(), "loopx-settlement-readback-"));
   const goalRoot = join(runtimeRoot, "goals", goalId);
@@ -72,12 +74,15 @@ async function fixture(options: {
     });
     runs.push({
       classification: "state_refreshed",
-      delivery_outcome: "outcome_progress",
+      delivery_outcome: options.writebackOutcome ?? "outcome_progress",
       goal_id: goalId,
       agent_id: agentId,
       todo_id: todoId,
       turn_instance_id: turnId,
       settlement_identity: identity,
+      ...(options.progressObservation
+        ? { progress_observation: options.progressObservation }
+        : {}),
     });
   }
   if (options.spend) {
@@ -190,6 +195,45 @@ test("keeps partial settlement fail-closed without losing durable facts", async 
   assert.equal(result.monitor_phase, "settlement_pending");
   assert.equal(result.replay_phase, "open");
   assert.equal((result.writeback_run as any).delivery_outcome, "outcome_progress");
+});
+
+test("accepts only an attributable typed blocker as an outcome-gap writeback", async () => {
+  const qualifiedRuntime = await fixture({
+    writeback: true,
+    writebackOutcome: "outcome_gap",
+    progressObservation: {
+      schema_version: "typed_progress_observation_v0",
+      result_class: "blocked",
+      work_item_id: todoId,
+      blocker_id: "blocker-runtime-boundary",
+      evidence_ids: ["evidence-runtime-boundary"],
+    },
+  });
+  const qualified = await readQuotaSettlement(request(qualifiedRuntime));
+  assert.equal((qualified.writeback as any).payload.ok, true);
+  assert.equal((qualified.writeback_run as any).delivery_outcome, "outcome_gap");
+
+  const bareRuntime = await fixture({
+    writeback: true,
+    writebackOutcome: "outcome_gap",
+  });
+  const bare = await readQuotaSettlement(request(bareRuntime));
+  assert.equal((bare.writeback as any).payload.ok, false);
+  assert.equal((bare.writeback as any).result.failure.kind, "writeback_missing");
+
+  const mismatchedRuntime = await fixture({
+    writeback: true,
+    writebackOutcome: "outcome_gap",
+    progressObservation: {
+      schema_version: "typed_progress_observation_v0",
+      result_class: "blocked",
+      work_item_id: "todo_other",
+      blocker_id: "blocker-runtime-boundary",
+      evidence_ids: ["evidence-runtime-boundary"],
+    },
+  });
+  const mismatched = await readQuotaSettlement(request(mismatchedRuntime));
+  assert.equal((mismatched.writeback as any).payload.ok, false);
 });
 
 test("rejects a guard bound to another Todo", async () => {

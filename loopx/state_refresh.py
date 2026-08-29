@@ -15,6 +15,7 @@ from .control_plane.work_items.delivery_batch_scale import (
 from .control_plane.work_items.delivery_outcome import (
     ACCOUNTABLE_DELIVERY_OUTCOMES,
     DELIVERY_OUTCOME_CHOICES as DELIVERY_OUTCOME_CHOICES,
+    qualifies_turn_scoped_settlement,
     require_delivery_outcome,
 )
 from .control_plane.agents.workspace_guard import (
@@ -897,12 +898,6 @@ def refresh_state_run(
     normalized_delivery_outcome = (
         require_delivery_outcome(delivery_outcome).value if delivery_outcome else None
     )
-    if delivery_workspace_path is not None and (
-        normalized_delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES
-    ):
-        raise ValueError(
-            "--delivery-workspace-path requires an accountable --delivery-outcome"
-        )
     normalized_repair_delta_kinds = normalize_repair_delta_kinds(repair_delta_kinds)
     normalized_progress_observation = (
         normalize_progress_observation(
@@ -912,15 +907,26 @@ def refresh_state_run(
         if progress_observation is not None
         else None
     )
+    turn_scoped_settlement_qualified = qualifies_turn_scoped_settlement(
+        normalized_delivery_outcome,
+        normalized_progress_observation,
+        work_item_id=todo_id,
+    )
+    if delivery_workspace_path is not None and not turn_scoped_settlement_qualified:
+        raise ValueError(
+            "--delivery-workspace-path requires a progress outcome or a typed "
+            "blocked outcome_gap settlement"
+        )
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
     settlement_identity = None
     settlement_result = None
     delivery_workspace_causality = None
     if todo_id or normalized_replan_obligation_id or turn_instance_id:
-        if normalized_delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES:
+        if not turn_scoped_settlement_qualified:
             raise ValueError(
-                "turn-scoped refresh-state requires an accountable --delivery-outcome"
+                "turn-scoped refresh-state requires a progress outcome or a typed "
+                "blocked outcome_gap settlement"
             )
         settlement_readback = read_heartbeat_settlement(
             runtime_root,
@@ -1182,7 +1188,7 @@ def refresh_state_run(
             "explicit non-delivery settlement contract"
         )
     if (
-        normalized_delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES
+        turn_scoped_settlement_qualified
         and workspace_requirement != "not_required"
     ):
         delivery_workspace = capture_delivery_workspace(

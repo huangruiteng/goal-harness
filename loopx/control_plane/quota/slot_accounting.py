@@ -22,8 +22,8 @@ from ..todos.contract import (
     normalize_todo_replan_obligation_id,
 )
 from ..work_items.delivery_outcome import (
-    ACCOUNTABLE_DELIVERY_OUTCOMES,
     normalize_delivery_outcome,
+    qualifies_turn_scoped_settlement,
 )
 from .decision_summary import compact_quota_decision, quota_decision_agent_id
 from .monitor_poll import QUOTA_MONITOR_POLL_CLASSIFICATION
@@ -377,7 +377,13 @@ def _latest_unspent_accountable_delivery_run(
         if _is_quota_neutral_state_refresh(run):
             continue
         delivery_outcome = normalize_delivery_outcome(run.get("delivery_outcome"))
-        if delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES:
+        if qualifies_turn_scoped_settlement(
+            delivery_outcome,
+            run.get("progress_observation")
+            if isinstance(run.get("progress_observation"), dict)
+            else None,
+            work_item_id=str(run.get("todo_id") or "") or None,
+        ):
             return run
         return None
     return None
