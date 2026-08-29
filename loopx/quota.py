@@ -1237,6 +1237,7 @@ def spend_quota_slot(
             goal_id=safe_goal_id,
             effect_ref=normalized_effect_ref,
             agent_id=agent_id,
+            read_only=not execute,
         )
         if replay.get("replay_found"):
             if not replay.get("ok"):

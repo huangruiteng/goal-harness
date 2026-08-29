@@ -92,6 +92,7 @@ interface QuotaSpendReplayRequest {
   goal_id: string;
   effect_id: string;
   resolved_agent_id: string | null;
+  read_only: boolean;
 }
 
 type SpendDisposition =
@@ -244,6 +245,9 @@ function replayRequestObject(value: unknown): QuotaSpendReplayRequest {
       request.resolved_agent_id,
       "resolved_agent_id",
     )?.trim() ?? null,
+    read_only: request.read_only === undefined
+      ? false
+      : requiredBoolean(request.read_only, "read_only"),
   };
 }
 
@@ -713,7 +717,7 @@ async function evaluateQuotaSpendReplay(
     "runs",
     "index.jsonl",
   );
-  return await withFileMutationLock(indexPath, async () => {
+  const evaluate = async () => {
     const content = await readOptionalText(indexPath);
     const candidateResolution = matchingIndexRecord(
       indexRecords(content),
@@ -816,7 +820,10 @@ async function evaluateQuotaSpendReplay(
         reason: "quota spend replayed for the same provider effect",
       },
     };
-  });
+  };
+  return request.read_only
+    ? await evaluate()
+    : await withFileMutationLock(indexPath, evaluate);
 }
 
 function indexRecordFor(

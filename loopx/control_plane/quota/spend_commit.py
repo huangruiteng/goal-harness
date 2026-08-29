@@ -111,6 +111,7 @@ def replay_quota_spend_by_effect_ref(
     goal_id: str,
     effect_ref: str,
     agent_id: str | None,
+    read_only: bool = False,
 ) -> dict[str, Any]:
     """Ask the native quota transaction to validate an effect replay."""
 
@@ -135,6 +136,7 @@ def replay_quota_spend_by_effect_ref(
                 "goal_id": safe_goal_id,
                 "effect_id": normalized_effect_ref,
                 "resolved_agent_id": normalize_todo_claimed_by(agent_id),
+                "read_only": read_only,
             },
         )
     except EffectRuntimeRejected as exc:

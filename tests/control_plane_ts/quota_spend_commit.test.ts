@@ -350,6 +350,18 @@ test("native replay ignores non-quota rows that reuse an effect identity", async
   assert.match(replay.reason, /replay was not found/);
 });
 
+test("read-only replay misses do not create a runtime directory", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+
+  const replay = await evaluateQuotaSpendCommit({
+    ...replayRequest(runtimeRoot, "missing-effect"),
+    read_only: true,
+  });
+
+  assert.equal(replay.status, "preview");
+  assert.deepEqual(await readdir(runtimeRoot), []);
+});
+
 test("native replay rejects either conflicting effect identity direction", async (t) => {
   for (const [label, row] of [
     ["metadata-first", {
