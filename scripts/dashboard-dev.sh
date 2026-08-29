@@ -188,8 +188,9 @@ resolve_lark_cli_binary() {
 
 CODEX_BIN="$(resolve_agent_binary codex)"
 CLAUDE_BIN="$(resolve_agent_binary claude)"
+LARK_CLI_ARGS=()  # Initialize as empty array
 if LARK_CLI_BIN="$(resolve_lark_cli_binary)"; then
-  LARK_CLI_ARGS=(--lark-cli-bin "${LARK_CLI_BIN}")
+  LARK_CLI_ARGS=(--lark-cli-bin "${LARK_CLI_BIN}")  # Set to lark-cli arg if found
 fi
 echo "LoopX Agent executables: Codex=${CODEX_BIN}; Claude Code=${CLAUDE_BIN}"
 if [ -n "${LARK_CLI_BIN}" ]; then
@@ -212,7 +213,7 @@ STATUS_PID=$!
   --port 8767 \
   --codex-bin "${CODEX_BIN}" \
   --claude-bin "${CLAUDE_BIN}" \
-  "${LARK_CLI_ARGS[@]}" \
+  ${LARK_CLI_ARGS[@]+"${LARK_CLI_ARGS[@]}"} \
   --no-open &
 CHAT_PID=$!
 
