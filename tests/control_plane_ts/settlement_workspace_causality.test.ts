@@ -137,3 +137,49 @@ test("typed settlement identity distinguishes replan from unknown Todo causality
     "required",
   );
 });
+
+test("legacy Todo compatibility requires exact committed settlement receipts", () => {
+  const effectId = "goal:agent:todo_legacy:turn-1";
+  const completeEvidence = {
+    schema_version: "legacy_settlement_receipt_evidence_v0",
+    settlement_effect_id: effectId,
+    delivery_workspace_present: false,
+    receipts: [
+      { step_kind: "validation", status: "committed", effect_id: effectId },
+      { step_kind: "durable_writeback", status: "committed", effect_id: effectId },
+    ],
+  };
+  assert.deepEqual(
+    resolveSettlementWorkspaceRequirement(null, "todo", completeEvidence),
+    {
+      schema_version: "settlement_workspace_requirement_v0",
+      settlement_binding_kind: "todo",
+      requirement: "not_required",
+      source: "legacy_settlement_receipts",
+      reason: "pre_causality_settlement_already_committed",
+    },
+  );
+  assert.equal(
+    resolveSettlementWorkspaceRequirement(null, "todo", {
+      ...completeEvidence,
+      delivery_workspace_present: true,
+    }).requirement,
+    "unknown",
+  );
+  assert.equal(
+    resolveSettlementWorkspaceRequirement(null, "todo", {
+      ...completeEvidence,
+      receipts: completeEvidence.receipts.slice(0, 1),
+    }).requirement,
+    "unknown",
+  );
+  assert.equal(
+    resolveSettlementWorkspaceRequirement(null, "todo", {
+      ...completeEvidence,
+      receipts: completeEvidence.receipts.map((receipt, index) =>
+        index === 1 ? { ...receipt, effect_id: "other-effect" } : receipt
+      ),
+    }).requirement,
+    "unknown",
+  );
+});

@@ -37,6 +37,7 @@ from .settlement import (
     settlement_result_payload,
 )
 from .settlement_workspace_causality import (
+    LEGACY_SETTLEMENT_RECEIPT_EVIDENCE_SCHEMA_VERSION,
     completed_todo_workspace_causality,
     missing_delivery_workspace_resolution,
     resolve_settlement_workspace_requirement,
@@ -397,12 +398,37 @@ def _latest_unspent_turn_settlement_run(
 def _settlement_workspace_requirement(
     delivery_workspace_causality: dict[str, Any] | None,
     settlement_identity: SettlementIdentity | None,
+    settlement_result: SettlementResult[dict[str, Any]] | None,
+    delivery_completion_run: dict[str, Any] | None,
 ) -> dict[str, str] | None:
     if settlement_identity is None:
         return None
     return resolve_settlement_workspace_requirement(
         delivery_workspace_causality,
         settlement_binding_kind=settlement_identity.binding_kind.value,
+        legacy_settlement_evidence=(
+            {
+                "schema_version": (
+                    LEGACY_SETTLEMENT_RECEIPT_EVIDENCE_SCHEMA_VERSION
+                ),
+                "settlement_effect_id": settlement_identity.effect_id,
+                "delivery_workspace_present": bool(
+                    isinstance(delivery_completion_run, dict)
+                    and delivery_completion_run.get("delivery_workspace") is not None
+                ),
+                "receipts": [
+                    {
+                        "step_kind": receipt.step_kind.value,
+                        "status": receipt.status,
+                        "effect_id": receipt.effect_id,
+                    }
+                    for receipt in settlement_result.receipts
+                ],
+            }
+            if settlement_result is not None
+            and settlement_result.failure is None
+            else None
+        ),
     )
 
 
@@ -612,7 +638,10 @@ def build_quota_slot_preview_for_decision(
         causality=delivery_workspace_causality,
     )
     settlement_workspace_requirement = _settlement_workspace_requirement(
-        delivery_workspace_causality, settlement_identity
+        delivery_workspace_causality,
+        settlement_identity,
+        settlement_result,
+        delivery_completion_run,
     )
     safe_bypass_without_delivery = (
         safe_bypass_requested and delivery_completion_run is None

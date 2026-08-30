@@ -12,6 +12,8 @@ export const DELIVERY_WORKSPACE_RESOLUTION_SCHEMA_VERSION =
   "delivery_workspace_resolution_v0";
 export const SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION =
   "settlement_workspace_requirement_v0";
+export const LEGACY_SETTLEMENT_RECEIPT_EVIDENCE_SCHEMA_VERSION =
+  "legacy_settlement_receipt_evidence_v0";
 
 export const DELIVERY_WORKSPACE_REQUIREMENTS = [
   "required",
@@ -44,6 +46,39 @@ export interface SettlementWorkspaceRequirement extends JsonObject {
   requirement: DeliveryWorkspaceRequirement;
   source: string;
   reason: string;
+}
+
+function hasCompleteLegacySettlementReceipts(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const evidence = value as JsonObject;
+  if (
+    evidence.schema_version !== LEGACY_SETTLEMENT_RECEIPT_EVIDENCE_SCHEMA_VERSION ||
+    typeof evidence.settlement_effect_id !== "string" ||
+    !evidence.settlement_effect_id.trim() ||
+    evidence.delivery_workspace_present !== false ||
+    !Array.isArray(evidence.receipts) ||
+    evidence.receipts.length !== 2
+  ) {
+    return false;
+  }
+  const expectedKinds = new Set(["validation", "durable_writeback"]);
+  for (const value of evidence.receipts) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return false;
+    }
+    const receipt = value as JsonObject;
+    if (
+      typeof receipt.step_kind !== "string" ||
+      !expectedKinds.delete(receipt.step_kind) ||
+      receipt.status !== "committed" ||
+      receipt.effect_id !== evidence.settlement_effect_id
+    ) {
+      return false;
+    }
+  }
+  return expectedKinds.size === 0;
 }
 
 export type DeliveryWorkspaceResolution =
@@ -108,6 +143,7 @@ function operation(value: unknown): DeliveryWorkspaceCausalityOperation {
 export function resolveSettlementWorkspaceRequirement(
   value: unknown,
   settlementBindingKind: unknown,
+  legacySettlementEvidence: unknown = null,
 ): SettlementWorkspaceRequirement {
   if (
     settlementBindingKind !== "todo" &&
@@ -134,6 +170,15 @@ export function resolveSettlementWorkspaceRequirement(
       requirement: "not_required",
       source: "typed_settlement_identity",
       reason: "autonomous_replan_is_non_repository_control_plane_work",
+    };
+  }
+  if (hasCompleteLegacySettlementReceipts(legacySettlementEvidence)) {
+    return {
+      schema_version: SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION,
+      settlement_binding_kind: settlementBindingKind,
+      requirement: "not_required",
+      source: "legacy_settlement_receipts",
+      reason: "pre_causality_settlement_already_committed",
     };
   }
   return {
@@ -329,6 +374,7 @@ export function evaluateDeliveryWorkspaceCausality(value: unknown): JsonObject {
       settlement_requirement: resolveSettlementWorkspaceRequirement(
         request.causality,
         request.settlement_binding_kind,
+        request.legacy_settlement_evidence,
       ),
     });
   }

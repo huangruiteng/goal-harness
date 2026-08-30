@@ -24,6 +24,9 @@ DELIVERY_WORKSPACE_RESOLUTION_SCHEMA_VERSION = "delivery_workspace_resolution_v0
 SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION = (
     "settlement_workspace_requirement_v0"
 )
+LEGACY_SETTLEMENT_RECEIPT_EVIDENCE_SCHEMA_VERSION = (
+    "legacy_settlement_receipt_evidence_v0"
+)
 DELIVERY_WORKSPACE_REQUIREMENTS = frozenset({"required", "not_required", "unknown"})
 
 
@@ -294,6 +297,7 @@ def resolve_settlement_workspace_requirement(
     causality: Mapping[str, Any] | None,
     *,
     settlement_binding_kind: str,
+    legacy_settlement_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
     """Resolve workspace policy from the original typed settlement binding."""
 
@@ -302,6 +306,11 @@ def resolve_settlement_workspace_requirement(
         expected_todo_id=None,
         causality=_prepared_causality(causality),
         settlement_binding_kind=settlement_binding_kind,
+        legacy_settlement_evidence=(
+            dict(legacy_settlement_evidence)
+            if isinstance(legacy_settlement_evidence, Mapping)
+            else None
+        ),
     )
     value = result.get("settlement_requirement")
     expected_keys = {
