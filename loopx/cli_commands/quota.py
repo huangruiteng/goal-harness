@@ -535,6 +535,7 @@ def handle_quota_command(
             interaction_projection_hooks = (
                 repository_delivery_interaction_hook(repo_path=Path.cwd()),
                 periodic_report_pending_intent_interaction_hook(
+                    registry_path=registry_path,
                     runtime_root=runtime_root,
                     goal_id=args.goal_id,
                     agent_id=args.agent_id,

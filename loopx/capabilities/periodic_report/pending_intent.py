@@ -76,27 +76,191 @@ def _intent_key(intent: Mapping[str, Any]) -> str:
     ).hexdigest()[:24]
 
 
-def _receipt_path(runtime_root: Path, goal_id: str, intent: Mapping[str, Any]) -> Path:
-    return (
+def _attempt_dir(
+    runtime_root: Path,
+    goal_id: str,
+    intent: Mapping[str, Any],
+    *,
+    rejection_revision: str | None = None,
+) -> Path:
+    base = (
         runtime_root
         / "goals"
         / goal_id
         / "periodic_reports"
         / _intent_key(intent)
-        / "receipt.json"
     )
+    return base / f"retry-{rejection_revision}" if rejection_revision else base
+
+
+def _receipt_path(
+    runtime_root: Path,
+    goal_id: str,
+    intent: Mapping[str, Any],
+    *,
+    rejection_revision: str | None = None,
+) -> Path:
+    return _attempt_dir(
+        runtime_root,
+        goal_id,
+        intent,
+        rejection_revision=rejection_revision,
+    ) / "receipt.json"
 
 
 def _editorial_request_path(
-    runtime_root: Path, goal_id: str, intent: Mapping[str, Any]
+    runtime_root: Path,
+    goal_id: str,
+    intent: Mapping[str, Any],
+    *,
+    rejection_revision: str | None = None,
 ) -> Path:
-    return _receipt_path(runtime_root, goal_id, intent).parent / "editorial_request.json"
+    return _attempt_dir(
+        runtime_root,
+        goal_id,
+        intent,
+        rejection_revision=rejection_revision,
+    ) / "editorial_request.json"
 
 
 def _editorial_response_path(
-    runtime_root: Path, goal_id: str, intent: Mapping[str, Any]
+    runtime_root: Path,
+    goal_id: str,
+    intent: Mapping[str, Any],
+    *,
+    rejection_revision: str | None = None,
 ) -> Path:
-    return _receipt_path(runtime_root, goal_id, intent).parent / "editorial.json"
+    return _attempt_dir(
+        runtime_root,
+        goal_id,
+        intent,
+        rejection_revision=rejection_revision,
+    ) / "editorial.json"
+
+
+def _decision_scope_text(value: object) -> str:
+    if isinstance(value, Mapping):
+        return ":".join(
+            str(value.get(field) or "")
+            for field in ("kind", "granularity", "scope_key")
+        )
+    return str(value or "")
+
+
+def _rejected_approval_revision(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    agent_id: str,
+    receipt: Mapping[str, Any],
+) -> str | None:
+    approval_scope = str(receipt.get("approval_scope") or "")
+    if receipt.get("status") != "approval_pending" or not approval_scope:
+        return None
+    registry = read_json(registry_path)
+    goal = find_registry_goal(registry, goal_id)
+    if not isinstance(goal, Mapping):
+        return None
+    repo = Path(str(goal.get("repo") or "")).expanduser()
+    state_path = resolve_state_file(repo, str(goal.get("state_file") or ""))
+    if state_path is None or not state_path.is_file():
+        return None
+    parsed = parse_active_state_todos(
+        state_path.read_text(encoding="utf-8"),
+        goal=dict(goal),
+        state_path=state_path,
+        item_limit=None,
+    )
+    user_summary = parsed.get("user_todos")
+    items = user_summary.get("items") if isinstance(user_summary, Mapping) else []
+    rejected = [
+        item
+        for item in items or []
+        if isinstance(item, Mapping)
+        and item.get("status") == "done"
+        and item.get("action_kind") == "approve_periodic_report_payload"
+        and item.get("decision_outcome") == "reject"
+        and _decision_scope_text(item.get("decision_scope")) == approval_scope
+        and str(item.get("bound_agent") or item.get("blocks_agent") or "")
+        == agent_id
+    ]
+    if not rejected:
+        return None
+    latest = max(rejected, key=lambda item: str(item.get("updated_at") or ""))
+    revision = f"{latest.get('todo_id')}:{latest.get('updated_at')}"
+    return hashlib.sha256(revision.encode("utf-8")).hexdigest()[:16]
+
+
+def _load_consumption_receipt(
+    path: Path, *, intent_digest: str
+) -> Mapping[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(receipt, Mapping)
+        or receipt.get("schema_version") != CONSUMPTION_RECEIPT_SCHEMA
+        or receipt.get("intent_digest") != intent_digest
+        or receipt.get("status") != "approval_pending"
+    ):
+        return None
+    return receipt
+
+
+def _next_attempt_revision(
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    goal_id: str,
+    agent_id: str,
+    intent: Mapping[str, Any],
+) -> tuple[bool, str | None]:
+    """Return whether an intent is actionable and its immutable attempt revision."""
+
+    base = _attempt_dir(runtime_root, goal_id, intent)
+    receipt_paths = [base / "receipt.json"]
+    if base.is_dir():
+        receipt_paths.extend(sorted(base.glob("retry-*/receipt.json")))
+    intent_digest = _canonical_digest(intent)
+    receipts = [
+        receipt
+        for path in receipt_paths
+        if (receipt := _load_consumption_receipt(path, intent_digest=intent_digest))
+        is not None
+    ]
+    if not receipts:
+        return True, None
+
+    candidate_revisions: list[str] = []
+    for receipt in receipts:
+        revision = _rejected_approval_revision(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            receipt=receipt,
+        )
+        if revision is None:
+            return False, None
+        retry_receipt = _receipt_path(
+            runtime_root,
+            goal_id,
+            intent,
+            rejection_revision=revision,
+        )
+        if _load_consumption_receipt(
+            retry_receipt, intent_digest=intent_digest
+        ) is None:
+            candidate_revisions.append(revision)
+
+    if not candidate_revisions:
+        return False, None
+    # Sequential approval gates yield one unconsumed rejection. Sorting keeps
+    # malformed or manually duplicated state deterministic without overwriting
+    # any earlier frozen attempt.
+    return True, sorted(candidate_revisions)[-1]
 
 
 def _valid_sidecar_intent(
@@ -136,7 +300,7 @@ def _valid_sidecar_intent(
 
 
 def pending_periodic_report_intents(
-    *, runtime_root: Path, goal_id: str, agent_id: str
+    *, registry_path: Path, runtime_root: Path, goal_id: str, agent_id: str
 ) -> list[dict[str, Any]]:
     """Read only exact, eligible, unconsumed intents for one Goal/Agent."""
 
@@ -161,31 +325,28 @@ def pending_periodic_report_intents(
         )
         if intent is None:
             continue
-        receipt_path = _receipt_path(runtime_root, goal_id, intent)
-        if receipt_path.is_file():
-            try:
-                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                receipt = None
-            if (
-                isinstance(receipt, Mapping)
-                and receipt.get("schema_version") == CONSUMPTION_RECEIPT_SCHEMA
-                and receipt.get("intent_digest") == _canonical_digest(intent)
-                and receipt.get("status") == "approval_pending"
-            ):
-                continue
+        actionable, _revision = _next_attempt_revision(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            intent=intent,
+        )
+        if not actionable:
+            continue
         pending.append(intent)
     return pending
 
 
 def periodic_report_pending_intent_interaction_hook(
-    *, runtime_root: Path, goal_id: str, agent_id: str | None
+    *, registry_path: Path, runtime_root: Path, goal_id: str, agent_id: str | None
 ) -> InteractionProjectionHookRegistration:
     normalized_agent_id = str(agent_id or "").strip()
 
     def produce() -> Mapping[str, Any]:
         intents = (
             pending_periodic_report_intents(
+                registry_path=registry_path,
                 runtime_root=runtime_root,
                 goal_id=goal_id,
                 agent_id=normalized_agent_id,
@@ -560,7 +721,10 @@ def consume_pending_periodic_report_intent(
     execute: bool,
 ) -> dict[str, Any]:
     intents = pending_periodic_report_intents(
-        runtime_root=runtime_root, goal_id=goal_id, agent_id=agent_id
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
     )
     if not intents:
         return {
@@ -581,8 +745,32 @@ def consume_pending_periodic_report_intent(
         agent_id=agent_id,
         completed_at=completed_at,
     )
-    request_path = _editorial_request_path(runtime_root, goal_id, intent)
-    response_path = _editorial_response_path(runtime_root, goal_id, intent)
+    actionable, rejection_revision = _next_attempt_revision(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        intent=intent,
+    )
+    if not actionable:
+        return {
+            "ok": True,
+            "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
+            "status": "no_pending_intent",
+            "external_writes_performed": False,
+        }
+    request_path = _editorial_request_path(
+        runtime_root,
+        goal_id,
+        intent,
+        rejection_revision=rejection_revision,
+    )
+    response_path = _editorial_response_path(
+        runtime_root,
+        goal_id,
+        intent,
+        rejection_revision=rejection_revision,
+    )
     intent_digest = _canonical_digest(intent)
     editorial_request = _load_frozen_editorial_request(
         request_path=request_path,
@@ -669,7 +857,12 @@ def consume_pending_periodic_report_intent(
     if not execute:
         return result
 
-    receipt_path = _receipt_path(runtime_root, goal_id, intent)
+    receipt_path = _receipt_path(
+        runtime_root,
+        goal_id,
+        intent,
+        rejection_revision=rejection_revision,
+    )
     artifact_dir = receipt_path.parent
     artifact_dir.mkdir(parents=True, exist_ok=True)
     markdown_path = artifact_dir / "report.md"
