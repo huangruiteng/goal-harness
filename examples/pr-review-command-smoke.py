@@ -74,6 +74,9 @@ def main() -> int:
         "Walk one positive path",
         "Walk one negative path",
         "omits whole files/modules is incomplete",
+        "Treat `candidate` as a preview, not a durable projection",
+        "durable Todo target-key readback -> `--projected-exact-head` -> exact-head review/comment readback -> `--handled-exact-head`",
+        "Never send the projection ACK before the Todo exists",
     ):
         assert phrase in skill_text, phrase
     assert len(skill_source.splitlines()) <= 180, len(skill_source.splitlines())
