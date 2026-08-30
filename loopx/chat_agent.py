@@ -119,6 +119,7 @@ def _turn_prompt(
                 "rationale": "Why this is the next safe step.",
             }
         ],
+        "protected_action": None,
         "gate": None,
     }
     role = (
@@ -137,6 +138,15 @@ def _turn_prompt(
         if not execution_mode
         else ""
     )
+    protected_action_contract = (
+        "For a protected operation (merge, release, deploy, delete, or payment), interpret the operator's semantic intent. "
+        "Set protected_action only when the dominant request is to perform exactly one operation now and the operator supplied a concrete target. "
+        "Use only operation, target, and summary; copy the target from the operator instead of inventing or resolving it. "
+        "Discussion, quotation, hypotheticals, exact-wording requests, negation, targetless requests, and compound operations must use protected_action=null; ask a useful clarification in message when needed. "
+        "A protected_action is only an untrusted proposal for LoopX typed preview and never authority to execute. "
+        if not execution_mode
+        else "This is already a confirmed execution turn, so protected_action must be null. "
+    )
     return (
         role
         + "The operator message below is the current task. Answer it directly and do not replace it "
@@ -144,13 +154,16 @@ def _turn_prompt(
         + planning_limits
         + "When the operator requests a durable Goal, Todo, Agent binding, heartbeat, monitor, gate, or correction change, "
         "describe the bounded proposal clearly so LoopX can route it through typed preview and explicit apply. "
-        "Never claim the change has been written without a verified control-plane receipt. "
+        + protected_action_contract
+        + "Never claim the change has been written without a verified control-plane receipt. "
         "If you encounter an identity, approval, or host-tool gate, stop and describe it in gate. "
         "Reply in Chinese unless the operator asks for another language. Keep proposals bounded and reviewable. "
         "Do not expose chain-of-thought, tool narration, intended steps, or scratch work. "
         "First write the complete operator-facing answer as ordinary text. Start with the conclusion, "
         "use short sentences or lines so the answer can stream, and include at most five actionable items. "
         "Then append exactly one machine-readable envelope whose message field repeats that complete answer. "
+        "protected_action must be null or an object shaped as "
+        '{"operation":"merge|release|deploy|delete|payment","target":"user-stated target","summary":"short public-safe proposal"}. '
         "Do not write anything after the closing tag. Use these tags and shape:\n"
         f"{CHAT_REVIEW_OPEN_TAG}{json.dumps(envelope, ensure_ascii=False)}{CHAT_REVIEW_CLOSE_TAG}\n\n"
         + (f"LoopX context (supporting context only):\n{context_summary.strip()}\n\n" if context_summary.strip() else "")

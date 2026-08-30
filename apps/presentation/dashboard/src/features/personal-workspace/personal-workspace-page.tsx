@@ -1311,7 +1311,8 @@ export function PersonalWorkspacePage({
       if (pendingImages.length) {
         if (!selectedGoalId) setManagerConversationReceiptVisible(true);
         else if (selectedGoalTab !== "chat") setGoalConversationReceiptVisible(true);
-        await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId, pendingImages);
+        const semanticPreview = await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId, pendingImages);
+        if (semanticPreview) await createPreview(semanticPreview);
         return;
       }
       const intentRoute = routeWorkspaceInput(message, {
@@ -1323,7 +1324,6 @@ export function PersonalWorkspacePage({
         setComposer(message);
         let clarification = t("composer.clarifySingleAction");
         if (intentRoute.missingFields.includes("resume_when")) clarification = t("composer.clarifyDefer");
-        else if (intentRoute.missingFields.includes("protected_action_target")) clarification = t("composer.clarifyProtectedTarget");
         setActionFeedback(clarification);
         return;
       }
@@ -1448,7 +1448,8 @@ export function PersonalWorkspacePage({
       }
       if (!selectedGoalId) setManagerConversationReceiptVisible(true);
       else if (selectedGoalTab !== "chat") setGoalConversationReceiptVisible(true);
-      await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId);
+      const semanticPreview = await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId);
+      if (semanticPreview) await createPreview(semanticPreview);
     } catch (error) {
       if (!messageOverride) {
         setComposer(message);

@@ -42,6 +42,7 @@ import {
   type ChatSessionSnapshot,
   type ChatSessionSummary,
   type ChatImageAttachment,
+  type ProtectedActionProposal,
   type TodoProposal,
 } from "../data/chat";
 import { Button } from "../components/ui/button";
@@ -66,8 +67,42 @@ import {
   type WorkspaceWorker,
   type WorkspaceGoalNotification,
   type WorkspaceActionPreview,
+  type WorkspaceActionPreviewRequest,
 } from "../features/personal-workspace/personal-workspace-model";
 import { routeWorkspaceInput } from "../features/personal-workspace/personal-workspace-router";
+
+const protectedOperationLabels: Record<ProtectedActionProposal["operation"], string> = {
+  delete: "删除",
+  deploy: "部署",
+  merge: "合并",
+  payment: "付款",
+  release: "发布",
+};
+
+function semanticProtectedActionPreview(
+  goalId: string,
+  message: string,
+  proposal: ProtectedActionProposal,
+): WorkspaceActionPreviewRequest | null {
+  const normalizedMessage = message.replace(/\s+/gu, " ").trim().toLowerCase();
+  const normalizedTarget = proposal.target.replace(/\s+/gu, " ").trim().toLowerCase();
+  if (!normalizedTarget || !normalizedMessage.includes(normalizedTarget)) return null;
+  return {
+    actionKind: "goal.update",
+    context: {
+      goal_id: goalId,
+      kind: "goal",
+      natural_language: message,
+      semantic_proposal: {
+        operation: proposal.operation,
+        target: proposal.target,
+      },
+    },
+    idempotencyKey: `workspace-semantic-protected-${goalId}-${Date.now().toString(36)}`,
+    normalizedParameters: { goal_id: goalId, status: "operator_gate_requested" },
+    summary: `请求受保护操作：${protectedOperationLabels[proposal.operation]} · ${proposal.target}`,
+  };
+}
 import type { StatusSourceControl } from "../features/personal-workspace/status-source-switcher";
 import { ensureSshSource } from "../data/ssh-host-catalog";
 import {
@@ -1907,6 +1942,14 @@ function PersonalGoalHome({
           ...current,
           [targetContextId]: [...(current[targetContextId] ?? []), ...cards],
         }));
+      }
+      if (targetContextId !== "manager" && response.protected_action) {
+        const protectedPreview = semanticProtectedActionPreview(
+          targetContextId,
+          question,
+          response.protected_action,
+        );
+        if (protectedPreview) return protectedPreview;
       }
     } catch (error) {
       const userInterrupted = interruptedContexts.current.delete(targetContextId);

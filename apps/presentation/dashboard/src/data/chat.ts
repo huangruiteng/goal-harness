@@ -137,10 +137,19 @@ export const todoProposalSchema = z.object({
   rationale: z.string(),
 });
 
+export const protectedActionProposalSchema = z.object({
+  operation: z.enum(["merge", "release", "deploy", "delete", "payment"]),
+  target: z.string().min(1).max(160),
+  summary: z.string().max(300),
+});
+
+export type ProtectedActionProposal = z.infer<typeof protectedActionProposalSchema>;
+
 export const agentResponseSchema = z.object({
   schema_version: z.literal("loopx_chat_agent_response_v0"),
   message: z.string(),
   proposals: z.array(todoProposalSchema),
+  protected_action: protectedActionProposalSchema.nullable().optional().default(null),
   gate: z
     .object({
       kind: z.string(),

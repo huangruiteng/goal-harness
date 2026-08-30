@@ -52,147 +52,6 @@ function executionIntent(message: string) {
     && /(帮我|请|给我|直接|现在|开始|bytedcli|codebase|git|rebase|push|提交|推送)/iu.test(message);
 }
 
-type ProtectedActionIntent = {
-  explicit: boolean;
-  hasTarget: boolean;
-};
-
-type ProtectedActionRule = {
-  hasTarget: (clause: string) => boolean;
-  subjectPattern: RegExp;
-  subjects: readonly string[];
-};
-
-const commandLeads = ["请", "现在", "开始", "批准", "执行", "立即", "直接", "帮我"] as const;
-const demonstratives = ["这个", "该", "当前"] as const;
-const identifierPattern = /^[a-z0-9_.\/-]{2,120}$/iu;
-
-function includesAny(message: string, candidates: readonly string[]) {
-  const lowerMessage = message.toLowerCase();
-  return candidates.some((candidate) => lowerMessage.includes(candidate.toLowerCase()));
-}
-
-function hasDemonstrativeObject(message: string, objects: readonly string[]) {
-  return demonstratives.some((demonstrative) => objects.some((object) => includesAny(message, [`${demonstrative}${object}`, `${demonstrative} ${object}`])));
-}
-
-function hasEnglishToken(message: string, candidates: readonly string[]) {
-  const tokens = [...message.toLowerCase().matchAll(/[a-z]+/gu)].map((match) => match[0]);
-  return candidates.some((candidate) => tokens.includes(candidate));
-}
-
-function tokenAfterLabel(message: string, labels: readonly string[]) {
-  const lowerMessage = message.toLowerCase();
-  for (const label of labels) {
-    const index = lowerMessage.indexOf(label.toLowerCase());
-    if (index < 0) continue;
-    const tail = message.slice(index + label.length).trimStart();
-    const token = tail.match(/^[^\s，,。！？!?；;：:]+/u)?.[0] ?? "";
-    if (token) return token;
-  }
-  return "";
-}
-
-function hasLabeledIdentifier(message: string, labels: readonly string[]) {
-  return identifierPattern.test(tokenAfterLabel(message, labels));
-}
-
-function hasIdentifierBeforeLabel(message: string, labels: readonly string[]) {
-  const lowerMessage = message.toLowerCase();
-  for (const label of labels) {
-    const index = lowerMessage.indexOf(label.toLowerCase());
-    if (index <= 0) continue;
-    const prefix = message.slice(0, index).trimEnd();
-    const token = prefix.match(/[^\s把将]+$/u)?.[0] ?? "";
-    if (identifierPattern.test(token)) return true;
-  }
-  return false;
-}
-
-function hasNumberedReference(message: string) {
-  const token = tokenAfterLabel(message, ["pull request", "merge request", "PR", "MR"]);
-  return /^#?[1-9]\d*$/u.test(token) || /#[1-9]\d*/u.test(message);
-}
-
-function stripCommandLead(clause: string) {
-  let rest = clause.trimStart();
-  let foundLead = false;
-  let matched = true;
-  while (matched) {
-    matched = false;
-    for (const lead of commandLeads) {
-      if (!rest.startsWith(lead)) continue;
-      rest = rest.slice(lead.length).trimStart();
-      foundLead = true;
-      matched = true;
-      break;
-    }
-  }
-  return foundLead ? rest : null;
-}
-
-const protectedActionRules = [
-  {
-    hasTarget: (clause: string) => /v?\d+(?:\.\d+){1,3}/iu.test(clause)
-      || hasDemonstrativeObject(clause, ["版本", "release", "构建", "应用", "服务", "站点"])
-      || hasLabeledIdentifier(clause, ["版本", "release", "构建"]),
-    subjectPattern: /发布|上线/iu,
-    subjects: ["发布", "上线"],
-  },
-  {
-    hasTarget: (clause: string) => hasNumberedReference(clause)
-      || hasDemonstrativeObject(clause, ["PR", "MR", "pull request", "merge request"]),
-    subjectPattern: /合并/iu,
-    subjects: ["合并"],
-  },
-  {
-    hasTarget: (clause: string) => includesAny(clause, ["生产", "预发", "测试环境"])
-      || hasEnglishToken(clause, ["prod", "production", "staging", "dev", "development"])
-      || hasIdentifierBeforeLabel(clause, ["服务", "应用", "项目"]),
-    subjectPattern: /部署/iu,
-    subjects: ["部署"],
-  },
-  {
-    hasTarget: (clause: string) => /(?:todo|goal)_[a-z0-9_-]{3,64}/iu.test(clause)
-      || hasDemonstrativeObject(clause, ["Todo", "任务", "Goal", "目标", "文件", "目录", "记录", "项目"])
-      || hasLabeledIdentifier(clause, ["文件", "目录", "记录", "任务", "Todo"]),
-    subjectPattern: /删除/iu,
-    subjects: ["删除"],
-  },
-  {
-    hasTarget: (clause: string) => /[¥￥$]\s*\d+(?:\.\d+)?/u.test(clause)
-      || /\d+(?:\.\d+)?\s*(?:元|美元|人民币)/u.test(clause)
-      || hasLabeledIdentifier(clause, ["订单", "账单", "发票"]),
-    subjectPattern: /付款/iu,
-    subjects: ["付款"],
-  },
-] satisfies readonly ProtectedActionRule[];
-
-function protectedActionIntent(message: string): ProtectedActionIntent {
-  const clauses = message.split(/[：:，,。！？!?；;\n]+/u).map((clause) => clause.trim()).filter(Boolean);
-  let explicit = false;
-
-  for (const clause of clauses) {
-    const commandBody = stripCommandLead(clause);
-    if (!commandBody) continue;
-    for (const rule of protectedActionRules) {
-      if (negates(clause, rule.subjectPattern)) continue;
-      const subjectAtStart = rule.subjects.some((subject) => commandBody.startsWith(subject));
-      const objectBody = commandBody.startsWith("把") || commandBody.startsWith("将")
-        ? commandBody.slice(1).trimStart()
-        : null;
-      const subjectAfterObject = objectBody !== null && rule.subjects.some((subject) => {
-        const subjectIndex = objectBody.indexOf(subject);
-        return subjectIndex > 0 && subjectIndex <= 48;
-      });
-      if (!subjectAtStart && !subjectAfterObject) continue;
-      explicit = true;
-      if (rule.hasTarget(clause)) return { explicit: true, hasTarget: true };
-    }
-  }
-  return { explicit, hasTarget: false };
-}
-
 export function todoResumeWhenFromMessage(rawMessage: string) {
   const message = normalizedMessage(rawMessage).toLowerCase();
   const match = message.match(
@@ -272,24 +131,12 @@ export function routeWorkspaceInput(rawMessage: string, context: WorkspaceRouter
       });
     }
   }
-  const protectedIntent = protectedActionIntent(message);
-  if (context.goalId && protectedIntent.explicit) {
-    candidates.push({
-      actionKind: "goal.update",
-      confidence: protectedIntent.hasTarget ? 0.98 : 0.9,
-      normalizedParameters: { goal_id: context.goalId, status: "operator_gate_requested" },
-    });
-  }
-
   const distinct = [...new Map(candidates.map((candidate) => [candidate.actionKind, candidate])).values()];
   if (distinct.length > 1) {
     return { actionKind: null, confidence: 0.4, missingFields: ["single_intent"], normalizedParameters: {}, route: "clarify" };
   }
   if (distinct.length === 1) {
     const candidate = distinct[0];
-    if (candidate.actionKind === "goal.update" && !protectedIntent.hasTarget) {
-      return { ...candidate, missingFields: ["protected_action_target"], route: "clarify" };
-    }
     return { ...candidate, missingFields: [], route: "typed_action" };
   }
   if (!context.goalId && managerProjectionIntent(message)) {
