@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from loopx.bootstrap import bootstrap_project, derive_public_goal_display_name
@@ -58,6 +60,49 @@ def test_bootstrap_project_persists_display_name_from_objective(tmp_path: Path) 
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     goal = next(item for item in registry["goals"] if item["id"] == "display-name-goal")
     assert goal["display_name"] == objective
+
+
+def test_bootstrap_without_objective_does_not_persist_default_display_name(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    goal_id = "plain-bootstrap-goal"
+    state_file = project / ".codex" / "goals" / goal_id / "ACTIVE_GOAL_STATE.md"
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text("# Active Goal State\n", encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "loopx.cli",
+            "--format",
+            "json",
+            "bootstrap",
+            "--project",
+            str(project),
+            "--goal-id",
+            goal_id,
+            "--state-file",
+            str(state_file),
+            "--no-onboarding-scan",
+            "--no-global-sync",
+            "--codex-app-heartbeat",
+            "no",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["display_name"] is None
+    registry = json.loads((project / ".loopx" / "registry.json").read_text(encoding="utf-8"))
+    goal = next(item for item in registry["goals"] if item["id"] == goal_id)
+    assert goal.get("display_name") is None
 
 
 def test_guided_start_connect_command_includes_display_name(tmp_path: Path) -> None:

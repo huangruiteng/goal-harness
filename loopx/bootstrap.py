@@ -681,7 +681,7 @@ def bootstrap_project(
     registry_path: Path,
     runtime_root: Path | None,
     goal_id: str | None,
-    objective: str,
+    objective: str | None,
     domain: str,
     role: str,
     parent_goal_id: str | None,
@@ -729,6 +729,7 @@ def bootstrap_project(
         state_file = project / state_file
     goal_doc = resolve_project_path(project, goal_doc)
     runtime_root = runtime_root.expanduser() if runtime_root else DEFAULT_RUNTIME_ROOT
+    state_objective = objective or DEFAULT_OBJECTIVE
     updated_at = now_iso()
     execution_profile = build_execution_profile(
         minimum_scale=execution_minimum_scale,
@@ -947,7 +948,7 @@ def bootstrap_project(
                     project=project,
                     goal_id=goal_id,
                     adapter_kind=adapter_kind,
-                    objective=objective,
+                    objective=state_objective,
                     updated_at=updated_at,
                     goal_doc=goal_doc,
                     execution_profile=execution_profile,

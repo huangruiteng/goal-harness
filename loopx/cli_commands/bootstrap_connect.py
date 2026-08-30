@@ -6,7 +6,6 @@ from pathlib import Path
 
 from ..bootstrap import (
     DEFAULT_DOMAIN,
-    DEFAULT_OBJECTIVE,
     bootstrap_project,
     render_bootstrap_markdown,
 )
@@ -28,7 +27,11 @@ def register_bootstrap_connect_command(subparsers: argparse._SubParsersAction) -
         "--fork-goal",
         help="Create a new forked goal id instead of reusing an existing global goal route.",
     )
-    bootstrap_parser.add_argument("--objective", default=DEFAULT_OBJECTIVE, help="Initial goal objective.")
+    bootstrap_parser.add_argument(
+        "--objective",
+        default=None,
+        help="Initial goal objective. Defaults to the internal objective in active state when omitted.",
+    )
     bootstrap_parser.add_argument(
         "--display-name",
         help=(
