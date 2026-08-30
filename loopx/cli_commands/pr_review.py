@@ -75,7 +75,7 @@ def _write_checkpoint(
 
 
 def register_pr_review_command(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     add_subcommand_format: Callable[[argparse.ArgumentParser], None],
 ) -> None:
     parser = subparsers.add_parser(
@@ -211,9 +211,10 @@ def handle_pr_review_command(
             checkpoint_repository = str(
                 previous_observation.get("repository") or ""
             ).strip()
-            if checkpoint_repository and checkpoint_repository != str(
-                repository or ""
-            ).strip():
+            if (
+                checkpoint_repository
+                and checkpoint_repository != str(repository or "").strip()
+            ):
                 raise ValueError(
                     "observation state repository does not match the requested repository"
                 )

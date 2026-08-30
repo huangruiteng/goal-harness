@@ -152,9 +152,7 @@ def test_round_robin_rotates_only_after_explicit_projection_ack() -> None:
 
 def test_round_robin_accepts_handled_rotated_candidate() -> None:
     first = _observe([_pr(1), _pr(2)])
-    second = _observe(
-        [_pr(1), _pr(2)], previous=first, projected=[f"1@{1:040d}"]
-    )
+    second = _observe([_pr(1), _pr(2)], previous=first, projected=[f"1@{1:040d}"])
 
     assert second["candidate"]["number"] == 2
     handled_second = _observe(
