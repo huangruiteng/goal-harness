@@ -278,7 +278,7 @@ function findWriteback(
     isTurnScopedSettlementOutcome(
       run.delivery_outcome,
       run.progress_observation,
-      identity.todo_id,
+      identity.todo_id ?? identity.replan_obligation_id,
     )
   ) ?? null;
 }
@@ -396,7 +396,8 @@ function inferPersistedIdentity(
         !isTurnScopedSettlementOutcome(
           run.delivery_outcome,
           run.progress_observation,
-          normalizeTodoId(run.todo_id),
+          normalizeTodoId(run.todo_id) ??
+            normalizeReplanObligationId(run.replan_obligation_id),
         ))
     ) {
       continue;
@@ -406,7 +407,8 @@ function inferPersistedIdentity(
       !isTurnScopedSettlementOutcome(
         run.delivery_outcome,
         run.progress_observation,
-        normalizeTodoId(run.todo_id),
+        normalizeTodoId(run.todo_id) ??
+          normalizeReplanObligationId(run.replan_obligation_id),
       )
     ) {
       return null;

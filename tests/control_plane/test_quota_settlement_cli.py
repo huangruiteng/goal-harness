@@ -2452,6 +2452,119 @@ def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
     assert _spend_run_count(runtime) == 1
 
 
+def test_todoless_blocked_replan_settles_read_only_external_evidence_without_worktree(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_autonomous_replan_fixture(project, runtime, registry_path)
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["coordination"]["registered_agents"].append(
+        "codex-settlement-peer"
+    )
+    registry_path.write_text(
+        json.dumps(registry, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    external_evidence_dir = tmp_path / "external-review"
+    external_evidence_dir.mkdir()
+    turn_instance_id = "turn-autonomous-replan-blocked-external-evidence"
+
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--scan-path",
+        str(project),
+    )
+
+    assert guard_rc == 0, guard
+    assert guard["decision"] == "autonomous_replan_required", guard
+    obligation_id = guard["replan_action_packet"]["obligation_id"]
+    binding = (
+        "--agent-id",
+        AGENT_ID,
+        "--replan-obligation-id",
+        obligation_id,
+        "--turn-instance-id",
+        turn_instance_id,
+    )
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--progress-scope",
+        "agent_lane",
+        "--classification",
+        "external_evidence_replan_blocked",
+        "--delivery-batch-scale",
+        "single_surface",
+        "--delivery-outcome",
+        "outcome_gap",
+        "--progress-result-class",
+        "blocked",
+        "--progress-blocker-id",
+        "public-head-validation-failed",
+        "--progress-evidence-id",
+        "public-review-readback",
+        *binding,
+        "--no-global-sync",
+        "--suppress-external-sinks",
+        cwd=external_evidence_dir,
+    )
+
+    assert refresh_rc == 0, refresh.get("error") or refresh
+    assert refresh["delivery_outcome"] == "outcome_gap"
+    assert refresh["progress_observation"]["work_item_id"] == obligation_id
+    assert refresh["settlement_workspace_requirement"] == {
+        "schema_version": "settlement_workspace_requirement_v0",
+        "settlement_binding_kind": "autonomous_replan",
+        "requirement": "not_required",
+        "source": "typed_settlement_identity",
+        "reason": "autonomous_replan_is_non_repository_control_plane_work",
+    }
+    assert "delivery_workspace" not in refresh
+    assert refresh["settlement_result"]["ok"] is True
+
+    spend_rc, spend = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "spend-slot",
+        "--goal-id",
+        GOAL_ID,
+        "--slots",
+        "1",
+        "--source",
+        "heartbeat",
+        "--execute",
+        *binding,
+        "--scan-path",
+        str(project),
+        cwd=external_evidence_dir,
+    )
+
+    assert spend_rc == 0, spend
+    assert spend["settlement_workspace_requirement"]["requirement"] == (
+        "not_required"
+    )
+    assert spend["delivery_workspace_validated"] is False
+    assert spend["settlement_result"]["ok"] is True
+    assert [
+        receipt["step_kind"] for receipt in spend["settlement_result"]["receipts"]
+    ] == ["validation", "durable_writeback", "quota_spend"]
+    assert _spend_run_count(runtime) == 1
+
+
 def test_unbound_visible_goal_todoless_replan_reenters_through_guided_turn(
     tmp_path: Path,
 ) -> None:

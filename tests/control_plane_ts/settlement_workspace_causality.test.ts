@@ -6,6 +6,7 @@ import {
   DELIVERY_WORKSPACE_CAUSALITY_REQUEST_SCHEMA,
   evaluateDeliveryWorkspaceCausality,
   resolveMissingDeliveryWorkspace,
+  resolveSettlementWorkspaceRequirement,
 } from "../../loopx/control_plane/quota/settlement_workspace_causality.ts";
 
 const fixture = JSON.parse(
@@ -102,4 +103,37 @@ test("missing workspace resolution preserves all three typed requirements", () =
       "declare_explicit_non_delivery_contract",
     ],
   });
+});
+
+test("typed settlement identity distinguishes replan from unknown Todo causality", () => {
+  assert.deepEqual(
+    resolveSettlementWorkspaceRequirement(null, "autonomous_replan"),
+    {
+      schema_version: "settlement_workspace_requirement_v0",
+      settlement_binding_kind: "autonomous_replan",
+      requirement: "not_required",
+      source: "typed_settlement_identity",
+      reason: "autonomous_replan_is_non_repository_control_plane_work",
+    },
+  );
+  assert.deepEqual(resolveSettlementWorkspaceRequirement(null, "todo"), {
+    schema_version: "settlement_workspace_requirement_v0",
+    settlement_binding_kind: "todo",
+    requirement: "unknown",
+    source: "typed_settlement_identity",
+    reason: "todo_delivery_contract_not_available",
+  });
+  assert.equal(
+    resolveSettlementWorkspaceRequirement(
+      {
+        schema_version: "delivery_workspace_causality_v0",
+        todo_id: "todo_write",
+        requirement: "required",
+        source: "selected_todo_contract",
+        reason: "declared_repository_or_write_contract",
+      },
+      "autonomous_replan",
+    ).requirement,
+    "required",
+  );
 });

@@ -27,6 +27,7 @@ from .control_plane.quota.settlement import (
     read_heartbeat_settlement,
     settlement_result_payload,
 )
+from .control_plane.quota.settlement_workspace_causality import resolve_settlement_workspace_requirement
 from .control_plane.quota.codex_session_usage import (
     book_codex_session_usage,
     usage_booking_lock_target,
@@ -902,7 +903,7 @@ def refresh_state_run(
     normalized_progress_observation = (
         normalize_progress_observation(
             progress_observation,
-            work_item_id=todo_id,
+            work_item_id=todo_id or normalized_replan_obligation_id,
         )
         if progress_observation is not None
         else None
@@ -911,6 +912,7 @@ def refresh_state_run(
         normalized_delivery_outcome,
         normalized_progress_observation,
         work_item_id=todo_id,
+        replan_obligation_id=normalized_replan_obligation_id,
     )
     if delivery_workspace_path is not None and not turn_scoped_settlement_qualified:
         raise ValueError(
@@ -922,6 +924,7 @@ def refresh_state_run(
     settlement_identity = None
     settlement_result = None
     delivery_workspace_causality = None
+    settlement_workspace_requirement = None
     if todo_id or normalized_replan_obligation_id or turn_instance_id:
         if not turn_scoped_settlement_qualified:
             raise ValueError(
@@ -945,6 +948,9 @@ def refresh_state_run(
         if settlement_identity is None:
             raise ValueError("turn-scoped refresh-state has no settlement identity")
         delivery_workspace_causality = settlement_readback.workspace_causality
+        settlement_workspace_requirement = resolve_settlement_workspace_requirement(
+            delivery_workspace_causality, settlement_binding_kind=settlement_identity.binding_kind.value
+        )
         if not dry_run:
             prior_writeback = settlement_readback.writeback
             if prior_writeback.failure is None and prior_writeback.value is not None:
@@ -1180,7 +1186,7 @@ def refresh_state_run(
     )
     delivery_workspace = None
     workspace_requirement = str(
-        (delivery_workspace_causality or {}).get("requirement") or "unknown"
+        (settlement_workspace_requirement or {}).get("requirement") or "unknown"
     )
     if delivery_workspace_path is not None and workspace_requirement == "not_required":
         raise ValueError(
@@ -1258,6 +1264,10 @@ def refresh_state_run(
     )
     if delivery_workspace_causality:
         record["delivery_workspace_causality"] = delivery_workspace_causality
+    if settlement_workspace_requirement:
+        record["settlement_workspace_requirement"] = (
+            settlement_workspace_requirement
+        )
     if autonomous_replan_recorded:
         if "autonomous_replan_ack" not in record:
             record["autonomous_replan_ack"] = {

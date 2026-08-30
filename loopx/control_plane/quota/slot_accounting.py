@@ -39,6 +39,7 @@ from .settlement import (
 from .settlement_workspace_causality import (
     completed_todo_workspace_causality,
     missing_delivery_workspace_resolution,
+    resolve_settlement_workspace_requirement,
 )
 from .settlement_validation import completion_validation_spend_error
 from .spend_sources import (
@@ -384,35 +385,65 @@ def _latest_unspent_turn_settlement_run(
             if isinstance(run.get("progress_observation"), dict)
             else None,
             work_item_id=normalize_todo_id(run.get("todo_id")),
+            replan_obligation_id=normalize_todo_replan_obligation_id(
+                run.get("replan_obligation_id")
+            ),
         ):
             return run
         return None
     return None
 
 
+def _settlement_workspace_requirement(
+    delivery_workspace_causality: dict[str, Any] | None,
+    settlement_identity: SettlementIdentity | None,
+) -> dict[str, str] | None:
+    if settlement_identity is None:
+        return None
+    return resolve_settlement_workspace_requirement(
+        delivery_workspace_causality,
+        settlement_binding_kind=settlement_identity.binding_kind.value,
+    )
+
+
+def _workspace_requirement_value(
+    settlement_workspace_requirement: dict[str, Any] | None,
+    delivery_workspace_causality: dict[str, Any] | None,
+) -> str:
+    return str(
+        (settlement_workspace_requirement or {}).get("requirement")
+        or (delivery_workspace_causality or {}).get("requirement")
+        or ""
+    )
+
+
 def _missing_delivery_workspace_preview(
     *,
     delivery_workspace_causality: dict[str, Any] | None,
+    settlement_workspace_requirement: dict[str, Any] | None,
     delivery_workspace: dict[str, Any] | None,
     goal_id: str,
     slots: int,
     agent_id: str | None,
     before: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if not delivery_workspace_causality or delivery_workspace_identity(
-        delivery_workspace
-    ):
+    if delivery_workspace_identity(delivery_workspace):
+        return None
+    requirement = _workspace_requirement_value(
+        settlement_workspace_requirement, delivery_workspace_causality
+    )
+    if not requirement or requirement == "not_required":
         return None
     resolution = missing_delivery_workspace_resolution(
         delivery_workspace_causality
     )
-    if resolution is None or resolution["decision"] == "omit_snapshot":
+    if resolution is not None and resolution["decision"] == "omit_snapshot":
         return None
-    requirement = resolution["requirement"]
     reason = (
         "quota spend requires a valid delivery workspace snapshot for "
         f"settlement causality requirement {requirement}"
-        if resolution["decision"] == "require_snapshot"
+        if resolution is not None
+        and resolution["decision"] == "require_snapshot"
         else (
             "quota spend requires an explicit Todo delivery contract; declare "
             "repository/write requirements or mark the Todo as explicit "
@@ -431,6 +462,7 @@ def _missing_delivery_workspace_preview(
         "reason": reason,
         "delivery_workspace": delivery_workspace,
         "delivery_workspace_causality": delivery_workspace_causality,
+        "settlement_workspace_requirement": settlement_workspace_requirement,
         "delivery_workspace_resolution": resolution,
         "delivery_workspace_validated": False,
         "before": before,
@@ -579,6 +611,9 @@ def build_quota_slot_preview_for_decision(
         settlement_identity=settlement_identity,
         causality=delivery_workspace_causality,
     )
+    settlement_workspace_requirement = _settlement_workspace_requirement(
+        delivery_workspace_causality, settlement_identity
+    )
     safe_bypass_without_delivery = (
         safe_bypass_requested and delivery_completion_run is None
     )
@@ -608,6 +643,7 @@ def build_quota_slot_preview_for_decision(
     )
     missing_delivery_workspace_preview = _missing_delivery_workspace_preview(
         delivery_workspace_causality=delivery_workspace_causality,
+        settlement_workspace_requirement=settlement_workspace_requirement,
         delivery_workspace=raw_delivery_workspace,
         goal_id=safe_goal_id,
         slots=safe_slots,
@@ -616,8 +652,8 @@ def build_quota_slot_preview_for_decision(
     )
     if missing_delivery_workspace_preview:
         return missing_delivery_workspace_preview
-    workspace_requirement = str(
-        (delivery_workspace_causality or {}).get("requirement") or ""
+    workspace_requirement = _workspace_requirement_value(
+        settlement_workspace_requirement, delivery_workspace_causality
     )
     raw_delivery_workspace_identity = delivery_workspace_identity(
         raw_delivery_workspace
@@ -815,6 +851,7 @@ def build_quota_slot_preview_for_decision(
         else None,
         "delivery_workspace": delivery_workspace,
         "delivery_workspace_causality": delivery_workspace_causality,
+        "settlement_workspace_requirement": settlement_workspace_requirement,
         "delivery_workspace_validated": delivery_workspace_validated,
     }
 

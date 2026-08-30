@@ -38,11 +38,14 @@ function stableIdentifier(value: unknown): string | null {
 export function isTurnScopedSettlementOutcome(
   deliveryOutcome: unknown,
   progressObservation: unknown,
-  expectedWorkItemId: string | null,
+  expectedSettlementBindingId: string | null,
 ): boolean {
   const normalizedOutcome = String(deliveryOutcome ?? "").trim() as DeliveryOutcome;
   if (PROGRESS_DELIVERY_OUTCOMES.has(normalizedOutcome)) return true;
-  if (normalizedOutcome !== "outcome_gap" || expectedWorkItemId === null) {
+  if (
+    normalizedOutcome !== "outcome_gap" ||
+    expectedSettlementBindingId === null
+  ) {
     return false;
   }
   const observation = jsonObject(progressObservation);
@@ -50,7 +53,7 @@ export function isTurnScopedSettlementOutcome(
     !observation ||
     observation.schema_version !== "typed_progress_observation_v0" ||
     observation.result_class !== "blocked" ||
-    stableIdentifier(observation.work_item_id) !== expectedWorkItemId ||
+    stableIdentifier(observation.work_item_id) !== expectedSettlementBindingId ||
     stableIdentifier(observation.blocker_id) === null ||
     !Array.isArray(observation.evidence_ids) ||
     observation.evidence_ids.length === 0

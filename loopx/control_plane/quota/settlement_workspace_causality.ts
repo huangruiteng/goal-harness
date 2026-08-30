@@ -10,6 +10,8 @@ export const DELIVERY_WORKSPACE_CAUSALITY_RESULT_SCHEMA =
   "loopx_delivery_workspace_causality_result_v0";
 export const DELIVERY_WORKSPACE_RESOLUTION_SCHEMA_VERSION =
   "delivery_workspace_resolution_v0";
+export const SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION =
+  "settlement_workspace_requirement_v0";
 
 export const DELIVERY_WORKSPACE_REQUIREMENTS = [
   "required",
@@ -33,7 +35,16 @@ type DeliveryWorkspaceCausalityOperation =
   | "normalize"
   | "event_fields"
   | "missing_workspace"
+  | "settlement_requirement"
   | "from_event";
+
+export interface SettlementWorkspaceRequirement extends JsonObject {
+  schema_version: typeof SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION;
+  settlement_binding_kind: "todo" | "autonomous_replan";
+  requirement: DeliveryWorkspaceRequirement;
+  source: string;
+  reason: string;
+}
 
 export type DeliveryWorkspaceResolution =
   | {
@@ -88,9 +99,50 @@ function operation(value: unknown): DeliveryWorkspaceCausalityOperation {
   if (
     value === "classify" || value === "normalize" ||
     value === "event_fields" || value === "missing_workspace" ||
+    value === "settlement_requirement" ||
     value === "from_event"
   ) return value;
   throw new EffectRuntimeRequestError("delivery workspace causality operation is unsupported");
+}
+
+export function resolveSettlementWorkspaceRequirement(
+  value: unknown,
+  settlementBindingKind: unknown,
+): SettlementWorkspaceRequirement {
+  if (
+    settlementBindingKind !== "todo" &&
+    settlementBindingKind !== "autonomous_replan"
+  ) {
+    throw new EffectRuntimeRequestError(
+      "settlement_binding_kind must be todo or autonomous_replan",
+    );
+  }
+  const causality = normalizeDeliveryWorkspaceCausality(value, null);
+  if (causality) {
+    return {
+      schema_version: SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION,
+      settlement_binding_kind: settlementBindingKind,
+      requirement: causality.requirement,
+      source: causality.source,
+      reason: causality.reason,
+    };
+  }
+  if (settlementBindingKind === "autonomous_replan") {
+    return {
+      schema_version: SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION,
+      settlement_binding_kind: settlementBindingKind,
+      requirement: "not_required",
+      source: "typed_settlement_identity",
+      reason: "autonomous_replan_is_non_repository_control_plane_work",
+    };
+  }
+  return {
+    schema_version: SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION,
+    settlement_binding_kind: settlementBindingKind,
+    requirement: "unknown",
+    source: "typed_settlement_identity",
+    reason: "todo_delivery_contract_not_available",
+  };
 }
 
 function requestObject(value: unknown): JsonObject {
@@ -270,6 +322,14 @@ export function evaluateDeliveryWorkspaceCausality(value: unknown): JsonObject {
   if (selectedOperation === "missing_workspace") {
     return result({
       resolution: resolveMissingDeliveryWorkspace(request.causality),
+    });
+  }
+  if (selectedOperation === "settlement_requirement") {
+    return result({
+      settlement_requirement: resolveSettlementWorkspaceRequirement(
+        request.causality,
+        request.settlement_binding_kind,
+      ),
     });
   }
   const nested = normalizeDeliveryWorkspaceCausality(
