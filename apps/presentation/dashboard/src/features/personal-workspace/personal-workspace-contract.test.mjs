@@ -80,6 +80,11 @@ assert.match(page, /routeWorkspaceInput\(message,/, "Every free-text send enters
 assert.match(router, /route: "projection" \| "typed_action" \| "agent_chat" \| "clarify"/, "Router exposes the constrained route contract");
 assert.match(router, /function executionIntent/, "Execution intent stays inside the Router implementation");
 assert.match(router, /function negates/, "Router can honor explicit negation");
+assert.doesNotMatch(router, /protectedActionIntent|protectedActionRules/, "Free-text protected operations are not interpreted by browser keyword rules");
+assert.match(chatData, /protected_action: protectedActionProposalSchema/, "Chat accepts one narrow semantic protected-action proposal");
+assert.match(dashboard, /response\.protected_action/, "Agent semantic protected intent is projected only after the Chat response");
+assert.match(dashboard, /normalizedMessage\.includes\(normalizedTarget\)/, "A model-invented protected target cannot reach typed preview");
+assert.match(page, /if \(semanticPreview\) await createPreview\(semanticPreview\)/, "Semantic intent still enters the typed preview boundary");
 for (const legacyClassifier of ["hasHeartbeatIntent", "hasMonitorIntent", "hasTodoCreationIntent", "isExecutionIntent"]) {
   assert.doesNotMatch(page, new RegExp(`function ${legacyClassifier}`), `${legacyClassifier} no longer bypasses the Router contract`);
 }

@@ -45,18 +45,14 @@ equal(routeWorkspaceInput("请问怎么解决一下这个问题？", goalContext
 equal(routeWorkspaceInput("请不要部署到生产环境", goalContext).route, "agent_chat", "negated deployment does not trigger gate");
 equal(routeWorkspaceInput("请只回复：合并后真实回复已收到", goalContext).route, "agent_chat", "descriptive merge phrase stays in chat");
 equal(routeWorkspaceInput("请分析：合并 PR #123 后会有什么风险", goalContext).route, "agent_chat", "protected action discussion stays in chat");
-const protectedMerge = routeWorkspaceInput("请合并 PR #123", goalContext);
-equal(protectedMerge.route, "typed_action", "explicit protected action with target uses preview");
-equal(protectedMerge.actionKind, "goal.update", "explicit protected action kind");
-const protectedTargetMissing = routeWorkspaceInput("请合并", goalContext);
-equal(protectedTargetMissing.route, "clarify", "targetless protected action does not enter chat");
-equal(protectedTargetMissing.missingFields.join(","), "protected_action_target", "targetless protected action names missing target");
-equal(routeWorkspaceInput("请把 PR #456 合并", goalContext).route, "typed_action", "object-first merge uses preview");
-equal(routeWorkspaceInput("请发布 v1.2.3", goalContext).route, "typed_action", "versioned release uses preview");
-equal(routeWorkspaceInput("现在部署到生产环境", goalContext).actionKind, "goal.update", "explicit deployment target uses preview");
-equal(routeWorkspaceInput("请删除 todo_demo_123", goalContext).route, "typed_action", "identified delete uses preview");
-equal(routeWorkspaceInput("批准付款 100 元", goalContext).actionKind, "goal.update", "explicit payment amount uses preview");
-equal(routeWorkspaceInput("请部署服务", goalContext).route, "clarify", "generic deployment object still needs a target");
+equal(routeWorkspaceInput("请合并 PR #123", goalContext).route, "agent_chat", "protected merge intent is interpreted by the Agent");
+equal(routeWorkspaceInput("请合并", goalContext).route, "agent_chat", "targetless protected intent is clarified by the Agent");
+equal(routeWorkspaceInput("请把 PR #456 合并", goalContext).route, "agent_chat", "object-first merge reaches semantic interpretation");
+equal(routeWorkspaceInput("请发布 v1.2.3", goalContext).route, "agent_chat", "release intent reaches semantic interpretation");
+equal(routeWorkspaceInput("现在部署到生产环境", goalContext).route, "agent_chat", "deployment intent reaches semantic interpretation");
+equal(routeWorkspaceInput("请删除 todo_demo_123", goalContext).route, "agent_chat", "delete intent reaches semantic interpretation");
+equal(routeWorkspaceInput("批准付款 100 元", goalContext).route, "agent_chat", "payment intent reaches semantic interpretation");
+equal(routeWorkspaceInput("请部署服务", goalContext).route, "agent_chat", "generic deployment target is clarified by the Agent");
 equal(routeWorkspaceInput("发布完成后请只回复结果", goalContext).route, "agent_chat", "descriptive release phrase stays in chat");
 equal(routeWorkspaceInput("整理验收材料还没有完成，不要关闭", goalContext).route, "agent_chat", "negated complete does not update todo");
 

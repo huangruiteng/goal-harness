@@ -306,11 +306,27 @@ async function installApi(page) {
     await route.fulfill({ contentType: "application/json", json: { ok: true }, status: 200 });
   });
   await page.route("**/events/**", async (route) => {
-    const answer = "已沿用当前 Goal 与 Agent Session。接下来会先核对状态，再继续推进。";
     const parts = new URL(route.request().url()).pathname.split("/").filter(Boolean);
     const sessionId = parts[1];
     const turnId = parts[2];
-    await new Promise((resolveWait) => setTimeout(resolveWait, /(中断控制|刷新恢复)/u.test(turnMessages.get(turnId) ?? "") ? 5000 : 1200));
+    const operatorMessage = turnMessages.get(turnId) ?? "";
+    const protectedAction = operatorMessage === "请合并 PR #123"
+      ? { operation: "merge", target: "PR #123", summary: "准备 PR #123 的受保护合并预览。" }
+      : operatorMessage === "请合并我刚才说的那个"
+        ? { operation: "merge", target: "PR #999", summary: "模型错误补出了用户没有提供的目标。" }
+      : null;
+    const answer = operatorMessage === "请只回复：合并后真实回复已收到"
+      ? "合并后真实回复已收到"
+      : operatorMessage === "请分析：合并 PR #123 后会有什么风险"
+        ? "主要风险是检查未完成或目标分支发生变化；这里只做分析，不会创建合并预览。"
+          : operatorMessage === "请合并"
+            ? "请告诉我要合并的具体 PR 或 MR；在目标明确前不会创建执行预览。"
+          : operatorMessage === "请合并我刚才说的那个"
+            ? "这个指代不够明确，请提供具体 PR 或 MR。"
+          : protectedAction
+            ? "我识别到一个明确的合并请求。LoopX 会先展示受保护操作预览，不会直接执行。"
+            : "已沿用当前 Goal 与 Agent Session。接下来会先核对状态，再继续推进。";
+    await new Promise((resolveWait) => setTimeout(resolveWait, /(中断控制|刷新恢复)/u.test(operatorMessage) ? 5000 : 1200));
     const activeSession = sessions.get(sessionId);
     if (!activeSession || activeSession.active_turn_id !== turnId) {
       await route.fulfill({ contentType: "text/event-stream", body: "", status: 200 });
@@ -323,7 +339,7 @@ async function installApi(page) {
       }
     }
     const event = (id, kind, payload) => `id: ${id}\nevent: ${kind}\ndata: ${JSON.stringify({ event_id: id, sequence: Number(id), kind, created_at: "2026-08-13T01:00:02Z", payload })}\n\n`;
-    await route.fulfill({ contentType: "text/event-stream", body: event("1", "assistant.delta", { text: answer }) + event("2", "turn.completed", { response: { schema_version: "loopx_chat_agent_response_v0", message: answer, proposals: [], gate: null } }), status: 200 });
+    await route.fulfill({ contentType: "text/event-stream", body: event("1", "assistant.delta", { text: answer }) + event("2", "turn.completed", { response: { schema_version: "loopx_chat_agent_response_v0", message: answer, proposals: [], protected_action: protectedAction, gate: null } }), status: 200 });
     const current = sessions.get(sessionId);
     if (current?.active_turn_id === turnId) sessions.set(sessionId, { ...current, active_turn_id: null, status: "ready", updated_at: "2026-08-13T01:00:02Z" });
   });
@@ -974,6 +990,35 @@ async function main() {
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Chat" }).click();
 
     const composer = page.getByLabel("向 LoopX 发送消息");
+    const previewCountBeforeSemanticIntent = api.actionPreviews.length;
+    await composer.fill("请只回复：合并后真实回复已收到");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await page.getByText("合并后真实回复已收到", { exact: true }).last().waitFor({ state: "visible", timeout: 10_000 });
+    if (api.actionPreviews.length !== previewCountBeforeSemanticIntent) throw new Error("An exact-wording protected-action mention created a typed preview");
+
+    await composer.fill("请分析：合并 PR #123 后会有什么风险");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await page.getByText("主要风险是检查未完成或目标分支发生变化；这里只做分析，不会创建合并预览。", { exact: true }).last().waitFor({ state: "visible", timeout: 10_000 });
+    if (api.actionPreviews.length !== previewCountBeforeSemanticIntent) throw new Error("Protected-action analysis created a typed preview");
+
+    await composer.fill("请合并");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await page.getByText("请告诉我要合并的具体 PR 或 MR；在目标明确前不会创建执行预览。", { exact: true }).last().waitFor({ state: "visible", timeout: 10_000 });
+    if (api.actionPreviews.length !== previewCountBeforeSemanticIntent) throw new Error("A targetless protected action created an incomplete preview");
+
+    await composer.fill("请合并我刚才说的那个");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await page.getByText("这个指代不够明确，请提供具体 PR 或 MR。", { exact: true }).last().waitFor({ state: "visible", timeout: 10_000 });
+    if (api.actionPreviews.length !== previewCountBeforeSemanticIntent) throw new Error("A model-invented protected target created a typed preview");
+
+    await composer.fill("请合并 PR #123");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await page.getByText("确认执行").waitFor({ state: "visible", timeout: 10_000 });
+    const protectedMerge = api.actionPreviews.find((preview) => preview.action_kind === "goal.update" && preview.summary.includes("PR #123"));
+    if (!protectedMerge) throw new Error("A clear Agent semantic proposal did not create the protected typed preview");
+    await page.screenshot({ path: resolve(outputDir, "semantic-protected-action-preview.png"), fullPage: false, animations: "disabled" });
+    await page.getByRole("button", { name: "关闭", exact: true }).click();
+
     await composer.fill("添加一个「补充回归测试」普通 Todo，并交给 Codex。不要设置 Heartbeat，也不要创建定时检查");
     await page.getByRole("button", { name: "发送", exact: true }).click();
     await page.getByText("确认执行").waitFor({ state: "visible" });
@@ -1078,7 +1123,7 @@ async function main() {
     await page.getByRole("button", { name: "确认并应用", exact: true }).click();
     await page.getByText("需要宿主确认").waitFor({ state: "visible" });
     if (api.durableWriteCount !== writesBeforeHeartbeat) throw new Error("Protected heartbeat gate wrote durable state");
-    pass(8, "Preview and protected-gate paths performed zero durable writes before confirmation.");
+    pass(8, "Agent semantic protected intent creates only a typed preview, while discussion and targetless requests remain conversational and all protected-gate paths perform zero durable writes before confirmation.");
     pass(11, "Heartbeat apply surfaced an explicit host-activation gate.");
     const heartbeatPreview = api.actionPreviews.find((preview) => preview.action_kind === "heartbeat.bind");
     if (!heartbeatPreview) throw new Error("Continuation intent did not map to heartbeat.bind");

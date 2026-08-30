@@ -92,6 +92,11 @@ def main() -> None:
                             "rationale": "It closes the first human review loop.",
                         }
                     ],
+                    "protected_action": {
+                        "operation": "merge",
+                        "target": "PR #123",
+                        "summary": "Prepare a protected merge preview.",
+                    },
                     "gate": None,
                 }
             )
@@ -108,6 +113,11 @@ def main() -> None:
                 "rationale": "It closes the first human review loop.",
             }
         ], parsed
+        assert parsed["protected_action"] == {
+            "operation": "merge",
+            "target": "PR #123",
+            "summary": "Prepare a protected merge preview.",
+        }, parsed
         assert parsed["gate"] is None, parsed
         assert str(project) not in json.dumps(parsed), parsed
 
@@ -117,11 +127,50 @@ def main() -> None:
         )
         assert fallback["message"] == "The host stopped at [local-path].", fallback
         assert fallback["proposals"] == [], fallback
+        assert fallback["protected_action"] is None, fallback
+
+        unsupported_action = parse_agent_response(
+            "<loopx-review-json>"
+            + json.dumps(
+                {
+                    "message": "Unsupported action stays conversational.",
+                    "proposals": [],
+                    "protected_action": {
+                        "operation": "shell",
+                        "target": "rm -rf target",
+                        "summary": "Run a command.",
+                    },
+                    "gate": None,
+                }
+            )
+            + "</loopx-review-json>"
+        )
+        assert unsupported_action["protected_action"] is None, unsupported_action
+
+        local_target = parse_agent_response(
+            "<loopx-review-json>"
+            + json.dumps(
+                {
+                    "message": "Local targets stay conversational.",
+                    "proposals": [],
+                    "protected_action": {
+                        "operation": "delete",
+                        "target": str(project / "private.txt"),
+                        "summary": "Delete one file.",
+                    },
+                    "gate": None,
+                }
+            )
+            + "</loopx-review-json>",
+            protected_paths=[project, root],
+        )
+        assert local_target["protected_action"] is None, local_target
 
         malformed = parse_agent_response(
             'tool narration that must stay hidden\n<loopx-review-json>{"message":"Clean answer.",}</loopx-review-json>',
         )
         assert malformed["message"] == "Clean answer.", malformed
+        assert malformed["protected_action"] is None, malformed
         assert "tool narration" not in malformed["message"], malformed
 
         original = state_file.read_text(encoding="utf-8")

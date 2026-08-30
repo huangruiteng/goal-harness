@@ -59,6 +59,7 @@ for line in sys.stdin:
         prompt = params.get("input", [{}])[0].get("text", "")
         if (
             "<loopx-review-json>" not in prompt
+            or "protected_action" not in prompt
             or "user message" not in prompt
             or "loopx-chat-smoke: Keep the review loop bounded." not in prompt
         ):
@@ -124,6 +125,11 @@ for line in sys.stdin:
             }), flush=True)
             continue
         visible_answer = "Reviewed " + params.get("cwd", "") + ".\n"
+        protected_action = ({
+            "operation": "merge",
+            "target": "PR #123",
+            "summary": "Prepare the protected merge preview.",
+        } if "explicit protected action" in prompt else None)
         response = (
             visible_answer + '<loopx-review-json>'
             + json.dumps({
@@ -135,6 +141,7 @@ for line in sys.stdin:
                     "priority": "P1",
                     "rationale": "This is the smallest reviewable step.",
                 }],
+                "protected_action": protected_action,
                 "gate": None,
             })
             + '</loopx-review-json>'
@@ -232,6 +239,7 @@ def main() -> None:
                 "inspect attached image",
                 attachments=[{"data_url": "data:image/png;base64,aW1hZ2U="}],
             )
+            protected_result = session.send("explicit protected action")
             retry_events = []
             retry_result = session.send(
                 "recover after retryable error",
@@ -256,6 +264,12 @@ def main() -> None:
             }
         ], result
         assert result["gate"] is None, result
+        assert result["protected_action"] is None, result
+        assert protected_result["protected_action"] == {
+            "operation": "merge",
+            "target": "PR #123",
+            "summary": "Prepare the protected merge preview.",
+        }, protected_result
         assert image_result["message"] == "Reviewed [project].", image_result
         assert retry_result["message"] == "Reviewed [project].", retry_result
         assert any(
