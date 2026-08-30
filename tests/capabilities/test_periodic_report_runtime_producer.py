@@ -28,6 +28,7 @@ def _request(*, threshold: int = 2, promote_replan: bool = True) -> dict[str, ob
                 "window_seconds": 604800,
                 "todo_completed_threshold": threshold,
                 "promote_replan": promote_replan,
+                "stage_completion_required": True,
             },
         },
         "segment": {
@@ -45,13 +46,47 @@ def _event(
     event_at: str,
     todo_id: str | None = None,
     replan: bool = False,
+    stage_transition: str | None = None,
+    stage_acceptance: str = "validated",
+    outcome_checkpoint_satisfied: bool = True,
+    durable_writeback_required: bool = True,
+    event_status: str | None = None,
 ) -> dict[str, object]:
+    details: dict[str, object] = {"autonomous_replan_recorded": replan}
+    if stage_transition:
+        details.update(
+            {
+                "stage_completion_schema": (
+                    "periodic_report_stage_completion_receipt_v0"
+                ),
+                "stage_identity": "stage-closed-vision-frontier",
+                "closed_vision_revision": "2026-08-21T08:59:00Z",
+                "frontier_identity": "frontier-next-analysis",
+                "stage_transition": stage_transition,
+                "stage_acceptance": stage_acceptance,
+                "stage_completed_at": "2026-08-21T09:00:00Z",
+                "stage_outcome_checkpoint_satisfied": (
+                    outcome_checkpoint_satisfied
+                ),
+                "stage_durable_writeback_required": durable_writeback_required,
+            }
+        )
     return build_rollout_event(
         goal_id="long-research",
         event_kind=kind,
         todo_id=todo_id,
         recorded_at=event_at,
-        details={"autonomous_replan_recorded": replan},
+        status=(
+            event_status
+            or (
+                "completed"
+                if kind == "todo_complete"
+                else "normal_run"
+                if kind == "quota_should_run"
+                else "appended"
+            )
+        ),
+        details=details,
     )
 
 
@@ -100,10 +135,14 @@ def _run_request(trigger: dict[str, object]) -> dict[str, object]:
     }
 
 
-def test_todo_threshold_promotes_durable_window_and_composes_run() -> None:
+def test_authoritative_stage_completion_promotes_and_composes_run() -> None:
     events = [
         _event("todo_complete", event_at="2026-08-20T09:00:00Z", todo_id="todo-a"),
-        _event("todo_complete", event_at="2026-08-21T09:00:00Z", todo_id="todo-b"),
+        _event(
+            "refresh_state",
+            event_at="2026-08-21T09:00:00Z",
+            stage_transition="successor_frontier_settled",
+        ),
         _event("todo_complete", event_at="2026-08-22T09:00:00Z", todo_id="todo-c"),
     ]
 
@@ -114,16 +153,28 @@ def test_todo_threshold_promotes_durable_window_and_composes_run() -> None:
 
     assert decision["eligible"] is True
     assert decision["selected_trigger_kind"] == "bounded_segment_milestone"
-    assert decision["producer_receipt"]["reason"] == "todo_completion_threshold_reached"
-    assert len(decision["producer_receipt"]["contributing_event_ids"]) == 2
+    assert (
+        decision["producer_receipt"]["reason"]
+        == "authoritative_stage_completion_observed"
+    )
+    assert len(decision["producer_receipt"]["contributing_event_ids"]) == 1
+    assert decision["producer_receipt"]["selected_stage_completion"] == {
+        "stage_identity": "stage-closed-vision-frontier",
+        "closed_vision_revision": "2026-08-21T08:59:00Z",
+        "frontier_identity": "frontier-next-analysis",
+        "transition": "successor_frontier_settled",
+        "completed_at": "2026-08-21T09:00:00Z",
+        "completion_receipt_ref": "stage:stage-closed-vision-frontier",
+    }
     assert run["trigger_receipt"]["trigger_policy"]["aggregation"] == {
         "window_seconds": 604800,
         "promote_replan": True,
+        "stage_completion_required": True,
         "todo_completed_threshold": 2,
     }
 
 
-def test_durable_replan_precedes_threshold_and_deduplicates_todos() -> None:
+def test_durable_replan_and_ordinary_todos_do_not_promote() -> None:
     duplicate = _event(
         "todo_complete", event_at="2026-08-20T09:00:00Z", todo_id="todo-a"
     )
@@ -141,13 +192,74 @@ def test_durable_replan_precedes_threshold_and_deduplicates_todos() -> None:
         _request(threshold=4), rollout_events=events
     )
 
-    assert decision["eligible"] is True
-    assert decision["producer_receipt"]["transition"] == "replan_entered"
+    assert decision["eligible"] is False
+    assert decision["producer_receipt"]["transition"] is None
     assert decision["producer_receipt"]["todo_completed_count"] == 1
     assert decision["producer_receipt"]["replan_event_count"] == 1
+    assert decision["producer_receipt"]["reason"] == "authoritative_stage_completion_missing"
 
 
-def test_below_threshold_stays_non_reportable() -> None:
+def test_quota_projection_replays_deduplicate_by_stage_identity() -> None:
+    first = _event(
+        "quota_should_run",
+        event_at="2026-08-21T10:00:00Z",
+        stage_transition="successor_frontier_settled",
+    )
+    replay = _event(
+        "quota_should_run",
+        event_at="2026-08-22T10:00:00Z",
+        stage_transition="successor_frontier_settled",
+    )
+
+    decision = build_periodic_report_runtime_trigger_decision(
+        _request(threshold=64), rollout_events=[first, replay]
+    )
+
+    assert decision["eligible"] is True
+    assert decision["producer_receipt"]["stage_completion_count"] == 1
+    assert decision["producer_receipt"]["contributing_event_ids"] == [
+        first["event_id"]
+    ]
+    assert decision["producer_receipt"]["selected_stage_completion"][
+        "completion_receipt_ref"
+    ] == "stage:stage-closed-vision-frontier"
+
+
+@pytest.mark.parametrize(
+    "stage_overrides",
+    [
+        {"stage_acceptance": "pending"},
+        {"outcome_checkpoint_satisfied": False},
+        {"durable_writeback_required": False},
+        {"event_status": "pending"},
+        {"stage_transition": "generic_replan"},
+    ],
+)
+def test_incomplete_stage_contract_fails_closed(
+    stage_overrides: dict[str, object],
+) -> None:
+    event_options: dict[str, object] = {
+        "stage_transition": "successor_frontier_settled",
+        **stage_overrides,
+    }
+    event = _event(
+        "refresh_state",
+        event_at="2026-08-20T09:00:00Z",
+        **event_options,
+    )
+
+    decision = build_periodic_report_runtime_trigger_decision(
+        _request(threshold=1), rollout_events=[event]
+    )
+
+    assert decision["eligible"] is False
+    assert decision["producer_receipt"]["stage_completion_count"] == 0
+    assert decision["producer_receipt"]["reason"] == (
+        "authoritative_stage_completion_missing"
+    )
+
+
+def test_ordinary_todo_threshold_never_creates_stage_completion() -> None:
     decision = build_periodic_report_runtime_trigger_decision(
         _request(threshold=3, promote_replan=False),
         rollout_events=[
@@ -161,6 +273,10 @@ def test_below_threshold_stays_non_reportable() -> None:
 
     assert decision["eligible"] is False
     assert decision["producer_receipt"]["status"] == "not_promoted"
+    assert (
+        decision["producer_receipt"]["reason"]
+        == "authoritative_stage_completion_missing"
+    )
     assert decision["suppressed_triggers"][0]["trigger_kind"] == "state_refreshed"
 
 
@@ -183,9 +299,9 @@ def test_runtime_producer_cli_reads_durable_rollout_log(tmp_path, capsys) -> Non
     append_rollout_event(
         event_log,
         _event(
-            "todo_complete",
+            "refresh_state",
             event_at="2026-08-20T09:00:00Z",
-            todo_id="todo-a",
+            stage_transition="goal_terminal",
         ),
     )
 
@@ -217,9 +333,9 @@ def test_runtime_producer_cli_streams_large_history_before_bounded_window(
         event_at="2026-08-17T09:00:00Z",
     )
     current_event = _event(
-        "todo_complete",
+        "refresh_state",
         event_at="2026-08-20T09:00:00Z",
-        todo_id="todo-current",
+        stage_transition="successor_frontier_settled",
     )
     rows = [
         json.dumps({**old_event, "event_id": f"old-{index}"})
@@ -242,7 +358,7 @@ def test_runtime_producer_cli_streams_large_history_before_bounded_window(
     ) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["eligible"] is True
-    assert payload["producer_receipt"]["todo_completed_count"] == 1
+    assert payload["producer_receipt"]["todo_completed_count"] == 0
 
 
 def test_runtime_producer_rejects_relevant_window_over_capacity() -> None:

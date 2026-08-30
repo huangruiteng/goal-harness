@@ -43,6 +43,10 @@ from .capabilities.periodic_report.cli import (
     handle_periodic_report_command,
     register_periodic_report_commands,
 )
+from .capabilities.periodic_report.post_writeback_hook import (
+    build_periodic_report_post_writeback_projection,
+    periodic_report_post_writeback_hooks_for_goal,
+)
 from .capabilities.semantic_preference.cli import (
     handle_semantic_preference_command,
     register_semantic_preference_commands,
@@ -647,6 +651,19 @@ def main(argv: list[str] | None = None) -> int:
         print_payload=print_payload,
         output_format=output_format,
         append_cli_rollout_event=append_cli_rollout_event,
+        post_writeback_hooks=(
+            periodic_report_post_writeback_hooks_for_goal(
+                registry_path=registry_path,
+                goal_id=args.goal_id,
+            )
+            if args.command == "refresh-state"
+            else ()
+        ),
+        post_writeback_projection_builder=(
+            build_periodic_report_post_writeback_projection
+            if args.command == "refresh-state"
+            else None
+        ),
     )
     if project_lifecycle_result is not None:
         return project_lifecycle_result

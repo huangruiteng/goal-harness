@@ -244,6 +244,89 @@ def todo_item_claimed_by_agent_or_unclaimed(
     return not claimed_by or claimed_by == normalized_agent_id
 
 
+def todo_advancement_frontier_counts(
+    summary: dict[str, Any] | None,
+    *,
+    agent_id: str | None,
+) -> dict[str, int]:
+    """Classify the durable advancement frontier by exact claim ownership."""
+
+    if not isinstance(summary, dict):
+        return {
+            "current_agent_claimed_advancement_count": 0,
+            "unclaimed_advancement_count": 0,
+            "other_agent_claimed_advancement_count": 0,
+        }
+    normalized_agent_id = normalize_todo_claimed_by(agent_id)
+    claim_scope = summary.get("claim_scope")
+    other_items = (
+        claim_scope.get("other_agent_claimed_items")
+        if isinstance(claim_scope, dict)
+        else []
+    )
+    diagnostic_other_count = sum(
+        1
+        for value in other_items or []
+        if isinstance(value, dict)
+        and todo_item_is_actionable_open(value)
+        and todo_item_task_class(value) == TODO_TASK_CLASS_ADVANCEMENT
+    )
+    executable_items = summary.get("executable_backlog_items")
+    if isinstance(executable_items, list):
+        current_count = 0
+        unclaimed_count = 0
+        other_count = 0
+        for value in executable_items:
+            if not isinstance(value, dict):
+                continue
+            if not todo_item_is_actionable_open(value):
+                continue
+            if todo_item_task_class(value) != TODO_TASK_CLASS_ADVANCEMENT:
+                continue
+            claimed_by = normalize_todo_claimed_by(value.get("claimed_by"))
+            if claimed_by:
+                if normalized_agent_id and claimed_by == normalized_agent_id:
+                    if not todo_item_excludes_agent(value, agent_id=normalized_agent_id):
+                        current_count += 1
+                elif normalized_agent_id:
+                    other_count += 1
+                else:
+                    current_count += 1
+                continue
+            if not todo_item_excludes_agent(value, agent_id=normalized_agent_id):
+                unclaimed_count += 1
+        return {
+            "current_agent_claimed_advancement_count": max(
+                current_count,
+                _positive_int(summary.get("current_agent_claimed_advancement_count")),
+            ),
+            "unclaimed_advancement_count": unclaimed_count,
+            # Agent-scoped executable backlogs intentionally omit peer-owned
+            # work. Preserve that diagnostic lane from claim_scope without
+            # letting it contribute to the current Agent's selectable count.
+            "other_agent_claimed_advancement_count": max(
+                other_count,
+                diagnostic_other_count,
+            ),
+        }
+
+    unclaimed_count = sum(
+        1
+        for value in summary.get("unclaimed_priority_open_items") or []
+        if isinstance(value, dict)
+        and todo_item_is_actionable_open(value)
+        and todo_item_task_class(value) == TODO_TASK_CLASS_ADVANCEMENT
+        and not todo_item_excludes_agent(value, agent_id=normalized_agent_id)
+    )
+    return {
+        "current_agent_claimed_advancement_count": _positive_int(
+            summary.get("current_agent_claimed_advancement_count")
+        ),
+        "unclaimed_advancement_count": unclaimed_count,
+        "other_agent_claimed_advancement_count": diagnostic_other_count,
+    }
+
+
 def todo_item_has_removed_continuation_policy(item: dict[str, Any]) -> bool:
     return bool(
         normalize_removed_todo_continuation_policy(

@@ -342,6 +342,11 @@ def _normalize_trigger_receipt(raw: object) -> dict[str, Any] | None:
                 raw_aggregation.get("promote_replan"),
                 "trigger_receipt.trigger_policy.aggregation.promote_replan",
             ),
+            "stage_completion_required": _boolean(
+                raw_aggregation.get("stage_completion_required", True),
+                "trigger_receipt.trigger_policy.aggregation."
+                "stage_completion_required",
+            ),
         }
         if raw_aggregation.get("todo_completed_threshold") is not None:
             aggregation["todo_completed_threshold"] = _integer(
@@ -353,10 +358,11 @@ def _normalize_trigger_receipt(raw: object) -> dict[str, Any] | None:
         if (
             "todo_completed_threshold" not in aggregation
             and not aggregation["promote_replan"]
+            and not aggregation["stage_completion_required"]
         ):
             raise ValueError(
                 "trigger_receipt.trigger_policy.aggregation must enable "
-                "a todo threshold or replan promotion"
+                "a stage completion, todo threshold, or replan promotion"
             )
         trigger_policy["aggregation"] = aggregation
     expected_report_key = _digest(

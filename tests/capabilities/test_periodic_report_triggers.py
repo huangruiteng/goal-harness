@@ -243,10 +243,28 @@ def test_vision_requires_validated_closure_and_continuation() -> None:
     assert payload["report_kind"] == "milestone_update"
 
 
-@pytest.mark.parametrize("transition", ["segment_completed", "replan_entered"])
-def test_bounded_segment_with_remaining_todos_triggers_milestone_update(
-    transition: str,
-) -> None:
+def _completed_stage_facts(**overrides: object) -> dict[str, object]:
+    facts: dict[str, object] = {
+        "segment_ref": "week-2026-w29",
+        "transition": "segment_completed",
+        "delivered_count": 4,
+        "remaining_todo_count": 12,
+        "durable_writeback": True,
+        "acceptance": "validated",
+        "completed_at": "2026-07-20T00:30:00Z",
+        "completion_receipt_ref": "event-analysis-complete",
+        "stage_identity": "stage-closed-vision-frontier",
+        "closed_vision_revision": "2026-07-20T00:00:00Z",
+        "frontier_identity": "frontier-next-analysis",
+        "stage_transition": "successor_frontier_settled",
+        "outcome_checkpoint_satisfied": True,
+        "status": "completed",
+    }
+    facts.update(overrides)
+    return facts
+
+
+def test_authoritative_stage_completion_with_remaining_todos_triggers() -> None:
     request = _trigger_request(
         _candidate(
             "cadence_due",
@@ -257,14 +275,8 @@ def test_bounded_segment_with_remaining_todos_triggers_milestone_update(
         _candidate(
             "bounded_segment_milestone",
             source_ref="segment:2026-w29",
-            evidence_digest=f"sha256:{transition}",
-            facts={
-                "segment_ref": "week-2026-w29",
-                "transition": transition,
-                "delivered_count": 4,
-                "remaining_todo_count": 12,
-                "durable_writeback": True,
-            },
+            evidence_digest="sha256:segment-completed",
+            facts=_completed_stage_facts(),
         ),
     )
 
@@ -279,30 +291,37 @@ def test_bounded_segment_with_remaining_todos_triggers_milestone_update(
 
 
 @pytest.mark.parametrize(
-    ("transition", "durable_writeback", "reason"),
+    ("facts", "reason"),
     [
-        ("vision_checkpoint", True, "segment_checkpoint_only"),
-        ("replan_entered", False, "segment_writeback_pending"),
+        (
+            {"transition": "vision_checkpoint", "durable_writeback": True},
+            "segment_checkpoint_only",
+        ),
+        (
+            {"transition": "replan_entered", "durable_writeback": False},
+            "segment_writeback_pending",
+        ),
+        (
+            {"transition": "replan_entered", "durable_writeback": True},
+            "stage_completion_not_proven",
+        ),
+        (
+            {"acceptance": "pending"},
+            "stage_completion_not_proven",
+        ),
     ],
 )
-def test_bounded_segment_requires_material_transition_and_writeback(
-    transition: str,
-    durable_writeback: bool,
-    reason: str,
+def test_bounded_segment_requires_authoritative_stage_completion(
+    facts: dict[str, object], reason: str
 ) -> None:
+    candidate_facts = _completed_stage_facts(**facts)
     payload = build_periodic_report_trigger_decision(
         _trigger_request(
             _candidate(
                 "bounded_segment_milestone",
                 source_ref="segment:2026-w29",
-                evidence_digest=f"sha256:{transition}",
-                facts={
-                    "segment_ref": "week-2026-w29",
-                    "transition": transition,
-                    "delivered_count": 4,
-                    "remaining_todo_count": 12,
-                    "durable_writeback": durable_writeback,
-                },
+                evidence_digest="sha256:stage-check",
+                facts=candidate_facts,
             )
         )
     )
