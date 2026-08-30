@@ -3,6 +3,53 @@
   "schema_version": "loopx_codex_provider_routing_request_v0",
   "snapshot": {
     "affinity_policy": "hint_revalidated_per_attempt",
+    "route_traversal": {
+      "auto/gpt-5.6-sol": {
+        "entrypoint": "affinity_then_first",
+        "fallback_tail": [
+          "ark-text"
+        ],
+        "max_cycles": 1,
+        "ordered_candidates": [
+          "codex-a",
+          "codex-b",
+          "ark-text"
+        ]
+      },
+      "codex-a/gpt-5.6-sol": {
+        "entrypoint": "codex-a",
+        "fallback_tail": [
+          "ark-text"
+        ],
+        "max_cycles": 1,
+        "ordered_candidates": [
+          "codex-a",
+          "codex-b",
+          "ark-text"
+        ]
+      },
+      "codex-b/gpt-5.6-sol": {
+        "entrypoint": "codex-b",
+        "fallback_tail": [
+          "ark-text"
+        ],
+        "max_cycles": 1,
+        "ordered_candidates": [
+          "codex-b",
+          "codex-a",
+          "ark-text"
+        ]
+      },
+      "gpt-5.6-luna": {
+        "entrypoint": "affinity_then_first",
+        "fallback_tail": [],
+        "max_cycles": 1,
+        "ordered_candidates": [
+          "codex-a",
+          "codex-b"
+        ]
+      }
+    },
     "commit_barrier": "before_first_visible_output_or_tool_call",
     "default_service_tier": "default",
     "endpoint_host": "127.0.0.1",

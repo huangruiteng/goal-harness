@@ -36,7 +36,8 @@ qualification.
 `qualify_snapshot`
 : Checks the content-free App/CPA readback: visible and hidden routes, input
   modalities, Fast projection with default-off semantics, loopback binding,
-  modality-aware affinity, durable settings revision and commit barrier.
+  modality-aware affinity, typed route traversal, durable settings revision
+  and commit barrier.
 
 `upgrade_plan`
 : Produces a bounded upgrade/rollback checklist from public current and target

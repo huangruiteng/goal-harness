@@ -121,6 +121,7 @@ merge commit，并重新运行本文矩阵。
 | Provider-bound history normalization | candidate、stale-task 与 `additional_tools` 回归通过 | 同 provider 的 A → B 也视为 scope 变化；跨 scope 时移除异源 identity / opaque state，保留可移植 summary、namespace/tool schema 与 tool call/result 因果链；unsupported item 仍返回 typed `409` |
 | Ark Responses SSE lifecycle normalizer | candidate 与真实 endpoint 通过 | 只对显式 `is-compat: true` 的模型启用；原生 Codex stream 保持原字节路径；真实 Ark HTTP/SSE 返回完整 lifecycle |
 | A/B 环 → Ark 组合路径 | loopback 与分层 live 证据通过 | 合成 quota 链 5/5 通过；live A → B 在同一请求完成；隔离禁用 A/B 后 auto 由 Ark 完成并恢复 auth 状态；Prefer B → A 依赖 CPA PR #5336 |
+| Route traversal readback | public contract 已补齐；live 待 #5336 | qualification 必须同时读回 entrypoint、ordered candidates、terminal tail 与 `max_cycles = 1`；只看到正确 selector 标签不能通过 |
 | Codex App selector projection | contract 已更新；live readback 待 CPA #5336 | 目标 `model/list` 暴露 Auto、Prefer A、Prefer B、Luna、Ark 五个可见 route，并保留隐藏 `gpt-5.6-sol` 兼容 alias；C 不存在 |
 | 图片能力投影 | 正向 E2E 通过，Auto 负向路径有已复现缺口 | Auto、Prefer A、Prefer B、Luna 声明 `text + image`，Ark 保持 `text`；健康 A/B 下图片到达 Codex。A/B 失败后，当前 Auto affinity 可能错误粘到 Ark，尚未做到 modality-aware fail closed |
 | 模型切换快照 | 已复现设置落盘与新 turn 启动竞态 | UI 显示已选择 B 不足以证明正在运行或重试的 turn 已采用 B；旧 turn 可能继续携带 Auto 快照。需要 durable settings revision / readback 后再启动新 turn |

@@ -456,6 +456,68 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         snapshot.get("affinity_policy") == "hint_revalidated_per_attempt",
         "Auto affinity is revalidated against required modalities per attempt",
     )
+    route_traversal = snapshot.get("route_traversal")
+    if not isinstance(route_traversal, Mapping):
+        raise TypeError("snapshot.route_traversal must be an object")
+    expected_traversal = {
+        "auto/gpt-5.6-sol": {
+            "entrypoint": "affinity_then_first",
+            "ordered_candidates": ["codex-a", "codex-b", "ark-text"],
+            "fallback_tail": ["ark-text"],
+        },
+        "codex-a/gpt-5.6-sol": {
+            "entrypoint": "codex-a",
+            "ordered_candidates": ["codex-a", "codex-b", "ark-text"],
+            "fallback_tail": ["ark-text"],
+        },
+        "codex-b/gpt-5.6-sol": {
+            "entrypoint": "codex-b",
+            "ordered_candidates": ["codex-b", "codex-a", "ark-text"],
+            "fallback_tail": ["ark-text"],
+        },
+        "gpt-5.6-luna": {
+            "entrypoint": "affinity_then_first",
+            "ordered_candidates": ["codex-a", "codex-b"],
+            "fallback_tail": [],
+        },
+    }
+    traversal_rows: dict[str, Mapping[str, Any]] = {}
+    for slug in expected_traversal:
+        raw_row = route_traversal.get(slug)
+        if not isinstance(raw_row, Mapping):
+            raise TypeError(f"snapshot.route_traversal[{slug}] must be an object")
+        traversal_rows[slug] = raw_row
+        _string_list(
+            raw_row.get("ordered_candidates"),
+            f"snapshot.route_traversal[{slug}].ordered_candidates",
+        )
+        _string_list(
+            raw_row.get("fallback_tail"),
+            f"snapshot.route_traversal[{slug}].fallback_tail",
+        )
+    check(
+        "preferred_route_order",
+        all(
+            traversal_rows[slug].get("entrypoint") == expected["entrypoint"]
+            and traversal_rows[slug].get("ordered_candidates")
+            == expected["ordered_candidates"]
+            for slug, expected in expected_traversal.items()
+        ),
+        "Auto/Prefer A/Prefer B/Luna use the expected account-ring entrypoint and order",
+    )
+    check(
+        "terminal_fallback_tail",
+        all(
+            traversal_rows[slug].get("fallback_tail") == expected["fallback_tail"]
+            for slug, expected in expected_traversal.items()
+        ),
+        "Sol routes append Ark once and Luna has no heterogeneous fallback tail",
+    )
+    check(
+        "single_cycle_traversal",
+        all(row.get("max_cycles") == 1 for row in traversal_rows.values()),
+        "every resilient route traverses the account ring at most once",
+    )
     check(
         "settings_revision",
         snapshot.get("settings_revision_durable") is True

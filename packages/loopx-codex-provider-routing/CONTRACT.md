@@ -39,4 +39,7 @@ image history. Luna has no heterogeneous fallback tail.
 
 Codex App settings use the same evidence rule. A selector label is not proof
 that a running turn adopted the new model. Qualification requires a durable
-settings revision and a turn receipt that matches it.
+settings revision and a turn receipt that matches it. The content-free runtime
+snapshot must also report each resilient route's entry point, ordered
+candidates, terminal tail and maximum cycle count; catalog compilation alone
+cannot qualify a deployment.
