@@ -146,10 +146,13 @@ independent gates.
 and Agent. A pending intent takes precedence over monitor-quiet and terminal
 no-follow-up projection and returns one TypeScript-validated governed command.
 That command may render provider-free local HTML and Markdown, run content
-checks, persist an idempotent consumption receipt, and create one approval Todo
-bound to the frozen generation digest. Exact replay does not rerender or create
-a second gate. Miaoda publication and group delivery remain unauthorized until
-that exact Todo is approved.
+checks, persist the normalized generation bundle, and create one blocked
+delivery successor plus one approval Todo bound to that successor and frozen
+generation digest. Exact replay does not rerender or duplicate either Todo.
+Approval consumes only that successor's decision scope and resumes it, so
+normal Todo/quota selection can see the required delivery work. Miaoda
+publication and group delivery remain unauthorized until that exact Todo is
+approved.
 
 Project-specific scheduled reports should be layered as profiles and adapters.
 For example, a maintenance profile may choose a local timezone and weekly
@@ -181,6 +184,17 @@ those verified `<at>` elements before the report. A match without a renderer,
 a mismatched document/artifact digest, or provider mention markup embedded in
 the artifact, title, or footer fails before send. The core therefore owns
 relevance while the Lark extension owns provider identity and wire rendering.
+
+The bundled execution command is `periodic-report deliver-goal-channel`. It
+derives the destination and sender exclusively from the current Goal's enabled
+Goal Channel binding. Only a verified `project_bot` profile is valid; the
+request cannot provide a chat id, profile, Bot App id, display name, or sender
+identity. The intent instead supplies exactly two ordered HTTPS entries—the
+hosted report and the Lark document. Execution sends two independent messages,
+verifies the bound Bot and chat before send, then requires exact
+interactive-card, chat, and Bot-identity readback for both. Missing or drifted
+identity, either missing message, or a partial readback fails closed without a
+user/default-Bot fallback.
 
 This is a built-in capability, not an extension: callers need the trigger,
 idempotency, retry, and receipt contract even when no provider is installed.

@@ -66,6 +66,30 @@ artifact/document digest, or mention markup authored into report content,
 title, or footer fails closed before send. This keeps relevance in the core
 contract and provider identity on the extension side.
 
+The shipped execution path is `loopx periodic-report deliver-goal-channel`.
+Its delivery intent must contain exactly two ordered HTTPS announcements: the
+hosted report entry, then the Lark document entry. They are sent as two
+independently idempotent messages and each one must pass exact readback. The
+command does not accept a chat, profile, App identity, or sender override. Instead,
+the Lark extension resolves the current Goal's local-private Goal Channel
+binding and requires `mode=project_bot`, Bot sender identity, a non-default
+profile, exact Bot App id and display name, and an enabled Lark channel.
+Before sending, it live-verifies that the bound profile authenticates as the
+same Bot App and can reach the same chat. After sending, it reads back the
+exact interactive card from that chat and requires the provider-native message
+sender to be an `app` whose id equals the bound Bot App id. Revalidating the
+profile alone is not sender proof.
+Missing bindings, local-user mode, identity drift, or incomplete readback fail
+closed; no environment-default or user-identity fallback exists.
+
+The governed pending-intent consumer persists the normalized generation bundle
+and writes one blocked, agent-owned delivery successor before creating the
+approval gate. The gate links to that successor and covers its exact decision
+scope. Approval removes only that scope and resumes the successor, making the
+external action visible to quota; rejection or cancellation keeps it blocked.
+This prevents an approved report from disappearing into a quiet terminal or
+monitor-only projection.
+
 `periodic_report_project_progress_projection_v0` is the built-in,
 domain-neutral source input. It groups typed project facts into progress,
 capability evolution, risks, next actions, and supporting evidence, with no
