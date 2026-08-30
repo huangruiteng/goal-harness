@@ -991,25 +991,16 @@ async function main() {
 
     const composer = page.getByLabel("向 LoopX 发送消息");
     const previewCountBeforeSemanticIntent = api.actionPreviews.length;
-    await composer.fill("请只回复：合并后真实回复已收到");
-    await page.getByRole("button", { name: "发送", exact: true }).click();
-    await page.getByText("合并后真实回复已收到", { exact: true }).last().waitFor({ state: "visible", timeout: 10_000 });
-    if (api.actionPreviews.length !== previewCountBeforeSemanticIntent) throw new Error("An exact-wording protected-action mention created a typed preview");
-
-    await composer.fill("请分析：合并 PR #123 后会有什么风险");
-    await page.getByRole("button", { name: "发送", exact: true }).click();
-    await page.getByText("主要风险是检查未完成或目标分支发生变化；这里只做分析，不会创建合并预览。", { exact: true }).last().waitFor({ state: "visible", timeout: 10_000 });
-    if (api.actionPreviews.length !== previewCountBeforeSemanticIntent) throw new Error("Protected-action analysis created a typed preview");
-
-    await composer.fill("请合并");
-    await page.getByRole("button", { name: "发送", exact: true }).click();
-    await page.getByText("请告诉我要合并的具体 PR 或 MR；在目标明确前不会创建执行预览。", { exact: true }).last().waitFor({ state: "visible", timeout: 10_000 });
-    if (api.actionPreviews.length !== previewCountBeforeSemanticIntent) throw new Error("A targetless protected action created an incomplete preview");
-
-    await composer.fill("请合并我刚才说的那个");
-    await page.getByRole("button", { name: "发送", exact: true }).click();
-    await page.getByText("这个指代不够明确，请提供具体 PR 或 MR。", { exact: true }).last().waitFor({ state: "visible", timeout: 10_000 });
-    if (api.actionPreviews.length !== previewCountBeforeSemanticIntent) throw new Error("A model-invented protected target created a typed preview");
+    async function expectConversationalProtectedTurn(message, answer, previewError) {
+      await composer.fill(message);
+      await page.getByRole("button", { name: "发送", exact: true }).click();
+      await page.getByText(answer, { exact: true }).last().waitFor({ state: "visible", timeout: 10_000 });
+      if (api.actionPreviews.length !== previewCountBeforeSemanticIntent) throw new Error(previewError);
+    }
+    await expectConversationalProtectedTurn("请只回复：合并后真实回复已收到", "合并后真实回复已收到", "An exact-wording protected-action mention created a typed preview");
+    await expectConversationalProtectedTurn("请分析：合并 PR #123 后会有什么风险", "主要风险是检查未完成或目标分支发生变化；这里只做分析，不会创建合并预览。", "Protected-action analysis created a typed preview");
+    await expectConversationalProtectedTurn("请合并", "请告诉我要合并的具体 PR 或 MR；在目标明确前不会创建执行预览。", "A targetless protected action created an incomplete preview");
+    await expectConversationalProtectedTurn("请合并我刚才说的那个", "这个指代不够明确，请提供具体 PR 或 MR。", "A model-invented protected target created a typed preview");
 
     await composer.fill("请合并 PR #123");
     await page.getByRole("button", { name: "发送", exact: true }).click();
