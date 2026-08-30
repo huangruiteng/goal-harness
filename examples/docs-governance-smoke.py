@@ -383,6 +383,18 @@ def assert_contributor_task_board_is_current() -> None:
         "| GH-C84 |",
         "| GH-C92 |",
         "| GH-C93 |",
+        "| GH-C49 |",
+        "| GH-C60 |",
+        "| GH-C62 |",
+        "| GH-C64 |",
+        "| GH-C71 |",
+        "| GH-C74 |",
+        "| GH-C75 |",
+        "| GH-C76 |",
+        "| GH-C80 |",
+        "| GH-C85 |",
+        "| GH-C95 |",
+        "| GH-C97 |",
     ):
         assert stale not in tasks, stale
 
