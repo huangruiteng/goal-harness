@@ -596,6 +596,7 @@ def main(argv: list[str] | None = None) -> int:
     periodic_report_result = handle_periodic_report_command(
         args,
         runtime_root_arg=args.runtime_root,
+        registry_path=registry_path,
         output_format=output_format,
         print_payload=print_payload,
         provider_command_handlers=(handle_lark_periodic_report_command,),

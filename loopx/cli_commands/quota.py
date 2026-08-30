@@ -10,6 +10,9 @@ from ..capabilities.explore.composition_frontier import (
 from ..capabilities.repository_change_window import (
     repository_delivery_interaction_hook,
 )
+from ..capabilities.periodic_report.pending_intent import (
+    periodic_report_pending_intent_interaction_hook,
+)
 from ..control_plane.quota.cli_projection import (
     compact_quota_monitor_poll_cli_payload,
     compact_quota_should_run_cli_payload,
@@ -531,6 +534,11 @@ def handle_quota_command(
         if args.quota_command == "should-run":
             interaction_projection_hooks = (
                 repository_delivery_interaction_hook(repo_path=Path.cwd()),
+                periodic_report_pending_intent_interaction_hook(
+                    runtime_root=runtime_root,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                ),
             )
             (
                 heartbeat_receipt_existing,

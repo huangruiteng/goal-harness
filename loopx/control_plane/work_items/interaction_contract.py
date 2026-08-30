@@ -451,6 +451,8 @@ def _interaction_mode(payload: dict[str, Any]) -> str:
     kind = str(execution_obligation.get("kind") or "")
     effective_action = str(payload.get("effective_action") or "")
     state = str(payload.get("state") or "")
+    if effective_action == "governed_capability_intent":
+        return effective_action
     if effective_action == "agent_monitor_only":
         return "agent_monitor_only"
     if effective_action == "monitor_due":
@@ -729,6 +731,14 @@ def interaction_next_cli_actions(
         )
         is SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
     )
+    if mode == "governed_capability_intent":
+        projection = (
+            payload.get("pending_capability_intent")
+            if isinstance(payload.get("pending_capability_intent"), Mapping)
+            else {}
+        )
+        command = protocol_action_text(projection.get("command"), limit=1200)
+        return [command] if command else []
     quota_spend_action = build_quota_spend_action(
         goal_id,
         scoped_cli_args=scoped_cli_args,
@@ -938,6 +948,8 @@ def _interaction_spend_policy(
     mode: str,
     spend_after_validation: bool,
 ) -> str | None:
+    if mode == "governed_capability_intent":
+        return "the capability consumer persists its own idempotent receipt"
     if mode == "terminal_no_followup":
         return "no spend for terminal automation shutdown"
     if mode == "agent_monitor_only":
@@ -1003,10 +1015,13 @@ def _blocked_priority_fallback_user_reason(payload: dict[str, Any]) -> str | Non
 def _interaction_must_attempt(
     execution_obligation: dict[str, Any],
     *,
+    mode: str,
     user_required: bool,
     scoped_user_gate_fallback: bool,
     bounded_delivery_with_user_notice: bool,
 ) -> bool:
+    if mode == "governed_capability_intent":
+        return bool(execution_obligation.get("must_attempt_work"))
     if user_required and not (
         scoped_user_gate_fallback or bounded_delivery_with_user_notice
     ):
@@ -1023,6 +1038,8 @@ def _interaction_delivery_allowed(
     scoped_user_gate_fallback: bool,
     bounded_delivery_with_user_notice: bool,
 ) -> bool:
+    if mode == "governed_capability_intent":
+        return bool(execution_obligation.get("must_attempt_work"))
     if mode == "mapped_noop_if_unchanged":
         return False
     if user_required and not (
@@ -1420,6 +1437,7 @@ def build_interaction_contract(
     bounded_delivery_with_user_notice = mode == "bounded_delivery_with_user_notice"
     must_attempt = _interaction_must_attempt(
         execution_obligation,
+        mode=mode,
         user_required=user_required,
         scoped_user_gate_fallback=scoped_user_gate_fallback,
         bounded_delivery_with_user_notice=bounded_delivery_with_user_notice,

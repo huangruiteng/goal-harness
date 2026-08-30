@@ -7,6 +7,7 @@ import {
   requireStringArray,
 } from "./runtime_decode.ts";
 import { projectRepositoryDeliveryGate } from "./work_items/repository_delivery.ts";
+import { projectPendingCapabilityIntent } from "./work_items/pending_capability_intent.ts";
 
 export const CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION =
   "loopx_capability_hook_registration_v0";
@@ -311,6 +312,9 @@ export function validateInteractionProjectionHookInvocation(input: {
   }
   let projection: JsonObject | null;
   switch (slot) {
+    case "pending_capability_intent":
+      projection = projectPendingCapabilityIntent(result.payload);
+      break;
     case "repository_delivery":
       projection = projectRepositoryDeliveryGate(result.payload);
       break;

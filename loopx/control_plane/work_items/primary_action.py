@@ -207,6 +207,15 @@ def resolve_canonical_primary_action(payload: dict[str, Any], *, mode: str) -> s
         if isinstance(payload.get("execution_obligation"), dict)
         else {}
     )
+    if mode == "governed_capability_intent":
+        projection = (
+            payload.get("pending_capability_intent")
+            if isinstance(payload.get("pending_capability_intent"), dict)
+            else {}
+        )
+        return protocol_action_text(
+            projection.get("action_summary"), limit=320
+        ) or "consume the validated pending capability intent"
     if mode == "external_evidence_observation":
         external_observation = (
             payload.get("external_evidence_observation")
