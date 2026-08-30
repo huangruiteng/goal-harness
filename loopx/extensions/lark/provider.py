@@ -37,6 +37,9 @@ REQUIRED_EXPORTS = {
         "periodic_report_lark_sink_adapter",
         "periodic_report_miaoda_html_sink_adapter",
     ),
+    "loopx.extensions.lark.periodic_report_delivery": (
+        "deliver_periodic_report_to_goal_channel",
+    ),
     "loopx.extensions.lark.presentation.kanban": (
         "lark_kanban_doctor",
         "sync_loopx_projection_to_lark_kanban",

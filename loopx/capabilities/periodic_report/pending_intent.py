@@ -14,7 +14,12 @@ from ...control_plane.capability_hooks import (
     InteractionProjectionHookRegistration,
 )
 from ...control_plane.todos.active_state_todo_parser import parse_active_state_todos
-from ...registry import atomic_write_json, find_registry_goal, read_json, resolve_state_file
+from ...registry import (
+    atomic_write_json,
+    find_registry_goal,
+    read_json,
+    resolve_state_file,
+)
 from ...todos import add_goal_todo
 from ...presentation.renderers.periodic_report_html import render_periodic_report_html
 from ...presentation.renderers.periodic_report_markdown import (
@@ -79,13 +84,7 @@ def _attempt_dir(
     *,
     rejection_revision: str | None = None,
 ) -> Path:
-    base = (
-        runtime_root
-        / "goals"
-        / goal_id
-        / "periodic_reports"
-        / _intent_key(intent)
-    )
+    base = runtime_root / "goals" / goal_id / "periodic_reports" / _intent_key(intent)
     return base / f"retry-{rejection_revision}" if rejection_revision else base
 
 
@@ -96,12 +95,15 @@ def _receipt_path(
     *,
     rejection_revision: str | None = None,
 ) -> Path:
-    return _attempt_dir(
-        runtime_root,
-        goal_id,
-        intent,
-        rejection_revision=rejection_revision,
-    ) / "receipt.json"
+    return (
+        _attempt_dir(
+            runtime_root,
+            goal_id,
+            intent,
+            rejection_revision=rejection_revision,
+        )
+        / "receipt.json"
+    )
 
 
 def _editorial_request_path(
@@ -111,12 +113,15 @@ def _editorial_request_path(
     *,
     rejection_revision: str | None = None,
 ) -> Path:
-    return _attempt_dir(
-        runtime_root,
-        goal_id,
-        intent,
-        rejection_revision=rejection_revision,
-    ) / "editorial_request.json"
+    return (
+        _attempt_dir(
+            runtime_root,
+            goal_id,
+            intent,
+            rejection_revision=rejection_revision,
+        )
+        / "editorial_request.json"
+    )
 
 
 def _editorial_response_path(
@@ -126,12 +131,15 @@ def _editorial_response_path(
     *,
     rejection_revision: str | None = None,
 ) -> Path:
-    return _attempt_dir(
-        runtime_root,
-        goal_id,
-        intent,
-        rejection_revision=rejection_revision,
-    ) / "editorial.json"
+    return (
+        _attempt_dir(
+            runtime_root,
+            goal_id,
+            intent,
+            rejection_revision=rejection_revision,
+        )
+        / "editorial.json"
+    )
 
 
 def _decision_scope_text(value: object) -> str:
@@ -178,8 +186,7 @@ def _superseding_approval_revision(
         in {"approve_periodic_report_payload", "cancel_periodic_report_payload"}
         and item.get("decision_outcome") in {"reject", "cancel"}
         and _decision_scope_text(item.get("decision_scope")) == approval_scope
-        and str(item.get("bound_agent") or item.get("blocks_agent") or "")
-        == agent_id
+        and str(item.get("bound_agent") or item.get("blocks_agent") or "") == agent_id
     ]
     if not superseding:
         return None
@@ -247,9 +254,10 @@ def _next_attempt_revision(
             intent,
             rejection_revision=revision,
         )
-        if _load_consumption_receipt(
-            retry_receipt, intent_digest=intent_digest
-        ) is None:
+        if (
+            _load_consumption_receipt(retry_receipt, intent_digest=intent_digest)
+            is None
+        ):
             candidate_revisions.append(revision)
 
     if not candidate_revisions:
@@ -437,7 +445,9 @@ def _progress_facts_from_snapshot(
     seen_source_refs: set[str] = set()
     for index, raw_item in enumerate(raw_items):
         if not isinstance(raw_item, Mapping):
-            raise ValueError(f"periodic-report progress snapshot item {index} is invalid")
+            raise ValueError(
+                f"periodic-report progress snapshot item {index} is invalid"
+            )
         item_id = str(raw_item.get("item_id") or "").strip()
         title = " ".join(str(raw_item.get("title") or "").split())
         summary = " ".join(str(raw_item.get("summary") or "").split())
@@ -731,7 +741,10 @@ def _load_editorial_response(
                 raise ValueError(
                     "periodic-report editorial item_id is assigned by the consumer"
                 )
-            if item.get("value_rank") is not None or item.get("content_kind") is not None:
+            if (
+                item.get("value_rank") is not None
+                or item.get("content_kind") is not None
+            ):
                 raise ValueError(
                     "periodic-report editorial ordering and semantics are assigned by the consumer"
                 )
@@ -776,9 +789,7 @@ def _load_editorial_response(
         if isinstance(highlight, Mapping)
     )
     if _chinese_density(highlight_text) < 0.45:
-        raise ValueError(
-            "periodic-report editorial highlights must be Chinese-first"
-        )
+        raise ValueError("periodic-report editorial highlights must be Chinese-first")
     return {
         "title": title,
         "editorial": {
@@ -969,8 +980,37 @@ def consume_pending_periodic_report_intent(
     artifact_dir.mkdir(parents=True, exist_ok=True)
     markdown_path = artifact_dir / "report.md"
     html_path = artifact_dir / "report.html"
+    generation_bundle_path = artifact_dir / "generation-bundle.json"
     markdown_path.write_text(str(markdown["content"]), encoding="utf-8")
     html_path.write_text(str(html["content"]), encoding="utf-8")
+    atomic_write_json(generation_bundle_path, bundle)
+    approval_scope = str(result["approval_scope"])
+    delivery = add_goal_todo(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        role="agent",
+        text=(
+            "[P0] Deliver the approved periodic report as two independent Goal "
+            "Channel messages: the report entry and the Lark document entry for "
+            f"{generation['generation_id']}."
+        ),
+        status="blocked",
+        note=(
+            "Use only the frozen generation consumption receipt and the current "
+            "Goal Channel project_bot binding; do not fall back to a user or "
+            "default Bot identity."
+        ),
+        task_class="advancement_task",
+        action_kind="deliver_periodic_report_goal_channel",
+        task_domain="provider_delivery",
+        capability_binding_ref=f"periodic-report:{digest_suffix}",
+        required_write_scopes=["goal_channel/lark/messages"],
+        required_capabilities=["network", "lark_bot_message_write"],
+        target_capabilities=["periodic_report", "goal_channel"],
+        required_decision_scopes=[approval_scope],
+        claimed_by=agent_id,
+        agent_id=agent_id,
+    )
     gate = add_goal_todo(
         registry_path=registry_path,
         goal_id=goal_id,
@@ -985,20 +1025,23 @@ def consume_pending_periodic_report_intent(
         ),
         task_class="user_gate",
         action_kind="approve_periodic_report_payload",
-        decision_scope=f"direction:action:periodic_report_{digest_suffix}",
+        decision_scope=approval_scope,
         bound_agent=agent_id,
         blocks_agent=agent_id,
+        unblocks_todo_id=str(delivery["todo_id"]),
         agent_id=agent_id,
     )
     durable = {
         **result,
         "status": "approval_pending",
         "approval_todo_id": gate.get("todo_id"),
+        "delivery_todo_id": delivery.get("todo_id"),
         "artifacts": {
             "html_path": str(html_path),
             "html_digest": html["content_digest"],
             "markdown_path": str(markdown_path),
             "markdown_digest": markdown["content_digest"],
+            "generation_bundle_path": str(generation_bundle_path),
         },
     }
     atomic_write_json(receipt_path, durable)

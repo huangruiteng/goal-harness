@@ -308,6 +308,7 @@ def handle_periodic_report_command(
         result = handle_provider_command(
             args,
             runtime_root_arg=runtime_root_arg,
+            registry_path=registry_path,
             output_format=output_format,
             print_payload=print_payload,
         )

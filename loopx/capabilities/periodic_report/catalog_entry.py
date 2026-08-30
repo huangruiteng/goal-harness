@@ -142,6 +142,16 @@ PERIODIC_REPORT_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "docs/reference/protocols/periodic-report-v0.md",
         },
         {
+            "schema_version": "periodic_report_goal_channel_delivery_request_v0",
+            "module": "loopx.extensions.lark.periodic_report_delivery",
+            "doc": "docs/reference/protocols/periodic-report-v0.md",
+        },
+        {
+            "schema_version": "periodic_report_goal_channel_delivery_result_v0",
+            "module": "loopx.extensions.lark.periodic_report_delivery",
+            "doc": "docs/reference/protocols/periodic-report-v0.md",
+        },
+        {
             "schema_version": "periodic_report_miaoda_delivery_result_v0",
             "module": "loopx.extensions.lark.miaoda_report",
             "doc": "docs/reference/protocols/periodic-report-v0.md",

@@ -93,8 +93,8 @@ status = "active-preview"
 visibility = "public"
 real_world_anchor = "a periodic report delivered to a configured Lark chat with only relevant recipients mentioned"
 user_value = "Deliver one report while mentioning only symbolic recipients selected by normalized domains or explicit typed routing rules."
-entry_command = "loopx periodic-report inspect-profile --profile-json <profile.json>"
-next_real_step = "Configure a profile-owned audience policy, preview the announcement plan, then execute through an explicitly enabled Lark sink."
+entry_command = "loopx periodic-report deliver-goal-channel --goal-id <goal-id> --request-json <request.json>"
+next_real_step = "Bind one project_bot Goal Channel, preview the typed delivery intent, then execute with exact sender and chat readback."
 
 [[provides]]
 id = "lark-miaoda-html-report"
