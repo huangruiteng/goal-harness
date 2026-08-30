@@ -161,7 +161,7 @@ function runDerivedSignals(): void {
   expectTone(signal(ledgerGap, "outcome").tone, "danger", "ledger outcome_gap signal");
 
   // Ordinary workspace/capability prose in a todo title must not classify as
-  // repair or wait; only typed action kinds, waiting status, and gate kinds do.
+  // repair or wait; only typed domain discriminators do.
   const proseOnly = projectionWith({
     waiting_on: "nothing",
     agent_todos: [
@@ -194,6 +194,32 @@ function runDerivedSignals(): void {
     ],
   });
   expectTone(signal(waiting, "capability-wait").tone, "warning", "capability_wait todo");
+
+  // A generic waiting lifecycle status does not establish a capability wait.
+  const externalReviewWait = projectionWith({
+    waiting_on: "external_evidence",
+    agent_todos: [
+      {
+        todo_id: "todo_external_review_wait",
+        priority: "P0",
+        status: "waiting",
+        task_class: "advancement_task",
+        action_kind: "external_review_wait",
+        title: "Wait for an independent reviewer.",
+      },
+    ],
+    open_gates: [],
+    recent_events: [],
+  });
+  const externalReviewSignal = signal(externalReviewWait, "capability-wait");
+  expectTone(
+    externalReviewSignal.tone,
+    "success",
+    "external review waiting todo",
+  );
+  if (externalReviewSignal.value !== "clear") {
+    throw new Error(`external review waiting value: ${externalReviewSignal.value}`);
+  }
 
   // Unknown outcome tokens stay neutral, never success.
   const unknownToken = projectionWith({

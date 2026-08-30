@@ -433,11 +433,7 @@ export function deriveOperatorStateSignals(
 
   const capabilityTodo = projection.agent_todos.find((todo) => {
     const kind = normalizeToken(todo.action_kind);
-    return (
-      kind === "capability_wait"
-      || kind === "capability_repair"
-      || normalizeToken(todo.status) === "waiting"
-    );
+    return kind === "capability_wait" || kind === "capability_repair";
   });
   const capabilityGate = projection.open_gates.find(
     (gate) => normalizeToken(gate.kind) === "capability_wait",
