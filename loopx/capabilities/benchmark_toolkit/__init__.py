@@ -62,9 +62,11 @@ from .four_arm_contract import (
 from .integrity import (
     BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION,
     BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
+    BENCHMARK_RESTRICTED_ACCESS_ADJUDICATION_SCHEMA_VERSION,
     BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION,
     INTEGRITY_EVIDENCE_CATEGORIES,
     REQUIRED_RUNTIME_ATTESTATIONS,
+    RestrictedAccessAdjudicationDecision,
     build_benchmark_integrity_qualification,
 )
 from .native_codex_goal import (
@@ -182,6 +184,7 @@ __all__ = [
     "BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION",
     "BENCHMARK_PLAN_FIDELITY_SCHEMA_VERSION",
     "BENCHMARK_RESOURCE_HEADROOM_RECEIPT_SCHEMA_VERSION",
+    "BENCHMARK_RESTRICTED_ACCESS_ADJUDICATION_SCHEMA_VERSION",
     "BENCHMARK_RUNTIME_CONTINUITY_SCHEMA_VERSION",
     "BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION",
     "BENCHMARK_RUNTIME_OBSERVATION_SCHEMA_VERSION",
@@ -225,6 +228,7 @@ __all__ = [
     "NativeGoalTurn",
     "PublicTrajectoryLifecycleState",
     "PublicTrajectorySummaryError",
+    "RestrictedAccessAdjudicationDecision",
     "RunPermissionAction",
     "RunnerOwnedProviderGateway",
     "StdioNativeGoalTransport",

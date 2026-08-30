@@ -92,13 +92,15 @@ def _render_integrity(payload: dict[str, object]) -> str:
         blocker_text = (
             "- Blockers: " + ", ".join(f"`{item}`" for item in blockers) + "\n"
         )
+    review = payload.get("restricted_access_review")
+    review = review if isinstance(review, dict) else {}
     return (
         "# Benchmark Integrity Qualification\n\n"
         f"- Classification: `{payload.get('classification')}`\n"
         f"- Integrity qualified: `{payload.get('integrity_qualified')}`\n"
         f"- Score claim eligible: `{payload.get('score_claim_eligible')}`\n"
         f"- Cheating detected: `{payload.get('benchmark_cheating_detected')}`\n"
-        + blocker_text
+        f"- Restricted access review: `{review.get('state')}`\n" + blocker_text
     )
 
 
@@ -306,6 +308,13 @@ def register_benchmark_boundary_commands(
     integrity_parser.add_argument("--trajectory-json", required=True)
     integrity_parser.add_argument("--runtime-attestation-json", required=True)
     integrity_parser.add_argument("--policy-json")
+    integrity_parser.add_argument(
+        "--restricted-access-adjudication-json",
+        help=(
+            "Optional compact post-run analyst decision. Suspicion remains "
+            "countable unless this confirms disclosure and causal use."
+        ),
+    )
     integrity_parser.add_argument("--sensitive-value-env", action="append", default=[])
     integrity_parser.add_argument("--require-qualified", action="store_true")
 
@@ -524,6 +533,14 @@ def handle_benchmark_boundary_command(
             if args.policy_json
             else None
         )
+        restricted_access_adjudication = (
+            _read_json_object(
+                args.restricted_access_adjudication_json,
+                "--restricted-access-adjudication-json",
+            )
+            if args.restricted_access_adjudication_json
+            else None
+        )
         sensitive_values: list[str] = []
         for env_name in args.sensitive_value_env:
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", env_name):
@@ -536,6 +553,7 @@ def handle_benchmark_boundary_command(
             trajectory=trajectory,
             runtime_attestation=attestation,
             policy=policy,
+            restricted_access_adjudication=restricted_access_adjudication,
             sensitive_values=sensitive_values,
         )
     except (OSError, UnicodeError, TypeError, ValueError):
