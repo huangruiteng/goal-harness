@@ -124,7 +124,7 @@ def _write_binding(
     )
 
 
-def _runner(calls: list[list[str]]):
+def _runner(calls: list[list[str]], *, normalized_readback: bool = False):
     sent_cards: dict[str, dict[str, Any]] = {}
 
     def run(
@@ -159,6 +159,15 @@ def _runner(calls: list[list[str]]):
             payload = {"ok": True, "data": {"message_id": message_id}}
         elif "+messages-mget" in args:
             message_id = args[args.index("--message-ids") + 1]
+            card = sent_cards[message_id]
+            if normalized_readback:
+                title = card["header"]["title"]["content"]
+                markdown = card["elements"][0]["text"]["content"]
+                footer = card["elements"][2]["elements"][0]["content"]
+                message_content = (
+                    f'<card title="{title}">\n{markdown}\n---\n'
+                    f"📝 {footer}\n</card>"
+                )
             payload = {
                 "ok": True,
                 "data": {
@@ -171,7 +180,15 @@ def _runner(calls: list[list[str]]):
                                 "id": APP_ID,
                             },
                             "msg_type": "interactive",
-                            "body": {"content": json.dumps(sent_cards[message_id])},
+                            **(
+                                {"content": message_content}
+                                if normalized_readback
+                                else {
+                                    "body": {
+                                        "content": json.dumps(sent_cards[message_id])
+                                    }
+                                }
+                            ),
                         }
                     ]
                 },
@@ -185,6 +202,32 @@ def _runner(calls: list[list[str]]):
         }
 
     return run
+
+
+def test_goal_channel_delivery_accepts_normalized_cli_card_readback(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    runtime_root = tmp_path / "runtime"
+    registry_path.parent.mkdir()
+    registry_path.write_text("{}", encoding="utf-8")
+    _write_binding(registry_path)
+    calls: list[list[str]] = []
+
+    result = deliver_periodic_report_to_goal_channel(
+        _request(),
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        extension_activation=_extension_activation(),
+        execute=True,
+        runner=_runner(calls, normalized_readback=True),
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "satisfied"
+    assert result["sink_result"]["readback_verified"] is True
+    assert len(result["sink_result"]["message_results"]) == 2
 
 
 def test_goal_channel_delivery_uses_only_the_bound_project_bot(

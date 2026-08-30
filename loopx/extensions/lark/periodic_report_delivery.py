@@ -190,6 +190,50 @@ def _message_card(value: Mapping[str, Any]) -> Mapping[str, Any] | None:
     return parsed if isinstance(parsed, Mapping) else None
 
 
+def _normalized_card_text(card: Mapping[str, Any]) -> str | None:
+    """Match the lossless interactive-card projection returned by new CLIs."""
+
+    header = card.get("header")
+    elements = card.get("elements")
+    if not isinstance(header, Mapping) or not isinstance(elements, list):
+        return None
+    title = header.get("title")
+    title = title.get("content") if isinstance(title, Mapping) else None
+    if not isinstance(title, str) or not elements:
+        return None
+    first = elements[0]
+    first = first if isinstance(first, Mapping) else {}
+    text = first.get("text")
+    markdown = text.get("content") if isinstance(text, Mapping) else None
+    if not isinstance(markdown, str):
+        return None
+    footer = None
+    if len(elements) == 3 and elements[1] == {"tag": "hr"}:
+        note = elements[2]
+        note_elements = note.get("elements") if isinstance(note, Mapping) else None
+        if isinstance(note_elements, list) and len(note_elements) == 1:
+            note_text = note_elements[0]
+            footer = (
+                note_text.get("content") if isinstance(note_text, Mapping) else None
+            )
+    lines = [f'<card title="{title}">', markdown]
+    if isinstance(footer, str) and footer:
+        lines.extend(["---", f"📝 {footer}"])
+    lines.append("</card>")
+    return "\n".join(lines)
+
+
+def _message_card_matches(
+    value: Mapping[str, Any], expected: Mapping[str, Any] | None
+) -> bool:
+    if expected is None:
+        return False
+    if _message_card(value) == expected:
+        return True
+    content = value.get("content")
+    return isinstance(content, str) and content == _normalized_card_text(expected)
+
+
 def _message_sender(value: Mapping[str, Any]) -> tuple[str, str]:
     sender = value.get("sender")
     sender = sender if isinstance(sender, Mapping) else {}
@@ -412,7 +456,7 @@ class _GoalChannelDeliverySession:
             result.get("returncode") == 0
             and message is not None
             and contains_exact_field(message, "chat_id", str(self.route["chat_id"]))
-            and _message_card(message) == expected_card
+            and _message_card_matches(message, expected_card)
             and sender_type == "app"
             and sender_app_id == self.route["bot_app_id"]
             and auth_verified(
