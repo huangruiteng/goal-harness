@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from .chat import (
     CHAT_AGENT_RESPONSE_SCHEMA_VERSION,
@@ -30,6 +33,10 @@ class CodexChatTimeoutError(CodexChatAgentError):
     pass
 
 
+class _LegacyModelCatalogSchemaError(RuntimeError):
+    pass
+
+
 def _host_tool_gate(summary: str, next_action: str) -> dict[str, str]:
     return {
         "kind": "host_tool_gate",
@@ -44,6 +51,71 @@ def _approval_gate(summary: str) -> dict[str, str]:
         "summary": summary,
         "next_action": "Review the request in the active host before continuing.",
     }
+
+
+def _is_legacy_model_catalog_error(value: Any) -> bool:
+    # App-server currently reports catalog schema failures only as JSON-RPC
+    # prose. Keep this compatibility classifier bound to its three stable
+    # schema tokens until the host exposes a typed configuration error code.
+    if not isinstance(value, dict):
+        return False
+    message = str(value.get("message") or "").lower()
+    return (
+        "model_catalog_json" in message
+        and "missing field" in message
+        and "base_instructions" in message
+    )
+
+
+def _model_catalog_compatibility_error() -> CodexChatAgentError:
+    return CodexChatAgentError(
+        "Codex app-server model catalog compatibility retry failed",
+        gate=_host_tool_gate(
+            "Codex app-server could not load a compatible model catalog for LoopX Chat.",
+            "Update the Codex CLI model catalog or remove its legacy override, then retry the session.",
+        ),
+    )
+
+
+@contextmanager
+def _current_builtin_model_catalog(codex_bin: str) -> Iterator[Path]:
+    """Materialize the selected Codex binary's current built-in catalog only."""
+
+    with tempfile.TemporaryDirectory(prefix="loopx-chat-codex-home-") as codex_home:
+        env = os.environ.copy()
+        env["CODEX_HOME"] = codex_home
+        try:
+            result = subprocess.run(
+                [codex_bin, "debug", "models"],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            payload = json.loads(result.stdout) if result.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+            raise _model_catalog_compatibility_error() from exc
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(models, list) or not models or any(
+            not isinstance(model, dict) or not str(model.get("base_instructions") or "").strip()
+            for model in models
+        ):
+            raise _model_catalog_compatibility_error()
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix="loopx-chat-model-catalog-",
+            suffix=".json",
+            delete=False,
+        ) as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+            catalog_path = Path(handle.name)
+        try:
+            yield catalog_path
+        finally:
+            catalog_path.unlink(missing_ok=True)
 
 
 def _reader(stream: Any, messages: "queue.Queue[dict[str, Any] | Exception]") -> None:
@@ -184,6 +256,7 @@ class CodexChatAgentSession:
     hard_timeout_sec: float = 900.0
     next_request_id: int = 5
     current_turn_id: str = ""
+    model_catalog_compatibility_applied: bool = False
     _pending_events: "queue.Queue[dict[str, Any]]" = field(default_factory=queue.Queue, repr=False)
     _response_waiters: dict[int, "queue.Queue[dict[str, Any]]"] = field(
         default_factory=dict,
@@ -207,6 +280,7 @@ class CodexChatAgentSession:
         hard_timeout_sec: float = 900.0,
         resume_thread_id: str | None = None,
         execution_mode: bool = False,
+        _compatibility_catalog_path: Path | None = None,
     ) -> "CodexChatAgentSession":
         resolved = shutil.which(codex_bin)
         if not resolved:
@@ -218,9 +292,18 @@ class CodexChatAgentSession:
                 ),
             )
         root = work_dir.resolve()
+        command = [resolved, "app-server"]
+        if _compatibility_catalog_path is not None:
+            command.extend(
+                [
+                    "-c",
+                    f"model_catalog_json={json.dumps(str(_compatibility_catalog_path))}",
+                ]
+            )
+        command.extend(["--listen", "stdio://"])
         try:
             process = subprocess.Popen(
-                [resolved, "app-server", "--listen", "stdio://"],
+                command,
                 cwd=str(root),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -251,6 +334,7 @@ class CodexChatAgentSession:
             idle_timeout_sec=idle_timeout_sec,
             hard_timeout_sec=hard_timeout_sec,
             execution_mode=execution_mode,
+            model_catalog_compatibility_applied=_compatibility_catalog_path is not None,
         )
         try:
             session._request(
@@ -287,6 +371,23 @@ class CodexChatAgentSession:
             # to be treated as continuation ticks instead of the current user task.
             session.next_request_id = 3
             return session
+        except _LegacyModelCatalogSchemaError as exc:
+            session.close()
+            if _compatibility_catalog_path is not None:
+                raise _model_catalog_compatibility_error() from exc
+            with _current_builtin_model_catalog(resolved) as catalog_path:
+                return cls.start(
+                    codex_bin=resolved,
+                    work_dir=root,
+                    goal_id=goal_id,
+                    objective=objective,
+                    response_timeout_sec=response_timeout_sec,
+                    idle_timeout_sec=idle_timeout_sec,
+                    hard_timeout_sec=hard_timeout_sec,
+                    resume_thread_id=resume_thread_id,
+                    execution_mode=execution_mode,
+                    _compatibility_catalog_path=catalog_path,
+                )
         except Exception:
             session.close()
             raise
@@ -410,6 +511,10 @@ class CodexChatAgentSession:
                                 continue
                 if message.get("id") == request_id:
                     if message.get("error"):
+                        if method in {"thread/start", "thread/resume"} and _is_legacy_model_catalog_error(
+                            message.get("error")
+                        ):
+                            raise _LegacyModelCatalogSchemaError
                         raise self._runtime_error(f"Codex app-server rejected {method}.")
                     result = message.get("result")
                     return result if isinstance(result, dict) else {}
