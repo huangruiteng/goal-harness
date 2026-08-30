@@ -111,11 +111,6 @@ from .native_codex_profile import (
     native_codex_profile_environment,
     render_native_codex_goal_prompt,
 )
-from .plan_fidelity import (
-    BENCHMARK_PLAN_FIDELITY_SCHEMA_VERSION,
-    BenchmarkPlanRole,
-    build_benchmark_plan_fidelity_receipt,
-)
 from .provider_gateway import (
     RunnerOwnedProviderGateway,
     serve_runner_owned_provider_gateway,
@@ -182,7 +177,6 @@ __all__ = [
     "BENCHMARK_FOUR_ARM_SPEC_SCHEMA_VERSION",
     "BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION",
     "BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION",
-    "BENCHMARK_PLAN_FIDELITY_SCHEMA_VERSION",
     "BENCHMARK_RESOURCE_HEADROOM_RECEIPT_SCHEMA_VERSION",
     "BENCHMARK_RESTRICTED_ACCESS_ADJUDICATION_SCHEMA_VERSION",
     "BENCHMARK_RUNTIME_CONTINUITY_SCHEMA_VERSION",
@@ -203,7 +197,6 @@ __all__ = [
     "RUN_PERMISSION_QUOTA_PROJECTION_SCHEMA_VERSION",
     "BenchmarkEventWindowState",
     "BenchmarkJobReceiptState",
-    "BenchmarkPlanRole",
     "BenchmarkRunnerOwnerState",
     "BenchmarkRuntimeClassification",
     "BenchmarkRuntimeContinuityClassification",
@@ -243,7 +236,6 @@ __all__ = [
     "build_benchmark_four_arm_contract",
     "build_benchmark_four_arm_contract_from_spec",
     "build_benchmark_integrity_qualification",
-    "build_benchmark_plan_fidelity_receipt",
     "build_benchmark_runtime_continuity",
     "build_benchmark_runtime_observation",
     "build_native_codex_isolation_envelope",

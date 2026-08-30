@@ -272,64 +272,18 @@ permissions, host and cross-trial isolation, credential propagation, canonical
 case-local state, verifier ordering, public/private evidence reduction, and matched-
 pair countability.
 
-## Treatment plan fidelity
+## Treatment fidelity boundary
 
-A treatment adapter may require the solver to create distinct technical-work and
-independent-validation Todos before editing. Do not qualify that requirement from
-Todo title words or from one hard-coded spelling of `action_kind`. Providers may
-use different exact public-safe tokens for the same semantic role.
+Treatment fidelity proves that the preregistered experimental factor actually ran,
+for example that guided startup preceded product edits and the solver authored its
+own business decomposition. It must not require an implementation-classified Todo
+merely because an arm uses LoopX. Todo role labels may be recorded as diagnostics,
+but affect countability only when that exact role requirement was preregistered.
 
-Declare the provider's accepted tokens explicitly and reduce only the typed action
-kinds through the stable benchmark roles:
-
-```python
-from loopx.capabilities.benchmark_toolkit import (
-    BenchmarkPlanRole,
-    build_benchmark_plan_fidelity_receipt,
-)
-
-receipt = build_benchmark_plan_fidelity_receipt(
-    action_kinds=["implementation", "implementation", "validation"],
-    role_action_kinds={
-        BenchmarkPlanRole.TECHNICAL_WORK: ["implement", "implementation"],
-        BenchmarkPlanRole.INDEPENDENT_VALIDATION: ["validate", "validation"],
-    },
-    required_role_counts={
-        BenchmarkPlanRole.TECHNICAL_WORK: 1,
-        BenchmarkPlanRole.INDEPENDENT_VALIDATION: 1,
-    },
-)
-assert receipt["qualified"] is True
-```
-
-Adapters that do not import the Python API can invoke the same shipped boundary:
-
-```bash
-loopx benchmark plan-fidelity \
-  --action-kind implementation \
-  --action-kind independent_validation \
-  --role-action-kind technical_work=implementation \
-  --role-action-kind independent_validation=independent_validation \
-  --required-role-count technical_work=1 \
-  --required-role-count independent_validation=1 \
-  --require-qualified \
-  --format json
-```
-
-This command is the provider-neutral integration seam for treatment adapters. It
-returns non-zero with a compact receipt when the plan is unqualified or its typed
-contract is invalid, so a runner can stop before recording a qualified closeout.
-
-Matching is exact. A token such as `implementation_detail` does not inherit the
-`implementation` role unless the provider declares it. One token cannot belong to
-two roles, required roles must have an explicit mapping, and invalid contracts fail
-closed. The public-safe receipt records semantic counts and blockers, never Todo
-text, raw action-kind values, paths, or trajectory content.
-
-This reducer proves only the declared plan shape. It does not prove that the Todos
-were created before editing, that their contents cover the task, that validation
-was independent, that implementation is correct, or that the run is score-countable.
-The runner and post-run integrity/fidelity adapters retain those responsibilities.
+The former `plan-fidelity` command and Python API were removed because no shipped
+benchmark runtime consumed them and a generic action-kind taxonomy is not a valid
+treatment gate. A study that preregisters a role-based factor owns that narrow
+adapter check; it must not promote the check into a default LoopX requirement.
 
 ## Integrity qualification
 

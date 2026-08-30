@@ -123,26 +123,6 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "command": (
-                "loopx benchmark plan-fidelity "
-                "--action-kind implementation "
-                "--action-kind independent_validation "
-                "--role-action-kind technical_work=implementation "
-                "--role-action-kind independent_validation=independent_validation "
-                "--required-role-count technical_work=1 "
-                "--required-role-count independent_validation=1 "
-                "--require-qualified --format json"
-            ),
-            "purpose": (
-                "Reduce a provider's exact public-safe Todo action kinds to stable "
-                "treatment-plan roles before closeout."
-            ),
-            "write_boundary": (
-                "read-only typed plan facts; emits semantic counts and blockers, "
-                "never Todo text or raw action-kind values"
-            ),
-        },
-        {
-            "command": (
                 "loopx benchmark experiment-board-upsert --goal-id <goal-id> "
                 "--row-json <compact-row.json> --execute --format json"
             ),
@@ -275,7 +255,6 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "upsert_preregistered_or_running_row_when_a_run_starts",
             "classify_exact_runtime_observation_during_active_monitor_cycles",
             "require_runtime_continuity_before_terminal_closeout_write",
-            "qualify_treatment_plan_roles_from_typed_action_kinds",
             "adjudicate_restricted_access_suspicion_after_solver_and_score_terminal",
             "upsert_terminal_score_countability_effort_and_insight_status",
             "release_case_slot_after_terminal_or_runner_invalid_transition",
@@ -331,24 +310,6 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "Keep diagnostic-only explore rows separate and make paired claims "
             "only from matched_pair_countable comparisons."
         ),
-        "treatment_plan_fidelity": {
-            "stable_roles": [
-                "technical_work",
-                "independent_validation",
-                "review_refine",
-            ],
-            "matching": "provider_declared_exact_action_kind_tokens",
-            "required_boundary": (
-                "Use typed action_kind values through the benchmark plan-fidelity "
-                "reducer; do not infer semantic roles from Todo title text, "
-                "substrings, or one provider's preferred spelling."
-            ),
-            "authority_boundary": (
-                "Plan-role qualification proves only declared Todo shape; it does "
-                "not prove ordering, task coverage, validation independence, "
-                "technical correctness, integrity, or score countability."
-            ),
-        },
     },
     "four_arm_study": {
         "benchmark_start_hint": (
