@@ -132,7 +132,7 @@ def _write_editorial_response(first: dict[str, object]) -> None:
         "language": "zh-CN",
         "title": "项目阶段分析周报",
         "kicker": "阶段分析周报",
-        "period_label": "2026-08-23 — 2026-08-30",
+        "period_label": request["actual_work_window"]["period_label"],
         "highlights": [
             {
                 "highlight_id": "coverage",
@@ -237,6 +237,22 @@ def _reject_approval(
             )
         updated_lines.append(line)
     state_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+
+
+def _append_cancelled_approval(
+    *, state_path: Path, approval_scope: str, updated_at: str
+) -> None:
+    state = state_path.read_text(encoding="utf-8")
+    cancellation = (
+        "\n- [x] Cancel the superseded report payload.\n"
+        "  <!-- loopx:todo todo_id=todo_cancelled status=done "
+        "task_class=user_gate action_kind=cancel_periodic_report_payload "
+        f"decision_scope={approval_scope} decision_outcome=cancel "
+        f"bound_agent={AGENT_ID} blocks_agent={AGENT_ID} "
+        f"completed_at={updated_at} updated_at={updated_at} -->\n"
+    )
+    state = state.replace("\n## Agent Todo\n", cancellation + "\n## Agent Todo\n")
+    state_path.write_text(state, encoding="utf-8")
 
 
 def test_pending_intent_projects_a_ts_validated_governed_action(tmp_path: Path) -> None:
@@ -481,6 +497,51 @@ def test_rejected_approval_reopens_the_intent_in_a_fresh_attempt(
     assert "retry-" in reopened_again["editorial_request_path"]
 
 
+def test_later_cancel_reopens_an_already_approved_generation(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    _write_editorial_response(required)
+    first = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    state_path = registry.parent / "ACTIVE_GOAL_STATE.md"
+    state = state_path.read_text(encoding="utf-8").replace(
+        "status=open task_class=user_gate action_kind=approve_periodic_report_payload",
+        "status=done task_class=user_gate action_kind=approve_periodic_report_payload "
+        "decision_outcome=approve completed_at=2026-08-30T10:00:00Z",
+    )
+    state_path.write_text(state, encoding="utf-8")
+    _append_cancelled_approval(
+        state_path=state_path,
+        approval_scope=str(first["approval_scope"]),
+        updated_at="2026-08-30T10:05:00Z",
+    )
+
+    reopened = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+
+    assert reopened["status"] == "editorial_required"
+    assert reopened["editorial_request_path"] != required["editorial_request_path"]
+    assert "retry-" in reopened["editorial_request_path"]
+
+
 def test_consumption_rejects_english_or_flat_editorial_response(
     tmp_path: Path,
 ) -> None:
@@ -507,6 +568,23 @@ def test_consumption_rejects_english_or_flat_editorial_response(
             execute=True,
         )
 
+    _write_editorial_response(required)
+    response = json.loads(response_path.read_text(encoding="utf-8"))
+    response["period_label"] = "2026-08-23 — 2026-08-30"
+    response_path.write_text(
+        json.dumps(response, ensure_ascii=False), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="must match the actual work window"):
+        consume_pending_periodic_report_intent(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            execute=True,
+        )
+
+    _write_editorial_response(required)
+    response = json.loads(response_path.read_text(encoding="utf-8"))
     response["title"] = "项目阶段分析周报"
     response["sections"] = response["sections"][::-1]
     response_path.write_text(
@@ -581,6 +659,75 @@ def test_consumption_reuses_the_exact_frozen_fact_request(tmp_path: Path) -> Non
 
     assert replay["status"] == "editorial_required"
     assert request_path.read_text(encoding="utf-8") == original
+
+
+def test_consumption_derives_the_period_from_actual_report_facts(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    state_path = registry.parent / "ACTIVE_GOAL_STATE.md"
+    state_path.write_text(
+        state_path.read_text(encoding="utf-8").replace(
+            "updated_at=2026-08-30T09:00:00Z",
+            "updated_at=2026-08-29T22:42:26+08:00",
+        ),
+        encoding="utf-8",
+    )
+
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    request = json.loads(
+        Path(required["editorial_request_path"]).read_text(encoding="utf-8")
+    )
+
+    assert request["actual_work_window"] == {
+        "start_at": "2026-08-29T14:42:26+00:00",
+        "end_at": "2026-08-30T09:00:00+00:00",
+        "period_label": "2026-08-29 22:42 — 2026-08-30 17:00（北京时间）",
+        "source": "agent_run_history_or_report_facts",
+    }
+
+
+def test_consumption_prefers_real_agent_run_start_over_completion_timestamps(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    run_dir = runtime / "goals" / GOAL_ID / "runs"
+    run_dir.mkdir(parents=True)
+    (run_dir / "index.jsonl").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-08-29T19:24:27+08:00",
+                "agent_id": AGENT_ID,
+                "classification": "state_refreshed",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    request = json.loads(
+        Path(required["editorial_request_path"]).read_text(encoding="utf-8")
+    )
+
+    assert request["actual_work_window"]["start_at"] == (
+        "2026-08-29T11:24:27+00:00"
+    )
+    assert request["actual_work_window"]["period_label"] == (
+        "2026-08-29 19:24 — 2026-08-30 17:00（北京时间）"
+    )
 
 
 def test_cross_agent_or_malformed_intent_fails_closed(tmp_path: Path) -> None:

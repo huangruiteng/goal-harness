@@ -147,7 +147,7 @@ def _decision_scope_text(value: object) -> str:
     return str(value or "")
 
 
-def _rejected_approval_revision(
+def _superseding_approval_revision(
     *,
     registry_path: Path,
     goal_id: str,
@@ -173,20 +173,21 @@ def _rejected_approval_revision(
     )
     user_summary = parsed.get("user_todos")
     items = user_summary.get("items") if isinstance(user_summary, Mapping) else []
-    rejected = [
+    superseding = [
         item
         for item in items or []
         if isinstance(item, Mapping)
         and item.get("status") == "done"
-        and item.get("action_kind") == "approve_periodic_report_payload"
-        and item.get("decision_outcome") == "reject"
+        and item.get("action_kind")
+        in {"approve_periodic_report_payload", "cancel_periodic_report_payload"}
+        and item.get("decision_outcome") in {"reject", "cancel"}
         and _decision_scope_text(item.get("decision_scope")) == approval_scope
         and str(item.get("bound_agent") or item.get("blocks_agent") or "")
         == agent_id
     ]
-    if not rejected:
+    if not superseding:
         return None
-    latest = max(rejected, key=lambda item: str(item.get("updated_at") or ""))
+    latest = max(superseding, key=lambda item: str(item.get("updated_at") or ""))
     revision = f"{latest.get('todo_id')}:{latest.get('updated_at')}"
     return hashlib.sha256(revision.encode("utf-8")).hexdigest()[:16]
 
@@ -236,7 +237,7 @@ def _next_attempt_revision(
 
     candidate_revisions: list[str] = []
     for receipt in receipts:
-        revision = _rejected_approval_revision(
+        revision = _superseding_approval_revision(
             registry_path=registry_path,
             goal_id=goal_id,
             agent_id=agent_id,
@@ -503,11 +504,19 @@ def _progress_facts(
 def _build_editorial_request(
     *,
     intent: Mapping[str, Any],
+    runtime_root: Path,
     goal_id: str,
     agent_id: str,
     completed_at: str,
     facts: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    work_window = _actual_work_window(
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        facts=facts,
+        completed_at=completed_at,
+    )
     request: dict[str, Any] = {
         "schema_version": EDITORIAL_REQUEST_SCHEMA,
         "goal_id": goal_id,
@@ -528,6 +537,7 @@ def _build_editorial_request(
             ],
         },
         "completed_at": completed_at,
+        "actual_work_window": work_window,
         "facts": facts,
         "boundary": {
             "agent_authors_business_judgment": True,
@@ -537,6 +547,92 @@ def _build_editorial_request(
     }
     request["request_digest"] = _canonical_digest(request)
     return request
+
+
+def _actual_work_window(
+    *,
+    runtime_root: Path,
+    goal_id: str,
+    agent_id: str,
+    facts: list[dict[str, Any]],
+    completed_at: str,
+) -> dict[str, str]:
+    end = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+    observed: list[datetime] = []
+    run_index = runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
+    if run_index.is_file():
+        try:
+            rows = run_index.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            rows = []
+        for raw_row in rows:
+            try:
+                row = json.loads(raw_row)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, Mapping) or row.get("agent_id") != agent_id:
+                continue
+            raw = str(row.get("generated_at") or "").strip()
+            try:
+                value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if value.tzinfo is None or end.tzinfo is None:
+                continue
+            value = value.astimezone(end.tzinfo)
+            if value <= end:
+                observed.append(value)
+    for fact in facts:
+        raw = str(fact.get("completed_at") or fact.get("updated_at") or "").strip()
+        if not raw:
+            continue
+        try:
+            value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if value.tzinfo is None or end.tzinfo is None:
+            continue
+        value = value.astimezone(end.tzinfo)
+        if value <= end:
+            observed.append(value)
+    start = min(observed, default=end)
+    # The document protocol requires a non-empty half-open window. A stage with
+    # only one timestamp still represents that exact completion instant.
+    document_start = start if start < end else end - timedelta(microseconds=1)
+    display_tz = end.tzinfo
+    timezone_label = "UTC"
+    registry_tz = None
+    try:
+        from zoneinfo import ZoneInfo
+
+        registry_tz = ZoneInfo("Asia/Shanghai")
+    except (ImportError, ValueError):
+        registry_tz = None
+    if registry_tz is not None:
+        display_tz = registry_tz
+        timezone_label = "北京时间"
+    display_start = start.astimezone(display_tz)
+    display_end = end.astimezone(display_tz)
+    offset = display_end.utcoffset()
+    if offset not in {timedelta(hours=8), timedelta(0)}:
+        total_minutes = int((offset or timedelta()).total_seconds() // 60)
+        sign = "+" if total_minutes >= 0 else "-"
+        hours, minutes = divmod(abs(total_minutes), 60)
+        timezone_label = f"UTC{sign}{hours:02d}:{minutes:02d}"
+    if start == end:
+        period_label = f"{display_end:%Y-%m-%d %H:%M}（{timezone_label}）"
+    else:
+        period_label = (
+            f"{display_start:%Y-%m-%d %H:%M} — "
+            f"{display_end:%Y-%m-%d %H:%M}"
+            f"（{timezone_label}）"
+        )
+    return {
+        "start_at": document_start.isoformat(),
+        "end_at": end.isoformat(),
+        "period_label": period_label,
+        "source": "agent_run_history_or_report_facts",
+    }
 
 
 def _load_frozen_editorial_request(
@@ -594,6 +690,15 @@ def _load_editorial_response(
     title = " ".join(str(response.get("title") or "").split())
     if not title or _chinese_density(title) < 0.45:
         raise ValueError("periodic-report editorial title must be Chinese-first")
+    work_window = request.get("actual_work_window")
+    if not isinstance(work_window, Mapping):
+        raise ValueError("periodic-report actual work window is missing")
+    expected_period_label = str(work_window.get("period_label") or "")
+    supplied_period_label = str(response.get("period_label") or "")
+    if supplied_period_label and supplied_period_label != expected_period_label:
+        raise ValueError(
+            "periodic-report editorial period_label must match the actual work window"
+        )
     raw_sections = response.get("sections")
     if not isinstance(raw_sections, list):
         raise ValueError("periodic-report editorial sections must be a list")
@@ -692,7 +797,7 @@ def _load_editorial_response(
         "editorial": {
             "language": "zh-CN",
             "kicker": str(response.get("kicker") or "阶段分析周报"),
-            "period_label": str(response.get("period_label") or ""),
+            "period_label": expected_period_label,
             "highlights": highlights,
         },
         "sections": normalized_sections,
@@ -738,7 +843,6 @@ def consume_pending_periodic_report_intent(
     payload = intent["payload"]
     stage = payload["stage_completion"]
     completed_at = str(stage["completed_at"])
-    end = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
     facts = _progress_facts(
         registry_path=registry_path,
         goal_id=goal_id,
@@ -779,6 +883,7 @@ def consume_pending_periodic_report_intent(
         agent_id=agent_id,
     ) or _build_editorial_request(
         intent=intent,
+        runtime_root=runtime_root,
         goal_id=goal_id,
         agent_id=agent_id,
         completed_at=completed_at,
@@ -807,13 +912,14 @@ def consume_pending_periodic_report_intent(
         response_path=response_path,
     )
     source = _build_authored_source(authored, completed_at=completed_at)
+    work_window = editorial_request["actual_work_window"]
     profile_ref = payload["profile_ref"]
     document = build_periodic_report_document(
         title=str(authored["title"]),
         generated_at=completed_at,
         period_window={
-            "start_at": (end - timedelta(days=7)).isoformat(),
-            "end_at": end.isoformat(),
+            "start_at": str(work_window["start_at"]),
+            "end_at": str(work_window["end_at"]),
         },
         profile={
             "profile_id": profile_ref["profile_id"],
