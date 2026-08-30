@@ -66,6 +66,10 @@ def test_benchmark_toolkit_catalog_exposes_integrity_boundary() -> None:
         protocol["schema_version"] == "benchmark_integrity_qualification_v0"
         for protocol in capability["implemented_protocols"]
     )
+    assert any(
+        protocol["schema_version"] == "benchmark_restricted_access_adjudication_v0"
+        for protocol in capability["implemented_protocols"]
+    )
 
 
 def _write_manifest(
