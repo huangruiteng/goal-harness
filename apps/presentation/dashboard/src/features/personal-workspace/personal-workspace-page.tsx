@@ -1321,9 +1321,10 @@ export function PersonalWorkspacePage({
       });
       if (intentRoute.route === "clarify") {
         setComposer(message);
-        setActionFeedback(intentRoute.missingFields.includes("resume_when")
-          ? t("composer.clarifyDefer")
-          : t("composer.clarifySingleAction"));
+        let clarification = t("composer.clarifySingleAction");
+        if (intentRoute.missingFields.includes("resume_when")) clarification = t("composer.clarifyDefer");
+        else if (intentRoute.missingFields.includes("protected_action_target")) clarification = t("composer.clarifyProtectedTarget");
+        setActionFeedback(clarification);
         return;
       }
       if (intentRoute.actionKind === "goal.create") {
