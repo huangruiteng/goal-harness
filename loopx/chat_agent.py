@@ -16,6 +16,7 @@ from .chat import (
     CHAT_REVIEW_OPEN_TAG,
     VisibleResponseStreamFilter,
     parse_agent_response,
+    redact_local_paths,
 )
 
 
@@ -83,6 +84,16 @@ def _event_turn_id(message: dict[str, Any]) -> str:
 def _event_thread_id(message: dict[str, Any]) -> str:
     params = message.get("params")
     return str(params.get("threadId") or "") if isinstance(params, dict) else ""
+
+
+def _error_message(payload: Any, *, protected_paths: list[Path]) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    value = payload.get("message")
+    if not isinstance(value, str):
+        return ""
+    compact = " ".join(value.split())
+    return redact_local_paths(compact, protected_paths=protected_paths)[:500].strip()
 
 
 def _agent_item_text(message: dict[str, Any]) -> str:
@@ -278,7 +289,15 @@ class CodexChatAgentSession:
             session.close()
             raise
 
-    def _runtime_error(self, summary: str) -> CodexChatAgentError:
+    def _runtime_error(
+        self,
+        summary: str,
+        *,
+        detail_payload: Any = None,
+    ) -> CodexChatAgentError:
+        detail = _error_message(detail_payload, protected_paths=[self.work_dir])
+        if detail:
+            summary = f"{summary} {detail}"
         return CodexChatAgentError(
             summary,
             gate=_host_tool_gate(
@@ -397,7 +416,10 @@ class CodexChatAgentSession:
                                 continue
                 if message.get("id") == request_id:
                     if message.get("error"):
-                        raise self._runtime_error(f"Codex app-server rejected {method}.")
+                        raise self._runtime_error(
+                            f"Codex app-server rejected {method}.",
+                            detail_payload=message.get("error"),
+                        )
                     result = message.get("result")
                     return result if isinstance(result, dict) else {}
                 raise self._runtime_error("Codex app-server returned an unexpected response.")
@@ -556,9 +578,35 @@ class CodexChatAgentSession:
                         visible_delta_count += 1
                         on_event("answer.delta", {"text": visible})
             elif method == "turn/completed":
+                turn = params.get("turn") if isinstance(params, dict) else None
+                turn_status = str(turn.get("status") or "") if isinstance(turn, dict) else ""
+                if turn_status == "failed":
+                    raise self._runtime_error(
+                        "Codex app-server reported a terminal turn failure.",
+                        detail_payload=turn.get("error") if isinstance(turn, dict) else None,
+                    )
+                if turn_status == "interrupted":
+                    raise CodexChatAgentError(
+                        "Codex app-server reported an interrupted turn.",
+                        error_code="interrupted",
+                        gate=_host_tool_gate(
+                            "The Codex Chat turn was interrupted.",
+                            "Send a new message to continue in the same session.",
+                        ),
+                    )
                 break
             elif method == "error":
-                raise self._runtime_error("Codex app-server reported a turn error.")
+                if isinstance(params, dict) and params.get("willRetry") is True:
+                    if on_event:
+                        on_event(
+                            "agent.phase",
+                            {"label": "Codex 正在重试", "method": method},
+                        )
+                    continue
+                raise self._runtime_error(
+                    "Codex app-server reported a turn error.",
+                    detail_payload=params.get("error") if isinstance(params, dict) else None,
+                )
         visible_tail = display_filter.finish()
         if visible_tail and on_event:
             visible_delta_count += 1
