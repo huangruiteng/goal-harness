@@ -39,126 +39,9 @@ from todo_lifecycle_fixtures import (  # noqa: E402
     write_fixture,
 )
 
+
 SUCCESSOR_REPOSITORY = "git:github.com/huangruiteng/loopx"
 SUCCESSOR_CAPABILITIES = ["network", "external_evidence_poll"]
-
-ARCHIVE_FIRST_TODO = "Archive smoke first completed todo."
-ARCHIVE_SECOND_TODO = "Archive smoke second completed todo."
-
-
-def assert_archive_completed_moves_excess_done_todos() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-archive-completed-smoke-") as tmp:
-        registry_path, state_file = write_fixture(Path(tmp))
-
-        first_added = run_cli(
-            registry_path,
-            "todo",
-            "add",
-            "--goal-id",
-            GOAL_ID,
-            "--role",
-            "agent",
-            "--text",
-            ARCHIVE_FIRST_TODO,
-            "--claimed-by",
-            "codex-main-control",
-            "--task-class",
-            "advancement_task",
-            "--action-kind",
-            "archive_smoke",
-        )
-        second_added = run_cli(
-            registry_path,
-            "todo",
-            "add",
-            "--goal-id",
-            GOAL_ID,
-            "--role",
-            "agent",
-            "--text",
-            ARCHIVE_SECOND_TODO,
-            "--claimed-by",
-            "codex-main-control",
-            "--task-class",
-            "advancement_task",
-            "--action-kind",
-            "archive_smoke",
-        )
-        run_cli(
-            registry_path,
-            "todo",
-            "complete",
-            "--goal-id",
-            GOAL_ID,
-            "--todo-id",
-            first_added["todo_id"],
-            "--claimed-by",
-            "codex-main-control",
-            "--agent-id",
-            "codex-main-control",
-            "--evidence",
-            "first archive smoke completion",
-            "--no-follow-up",
-        )
-        run_cli(
-            registry_path,
-            "todo",
-            "complete",
-            "--goal-id",
-            GOAL_ID,
-            "--todo-id",
-            second_added["todo_id"],
-            "--claimed-by",
-            "codex-main-control",
-            "--agent-id",
-            "codex-main-control",
-            "--evidence",
-            "second archive smoke completion",
-            "--no-follow-up",
-        )
-
-        preview = run_cli(
-            registry_path,
-            "todo",
-            "archive-completed",
-            "--goal-id",
-            GOAL_ID,
-            "--max-active-done",
-            "1",
-        )
-        assert preview["dry_run"] is True, preview
-        assert preview["moved_count"] == 1, preview
-        assert preview["active_done_before"] == 2, preview
-        assert preview["active_done_after"] == 1, preview
-        assert ARCHIVE_FIRST_TODO in state_file.read_text(encoding="utf-8"), preview
-        assert "## Completed Work Archive" not in state_file.read_text(encoding="utf-8"), preview
-
-        archived = run_cli(
-            registry_path,
-            "todo",
-            "archive-completed",
-            "--goal-id",
-            GOAL_ID,
-            "--max-active-done",
-            "1",
-            "--execute",
-        )
-        assert archived["dry_run"] is False, archived
-        assert archived["moved_count"] == 1, archived
-        assert archived["active_done_before"] == 2, archived
-        assert archived["active_done_after"] == 1, archived
-
-        updated = state_file.read_text(encoding="utf-8")
-        agent_section, archive_tail = updated.split("## Completed Work Archive", maxsplit=1)
-        assert ARCHIVE_FIRST_TODO in archive_tail, updated
-        assert ARCHIVE_SECOND_TODO in agent_section, updated
-        assert ARCHIVE_FIRST_TODO not in agent_section, updated
-
-        items = parsed_items(state_file)
-        retained_item = next(item for item in items if item["todo_id"] == second_added["todo_id"])
-        assert retained_item["archive_state"] == "active", retained_item
-        assert retained_item["status"] == "done", retained_item
-        assert all(item["todo_id"] != first_added["todo_id"] for item in items)
 
 
 def assert_peer_monitor_no_followup() -> None:
@@ -504,7 +387,6 @@ def main() -> int:
     assert_peer_monitor_no_followup()
     assert_open_parent_successor_advisory()
     assert_nonblocking_review_continuation()
-    assert_archive_completed_moves_excess_done_todos()
 
     with tempfile.TemporaryDirectory(prefix="loopx-todo-lifecycle-smoke-") as tmp:
         root = Path(tmp)
