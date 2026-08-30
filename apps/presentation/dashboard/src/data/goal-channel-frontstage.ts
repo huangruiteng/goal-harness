@@ -312,3 +312,189 @@ export const sampleGoalChannelProjection: GoalChannelProjection = {
     write_authority: "none",
   },
 };
+
+// ---------------------------------------------------------------------------
+// Operator state semantics.
+//
+// Classification is exact and typed: only tokens from the shipped control-plane
+// vocabularies (loopx/control_plane/work_items/delivery_outcome.py, todo
+// action kinds, gate kinds, lease statuses) map to a tone. Unknown values stay
+// neutral — absence of evidence is not success — and todo titles are display
+// copy only, never classification input.
+// ---------------------------------------------------------------------------
+
+export type BadgeTone = "neutral" | "success" | "warning" | "info" | "danger";
+
+export type OperatorStateSignal = {
+  helper: string;
+  label: string;
+  tone: BadgeTone;
+  value: string;
+};
+
+// DeliveryOutcome enum plus the shipped failure dispositions.
+const DELIVERY_OUTCOME_TONES: Record<string, BadgeTone> = {
+  outcome_progress: "success",
+  primary_goal_outcome: "success",
+  outcome_gap: "danger",
+  delivery_failed: "danger",
+  delivery_blocked: "danger",
+  surface_only: "neutral",
+  unknown: "neutral",
+  not_configured: "neutral",
+};
+
+// Outcome tokens that carry valence when seen as event classifications.
+const VALENCED_OUTCOME_TOKENS = new Set([
+  "outcome_progress",
+  "primary_goal_outcome",
+  "outcome_gap",
+  "delivery_failed",
+  "delivery_blocked",
+]);
+
+const ACTION_KIND_TONES: Record<string, BadgeTone> = {
+  workspace_repair: "warning",
+  capability_wait: "warning",
+  capability_repair: "warning",
+};
+
+const EVENT_CLASSIFICATION_TONES: Record<string, BadgeTone> = {
+  validated_progress: "success",
+  delivery_outcome: "info",
+  operator_gate_recorded: "info",
+  capability_wait: "warning",
+  workspace_repair: "warning",
+  outcome_progress: "success",
+  primary_goal_outcome: "success",
+  outcome_gap: "danger",
+  delivery_failed: "danger",
+  delivery_blocked: "danger",
+};
+
+const LEASE_STATUS_TONES: Record<string, BadgeTone> = {
+  hard_lease: "success",
+  active: "success",
+  soft_claim: "info",
+  claimed: "info",
+  expired: "neutral",
+  released: "neutral",
+};
+
+function normalizeToken(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+export function deliveryOutcomeTone(outcome?: string | null): BadgeTone {
+  return DELIVERY_OUTCOME_TONES[normalizeToken(outcome)] ?? "neutral";
+}
+
+export function actionKindTone(actionKind?: string | null): BadgeTone {
+  return ACTION_KIND_TONES[normalizeToken(actionKind)] ?? "neutral";
+}
+
+export function eventClassificationTone(classification?: string | null): BadgeTone {
+  return EVENT_CLASSIFICATION_TONES[normalizeToken(classification)] ?? "neutral";
+}
+
+export function leaseStatusTone(status?: string | null): BadgeTone {
+  return LEASE_STATUS_TONES[normalizeToken(status)] ?? "neutral";
+}
+
+function stringifySourceRef(value: string | number | boolean | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "n/a";
+  }
+  return String(value);
+}
+
+export function deriveOperatorStateSignals(
+  projection: GoalChannelProjection,
+): OperatorStateSignal[] {
+  const outcomeRefValue = projection.source_refs.latest_delivery_outcome;
+  const hasOutcomeRef = outcomeRefValue !== null && outcomeRefValue !== undefined;
+  const outcomeRefToken = normalizeToken(
+    hasOutcomeRef ? String(outcomeRefValue) : undefined,
+  );
+  const outcomeEvent = projection.recent_events.find((event) => {
+    const classification = normalizeToken(event.classification);
+    return classification === "delivery_outcome" || VALENCED_OUTCOME_TOKENS.has(classification);
+  });
+  const outcomeToken = hasOutcomeRef
+    ? outcomeRefToken
+    : normalizeToken(outcomeEvent?.classification) || undefined;
+  const outcomeTone = !outcomeToken
+    ? "neutral"
+    : (DELIVERY_OUTCOME_TONES[outcomeToken] ?? "neutral");
+
+  const lease =
+    projection.active_leases.find((entry) => Boolean(entry.lease_until))
+    ?? projection.active_leases[0];
+
+  const capabilityTodo = projection.agent_todos.find((todo) => {
+    const kind = normalizeToken(todo.action_kind);
+    return (
+      kind === "capability_wait"
+      || kind === "capability_repair"
+      || normalizeToken(todo.status) === "waiting"
+    );
+  });
+  const capabilityGate = projection.open_gates.find(
+    (gate) => normalizeToken(gate.kind) === "capability_wait",
+  );
+  const waitingOnCapability = normalizeToken(projection.waiting_on) === "capability";
+
+  const workspaceTodo = projection.agent_todos.find(
+    (todo) => normalizeToken(todo.action_kind) === "workspace_repair",
+  );
+  const workspaceEvent = projection.recent_events.find(
+    (event) => normalizeToken(event.classification) === "workspace_repair",
+  );
+
+  return [
+    {
+      label: "outcome",
+      value: hasOutcomeRef
+        ? String(outcomeRefValue)
+        : (outcomeEvent?.classification ?? "not projected"),
+      helper: outcomeEvent?.summary
+        ?? "Delivery outcome stays in the compact event ledger, not in browser writes.",
+      tone: outcomeTone,
+    },
+    {
+      label: "lease",
+      value: lease
+        ? `${lease.status ?? "claim"} · ${lease.lease_until ?? "no expiry"}`
+        : "no active lease",
+      helper: lease?.write_scope?.length
+        ? `scope: ${lease.write_scope.join(", ")}`
+        : lease?.todo_id
+          ? `todo: ${lease.todo_id}`
+          : "Claim owners stay visible without granting browser write authority.",
+      tone: lease ? leaseStatusTone(lease.status) : "neutral",
+    },
+    {
+      label: "capability-wait",
+      value: capabilityGate?.status
+        ?? capabilityTodo?.status
+        ?? (waitingOnCapability ? projection.waiting_on : "clear"),
+      helper: capabilityTodo?.title
+        ?? capabilityGate?.gate_id
+        ?? "Missing capabilities stay explicit as wait/repair state.",
+      tone:
+        capabilityGate || capabilityTodo || waitingOnCapability
+          ? "warning"
+          : "success",
+    },
+    {
+      label: "workspace-repair",
+      value: workspaceTodo?.action_kind
+        ?? workspaceEvent?.classification
+        ?? "clear",
+      helper: workspaceTodo?.title
+        ?? workspaceEvent?.summary
+        ?? "Workspace repair stays a projected agent lane, not a browser mutation.",
+      tone: workspaceTodo || workspaceEvent ? "warning" : "success",
+    },
+  ];
+}

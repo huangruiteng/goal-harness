@@ -21,11 +21,16 @@ import rolloutProjectionFixture from "../../../../../examples/fixtures/frontstag
 import rolloutFixture from "../../../../../examples/fixtures/long-horizon-self-iteration-rollout.public.json";
 import { frontstageRoute } from "../router";
 import {
+  actionKindTone,
+  deriveOperatorStateSignals,
+  eventClassificationTone,
   GoalChannelEvent,
   GoalChannelLease,
   GoalChannelProjection,
   GoalChannelTodo,
+  leaseStatusTone,
   sampleGoalChannelProjection,
+  type BadgeTone,
 } from "../data/goal-channel-frontstage";
 import { QueueItem, StatusPayload, formatStatusError } from "../data/status";
 import {
@@ -41,7 +46,6 @@ import { Button } from "../components/ui/button";
 import { Select } from "../components/ui/select";
 import { cn } from "../lib/utils";
 
-type BadgeTone = "neutral" | "success" | "warning" | "info" | "danger";
 type FrontstageSource = { kind: "demo"; label: string } | { kind: "url"; label: string };
 type FrontstageMode = "showcase" | "developer" | "ops";
 type TodoLaneFilter = "all" | "user" | "agent";
@@ -388,160 +392,6 @@ function priorityTone(priority?: string): BadgeTone {
     return "info";
   }
   return "neutral";
-}
-
-function actionKindTone(actionKind?: string): BadgeTone {
-  if (!actionKind) {
-    return "neutral";
-  }
-  const normalized = actionKind.toLowerCase();
-  if (normalized.includes("workspace_repair")) {
-    return "warning";
-  }
-  if (normalized.includes("capability_wait") || normalized.includes("capability_repair")) {
-    return "warning";
-  }
-  if (normalized.includes("outcome") || normalized.includes("delivery")) {
-    return "success";
-  }
-  return "info";
-}
-
-function eventClassificationTone(classification?: string): BadgeTone {
-  if (!classification) {
-    return "neutral";
-  }
-  const normalized = classification.toLowerCase();
-  if (normalized.includes("outcome") || normalized.includes("validated_progress")) {
-    return "success";
-  }
-  if (
-    normalized.includes("capability_wait")
-    || normalized.includes("workspace_repair")
-    || normalized.includes("operator_gate")
-  ) {
-    return "warning";
-  }
-  return "info";
-}
-
-function leaseStatusTone(status?: string): BadgeTone {
-  if (!status) {
-    return "neutral";
-  }
-  const normalized = status.toLowerCase();
-  if (normalized.includes("hard_lease") || normalized.includes("active")) {
-    return "success";
-  }
-  if (normalized.includes("soft_claim") || normalized.includes("claim")) {
-    return "info";
-  }
-  if (normalized.includes("expired") || normalized.includes("released")) {
-    return "neutral";
-  }
-  return "info";
-}
-
-type OperatorStateSignal = {
-  helper: string;
-  label: string;
-  tone: BadgeTone;
-  value: string;
-};
-
-function firstMatchingTodo(
-  todos: GoalChannelTodo[],
-  predicate: (todo: GoalChannelTodo) => boolean,
-) {
-  return todos.find(predicate);
-}
-
-function firstMatchingEvent(
-  events: GoalChannelEvent[],
-  predicate: (event: GoalChannelEvent) => boolean,
-) {
-  return events.find(predicate);
-}
-
-function firstLeaseWithDeadline(leases: GoalChannelLease[]) {
-  return leases.find((lease) => Boolean(lease.lease_until));
-}
-
-function deriveOperatorStateSignals(projection: GoalChannelProjection): OperatorStateSignal[] {
-  const outcomeEvent = firstMatchingEvent(
-    projection.recent_events,
-    (event) => {
-      const classification = (event.classification ?? "").toLowerCase();
-      return classification.includes("outcome") || classification.includes("validated_progress");
-    },
-  );
-  const outcomeRef = stringifyScalar(projection.source_refs.latest_delivery_outcome);
-  const lease = firstLeaseWithDeadline(projection.active_leases) ?? projection.active_leases[0];
-  const capabilityTodo = firstMatchingTodo(
-    projection.agent_todos,
-    (todo) => (todo.action_kind ?? "").toLowerCase().includes("capability_wait")
-      || (todo.status ?? "").toLowerCase() === "waiting"
-      || (todo.title ?? "").toLowerCase().includes("capability"),
-  );
-  const capabilityGate = projection.open_gates.find((gate) => {
-    const kind = (gate.kind ?? "").toLowerCase();
-    return kind.includes("capability");
-  });
-  const workspaceTodo = firstMatchingTodo(
-    projection.agent_todos,
-    (todo) => (todo.action_kind ?? "").toLowerCase().includes("workspace_repair")
-      || (todo.title ?? "").toLowerCase().includes("workspace"),
-  );
-  const workspaceEvent = firstMatchingEvent(
-    projection.recent_events,
-    (event) => (event.classification ?? "").toLowerCase().includes("workspace_repair"),
-  );
-
-  return [
-    {
-      label: "outcome",
-      value: outcomeRef !== "n/a"
-        ? outcomeRef
-        : (outcomeEvent?.classification ?? "not projected"),
-      helper: outcomeEvent?.summary
-        ?? "Delivery outcome stays in the compact event ledger, not in browser writes.",
-      tone: outcomeRef !== "n/a" || outcomeEvent ? "success" : "neutral",
-    },
-    {
-      label: "lease",
-      value: lease
-        ? `${lease.status ?? "claim"} · ${lease.lease_until ?? "no expiry"}`
-        : "no active lease",
-      helper: lease?.write_scope?.length
-        ? `scope: ${lease.write_scope.join(", ")}`
-        : lease?.todo_id
-          ? `todo: ${lease.todo_id}`
-          : "Claim owners stay visible without granting browser write authority.",
-      tone: lease ? leaseStatusTone(lease.status) : "neutral",
-    },
-    {
-      label: "capability-wait",
-      value: capabilityGate?.status
-        ?? capabilityTodo?.status
-        ?? (projection.waiting_on.toLowerCase().includes("capability") ? projection.waiting_on : "clear"),
-      helper: capabilityTodo?.title
-        ?? capabilityGate?.gate_id
-        ?? "Missing capabilities stay explicit as wait/repair state.",
-      tone: capabilityGate || capabilityTodo || projection.waiting_on.toLowerCase().includes("capability")
-        ? "warning"
-        : "success",
-    },
-    {
-      label: "workspace-repair",
-      value: workspaceTodo?.action_kind
-        ?? workspaceEvent?.classification
-        ?? "clear",
-      helper: workspaceTodo?.title
-        ?? workspaceEvent?.summary
-        ?? "Workspace repair stays a projected agent lane, not a browser mutation.",
-      tone: workspaceTodo || workspaceEvent ? "warning" : "success",
-    },
-  ];
 }
 
 function stringifyScalar(value: string | number | boolean | null | undefined) {

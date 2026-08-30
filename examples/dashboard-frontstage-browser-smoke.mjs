@@ -53,6 +53,7 @@ function projectionFor(goalId, displayName, claimedBy, todoTitle) {
     source_refs: {
       status_generated_at: "2026-06-20T09:00:00Z",
       event_ledger_source: "browser-smoke-fixture",
+      latest_delivery_outcome: "outcome_progress",
       private_marker: "FAKE_INTERNAL_TABLE_BETA",
     },
     decision_frame: {
@@ -881,6 +882,20 @@ async function main() {
           "browser_smoke_public_fixture",
         ],
       );
+      const outcomePanel = desktopPage.locator('[data-testid="frontstage-state-outcome"]');
+      const outcomePanelText = await outcomePanel.innerText();
+      if (!outcomePanelText.includes("outcome_progress")) {
+        throw new Error(`Operator state panel missed latest_delivery_outcome value: ${outcomePanelText}`);
+      }
+      await outcomePanel.locator("span.text-emerald-800").waitFor({ timeout: 10_000 });
+      const leasePanel = desktopPage.locator('[data-testid="frontstage-state-lease"]');
+      const leasePanelText = await leasePanel.innerText();
+      if (!leasePanelText.includes("soft_claim")) {
+        throw new Error(`Operator state panel missed soft_claim lease status: ${leasePanelText}`);
+      }
+      await leasePanel.locator("span.text-sky-800").waitFor({ timeout: 10_000 });
+      const capabilityPanel = desktopPage.locator('[data-testid="frontstage-state-capability-wait"]');
+      await capabilityPanel.locator("span.text-emerald-800").waitFor({ timeout: 10_000 });
       await desktopPage.locator('[data-testid="frontstage-todo-search"]').fill("filtered ops");
       await desktopPage.waitForFunction(() => document.body.innerText.includes("Showing 1 of 4 projected todos"));
       const filteredTodoText = await desktopPage.locator('[data-testid="frontstage-agent-todos"]').innerText();
