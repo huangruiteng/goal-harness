@@ -217,18 +217,9 @@ def _validate_extension_activation(value: Mapping[str, Any]) -> None:
         )
 
 
-def deliver_periodic_report_to_goal_channel(
+def _normalized_delivery_request(
     request: Mapping[str, Any],
-    *,
-    registry_path: Path,
-    runtime_root: Path,
-    goal_id: str,
-    extension_activation: Mapping[str, Any],
-    execute: bool = False,
-    runner: CommandRunner = default_subprocess_runner,
-) -> dict[str, Any]:
-    """Deliver one generated report through the Goal-bound project Bot only."""
-
+) -> tuple[dict[str, Any], str, str, list[dict[str, str]], dict[str, Any]]:
     payload = _mapping(request, "request")
     _reject_unknown_fields(
         payload,
@@ -237,7 +228,6 @@ def deliver_periodic_report_to_goal_channel(
     )
     if payload.get("schema_version") != GOAL_CHANNEL_DELIVERY_REQUEST_SCHEMA:
         raise ValueError(f"request must use {GOAL_CHANNEL_DELIVERY_REQUEST_SCHEMA}")
-    _validate_extension_activation(extension_activation)
     generation = _normalized_generation_bundle(payload.get("generation_bundle"))
     intent = _mapping(payload.get("delivery_intent"), "request.delivery_intent")
     identity_override_keys = sorted(
@@ -289,73 +279,82 @@ def deliver_periodic_report_to_goal_channel(
         artifact
         for artifact in generation["artifacts"]
         if artifact.get("renderer_kind") == "markdown"
+        and (
+            not intent.get("artifact_id")
+            or artifact.get("artifact_id") == str(intent["artifact_id"]).strip()
+        )
     ]
-    artifact_id = str(intent.get("artifact_id") or "").strip()
-    if artifact_id:
-        artifacts = [
-            artifact
-            for artifact in artifacts
-            if artifact.get("artifact_id") == artifact_id
-        ]
     if len(artifacts) != 1:
         raise ValueError("delivery intent must resolve exactly one Markdown artifact")
+    return generation, sink_id, idempotency_key, announcements, artifacts[0]
 
-    binding = _resolved_goal_channel_binding(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id=goal_id,
-    )
-    current_route: dict[str, Any] = {}
-    expected_cards: dict[str, list[dict[str, Any]]] = {}
 
-    def resolve_goal_channel(requested_goal_id: str) -> Mapping[str, Any]:
-        if requested_goal_id != goal_id:
+class _GoalChannelDeliverySession:
+    def __init__(
+        self,
+        *,
+        goal_id: str,
+        binding: Mapping[str, Any],
+        runner: CommandRunner,
+    ) -> None:
+        self.goal_id = goal_id
+        self.binding = dict(binding)
+        self.runner = runner
+        self.route: dict[str, Any] = {}
+        self.expected_cards: dict[str, list[dict[str, Any]]] = {}
+
+    def resolve(self, requested_goal_id: str) -> Mapping[str, Any]:
+        if requested_goal_id != self.goal_id:
             raise ValueError("Goal Channel delivery goal identity changed")
-        return binding
+        return self.binding
 
-    def verify_goal_channel(route: Mapping[str, Any]) -> bool:
+    def verify(self, route: Mapping[str, Any]) -> bool:
         cli_bin = str(route["cli_bin"])
         profile = str(route["sender_profile"])
         app_id = str(route["bot_app_id"])
         chat_id = str(route["chat_id"])
-        verified = bool(
+        checks = (
             auth_verified(
-                runner=runner,
+                runner=self.runner,
                 cli_bin=cli_bin,
                 profile=profile,
                 identity="bot",
                 expected_bot_name=str(route["bot_display_name"]),
-            )
-            and verified_app_id(
-                runner=runner,
+            ),
+            verified_app_id(
+                runner=self.runner,
                 cli_bin=cli_bin,
                 profile=profile,
             )
-            == app_id
-            and chat_verified(
-                runner=runner,
+            == app_id,
+            chat_verified(
+                runner=self.runner,
                 cli_bin=cli_bin,
                 profile=profile,
                 identity="bot",
                 chat_id=chat_id,
-            )
-            and bot_membership_verified(
-                runner=runner,
+            ),
+            bot_membership_verified(
+                runner=self.runner,
                 cli_bin=cli_bin,
                 profile=profile,
                 chat_id=chat_id,
                 app_id=app_id,
-            )
+            ),
         )
+        verified = all(checks)
         if verified:
-            current_route.update(dict(route))
+            self.route = dict(route)
         return verified
 
     def send(
-        card: Mapping[str, Any], key: str, route: Mapping[str, Any]
+        self,
+        card: Mapping[str, Any],
+        key: str,
+        route: Mapping[str, Any],
     ) -> Mapping[str, Any]:
         result = call(
-            runner,
+            self.runner,
             lark_args(
                 cli_bin=str(route["cli_bin"]),
                 profile=str(route["sender_profile"]),
@@ -382,16 +381,15 @@ def deliver_periodic_report_to_goal_channel(
         )
         if result.get("returncode") != 0 or not message_id:
             raise ValueError("Goal Channel periodic report send failed")
-        expected_cards.setdefault(message_id, []).append(dict(card))
+        self.expected_cards.setdefault(message_id, []).append(dict(card))
         return {"message_id": message_id}
 
-    def readback(message_id: str) -> Mapping[str, Any]:
-        route = current_route
+    def readback(self, message_id: str) -> Mapping[str, Any]:
         result = call(
-            runner,
+            self.runner,
             lark_args(
-                cli_bin=str(route["cli_bin"]),
-                profile=str(route["sender_profile"]),
+                cli_bin=str(self.route["cli_bin"]),
+                profile=str(self.route["sender_profile"]),
                 tail=[
                     "im",
                     "+messages-mget",
@@ -405,49 +403,84 @@ def deliver_periodic_report_to_goal_channel(
                 ],
             ),
         )
-        response = json_payload(result)
-        message = _find_message(response, message_id)
-        card_readback = _message_card(message) if message is not None else None
+        message = _find_message(json_payload(result), message_id)
         sender_type, sender_app_id = (
             _message_sender(message) if message is not None else ("", "")
         )
+        expected_card = (self.expected_cards.get(message_id) or [None]).pop(0)
         exact = bool(
             result.get("returncode") == 0
             and message is not None
-            and contains_exact_field(message, "chat_id", str(route["chat_id"]))
-            and card_readback == (expected_cards.get(message_id) or [None]).pop(0)
+            and contains_exact_field(message, "chat_id", str(self.route["chat_id"]))
+            and _message_card(message) == expected_card
             and sender_type == "app"
-            and sender_app_id == route["bot_app_id"]
+            and sender_app_id == self.route["bot_app_id"]
             and auth_verified(
-                runner=runner,
-                cli_bin=str(route["cli_bin"]),
-                profile=str(route["sender_profile"]),
+                runner=self.runner,
+                cli_bin=str(self.route["cli_bin"]),
+                profile=str(self.route["sender_profile"]),
                 identity="bot",
-                expected_bot_name=str(route["bot_display_name"]),
+                expected_bot_name=str(self.route["bot_display_name"]),
             )
             and verified_app_id(
-                runner=runner,
-                cli_bin=str(route["cli_bin"]),
-                profile=str(route["sender_profile"]),
+                runner=self.runner,
+                cli_bin=str(self.route["cli_bin"]),
+                profile=str(self.route["sender_profile"]),
             )
-            == route["bot_app_id"]
+            == self.route["bot_app_id"]
         )
         return {
             "verified": exact,
             "message_id": message_id,
-            "chat_id": route["chat_id"] if exact else None,
+            "chat_id": self.route["chat_id"] if exact else None,
             "sender_app_id": sender_app_id if exact else None,
             "sender_identity": "bot" if exact else None,
             "sender_evidence_source": "message_readback" if exact else None,
         }
 
+
+def _delivery_status(*, satisfied: bool, execute: bool) -> str:
+    if satisfied:
+        return "satisfied"
+    if execute:
+        return "readback_unverified"
+    return "pending_execution"
+
+
+def deliver_periodic_report_to_goal_channel(
+    request: Mapping[str, Any],
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    goal_id: str,
+    extension_activation: Mapping[str, Any],
+    execute: bool = False,
+    runner: CommandRunner = default_subprocess_runner,
+) -> dict[str, Any]:
+    """Deliver one generated report through the Goal-bound project Bot only."""
+
+    _validate_extension_activation(extension_activation)
+    generation, sink_id, idempotency_key, announcements, artifact = (
+        _normalized_delivery_request(request)
+    )
+
+    binding = _resolved_goal_channel_binding(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+    )
+    session = _GoalChannelDeliverySession(
+        goal_id=goal_id,
+        binding=binding,
+        runner=runner,
+    )
     registry = PeriodicReportAdapterRegistry()
     registry.register_sink(
         periodic_report_lark_sink_adapter(
-            send=send,
-            readback=readback,
-            resolve_goal_channel=resolve_goal_channel,
-            verify_goal_channel=verify_goal_channel,
+            send=session.send,
+            readback=session.readback,
+            resolve_goal_channel=session.resolve,
+            verify_goal_channel=session.verify,
             sink_id=sink_id,
         )
     )
@@ -457,7 +490,7 @@ def deliver_periodic_report_to_goal_channel(
         result = registry.deliver(
             sink_id,
             {
-                **artifacts[0],
+                **artifact,
                 "content": content,
                 "content_digest": "sha256:"
                 + hashlib.sha256(content.encode("utf-8")).hexdigest(),
@@ -484,8 +517,9 @@ def deliver_periodic_report_to_goal_channel(
             for result in message_results
         )
     )
+    sink_status = "sent" if satisfied else "unknown" if execute else "pending"
     sink_result = {
-        "status": "sent" if satisfied else "pending" if not execute else "unknown",
+        "status": sink_status,
         "readback_verified": satisfied,
         "goal_channel_verified": satisfied,
         "sender_identity_verified": satisfied,
@@ -498,13 +532,7 @@ def deliver_periodic_report_to_goal_channel(
     return {
         "ok": bool(satisfied or not execute),
         "schema_version": GOAL_CHANNEL_DELIVERY_RESULT_SCHEMA,
-        "status": (
-            "satisfied"
-            if satisfied
-            else "pending_execution"
-            if not execute
-            else "readback_unverified"
-        ),
+        "status": _delivery_status(satisfied=satisfied, execute=execute),
         "intent_satisfied": satisfied,
         "generation_id": generation["generation_receipt"]["generation_id"],
         "sink_result": sink_result,

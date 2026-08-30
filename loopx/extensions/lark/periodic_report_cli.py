@@ -85,6 +85,73 @@ def register_lark_periodic_report_commands(
     goal_channel.add_argument("--execute", action="store_true")
 
 
+def _resolved_goal_channel_runtime_root(
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+) -> tuple[Path, Path]:
+    resolved_registry = registry_path.expanduser().resolve()
+    runtime_root = resolve_runtime_root(
+        read_json(resolved_registry),
+        runtime_root_arg,
+        registry_path=resolved_registry,
+    )
+    return resolved_registry, runtime_root
+
+
+def _goal_channel_payload(
+    args: argparse.Namespace,
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    extension_activation: dict[str, Any],
+) -> dict[str, Any]:
+    call_args: dict[str, Any] = {
+        "registry_path": registry_path,
+        "runtime_root": runtime_root,
+        "goal_id": args.goal_id,
+        "extension_activation": extension_activation,
+        "execute": bool(args.execute),
+    }
+    if args.execute:
+        resolution = resolve_lark_cli()
+        if not resolution.available or not resolution.command:
+            raise LarkCliUnavailableError(
+                resolution.error_code or "lark_cli_not_installed"
+            )
+        call_args["runner"] = build_lark_command_runner(resolution)
+    return deliver_periodic_report_to_goal_channel(
+        _load_json_object(args.request_json),
+        **call_args,
+    )
+
+
+def _miaoda_payload(
+    args: argparse.Namespace,
+    *,
+    extension_activation: dict[str, Any],
+) -> dict[str, Any]:
+    cli_bin = args.lark_cli_bin or "lark-cli"
+    call_args: dict[str, Any] = {
+        "extension_activation": extension_activation,
+        "execute": bool(args.execute),
+        "cli_bin": cli_bin,
+        "lark_profile": args.lark_profile,
+    }
+    if args.execute:
+        resolution = resolve_lark_cli(explicit=args.lark_cli_bin)
+        if not resolution.available or not resolution.command:
+            raise LarkCliUnavailableError(
+                resolution.error_code or "lark_cli_not_installed"
+            )
+        call_args["cli_bin"] = resolution.command
+        call_args["runner"] = build_lark_command_runner(resolution)
+    return deliver_periodic_report_to_miaoda(
+        _load_json_object(args.request_json),
+        **call_args,
+    )
+
+
 def handle_lark_periodic_report_command(
     args: argparse.Namespace,
     *,
@@ -99,19 +166,16 @@ def handle_lark_periodic_report_command(
     ):
         return None
     try:
+        goal_channel_command = args.periodic_report_command == "deliver-goal-channel"
         resolved_runtime_root: Path | None = None
-        if args.periodic_report_command == "deliver-goal-channel":
-            registry_path = registry_path.expanduser().resolve()
-            resolved_runtime_root = resolve_runtime_root(
-                read_json(registry_path),
-                runtime_root_arg,
+        if goal_channel_command:
+            registry_path, resolved_runtime_root = _resolved_goal_channel_runtime_root(
                 registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
             )
-        required_permission = (
-            LARK_MIAODA_HTML_PERMISSION
-            if args.periodic_report_command == "publish-miaoda"
-            else LARK_GOAL_CHANNEL_PERMISSION
-        )
+        required_permission = LARK_GOAL_CHANNEL_PERMISSION
+        if not goal_channel_command:
+            required_permission = LARK_MIAODA_HTML_PERMISSION
         extension_activation = resolve_extension_activation(
             LARK_EXTENSION_ID,
             state_file=default_extension_state_file(
@@ -119,52 +183,20 @@ def handle_lark_periodic_report_command(
             ),
             required_permissions=(required_permission,),
         )
-        if args.periodic_report_command == "deliver-goal-channel":
-            assert resolved_runtime_root is not None
-            runner = None
-            if args.execute:
-                resolution = resolve_lark_cli()
-                if not resolution.available or not resolution.command:
-                    raise LarkCliUnavailableError(
-                        resolution.error_code or "lark_cli_not_installed"
-                    )
-                runner = build_lark_command_runner(resolution)
-            call_args: dict[str, Any] = {
-                "registry_path": registry_path,
-                "runtime_root": resolved_runtime_root,
-                "goal_id": args.goal_id,
-                "extension_activation": extension_activation,
-                "execute": bool(args.execute),
-            }
-            if runner is not None:
-                call_args["runner"] = runner
-            payload = deliver_periodic_report_to_goal_channel(
-                _load_json_object(args.request_json),
-                **call_args,
+        if goal_channel_command:
+            if resolved_runtime_root is None:
+                raise ValueError("Goal Channel runtime root could not be resolved")
+            payload = _goal_channel_payload(
+                args,
+                registry_path=registry_path,
+                runtime_root=resolved_runtime_root,
+                extension_activation=extension_activation,
             )
             print_payload(payload, output_format(args), render_periodic_report_markdown)
             return 0 if payload.get("ok") else 1
-        cli_bin = args.lark_cli_bin or "lark-cli"
-        runner = None
-        if args.execute:
-            resolution = resolve_lark_cli(explicit=args.lark_cli_bin)
-            if not resolution.available or not resolution.command:
-                raise LarkCliUnavailableError(
-                    resolution.error_code or "lark_cli_not_installed"
-                )
-            cli_bin = resolution.command
-            runner = build_lark_command_runner(resolution)
-        call_args: dict[str, Any] = {
-            "extension_activation": extension_activation,
-            "execute": bool(args.execute),
-            "cli_bin": cli_bin,
-            "lark_profile": args.lark_profile,
-        }
-        if runner is not None:
-            call_args["runner"] = runner
-        payload = deliver_periodic_report_to_miaoda(
-            _load_json_object(args.request_json),
-            **call_args,
+        payload = _miaoda_payload(
+            args,
+            extension_activation=extension_activation,
         )
     except Exception as exc:
         payload = {
