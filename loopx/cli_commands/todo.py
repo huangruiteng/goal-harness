@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from ..control_plane.todos.contract import (
     TODO_CONTINUATION_POLICY_VALUES,
     replan_successor_semantic_binding,
 )
+from ..control_plane.capability_hooks import PostWritebackHookRegistration
 from ..control_plane.quota.settlement import (
     read_heartbeat_settlement,
     settlement_result_payload,
@@ -55,6 +56,10 @@ from .todo_argument_validation import (
     validate_todo_update_options,
 )
 from .todo_event import RolloutEventAppender, append_todo_rollout_event
+from .post_writeback import (
+    PostWritebackProjectionBuilder,
+    dispatch_committed_cli_post_writeback_hooks,
+)
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -599,6 +604,8 @@ def handle_todo_command(
     print_payload: PrintPayload,
     append_cli_rollout_event: RolloutEventAppender,
     format_name: str | None = None,
+    post_writeback_hooks: Sequence[PostWritebackHookRegistration] | None = None,
+    post_writeback_projection_builder: PostWritebackProjectionBuilder | None = None,
 ) -> int:
     renderer = (
         render_todo_suggestion_prompt_markdown
@@ -968,6 +975,31 @@ def handle_todo_command(
             payload["ok"] = False
             payload["receipt_repair_required"] = True
             payload["error"] = settlement_result.failure.reason
+    if (
+        args.todo_command == "complete"
+        and payload.get("ok")
+        and payload.get("completed")
+        and not payload.get("dry_run")
+        and post_writeback_hooks
+        and settlement_identity is not None
+    ):
+        identity = settlement_identity.as_dict()
+        committed_at = str(payload.get("updated_at") or "").strip()
+        if committed_at:
+            payload["post_writeback_hooks"] = (
+                dispatch_committed_cli_post_writeback_hooks(
+                    payload=payload,
+                    registry_path=registry_path,
+                    runtime_root_arg=runtime_root_arg,
+                    goal_id=args.goal_id,
+                    event_kind="todo_complete",
+                    identity=identity,
+                    state_version=committed_at,
+                    committed_at=committed_at,
+                    hooks=post_writeback_hooks,
+                    projection_builder=post_writeback_projection_builder,
+                )
+            )
     print_payload(
         payload,
         format_name or str(getattr(args, "format", None) or "markdown"),

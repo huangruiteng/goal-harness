@@ -25,7 +25,7 @@ function postWritebackRegistration(overrides: Record<string, unknown> = {}) {
     capability_id: "periodic-report",
     policy_version: "weekly-v1",
     phase: "post_writeback",
-    event_kinds: ["refresh_state"],
+    event_kinds: ["refresh_state", "todo_complete"],
     intent_kinds: ["periodic_report.trigger_evaluation"],
     budget: {
       max_invocations_per_dispatch: 1,
@@ -105,6 +105,21 @@ test("post-writeback hook admits one receipt-bound effect-free intent", () => {
   assert.equal(
     (result.intent as Record<string, unknown>).source_receipt_id,
     "evt-stage-1",
+  );
+});
+
+test("post-writeback hook admits durable Todo completion events", () => {
+  const input = postWritebackInput();
+  (input.receipt as Record<string, unknown>).event_kind = "todo_complete";
+
+  const admitted = validatePostWritebackHookInput({
+    registration: postWritebackRegistration(),
+    hook_input: input,
+  });
+
+  assert.equal(
+    (admitted.receipt as Record<string, unknown>).event_kind,
+    "todo_complete",
   );
 });
 

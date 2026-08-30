@@ -10,12 +10,11 @@ from ...control_plane.capability_hooks import (
     POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION,
     PostWritebackHookRegistration,
 )
-from ...control_plane.goals.goal_frontier.terminal import derive_goal_terminal_state
-from ...control_plane.todos.active_state_todo_parser import parse_active_state_todos
-from ...control_plane.todos.projection import (
-    todo_advancement_frontier_counts,
-    todo_summary_open_task_counts,
+from ...control_plane.goals.goal_frontier import (
+    build_goal_frontier_projection_from_summaries,
 )
+from ...control_plane.todos.active_state_todo_parser import parse_active_state_todos
+from ...control_plane.todos.quota_summary import summarize_user_todos_for_quota
 from ...history import collect_history, load_registry
 from ...registry import registry_goals
 from .stage_completion import STAGE_COMPLETION_RECEIPT_SCHEMA
@@ -110,57 +109,33 @@ def _frontier_projection(
         state_path=state_path,
         item_limit=None,
     )
-    user_summary = (
+    raw_user_summary = (
         dict(todos.get("user_todos"))
         if isinstance(todos.get("user_todos"), Mapping)
         else {}
     )
-    agent_summary = (
+    raw_agent_summary = (
         dict(todos.get("agent_todos"))
         if isinstance(todos.get("agent_todos"), Mapping)
         else {}
     )
-    user_counts = todo_summary_open_task_counts(user_summary)
-    agent_counts = todo_summary_open_task_counts(agent_summary)
-    frontier_counts = todo_advancement_frontier_counts(
-        agent_summary,
+    user_summary = summarize_user_todos_for_quota(raw_user_summary) or {}
+    agent_summary = summarize_user_todos_for_quota(raw_agent_summary) or {}
+    projection = build_goal_frontier_projection_from_summaries(
+        goal_id=goal_id,
         agent_id=agent_id,
-    )
-    projection: dict[str, Any] = {
-        "schema_version": "goal_frontier_projection_v0",
-        "goal_id": goal_id,
-        "agent_id": agent_id,
-        "source": "periodic_report_post_writeback",
-        "normalized_progress": {
-            "user_open_count": user_counts["open"],
-            "agent_open_count": agent_counts["open"],
-            "agent_advancement_open_count": agent_counts["advancement"],
-            "agent_monitor_open_count": agent_counts["monitor"],
-            "agent_monitor_due_count": agent_counts["monitor_due"],
-        },
-        "remaining_advancement_frontier": frontier_counts,
-        "monitor_only_lanes": {
-            "present": agent_counts["monitor"] > 0,
-            "quiet_until_material_transition": False,
-        },
-        "deferred_successors": {
-            "ready_count": 0,
-            "blocked_count": 0,
-            "current_agent_ready_count": 0,
-        },
-        "acceptance_gaps": [],
-        "autonomy_blockers": [],
-        "replan_required": False,
-        "blocking_handoff_gate_count": user_counts["open"],
-    }
-    source_completeness, terminal_state = derive_goal_terminal_state(
         user_todo_summary=user_summary,
         agent_todo_summary=agent_summary,
-        projection=projection,
+        work_lane_contract=None,
+        replan_obligation=None,
     )
-    projection["source_completeness"] = source_completeness
-    if terminal_state is not None:
-        projection["terminal_state"] = terminal_state
+    projection["source"] = "periodic_report_post_writeback"
+    normalized = projection.get("normalized_progress")
+    projection["blocking_handoff_gate_count"] = (
+        int(normalized.get("user_open_count") or 0)
+        if isinstance(normalized, Mapping)
+        else 0
+    )
     return projection, user_summary, agent_summary
 
 
@@ -176,7 +151,9 @@ def build_periodic_report_post_writeback_projection(
 
     normalized_agent_id = str(agent_id or "").strip()
     state = payload.get("state")
-    state_path_value = state.get("path") if isinstance(state, Mapping) else None
+    state_path_value = (
+        state.get("path") if isinstance(state, Mapping) else None
+    ) or payload.get("state_file")
     state_path = Path(str(state_path_value or "")).expanduser()
     if not normalized_agent_id or not state_path.is_file():
         return {}
@@ -306,7 +283,7 @@ def periodic_report_post_writeback_hook(
     return PostWritebackHookRegistration(
         hook_id=PERIODIC_REPORT_POST_WRITEBACK_HOOK_ID,
         capability_id="periodic-report",
-        event_kinds=("refresh_state",),
+        event_kinds=("refresh_state", "todo_complete"),
         intent_kinds=(PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT,),
         requested_read_scope=("stage_completion",),
         producer=producer,

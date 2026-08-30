@@ -14,9 +14,6 @@ from ..control_plane.agents.capability_gate import (
 )
 from ..control_plane.capability_hooks import (
     PostWritebackHookRegistration,
-    PostWritebackHookReceiptJournal,
-    build_post_writeback_hook_input,
-    dispatch_post_writeback_hooks,
 )
 from ..control_plane.goals.goal_vision_policy import (
     GOAL_VISION_ADVANCEMENT_POLICY_CHOICES,
@@ -69,6 +66,10 @@ from ..state_refresh import (
     refresh_state_run,
     render_state_refresh_markdown,
 )
+from .post_writeback import (
+    PostWritebackProjectionBuilder,
+    dispatch_committed_cli_post_writeback_hooks,
+)
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -76,7 +77,6 @@ PrintPayload = Callable[
 ]
 OutputFormat = Callable[[argparse.Namespace], str]
 AppendCliRolloutEvent = Callable[..., dict[str, object]]
-PostWritebackProjectionBuilder = Callable[..., Mapping[str, object]]
 
 PROJECT_LIFECYCLE_COMMANDS = {
     "refresh-state",
@@ -875,68 +875,34 @@ def handle_project_lifecycle_command(
                     payload["receipt_repair_required"] = False
                     payload["receipt_repaired"] = True
             if material_refresh_ready and post_writeback_hooks:
-                try:
-                    settlement_identity = (
-                        payload.get("settlement_identity")
-                        if isinstance(payload.get("settlement_identity"), Mapping)
-                        else {}
-                    )
-                    projection = (
-                        dict(
-                            post_writeback_projection_builder(
-                                payload=payload,
-                                registry_path=registry_path,
-                                runtime_root=resolve_runtime_root(
-                                    load_registry(registry_path),
-                                    args.runtime_root,
-                                ),
-                                goal_id=args.goal_id,
-                                agent_id=args.agent_id,
-                            )
-                        )
-                        if post_writeback_projection_builder is not None
-                        else {}
-                    )
-                    hook_input = build_post_writeback_hook_input(
-                        event_kind="refresh_state",
+                settlement_identity = (
+                    payload.get("settlement_identity")
+                    if isinstance(payload.get("settlement_identity"), Mapping)
+                    else {}
+                )
+                payload["post_writeback_hooks"] = (
+                    dispatch_committed_cli_post_writeback_hooks(
+                        payload=payload,
+                        registry_path=registry_path,
+                        runtime_root_arg=args.runtime_root,
                         goal_id=args.goal_id,
-                        agent_id=str(args.agent_id or ""),
-                        todo_id=str(getattr(args, "todo_id", None) or ""),
-                        turn_instance_id=str(
-                            getattr(args, "turn_instance_id", None) or ""
-                        ),
-                        effect_id=str(settlement_identity.get("effect_id") or ""),
+                        event_kind="refresh_state",
+                        identity={
+                            "agent_id": str(args.agent_id or ""),
+                            "todo_id": str(getattr(args, "todo_id", None) or ""),
+                            "turn_instance_id": str(
+                                getattr(args, "turn_instance_id", None) or ""
+                            ),
+                            "effect_id": str(
+                                settlement_identity.get("effect_id") or ""
+                            ),
+                        },
                         state_version=str(payload.get("generated_at") or ""),
                         committed_at=str(payload.get("generated_at") or ""),
-                        projection=projection,
+                        hooks=post_writeback_hooks,
+                        projection_builder=post_writeback_projection_builder,
                     )
-                    payload["post_writeback_hooks"] = dispatch_post_writeback_hooks(
-                        post_writeback_hooks,
-                        hook_input=hook_input,
-                        journal=PostWritebackHookReceiptJournal(
-                            runtime_root=resolve_runtime_root(
-                                load_registry(registry_path),
-                                args.runtime_root,
-                            ),
-                            goal_id=args.goal_id,
-                        ),
-                    )
-                except Exception:  # Optional hooks never alter primary truth.
-                    payload["post_writeback_hooks"] = {
-                        "schema_version": "loopx_post_writeback_capability_hook_dispatch_v0",
-                        "phase": "post_writeback",
-                        "registered_count": len(post_writeback_hooks),
-                        "intent_count": 0,
-                        "failures": [
-                            {
-                                "hook_id": "composition",
-                                "capability_id": "unknown",
-                                "error_code": "source_projection_failed",
-                            }
-                        ],
-                        "primary_writeback_preserved": True,
-                        "external_writes_performed": False,
-                    }
+                )
             if not material_refresh_ready:
                 print_payload(payload, fmt, render_state_refresh_markdown)
                 return 0 if payload.get("ok") else 1

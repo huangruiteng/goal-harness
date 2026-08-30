@@ -208,6 +208,7 @@ def materialized_todo_completion_replay(
         "mutation_authority": dict(mutation_authority),
         "state_file": state_file,
         "project": project,
+        "updated_at": todo.get("updated_at"),
     }
 
 

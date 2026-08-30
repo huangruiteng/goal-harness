@@ -3208,7 +3208,26 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     tmp_path: Path,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["control_plane"] = {
+        "periodic_report": {
+            "enabled": True,
+            "profile_preset": "weekly",
+        }
+    }
+    registry_path.write_text(
+        json.dumps(registry, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     state_path = _configure_read_only_todo(project)
+    state_path.write_text(
+        state_path.read_text(encoding="utf-8").replace(
+            "## Agent Todo\n\n",
+            "## User Todo\n\n## Agent Todo\n\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
     binding = (
         "--agent-id",
         AGENT_ID,
@@ -3292,6 +3311,12 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
         "single_surface",
         "--delivery-outcome",
         "outcome_progress",
+        "--vision-state",
+        "vision_closed",
+        "--vision-summary",
+        "The bounded read-only characterization is complete.",
+        "--vision-acceptance",
+        "The characterization evidence is validated and durably written.",
         *binding,
         "--no-global-sync",
         "--suppress-external-sinks",
@@ -3299,6 +3324,7 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     assert refresh_rc == 0, refresh
     assert refresh["delivery_workspace_causality"]["requirement"] == "not_required"
     assert "delivery_workspace" not in refresh
+    assert refresh["post_writeback_hooks"]["intent_count"] == 0
 
     ordinary_args = (
         "todo",
@@ -3320,6 +3346,7 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     assert ordinary["changed"] is True
     assert ordinary["completion_continuation"] == "active_goal"
     assert ordinary["completion_recovery"] is None
+    assert ordinary["post_writeback_hooks"]["intent_count"] == 0
 
     spend_args = (
         "quota",
@@ -3366,6 +3393,12 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     assert complete["changed"] is True
     assert complete["completion_continuation"] == "no_followup"
     assert complete["completion_recovery"] == "same_turn_terminal_closeout"
+    assert complete["post_writeback_hooks"]["intent_count"] == 1
+    trigger_intent = complete["post_writeback_hooks"]["intents"][0]
+    assert trigger_intent["intent_kind"] == "periodic_report.trigger_evaluation"
+    assert trigger_intent["requested_write_scope"] == []
+    assert trigger_intent["payload"]["generation_authorized"] is False
+    assert trigger_intent["payload"]["external_delivery_authorized"] is False
     assert [
         receipt["step_kind"] for receipt in complete["settlement_result"]["receipts"]
     ] == [
@@ -3404,6 +3437,11 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     assert complete_replay_rc == 0, complete_replay
     assert complete_replay["idempotent_replay"] is True
     assert complete_replay["changed"] is False
+    assert complete_replay["post_writeback_hooks"]["invoked_count"] == 0
+    assert complete_replay["post_writeback_hooks"]["replayed_hooks"] == [
+        "periodic_report.runtime_trigger"
+    ]
+    assert complete_replay["post_writeback_hooks"]["intents"] == [trigger_intent]
     ordinary_replay_rc, ordinary_replay = _run_cli(
         registry_path,
         runtime,

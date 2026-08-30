@@ -265,6 +265,10 @@ def dispatch_common_command(
 			print_payload=print_payload,
 		)
 	if args.command == "todo":
+		from .capabilities.periodic_report.post_writeback_hook import (
+			build_periodic_report_post_writeback_projection,
+			periodic_report_post_writeback_hooks_for_goal,
+		)
 		from .cli_commands.todo import handle_todo_command
 		from .cli_rollout import append_cli_rollout_event
 
@@ -275,6 +279,19 @@ def dispatch_common_command(
 			format_name=output_format(args),
 			print_payload=print_payload,
 			append_cli_rollout_event=append_cli_rollout_event,
+			post_writeback_hooks=(
+				periodic_report_post_writeback_hooks_for_goal(
+					registry_path=registry_path,
+					goal_id=args.goal_id,
+				)
+				if args.todo_command == "complete"
+				else ()
+			),
+			post_writeback_projection_builder=(
+				build_periodic_report_post_writeback_projection
+				if args.todo_command == "complete"
+				else None
+			),
 		)
 	if args.command == "quota":
 		from .cli_commands.quota import handle_quota_command

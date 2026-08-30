@@ -151,6 +151,23 @@ def test_periodic_report_hook_emits_only_an_approval_neutral_trigger_intent() ->
     assert intent["payload"]["external_delivery_authorized"] is False
 
 
+def test_periodic_report_hook_accepts_durable_todo_completion() -> None:
+    hook_input = _input()
+    hook_input["receipt"] = {
+        **hook_input["receipt"],  # type: ignore[dict-item]
+        "event_kind": "todo_complete",
+        "status": "committed",
+    }
+
+    dispatch = dispatch_post_writeback_hooks(
+        [periodic_report_post_writeback_hook()],
+        hook_input=hook_input,
+    )
+
+    assert dispatch["intent_count"] == 1
+    assert dispatch["failures"] == []
+
+
 def test_post_writeback_sidecar_replay_skips_provider(tmp_path) -> None:
     calls = 0
     base = _hook()
@@ -427,6 +444,82 @@ def test_periodic_report_projection_reduces_durable_successor_transition(
     receipt = projection["stage_completion"]
     assert receipt["transition"] == "successor_frontier_settled"
     assert receipt["frontier_identity"] == "frontier-2"
+
+
+def test_periodic_report_projection_reduces_terminal_after_todo_completion(
+    tmp_path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    state_path = tmp_path / "goal.md"
+    state_path.write_text(
+        """# Goal
+
+## User Todo
+
+## Agent Todo
+
+- [x] Complete the bounded analysis.
+  <!-- loopx:todo todo_id=todo_analysis status=done task_class=advancement_task claimed_by=agent-1 no_followup=true updated_at=2026-08-30T10:30:00Z -->
+- [ ] Watch for later external changes.
+  <!-- loopx:todo todo_id=todo_watch status=open task_class=continuous_monitor claimed_by=agent-1 watch_only=true next_due_at=2026-09-06T10:30:00Z -->
+""",
+        encoding="utf-8",
+    )
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": "goal-1",
+                        "repo": str(tmp_path),
+                        "state_file": "goal.md",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    runs_dir = runtime_root / "goals" / "goal-1" / "runs"
+    runs_dir.mkdir(parents=True)
+    closed_run = {
+        "generated_at": "2026-08-30T10:00:00Z",
+        "goal_id": "goal-1",
+        "agent_id": "agent-1",
+        "agent_vision": {
+            "schema_version": "goal_vision_replan_contract_v0",
+            "agent_id": "agent-1",
+            "state": "vision_closed",
+            "vision_patch": {"acceptance_summary": "Analysis accepted."},
+        },
+        "vision_checkpoint": {
+            "schema_version": "vision_checkpoint_v0",
+            "satisfied": True,
+            "decision": "patched",
+            "triggers": [
+                {
+                    "kind": "material_delivery_outcome",
+                    "delivery_outcome": "primary_goal_outcome",
+                }
+            ],
+        },
+    }
+    (runs_dir / "index.jsonl").write_text(
+        json.dumps(closed_run) + "\n",
+        encoding="utf-8",
+    )
+
+    projection = build_periodic_report_post_writeback_projection(
+        payload={"state_file": str(state_path)},
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id="goal-1",
+        agent_id="agent-1",
+    )
+
+    receipt = projection["stage_completion"]
+    assert receipt["transition"] == "goal_terminal"
+    assert receipt["frontier_identity"] == "validated-goal-terminal"
 
 
 def test_post_writeback_concurrent_exact_dispatch_single_flight(tmp_path) -> None:
