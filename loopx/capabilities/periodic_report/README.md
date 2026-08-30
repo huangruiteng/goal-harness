@@ -141,6 +141,15 @@ evaluate it into the normal trigger decision. Report composition, Miaoda HTML,
 content review, explicit owner approval, and any group delivery remain later
 independent gates.
 
+`quota should-run` reads eligible `intent_recorded` sidecars for the exact Goal
+and Agent. A pending intent takes precedence over monitor-quiet and terminal
+no-follow-up projection and returns one TypeScript-validated governed command.
+That command may render provider-free local HTML and Markdown, run content
+checks, persist an idempotent consumption receipt, and create one approval Todo
+bound to the frozen generation digest. Exact replay does not rerender or create
+a second gate. Miaoda publication and group delivery remain unauthorized until
+that exact Todo is approved.
+
 Project-specific scheduled reports should be layered as profiles and adapters.
 For example, a maintenance profile may choose a local timezone and weekly
 cadence, collect repository and discussion signals, render a team card, archive

@@ -325,6 +325,50 @@ test("verified capability candidate projects separate preparation and delivery a
   );
 });
 
+test("pending capability intent projects local generation without delivery authority", () => {
+  const result = validateInteractionProjectionHookInvocation({
+    registration: {
+      schema_version: CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION,
+      hook_id: "periodic_report.pending_intent",
+      capability_id: "periodic-report",
+      phase: "interaction_projection",
+      projection_slots: ["pending_capability_intent"],
+      budget: { max_invocations_per_dispatch: 1, max_result_bytes: 16384 },
+      failure_policy: "isolate",
+      requested_read_scope: ["post_writeback_intent_journal"],
+      requested_write_scope: [],
+    },
+    result: {
+      schema_version: INTERACTION_PROJECTION_HOOK_RESULT_SCHEMA_VERSION,
+      hook_id: "periodic_report.pending_intent",
+      capability_id: "periodic-report",
+      phase: "interaction_projection",
+      status: "candidate",
+      projection_slot: "pending_capability_intent",
+      payload: {
+        schema_version: "pending_capability_intent_projection_v0",
+        capability_id: "periodic-report",
+        intent_kind: "periodic_report.trigger_evaluation",
+        idempotency_key: "periodic-report:stage-example",
+        intent_digest: `sha256:${"a".repeat(64)}`,
+        goal_id: "goal-example",
+        agent_id: "agent-example",
+        state: "pending",
+        action_kind: "consume_periodic_report_intent",
+        action_summary: "Generate the exact local report draft.",
+        command: "loopx periodic-report consume-pending --goal-id goal-example --agent-id agent-example --execute",
+        generation_authorized: true,
+        external_delivery_authorized: false,
+      },
+    },
+  });
+  assert.equal(result.status, "projected");
+  assert.equal(
+    (result.projection as JsonObject).external_delivery_authorized,
+    false,
+  );
+});
+
 test("uninstalled or drifted provider is diagnostic-only", () => {
   const external = {
     ...status(true),
