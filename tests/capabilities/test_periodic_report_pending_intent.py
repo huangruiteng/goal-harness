@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from loopx.capabilities.periodic_report.pending_intent import (
     consume_pending_periodic_report_intent,
     pending_periodic_report_intents,
@@ -119,6 +121,108 @@ status: active
     return registry, runtime
 
 
+def _write_editorial_response(first: dict[str, object]) -> None:
+    request_path = Path(str(first["editorial_request_path"]))
+    response_path = Path(str(first["editorial_response_path"]))
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    source_ref = request["facts"][0]["source_ref"]
+    response = {
+        "schema_version": "periodic_report_editorial_response_v0",
+        "request_digest": request["request_digest"],
+        "language": "zh-CN",
+        "title": "项目阶段分析周报",
+        "kicker": "阶段分析周报",
+        "period_label": "2026-08-23 — 2026-08-30",
+        "highlights": [
+            {
+                "highlight_id": "coverage",
+                "value": "全景",
+                "label": "问题覆盖",
+                "tone": "positive",
+            },
+            {
+                "highlight_id": "depth",
+                "value": "因果",
+                "label": "重点下钻",
+                "tone": "neutral",
+            },
+        ],
+        "sections": [
+            {
+                "section_id": "overview",
+                "title": "全景判断",
+                "items": [
+                    {
+                        "title": "阶段分析已经形成完整判断",
+                        "summary": "当前证据已经覆盖全景分类、重点因果与后续处置。",
+                        "source_ref": source_ref,
+                    }
+                ],
+            },
+            {
+                "section_id": "problem_map",
+                "title": "问题版图",
+                "items": [
+                    {
+                        "title": "问题已按影响与证据分层",
+                        "summary": "主问题、次要问题与待确认边界已经拆开呈现。",
+                        "source_ref": source_ref,
+                    }
+                ],
+            },
+            {
+                "section_id": "causal_analysis",
+                "title": "重点因果下钻",
+                "items": [
+                    {
+                        "title": "最高价值问题已下钻到最窄责任层",
+                        "summary": "结论由完成回执支撑，并保留尚未证明的边界。",
+                        "source_ref": source_ref,
+                        "details": [
+                            {"label": "证据", "text": "完成事实已持久化。"},
+                            {"label": "边界", "text": "不外推到未验证范围。"},
+                        ],
+                    },
+                    {
+                        "title": "跨项共因已经与单点问题分离",
+                        "summary": "处置优先级不再由 Todo 时间顺序决定。",
+                        "source_ref": source_ref,
+                        "details": [
+                            {"label": "共因", "text": "证据链可跨条目复核。"},
+                            {"label": "单点", "text": "局部现象单独保留。"},
+                        ],
+                    },
+                ],
+            },
+            {
+                "section_id": "coverage_and_actions",
+                "title": "版本覆盖与处置",
+                "items": [
+                    {
+                        "title": "历史证据与当前覆盖已经分开",
+                        "summary": "当前版本只声明已有证据能证明的覆盖范围。",
+                        "source_ref": source_ref,
+                    }
+                ],
+            },
+            {
+                "section_id": "next_actions",
+                "title": "下一步",
+                "items": [
+                    {
+                        "title": "按影响与可证伪性推进下一阶段",
+                        "summary": "优先验证能覆盖多个问题族的修复。",
+                        "source_ref": source_ref,
+                    }
+                ],
+            },
+        ],
+    }
+    response_path.write_text(
+        json.dumps(response, ensure_ascii=False), encoding="utf-8"
+    )
+
+
 def test_pending_intent_projects_a_ts_validated_governed_action(tmp_path: Path) -> None:
     _registry, runtime = _fixture(tmp_path)
 
@@ -134,6 +238,7 @@ def test_pending_intent_projects_a_ts_validated_governed_action(tmp_path: Path) 
     assert projection["state"] == "pending"
     assert projection["generation_authorized"] is True
     assert projection["external_delivery_authorized"] is False
+    assert projection["agent_read_required"] is True
     assert "consume-pending" in projection["command"]
 
     quiet = {
@@ -183,6 +288,21 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
 ) -> None:
     registry, runtime = _fixture(tmp_path)
 
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    assert required["status"] == "editorial_required"
+    assert Path(required["editorial_request_path"]).is_file()
+    assert not Path(required["editorial_response_path"]).exists()
+    state_before = (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(
+        encoding="utf-8"
+    )
+    assert "approve_periodic_report_payload" not in state_before
+    _write_editorial_response(required)
     first = consume_pending_periodic_report_intent(
         registry_path=registry,
         runtime_root=runtime,
@@ -206,22 +326,37 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
         "artifact_digests_verified": True,
         "html_self_contained": True,
         "matching_document_digest": True,
+        "language_is_zh_cn": True,
+        "analysis_narrative_validated": True,
+        "evidence_lineage_validated": True,
         "external_writes_performed": False,
     }
     assert Path(first["artifacts"]["html_path"]).is_file()
     assert Path(first["artifacts"]["markdown_path"]).is_file()
+    html = Path(first["artifacts"]["html_path"]).read_text(encoding="utf-8")
+    assert "本期结论：阶段分析已经形成完整判断" in html
+    assert "当前风险：问题已按影响与证据分层" in html
+    assert "下一步：按影响与可证伪性推进下一阶段" in html
     assert replay["status"] == "no_pending_intent"
     assert pending_periodic_report_intents(
         runtime_root=runtime, goal_id=GOAL_ID, agent_id=AGENT_ID
     ) == []
     state = (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
     assert state.count("approve_periodic_report_payload") == 1
-    assert "Miaoda publication or group delivery" in state
+    assert "批准前不得发布妙搭或发送群消息" in state
 
 
 def test_consumption_recovers_when_gate_precedes_receipt_write(tmp_path: Path) -> None:
     registry, runtime = _fixture(tmp_path)
 
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    _write_editorial_response(required)
     first = consume_pending_periodic_report_intent(
         registry_path=registry,
         runtime_root=runtime,
@@ -244,6 +379,108 @@ def test_consumption_recovers_when_gate_precedes_receipt_write(tmp_path: Path) -
     assert recovered["generation_receipt"] == first["generation_receipt"]
     state = (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
     assert state.count("approve_periodic_report_payload") == 1
+
+
+def test_consumption_rejects_english_or_flat_editorial_response(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    _write_editorial_response(required)
+    response_path = Path(required["editorial_response_path"])
+    response = json.loads(response_path.read_text(encoding="utf-8"))
+    response["title"] = "Weekly project report"
+    response_path.write_text(json.dumps(response), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="title must be Chinese-first"):
+        consume_pending_periodic_report_intent(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            execute=True,
+        )
+
+    response["title"] = "项目阶段分析周报"
+    response["sections"] = response["sections"][::-1]
+    response_path.write_text(
+        json.dumps(response, ensure_ascii=False), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="overview-to-depth contract"):
+        consume_pending_periodic_report_intent(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            execute=True,
+        )
+
+    _write_editorial_response(required)
+    response = json.loads(response_path.read_text(encoding="utf-8"))
+    response["sections"][0]["items"][0]["item_id"] = "authored_id"
+    response_path.write_text(
+        json.dumps(response, ensure_ascii=False), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="item_id is assigned by the consumer"):
+        consume_pending_periodic_report_intent(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            execute=True,
+        )
+
+    _write_editorial_response(required)
+    response = json.loads(response_path.read_text(encoding="utf-8"))
+    response["raw_content"] = "must not enter a frozen report"
+    response_path.write_text(
+        json.dumps(response, ensure_ascii=False), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="forbidden raw/private field"):
+        consume_pending_periodic_report_intent(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            execute=True,
+        )
+
+
+def test_consumption_reuses_the_exact_frozen_fact_request(tmp_path: Path) -> None:
+    registry, runtime = _fixture(tmp_path)
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    request_path = Path(required["editorial_request_path"])
+    original = request_path.read_text(encoding="utf-8")
+    state_path = registry.parent / "ACTIVE_GOAL_STATE.md"
+    state_path.write_text(
+        state_path.read_text(encoding="utf-8").replace(
+            "validated-analysis-outcome", "later-mutable-registry-prose"
+        ),
+        encoding="utf-8",
+    )
+
+    replay = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+
+    assert replay["status"] == "editorial_required"
+    assert request_path.read_text(encoding="utf-8") == original
 
 
 def test_cross_agent_or_malformed_intent_fails_closed(tmp_path: Path) -> None:

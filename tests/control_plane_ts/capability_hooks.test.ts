@@ -359,6 +359,7 @@ test("pending capability intent projects local generation without delivery autho
         command: "loopx periodic-report consume-pending --goal-id goal-example --agent-id agent-example --execute",
         generation_authorized: true,
         external_delivery_authorized: false,
+        agent_read_required: true,
       },
     },
   });
@@ -366,6 +367,10 @@ test("pending capability intent projects local generation without delivery autho
   assert.equal(
     (result.projection as JsonObject).external_delivery_authorized,
     false,
+  );
+  assert.equal(
+    (result.projection as JsonObject).agent_read_required,
+    true,
   );
 });
 

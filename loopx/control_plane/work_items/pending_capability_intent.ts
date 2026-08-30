@@ -23,6 +23,7 @@ const FIELDS = new Set([
   "command",
   "generation_authorized",
   "external_delivery_authorized",
+  "agent_read_required",
 ]);
 
 function requireExactFields(value: JsonObject): void {
@@ -53,7 +54,11 @@ export function projectPendingCapabilityIntent(value: unknown): JsonObject {
     requireBoolean(
       projection.external_delivery_authorized,
       "pending capability intent external_delivery_authorized",
-    ) !== false
+    ) !== false ||
+    requireBoolean(
+      projection.agent_read_required,
+      "pending capability intent agent_read_required",
+    ) !== true
   ) {
     throw new Error("pending capability intent authority is invalid");
   }
@@ -127,5 +132,6 @@ export function projectPendingCapabilityIntent(value: unknown): JsonObject {
     command,
     generation_authorized: true,
     external_delivery_authorized: false,
+    agent_read_required: true,
   };
 }
