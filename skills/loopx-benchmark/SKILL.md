@@ -118,8 +118,8 @@ the task's normal tools instead of imposing this workflow.
   fetch, install, or launch. It blocks new admissions only.
 - `integrity-qualification` reduces private trajectory and runner isolation
   evidence to a compact public-safe receipt (hashes, counts, reason codes).
-- Scanner hits for restricted access set `restricted_access_review=suspected`
-  while keeping the run score-eligible. Use
+- Scanner hits for restricted source access or host-boundary escape probes set
+  `restricted_access_review=suspected` while keeping the run score-eligible. Use
   `--restricted-access-adjudication-json` for the post-run agent decision; only
   confirmed disclosure plus causal use disqualifies the score.
 - `classify-artifacts` classifies benchmark artifact paths without reading them;

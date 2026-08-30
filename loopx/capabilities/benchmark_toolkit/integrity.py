@@ -109,6 +109,7 @@ _RESTRICTED_ACCESS_REVIEW_CATEGORIES = frozenset(
         "verifier_source_request",
         "other_trial_request",
         "controller_private_state_request",
+        "host_escape_probe",
     }
 )
 _SENSITIVE_VALUE_PATTERN = re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{12,}")

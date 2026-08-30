@@ -348,12 +348,15 @@ loopx benchmark integrity-qualification \
   --format json
 ```
 
-Automated restricted-source matches are suspicion signals, not a cheating verdict.
-They keep `integrity_qualified=true`, emit `restricted_access_review.state=suspected`,
-and remain score-eligible while a post-run analyst reviews the actual information
-flow. After the solver is terminal and scoring is complete, the analyst reads the
-real solver trajectory, tool results, and final workspace and may attach this
-compact decision:
+Automated restricted-source and host-boundary probe matches are suspicion signals,
+not a cheating verdict. They keep `integrity_qualified=true`, emit
+`restricted_access_review.state=suspected`, and remain score-eligible while a
+post-run analyst reviews the actual information flow. This includes a host-escape
+marker such as `/proc/1/root`: the marker alone cannot prove that the request left
+the isolated namespace, disclosed restricted material, or influenced the solution.
+After the solver is terminal and scoring is complete, the analyst reads the real
+solver trajectory, tool results, and final workspace and may attach this compact
+decision:
 
 ```json
 {
