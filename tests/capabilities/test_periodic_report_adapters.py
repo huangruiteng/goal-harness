@@ -117,6 +117,22 @@ def _archive_context(document: dict[str, Any], *, execute: bool) -> dict[str, An
     }
 
 
+def _goal_channel_binding(goal_id: str = "project-maintenance") -> dict[str, Any]:
+    return {
+        "goal_id": goal_id,
+        "provider": "lark",
+        "enabled": True,
+        "channel": {"chat_id": "oc_project_reports"},
+        "identity": {
+            "mode": "project_bot",
+            "sender_profile": "project-reporter",
+            "sender_identity": "bot",
+            "bot_app_id": "cli_project_reporter",
+            "bot_display_name": "Project Reporter",
+        },
+    }
+
+
 def _registry(*, calls: list[str]) -> PeriodicReportAdapterRegistry:
     registry = PeriodicReportAdapterRegistry()
     registry.register_source(issue_fix_periodic_report_source_adapter())
@@ -129,8 +145,11 @@ def _registry(*, calls: list[str]) -> PeriodicReportAdapterRegistry:
     )
     registry.register_renderer(periodic_report_markdown_renderer_adapter())
 
-    def lark_send(card: dict[str, Any], key: str) -> dict[str, str]:
+    def lark_send(
+        card: dict[str, Any], key: str, route: dict[str, Any]
+    ) -> dict[str, str]:
         assert card["header"]["title"]["content"] == "Weekly maintenance"
+        assert route["sender_profile"] == "project-reporter"
         calls.append(f"lark:{key}")
         return {"message_id": "om_report_123"}
 
@@ -140,7 +159,13 @@ def _registry(*, calls: list[str]) -> PeriodicReportAdapterRegistry:
             readback=lambda ref: {
                 "verified": True,
                 "message_id": ref,
+                "chat_id": "oc_project_reports",
+                "sender_app_id": "cli_project_reporter",
+                "sender_identity": "bot",
+                "sender_evidence_source": "message_readback",
             },
+            resolve_goal_channel=_goal_channel_binding,
+            verify_goal_channel=lambda _route: True,
         )
     )
 
@@ -197,9 +222,7 @@ def test_registry_composes_issue_fix_and_second_domain_without_semantic_leak() -
     assert next_actions["items"][0]["summary"] == (
         "Obtain reviewer approval and merge."
     )
-    assert next_actions["items"][0]["title"] == (
-        "Obtain reviewer approval and merge."
-    )
+    assert next_actions["items"][0]["title"] == ("Obtain reviewer approval and merge.")
     assert next_actions["items"][0]["content_kind"] == "next_action"
     assert issue_fix["boundary"]["schedule_policy_owned_by_source"] is False
 
@@ -254,7 +277,11 @@ def test_sink_preview_has_no_effect_and_execute_requires_exact_readback() -> Non
     preview = registry.deliver(
         "lark_delivery",
         artifact,
-        {"execute": False, "idempotency_key": "delivery-preview"},
+        {
+            "execute": False,
+            "goal_id": "project-maintenance",
+            "idempotency_key": "delivery-preview",
+        },
     )
     assert preview["status"] == "pending"
     assert preview["external_writes_performed"] is False
@@ -265,6 +292,7 @@ def test_sink_preview_has_no_effect_and_execute_requires_exact_readback() -> Non
         artifact,
         {
             "execute": True,
+            "goal_id": "project-maintenance",
             "idempotency_key": "delivery-live",
             "title": "Weekly maintenance",
         },
@@ -313,8 +341,19 @@ def test_lark_sink_rejects_private_card_context_before_send() -> None:
     registry = PeriodicReportAdapterRegistry()
     registry.register_sink(
         periodic_report_lark_sink_adapter(
-            send=lambda _card, key: calls.append(key) or {"message_id": "message"},
-            readback=lambda ref: {"verified": True, "message_id": ref},
+            send=lambda _card, key, _route: (
+                calls.append(key) or {"message_id": "message"}
+            ),
+            readback=lambda ref: {
+                "verified": True,
+                "message_id": ref,
+                "chat_id": "oc_project_reports",
+                "sender_app_id": "cli_project_reporter",
+                "sender_identity": "bot",
+                "sender_evidence_source": "message_readback",
+            },
+            resolve_goal_channel=_goal_channel_binding,
+            verify_goal_channel=lambda _route: True,
         )
     )
 
@@ -324,6 +363,7 @@ def test_lark_sink_rejects_private_card_context_before_send() -> None:
             artifact,
             {
                 "execute": True,
+                "goal_id": "project-maintenance",
                 "idempotency_key": "delivery-private-context",
                 "title": "/private/tmp/project-title",
             },
@@ -334,11 +374,100 @@ def test_lark_sink_rejects_private_card_context_before_send() -> None:
             artifact,
             {
                 "execute": True,
+                "goal_id": "project-maintenance",
                 "idempotency_key": "delivery-structured-context",
                 "title": {"to" + "ken": "super" + "sec" + "ret1234567890"},
             },
         )
     assert calls == []
+
+
+def test_lark_sink_requires_goal_channel_project_bot_and_exact_sender_readback() -> (
+    None
+):
+    artifact = periodic_report_markdown_renderer_adapter().render(
+        build_periodic_report_document(
+            title="Weekly maintenance",
+            generated_at="2026-07-20T01:00:00Z",
+            period_window={
+                "start_at": "2026-07-13T00:00:00Z",
+                "end_at": "2026-07-20T00:00:00Z",
+            },
+            profile={"profile_id": "maintenance", "profile_version": "v1"},
+            sources=[_release_source({})],
+        )
+    )
+    sent_routes: list[dict[str, Any]] = []
+
+    def adapter(
+        binding: dict[str, Any], readback: dict[str, Any]
+    ) -> PeriodicReportSinkAdapter:
+        return periodic_report_lark_sink_adapter(
+            send=lambda _card, _key, route: (
+                sent_routes.append(dict(route)) or {"message_id": "om_identity"}
+            ),
+            readback=lambda _ref: readback,
+            resolve_goal_channel=lambda _goal_id: binding,
+            verify_goal_channel=lambda _route: True,
+        )
+
+    context = {
+        "execute": True,
+        "goal_id": "project-maintenance",
+        "idempotency_key": "identity-live",
+    }
+    missing = _goal_channel_binding()
+    missing["enabled"] = False
+    with pytest.raises(ValueError, match="enabled Lark Goal Channel"):
+        adapter(missing, {}).deliver(artifact, context)
+
+    local_user = _goal_channel_binding()
+    local_user["identity"]["mode"] = "local_user"
+    with pytest.raises(ValueError, match="project_bot Goal Channel identity"):
+        adapter(local_user, {}).deliver(artifact, context)
+
+    with pytest.raises(ValueError, match="caller overrides are forbidden"):
+        adapter(_goal_channel_binding(), {}).deliver(
+            artifact,
+            {**context, "sender_profile": "environment-default"},
+        )
+
+    unverified = periodic_report_lark_sink_adapter(
+        send=lambda _card, _key, route: (
+            sent_routes.append(dict(route)) or {"message_id": "om_identity"}
+        ),
+        readback=lambda _ref: {},
+        resolve_goal_channel=_goal_channel_binding,
+        verify_goal_channel=lambda _route: False,
+    )
+    with pytest.raises(ValueError, match="sender identity could not be verified"):
+        unverified.deliver(artifact, context)
+    assert sent_routes == []
+
+    mismatch = adapter(
+        _goal_channel_binding(),
+        {
+            "verified": True,
+            "message_id": "om_identity",
+            "chat_id": "oc_project_reports",
+            "sender_app_id": "cli_wrong_sender",
+            "sender_identity": "bot",
+            "sender_evidence_source": "message_readback",
+        },
+    ).deliver(artifact, context)
+    assert mismatch["status"] == "unknown"
+    assert mismatch["sender_identity_verified"] is False
+    assert sent_routes == [
+        {
+            "goal_id": "project-maintenance",
+            "chat_id": "oc_project_reports",
+            "sender_profile": "project-reporter",
+            "sender_identity": "bot",
+            "bot_app_id": "cli_project_reporter",
+            "bot_display_name": "Project Reporter",
+            "cli_bin": "lark-cli",
+        }
+    ]
 
 
 def test_sink_factories_emit_canonical_custom_ids() -> None:
@@ -364,8 +493,10 @@ def test_sink_factories_emit_canonical_custom_ids() -> None:
     registry.register_sink(
         periodic_report_lark_sink_adapter(
             sink_id="Lark_Custom",
-            send=lambda _card, _key: {},
+            send=lambda _card, _key, _route: {},
             readback=lambda _ref: {},
+            resolve_goal_channel=_goal_channel_binding,
+            verify_goal_channel=lambda _route: True,
         )
     )
     registry.register_sink(
@@ -379,7 +510,11 @@ def test_sink_factories_emit_canonical_custom_ids() -> None:
     lark = registry.deliver(
         "Lark_Custom",
         artifact,
-        {"execute": False, "idempotency_key": "lark-custom-preview"},
+        {
+            "execute": False,
+            "goal_id": "project-maintenance",
+            "idempotency_key": "lark-custom-preview",
+        },
     )
     archive = registry.deliver(
         "OpenViking_Custom",

@@ -13,7 +13,9 @@ from loopx.capabilities.periodic_report.pending_intent import (
 from loopx.capabilities.periodic_report.project_progress_snapshot import (
     build_project_progress_snapshot,
 )
-from loopx.todos import add_goal_todo
+from loopx.todos import add_goal_todo, complete_goal_todo
+from loopx.status import collect_status, parse_active_state_todos
+from loopx.quota import build_quota_should_run
 from loopx.control_plane.capability_hooks import dispatch_interaction_projection_hooks
 from loopx.control_plane.quota.live_decision import (
     _apply_pending_capability_intent_precedence,
@@ -222,9 +224,7 @@ def _write_editorial_response(first: dict[str, object]) -> None:
             },
         ],
     }
-    response_path.write_text(
-        json.dumps(response, ensure_ascii=False), encoding="utf-8"
-    )
+    response_path.write_text(json.dumps(response, ensure_ascii=False), encoding="utf-8")
 
 
 def _reject_approval(
@@ -372,20 +372,77 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
     }
     assert Path(first["artifacts"]["html_path"]).is_file()
     assert Path(first["artifacts"]["markdown_path"]).is_file()
+    assert Path(first["artifacts"]["generation_bundle_path"]).is_file()
     html = Path(first["artifacts"]["html_path"]).read_text(encoding="utf-8")
     assert "本期结论：阶段分析已经形成完整判断" in html
     assert "当前风险：问题已按影响与证据分层" in html
     assert "下一步：按影响与可证伪性推进下一阶段" in html
     assert replay["status"] == "no_pending_intent"
-    assert pending_periodic_report_intents(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-    ) == []
+    assert (
+        pending_periodic_report_intents(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+        )
+        == []
+    )
     state = (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
     assert state.count("approve_periodic_report_payload") == 1
     assert "批准前不得发布妙搭或发送群消息" in state
+    parsed = parse_active_state_todos(state)
+    delivery = next(
+        item
+        for item in parsed["agent_todos"]["items"]
+        if item.get("todo_id") == first["delivery_todo_id"]
+    )
+    gate = next(
+        item
+        for item in parsed["user_todos"]["items"]
+        if item.get("todo_id") == first["approval_todo_id"]
+    )
+    assert delivery["status"] == "blocked"
+    assert delivery["action_kind"] == "deliver_periodic_report_goal_channel"
+    assert delivery["required_decision_scopes"][0]["scope_key"].startswith(
+        "periodic_report_"
+    )
+    assert gate["unblocks_todo_id"] == delivery["todo_id"]
+
+    completion = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=str(first["approval_todo_id"]),
+        role="user",
+        agent_id=AGENT_ID,
+        decision_outcome="approve",
+        evidence="owner approved the exact frozen report payload",
+    )
+    assert completion["unblock_resume"]["state"] == "resumed"
+    approved = parse_active_state_todos(
+        (registry.parent / "ACTIVE_GOAL_STATE.md").read_text(encoding="utf-8")
+    )
+    delivery_after = next(
+        item
+        for item in approved["agent_todos"]["items"]
+        if item.get("todo_id") == first["delivery_todo_id"]
+    )
+    assert delivery_after["status"] == "open"
+    assert delivery_after.get("required_decision_scopes", []) == []
+    status = collect_status(
+        registry_path=registry,
+        runtime_root_override=str(runtime),
+        scan_roots=[registry.parent],
+        limit=20,
+        goal_id=GOAL_ID,
+    )
+    quota = build_quota_should_run(
+        status,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        available_capabilities=["network", "lark_bot_message_write"],
+    )
+    assert quota["selected_todo"]["todo_id"] == delivery_after["todo_id"], quota
+    assert quota["user_todo_summary"]["open_count"] == 0
 
 
 def test_consumption_uses_the_stage_progress_snapshot(tmp_path: Path) -> None:
@@ -433,8 +490,7 @@ def test_consumption_uses_the_stage_progress_snapshot(tmp_path: Path) -> None:
         "2026-08-30 17:00（北京时间）"
     )
     assert not any(
-        "Follow-up work added after stage completion" in fact["title"]
-        for fact in facts
+        "Follow-up work added after stage completion" in fact["title"] for fact in facts
     )
 
 
@@ -558,15 +614,19 @@ def test_rejected_approval_reopens_the_intent_in_a_fresh_attempt(
     )
     assert second["status"] == "approval_pending"
     assert second["approval_todo_id"] != first["approval_todo_id"]
-    assert state_path.read_text(encoding="utf-8").count(
-        "approve_periodic_report_payload"
-    ) == 2
-    assert pending_periodic_report_intents(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-    ) == []
+    assert (
+        state_path.read_text(encoding="utf-8").count("approve_periodic_report_payload")
+        == 2
+    )
+    assert (
+        pending_periodic_report_intents(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+        )
+        == []
+    )
 
     _reject_approval(
         state_path=state_path,
@@ -662,9 +722,7 @@ def test_consumption_rejects_english_or_flat_editorial_response(
     _write_editorial_response(required)
     response = json.loads(response_path.read_text(encoding="utf-8"))
     response["period_label"] = "2026-08-23 — 2026-08-30"
-    response_path.write_text(
-        json.dumps(response, ensure_ascii=False), encoding="utf-8"
-    )
+    response_path.write_text(json.dumps(response, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="must match the actual work window"):
         consume_pending_periodic_report_intent(
             registry_path=registry,
@@ -678,9 +736,7 @@ def test_consumption_rejects_english_or_flat_editorial_response(
     response = json.loads(response_path.read_text(encoding="utf-8"))
     response["title"] = "项目阶段分析周报"
     response["sections"] = response["sections"][::-1]
-    response_path.write_text(
-        json.dumps(response, ensure_ascii=False), encoding="utf-8"
-    )
+    response_path.write_text(json.dumps(response, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="overview-to-depth contract"):
         consume_pending_periodic_report_intent(
             registry_path=registry,
@@ -693,9 +749,7 @@ def test_consumption_rejects_english_or_flat_editorial_response(
     _write_editorial_response(required)
     response = json.loads(response_path.read_text(encoding="utf-8"))
     response["sections"][0]["items"][0]["item_id"] = "authored_id"
-    response_path.write_text(
-        json.dumps(response, ensure_ascii=False), encoding="utf-8"
-    )
+    response_path.write_text(json.dumps(response, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="item_id is assigned by the consumer"):
         consume_pending_periodic_report_intent(
             registry_path=registry,
@@ -708,9 +762,7 @@ def test_consumption_rejects_english_or_flat_editorial_response(
     _write_editorial_response(required)
     response = json.loads(response_path.read_text(encoding="utf-8"))
     response["raw_content"] = "must not enter a frozen report"
-    response_path.write_text(
-        json.dumps(response, ensure_ascii=False), encoding="utf-8"
-    )
+    response_path.write_text(json.dumps(response, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="forbidden raw/private field"):
         consume_pending_periodic_report_intent(
             registry_path=registry,
@@ -813,9 +865,7 @@ def test_consumption_prefers_real_agent_run_start_over_completion_timestamps(
         Path(required["editorial_request_path"]).read_text(encoding="utf-8")
     )
 
-    assert request["actual_work_window"]["start_at"] == (
-        "2026-08-29T11:24:27+00:00"
-    )
+    assert request["actual_work_window"]["start_at"] == ("2026-08-29T11:24:27+00:00")
     assert request["actual_work_window"]["period_label"] == (
         "2026-08-29 19:24 — 2026-08-30 17:00（北京时间）"
     )
@@ -823,21 +873,27 @@ def test_consumption_prefers_real_agent_run_start_over_completion_timestamps(
 
 def test_cross_agent_or_malformed_intent_fails_closed(tmp_path: Path) -> None:
     registry, runtime = _fixture(tmp_path)
-    assert pending_periodic_report_intents(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id="other-agent",
-    ) == []
+    assert (
+        pending_periodic_report_intents(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id="other-agent",
+        )
+        == []
+    )
     sidecar = next(
         (runtime / "goals" / GOAL_ID / "post_writeback_hooks").glob("*.json")
     )
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
     payload["intent"]["requested_write_scope"] = ["external_delivery"]
     sidecar.write_text(json.dumps(payload), encoding="utf-8")
-    assert pending_periodic_report_intents(
-        registry_path=registry,
-        runtime_root=runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-    ) == []
+    assert (
+        pending_periodic_report_intents(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+        )
+        == []
+    )
