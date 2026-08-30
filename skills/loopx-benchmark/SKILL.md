@@ -71,6 +71,14 @@ the task's normal tools instead of imposing this workflow.
    score_countable:false}`. Keep the same stable `run_id` for every transition.
 
 4. **Preview and upsert terminal score, countability, effort, and insight.**
+   First run integrity qualification. An automated restricted-access match is a
+   countable suspicion, not a cheating verdict. After solver and scoring are
+   terminal, inspect the real solver trajectory, tool results, and final
+   workspace. Pass a compact
+   `benchmark_restricted_access_adjudication_v0` only after that review; confirm
+   cheating only when restricted material was actually disclosed and causally
+   entered a solving or validation decision.
+
    ```bash
    loopx benchmark experiment-board-upsert --goal-id <GOAL_ID> \
      --row-json <terminal-row.json> --execute --format json
@@ -110,6 +118,10 @@ the task's normal tools instead of imposing this workflow.
   fetch, install, or launch. It blocks new admissions only.
 - `integrity-qualification` reduces private trajectory and runner isolation
   evidence to a compact public-safe receipt (hashes, counts, reason codes).
+- Scanner hits for restricted access set `restricted_access_review=suspected`
+  while keeping the run score-eligible. Use
+  `--restricted-access-adjudication-json` for the post-run agent decision; only
+  confirmed disclosure plus causal use disqualifies the score.
 - `classify-artifacts` classifies benchmark artifact paths without reading them;
   use it before reading or publishing any candidate artifact.
 - The solver lane must not read hidden tests, verifier sources, gold answers, or

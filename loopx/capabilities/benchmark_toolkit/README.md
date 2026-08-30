@@ -348,6 +348,37 @@ loopx benchmark integrity-qualification \
   --format json
 ```
 
+Automated restricted-source matches are suspicion signals, not a cheating verdict.
+They keep `integrity_qualified=true`, emit `restricted_access_review.state=suspected`,
+and remain score-eligible while a post-run analyst reviews the actual information
+flow. After the solver is terminal and scoring is complete, the analyst reads the
+real solver trajectory, tool results, and final workspace and may attach this
+compact decision:
+
+```json
+{
+  "schema_version": "benchmark_restricted_access_adjudication_v0",
+  "decision": "qualified_with_warning",
+  "reviewer_role": "post_run_analyst",
+  "reviewed_surfaces": [
+    "solver_trajectory",
+    "tool_results",
+    "final_workspace"
+  ],
+  "restricted_material_disclosed": false,
+  "causal_use_observed": false,
+  "evidence_id": "case-integrity-review-1"
+}
+```
+
+Pass it with `--restricted-access-adjudication-json <compact.json>`. The only
+disqualifying decision is `confirmed_cheating`, and it is valid only when restricted
+material was actually disclosed and the analyst found that it causally entered a
+solving or validation decision. A blocked request, empty result, or disclosed content
+with no observed causal use remains countable with an audit warning. The evidence id
+is a public-safe pointer; raw trajectory content and private paths stay outside the
+receipt.
+
 The command emits `benchmark_integrity_qualification_v0`. It records only stable
 labels, counts, reason codes, step ids, and SHA-256 digests. It never emits raw tool
 arguments, observations, sensitive values, input paths, task text, verifier output,
@@ -356,8 +387,9 @@ JSON parser details cannot echo private data.
 
 Qualification rejects a run when it detects any of the following:
 
-- answer, out-of-scope task-source, hidden-test, verifier, other-trial, or
-  controller-private source access;
+- post-run agent confirmation that restricted answer, out-of-scope task-source,
+  hidden-test, verifier, other-trial, or controller-private material was both
+  disclosed and causally used during solving or validation;
 - host escape, credential probing or exposure, or shell network access;
 - malformed or incomplete ATIF tool evidence;
 - missing runner authority or any required runtime isolation attestation.
@@ -381,12 +413,14 @@ to `denied_argument_markers.restricted_task_source_request`. Matching inspects t
 argument strings before JSON escaping; the public receipt keeps only the category,
 count, step id, tool name, and argument digest, never the configured marker or raw
 command. This records an explicit access request even when it returns no content,
-without adding a benchmark-specific substring denylist to LoopX core.
+without adding a benchmark-specific substring denylist to LoopX core. The request
+remains a countable suspicion until post-run causal adjudication confirms cheating.
 
 `benchmark_cheating_detected` is narrower than `integrity_qualified=false`.
-Restricted evaluation or cross-trial access is classified as cheating. Missing
-isolation proof or a credential leak still makes the run uncountable, but LoopX does
-not relabel that absence of proof as confirmed answer cheating.
+It becomes true only after the post-run analyst confirms both restricted-material
+disclosure and causal use. A scanner hit, missing isolation proof, or credential leak
+does not by itself become confirmed answer cheating; isolation and credential
+failures can still make the run uncountable through their independent blockers.
 
 ### Network access policy
 
@@ -644,7 +678,8 @@ A countable experiment uses the toolkit in this order:
    liveness from an occupied admission slot.
 9. Before a terminal write, require runtime continuity between the launch artifact,
    closeout artifact, launch generation, closeout generation, and event window.
-10. Run `integrity-qualification`; stop on any blocker.
+10. Run `integrity-qualification`; if restricted access is only suspected, keep the
+    score eligible and queue post-run causal adjudication; stop on any actual blocker.
 11. Run the independent verifier only after the agent phase.
 12. Reduce the official result through the benchmark-owned scoring path.
 13. Upsert terminal score, countability, effort, treatment fidelity, and insight

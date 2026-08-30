@@ -210,11 +210,14 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "loopx benchmark integrity-qualification "
                 "--trajectory-json <private.json> "
                 "--runtime-attestation-json <attestation.json> "
+                "[--restricted-access-adjudication-json <compact.json>] "
                 "--require-qualified --format json"
             ),
             "purpose": (
                 "Reduce private ATIF tool evidence and runner-owned isolation "
-                "facts to a compact integrity qualification receipt."
+                "facts to a compact integrity qualification receipt; scanner "
+                "suspicion remains eligible unless post-run causal review confirms "
+                "restricted disclosure and use."
             ),
             "write_boundary": (
                 "read-only private local inputs; emits hashes, counts, and "
@@ -273,6 +276,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "classify_exact_runtime_observation_during_active_monitor_cycles",
             "require_runtime_continuity_before_terminal_closeout_write",
             "qualify_treatment_plan_roles_from_typed_action_kinds",
+            "adjudicate_restricted_access_suspicion_after_solver_and_score_terminal",
             "upsert_terminal_score_countability_effort_and_insight_status",
             "release_case_slot_after_terminal_or_runner_invalid_transition",
             "read_matched_comparisons_before_selecting_the_next_arm",
@@ -489,6 +493,33 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "evidence, why the outcome happened, whether it was expected, and what "
             "LoopX should test or change next."
         ),
+        "restricted_access_adjudication": {
+            "hint": (
+                "When the integrity scan marks restricted access as suspected, "
+                "inspect the real solver trajectory, tool results, and final "
+                "workspace after terminal scoring. Keep the run countable unless "
+                "restricted material was actually disclosed and causally entered "
+                "a solving or validation decision."
+            ),
+            "artifact_template": {
+                "schema_version": "benchmark_restricted_access_adjudication_v0",
+                "decision": "<qualified_with_warning-or-confirmed_cheating>",
+                "reviewer_role": "post_run_analyst",
+                "reviewed_surfaces": [
+                    "solver_trajectory",
+                    "tool_results",
+                    "final_workspace",
+                ],
+                "restricted_material_disclosed": "<true-or-false>",
+                "causal_use_observed": "<true-or-false>",
+                "evidence_id": "<public-safe-pointer>",
+            },
+            "decision_rule": (
+                "Only disclosed=true plus causal_use=true may be "
+                "confirmed_cheating; all other reviewed suspicion remains "
+                "qualified_with_warning."
+            ),
+        },
         "role_boundary": {
             "solver": (
                 "must not access hidden tests, grader or verifier sources, expected "
@@ -571,6 +602,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
         },
         {
+            "schema_version": "benchmark_restricted_access_adjudication_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.integrity",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
             "schema_version": "benchmark_runtime_integrity_attestation_v0",
             "module": "loopx.capabilities.benchmark_toolkit.integrity",
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
@@ -611,6 +647,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         "Source revision qualification is read-only and caller-observed: it does not fetch, install, update a checkout, or rewrite an already admitted run.",
         "Raw trajectories are private local inputs to integrity qualification and are never copied into receipts, ledgers, docs, or PR artifacts.",
         "A clean trajectory scan is not isolation proof: runner-owned permission and verifier-order attestations are mandatory and fail closed when absent.",
+        "Automated restricted-access matches are countable suspicion only; confirmed cheating requires post-run agent evidence of both disclosure and causal use.",
         "Concurrent Docker runs must bind runtime evidence to one exact job-owned container; image-only discovery is not sufficient.",
         "Admission-ledger occupancy never proves runner liveness; active health requires a resolved exact-job receipt and a live exact runner owner after startup grace.",
         "Integrity qualification establishes countability eligibility only; an independent official result and matched experiment contract are still required.",
