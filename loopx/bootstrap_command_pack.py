@@ -908,11 +908,7 @@ def build_loopx_bootstrap_command_pack(
         cli_bin=cli_bin,
         runtime_root=command_runtime_root,
         fine_grained=fine_grained,
-        display_name=(
-            derive_public_goal_display_name(None, explicit=display_name)
-            if display_name and display_name.strip()
-            else None
-        ),
+        display_name=derive_public_goal_display_name(None, explicit=display_name) if display_name else None,
     )
     goal_start_plan_prompt = build_goal_start_prompt(
         goal_text=normalized_goal_text,
