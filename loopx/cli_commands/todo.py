@@ -18,6 +18,9 @@ from ..control_plane.quota.settlement import (
     settlement_result_payload,
 )
 from ..control_plane.todos.handoff_mode import HandoffModeError
+from ..control_plane.todos.external_wait_contract import (
+    TodoExternalWaitAuthoringError,
+)
 from ..control_plane.todos.markdown import render_todo_markdown
 from ..control_plane.work_items.task_lease import TaskLeaseError
 from ..file_lock import lock_timeout_error_fields
@@ -1025,6 +1028,10 @@ def handle_todo_command(
         if isinstance(exc, (TaskLeaseError, HandoffModeError)):
             payload["error_code"] = exc.code
             payload.update(exc.payload)
+        elif isinstance(exc, TodoExternalWaitAuthoringError):
+            payload["error_code"] = exc.code
+            if exc.authoring_contract is not None:
+                payload["authoring_contract"] = exc.authoring_contract
     append_todo_rollout_event(
         payload,
         args=args,

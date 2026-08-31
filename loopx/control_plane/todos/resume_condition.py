@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
+from .external_wait_contract import TodoExternalWaitAuthoringError
 
 
 TODO_RESUME_NORMALIZE_REQUEST_SCHEMA_VERSION = "todo_resume_normalize_request_v0"
@@ -35,6 +36,7 @@ _RESUME_PR_MERGED_PATTERN = re.compile(
 
 _RESUME_ITEM_FIELDS = (
     "todo_id",
+    "role",
     "status",
     "task_class",
     "archive_state",
@@ -201,7 +203,15 @@ def plan_todo_external_wait_transition(
             },
         )
     except EffectRuntimeRejected as exc:
-        raise ValueError(str(exc)) from None
+        resume_kind, _, target_todo_id = resume_when.partition(":")
+        raise TodoExternalWaitAuthoringError(
+            str(exc),
+            code=exc.diagnostic_code,
+            monitor_todo_id=(
+                target_todo_id if resume_kind == TODO_RESUME_KIND_MONITOR_CHANGED else None
+            ),
+            successor_todo_ids=successor_todo_ids,
+        ) from None
     if not isinstance(result, Mapping) or (
         result.get("schema_version") != TODO_EXTERNAL_WAIT_TRANSITION_SCHEMA_VERSION
     ):

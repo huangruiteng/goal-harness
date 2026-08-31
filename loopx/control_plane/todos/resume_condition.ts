@@ -53,6 +53,7 @@ interface ResumeSpec {
 
 interface TodoItem extends JsonObject {
   todo_id: string;
+  role?: string;
   status?: string;
   task_class?: string;
   resume_when?: string;
@@ -89,6 +90,7 @@ function todoItem(value: unknown, label: string): TodoItem {
   const raw = requireJsonObject(value, label);
   const item: TodoItem = { todo_id: todoId(raw.todo_id, `${label}.todo_id`) };
   for (const field of [
+    "role",
     "status",
     "task_class",
     "archive_state",
@@ -467,11 +469,25 @@ function externalWaitTodo(
   if (!todo) {
     throw new EffectRuntimeRequestError(
       "external-wait Todo is absent from current state",
+      "external_wait_todo_absent",
     );
   }
-  if (todo.status !== "open" || todo.task_class !== "advancement_task") {
+  if (todo.role !== "agent") {
     throw new EffectRuntimeRequestError(
-      "external-wait transition requires an open advancement_task",
+      "external-wait Todo must have role=agent",
+      "external_wait_todo_role_invalid",
+    );
+  }
+  if (todo.status !== "open") {
+    throw new EffectRuntimeRequestError(
+      "external-wait Todo must remain status=open; resume_when excludes it from runnable selection until the condition is satisfied",
+      "external_wait_todo_status_must_remain_open",
+    );
+  }
+  if (todo.task_class !== "advancement_task") {
+    throw new EffectRuntimeRequestError(
+      "external-wait Todo must have task_class=advancement_task",
+      "external_wait_todo_task_class_invalid",
     );
   }
   return { todoId: requestedId, todo };
@@ -486,27 +502,32 @@ function externalWaitDependency(
     throw new EffectRuntimeRequestError(
       "external-wait transition supports todo_done or monitor_changed; use ordinary " +
         "resume_when authoring for PR and capacity conditions",
+      "external_wait_resume_kind_invalid",
     );
   }
   if (spec.target === waitingTodoId) {
     throw new EffectRuntimeRequestError(
       "external-wait Todo cannot resume from itself",
+      "external_wait_dependency_self_reference",
     );
   }
   const dependency = byId.get(spec.target);
   if (!dependency) {
     throw new EffectRuntimeRequestError(
       "external-wait dependency is absent from current state",
+      "external_wait_dependency_absent",
     );
   }
   if (spec.kind === "todo_done" && dependency.task_class === "continuous_monitor") {
     throw new EffectRuntimeRequestError(
       "todo_done cannot wait on a continuous_monitor; use monitor_changed:<todo_id>",
+      "external_wait_monitor_condition_required",
     );
   }
   if (spec.kind === "todo_done" && dependency.status === "done") {
     throw new EffectRuntimeRequestError(
       "todo_done dependency is already complete",
+      "external_wait_dependency_already_complete",
     );
   }
   if (
@@ -515,6 +536,7 @@ function externalWaitDependency(
   ) {
     throw new EffectRuntimeRequestError(
       "monitor_changed requires an open continuous_monitor target",
+      "external_wait_monitor_target_invalid",
     );
   }
   return dependency;
@@ -533,6 +555,7 @@ function externalWaitSuccessors(
   if (successors.length === 0) {
     throw new EffectRuntimeRequestError(
       "external-wait transition requires at least one independent runnable successor",
+      "external_wait_successor_required",
     );
   }
   for (const successorId of successors) {
@@ -540,16 +563,19 @@ function externalWaitSuccessors(
     if (!successor || successorId === waitingTodoId) {
       throw new EffectRuntimeRequestError(
         "external-wait successor is absent or self-referential",
+        "external_wait_successor_absent_or_self",
       );
     }
     if (successor.status !== "open" || successor.task_class !== "advancement_task") {
       throw new EffectRuntimeRequestError(
         "external-wait successor must be an open advancement_task",
+        "external_wait_successor_not_open_advancement",
       );
     }
     if (successor.resume_when && successor.resume_ready !== true) {
       throw new EffectRuntimeRequestError(
         "external-wait successor must be runnable, not resume-gated",
+        "external_wait_successor_resume_gated",
       );
     }
   }
@@ -572,6 +598,7 @@ function externalWaitMetadata(
   if (sameCondition && currentCondition.satisfied === true) {
     throw new EffectRuntimeRequestError(
       "clear the satisfied resume_when before re-arming the same monitor wait",
+      "external_wait_satisfied_condition_requires_clear",
     );
   }
   const baselineGeneration =

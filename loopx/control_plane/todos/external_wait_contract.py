@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from typing import Any
+
+
+MONITOR_ADVANCEMENT_AUTHORING_SCHEMA_VERSION = (
+    "monitor_advancement_authoring_v0"
+)
+
+
+def build_monitor_advancement_authoring_contract(
+    *,
+    monitor_todo_id: str | None = None,
+    successor_todo_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Project the cross-command monitor-to-advancement authoring contract."""
+
+    monitor_ref = str(monitor_todo_id or "<monitor_todo_id>").strip()
+    successors = [
+        str(item).strip()
+        for item in (successor_todo_ids or [])
+        if str(item).strip()
+    ]
+    return {
+        "schema_version": MONITOR_ADVANCEMENT_AUTHORING_SCHEMA_VERSION,
+        "monitor": {
+            "task_class": "continuous_monitor",
+            "execution": "observe_only",
+        },
+        "material_change": {
+            "command": "loopx quota monitor-poll",
+            "required_args": [
+                "--material-change",
+                "--next-agent-todo",
+                "--next-action-kind",
+            ],
+            "next_agent_todo_effect": "emit_independent_open_advancement_task",
+        },
+        "waiting_todo": {
+            "status": "open",
+            "task_class": "advancement_task",
+            "resume_when": f"monitor_changed:{monitor_ref}",
+            "successor_todo_ids": successors,
+            "successor_requirement": "independent_runnable_advancement_task",
+            "runnable_state": "excluded_until_resume_condition_satisfied",
+        },
+    }
+
+
+class TodoExternalWaitAuthoringError(ValueError):
+    """Typed public diagnostic for an invalid external-wait transition."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        monitor_todo_id: str | None = None,
+        successor_todo_ids: list[str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.authoring_contract = (
+            build_monitor_advancement_authoring_contract(
+                monitor_todo_id=monitor_todo_id,
+                successor_todo_ids=successor_todo_ids,
+            )
+            if monitor_todo_id
+            else None
+        )

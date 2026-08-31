@@ -34,6 +34,9 @@ from ..todos.contract import (
     normalize_todo_id,
     resolve_next_user_task_class,
 )
+from ..todos.external_wait_contract import (
+    build_monitor_advancement_authoring_contract,
+)
 from ..work_items.delivery_outcome import DeliveryOutcome
 
 
@@ -452,6 +455,24 @@ def _capability_declaration_retry(before: dict[str, Any]) -> dict[str, Any] | No
     }
 
 
+def _monitor_advancement_authoring_fields(
+    *,
+    material_change: bool,
+    monitor_todo_id: Any,
+    successor_todo_ids: list[str],
+) -> dict[str, Any]:
+    """Attach the optional cross-command recipe outside the hot-path reducer."""
+
+    if not material_change:
+        return {}
+    return {
+        "authoring_contract": build_monitor_advancement_authoring_contract(
+            monitor_todo_id=str(monitor_todo_id or "") or None,
+            successor_todo_ids=successor_todo_ids,
+        )
+    }
+
+
 def record_quota_monitor_poll_for_decision(
     before: dict[str, Any],
     status_payload: dict[str, Any],
@@ -606,6 +627,11 @@ def record_quota_monitor_poll_for_decision(
                     "todo_id": existing.get("todo_id"),
                     "target_key": existing.get("target_key"),
                     "material_change": bool(existing.get("material_change")),
+                    **_monitor_advancement_authoring_fields(
+                        material_change=bool(existing.get("material_change")),
+                        monitor_todo_id=existing.get("todo_id"),
+                        successor_todo_ids=replay_successor_ids,
+                    ),
                     "turn_instance_id": normalized_turn_instance_id,
                     "monitor_event": monitor_event,
                     "todo_writeback": None,
@@ -810,6 +836,11 @@ def record_quota_monitor_poll_for_decision(
         "todo_id": record["monitor_event"].get("todo_id"),
         "target_key": record["monitor_event"].get("target_key"),
         "material_change": record["monitor_event"].get("material_change"),
+        **_monitor_advancement_authoring_fields(
+            material_change=material_change,
+            monitor_todo_id=record["monitor_event"].get("todo_id"),
+            successor_todo_ids=successor_todo_ids,
+        ),
         "monitor_event": record["monitor_event"],
         "todo_writeback": todo_writeback,
         "successor_todo_ids": successor_todo_ids,
