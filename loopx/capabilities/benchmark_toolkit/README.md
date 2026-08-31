@@ -714,10 +714,12 @@ capacity, file descriptors, persistent storage, or provider capacity, enable
 fresh `benchmark_resource_headroom_receipt_v0`. The provider observes its own
 environment and supplies only typed `sufficient`, `insufficient`, or `unresolved`
 checks plus a validity window of at most 15 minutes. Missing, expired, future,
-unresolved, or
-insufficient receipts fail closed before the slot is reserved. LoopX never records
-raw metrics, paths, provider logs, or the receipt in the envelope, and the receipt
-does not grant launch authority.
+unresolved, or insufficient receipts fail closed before the slot is reserved. Each
+check must observe the runner-resolved resource actually consumed by the launch—for
+example its profile, cache, scratch, and artifact filesystems—not merely a generic
+host default such as `/tmp`; if that binding cannot be proven, report `unresolved`.
+LoopX never records raw metrics, paths, provider logs, or the receipt in the
+envelope, and the receipt does not grant launch authority.
 
 Read back the gate with `concurrency-status`. To disable it, rerun
 `concurrency-configure` with the same capacity values and omit
