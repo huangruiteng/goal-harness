@@ -86,8 +86,8 @@ def main() -> int:
 
         payload = json.loads(guided.stdout)
         connect_command = payload["guided_transaction"]["ordered_steps"][1]["command"]
-        assert "--display-name" in connect_command, connect_command
-        assert GOAL_TEXT in connect_command, connect_command
+        assert "--display-name" not in connect_command, connect_command
+        assert connect_command.count(GOAL_TEXT) == 1, connect_command
 
     print("ok: start-goal display_name smoke passed")
     return 0

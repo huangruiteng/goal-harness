@@ -105,7 +105,7 @@ def test_bootstrap_without_objective_does_not_persist_default_display_name(
     assert goal.get("display_name") is None
 
 
-def test_guided_start_connect_command_includes_display_name(tmp_path: Path) -> None:
+def test_guided_start_connect_command_omits_derived_display_name(tmp_path: Path) -> None:
     project = tmp_path / "project"
     state_file = project / ".codex" / "goals" / "guided-goal" / "ACTIVE_GOAL_STATE.md"
     state_file.parent.mkdir(parents=True)
@@ -139,5 +139,47 @@ def test_guided_start_connect_command_includes_display_name(tmp_path: Path) -> N
         goal_text=goal_text,
     )
     connect_command = payload["guided_transaction"]["ordered_steps"][1]["command"]
-    assert "--display-name" in connect_command
-    assert goal_text in connect_command
+    assert "--display-name" not in connect_command
+    assert connect_command.count(goal_text) == 1
+
+
+def test_guided_start_connect_command_includes_explicit_display_name(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    state_file = project / ".codex" / "goals" / "guided-goal" / "ACTIVE_GOAL_STATE.md"
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text("# Active Goal State\n", encoding="utf-8")
+    registry = project / ".loopx" / "registry.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "goals": [
+                    {
+                        "id": "guided-goal",
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": ".codex/goals/guided-goal/ACTIVE_GOAL_STATE.md",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    goal_text = "Repair dashboard goal title fallback"
+    display_name = "Repair dashboard title"
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id="guided-goal",
+        agent_id="cursor-display-name-agent",
+        cli_bin="loopx",
+        host_surface="cursor-agent",
+        goal_text=goal_text,
+        display_name=f"  {display_name}  ",
+    )
+    connect_command = payload["guided_transaction"]["ordered_steps"][1]["command"]
+    assert f"--display-name '{display_name}'" in connect_command
+    assert connect_command.count(goal_text) == 1
