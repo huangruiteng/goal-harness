@@ -187,6 +187,22 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "command": (
+                "loopx benchmark concurrency-tune --goal-id <goal-id> "
+                "--feedback-json <feedback.json> "
+                "--resource-headroom-json <receipt.json> "
+                "[--execute] --format json"
+            ),
+            "purpose": (
+                "Adapt desired occupancy inside the operator-owned hard ceiling "
+                "from compact runner health and resource headroom."
+            ),
+            "write_boundary": (
+                "preview by default; execute changes only target occupancy, never "
+                "hard or role caps, active runs, raw metrics, or launch authority"
+            ),
+        },
+        {
+            "command": (
                 "loopx benchmark integrity-qualification "
                 "--trajectory-json <private.json> "
                 "--runtime-attestation-json <attestation.json> "
@@ -251,6 +267,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "backfill_when_concurrency_status_reports_underfilled",
             "qualify_source_revision_before_each_new_run_admission",
             "qualify_resource_headroom_when_the_envelope_requires_a_receipt",
+            "tune_target_occupancy_from_fresh_runner_feedback_when_opted_in",
             "atomically_admit_case_slot_before_runner_launch",
             "upsert_preregistered_or_running_row_when_a_run_starts",
             "classify_exact_runtime_observation_during_active_monitor_cycles",
@@ -298,6 +315,12 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "release": (
                 "loopx benchmark concurrency-release --goal-id <goal-id> "
                 "--run-id <run-id> --execute --format json"
+            ),
+            "tune": (
+                "loopx benchmark concurrency-tune --goal-id <goal-id> "
+                "--feedback-json <feedback.json> "
+                "--resource-headroom-json <receipt.json> "
+                "[--execute] --format json"
             ),
         },
         "concurrency_boundary": (
@@ -579,6 +602,16 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         {
             "schema_version": "benchmark_concurrency_envelope_v0",
             "module": "loopx.capabilities.benchmark_toolkit.concurrency_envelope",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
+            "schema_version": "benchmark_adaptive_concurrency_policy_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.adaptive_concurrency",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
+            "schema_version": "benchmark_concurrency_feedback_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.adaptive_concurrency",
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
         },
         {

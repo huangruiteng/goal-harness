@@ -720,6 +720,47 @@ Read back the gate with `concurrency-status`. To disable it, rerun
 `concurrency-configure` with the same capacity values and omit
 `--require-resource-headroom-receipt`; existing active reservations are preserved.
 
+To ramp toward the hard ceiling without guessing a new occupancy on every monitor
+cycle, feed compact runner-owned health into the adaptive tuner. It uses additive
+increase after consecutive saturated healthy windows and subtractive decrease on
+launch, provider-capacity, runner-invalid, or typed resource-pressure evidence:
+
+```bash
+loopx benchmark concurrency-tune \
+  --goal-id <goal-id> \
+  --feedback-json concurrency-feedback.json \
+  --resource-headroom-json resource-headroom.json \
+  --saturated-healthy-windows-required 2 \
+  --increase-step 1 \
+  --decrease-step 1 \
+  --execute \
+  --format json
+```
+
+`concurrency-tune` changes only `target-active-cases`. The configured
+`max-active-cases`, baseline/test caps, and reserved test slots remain
+operator-owned. Lowering the target never terminates an active run; it only prevents
+replacement admissions until occupancy falls below the new target. Missing, stale,
+future, or unresolved feedback/headroom produces a hold; malformed input fails closed
+without a write. Preview
+is the default; `--execute` atomically writes the selected target. The runner remains
+responsible for measuring resources, constructing `benchmark_concurrency_feedback_v0`,
+and launching admitted work; raw metrics and receipts are never persisted.
+
+```json
+{
+  "schema_version": "benchmark_concurrency_feedback_v0",
+  "window_started_at": "2026-09-01T03:50:00Z",
+  "observed_at": "2026-09-01T04:00:00Z",
+  "expires_at": "2026-09-01T04:05:00Z",
+  "saturated_healthy_window_streak": 2,
+  "launch_attempts": 1,
+  "launch_failures": 0,
+  "provider_capacity_rejections": 0,
+  "runner_invalid_transitions": 0
+}
+```
+
 ```json
 {
   "schema_version": "benchmark_resource_headroom_receipt_v0",
@@ -741,7 +782,9 @@ shared authority instead of configuring one envelope per host.
 At campaign startup, create the capability packet's
 `concurrency_occupancy.monitor_todo_template` as one goal-scoped
 `continuous_monitor` todo. This preserves the obligation to notice and fill safe
-capacity without granting launch authority. The runner still owns launch, liveness,
+capacity without granting launch authority. On material monitor windows, preview
+`concurrency-tune`; execute its target change only when the runner-authorized campaign
+has opted into adaptive occupancy. The runner still owns launch, liveness,
 termination, credentials, verifier ordering, scoring, upload, and submission.
 
 ## Experiment board

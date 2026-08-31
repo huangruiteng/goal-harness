@@ -734,6 +734,17 @@ def render_benchmark_concurrency_markdown(payload: Mapping[str, Any]) -> str:
                 ),
             ]
         )
+    if payload.get("action"):
+        lines.extend(
+            [
+                f"- Adaptive action: `{payload.get('action')}`",
+                (
+                    "- Adaptive target: "
+                    f"`{payload.get('current_target_active_cases')}` -> "
+                    f"`{payload.get('next_target_active_cases')}`"
+                ),
+            ]
+        )
     target = status.get("target_occupancy")
     if isinstance(target, Mapping) and target.get("underfilled"):
         lines.append(
