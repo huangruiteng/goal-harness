@@ -33,7 +33,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
         "pull_requests[].evidence_commands",
     ]
     contract = response["review_execution_contract"]
-    assert contract["schema_version"] == "pull_request_review_execution_contract_v1"
+    assert contract["schema_version"] == "pull_request_review_execution_contract_v2"
     requirements = {
         item["evidence_id"]: item for item in contract["evidence_requirements"]
     }
@@ -48,6 +48,8 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
         "failure_analysis",
         "code_volume",
         "change_proportionality",
+        "default_off_isolation",
+        "authority_semantics",
         "typed_state_rule",
         "domain_neutrality",
         "behavior_change_disclosure",
@@ -79,10 +81,32 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert "maintenance_and_migration_cost" in proportionality["fields"]
     assert "green CI" in proportionality["rule"]
     assert "original problem" in proportionality["rule"]
+    isolation = requirements["default_off_isolation"]
+    assert isolation["required_when"] == "code_change"
+    assert isolation["verdict_values"] == [
+        "isolated",
+        "not_isolated",
+        "not_applicable",
+        "not_yet_proven",
+    ]
+    assert "disabled_prompt_or_guidance" in isolation["fields"]
+    assert "paired_counterfactual_validation" in isolation["fields"]
+    assert "absence of a topology" in isolation["rule"]
+    authority = requirements["authority_semantics"]
+    assert authority["verdict_values"] == [
+        "aligned",
+        "misleading",
+        "not_applicable",
+        "not_yet_proven",
+    ]
+    assert "actual_actor_lifecycle" in authority["fields"]
+    assert "ephemeral sub-agent" in authority["rule"]
     assert contract["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert contract["completion_gate"]["stale_head_verdict_allowed"] is False
     assert contract["completion_gate"]["blocking_evidence_verdicts"] == {
-        "change_proportionality": ["disproportionate", "not_yet_proven"]
+        "change_proportionality": ["disproportionate", "not_yet_proven"],
+        "default_off_isolation": ["not_isolated", "not_yet_proven"],
+        "authority_semantics": ["misleading", "not_yet_proven"],
     }
     assert contract["finding_contract"]["findings_first"] is True
     verdict = contract["verdict_policy"]
@@ -107,6 +131,8 @@ def test_runtime_plan_requires_symbol_map_and_negative_walkthrough() -> None:
     assert plan["applicability"]["symbol_map_required"] is True
     assert plan["applicability"]["scope_fit_required"] is True
     assert plan["applicability"]["change_proportionality_required"] is True
+    assert plan["applicability"]["default_off_isolation_required"] is True
+    assert plan["applicability"]["authority_semantics_required"] is True
     assert plan["applicability"]["negative_walkthrough_required"] is True
     assert plan["applicability"]["typed_state_rule_required"] is True
     assert plan["applicability"]["behavior_change_disclosure_required"] is True
@@ -115,6 +141,8 @@ def test_runtime_plan_requires_symbol_map_and_negative_walkthrough() -> None:
     assert "symbol_map" in plan["required_evidence_ids"]
     assert "scope_fit" in plan["required_evidence_ids"]
     assert "change_proportionality" in plan["required_evidence_ids"]
+    assert "default_off_isolation" in plan["required_evidence_ids"]
+    assert "authority_semantics" in plan["required_evidence_ids"]
     assert "typed_state_rule" in plan["required_evidence_ids"]
     assert "behavior_change_disclosure" in plan["required_evidence_ids"]
     assert "domain_neutrality" in plan["required_evidence_ids"]
@@ -139,6 +167,8 @@ def test_docs_plan_does_not_invent_code_symbols() -> None:
     assert plan["applicability"]["symbol_map_required"] is False
     assert plan["applicability"]["scope_fit_required"] is False
     assert plan["applicability"]["change_proportionality_required"] is False
+    assert plan["applicability"]["default_off_isolation_required"] is False
+    assert plan["applicability"]["authority_semantics_required"] is False
     assert plan["applicability"]["typed_state_rule_required"] is False
     assert plan["applicability"]["behavior_change_disclosure_required"] is False
     assert plan["applicability"]["domain_neutrality_required"] is False
@@ -146,6 +176,8 @@ def test_docs_plan_does_not_invent_code_symbols() -> None:
     assert "symbol_map" not in plan["required_evidence_ids"]
     assert "scope_fit" not in plan["required_evidence_ids"]
     assert "change_proportionality" not in plan["required_evidence_ids"]
+    assert "default_off_isolation" not in plan["required_evidence_ids"]
+    assert "authority_semantics" not in plan["required_evidence_ids"]
     assert "typed_state_rule" not in plan["required_evidence_ids"]
     assert "domain_neutrality" not in plan["required_evidence_ids"]
     assert "behavior_change_disclosure" not in plan["required_evidence_ids"]

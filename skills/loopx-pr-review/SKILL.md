@@ -57,10 +57,10 @@ selected PR:
 
 1. Record the packet's exact head and run its `evidence_commands`, plus focused
    repository-native validation when applicable.
-2. Fill `review_plan.result_template` using the shared
-   `agent_response_contract.review_execution_contract`. Preserve `unverified`
-   for missing evidence and give the reason; never infer `verified` from title,
-   labels, metadata risk, changed-file counts, or green CI alone.
+2. Fill `review_plan.result_template` from the shared execution contract;
+   preserve missing evidence as `unverified`. For `default_off_isolation`, run
+   its paired counterfactual across all shared surfaces; for `authority_semantics`,
+   match names to actor authority. Never infer `verified` from metadata or CI.
 3. Apply `completion_gate` literally. If an applicable requirement is missing,
    do not manufacture a detailed verdict; name the evidence gap.
 4. Render the verified result through `review_template`. The five sections are

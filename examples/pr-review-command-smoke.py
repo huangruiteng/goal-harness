@@ -282,6 +282,21 @@ def main() -> int:
         "disproportionate",
         "not_yet_proven",
     ]
+    isolation_reqs = [
+        req
+        for req in contract.get("evidence_requirements", [])
+        if req.get("evidence_id") == "default_off_isolation"
+    ]
+    assert isolation_reqs, "default_off_isolation evidence requirement missing"
+    assert isolation_reqs[0]["required_when"] == "code_change"
+    assert "paired_counterfactual_validation" in isolation_reqs[0]["fields"]
+    authority_reqs = [
+        req
+        for req in contract.get("evidence_requirements", [])
+        if req.get("evidence_id") == "authority_semantics"
+    ]
+    assert authority_reqs, "authority_semantics evidence requirement missing"
+    assert authority_reqs[0]["required_when"] == "code_change"
     code_pr = next(
         (
             p
@@ -297,11 +312,25 @@ def main() -> int:
     assert (
         "change_proportionality" in code_pr["review_plan"]["required_evidence_ids"]
     ), code_pr["review_plan"]
+    assert (
+        "default_off_isolation" in code_pr["review_plan"]["required_evidence_ids"]
+    ), code_pr["review_plan"]
+    assert (
+        "authority_semantics" in code_pr["review_plan"]["required_evidence_ids"]
+    ), code_pr["review_plan"]
     assert code_pr["review_plan"]["applicability"]["scope_fit_required"] is True, (
         code_pr["review_plan"]
     )
     assert (
         code_pr["review_plan"]["applicability"]["change_proportionality_required"]
+        is True
+    ), code_pr["review_plan"]
+    assert (
+        code_pr["review_plan"]["applicability"]["default_off_isolation_required"]
+        is True
+    ), code_pr["review_plan"]
+    assert (
+        code_pr["review_plan"]["applicability"]["authority_semantics_required"]
         is True
     ), code_pr["review_plan"]
     docs_pr = next(
@@ -318,6 +347,14 @@ def main() -> int:
         docs_pr["review_plan"]["applicability"]["change_proportionality_required"]
         is False
     )
+    assert (
+        docs_pr["review_plan"]["applicability"]["default_off_isolation_required"]
+        is False
+    )
+    assert (
+        docs_pr["review_plan"]["applicability"]["authority_semantics_required"]
+        is False
+    )
     risk_section = next(
         section
         for section in template["sections"]
@@ -325,6 +362,8 @@ def main() -> int:
     )
     assert "scope_fit" in risk_section["agent_instruction"], risk_section
     assert "change_proportionality" in risk_section["agent_instruction"], risk_section
+    assert "default_off_isolation" in risk_section["agent_instruction"], risk_section
+    assert "authority_semantics" in risk_section["agent_instruction"], risk_section
 
     default_payload = json.loads(
         run_cli("--format", "json", "pr-review", "--fixture", str(FIXTURE)).stdout
@@ -638,7 +677,7 @@ def main() -> int:
     )
     assert "may not know" in depth["reader_profile"], depth
     execution = response_contract["review_execution_contract"]
-    assert execution["schema_version"] == "pull_request_review_execution_contract_v1", (
+    assert execution["schema_version"] == "pull_request_review_execution_contract_v2", (
         execution
     )
     requirements = {
@@ -655,6 +694,8 @@ def main() -> int:
         "failure_analysis",
         "code_volume",
         "change_proportionality",
+        "default_off_isolation",
+        "authority_semantics",
         "typed_state_rule",
         "domain_neutrality",
         "behavior_change_disclosure",
@@ -684,6 +725,22 @@ def main() -> int:
     ]
     assert "green CI" in requirements["change_proportionality"]["rule"]
     assert "original problem" in requirements["change_proportionality"]["rule"]
+    assert requirements["default_off_isolation"]["verdict_values"] == [
+        "isolated",
+        "not_isolated",
+        "not_applicable",
+        "not_yet_proven",
+    ]
+    assert "paired_counterfactual_validation" in requirements[
+        "default_off_isolation"
+    ]["fields"]
+    assert requirements["authority_semantics"]["verdict_values"] == [
+        "aligned",
+        "misleading",
+        "not_applicable",
+        "not_yet_proven",
+    ]
+    assert "actual_actor_lifecycle" in requirements["authority_semantics"]["fields"]
     assert "substring denylists" in requirements["typed_state_rule"]["rule"]
     assert "domain-neutral" in requirements["domain_neutrality"]["rule"]
     assert (
@@ -695,7 +752,9 @@ def main() -> int:
     assert execution["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert execution["completion_gate"]["stale_head_verdict_allowed"] is False
     assert execution["completion_gate"]["blocking_evidence_verdicts"] == {
-        "change_proportionality": ["disproportionate", "not_yet_proven"]
+        "change_proportionality": ["disproportionate", "not_yet_proven"],
+        "default_off_isolation": ["not_isolated", "not_yet_proven"],
+        "authority_semantics": ["misleading", "not_yet_proven"],
     }
     assert execution["finding_contract"]["findings_first"] is True
     first_plan = first["review_plan"]

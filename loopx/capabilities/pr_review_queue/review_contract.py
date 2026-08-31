@@ -84,12 +84,12 @@ def build_review_template(item: Mapping[str, Any]) -> dict[str, Any]:
             _section(
                 "对主干的风险",
                 "250-500字",
-                "Use `failure_analysis`, `walkthroughs.negative`, and `validation_matrix`; trace each finding from triggering state to observed outcome and minimum repair. When `scope_fit` applies, name the active production caller or explicitly record a coverage-only boundary. When `change_proportionality` applies, compare verified problem impact with mechanism and maintenance cost; a resolved implementation blocker does not justify approval when the full exact-head scope remains disproportionate. Surface typed-state-rule, domain-neutrality, behavior-change-disclosure, and guidance-vs-obligation findings when their evidence applies.",
+                "Use `failure_analysis`, `walkthroughs.negative`, and `validation_matrix`; trace each finding from triggering state to observed outcome and minimum repair. When `scope_fit` applies, name the active production caller or explicitly record a coverage-only boundary. When `change_proportionality` applies, compare verified problem impact with mechanism and maintenance cost; a resolved implementation blocker does not justify approval when the full exact-head scope remains disproportionate. For opt-in changes, prove disabled-path parity through `default_off_isolation`; do not infer isolation from an absent feature object. Use `authority_semantics` to verify that public protocol names do not claim a broader actor lifecycle or authority model than the implementation provides. Surface typed-state-rule, domain-neutrality, behavior-change-disclosure, and guidance-vs-obligation findings when their evidence applies.",
             ),
             _section(
                 "我的整体评价",
                 "150-300字",
-                "Use `code_volume`, `change_proportionality`, validation results, residual risk, and exact-head freshness to state the verdict and the evidence needed for re-review.",
+                "Use `code_volume`, `change_proportionality`, `default_off_isolation`, `authority_semantics`, validation results, residual risk, and exact-head freshness to state the verdict and the evidence needed for re-review.",
             ),
         ],
         "review_order": _review_order(key_files),
@@ -102,7 +102,7 @@ def build_review_template(item: Mapping[str, Any]) -> dict[str, Any]:
 
 def build_review_execution_contract() -> dict[str, Any]:
     return {
-        "schema_version": "pull_request_review_execution_contract_v1",
+        "schema_version": "pull_request_review_execution_contract_v2",
         "purpose": (
             "Define the evidence that must exist before a detailed review verdict; "
             "host skills route this contract but must not reimplement it."
@@ -292,6 +292,80 @@ def build_review_execution_contract() -> dict[str, Any]:
                 ),
             },
             {
+                "evidence_id": "default_off_isolation",
+                "required_when": "code_change",
+                "verdict_values": [
+                    "isolated",
+                    "not_isolated",
+                    "not_applicable",
+                    "not_yet_proven",
+                ],
+                "fields": [
+                    "opt_in_or_default_off_claim",
+                    "authoritative_gate",
+                    "default_state",
+                    "disabled_entry_path",
+                    "enabled_entry_path",
+                    "shared_changed_surfaces",
+                    "disabled_schema_or_required_fields",
+                    "disabled_prompt_or_guidance",
+                    "disabled_accepted_inputs",
+                    "disabled_state_or_projection",
+                    "disabled_scheduling_quota_or_side_effects",
+                    "paired_counterfactual_validation",
+                    "verdict",
+                ],
+                "rule": (
+                    "When a change is claimed to be opt-in, feature-gated, or "
+                    "default-off, trace every changed production surface on both "
+                    "sides of the authoritative gate. With the feature disabled, "
+                    "preserve the previous observable contract: schema and required "
+                    "fields, prompts and guidance, accepted host inputs, persisted "
+                    "or journal projections, scheduling and quota decisions, and "
+                    "external effects. The absence of a topology, operation list, "
+                    "or feature object proves only that one enabled path did not run; "
+                    "it does not prove isolation of shared builders or serializers. "
+                    "Run a paired counterfactual using otherwise identical inputs "
+                    "with the gate disabled and enabled, and compare the disabled "
+                    "result with the pre-change contract. Use `not_applicable` only "
+                    "after verifying that the PR makes no opt-in or default-off claim. "
+                    "Treat `not_isolated` and `not_yet_proven` as blocking."
+                ),
+            },
+            {
+                "evidence_id": "authority_semantics",
+                "required_when": "code_change",
+                "verdict_values": [
+                    "aligned",
+                    "misleading",
+                    "not_applicable",
+                    "not_yet_proven",
+                ],
+                "fields": [
+                    "public_protocol_ids_and_symbols",
+                    "actual_actor_lifecycle",
+                    "authority_granted",
+                    "authority_explicitly_excluded",
+                    "nearest_existing_domain_term",
+                    "name_scope_match",
+                    "compatibility_or_migration_cost",
+                    "verdict",
+                ],
+                "rule": (
+                    "Public schema ids, version names, payload fields, CLI options, "
+                    "and exported symbols must not claim a broader actor lifecycle "
+                    "or authority model than the implementation provides. Distinguish "
+                    "an ephemeral sub-agent or child execution from a registered peer "
+                    "with independent authority and from durable multi-agent "
+                    "coordination. Prefer the nearest established domain term. If a "
+                    "new v0 protocol has not shipped, rename it before compatibility "
+                    "cost accumulates. Treat `misleading` and `not_yet_proven` as "
+                    "blocking when public protocol naming is in scope; use "
+                    "`not_applicable` only when the exact-head change adds or changes "
+                    "no actor, authority, or coordination semantics."
+                ),
+            },
+            {
                 "evidence_id": "typed_state_rule",
                 "required_when": "code_change",
                 "fields": [
@@ -411,7 +485,15 @@ def build_review_execution_contract() -> dict[str, Any]:
                 "change_proportionality": [
                     "disproportionate",
                     "not_yet_proven",
-                ]
+                ],
+                "default_off_isolation": [
+                    "not_isolated",
+                    "not_yet_proven",
+                ],
+                "authority_semantics": [
+                    "misleading",
+                    "not_yet_proven",
+                ],
             },
             "required_final_sections": REQUIRED_FINAL_SECTIONS,
         },
@@ -466,6 +548,8 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
         required_evidence.insert(3, "symbol_map")
         required_evidence.append("scope_fit")
         required_evidence.append("change_proportionality")
+        required_evidence.append("default_off_isolation")
+        required_evidence.append("authority_semantics")
         required_evidence.append("typed_state_rule")
         required_evidence.append("behavior_change_disclosure")
     if areas & {"product_runtime", "public_entry_or_policy"}:
@@ -492,6 +576,8 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
             "symbol_map_required": code_change,
             "scope_fit_required": code_change,
             "change_proportionality_required": code_change,
+            "default_off_isolation_required": code_change,
+            "authority_semantics_required": code_change,
             "negative_walkthrough_required": bool(areas & NEGATIVE_PATH_AREAS),
             "typed_state_rule_required": code_change,
             "behavior_change_disclosure_required": code_change,

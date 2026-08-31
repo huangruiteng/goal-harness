@@ -197,11 +197,14 @@ should include the PR comment URL and a compact summary of the posted findings.
 
 Before publishing a review, run the capability-owned review lenses for typed
 state rules, domain neutrality, behavior-change disclosure, and
-guidance-vs-obligation (defined in `pull_request_review_execution_contract_v1`).
+guidance-vs-obligation, plus default-off isolation and authority semantics
+(defined in `pull_request_review_execution_contract_v2`).
 Flag substring denylists or prose-only classification rules with the concrete
 misclassification risk, product- or benchmark-specific wording in generic
 control-plane contracts, silent default-behavior changes, and text that calls a
-machine-enforced obligation "guidance".
+machine-enforced obligation "guidance". For opt-in behavior, prove feature-off
+parity across every shared changed surface. Reject protocol names that imply a
+broader actor lifecycle or authority model than the implementation provides.
 
 ## Engineering Quality And Right-Sized Scope
 
