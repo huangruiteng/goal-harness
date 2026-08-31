@@ -197,9 +197,10 @@ It provides a unified, coherent experience for managing long-running agent Goals
   - **Context Drawer**: Goal diagnosis, repository bindings, Lark Topic connections, and session health.
 
 - **Action Safety & Control Plane**:
-  Durable modifications to Goals, Todos, Heartbeats, monitors, or settings follow the typed preview → explicit user confirmation → verified receipt protocol. The browser never performs unmediated direct writes to control-plane truth.
+  Durable modifications to Goals, Todos, Heartbeats, monitors, or settings follow the typed preview → governed apply → verified receipt protocol. Presentation follows risk and reversibility: protected or irreversible actions remain review-first, while the reversible Goal pause below applies a ready preview directly and escalates stale or newly gated results back to review. The browser never performs unmediated direct writes to control-plane truth.
   The Goal directory keeps only active Goals in its main list. Use the pause action
-  beside a Goal to preview and confirm a reversible stop; stopped Goals retain their
+  beside a Goal to apply a reversible stop in one click; persistent feedback reports
+  the result, and stopped Goals retain their
   Todos, history, and evidence in a collapsed **Stopped Goals** section and can be
   restored from the same section. Stopping a Goal pauses automatic Agent turns; it
   does not mark the Goal complete or delete state. A stopped Goal leaves active
