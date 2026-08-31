@@ -699,9 +699,12 @@ loopx benchmark concurrency-release \
 Configuration, admission, and release are project-local, locked, and atomic.
 `max-active-cases` is the hard ceiling; `target-active-cases` is desired occupancy.
 Below target, status reports the exact gap, a preferred arm group, and
-`next_action=backfill_to_target`. `active_counts` is an admission ledger, not
-runtime proof. On each launch, terminal or runner-invalid transition, and a bounded
-periodic cadence, pass exact-job receipt and runner-owner facts through
+`next_action=backfill_to_target`. At target, new admission fails closed with
+`target_capacity_exhausted`. When target is lowered below current occupancy, status
+reports `next_action=drain_to_target`; no active run is terminated, and replacement
+admission remains closed until occupancy falls below target. `active_counts` is an
+admission ledger, not runtime proof. On each launch, terminal or runner-invalid
+transition, and a bounded periodic cadence, pass exact-job receipt and runner-owner facts through
 `runtime-observation`. Apply its typed terminal or runner-invalid transition before
 releasing that reservation, then backfill the reported gap.
 

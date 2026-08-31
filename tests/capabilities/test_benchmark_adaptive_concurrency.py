@@ -196,6 +196,20 @@ def test_capacity_pressure_decreases_target_without_killing_runs(
     assert stored["config"]["target_active_cases"] == 2
     assert len(stored["active_runs"]) == 4
     assert result["status"]["overcommitted"] is False
+    assert result["status"]["target_occupancy"]["above_target"] is True
+    assert result["status"]["target_occupancy"]["excess_cases"] == 2
+    assert result["status"]["next_action"] == "drain_to_target"
+
+    blocked = admit_benchmark_case(
+        path,
+        run_id="run-after-pressure",
+        case_id="case-after-pressure",
+        arm_role="treatment",
+        execute=True,
+    )
+    assert blocked["admitted"] is False
+    assert "target_capacity_exhausted" in blocked["reason_codes"]
+    assert len(read_benchmark_concurrency_envelope(path)["active_runs"]) == 4
 
 
 def test_stale_failure_feedback_holds_instead_of_decreasing(tmp_path: Path) -> None:
