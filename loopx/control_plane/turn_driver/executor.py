@@ -19,6 +19,7 @@ from ..effect_program import (
 from ..goals.goal_vision import normalize_goal_vision_packet
 from ..work_items.delivery_batch_scale import require_delivery_batch_scale
 from ..work_items.delivery_outcome import require_delivery_outcome
+from . import child_execution_topology as multi_agent
 from .driver import selected_turn_todo
 from .journal_store import (
     LOOPX_TURN_JOURNAL_SCHEMA_VERSION,
@@ -97,7 +98,7 @@ HOST_RESULT_FIELDS = {
     "path_delta_mode",
     "agent_vision_json",
     "summary",
-}
+} | multi_agent.HOST_RESULT_FIELDS
 
 Writeback = Callable[..., dict[str, Any]]
 CompletionWriteback = Callable[..., dict[str, Any]]
@@ -167,9 +168,7 @@ def build_loopx_turn_host_request(plan: Mapping[str, Any]) -> dict[str, Any]:
             "stdout": "one public-safe JSON object",
         },
     }
-    child_operations = plan.get("child_operations")
-    if isinstance(child_operations, list) and child_operations:
-        request["child_operations"] = child_operations
+    request.update(multi_agent.multi_agent_host_request_projection(plan))
     return request
 
 
@@ -366,6 +365,7 @@ def validate_loopx_turn_host_result(
         errors.append(
             "wait and user_action_required results cannot declare a path delta"
         )
+    multi_agent.observe_multi_agent_host_result(plan, result, normalized, errors)
     return {
         "ok": not errors,
         "result": normalized,
@@ -823,6 +823,7 @@ def _execution_payload(
         "validation": journal.get("task_validation"),
         "receipt": journal.get("receipt"),
         "scheduler": journal.get("scheduler"),
+        **multi_agent.multi_agent_execution_payload_projection(journal),
         "effects": dict(effects),
         "quota_slot_spend_count": 1 if quota_spent else 0,
         **(

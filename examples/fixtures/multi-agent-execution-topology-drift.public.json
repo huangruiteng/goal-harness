@@ -1,0 +1,164 @@
+{
+  "schema_version": "multi_agent_control_plane_reconciliation_fixture_v0",
+  "goal": {
+    "goal_id": "example-pr-program",
+    "orchestration": {
+      "mode": "default",
+      "spawn_allowed": false,
+      "max_children": 3,
+      "allowed_effect_classes": [
+        "local_read",
+        "held_workspace_write"
+      ]
+    }
+  },
+  "pre_spawn_rejections": [
+    {
+      "case_id": "child_task_packet_incomplete",
+      "task_packet": {
+        "todo_id": "todo_review",
+        "objective": "review one isolated change",
+        "missing_fields": [
+          "acceptance"
+        ]
+      },
+      "expected_reason_code": "child_task_packet_incomplete",
+      "launch_allowed": false
+    },
+    {
+      "case_id": "child_capacity_exceeded",
+      "execution_envelope": {
+        "max_children": 1
+      },
+      "child_operation_count": 2,
+      "expected_reason_code": "child_capacity_exceeded",
+      "launch_allowed": false
+    }
+  ],
+  "reconciliation_cases": [
+    {
+      "case_id": "unadmitted_child",
+      "topology_present": false,
+      "receipt": {
+        "schema_version": "multi_agent_host_execution_receipt_v0",
+        "bundle_id": "bundle_unadmitted",
+        "lane_id": "lane_unadmitted",
+        "goal_id": "example-pr-program",
+        "todo_id": "todo_unadmitted",
+        "execution_kind": "ephemeral_child",
+        "runtime_id": "codex_app",
+        "worker_ref": "worker-unadmitted",
+        "source_state_ref": "sha256:state",
+        "task_packet_digest": "sha256:packet",
+        "context_mode": "fresh",
+        "workspace_ref": null,
+        "status": "completed",
+        "effect_classes": [
+          "local_read"
+        ],
+        "evidence_refs": [
+          "artifact:review"
+        ],
+        "raw_transcript_copied": false
+      },
+      "expected_reason_codes": [
+        "unadmitted_child_spawn",
+        "orphaned_worker_result"
+      ],
+      "evidence_disposition": "quarantined",
+      "recommended_child_action": "stop_child",
+      "parent_blocked": false,
+      "parent_continuation": "continue"
+    },
+    {
+      "case_id": "task_packet_mismatch",
+      "all_other_lineage_matches": true,
+      "expected_reason_codes": [
+        "task_packet_mismatch"
+      ],
+      "evidence_disposition": "quarantined",
+      "recommended_child_action": "stop_child",
+      "parent_blocked": false,
+      "parent_continuation": "continue",
+      "fallback_actions": [
+        "retry_fresh",
+        "replace_child",
+        "serial_takeover",
+        "ignore_optional_result"
+      ]
+    },
+    {
+      "case_id": "context_mode_mismatch",
+      "planned_context_mode": "fresh",
+      "observed_context_mode": "forked_snapshot",
+      "expected_reason_codes": [
+        "context_mode_mismatch"
+      ],
+      "evidence_disposition": "quarantined",
+      "recommended_child_action": "stop_child",
+      "parent_blocked": false,
+      "parent_continuation": "continue",
+      "fallback_actions": [
+        "retry_fresh",
+        "replace_child",
+        "serial_takeover",
+        "ignore_optional_result"
+      ]
+    },
+    {
+      "case_id": "side_effect_boundary_exceeded",
+      "allowed_effect_classes": [
+        "local_read",
+        "held_workspace_write"
+      ],
+      "observed_effect_classes": [
+        "held_workspace_write",
+        "external_write"
+      ],
+      "expected_reason_codes": [
+        "side_effect_boundary_exceeded"
+      ],
+      "evidence_disposition": "quarantined",
+      "recommended_child_action": "stop_child",
+      "parent_blocked": false,
+      "parent_continuation": "continue",
+      "fallback_actions": [
+        "retry_fresh",
+        "replace_child",
+        "serial_takeover",
+        "ignore_optional_result"
+      ]
+    }
+  ],
+  "child_guard": {
+    "schema_version": "child_execution_guard_v0",
+    "enforced_boundaries": [
+      "pre_spawn_task_packet"
+    ],
+    "validated_observations": [
+      "receipt_task_packet_binding",
+      "context_mode_binding",
+      "workspace_boundary",
+      "effect_boundary"
+    ],
+    "projected_dispositions": [
+      "stop_child",
+      "quarantine_evidence",
+      "continue_parent",
+      "fallback_actions"
+    ],
+    "unsupported_boundaries": [
+      "evidence_acceptance_enforcement",
+      "live_host_tool_interception",
+      "automatic_host_child_termination"
+    ],
+    "parent_acceptance_required": true
+  },
+  "boundary": {
+    "raw_transcripts_copied": false,
+    "raw_tool_outputs_copied": false,
+    "credentials_copied": false,
+    "private_links_copied": false,
+    "local_paths_copied": false
+  }
+}

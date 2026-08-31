@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from ...runtime import validate_goal_id_path_segment
+from .child_execution_topology import (
+    child_execution_receipts_json_schema,
+)
 from .executor import (
     HOST_AGENT_VISION_JSON_MAX_CHARS,
     HOST_RESULT_TEXT_LIMITS,
@@ -237,6 +240,7 @@ def codex_cli_result_schema() -> dict[str, Any]:
             "maxLength": HOST_AGENT_VISION_JSON_MAX_CHARS,
         },
         "summary": {"type": "string", "maxLength": text_limits["summary"]},
+        "child_execution_receipts": child_execution_receipts_json_schema(),
     }
     return {
         "type": "object",
@@ -259,6 +263,10 @@ def _prompt(request: Mapping[str, Any]) -> str:
             "For those material results, set path_delta_mode=material_replan only when this Turn changes a prior assumption, route, scope, acceptance rule, or stops prior work; then provide a complete bounded agent vision packet with goal_path_delta_v0 in agent_vision_json and leave vision_unchanged_reason empty.",
             "For routine continuation, retry, successor creation, or no-change replanning, set path_delta_mode=unchanged, leave agent_vision_json empty, and provide vision_unchanged_reason.",
             "For user_action_required or wait, leave material-only fields empty and explain the stop in summary.",
+            "When multi_agent_execution_topology is present, return one compact child_execution_receipts item for each observed child, including the actual context_mode. Never copy prompts, transcripts, tool output, credentials, private links, or local absolute paths into a receipt. If no child was observed, return an empty list.",
+            "Launch a child only from its complete child_execution_task_packet_v0. Keep the child inside its objective, acceptance, capability, write-scope, effect, workspace, and execution-budget boundaries, and copy the exact task_packet_digest into its receipt.",
+            "Use the generic task-packet context mode exactly and execute the separate host_adapter projection. For the Codex spawn_agent adapter, fresh maps to fork_context=false and forked_snapshot maps to fork_context=true; never infer native arguments inside the generic LoopX task packet.",
+            "If a child deviates from that packet, stop or quarantine only that child and its evidence. Do not let the child write LoopX state or block the parent agent; the parent may retry fresh, replace the child, take over serially, or ignore an optional result.",
             'completed_phases must be exactly ["host_execute","typed_result"], and turn_key must match the request.',
             "Turn request:",
             request_json,

@@ -370,9 +370,14 @@ def main() -> int:
     )
     codex_request = build_loopx_turn_host_request(codex_plan)
     assert [
-        item["context"]
-        for item in codex_request["child_operations"][0]["available_contexts"]
-    ] == ["fresh", "resume"]
+        item for item in codex_request["child_operations"][0]["available_contexts"]
+    ] == ["fresh"]
+    assert codex_request["child_operations"][0]["host_adapter"] == {
+        "host": "codex-cli",
+        "native_operation": "spawn_agent",
+        "arguments": {"fork_context": False},
+        "requires_session": False,
+    }
 
     claude_decision = build_quota_should_run(
         adaptive_payload(),
@@ -388,13 +393,13 @@ def main() -> int:
         host="claude-code",
         execution_mode="interactive-visible",
     )
-    assert claude_plan["child_operations"][0]["available_contexts"] == [
-        {
-            "context": "fresh",
-            "native_operation": "Task",
-            "requires_session": False,
-        }
-    ]
+    assert claude_plan["child_operations"][0]["available_contexts"] == ["fresh"]
+    assert claude_plan["child_operations"][0]["host_adapter"] == {
+        "host": "claude-code",
+        "native_operation": "Task",
+        "arguments": {},
+        "requires_session": False,
+    }
     print("task-orchestration-smoke ok")
     return 0
 

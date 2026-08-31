@@ -127,14 +127,12 @@ def test_admission_emits_complete_child_brief_and_typed_block_reasons() -> None:
             "allowed": ["fresh"],
         },
         "expected_output": "public_safe_evidence",
-        "child_decision": "continue",
         "execution_policy": {
             "timeout": "bounded_by_host_turn",
             "cancel": "task_coordinator_or_host_timeout",
         },
-        "validation_policy": (
-            "run todo-scoped validation when applicable and report commands/results"
-        ),
+        "child_guard_policy": "prevention_first_v0",
+        "validation_policy": "child reports evidence; parent runs declared todo gate",
         "acceptance": [
             "report completed scope and evidence",
             "report validation result and residual risk",
@@ -170,6 +168,42 @@ def test_admission_emits_complete_child_brief_and_typed_block_reasons() -> None:
         "todo_wrong_domain": ["task_domain_not_allowed"],
         "todo_waiting": ["dependency_not_ready"],
     }
+
+
+def test_admission_exposes_context_fork_only_as_explicit_host_capability() -> None:
+    contract = _contract(
+        [
+            _todo("todo_primary"),
+            _todo("todo_child"),
+        ],
+        available_capabilities=["subagent_spawn", "subagent_context_fork"],
+    )
+
+    assert contract is not None
+    assert contract["child_brief_defaults"]["context_policy"] == {
+        "selection_owner": "task_coordinator",
+        "default": "fresh",
+        "allowed": ["fresh", "forked_snapshot"],
+    }
+
+
+def test_admission_keeps_declared_validation_with_registered_parent() -> None:
+    validation_child = _todo("todo_child")
+    validation_child["completion_validation_required"] = True
+    contract = _contract(
+        [
+            _todo("todo_primary"),
+            validation_child,
+        ],
+        available_capabilities=["subagent_spawn"],
+    )
+
+    assert contract is not None
+    child_brief = contract["eligible_child_lanes"][0]["child_brief"]
+    assert child_brief["validation_declared"] is True
+    assert child_brief["validation_label"] is None
+    assert "validation_command" not in child_brief
+    assert "validation_command_argv" not in child_brief
 
 
 def test_admission_serializes_overlapping_write_scopes() -> None:

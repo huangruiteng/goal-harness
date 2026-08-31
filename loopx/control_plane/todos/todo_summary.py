@@ -128,6 +128,7 @@ TASK_ORCHESTRATION_CANDIDATE_FIELDS = (
     "resume_ready",
     "continuation_policy",
     "target_key",
+    "completion_validation_required",
     "title",
     "text",
 )

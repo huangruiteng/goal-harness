@@ -10,6 +10,7 @@ import pytest
 
 from loopx.control_plane.turn_driver.codex_cli import (
     CODEX_CLI_SESSION_SCHEMA_VERSION,
+    _prompt,
     codex_cli_result_schema,
     codex_cli_session_binding,
     load_codex_cli_session,
@@ -108,6 +109,15 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
     assert set(schema["required"]) == set(schema["properties"])
     assert "raw_trajectory" not in schema["properties"]
     assert "stdout" not in schema["properties"]
+    receipt_properties = schema["properties"]["child_execution_receipts"]["items"][
+        "properties"
+    ]
+    assert "task_packet_digest" in receipt_properties
+    assert receipt_properties["context_mode"]["enum"] == [
+        "forked_snapshot",
+        "fresh",
+        "resume",
+    ]
     assert {
         field: schema["properties"][field]["maxLength"]
         for field in (
@@ -124,6 +134,17 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
         "vision_unchanged_reason": 240,
         "summary": 400,
     }
+
+
+def test_codex_cli_prompt_requires_explicit_child_context_isolation() -> None:
+    request = _request()
+
+    prompt = _prompt(request)
+
+    assert "execute the separate host_adapter projection" in prompt
+    assert "fresh maps to fork_context=false" in prompt
+    assert "forked_snapshot maps to fork_context=true" in prompt
+    assert "never infer native arguments inside the generic LoopX task packet" in prompt
 
 
 def test_codex_cli_host_starts_then_resumes_opaque_session(
