@@ -37,6 +37,7 @@ _POLICY_FIELDS = {
 }
 _FEEDBACK_FIELDS = {
     "schema_version",
+    "observed_envelope_updated_at",
     "window_started_at",
     "observed_at",
     "expires_at",
@@ -138,6 +139,10 @@ def normalize_benchmark_concurrency_feedback(
         raise ValueError("provider_capacity_rejections cannot exceed launch_attempts")
     return {
         "schema_version": BENCHMARK_CONCURRENCY_FEEDBACK_SCHEMA_VERSION,
+        "observed_envelope_updated_at": _timestamp(
+            value.get("observed_envelope_updated_at"),
+            field="observed_envelope_updated_at",
+        ),
         "window_started_at": window_started_at,
         "observed_at": observed_at,
         "expires_at": expires_at,
@@ -268,6 +273,11 @@ def build_benchmark_adaptive_concurrency_decision(
     feedback_observed = datetime.fromisoformat(compact_feedback["observed_at"])
     feedback_expires = datetime.fromisoformat(compact_feedback["expires_at"])
     feedback_reasons: list[str] = []
+    if (
+        compact_feedback["observed_envelope_updated_at"]
+        != normalized["updated_at"]
+    ):
+        feedback_reasons.append("concurrency_feedback_envelope_revision_mismatch")
     if feedback_observed > decision_time:
         feedback_reasons.append("concurrency_feedback_from_future")
     if decision_time >= feedback_expires:

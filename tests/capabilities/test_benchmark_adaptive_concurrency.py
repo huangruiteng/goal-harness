@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def _feedback(
     now: datetime,
     *,
+    observed_envelope_updated_at: str,
     streak: int = 2,
     launch_attempts: int = 1,
     launch_failures: int = 0,
@@ -30,6 +31,7 @@ def _feedback(
 ) -> dict[str, object]:
     return {
         "schema_version": "benchmark_concurrency_feedback_v0",
+        "observed_envelope_updated_at": observed_envelope_updated_at,
         "window_started_at": (now - timedelta(minutes=5)).isoformat(),
         "observed_at": now.isoformat(),
         "expires_at": (now + timedelta(minutes=5)).isoformat(),
@@ -39,6 +41,18 @@ def _feedback(
         "provider_capacity_rejections": provider_capacity_rejections,
         "runner_invalid_transitions": runner_invalid_transitions,
     }
+
+
+def _feedback_for_path(
+    path: Path, now: datetime, **kwargs: object
+) -> dict[str, object]:
+    envelope = read_benchmark_concurrency_envelope(path)
+    assert envelope is not None
+    return _feedback(
+        now,
+        observed_envelope_updated_at=envelope["updated_at"],
+        **kwargs,
+    )
 
 
 def _headroom(now: datetime, *, state: str = "sufficient") -> dict[str, object]:
@@ -90,7 +104,7 @@ def test_saturated_healthy_windows_increase_only_target(tmp_path: Path) -> None:
     result = tune_benchmark_concurrency_target(
         path,
         policy=policy,
-        feedback=_feedback(now),
+        feedback=_feedback_for_path(path, now),
         resource_headroom_receipt=_headroom(now),
         execute=True,
         decided_at=(now + timedelta(seconds=1)).isoformat(),
@@ -116,14 +130,14 @@ def test_underfilled_or_incomplete_health_streak_holds(tmp_path: Path) -> None:
     underfilled_result = tune_benchmark_concurrency_target(
         underfilled,
         policy=policy,
-        feedback=_feedback(now),
+        feedback=_feedback_for_path(underfilled, now),
         resource_headroom_receipt=_headroom(now),
         decided_at=(now + timedelta(seconds=1)).isoformat(),
     )
     incomplete_result = tune_benchmark_concurrency_target(
         incomplete,
         policy=policy,
-        feedback=_feedback(now, streak=1),
+        feedback=_feedback_for_path(incomplete, now, streak=1),
         resource_headroom_receipt=_headroom(now),
         decided_at=(now + timedelta(seconds=1)).isoformat(),
     )
@@ -136,6 +150,50 @@ def test_underfilled_or_incomplete_health_streak_holds(tmp_path: Path) -> None:
     ]
 
 
+def test_health_receipt_cannot_be_replayed_across_target_levels(
+    tmp_path: Path,
+) -> None:
+    path = _configured_envelope(tmp_path)
+    now = datetime.now(UTC)
+    policy = build_benchmark_adaptive_concurrency_policy()
+    feedback = _feedback_for_path(path, now)
+
+    increased = tune_benchmark_concurrency_target(
+        path,
+        policy=policy,
+        feedback=feedback,
+        resource_headroom_receipt=_headroom(now),
+        execute=True,
+        decided_at=(now + timedelta(seconds=1)).isoformat(),
+    )
+    admitted = admit_benchmark_case(
+        path,
+        run_id="run-at-new-target",
+        case_id="case-at-new-target",
+        arm_role="treatment",
+        execute=True,
+    )
+    replayed = tune_benchmark_concurrency_target(
+        path,
+        policy=policy,
+        feedback=feedback,
+        resource_headroom_receipt=_headroom(now),
+        execute=True,
+        decided_at=(now + timedelta(seconds=2)).isoformat(),
+    )
+
+    stored = read_benchmark_concurrency_envelope(path)
+    assert increased["action"] == "increase"
+    assert admitted["admitted"] is True
+    assert replayed["action"] == "hold"
+    assert replayed["reason_codes"] == [
+        "concurrency_feedback_envelope_revision_mismatch"
+    ]
+    assert replayed["write_performed"] is False
+    assert stored is not None
+    assert stored["config"]["target_active_cases"] == 4
+
+
 def test_missing_stale_or_unresolved_headroom_fails_closed(tmp_path: Path) -> None:
     path = _configured_envelope(tmp_path)
     now = datetime.now(UTC)
@@ -144,21 +202,21 @@ def test_missing_stale_or_unresolved_headroom_fails_closed(tmp_path: Path) -> No
     missing = build_benchmark_adaptive_concurrency_decision(
         read_benchmark_concurrency_envelope(path),
         policy=policy,
-        feedback=_feedback(now),
+        feedback=_feedback_for_path(path, now),
         resource_headroom_receipt=None,
         decided_at=(now + timedelta(seconds=1)).isoformat(),
     )
     stale = build_benchmark_adaptive_concurrency_decision(
         read_benchmark_concurrency_envelope(path),
         policy=policy,
-        feedback=_feedback(now),
+        feedback=_feedback_for_path(path, now),
         resource_headroom_receipt=_headroom(now),
         decided_at=(now + timedelta(minutes=6)).isoformat(),
     )
     unresolved = build_benchmark_adaptive_concurrency_decision(
         read_benchmark_concurrency_envelope(path),
         policy=policy,
-        feedback=_feedback(now),
+        feedback=_feedback_for_path(path, now),
         resource_headroom_receipt=_headroom(now, state="unresolved"),
         decided_at=(now + timedelta(seconds=1)).isoformat(),
     )
@@ -183,7 +241,9 @@ def test_capacity_pressure_decreases_target_without_killing_runs(
     result = tune_benchmark_concurrency_target(
         path,
         policy=build_benchmark_adaptive_concurrency_policy(decrease_step=2),
-        feedback=_feedback(now, provider_capacity_rejections=1),
+        feedback=_feedback_for_path(
+            path, now, provider_capacity_rejections=1
+        ),
         resource_headroom_receipt=_headroom(now),
         execute=True,
         decided_at=(now + timedelta(seconds=1)).isoformat(),
@@ -219,7 +279,7 @@ def test_stale_failure_feedback_holds_instead_of_decreasing(tmp_path: Path) -> N
     result = tune_benchmark_concurrency_target(
         path,
         policy=build_benchmark_adaptive_concurrency_policy(),
-        feedback=_feedback(now, launch_failures=1),
+        feedback=_feedback_for_path(path, now, launch_failures=1),
         resource_headroom_receipt=_headroom(now),
         execute=True,
         decided_at=(now + timedelta(minutes=6)).isoformat(),
@@ -241,7 +301,7 @@ def test_hard_ceiling_and_preview_are_preserved(tmp_path: Path) -> None:
     result = tune_benchmark_concurrency_target(
         path,
         policy=build_benchmark_adaptive_concurrency_policy(increase_step=3),
-        feedback=_feedback(now),
+        feedback=_feedback_for_path(path, now),
         resource_headroom_receipt=_headroom(now),
         execute=False,
         decided_at=(now + timedelta(seconds=1)).isoformat(),
@@ -258,7 +318,9 @@ def test_cli_tune_preview_then_execute(tmp_path: Path) -> None:
     now = datetime.now(UTC)
     feedback_path = tmp_path / "feedback.json"
     headroom_path = tmp_path / "headroom.json"
-    feedback_path.write_text(json.dumps(_feedback(now)), encoding="utf-8")
+    feedback_path.write_text(
+        json.dumps(_feedback_for_path(path, now)), encoding="utf-8"
+    )
     headroom_path.write_text(json.dumps(_headroom(now)), encoding="utf-8")
     base = [
         str(REPO_ROOT / "scripts/loopx"),

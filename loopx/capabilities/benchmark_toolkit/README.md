@@ -747,7 +747,10 @@ loopx benchmark concurrency-tune \
 operator-owned. Lowering the target never terminates an active run; it only prevents
 replacement admissions until occupancy falls below the new target. Missing, stale,
 future, or unresolved feedback/headroom produces a hold; malformed input fails closed
-without a write. Preview
+without a write. Feedback also carries the exact `updated_at` revision of the
+concurrency envelope it observed. Any configure, target change, admission, or release
+invalidates that receipt, so one healthy window cannot be replayed across target
+levels. Preview
 is the default; `--execute` atomically writes the selected target. The runner remains
 responsible for measuring resources, constructing `benchmark_concurrency_feedback_v0`,
 and launching admitted work; raw metrics and receipts are never persisted.
@@ -755,6 +758,7 @@ and launching admitted work; raw metrics and receipts are never persisted.
 ```json
 {
   "schema_version": "benchmark_concurrency_feedback_v0",
+  "observed_envelope_updated_at": "2026-09-01T03:49:30Z",
   "window_started_at": "2026-09-01T03:50:00Z",
   "observed_at": "2026-09-01T04:00:00Z",
   "expires_at": "2026-09-01T04:05:00Z",
