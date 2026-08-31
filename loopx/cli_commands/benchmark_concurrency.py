@@ -152,6 +152,31 @@ def _read_json_argument(value: str) -> Any:
     return json.loads(Path(value).expanduser().read_text(encoding="utf-8"))
 
 
+def _tune_payload(args: argparse.Namespace, *, path: Path) -> dict[str, Any]:
+    if args.feedback_json == "-" and args.resource_headroom_json == "-":
+        raise ValueError("only one JSON input may use stdin")
+    feedback = _read_json_argument(args.feedback_json)
+    resource_headroom_receipt = (
+        _read_json_argument(args.resource_headroom_json)
+        if args.resource_headroom_json
+        else None
+    )
+    policy = build_benchmark_adaptive_concurrency_policy(
+        minimum_target_active_cases=args.minimum_target_active_cases,
+        increase_step=args.increase_step,
+        decrease_step=args.decrease_step,
+        saturated_healthy_windows_required=args.saturated_healthy_windows_required,
+    )
+    return tune_benchmark_concurrency_target(
+        path,
+        policy=policy,
+        feedback=feedback,
+        resource_headroom_receipt=resource_headroom_receipt,
+        execute=args.execute,
+        agent_id=args.agent_id,
+    )
+
+
 def handle_benchmark_concurrency_command(
     args: argparse.Namespace,
     *,
@@ -212,30 +237,7 @@ def handle_benchmark_concurrency_command(
                 agent_id=args.agent_id,
             )
         else:
-            if args.feedback_json == "-" and args.resource_headroom_json == "-":
-                raise ValueError("only one JSON input may use stdin")
-            feedback = _read_json_argument(args.feedback_json)
-            resource_headroom_receipt = (
-                _read_json_argument(args.resource_headroom_json)
-                if args.resource_headroom_json
-                else None
-            )
-            policy = build_benchmark_adaptive_concurrency_policy(
-                minimum_target_active_cases=args.minimum_target_active_cases,
-                increase_step=args.increase_step,
-                decrease_step=args.decrease_step,
-                saturated_healthy_windows_required=(
-                    args.saturated_healthy_windows_required
-                ),
-            )
-            payload = tune_benchmark_concurrency_target(
-                path,
-                policy=policy,
-                feedback=feedback,
-                resource_headroom_receipt=resource_headroom_receipt,
-                execute=args.execute,
-                agent_id=args.agent_id,
-            )
+            payload = _tune_payload(args, path=path)
         payload["goal_id"] = args.goal_id
         payload["path_recorded"] = False
     except (OSError, TypeError, ValueError):

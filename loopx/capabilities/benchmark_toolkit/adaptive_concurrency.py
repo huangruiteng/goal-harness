@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +9,10 @@ from ...file_lock import exclusive_file_lock
 from ...registry import atomic_write_json
 from .concurrency_envelope import (
     BENCHMARK_CONCURRENCY_ENVELOPE_SCHEMA_VERSION,
+    _bounded_int,
+    _now_iso,
+    _reject_unknown_fields,
+    _timestamp,
     build_benchmark_concurrency_status,
     normalize_benchmark_concurrency_envelope,
     normalize_benchmark_resource_headroom_receipt,
@@ -42,38 +46,6 @@ _FEEDBACK_FIELDS = {
     "provider_capacity_rejections",
     "runner_invalid_transitions",
 }
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _timestamp(value: Any, *, field: str) -> str:
-    text = str(value or "").strip()
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError as exc:
-        raise ValueError(f"{field} must be an ISO-8601 timestamp") from exc
-    if parsed.tzinfo is None:
-        raise ValueError(f"{field} must include a timezone")
-    return parsed.isoformat().replace("+00:00", "Z")
-
-
-def _bounded_int(value: Any, *, field: str, minimum: int = 0) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        qualifier = "positive" if minimum == 1 else "non-negative"
-        raise ValueError(f"{field} must be a {qualifier} integer")
-    if value > 1024:
-        raise ValueError(f"{field} must not exceed 1024")
-    return value
-
-
-def _reject_unknown_fields(
-    value: Mapping[str, Any], *, allowed: set[str], field: str
-) -> None:
-    unknown = sorted(set(value) - allowed)
-    if unknown:
-        raise ValueError(f"{field} contains unsupported fields: {', '.join(unknown)}")
 
 
 def build_benchmark_adaptive_concurrency_policy(
@@ -213,6 +185,60 @@ def _headroom_state(
     return "sufficient", []
 
 
+def _pressure_reasons(
+    feedback: Mapping[str, Any], *, headroom_state: str, headroom_reasons: list[str]
+) -> list[str]:
+    reasons = [
+        field
+        for field in (
+            "launch_failures",
+            "provider_capacity_rejections",
+            "runner_invalid_transitions",
+        )
+        if feedback[field] > 0
+    ]
+    if headroom_state == "insufficient":
+        reasons.extend(headroom_reasons)
+    return sorted(set(reasons))
+
+
+def _adaptive_action(
+    *,
+    current_target: int,
+    max_active_cases: int,
+    active_count: int,
+    policy: Mapping[str, Any],
+    feedback: Mapping[str, Any],
+    feedback_reasons: list[str],
+    headroom_state: str,
+    headroom_reasons: list[str],
+    pressure_reasons: list[str],
+) -> tuple[str, int, list[str]]:
+    if feedback_reasons:
+        return "hold", current_target, feedback_reasons
+    if pressure_reasons:
+        next_target = max(
+            policy["minimum_target_active_cases"],
+            current_target - policy["decrease_step"],
+        )
+        return "decrease", next_target, pressure_reasons
+    if headroom_state != "sufficient":
+        return "hold", current_target, headroom_reasons
+    if active_count < current_target:
+        return "hold", current_target, ["target_not_saturated"]
+    if active_count > current_target:
+        return "hold", current_target, ["active_count_above_target"]
+    if current_target >= max_active_cases:
+        return "hold", current_target, ["operator_hard_ceiling_reached"]
+    if (
+        feedback["saturated_healthy_window_streak"]
+        < policy["saturated_healthy_windows_required"]
+    ):
+        return "hold", current_target, ["saturated_healthy_window_streak_incomplete"]
+    next_target = min(max_active_cases, current_target + policy["increase_step"])
+    return "increase", next_target, ["saturated_healthy_windows_with_headroom"]
+
+
 def build_benchmark_adaptive_concurrency_decision(
     envelope: Mapping[str, Any] | None,
     *,
@@ -252,58 +278,21 @@ def build_benchmark_adaptive_concurrency_decision(
     status = build_benchmark_concurrency_status(normalized)
     active_count = status["active_counts"]["total"]
 
-    pressure_reasons: list[str] = []
-    for field in (
-        "launch_failures",
-        "provider_capacity_rejections",
-        "runner_invalid_transitions",
-    ):
-        if compact_feedback[field] > 0:
-            pressure_reasons.append(field)
-    if headroom_state == "insufficient":
-        pressure_reasons.extend(headroom_reasons)
-
-    if feedback_reasons:
-        action = "hold"
-        next_target = current_target
-        reasons = feedback_reasons
-    elif pressure_reasons:
-        action = "decrease"
-        next_target = max(
-            compact_policy["minimum_target_active_cases"],
-            current_target - compact_policy["decrease_step"],
-        )
-        reasons = sorted(set(pressure_reasons))
-    elif headroom_state != "sufficient":
-        action = "hold"
-        next_target = current_target
-        reasons = headroom_reasons
-    elif active_count < current_target:
-        action = "hold"
-        next_target = current_target
-        reasons = ["target_not_saturated"]
-    elif active_count > current_target:
-        action = "hold"
-        next_target = current_target
-        reasons = ["active_count_above_target"]
-    elif current_target >= config["max_active_cases"]:
-        action = "hold"
-        next_target = current_target
-        reasons = ["operator_hard_ceiling_reached"]
-    elif (
-        compact_feedback["saturated_healthy_window_streak"]
-        < compact_policy["saturated_healthy_windows_required"]
-    ):
-        action = "hold"
-        next_target = current_target
-        reasons = ["saturated_healthy_window_streak_incomplete"]
-    else:
-        action = "increase"
-        next_target = min(
-            config["max_active_cases"],
-            current_target + compact_policy["increase_step"],
-        )
-        reasons = ["saturated_healthy_windows_with_headroom"]
+    action, next_target, reasons = _adaptive_action(
+        current_target=current_target,
+        max_active_cases=config["max_active_cases"],
+        active_count=active_count,
+        policy=compact_policy,
+        feedback=compact_feedback,
+        feedback_reasons=feedback_reasons,
+        headroom_state=headroom_state,
+        headroom_reasons=headroom_reasons,
+        pressure_reasons=_pressure_reasons(
+            compact_feedback,
+            headroom_state=headroom_state,
+            headroom_reasons=headroom_reasons,
+        ),
+    )
 
     return {
         "ok": True,
