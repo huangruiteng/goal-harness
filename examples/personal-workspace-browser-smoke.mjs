@@ -2,6 +2,7 @@
 // Focused browser smoke for the personal Agent workspace first screen and interactions.
 
 import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,20 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dashboardDir = resolve(repoRoot, "apps/presentation/dashboard");
 const outputDir = resolve(repoRoot, "output/playwright/personal-workspace");
 const port = Number(process.env.LOOPX_PERSONAL_WORKSPACE_PORT ?? "5196");
+const packaged = process.env.LOOPX_PERSONAL_WORKSPACE_PACKAGED === "1";
+
+function startServer() {
+  if (packaged) {
+    return spawn(process.env.LOOPX_PYTHON_BIN || "python3", [
+      "-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", resolve(repoRoot, "loopx/web"),
+    ], {
+      cwd: repoRoot,
+      env: { ...process.env },
+      stdio: "ignore",
+    });
+  }
+  return startViteDashboardServer({ dashboardDir, port });
+}
 
 async function visibleElementCount(locator) {
   return locator.evaluateAll((elements) => elements.filter((element) => {
@@ -496,10 +511,10 @@ async function main() {
   const observations = [];
   const pass = (criterion, note) => results.set(criterion, { status: "PASS", note });
   const fail = (criterion, note) => results.set(criterion, { status: "FAIL", note });
-  const server = startViteDashboardServer({ dashboardDir, port });
+  const server = startServer();
   let browser;
   try {
-    const url = `http://127.0.0.1:${port}/?statusUrl=/status.json`;
+    const url = `http://127.0.0.1:${port}/${packaged ? "chat/" : ""}?statusUrl=/status.json`;
     await waitForHttp(url);
     browser = await launchBrowser(chromium);
     const page = await browser.newPage({ viewport: { width: 1512, height: 982 } });
@@ -1424,7 +1439,7 @@ async function main() {
     pass(20, "Empty and populated Tasks boards keep identical width and four equal columns at desktop and wide desktop viewports.");
     const report = { criteria: Object.fromEntries(results), observations };
     await writeFile(resolve(outputDir, "acceptance-results.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
-    console.log(`personal-workspace-browser-smoke: ok\npreview=${url}\nscreenshot=${resolve(outputDir, "desktop-first-screen.png")}`);
+    console.log(`personal-workspace-browser-smoke (${packaged ? "packaged" : "development"}): ok\npreview=${url}\nscreenshot=${resolve(outputDir, "desktop-first-screen.png")}`);
     const failures = [...results.entries()].filter(([, result]) => result.status !== "PASS");
     if (failures.length) throw new Error(`Acceptance failures: ${failures.map(([criterion, result]) => `${criterion} ${result.status}: ${result.note}`).join(" | ")}`);
   } finally {
