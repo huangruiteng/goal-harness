@@ -354,6 +354,45 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "submission authority."
         ),
     },
+    "campaign_monitor_handoff": {
+        "lane_boundary": (
+            "A continuous_monitor observes and records campaign transitions; "
+            "repository delivery, runner repair, experiment redesign, and other "
+            "bounded work belong in an independent advancement_task."
+        ),
+        "material_transition_command": (
+            "loopx quota monitor-poll --goal-id <goal-id> "
+            "--todo-id <monitor-todo-id> --agent-id <registered-agent> "
+            "--result-hash <public-safe-hash> --material-change "
+            '--next-agent-todo "<bounded public-safe work>" '
+            "--next-action-kind <action-kind> "
+            "--next-task-repository <git-repository> "
+            "--next-required-capability <capability> --execute --format json"
+        ),
+        "material_transition_result": {
+            "monitor_status": "open",
+            "successor_task_class": "advancement_task",
+            "successor_relationship": "independent_runnable_work",
+            "quota_spend": False,
+        },
+        "external_wait_command": (
+            "loopx todo update --goal-id <goal-id> "
+            "--todo-id <waiting-advancement-todo-id> "
+            "--agent-id <registered-agent> --status open "
+            "--resume-when monitor_changed:<monitor-todo-id> "
+            "--successor-todo-id <independent-runnable-successor-id> "
+            '--reason "<public-safe external-wait rationale>" --format json'
+        ),
+        "external_wait_result": (
+            "Keep the waiting advancement Todo visible but non-runnable until the "
+            "monitor generation advances. Do not mark it blocked, and do not use "
+            "the monitor itself as executable delivery work."
+        ),
+        "unchanged_policy": (
+            "An unchanged poll records monitor evidence only; it creates no "
+            "successor and spends no delivery quota."
+        ),
+    },
     "post_run_case_analysis": {
         "benchmark_start_hint": (
             "When starting a benchmark, add one continuous_monitor todo that "

@@ -835,6 +835,53 @@ of the benchmark lifecycle, not an optional cleanup pass. The catalog entry is a
 guidance template rather than a scheduler: the benchmark startup provider creates
 the todo, and the registered monitor runtime owns its cadence.
 
+### Monitor-to-advancement handoff
+
+A benchmark `continuous_monitor` is an observation and control-plane lane. Do not
+put repository delivery, runner repair, experiment redesign, or PR work only in
+the monitor text and expect it to execute. When a monitor poll discovers material
+bounded work, record the transition and create an independent executable successor
+in one writeback:
+
+```bash
+loopx quota monitor-poll \
+  --goal-id <goal-id> \
+  --todo-id <monitor-todo-id> \
+  --agent-id <registered-agent> \
+  --result-hash <public-safe-hash> \
+  --material-change \
+  --next-agent-todo "<bounded public-safe work>" \
+  --next-action-kind <action-kind> \
+  --next-task-repository <git-repository> \
+  --next-required-capability <capability> \
+  --execute \
+  --format json
+```
+
+The monitor remains open, while the new `advancement_task` enters ordinary claim,
+lease, validation, and delivery lifecycle. The poll itself spends no delivery
+quota. An unchanged poll creates no successor.
+
+When the main campaign Todo must remain visible but cannot advance until a monitor
+generation changes—for example, target occupancy is full—keep that Todo `open` and
+pair the wait with an already-created independent runnable successor:
+
+```bash
+loopx todo update \
+  --goal-id <goal-id> \
+  --todo-id <waiting-advancement-todo-id> \
+  --agent-id <registered-agent> \
+  --status open \
+  --resume-when monitor_changed:<monitor-todo-id> \
+  --successor-todo-id <independent-runnable-successor-id> \
+  --reason "<public-safe external-wait rationale>" \
+  --format json
+```
+
+The resume condition removes the waiting Todo from runnable selection until the
+monitor records a newer material-change generation. Do not mark this typed external
+wait `blocked`, and do not use the monitor itself as the runnable successor.
+
 A material user update should include the current countable arm and pair coverage,
 aggregate primary metric by arm, binary outcomes when the benchmark exposes them,
 improved/flat/regressed pair counts, and the new causal insight or next probe. Derive

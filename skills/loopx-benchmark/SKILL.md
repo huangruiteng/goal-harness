@@ -138,6 +138,16 @@ the task's normal tools instead of imposing this workflow.
   `continuous_monitor` todo. Refresh aggregate score/coverage and write
   `benchmark_case_insight_v0` on material scored-case transitions, with bounded
   periodic reviews while the campaign remains active.
+- Treat that monitor as an observation lane, not executable delivery. When a
+  material poll discovers bounded repository, runner-repair, or experiment work,
+  use `quota monitor-poll --material-change --next-agent-todo` with explicit
+  `--next-action-kind`, repository, and required capabilities so it creates an
+  independent runnable `advancement_task`. An unchanged poll creates no successor
+  and spends no delivery quota.
+- If the main campaign advancement Todo is waiting for a monitor transition, keep
+  it `open` and pair `resume_when=monitor_changed:<monitor-todo-id>` with an
+  already-created independent runnable successor. Do not mark the wait `blocked`,
+  and do not treat the monitor itself as delivery work.
 - Report only public-safe conclusions (countable baselines, countable
   treatments, matched pairs, aggregate primary metric by arm, improved/flat/
   regressed pair counts). Never copy raw private evidence into a user update.
