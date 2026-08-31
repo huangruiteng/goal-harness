@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { EffectRuntimeRequestError } from "../../loopx/control_plane/effect_runtime_errors.ts";
 import {
   TODO_EXTERNAL_WAIT_REQUEST_SCHEMA_VERSION,
   TODO_RESUME_EVALUATION_REQUEST_SCHEMA_VERSION,
@@ -16,7 +17,13 @@ function todo(
   taskClass = "advancement_task",
   extra: Record<string, unknown> = {},
 ) {
-  return { todo_id: todoId, status, task_class: taskClass, ...extra };
+  return {
+    todo_id: todoId,
+    role: "agent",
+    status,
+    task_class: taskClass,
+    ...extra,
+  };
 }
 
 test("resume syntax is normalized by the typed Todo boundary", () => {
@@ -158,6 +165,42 @@ test("external wait rejects monitor completion and non-runnable fallbacks", () =
     successor_todo_ids: ["todo_fallback001"],
     items,
   }), /successor must be an open advancement_task/);
+});
+
+test("external wait rejection codes identify status and successor faults", () => {
+  const commonItems = [
+    todo("todo_waiting001", "blocked"),
+    todo("todo_watch001", "open", "continuous_monitor"),
+    todo("todo_fallback001", "open"),
+  ];
+  assert.throws(
+    () => planTodoExternalWaitTransition({
+      schema_version: TODO_EXTERNAL_WAIT_REQUEST_SCHEMA_VERSION,
+      todo_id: "todo_waiting001",
+      resume_when: "monitor_changed:todo_watch001",
+      successor_todo_ids: ["todo_fallback001"],
+      items: commonItems,
+    }),
+    (error: unknown) =>
+      error instanceof EffectRuntimeRequestError &&
+      error.code === "external_wait_todo_status_must_remain_open" &&
+      /must remain status=open/.test(error.message),
+  );
+  assert.throws(
+    () => planTodoExternalWaitTransition({
+      schema_version: TODO_EXTERNAL_WAIT_REQUEST_SCHEMA_VERSION,
+      todo_id: "todo_waiting001",
+      resume_when: "monitor_changed:todo_watch001",
+      successor_todo_ids: [],
+      items: [
+        todo("todo_waiting001", "open"),
+        todo("todo_watch001", "open", "continuous_monitor"),
+      ],
+    }),
+    (error: unknown) =>
+      error instanceof EffectRuntimeRequestError &&
+      error.code === "external_wait_successor_required",
+  );
 });
 
 test("a satisfied monitor fence must be cleared before it can be re-armed", () => {
