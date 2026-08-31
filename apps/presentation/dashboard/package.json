@@ -51,6 +51,7 @@
   "devDependencies": {
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
+    "playwright": "^1.62.1",
     "typescript": "^6.0.3",
     "vite": "^8.2.1"
   },
