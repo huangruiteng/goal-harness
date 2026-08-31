@@ -48,10 +48,11 @@ environment. This works with externally managed Python distributions that
 enforce PEP 668; the plugin does not use `--break-system-packages`.
 The published plugin requires LoopX 0.5.3 or newer because that is the first
 release contract whose wheel carries the packaged workflow skills.
-Install the published package into the web profile:
+Install the prebuilt release into the web profile:
 
 ```bash
-dsh plugin --profile web add dsh-loopx-plugin
+dsh plugin --profile web add \
+  "https://github.com/huangruiteng/loopx/releases/download/dsh-loopx-plugin-v0.1.1-beta.3/dsh-loopx-plugin-0.1.1-beta.3.tgz"
 ```
 
 For a source checkout, the equivalent build-and-install path is:

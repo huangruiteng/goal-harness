@@ -1,6 +1,6 @@
 {
   "name": "dsh-loopx-plugin",
-  "version": "0.1.1-beta.2",
+  "version": "0.1.1-beta.3",
   "description": "One-step LoopX bootstrap, same-session driver, and local GoalBar for DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",
@@ -42,6 +42,7 @@
     "test": "vitest run",
     "prepack": "pnpm build",
     "smoke:artifact": "node smoke/dsh-client-artifact-smoke.mjs",
+    "smoke:peer-range": "node smoke/dsh-peer-range-smoke.mjs",
     "smoke:profile": "node smoke/dsh-profile-smoke.mjs",
     "smoke:runtime": "node smoke/dsh-goalbar-runtime-smoke.mjs",
     "smoke:docker": "bash smoke/dsh-clean-docker-smoke.sh"
@@ -62,13 +63,13 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh": ">=0.1.0-rc.7 <0.2.0",
-    "@deepseek-ai/dsh-client-connection": ">=0.1.0-rc.7 <0.2.0",
-    "@deepseek-ai/dsh-client-locale": ">=0.1.0-rc.7 <0.2.0",
-    "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.7 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.0-rc.7 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-primitives": ">=0.1.0-rc.7 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.7 <0.2.0",
+    "@deepseek-ai/dsh": ">=0.1.0-rc.7 <0.1.1 || >=0.1.1-rc.1 <0.2.0-0",
+    "@deepseek-ai/dsh-client-connection": ">=0.1.0-rc.7 <0.1.1 || >=0.1.1-rc.1 <0.2.0-0",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.0-rc.7 <0.1.1 || >=0.1.1-rc.1 <0.2.0-0",
+    "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.7 <0.1.1 || >=0.1.1-rc.1 <0.2.0-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.0-rc.7 <0.1.1 || >=0.1.1-rc.1 <0.2.0-0",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.1.0-rc.7 <0.1.1 || >=0.1.1-rc.1 <0.2.0-0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.7 <0.1.1 || >=0.1.1-rc.1 <0.2.0-0",
     "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
