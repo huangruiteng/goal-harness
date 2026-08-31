@@ -1,7 +1,7 @@
 {
-  "name": "LoopX 看板",
+  "name": "LoopX Dashboard",
   "short_name": "LoopX",
-  "description": "LoopX 本地控制面板：目标、配额、待办与运行历史。",
+  "description": "LoopX local control panel: goals, quota, todos, and run history.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

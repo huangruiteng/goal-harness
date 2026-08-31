@@ -446,7 +446,7 @@ function buildAgentManagementRows(
       primaryGoalId,
       quotaHints: [],
       staleClaimHint: null,
-      status: { label: "可用", summary: "正常运行", variant: "success" },
+      status: { label: "Available", summary: "Running normally", variant: "success" },
       workspaceRef: null,
     };
   });
@@ -635,8 +635,8 @@ function visibleAgentMessage(value: string) {
     .split(/\r?\n/u)
     .filter((line) => !/^\s*GOAL_(STATUS|PROGRESS)\s*:/u.test(line))
     .map((line) => {
-      if (/^\s*GOAL_EVIDENCE\s*:/u.test(line)) return line.replace(/^\s*GOAL_EVIDENCE\s*:/u, "验证依据：");
-      if (/^\s*NEXT_ACTION\s*:/u.test(line)) return line.replace(/^\s*NEXT_ACTION\s*:/u, "下一步：");
+      if (/^\s*GOAL_EVIDENCE\s*:/u.test(line)) return line.replace(/^\s*GOAL_EVIDENCE\s*:/u, "Evidence:");
+      if (/^\s*NEXT_ACTION\s*:/u.test(line)) return line.replace(/^\s*NEXT_ACTION\s*:/u, "Next action:");
       return line;
     })
     .join("\n")
@@ -649,20 +649,20 @@ function isAgentResultMessage(role: string, text: string) {
 
 function personalProjectionSentence(value: string | null | undefined, fallback = "") {
   const cleaned = cleanShareText(value);
-  if (!cleaned || cleaned === "暂无") {
+  if (!cleaned || cleaned === "暂无" || cleaned === "None") {
     return fallback;
   }
   if (/refresh-state|latest_run|latest run-derived/i.test(cleaned)) {
-    return "刷新 LoopX 状态，确认当前进度仍然有效";
+    return "Refresh LoopX state to confirm current progress is still valid";
   }
   if (/first read-only adapter tick|read-only adapter/i.test(cleaned)) {
-    return "执行首次只读适配检查并保存进度";
+    return "Run the first read-only adapter check and save progress";
   }
   if (/todo update recorded for/i.test(cleaned)) {
-    return "Todo 状态已经更新，正在确认下一步";
+    return "Todo status updated; confirming the next step";
   }
   if (/^(loopx|python3|npm|git|run)\s|\s--[a-z0-9-]+|\b[a-z]+_[a-z_]+\b/i.test(cleaned)) {
-    return fallback || "Agent 正在整理下一步";
+    return fallback || "Agent is planning the next step";
   }
   return compactShareText(cleaned, 120);
 }
@@ -687,21 +687,21 @@ function personalAgentLabel(agentId: string) {
 function personalAgentCapability(agentId: string) {
   const normalized = agentId.toLowerCase();
   if (normalized.includes("codex")) {
-    return "代码与项目执行";
+    return "Code and project execution";
   }
   if (normalized.includes("claude")) {
-    return "复杂分析与长任务";
+    return "Deep analysis and long-horizon work";
   }
   if (normalized.includes("openai") || normalized.includes("anthropic")) {
-    return "管家问答 · 无工具";
+    return "Manager Q&A · no tools";
   }
   if (normalized.includes("trae")) {
-    return "前端与交互实现";
+    return "Frontend and interaction work";
   }
   if (normalized.includes("coco")) {
-    return "通用任务";
+    return "General tasks";
   }
-  return "已发现的项目 Agent";
+  return "Discovered project Agent";
 }
 
 function personalVisibleAgentMessage(value: string) {
@@ -794,9 +794,9 @@ function personalValidationSentence(value: string | null | undefined) {
     return "";
   }
   if (/\b(state_file|registry_goal|authority_sources|source_registry)\b|\b[a-z_]+\s+\d+\/\d+/i.test(cleaned)) {
-    return "Goal 状态、Todo 与注册信息已验证";
+    return "Goal state, todos, and registry metadata verified";
   }
-  return personalProjectionSentence(cleaned, "最近验证已经记录");
+  return personalProjectionSentence(cleaned, "Latest validation recorded");
 }
 
 function personalVisiblePlanTodos(todos: PersonalAgentTodoItem[], limit = 4) {
@@ -824,16 +824,16 @@ function personalRunEvidence(payload: StatusPayload, row: GoalDirectoryRow): Per
     personalProjectionSentence(latestRun?.recommended_action),
   ]
     .find((value) => value !== "" && value !== "暂无")
-    ?? "最近一次 LoopX 运行已经记录";
+    ?? "Latest LoopX run recorded";
   const eventCount = eventSummary?.events_24h ?? 0;
   const metadata = eventCount > 0
-    ? `24 小时内 ${eventCount} 个事件`
+    ? `${eventCount} events in the last 24h`
     : latestRun?.json_exists || latestRun?.markdown_exists
-      ? "存在可查看的运行证据"
-      : "公开安全状态投影";
+      ? "Runnable evidence available"
+      : "Public-safe state projection";
   return {
     generatedAt: latestValidation?.generated_at ?? latestRun?.generated_at ?? eventSummary?.latest_event_at ?? "",
-    label: latestValidation ? "最近验证" : "最近运行",
+    label: latestValidation ? "Latest validation" : "Latest run",
     metadata,
     runId: latestRun ? `${row.goal.id}:${latestRun.generated_at}` : null,
     safePreview: [summary, metadata].filter(Boolean).join("\n"),
@@ -844,20 +844,20 @@ function personalRunEvidence(payload: StatusPayload, row: GoalDirectoryRow): Per
 
 function personalDecisionPrimaryLabel(goal: PersonalGoalItem) {
   const signal = `${goal.needsYouTaskClass ?? ""} ${goal.needsYouActionKind ?? ""}`.toLowerCase();
-  return /approve|approval|merge|release|submit|write|publish/.test(signal) ? "确认处理" : "回复 Agent";
+  return /approve|approval|merge|release|submit|write|publish/.test(signal) ? "Confirm" : "Reply to Agent";
 }
 
 function personalProposalStateLabel(state: PersonalProposalState) {
   const labels: Record<PersonalProposalState, string> = {
-    candidate: "候选 Todo",
-    previewing: "正在生成写入预览",
-    ready: "预览已锁定，等待你批准",
-    applying: "正在写入",
-    approved: "已批准并写入",
-    rejected: "已拒绝，未写入",
-    cancelled: "已取消，未写入",
-    stale: "状态已变化，需重新预览",
-    error: "暂时无法处理",
+    candidate: "Candidate todo",
+    previewing: "Generating write preview",
+    ready: "Preview locked; awaiting approval",
+    applying: "Applying write",
+    approved: "Approved and written",
+    rejected: "Rejected; not written",
+    cancelled: "Cancelled; not written",
+    stale: "State changed; regenerate preview",
+    error: "Temporarily unavailable",
   };
   return labels[state];
 }
@@ -900,7 +900,7 @@ function personalRepairText(payload: StatusPayload, row: GoalDirectoryRow) {
     ?? healthFinding?.message
     ?? row.queueItem?.recommended_action
     ?? row.latestRun?.recommended_action
-    ?? "LoopX 状态异常，请进入管理页检查";
+    ?? "LoopX state is unhealthy; open the ops view";
 }
 
 function personalGoalHasPendingOperatorGate(row: GoalDirectoryRow) {
@@ -925,7 +925,7 @@ function personalPendingOperatorGateText(row: GoalDirectoryRow) {
       ?? gate?.follow_up
       ?? row.queueItem?.recommended_action
       ?? row.latestRun?.recommended_action,
-    "请确认 Agent 下一步需要的权限或决策",
+    "Confirm the permission or decision the Agent needs next",
   );
 }
 
@@ -957,13 +957,13 @@ function personalGoalState(payload: StatusPayload, row: GoalDirectoryRow): Perso
 
 function personalAgentSentence(payload: StatusPayload, row: GoalDirectoryRow, state: PersonalGoalState) {
   if (state === "已停止") {
-    return "已由你停止；历史、Todo 和证据仍保留";
+    return "Stopped by you; history, todos, and evidence are preserved";
   }
   if (state === "需修复") {
-    return personalProjectionSentence(personalRepairText(payload, row), "LoopX 状态需要刷新");
+    return personalProjectionSentence(personalRepairText(payload, row), "LoopX state needs a refresh");
   }
   if (state === "等你") {
-    return "Agent 等待你的决定";
+    return "Agent is waiting for your decision";
   }
   if (state === "推进中") {
     const todoText = (getShareTodos(row, "agent")?.items ?? [])
@@ -977,12 +977,12 @@ function personalAgentSentence(payload: StatusPayload, row: GoalDirectoryRow, st
       row.latestRun?.recommended_action,
     ].map((value) => cleanShareText(value))
       .find((value) => value !== "" && value !== "暂无");
-    return progressText ? personalProjectionSentence(progressText, "Agent 正在推进当前 Goal") : "Agent 正在推进当前 Goal";
+    return progressText ? personalProjectionSentence(progressText, "Agent is advancing the current Goal") : "Agent is advancing the current Goal";
   }
   if (state === "等待条件") {
-    return "正在等待外部条件";
+    return "Waiting on external conditions";
   }
-  return "暂无需要你处理";
+  return "Nothing needs you right now";
 }
 
 function personalManagerMatches(question: string, keywords: string[]) {
@@ -991,6 +991,10 @@ function personalManagerMatches(question: string, keywords: string[]) {
 
 function isManagerProjectionQuestion(question: string) {
   return personalManagerMatches(question, [
+    "what should i do",
+    "what's next",
+    "which goals need me",
+    "what are agents doing",
     "我现在该做什么",
     "该做什么",
     "下一步",
@@ -1015,10 +1019,10 @@ function answerPersonalManagerQuestion(
     );
     const shownGoals = (activeGoals.length > 0 ? activeGoals : model.goals).slice(0, 3);
     if (shownGoals.length === 0) {
-      return { text: "当前状态里还没有 Goal 可供汇总。", lines: [] };
+      return { text: "No Goals are available to summarize yet.", lines: [] };
     }
     return {
-      text: activeGoals.length > 0 ? "Agent 当前关注这些 Goal：" : "当前 Goal 都比较安静：",
+      text: activeGoals.length > 0 ? "Agents are focused on these Goals:" : "Goals are mostly quiet:",
       lines: shownGoals.map((goal) => `${goal.title} · ${goal.state} · ${goal.agentSentence}`),
     };
   }
@@ -1029,36 +1033,36 @@ function answerPersonalManagerQuestion(
     if (nextTodo) {
       return {
         text: nextTodo.blocking
-          ? `先处理「${personalGoalTitle(nextTodo.goalId)}」：${nextTodo.text}`
-          : `当前最先处理「${personalGoalTitle(nextTodo.goalId)}」：${nextTodo.text}`,
+          ? `Handle “${personalGoalTitle(nextTodo.goalId)}” first: ${nextTodo.text}`
+          : `Start with “${personalGoalTitle(nextTodo.goalId)}”: ${nextTodo.text}`,
         lines: [],
       };
     }
     const repairGoal = model.goals.find((goal) => goal.state === "需修复");
     if (repairGoal) {
       return {
-        text: "没有待办，但这个 Goal 需要先修复。",
+        text: "No todos, but this Goal needs repair first.",
         lines: [`${repairGoal.title} · ${repairGoal.agentSentence}`],
       };
     }
     const progressingGoal = model.goals.find((goal) => goal.state === "推进中");
     if (progressingGoal) {
       return {
-        text: "目前不需要你介入，Agent 正在推进。",
+        text: "No operator action needed; the Agent is advancing.",
         lines: [`${progressingGoal.title} · ${progressingGoal.agentSentence}`],
       };
     }
-    return { text: "当前系统很安静，没有需要你立即处理的事项。", lines: [] };
+    return { text: "Everything is quiet; nothing needs you immediately.", lines: [] };
   }
 
   if (personalManagerMatches(question, ["等我", "阻塞", "需要我", "全局待办"])) {
     if (model.userTodos.length === 0) {
-      return { text: "目前没有 Goal 在等你，开放用户待办为 0。", lines: [] };
+      return { text: "No Goals are waiting on you; open user todos = 0.", lines: [] };
     }
     return {
-      text: `有 ${model.userTodos.length} 项开放用户待办，阻塞项优先：`,
+      text: `${model.userTodos.length} open user todo(s); blocking items first:`,
       lines: model.userTodos.slice(0, 3).map((todo) =>
-        `${personalGoalTitle(todo.goalId)} · ${todo.blocking ? "阻塞" : "待处理"} · ${todo.text}`
+        `${personalGoalTitle(todo.goalId)} · ${todo.blocking ? "blocking" : "open"} · ${todo.text}`
       ),
     };
   }
@@ -1072,23 +1076,23 @@ function answerPersonalManagerQuestion(
     const lines = repairGoals.slice(0, globalHealthFailed ? 2 : 3)
       .map((goal) => `${goal.title} · ${goal.agentSentence}`);
     if (globalHealthFailed) {
-      lines.push("全局状态、契约或注册表健康检查未通过，请进入管理页检查。");
+      lines.push("Global state, contract, or registry health checks failed; open the ops view.");
     }
     if (lines.length === 0) {
-      return { text: "当前没有发现 Goal 级或全局健康异常。", lines: [] };
+      return { text: "No Goal-level or global health issues found.", lines: [] };
     }
     return {
-      text: repairGoals.length > 0 ? "当前需要关注这些健康问题：" : "Goal 状态正常，但全局健康需要检查：",
+      text: repairGoals.length > 0 ? "These health issues need attention:" : "Goals look fine, but global health needs review:",
       lines,
     };
   }
 
   return {
-    text: "当前管家支持三类问题：下一步、等待你的事项、Agent 与健康状态。",
+    text: "The Manager supports three question types: next step, items waiting on you, and Agent/health status.",
     lines: [
-      "问“我现在该做什么？”",
-      "问“哪些 Goal 在等我？”",
-      "问“Agent 在做什么？”或当前健康状态",
+      "Ask “What should I do next?”",
+      "Ask “Which Goals need me?”",
+      "Ask “What are Agents doing?” or about current health",
     ],
   };
 }
@@ -1169,7 +1173,7 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
       row.latestRun?.recommended_action,
       personalAgentSentence(payload, row, state),
     ].map((value) => personalProjectionSentence(value))
-      .find((value) => value !== "" && value !== "暂无") ?? "等待 LoopX 更新下一步";
+      .find((value) => value !== "" && value !== "暂无") ?? "Waiting for LoopX to update the next step";
     return [{
       activationState: goal.activation_state,
       agentId: agentRow?.agentId ?? "codex",
@@ -1203,18 +1207,18 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
 
   const systemHealthIssues: string[] = [];
   if (!payload.ok) {
-    systemHealthIssues.push("状态载荷未标记为正常 (payload.ok === false)");
+    systemHealthIssues.push("Status payload is not marked healthy (payload.ok === false)");
   }
   if (payload.contract && !payload.contract.ok) {
     const summary = payload.contract.summary;
     const detail = summary
-      ? `${summary.errors} 项错误 / ${summary.warnings} 项警告`
-      : (payload.contract.errors?.[0] || "请检查控制面契约");
-    systemHealthIssues.push(`契约检查未通过: ${detail}`);
+      ? `${summary.errors} error(s) / ${summary.warnings} warning(s)`
+      : (payload.contract.errors?.[0] || "Check the control-plane contract");
+    systemHealthIssues.push(`Contract check failed: ${detail}`);
   }
   if (payload.global_registry) {
     if (!payload.global_registry.ok) {
-      systemHealthIssues.push(`注册表状态异常: ${payload.global_registry.summary.high} 项高危`);
+      systemHealthIssues.push(`Registry unhealthy: ${payload.global_registry.summary.high} high-severity finding(s)`);
     }
     for (const finding of payload.global_registry.findings || []) {
       if (finding.severity === "high") {
@@ -1223,14 +1227,14 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
     }
   }
   const freshnessWarning = payload.decision_freshness_summary?.summary?.stale_count
-    ? `${payload.decision_freshness_summary.summary.stale_count} 项决策状态已过期`
+    ? `${payload.decision_freshness_summary.summary.stale_count} decision state(s) stale`
     : null;
   const isHealthy = systemHealthIssues.length === 0 && !freshnessWarning;
   const systemHealth: WorkspaceSystemHealth = {
     ok: isHealthy,
     summary: isHealthy
-      ? "所有控制面契约与注册表检查均正常"
-      : `发现 ${systemHealthIssues.length + (freshnessWarning ? 1 : 0)} 项系统健康关注点`,
+      ? "All control-plane contract and registry checks passed"
+      : `${systemHealthIssues.length + (freshnessWarning ? 1 : 0)} system health concern(s) found`,
     issues: systemHealthIssues,
     freshnessWarning,
   };
@@ -1309,10 +1313,10 @@ function PersonalGoalHome({
     || !payload.contract?.ok
     || !payload.global_registry?.ok
     || (payload.global_registry?.summary?.high ?? 0) > 0
-    ? "LoopX 当前存在状态问题，可以打开运行详情查看原因。"
+    ? "LoopX has state issues; open run details for context."
     : model.openUserTodoCount > 0
-      ? `你有 ${model.openUserTodoCount} 项需要处理，其中 ${model.blockingTodoCount} 项正在阻塞 Agent。`
-      : "暂时没有需要你处理的事项，Agent 会按当前计划继续推进。";
+      ? `You have ${model.openUserTodoCount} item(s) to handle; ${model.blockingTodoCount} block the Agent.`
+      : "Nothing needs you right now; Agents will continue on the current plan.";
   const discoveredAgents: PersonalAgentOption[] = runtimeAgents.length > 0
     ? runtimeAgents.map((agent) => ({
         agentId: agent.agent_id,
@@ -1324,7 +1328,7 @@ function PersonalGoalHome({
         location: agent.location,
         resume: agent.resume,
         source: agent.source,
-        statusLabel: agent.available ? "可用" : "需要配置",
+        statusLabel: agent.available ? "Available" : "Needs setup",
         streaming: agent.streaming,
         toolCalls: agent.tool_calls,
         trustScope: agent.trust_scope,
@@ -1334,19 +1338,19 @@ function PersonalGoalHome({
         available: true,
         capability: personalAgentCapability("codex"),
         label: "Codex",
-        statusLabel: "正在检测",
+        statusLabel: "Checking",
       }];
   const agentOptions = [
     ...discoveredAgents,
     {
       agentId: "status-only",
       available: true,
-      capability: "不调用模型",
+      capability: "No model calls",
       adapterKind: "status_projection",
       interrupt: false,
-      label: "仅查状态",
+      label: "Status only",
       resume: true,
-      statusLabel: "只读",
+      statusLabel: "Read-only",
       streaming: false,
       toolCalls: false,
       trustScope: "read_only",
@@ -1381,7 +1385,7 @@ function PersonalGoalHome({
   const detailsCloseRef = useRef<HTMLButtonElement>(null);
   const detailsTriggerRef = useRef<HTMLButtonElement>(null);
   const managerInputRef = useRef<HTMLInputElement>(null);
-  const managerQuickPrompts = ["我现在该做什么？", "哪些 Goal 在等我？", "Agent 在做什么？"];
+  const managerQuickPrompts = ["What should I do next?", "Which Goals need me?", "What are Agents doing?"];
   const contextMessages = messagesByContext[contextId] ?? [];
   const contextProposals = proposalsByContext[contextId] ?? [];
   const goalUserTodos = selectedGoal
@@ -1392,7 +1396,7 @@ function PersonalGoalHome({
   const completedAgentTodoCount = goalAgentTodos.filter((todo) => todo.done).length;
   const goalProgressLabel = goalAgentTodos.length > 0
     ? `${completedAgentTodoCount}/${goalAgentTodos.length}`
-    : "暂无计划";
+    : "No plan yet";
   const questionModel = selectedGoal
     ? {
         ...model,
@@ -1473,8 +1477,8 @@ function PersonalGoalHome({
               sourceLabel: message.role === "user"
                 ? undefined
                 : message.role === "error"
-                  ? "本地会话记录"
-                  : `恢复的 ${selectedAgent.label} 会话`,
+                  ? "Local session history"
+                  : `Resumed ${selectedAgent.label} session`,
               text: message.role === "user" ? message.text : visibleAgentMessage(message.text),
             })),
           };
@@ -1531,11 +1535,11 @@ function PersonalGoalHome({
         streamControllers.current.set(targetContextId, recoveryController);
         let streamedText = "";
         const streamingMessageId = appendManagerAssistantMessage(targetContextId, {
-          activity: ["正在恢复进行中的 Agent 回合"],
+          activity: ["Resuming in-flight Agent turn"],
           agentLabel: selectedAgent.label,
           lines: [],
           pending: true,
-          sourceLabel: `恢复的 ${selectedAgent.label} 会话`,
+          sourceLabel: `Resumed ${selectedAgent.label} session`,
           text: "",
         });
         try {
@@ -1567,7 +1571,7 @@ function PersonalGoalHome({
               ? [streamed.response.gate.summary, streamed.response.gate.next_action].filter(Boolean).slice(0, 2)
               : [],
             pending: false,
-            text: streamed.response.message || streamedText.trim() || `${selectedAgent.label} 已完成分析。`,
+            text: streamed.response.message || streamedText.trim() || `${selectedAgent.label} finished the analysis.`,
           });
           const recoveryGoal = model.goals.find((goal) => goal.goalId === activeSnapshot?.session.goal_id)
             ?? selectedGoal
@@ -1595,8 +1599,8 @@ function PersonalGoalHome({
             lines: [],
             pending: false,
             reconnect: error instanceof ChatApiError && error.payload.reconnectable === true,
-            sourceLabel: "LoopX Chat 本地后端",
-            text: error instanceof Error ? error.message : "无法恢复进行中的 Agent 回合。",
+            sourceLabel: "LoopX Chat local backend",
+            text: error instanceof Error ? error.message : "Could not resume the in-flight Agent turn.",
           });
         } finally {
           recoveringTurnKeys.current.delete(recoveryKey);
@@ -1832,9 +1836,9 @@ function PersonalGoalHome({
       const answer = answerPersonalManagerQuestion(payload, targetQuestionModel, question);
       const usesStatusOnlyRoute = selectedRoute.agentId === "status-only";
       appendManagerAssistantMessage(targetContextId, {
-        agentLabel: usesStatusOnlyRoute ? "仅查状态" : "LoopX 管家",
+        agentLabel: usesStatusOnlyRoute ? "Status only" : "LoopX Manager",
         lines: answer.lines.slice(0, 3),
-        sourceLabel: usesStatusOnlyRoute ? "LoopX 状态投影 · 仅查状态" : "LoopX 状态投影",
+        sourceLabel: usesStatusOnlyRoute ? "LoopX state projection · status only" : "LoopX state projection",
         text: answer.text,
       });
       void recordProjectionExchange({
@@ -1873,13 +1877,13 @@ function PersonalGoalHome({
       }
       let streamedText = "";
       streamingMessageId = appendManagerAssistantMessage(targetContextId, {
-        activity: ["正在连接 Agent"],
+        activity: ["Connecting to Agent"],
         agentLabel: selectedRoute.label,
         lines: [],
         pending: true,
         sourceLabel: targetContextId !== "manager"
           ? `${selectedRoute.label} Agent · ${personalGoalTitle(targetGoal.goalId)}`
-          : `${selectedRoute.label} 管家 · 跨 Goal`,
+          : `${selectedRoute.label} Manager · cross-Goal`,
         text: "",
       });
       const streamed = await sendChatTurnStreaming(sessionId, question, {
@@ -1926,7 +1930,7 @@ function PersonalGoalHome({
       updateManagerAssistantMessage(targetContextId, streamingMessageId, {
         lines: response.gate ? [response.gate.summary, response.gate.next_action].filter(Boolean).slice(0, 2) : [],
         pending: false,
-        text: visibleAgentMessage(response.message || streamedText.trim()) || `${selectedRoute.label} 已完成分析。`,
+        text: visibleAgentMessage(response.message || streamedText.trim()) || `${selectedRoute.label} finished the analysis.`,
       });
       if (response.proposals.length > 0) {
         const cards = response.proposals.map((proposal) => ({
@@ -1958,8 +1962,8 @@ function PersonalGoalHome({
           agentLabel: selectedRoute.label,
           lines: [],
           pending: false,
-          sourceLabel: `${selectedRoute.label} 会话`,
-          text: "已中断。你可以在当前会话继续发送消息。",
+          sourceLabel: `${selectedRoute.label} session`,
+          text: "Interrupted. You can keep messaging in this session.",
         };
         if (streamingMessageId === null) {
           appendManagerAssistantMessage(targetContextId, interruptedMessage);
@@ -1991,10 +1995,10 @@ function PersonalGoalHome({
         lines: gateSummary ? [gateSummary] : [],
         pending: false,
         reconnect: payloadError?.reconnectable === true,
-        sourceLabel: "LoopX Chat 本地后端",
+        sourceLabel: "LoopX Chat local backend",
         text: payloadError?.error_code === "resume_failed"
-          ? `原 ${selectedRoute.label} 会话无法恢复。本地历史已经保留，请在运行详情里选择“重试恢复”或“开始新 Session”。`
-          : error instanceof Error ? error.message : `${selectedRoute.label} 会话暂时不可用。`,
+          ? `The previous ${selectedRoute.label} session could not resume. Local history is preserved; choose Retry resume or Start new session in run details.`
+          : error instanceof Error ? error.message : `${selectedRoute.label} session is temporarily unavailable.`,
       };
       if (streamingMessageId === null) {
         appendManagerAssistantMessage(targetContextId, failureMessage);
@@ -2102,12 +2106,12 @@ function PersonalGoalHome({
       updatePersonalProposal(targetContextId, card.id, {
         previewId: preview.preview_id,
         state: "ready",
-        statusMessage: "LoopX 已锁定这次写入预览，请确认后再提交。",
+        statusMessage: "LoopX locked this write preview; confirm before submitting.",
       });
     } catch (error) {
       updatePersonalProposal(targetContextId, card.id, {
         state: "error",
-        statusMessage: error instanceof Error ? error.message : "无法生成 Todo 预览。",
+        statusMessage: error instanceof Error ? error.message : "Could not generate the todo preview.",
       });
     }
   }
@@ -2126,7 +2130,7 @@ function PersonalGoalHome({
       updatePersonalProposal(targetContextId, card.id, {
         receiptLabel: todoReceiptLabel(result.receipt),
         state: "approved",
-        statusMessage: result.receipt.already_exists ? "Todo 已存在，本次没有重复写入。" : "Todo 已写入，并返回可核对回执。",
+        statusMessage: result.receipt.already_exists ? "Todo already exists; no duplicate write." : "Todo written with a verifiable receipt.",
       });
       onRefresh();
     } catch (error) {
@@ -2135,12 +2139,12 @@ function PersonalGoalHome({
         : null;
       updatePersonalProposal(targetContextId, card.id, noWriteReceipt ? {
         previewId: null,
-        receiptLabel: `未写入 · 回执 ${noWriteReceipt.receipt_id.slice(0, 12)}`,
+        receiptLabel: `Not written · receipt ${noWriteReceipt.receipt_id.slice(0, 12)}`,
         state: "stale",
-        statusMessage: "Goal 状态已变化，本次保持零写入。请重新生成预览。",
+        statusMessage: "Goal state changed; kept a zero-write outcome. Regenerate the preview.",
       } : {
         state: "error",
-        statusMessage: error instanceof Error ? error.message : "Todo 写入失败。",
+        statusMessage: error instanceof Error ? error.message : "Todo write failed.",
       });
     }
   }
@@ -2148,9 +2152,9 @@ function PersonalGoalHome({
   function settlePersonalProposal(card: PersonalProposalCard, state: "rejected" | "cancelled") {
     updatePersonalProposal(contextId, card.id, {
       previewId: null,
-      receiptLabel: "未写入",
+      receiptLabel: "Not written",
       state,
-      statusMessage: state === "rejected" ? "你已拒绝这个候选 Todo。" : "你已取消本次处理。",
+      statusMessage: state === "rejected" ? "You rejected this candidate todo." : "You cancelled this action.",
     });
   }
 
@@ -2184,32 +2188,32 @@ function PersonalGoalHome({
 
   const selectedGoalStateVariant = selectedGoal ? personalGoalStateVariant[selectedGoal.state] : "neutral";
   const selectedGoalHeaderSummary = selectedGoal
-    ? `${selectedAgent.label} · ${selectedGoal.state}${goalAgentTodos.length > 0 ? ` ${goalProgressLabel}` : ""}${goalUserTodos.length > 0 ? ` · ${goalUserTodos.length} 项等你` : ""}`
-    : "跨 Goal 的个人工作入口";
+    ? `${selectedAgent.label} · ${selectedGoal.state}${goalAgentTodos.length > 0 ? ` ${goalProgressLabel}` : ""}${goalUserTodos.length > 0 ? ` · ${goalUserTodos.length} waiting on you` : ""}`
+    : "Cross-Goal personal workspace";
   const diagnosis = selectedGoal?.state === "需修复" || (!selectedGoal && !payload.ok)
     ? {
-        impact: "可见进度可能已经过期，受影响的执行路径会暂停。",
-        label: "需要关注",
-        owner: selectedGoal ? personalAgentLabel(selectedGoal.agentId) : "LoopX 管家",
-        suggestion: selectedGoal?.nextSentence ?? "刷新 LoopX 状态并检查健康信息。",
-        title: selectedGoal?.agentSentence ?? "LoopX 状态需要检查",
+        impact: "Visible progress may be stale; affected execution paths pause.",
+        label: "Needs attention",
+        owner: selectedGoal ? personalAgentLabel(selectedGoal.agentId) : "LoopX Manager",
+        suggestion: selectedGoal?.nextSentence ?? "Refresh LoopX state and review health.",
+        title: selectedGoal?.agentSentence ?? "LoopX state needs review",
       }
     : selectedGoal?.state === "等你"
       ? {
           impact: selectedGoal.needsYouBlocking
-            ? "这项 Gate 约束的路径暂停；独立执行路径仍按 interaction contract 推进。"
-            : "Agent 可以继续推进；这项用户待办会持续保留。",
-          label: selectedGoal.needsYouBlocking ? "等待你的决定" : "有一项待办等你",
-          owner: "你",
+            ? "This gate pauses the gated path; independent paths still advance per the interaction contract."
+            : "The Agent can keep advancing; this user todo stays open.",
+          label: selectedGoal.needsYouBlocking ? "Waiting on your decision" : "One todo needs you",
+          owner: "You",
           suggestion: selectedGoal.needsYou ?? selectedGoal.nextSentence,
-          title: selectedGoal.needsYou ?? "请处理当前用户待办",
+          title: selectedGoal.needsYou ?? "Handle the current user todo",
         }
       : {
-          impact: selectedGoal ? "Agent 可以按当前计划继续。" : "各 Goal 会按各自 interaction contract 推进。",
-          label: "运行正常",
-          owner: selectedGoal ? personalAgentLabel(selectedGoal.agentId) : "LoopX 管家",
-          suggestion: selectedGoal?.nextSentence ?? "继续观察跨 Goal 状态。",
-          title: selectedGoal ? "当前没有阻止 Agent 继续的运行异常" : "当前没有全局健康异常",
+          impact: selectedGoal ? "The Agent can continue on the current plan." : "Goals advance per their interaction contracts.",
+          label: "Healthy",
+          owner: selectedGoal ? personalAgentLabel(selectedGoal.agentId) : "LoopX Manager",
+          suggestion: selectedGoal?.nextSentence ?? "Keep watching cross-Goal state.",
+          title: selectedGoal ? "No run issue is blocking the Agent" : "No global health issues",
         };
 
   const workspaceTimeline: WorkspaceTimelineItem[] = [
@@ -2222,14 +2226,14 @@ function PersonalGoalHome({
         canInterrupt: false,
         completedSteps: 0,
         goalId: "manager",
-        goalTitle: "LoopX 管家",
-        latestActivity: "本地聊天记录已保留，点我查看恢复方式。",
+        goalTitle: "LoopX Manager",
+        latestActivity: "Local chat history preserved; open for recovery options.",
         resumable: false,
         runId: "manager:resume-failed",
         sessionId: runtimeBindings.manager.sessionId,
         sessionStatus: "resume_failed",
         status: "failed" as const,
-        title: "上次会话需要恢复",
+        title: "Previous session needs recovery",
         totalSteps: 1,
         outputs: [],
       },
@@ -2251,10 +2255,10 @@ function PersonalGoalHome({
           goalId: selectedGoal.goalId,
           goalTitle: selectedGoal.title,
           latestActivity: running
-            ? "Agent 正在执行，可进入 Session 查看过程或发送纠偏。"
+            ? "Agent is running; open the session to watch progress or steer."
             : hasResult
-              ? "Agent 已返回结果，点击查看结果与完整运行记录。"
-              : "执行 Session 已保留，可继续纠偏或恢复。",
+              ? "Agent returned a result; open for the full run record."
+              : "Execution session preserved; steer or resume.",
           resumable: session.resumable,
           runId: session.session_id,
           sessionId: session.session_id,
@@ -2266,7 +2270,7 @@ function PersonalGoalHome({
           })),
           sessionStatus: hasResult ? "completed" : session.status,
           status: todo?.done || hasResult ? "completed" : running ? "running" : session.status === "resume_failed" ? "failed" : "waiting",
-          title: todo?.text ?? "Agent 执行任务",
+          title: todo?.text ?? "Agent task",
           todoId,
           totalSteps: 1,
           turnId: session.active_turn_id ?? undefined,
@@ -2313,7 +2317,7 @@ function PersonalGoalHome({
         id: String(message.id),
         pending: message.pending,
         role: message.role,
-        text: message.text || (message.pending ? "Agent 正在处理…" : message.lines.join("\n")),
+        text: message.text || (message.pending ? "Agent is working…" : message.lines.join("\n")),
       },
     })),
     ...(selectedGoal ? [selectedGoal] : model.goals).flatMap((goal) => goal.runEvidence ? [{
@@ -2354,18 +2358,18 @@ function PersonalGoalHome({
           streaming: agent.streaming,
           toolCalls: agent.toolCalls,
           trustScope: agent.trustScope,
-          workspaceCompatibility: agent.available ? "当前 Goal 写入前验证" : "不可用，需先修复 Endpoint",
+          workspaceCompatibility: agent.available ? "Validated before writes on this Goal" : "Unavailable; fix the endpoint first",
         }))}
         callbacks={{
           onApplyAttention: (attention) => openGoalChat(attention.goalId),
           onCorrectRun: async (run, message) => {
-            if (!run.sessionId) throw new Error("这个 Run 还没有可纠偏的执行 Session。");
+            if (!run.sessionId) throw new Error("This run has no steerable execution session yet.");
             const proposal = await previewTypedAction({
               actionKind: "run.correct",
               context: { kind: "run", goal_id: run.goalId, todo_id: run.todoId },
               idempotencyKey: `workspace-run-correct-${run.sessionId}-${Date.now().toString(36)}`,
               normalizedParameters: { goal_id: run.goalId, message, session_id: run.sessionId },
-              summary: `纠偏执行任务：${run.title}`,
+              summary: `Steer run: ${run.title}`,
             });
             const applied = await applyTypedAction(proposal.proposal_id);
             const turnId = typeof applied.turn?.turn_id === "string" ? applied.turn.turn_id : undefined;
@@ -2382,11 +2386,11 @@ function PersonalGoalHome({
               streamControllers.current.set(run.goalId, controller);
               let streamedText = "";
               const messageId = appendManagerAssistantMessage(run.goalId, {
-                activity: ["正在把纠偏送入原执行 Session"],
+                activity: ["Sending steer into the original execution session"],
                 agentLabel: run.agentLabel,
                 lines: [],
                 pending: true,
-                sourceLabel: `${run.agentLabel} · 执行 Session`,
+                sourceLabel: `${run.agentLabel} · execution session`,
                 text: "",
               });
               try {
@@ -2400,14 +2404,14 @@ function PersonalGoalHome({
                 updateManagerAssistantMessage(run.goalId, messageId, {
                   activity: [],
                   pending: false,
-                  text: visibleAgentMessage(streamed.response.message || streamedText.trim()) || `${run.agentLabel} 已完成纠偏。`,
+                  text: visibleAgentMessage(streamed.response.message || streamedText.trim()) || `${run.agentLabel} finished the steer.`,
                 });
               } catch (error) {
                 const interrupted = interruptedContexts.current.delete(run.goalId);
                 updateManagerAssistantMessage(run.goalId, messageId, {
                   activity: [],
                   pending: false,
-                  text: interrupted ? "已中断。你可以在当前会话继续发送消息。" : error instanceof Error ? error.message : "纠偏回合失败。",
+                  text: interrupted ? "Interrupted. You can keep messaging in this session." : error instanceof Error ? error.message : "Steer turn failed.",
                 });
               } finally {
                 activeTurnIds.current.delete(run.goalId);
@@ -2441,7 +2445,7 @@ function PersonalGoalHome({
                 id: managerMessageId.current++,
                 lines: [],
                 role: message.role === "user" ? "user" : "assistant",
-                sourceLabel: message.role === "user" ? undefined : `${run.agentLabel} · 执行 Session`,
+                sourceLabel: message.role === "user" ? undefined : `${run.agentLabel} · execution session`,
                 text: message.role === "user" ? message.text : visibleAgentMessage(message.text),
               })),
             }));
@@ -2463,7 +2467,7 @@ function PersonalGoalHome({
               "",
               output.summary ?? "",
               "",
-              output.safePreview ?? "此产出没有可用的公开安全预览。",
+              output.safePreview ?? "No public-safe preview is available for this output.",
               "",
               `Goal: ${output.goalId}`,
               `Todo: ${output.todoId ?? "unlinked"}`,
@@ -2521,10 +2525,10 @@ function StatusRequestView({
       <main className="min-h-screen bg-[#f6f7f9] text-slate-950 dark:bg-[#09090b] dark:text-zinc-50">
         <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
           <div>
-            <h1 className="text-xl font-semibold">LoopX 看板</h1>
+            <h1 className="text-xl font-semibold">LoopX Dashboard</h1>
             <p className="mt-1 break-all text-sm text-slate-500 dark:text-zinc-400">{requestedUrl}</p>
           </div>
-          <Button aria-label="切换主题" onClick={toggleTheme} size="icon" variant="secondary">
+          <Button aria-label="Toggle theme" onClick={toggleTheme} size="icon" variant="secondary">
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
         </header>
@@ -2538,27 +2542,27 @@ function StatusRequestView({
                   <RefreshCw className="mx-auto h-6 w-6 animate-spin text-slate-500 dark:text-zinc-400" />
                 )}
                 <p className="mt-3 text-sm font-medium">
-                  {error ? "无法加载实时状态" : "正在加载实时状态"}
+                  {error ? "Could not load live status" : "Loading live status"}
                 </p>
                 {error ? (
                   <>
                     <p className="mt-2 break-words text-sm leading-6 text-slate-500 dark:text-zinc-400">
                       {statusServiceUnavailable
-                        ? "LoopX 状态服务未连接。请从 dashboard 目录运行 npm run dev；它会同时启动 5173、8766 和 8767。"
+                        ? "LoopX status service is not connected. Run npm run dev from the dashboard directory to start 5173, 8766, and 8767."
                         : error}
                     </p>
                     {statusServiceUnavailable ? (
                       <p className="mt-2 text-xs leading-5 text-slate-400 dark:text-zinc-500">
-                        远程 SSH 开发只需转发 5173；状态请求会通过 Vite 转发到远程 8766。
+                        For remote SSH dev, forward 5173 only; status requests proxy to remote 8766 via Vite.
                       </p>
                     ) : null}
                     <div className="mt-4 flex flex-wrap justify-center gap-2">
                       <Button disabled={isLoading} onClick={onRetry}>
                         <RefreshCw className="h-4 w-4" />
-                        重试
+                        Retry
                       </Button>
                       <Button disabled={isLoading} onClick={onReset} variant="ghost">
-                        使用示例
+                        Use sample data
                       </Button>
                     </div>
                   </>
@@ -2626,7 +2630,7 @@ export function DashboardPage() {
     const trimmed = url.trim();
     const background = options.background === true;
     if (!trimmed) {
-      if (!background) setLoadError("状态地址不能为空");
+      if (!background) setLoadError("Status URL cannot be empty");
       return;
     }
     const request = beginStatusRequest(statusRequestFenceRef.current, trimmed, {
@@ -2715,7 +2719,7 @@ export function DashboardPage() {
         ? "error"
         : "connected",
     errorMessage: requestFailed
-      ? `未切换到 ${requestedStatusUrl ?? "所选来源"}：${loadError}`
+      ? `Did not switch to ${requestedStatusUrl ?? "the selected source"}: ${loadError}`
       : null,
     onAdd: (input) => {
       const result = addSshTunnelStatusSource(statusSourceCatalog, input, window.location.href);

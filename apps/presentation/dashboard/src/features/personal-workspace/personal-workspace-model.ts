@@ -350,16 +350,16 @@ export function goalTitleFor(model: WorkspaceModel, goalId: string) {
 }
 
 export function workspaceSessionStatusLabel(status?: string): string {
-  if (!status) return "状态未知";
+  if (!status) return "Status unknown";
   return ({
-    busy: "执行中",
-    completed: "已完成",
-    failed: "需检查",
-    queued: "已安排",
-    ready: "可继续",
-    resume_failed: "恢复失败",
-    running: "执行中",
-    waiting: "等待条件",
+    busy: "Running",
+    completed: "Completed",
+    failed: "Needs review",
+    queued: "Queued",
+    ready: "Ready",
+    resume_failed: "Resume failed",
+    running: "Running",
+    waiting: "Waiting",
   } as Record<string, string>)[status] ?? status;
 }
 
@@ -384,8 +384,8 @@ export function attentionAgeLabel(updatedAt?: string | null): string | null {
   const diff = Date.now() - then;
   if (diff < 3_600_000) return null;
   const days = Math.floor(diff / 86_400_000);
-  if (days >= 1) return `${days} 天`;
-  return `${Math.floor(diff / 3_600_000)} 小时`;
+  if (days >= 1) return `${days}d`;
+  return `${Math.floor(diff / 3_600_000)}h`;
 }
 
 export function formatTokenCount(value?: number | null): string {
@@ -419,8 +419,8 @@ export function goalUsageLabel(usage?: WorkspaceGoalUsage | null): string | null
 }
 
 export function workerStateLabel(state?: string | null): string {
-  if (state === "running") return "执行中";
-  if (state === "monitoring") return "监控中";
-  if (state === "blocked") return "受阻";
-  return "待命";
+  if (state === "running") return "Running";
+  if (state === "monitoring") return "Monitoring";
+  if (state === "blocked") return "Blocked";
+  return "Idle";
 }

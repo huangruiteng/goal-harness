@@ -67,7 +67,7 @@ assert.match(
   "Selecting a Goal opens its Tasks view first",
 );
 assert.match(model, /onOpenGoalView\??:/, "Goal detail can switch the center workspace view");
-for (const label of ["执行中", "已安排", "等待条件", "可继续"]) {
+for (const label of ["Running", "Queued", "Waiting", "Ready"]) {
   assert.match(model + drawer + page, new RegExp(label), `Session and Run status language includes ${label}`);
 }
 assert.match(dashboard, /actionKind:\s*"run\.correct"/, "Run correction uses the scoped typed action");
@@ -90,11 +90,11 @@ assert.match(page, /if \(semanticPreview\) await createPreview\(semanticPreview\
 for (const legacyClassifier of ["hasHeartbeatIntent", "hasMonitorIntent", "hasTodoCreationIntent", "isExecutionIntent"]) {
   assert.doesNotMatch(page, new RegExp(`function ${legacyClassifier}`), `${legacyClassifier} no longer bypasses the Router contract`);
 }
-assert.match(dashboard, /Agent 已返回结果/, "A completed task Session advertises its result instead of looking stalled");
+assert.match(dashboard, /Agent returned a result/, "A completed task Session advertises its result instead of looking stalled");
 assert.match(dashboard, /sessionStatus: hasResult \? "completed"/, "A returned answer outranks a stale transport label in the visible Session status");
 assert.match(dashboard, /function visibleAgentMessage[\s\S]*GOAL_\(STATUS\|PROGRESS\)/, "Internal Session protocol markers stay out of the user-facing result");
-assert.match(dashboard, /GOAL_EVIDENCE[\s\S]*验证依据：/, "Session evidence uses a readable heading instead of an internal protocol marker");
-assert.match(dashboard, /NEXT_ACTION[\s\S]*下一步：/, "Session next actions use a readable heading instead of an internal protocol marker");
+assert.match(dashboard, /GOAL_EVIDENCE[\s\S]*Evidence:/, "Session evidence uses a readable heading instead of an internal protocol marker");
+assert.match(dashboard, /NEXT_ACTION[\s\S]*Next action:/, "Session next actions use a readable heading instead of an internal protocol marker");
 assert.match(tasks, /t\("tasks\.viewResult"\)/, "Tasks expose a direct result entry when a Session has answered");
 assert.match(tasks, /t\("tasks\.pendingAndRunning"\)/, "Tasks do not imply that every uncompleted Todo already has an active Run");
 assert.match(tasks, /t\("tasks\.chatRecent"\)/, "Tasks surface the latest Goal conversation without forcing a tab switch");
@@ -206,7 +206,7 @@ assert.match(page, /loopx-pw-theme/, "Theme preference persists across reloads")
 assert.match(dashboard, /function isManagerProjectionQuestion[\s\S]*我现在该做什么[\s\S]*哪些 Goal 在等我[\s\S]*Agent 在做什么/, "Manager projection questions use stable intent phrases instead of exact button copy");
 assert.match(dashboard, /targetContextId === "manager" && isManagerProjectionQuestion\(question\)/, "Manager projection questions remain on the cross-Goal manager route when the user adds a read-only boundary");
 assert.match(dashboard, /const asksForNextAction[\s\S]*if \(asksForNextAction\)[\s\S]*personalManagerMatches\(question, \["状态"/, "A next-step question outranks a read-only boundary that mentions state");
-assert.match(dashboard, /先处理「\$\{personalGoalTitle\(nextTodo\.goalId\)\}」：\$\{nextTodo\.text\}/, "The compact manager answer names the Goal and concrete blocking action");
+assert.match(dashboard, /Handle “\$\{personalGoalTitle\(nextTodo\.goalId\)\}” first: \$\{nextTodo\.text\}/, "The compact manager answer names the Goal and concrete blocking action");
 assert.match(drawer, /t\("drawer\.decisionReview"\)/, "Blocked items preview their decision boundary before any write");
 assert.match(drawer, /const hasProjectedRunActivity = selection\.kind === "run"[\s\S]*selection\.item\.completedSteps > 0/, "Session empty-state copy distinguishes projected progress from a truly idle run");
 assert.match(drawer, /t\("drawer\.runRecordProjected"/, "A projected run does not claim that the Agent never started");

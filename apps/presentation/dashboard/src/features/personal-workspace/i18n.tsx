@@ -1288,9 +1288,13 @@ function formatMessage(template: string, values?: Record<string, string | number
 
 export function readWorkspaceLocale(): WorkspaceLocale {
   try {
-    return window.localStorage.getItem(workspaceLocaleStorageKey) === "en" ? "en" : "zh-CN";
+    const stored = window.localStorage.getItem(workspaceLocaleStorageKey);
+    if (stored === "zh-CN") {
+      return "zh-CN";
+    }
+    return "en";
   } catch {
-    return "zh-CN";
+    return "en";
   }
 }
 

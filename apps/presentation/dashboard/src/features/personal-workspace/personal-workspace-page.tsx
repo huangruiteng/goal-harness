@@ -598,7 +598,7 @@ function todoTextFromMessage(message: string) {
     .replace(/[，,]\s*(并且|然后|再)?\s*(交给|分配给|让).+$/u, "")
     .replace(/\s*(交给|分配给|让)\s+.+$/u, "")
     .trim()
-    .slice(0, 400) || "推进当前 Goal 的下一项工作";
+    .slice(0, 400) || "Advance the next item on the current Goal";
 }
 
 const acceptedImageTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
@@ -621,7 +621,7 @@ function readImageAttachment(file: File, t: WorkspaceTranslate): Promise<Workspa
 }
 
 export function PersonalWorkspacePage({
-  agents = [{ agentId: "codex", available: true, capability: "代码与项目执行", label: "Codex" }],
+  agents = [{ agentId: "codex", available: true, capability: "Code and project execution", label: "Codex" }],
   callbacks = {},
   model,
   readOnly = false,
