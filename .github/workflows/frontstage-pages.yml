@@ -124,7 +124,7 @@ jobs:
             echo "Tracked packaged Dashboard assets differ from a clean source build." >&2
             exit 1
           fi
-          npx playwright install --with-deps chromium
+          ./node_modules/.bin/playwright install --with-deps chromium
           npm run smoke:personal-workspace-packaged
 
       - name: Install docs dependencies
