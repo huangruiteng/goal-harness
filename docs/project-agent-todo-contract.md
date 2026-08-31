@@ -250,6 +250,8 @@ next-action selection should prefer that repair-mode candidate over ordinary
 runnable work in the same claim/priority bucket so capability-building todos do
 not require fragile active-state reordering.
 
+### Machine-readable resume conditions
+
 Deferred todos may carry a machine-readable resume condition with
 `resume_when=<token>`. Supported conditions are:
 
@@ -270,6 +272,18 @@ Deferred todos may carry a machine-readable resume condition with
   material-change generation. The transition binds the monitor's current
   generation as a baseline, so unchanged polls, note edits, and replay of the
   same material result do not wake the todo.
+
+The monitor and the delivery it discovers are separate work items. A
+`continuous_monitor` is observe-only; it never becomes the runnable delivery.
+On a material observation, use `quota monitor-poll --material-change
+--next-agent-todo ... --next-action-kind ...` to emit an independent open
+`advancement_task`. A waiting advancement Todo stays `status=open` and pairs
+`resume_when=monitor_changed:<monitor_todo_id>` with that independent Todo via
+`--successor-todo-id`. The resume condition—not `status=blocked`—keeps the
+waiting Todo out of runnable selection until the monitor generation advances.
+Relevant command results expose the compact
+`monitor_advancement_authoring_v0` contract so an Agent can recover this
+sequence without parsing documentation prose.
 
 Open todos may also carry `resume_when` when they are visible but not yet
 executable. Until the parsed `resume_condition.satisfied` value is true, status

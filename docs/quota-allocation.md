@@ -523,7 +523,11 @@ When a poll sees a material transition, add `--material-change` and optionally
 follow-up instead of staying as an opaque watch. A user follow-up must declare
 `--next-user-task-class user_gate|user_action` explicitly: use `user_gate` for
 a blocking owner decision and `user_action` for a visible reminder that must
-not block the bound agent lane. Omitting the task class fails before writeback:
+not block the bound agent lane. Omitting the task class fails before writeback.
+The monitor remains an observe-only `continuous_monitor`; `--next-agent-todo`
+creates a separate runnable `advancement_task`. For the corresponding
+generation-fenced waiting-Todo recipe, see
+[Project Agent Todo Contract](project-agent-todo-contract.md#machine-readable-resume-conditions):
 
 ```bash
 loopx quota monitor-poll --goal-id <GOAL_ID> \
