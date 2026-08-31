@@ -663,6 +663,7 @@ export function PersonalWorkspacePage({
   const [imageAttachments, setImageAttachments] = useState<WorkspaceImageAttachment[]>([]);
   const [imageAttachmentError, setImageAttachmentError] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [lifecycleBusyGoalIds, setLifecycleBusyGoalIds] = useState<ReadonlySet<string>>(() => new Set());
   const [refreshState, setRefreshState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [sessionProposalIds, setSessionProposalIds] = useState<string[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -679,6 +680,7 @@ export function PersonalWorkspacePage({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const channelScrollRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const lifecyclePendingGoalIdsRef = useRef(new Set<string>());
   const [digest, setDigest] = useState<{ attention: number; done: number; failed: number } | null>(null);
   const selectedGoalId = controlledGoalId === undefined ? localGoalId : controlledGoalId;
   const selectedAgentId = controlledAgentId ?? localAgentId;
@@ -935,7 +937,10 @@ export function PersonalWorkspacePage({
     return () => { cancelled = true; };
   }, [readOnly, selectedGoalId, t]);
 
-  async function createPreview(request: WorkspaceActionPreviewRequest) {
+  async function createPreview(
+    request: WorkspaceActionPreviewRequest,
+    options: { select?: boolean } = {},
+  ) {
     if (readOnly) throw new Error(t("source.readOnlyWriteError"));
     let local: WorkspaceActionPreview;
     try {
@@ -982,7 +987,7 @@ export function PersonalWorkspacePage({
     }
     setSessionProposalIds((current) => current.includes(local.previewId) ? current : [...current, local.previewId]);
     setProposals((current) => ({ ...current, [local.previewId]: local }));
-    setSelection({ item: local, kind: "proposal" });
+    if (options.select !== false) setSelection({ item: local, kind: "proposal" });
     return local;
   }
 
@@ -1004,7 +1009,13 @@ export function PersonalWorkspacePage({
       stop: t("proposal.summary.lifecycleStop", { title: goal.title }),
     };
     try {
-      await createPreview({
+      if (operation === "stop") {
+        if (lifecyclePendingGoalIdsRef.current.has(goal.goalId)) return;
+        lifecyclePendingGoalIdsRef.current.add(goal.goalId);
+        setLifecycleBusyGoalIds(new Set(lifecyclePendingGoalIdsRef.current));
+        setSelection(null);
+      }
+      const proposal = await createPreview({
         actionKind: "goal.lifecycle",
         context: { kind: "goal_directory", goal_id: goal.goalId },
         idempotencyKey: `workspace-goal-${operation}-${goal.goalId}-${Date.now().toString(36)}`,
@@ -1014,11 +1025,23 @@ export function PersonalWorkspacePage({
           reason: reasonByOperation[operation],
         },
         summary: summaryByOperation[operation],
-      });
+      }, { select: operation !== "stop" });
+      if (operation === "stop") {
+        if (proposal.status === "ready") {
+          await applyProposal(proposal, { presentation: "feedback" });
+        } else {
+          setSelection({ item: proposal, kind: "proposal" });
+        }
+      }
     } catch (error) {
       setActionFeedback(t("feedback.executionFailed", {
         error: error instanceof Error ? error.message : String(error),
       }));
+    } finally {
+      if (operation === "stop") {
+        lifecyclePendingGoalIdsRef.current.delete(goal.goalId);
+        setLifecycleBusyGoalIds(new Set(lifecyclePendingGoalIdsRef.current));
+      }
     }
   }
 
@@ -1074,6 +1097,117 @@ export function PersonalWorkspacePage({
     });
   }
 
+  async function applyProposal(
+    proposal: WorkspaceActionPreview,
+    options: { presentation?: "drawer" | "feedback" } = {},
+  ) {
+    const showDrawer = options.presentation !== "feedback";
+    const lifecycleChange = proposal.actionKind === "goal.lifecycle"
+      && proposal.goalId
+      && (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "resume")
+      ? {
+          goalId: proposal.goalId,
+          next: proposal.lifecycleOperation === "stop" ? "stopped" as const : "active" as const,
+          previous: model.goals.find((goal) => goal.goalId === proposal.goalId)?.activationState
+            ?? (proposal.lifecycleOperation === "stop" ? "active" as const : "stopped" as const),
+        }
+      : null;
+    setActionFeedback(t("feedback.applying", { title: proposal.title }));
+    const applying = { ...proposal, status: "applying" as const };
+    setProposals((current) => ({ ...current, [proposal.previewId]: applying }));
+    if (showDrawer) setSelection({ item: applying, kind: "proposal" });
+    if (lifecycleChange) {
+      callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.next);
+    }
+    try {
+      if (callbacks.onApplyProposal) {
+        await callbacks.onApplyProposal(proposal);
+        const applied = { ...proposal, status: "applied" as const };
+        setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
+        if (showDrawer) setSelection({ item: applied, kind: "proposal" });
+        setActionFeedback(t("feedback.completed", { title: proposal.title }));
+        if (proposal.actionKind === "goal.lifecycle") {
+          if (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "delete") {
+            selectGoal(null);
+          }
+          if (proposal.lifecycleOperation === "delete" && proposal.goalId) {
+            callbacks.onGoalDeleted?.(proposal.goalId);
+          }
+          const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
+          void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
+        }
+        return;
+      }
+      const result = await applyTypedAction(proposal.previewId);
+      const applied = workspaceProposal(result.proposal, t);
+      setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
+      if (showDrawer) setSelection({ item: applied, kind: "proposal" });
+      if (result.proposal.status !== "applied" || result.proposal.receipt?.projection_verified !== true) {
+        if (lifecycleChange) {
+          callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
+        }
+        setActionFeedback(
+          result.proposal.status === "stale"
+            ? t("feedback.stale")
+            : t("feedback.notCompleted", { status: result.proposal.status }),
+        );
+        return;
+      }
+      setActionFeedback(t("feedback.completed", { title: applied.title }));
+      // Keep the success receipt visible for reviewed actions. Direct actions
+      // surface the same result through the persistent feedback receipt.
+      if (applied.actionKind === "todo.create") {
+        await callbacks.onRefresh?.();
+      }
+      if (applied.actionKind === "goal.lifecycle" && (applied.lifecycleOperation === "stop" || applied.lifecycleOperation === "delete")) {
+        selectGoal(null);
+      }
+      if (applied.actionKind === "goal.lifecycle" && applied.lifecycleOperation === "delete" && applied.goalId) {
+        callbacks.onGoalDeleted?.(applied.goalId);
+      }
+      if (applied.actionKind === "goal.lifecycle") {
+        const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
+        void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
+      }
+    } catch (error) {
+      if (lifecycleChange) {
+        callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
+      }
+      if (error instanceof ChatApiError && error.payload.error_code === "protected_action") {
+        const rawGate = error.payload.gate;
+        const gate = rawGate && typeof rawGate === "object" ? rawGate as Record<string, unknown> : {};
+        const gated = {
+          ...proposal,
+          gate: {
+            kind: String(gate.kind ?? "protected_action"),
+            nextAction: typeof gate.next_action === "string" ? gate.next_action : undefined,
+            summary: String(gate.summary ?? error.message),
+          },
+          status: "gated" as const,
+        };
+        setProposals((current) => ({ ...current, [proposal.previewId]: gated }));
+        // A newly discovered authority gate always deserves review, including
+        // when the action started on the direct path.
+        setSelection({ item: gated, kind: "proposal" });
+        setActionFeedback(t("feedback.gateRequired", { summary: gated.gate.summary }));
+        if (proposal.actionKind === "goal.create" && proposal.goalId) {
+          callbacks.onRefresh?.();
+          selectGoal(proposal.goalId);
+        }
+        return;
+      }
+      const stale = error instanceof Error && /stale|状态.*变化|conflict/i.test(error.message);
+      const failed = {
+        ...proposal,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        status: (stale ? "stale" : "error") as "stale" | "error",
+      };
+      setProposals((current) => ({ ...current, [proposal.previewId]: failed }));
+      if (showDrawer) setSelection({ item: failed, kind: "proposal" });
+      setActionFeedback(t("feedback.executionFailed", { error: failed.errorMessage }));
+    }
+  }
+
   const drawerCallbacks: PersonalWorkspaceCallbacks = {
     ...callbacks,
     onOpenRunSession: async (run) => {
@@ -1097,109 +1231,7 @@ export function PersonalWorkspacePage({
       setSelectedGoalTab("files");
       callbacks.onOpenOutput?.(output);
     },
-    onApplyProposal: async (proposal) => {
-      const lifecycleChange = proposal.actionKind === "goal.lifecycle"
-        && proposal.goalId
-        && (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "resume")
-        ? {
-            goalId: proposal.goalId,
-            next: proposal.lifecycleOperation === "stop" ? "stopped" as const : "active" as const,
-            previous: model.goals.find((goal) => goal.goalId === proposal.goalId)?.activationState
-              ?? (proposal.lifecycleOperation === "stop" ? "active" as const : "stopped" as const),
-          }
-        : null;
-      setActionFeedback(t("feedback.applying", { title: proposal.title }));
-      setProposals((current) => ({ ...current, [proposal.previewId]: { ...proposal, status: "applying" } }));
-      setSelection({ item: { ...proposal, status: "applying" }, kind: "proposal" });
-      if (lifecycleChange) {
-        callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.next);
-      }
-      try {
-        if (callbacks.onApplyProposal) {
-          await callbacks.onApplyProposal(proposal);
-          const applied = { ...proposal, status: "applied" as const };
-          setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
-          setSelection({ item: applied, kind: "proposal" });
-          setActionFeedback(t("feedback.completed", { title: proposal.title }));
-          if (proposal.actionKind === "goal.lifecycle") {
-            if (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "delete") {
-              selectGoal(null);
-            }
-            if (proposal.lifecycleOperation === "delete" && proposal.goalId) {
-              callbacks.onGoalDeleted?.(proposal.goalId);
-            }
-            const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
-            void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
-          }
-          return;
-        }
-        const result = await applyTypedAction(proposal.previewId);
-        const applied = workspaceProposal(result.proposal, t);
-        setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
-        setSelection({ item: applied, kind: "proposal" });
-        if (result.proposal.status !== "applied" || result.proposal.receipt?.projection_verified !== true) {
-          if (lifecycleChange) {
-            callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
-          }
-          setActionFeedback(
-            result.proposal.status === "stale"
-              ? t("feedback.stale")
-              : t("feedback.notCompleted", { status: result.proposal.status }),
-          );
-          return;
-        }
-        setActionFeedback(t("feedback.completed", { title: applied.title }));
-        // Keep the success receipt visible. Refresh and navigation happen when
-        // the user chooses the explicit "进入 Goal" action in the drawer.
-        if (applied.actionKind === "todo.create") {
-          await callbacks.onRefresh?.();
-        }
-        if (applied.actionKind === "goal.lifecycle" && (applied.lifecycleOperation === "stop" || applied.lifecycleOperation === "delete")) {
-          selectGoal(null);
-        }
-        if (applied.actionKind === "goal.lifecycle" && applied.lifecycleOperation === "delete" && applied.goalId) {
-          callbacks.onGoalDeleted?.(applied.goalId);
-        }
-        if (applied.actionKind === "goal.lifecycle") {
-          const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
-          void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
-        }
-      } catch (error) {
-        if (lifecycleChange) {
-          callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
-        }
-        if (error instanceof ChatApiError && error.payload.error_code === "protected_action") {
-          const rawGate = error.payload.gate;
-          const gate = rawGate && typeof rawGate === "object" ? rawGate as Record<string, unknown> : {};
-          const gated = {
-            ...proposal,
-            gate: {
-              kind: String(gate.kind ?? "protected_action"),
-              nextAction: typeof gate.next_action === "string" ? gate.next_action : undefined,
-              summary: String(gate.summary ?? error.message),
-            },
-            status: "gated" as const,
-          };
-          setProposals((current) => ({ ...current, [proposal.previewId]: gated }));
-          setSelection({ item: gated, kind: "proposal" });
-          setActionFeedback(t("feedback.gateRequired", { summary: gated.gate.summary }));
-          if (proposal.actionKind === "goal.create" && proposal.goalId) {
-            callbacks.onRefresh?.();
-            selectGoal(proposal.goalId);
-          }
-          return;
-        }
-        const stale = error instanceof Error && /stale|状态.*变化|conflict/i.test(error.message);
-        const failed = {
-          ...proposal,
-          errorMessage: error instanceof Error ? error.message : String(error),
-          status: (stale ? "stale" : "error") as "stale" | "error",
-        };
-        setProposals((current) => ({ ...current, [proposal.previewId]: failed }));
-        setSelection({ item: failed, kind: "proposal" });
-        setActionFeedback(t("feedback.executionFailed", { error: failed.errorMessage }));
-      }
-    },
+    onApplyProposal: applyProposal,
     onCancelProposal: async (proposal) => {
       setSelection(null);
       setProposals((current) => {
@@ -1764,6 +1796,7 @@ export function PersonalWorkspacePage({
         <GoalSidebar
           attentionCount={managerNeedsYouCount}
           goals={workspaceGoals}
+          lifecycleBusyGoalIds={lifecycleBusyGoalIds}
           onRequestGoalCreate={readOnly ? undefined : requestGoalCreate}
           onRequestGoalLifecycle={readOnly ? undefined : (goal, operation) => void requestGoalLifecycle(goal, operation)}
           onOpenSettings={readOnly ? undefined : () => setSelection({ kind: "settings" })}

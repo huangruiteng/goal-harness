@@ -17,6 +17,7 @@ const goalStateClass: Record<WorkspaceGoal["state"], string> = {
 export function GoalSidebar({
   attentionCount,
   goals,
+  lifecycleBusyGoalIds,
   onRequestGoalCreate,
   onOpenSettings,
   onRequestGoalLifecycle,
@@ -26,6 +27,7 @@ export function GoalSidebar({
 }: {
   attentionCount: number;
   goals: WorkspaceGoal[];
+  lifecycleBusyGoalIds?: ReadonlySet<string>;
   onRequestGoalCreate?: () => void;
   onOpenSettings?: () => void;
   onRequestGoalLifecycle?: (goal: WorkspaceGoal, operation: "stop" | "resume" | "delete") => void;
@@ -56,6 +58,7 @@ export function GoalSidebar({
           <button
             aria-label={`${stopped ? t("sidebar.resume") : t("sidebar.stop")} ${goal.title}`}
             className="personal-goal-lifecycle"
+            disabled={lifecycleBusyGoalIds?.has(goal.goalId)}
             onClick={() => onRequestGoalLifecycle(goal, stopped ? "resume" : "stop")}
             title={stopped ? t("sidebar.resumeGoal") : t("sidebar.stopGoal")}
             type="button"
