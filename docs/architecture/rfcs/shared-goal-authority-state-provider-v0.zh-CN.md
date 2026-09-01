@@ -3,14 +3,15 @@
 - 状态：Draft，正在接受 maintainer review
 - 最初提案方：NoKV Lab
 - 扩展修订方：LoopX maintainer
-- 日期：2026-08-05；修订于 2026-09-01
+- 日期：2026-08-05；修订于 2026-09-02
 - 范围：一个 provider-neutral 的 LoopX 权威合同，支持内置 file、可选 NoKV
   与可选 PostgreSQL provider profile，用来补充
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
 - 源码基线：LoopX `a0c20f1779d273e7aaa4bd3ea166d145d466e6d5`
-- Provider API 基线：NoKV `3d75d96965`（0.11.0 线）。Python `publish_bytes`
-  generation-CAS 映射已在该基线的真实 NoKV stack 上手工跑过一次（见示例 README）；
-  该次运行只是映射本身的证据，不属于任何合并门槛
+- Provider API 基线：NoKV `0f1995ebee96048e5d4f9d4745d84c3518c64351`
+  （release 0.11.0、Python API 1、Holt 固定为 0.8.6）。Stage 2A 的可执行资格
+  验证只接受这份 SDK 合同与本 checkout 的 helper；它仍是候选证据，不是合并门槛
+  或 authority promotion
 - PostgreSQL 基线：TypeScript Stage 2B candidate 已实现 store contract，且已通过
   真实 PostgreSQL 16 transaction matrix；shared authority service、runtime caller、
   authentication boundary 与 authority promotion 均尚未交付
@@ -1167,6 +1168,17 @@ migration/promotion、service recovery 或 HA。
 `python3 examples/nokv-shadow-provider/probes.py contract` 通过并不表示上面的完整 P0
 验收门通过。历史 latency 或 fault 结果只具有参考意义，不构成 durability、recovery、
 HA 或 production qualification 声明。
+
+`examples/nokv-authority-store/` 还包含一个 TEST ONLY 的 Stage 2A probe：它会
+打开三个相互独立的 SDK helper 进程，验证 fresh create、精确 generation update、
+两个竞争者恰一胜出的 CAS、胜负双方的 receipt 行为，以及新进程对完整 history 的
+回读。该可执行入口把 argv 固定为一个绝对 Python executable 加本 checkout 的生产
+helper；helper 只接受 NoKV 0.11.0 / Python API 1，并逐项核对 read/publish 回包与
+请求的 workbench、path、workspace incarnation、operation、revision、generation
+是否绑定。只有成功的 live JSON report 才是该次单节点运行的证据；确定性测试只证明
+场景序列。这个纯 LoopX 候选既不修改 NoKV main，也不改变其 workbench/artifact
+数据模型或 frozen-oracle-log 用途；它仍不证明 HA、重启恢复、容量、生产路由或
+authority-source promotion。
 
 ## 附录 B：交接模式决策记录（2026-08-10）
 
