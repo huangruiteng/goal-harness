@@ -40,7 +40,7 @@ from loopx.control_plane.coordination.file_provider import (  # noqa: E402
 )
 from loopx.control_plane.coordination.head import bootstrap_head  # noqa: E402
 
-from provider import NoKVCoordinationProvider  # noqa: E402
+from provider import open_nokv_coordination_provider  # noqa: E402
 
 
 def eligibility() -> dict:
@@ -351,10 +351,17 @@ def nokv_matrix() -> tuple[dict | None, str | None]:
         )
 
     workbench = "wbstage2" + uuid.uuid4().hex[:10]
-    make_client().create_workspace(workbench)
+    # This handle provisions the evidence workspace; it cannot authorize a
+    # coordination-head state transition or participate in provider fallback.
+    provisioning_client = make_client()
+    provisioning_client.create_workspace(workbench)
 
     def make_provider(goal_id):
-        return NoKVCoordinationProvider(make_client(), workbench, goal_id)
+        return open_nokv_coordination_provider(
+            make_client,
+            workbench,
+            goal_id,
+        )
 
     rows = scenario_matrix(make_provider)
     rows["restored_lineage_fails_closed"] = _restored_lineage_fails_closed(
@@ -369,11 +376,13 @@ def _restored_lineage_fails_closed(make_client) -> bool:
     workbench B must refuse every command on B with store_lineage_mismatch -
     restored bytes never grant live authority."""
 
-    client = make_client()
+    # Workspace lifecycle operations belong to the live-evidence provisioner;
+    # coordination reads and writes use a separately admitted provider handle.
+    provisioning_client = make_client()
     source = "wbline" + uuid.uuid4().hex[:10]
-    client.create_workspace(source)
+    provisioning_client.create_workspace(source)
     goal_id = "g" + uuid.uuid4().hex[:8]
-    provider = NoKVCoordinationProvider(client, source, goal_id)
+    provider = open_nokv_coordination_provider(make_client, source, goal_id)
     head = bootstrap_head(
         goal_id, {"todo_parent01": todo()},
         store_binding=provider.store_identity(),
@@ -386,13 +395,25 @@ def _restored_lineage_fails_closed(make_client) -> bool:
     if claim(executor, "agent-a", "todo_parent01", "line-claim")["result"] != "applied":
         return False
 
-    stat = client.stat(source, provider.head_path)
-    client.commit(source, {"purpose": "stage3-lineage-fence"}, stat["body_digest"])
-    snapshot = client.snapshot(source)
+    stat = provisioning_client.stat(source, provider.head_path)
+    provisioning_client.commit(
+        source,
+        {"purpose": "stage3-lineage-fence"},
+        stat["body_digest"],
+    )
+    snapshot = provisioning_client.snapshot(source)
     destination = "wbline" + uuid.uuid4().hex[:10]
-    client.restore(source, destination, at_snapshot=snapshot["snapshot_id"])
+    provisioning_client.restore(
+        source,
+        destination,
+        at_snapshot=snapshot["snapshot_id"],
+    )
 
-    restored = NoKVCoordinationProvider(make_client(), destination, goal_id)
+    restored = open_nokv_coordination_provider(
+        make_client,
+        destination,
+        goal_id,
+    )
     restored_executor = CoordinationAuthorityExecutor(
         restored, goal_id=goal_id, now=MatrixClock()
     )

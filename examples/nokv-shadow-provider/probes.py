@@ -54,6 +54,7 @@ from provider import (  # noqa: E402
     NoKVCoordinationProvider,
     ProviderProtocolError,
     ProviderUnavailableError,
+    open_nokv_coordination_provider,
 )
 
 
@@ -1100,6 +1101,69 @@ def probe_nokv_adapter_exception_mapping() -> None:
     )
 
 
+def probe_nokv_fresh_client_failure_is_typed() -> None:
+    """A fresh SDK admission failure belongs to the provider boundary too.
+
+    Python evaluates constructor arguments before ``NoKVCoordinationProvider``
+    can run, so ``NoKVCoordinationProvider(make_client(), ...)`` leaks the
+    SDK's bare ``RuntimeError`` when eager route admission fails.  The
+    adapter-owned factory must classify that failure before any provider can
+    be returned or any coordination write can be attempted.  An already
+    admitted client must keep the same typed behavior on later calls.
+    """
+
+    calls = {"factory": 0, "publish": 0}
+
+    def unavailable_client_factory():
+        calls["factory"] += 1
+        raise RuntimeError("invalid root route: root placement does not exist")
+
+    try:
+        open_nokv_coordination_provider(
+            unavailable_client_factory,
+            "wb-fresh-outage",
+            "fresh-outage",
+        )
+    except ProviderUnavailableError as exc:
+        assert "root placement does not exist" in str(exc)
+        assert isinstance(exc.__cause__, RuntimeError)
+    else:
+        raise AssertionError("fresh client failure escaped the typed boundary")
+
+    assert calls == {"factory": 1, "publish": 0}
+
+    class AdmittedThenUnavailable(FakeNoKVClient):
+        def publish_bytes(self, workbench, path, data, **options):
+            calls["publish"] += 1
+            return super().publish_bytes(workbench, path, data, **options)
+
+    client = AdmittedThenUnavailable()
+    provider = open_nokv_coordination_provider(
+        lambda: client,
+        "wb-existing-outage",
+        "existing-outage",
+    )
+    client.read_failure = RuntimeError("transport closed after admission")
+    try:
+        provider.load()
+    except ProviderUnavailableError as exc:
+        assert "transport closed after admission" in str(exc)
+    else:
+        raise AssertionError("established provider leaked a bare client failure")
+
+    # Neither construction/read failure authorizes a create, local-file
+    # fallback, or other provider write.
+    assert calls == {"factory": 1, "publish": 0}
+
+    out(
+        "contract.nokv_fresh_client_failure_is_typed",
+        ok=True,
+        construction_failure_typed=True,
+        established_failure_typed=True,
+        no_write_or_fallback=True,
+    )
+
+
 PROBES = (
     probe_bootstrap_and_preconditions,
     probe_a_b_replay_a,
@@ -1108,6 +1172,7 @@ PROBES = (
     probe_crash_windows_and_ambiguity,
     probe_version_domains_and_retain_all,
     probe_nokv_adapter_exception_mapping,
+    probe_nokv_fresh_client_failure_is_typed,
     probe_durable_completion_projection,
     probe_durable_completion_fail_closed,
 )

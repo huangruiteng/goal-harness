@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from typing import Any, Callable
 
 from loopx.control_plane.coordination.head import (
     HeadValidationError,
@@ -217,3 +218,26 @@ class NoKVCoordinationProvider:
                 source="publish result",
             ),
         }
+
+
+def open_nokv_coordination_provider(
+    client_factory: Callable[[], Any],
+    workbench: str,
+    goal_id: str,
+) -> NoKVCoordinationProvider:
+    """Admit and construct one fresh provider without a fallback.
+
+    The NoKV SDK performs route admission eagerly in ``Client(...)``.  A
+    direct ``NoKVCoordinationProvider(make_client(), ...)`` therefore evaluates
+    the fallible SDK constructor before the adapter exists and leaks a bare
+    client exception.  Live composition roots enter here so construction-time
+    availability failures have the same fail-closed type as later reads.
+    """
+
+    try:
+        client = client_factory()
+    except ProviderUnavailableError:
+        raise
+    except NoKVCoordinationProvider._CLIENT_ERRORS as exc:
+        raise ProviderUnavailableError(str(exc)) from exc
+    return NoKVCoordinationProvider(client, workbench, goal_id)

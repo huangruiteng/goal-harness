@@ -118,6 +118,18 @@ pinned baseline. `contract.nokv_adapter_exception_mapping` pins the
 classification offline with fake clients that raise the 0.11.0 exception
 classes and the real outage message shapes.
 
+A fresh coordination-provider handle must be admitted with
+`open_nokv_coordination_provider(...)`. NoKV performs route admission while
+constructing `Client`, before an ordinary provider constructor could classify
+the failure. The adapter-owned helper maps that eager failure to the same
+`ProviderUnavailableError`, performs no coordination write, and never falls
+back to the file provider. The live matrix uses this path for every fresh
+provider handle. Separate clients used only to provision test workspaces and
+snapshots are outside this provider contract and cannot execute authority
+commands. The
+`contract.nokv_fresh_client_failure_is_typed` guards both construction-time and
+post-construction outages.
+
 The mapping was exercised once by hand against a live NoKV stack at that
 pin (etcd, an S3-compatible object store, `nokv serve`, and `nokv-python`
 built from the same commit): the adapter verbs and the Section 10 checks
