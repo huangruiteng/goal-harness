@@ -339,3 +339,30 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: dist/packages
+
+      - name: Verify the published package from PyPI
+        env:
+          RELEASE_TAG: ${{ needs.build.outputs.release-tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          verify_venv="${RUNNER_TEMP}/loopx-pypi-${version}"
+          python -m venv "${verify_venv}"
+          for attempt in {1..12}; do
+            if "${verify_venv}/bin/python" -m pip install \
+              --disable-pip-version-check \
+              --index-url https://pypi.org/simple \
+              --no-cache-dir \
+              --no-deps \
+              "loopx==${version}"; then
+              test "$("${verify_venv}/bin/loopx" --version)" = "loopx ${version}"
+              exit 0
+            fi
+            if [[ "${attempt}" -eq 12 ]]; then
+              break
+            fi
+            echo "PyPI has not exposed loopx ${version} yet; retrying in 10 seconds"
+            sleep 10
+          done
+          echo "loopx ${version} is still not installable from PyPI" >&2
+          exit 1
