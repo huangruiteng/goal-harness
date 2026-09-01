@@ -651,8 +651,12 @@ test("auto-acquire keeps its token claim until the held receipt is durable", asy
     expected_version: null,
     allow_user_gate_auto_acquire: true,
   });
-  let resumeVerifier!: () => void;
-  let verifierEntered!: () => void;
+  let resumeVerifier: () => void = () => {
+    throw new Error("verifier gate was not initialized");
+  };
+  let verifierEntered: () => void = () => {
+    throw new Error("verifier start gate was not initialized");
+  };
   const verifierGate = new Promise<void>((resolve) => {
     resumeVerifier = resolve;
   });
@@ -757,8 +761,12 @@ test("a concurrent fence verifier cannot reopen a receipt while close owns its c
   assert.equal(checked.ok, true);
   const fence = checked.fence as Record<string, unknown>;
 
-  let releaseClose!: () => void;
-  let closeEntered!: () => void;
+  let releaseClose: () => void = () => {
+    throw new Error("close gate was not initialized");
+  };
+  let closeEntered: () => void = () => {
+    throw new Error("close start gate was not initialized");
+  };
   const closeGate = new Promise<void>((resolve) => {
     releaseClose = resolve;
   });
