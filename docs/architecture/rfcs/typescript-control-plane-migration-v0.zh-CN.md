@@ -256,8 +256,9 @@ window 仍需 differential proof 时才保留 characterization corpus；引入�
   write 紧前重验 source。Closed fence replay 与 generation 绑定：non-required receipt
   仅在 lease record 仍不存在时可重放；已提交 release 必须仍匹配同一 retired
   generation；aborted close 只能在新锁下重验同一 active generation。
-  NoKV/shared-goal coordination executor 仍通过 typed Python adapter 到达纯 acquire
-  decision；#3669 跟踪的 shared-goal/NoKV lifecycle 明确不属于本次 cutover。
+  Provider-neutral coordination executor 通过 typed Python adapter，对 acquire、renew、
+  transfer、release 到达同一份纯 TypeScript decision；#3669 跟踪的 shared provider
+  execution、CAS 与 authority receipt 仍不属于本次 cutover。
 
 Quota-spend cutover 删除了 Python spend-event builder 与三文件 writer。它的 bounded
 facade 会在 quota CLI 和剩余 run-index writer 进程内执行 transaction 后退出；在此
@@ -305,7 +306,7 @@ exactly-once 保证；原 handler 可能仍存活时，caller 不得启动第二
 | 跨 runtime 调用 | 每个 lifecycle verb 使用一次 coarse native request/response。Held fence 有意跨 verify 和 close 两次调用，因为 caller 的 Todo mutation 位于两者之间，并持续由同一个 lock token 授权。 |
 | 恢复契约 | Operation receipt 绑定 retry identity 与 expected generation。Fence receipt 区分 acquired、held、closed；返回幂等结果前会重验当前 authority 以及当前或 retired lease generation。 |
 | 锁迁移债务 | PID liveness、token claim、stale reclaim 与抗替换文件身份使 Python/Node 共享锁可安全恢复。handoff-mode transition 与所有剩余 Python lease-lock holder 进程内迁移后，删除这层有界协议。 |
-| 非目标 | 本次 cutover 不实现 #3669 的 shared-goal/NoKV lifecycle，也不承诺 client timeout 后原 Node handler 仍运行时，第二个请求具备 exactly-once execution。 |
+| 非目标 | 本次 cutover 共享 ordinary lifecycle decision，但不实现 #3669 的 shared-provider execution、CAS 或 authority receipt；也不承诺 client timeout 后原 Node handler 仍运行时，第二个请求具备 exactly-once execution。 |
 
 ### Stage 3 — CLI 与 App 汇合
 

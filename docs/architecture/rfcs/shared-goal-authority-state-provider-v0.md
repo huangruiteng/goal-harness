@@ -986,8 +986,11 @@ The sequence is:
 
 1. **Stage 0 - merge the recoverable reference foundation.** Integrate #3669
    with the native TypeScript task-lease acquire boundary, preserve TypeScript as
-   the acquire transaction owner, close file store-identity publication, and
-   keep the remaining Python lifecycle verbs explicitly coverage-only.
+   the acquire transaction owner, and close file store-identity publication.
+   #3806 completes the local lifecycle transaction cutover and makes renew,
+   transfer, and release consume one pure TypeScript decision in both the local
+   file executor and provider-neutral coordination; Python is a typed adapter,
+   not an alternate authority.
 2. **Stage 1 - define the provider-neutral transaction boundary.** Express the
    service-grade contract in LoopX-owned TypeScript and make the file provider
    its first conformance backend. Do not recreate a second Python semantic
@@ -996,20 +999,27 @@ The sequence is:
    the NoKV adapter and storage envelope; the PostgreSQL owner implements the
    generic service/provider. Both reuse the same LoopX transition and receipt
    semantics.
-4. **Stage 3 - one-way shadow parity.** Local control-plane files remain the
-   only authority while committed observations are projected to the candidate
-   provider. Provider parity compares Todo/claim, lease fence, operation
+4. **Stage 2C - promote the local canonical file aggregate.** First shadow the
+   current Markdown/task-lease writers into `FileAuthorityStore` without reading
+   it for decisions. Prove parity, crash recovery, migration, and one-command
+   rollback; then, in a separately reviewed promotion, make the file aggregate
+   the local coordination authority and fence the legacy writers. Markdown and
+   task-lease files become projections only after that promotion.
+5. **Stage 3 - one-way remote shadow parity.** The promoted local
+   `FileAuthorityStore` remains the only authority while committed observations
+   are projected to a NoKV or PostgreSQL candidate. Provider parity compares
+   Todo/claim, lease fence, operation
    receipt, projection head, and cursor. Turn admission, quota, settlement,
    inbox, and run history remain independent ledgers: the shadow records only
    typed references needed to verify their end-to-end composition. Do not
    perform bidirectional synchronization or provider-to-file writes.
-5. **Stage 4 - TEST ONLY canary.** One Goal and two Agents must show no duplicate
+6. **Stage 4 - TEST ONLY canary.** One Goal and two Agents must show no duplicate
    claim, correct expiry/fencing, restart resume, and fail-closed coordination
    writes during network failure. The same canary separately observes that no
    external effect is duplicated, inbox steering changes a later decision,
    and settlement is idempotent and exactly-once; those are composition proofs
    over their owning ledgers, not `AuthorityStore` conformance claims.
-6. **Stage 5 - flip one authority source.** Only after a reviewed promotion,
+7. **Stage 5 - flip one authority source.** Only after a reviewed promotion,
    make the shared LoopX service the sole writer. Local `.loopx` state becomes
    cache, offline projection, and diagnostic material. Never keep a long-lived
    dual-write or dual-master mode.
@@ -1041,16 +1051,17 @@ does not replace today's separate claim and lease verbs with the atomic
 `claim_work` command described above; that command belongs to the future shared
 aggregate.
 
-After the task-lease acquire TypeScript cutover, the acquire portion of this
-pure core is owned by `task_lease_acquire.ts`. The Python `authority_core`
-surface is a typed adapter for that command: it projects a normalized snapshot,
-invokes `task_lease.acquire.decide`, and reconstructs the provider-neutral
-`TransitionPlan`. Both the local lease-file transaction and the Stage 2
-coordination executor therefore consume the same acquire decision; locking,
+After the task-lease TypeScript cutovers, acquire is owned by
+`task_lease_acquire.ts`, while renew, transfer, and release are owned by the
+pure seam in `task_lease_lifecycle_decision.ts`. Python `authority_core`
+projects normalized snapshots, invokes those decisions, and reconstructs the
+provider-neutral `TransitionPlan`. The local lease-file transaction and the
+coordination executor therefore consume the same lease decisions; locking,
 source revalidation, file persistence, provider CAS, and receipt construction
-remain in their respective execution layers. The remaining todo, renew,
-transfer, release, fence, and handoff-mode decisions stay in the Python core
-until their own reviewed TypeScript cutovers.
+remain in their respective execution layers. Todo, terminal-fence, and
+handoff-mode decisions stay in the Python core until their own reviewed
+TypeScript cutovers; local holder/fence-close lock mechanics remain execution
+effects rather than provider contracts.
 
 Keep three layers distinct as the provider work proceeds:
 

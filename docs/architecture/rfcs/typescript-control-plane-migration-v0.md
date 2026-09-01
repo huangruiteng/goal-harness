@@ -299,9 +299,10 @@ shipped Stage 2B cutovers are in place:
   non-required receipt is reusable only while no lease record exists, a
   committed release must still match the exact retired generation, and an
   aborted close can re-verify only the same active generation under a new lock.
-  The NoKV/shared-goal coordination executor still reaches the pure acquire
-  decision through a typed Python adapter. Extending lifecycle ownership to the
-  shared-goal/NoKV design tracked by #3669 is explicitly outside this cutover.
+  The provider-neutral coordination executor reaches the same pure TypeScript
+  decisions for acquire, renew, transfer, and release through typed Python
+  adapters. Shared provider execution, CAS, and authority receipts tracked by
+  #3669 remain outside this cutover.
 
 The quota-spend cutover removes the Python spend-event builder and three-file
 writer. Its bounded facade exits when the quota CLI and remaining run-index
@@ -356,7 +357,7 @@ not start a second independent operation while that handler may still be live.
 | Cross-runtime calls | Each lifecycle verb uses one coarse native request/response. A held fence intentionally spans two calls, verify then close, because the caller's Todo mutation occurs between them while the same lock token remains authoritative. |
 | Recovery contract | Operation receipts fence retry identity and expected generation. Fence receipts distinguish acquired, held, and closed states; replay revalidates current authority and the current or retired lease generation before returning an idempotent result. |
 | Locking debt | PID liveness, token claims, stale reclaim, and replacement-resistant file identity make the shared lock safe across Python and Node. This bounded protocol is deleted after the handoff-mode transition and every remaining Python lease-lock holder move in-process. |
-| Out of scope | This cutover does not implement the shared-goal/NoKV lifecycle from #3669 and does not promise exactly-once execution for a second request issued while the original Node handler is still running after a client timeout. |
+| Out of scope | This cutover shares the ordinary lifecycle decision but does not implement #3669's shared-provider execution, CAS, or authority receipts, and does not promise exactly-once execution for a second request issued while the original Node handler is still running after a client timeout. |
 
 ### Stage 3 — CLI and App convergence
 

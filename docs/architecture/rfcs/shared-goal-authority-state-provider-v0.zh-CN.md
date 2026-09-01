@@ -790,26 +790,33 @@ Stage 3/4 qualification 必须保持以下 ownership 与 proof 边界：
 实施顺序如下：
 
 1. **Stage 0——合入可恢复执行参考基础。** 将 #3669 与原生 TypeScript task-lease
-   acquire boundary 集成，保持 TypeScript 是 acquire transaction owner，关闭
-   file store-identity 发布问题，并把其余 Python lifecycle verb 明确保持为
-   coverage-only。
+   acquire boundary 集成，保持 TypeScript 是 acquire transaction owner，并关闭
+   file store-identity 发布问题。#3806 完成本地 lifecycle transaction cutover，并让
+   renew、transfer、release 在本地 file executor 与 provider-neutral coordination
+   中消费同一个纯 TypeScript decision；Python 只做 typed adapter，不形成另一套权威。
 2. **Stage 1——定义 provider-neutral transaction boundary。** 在 LoopX 持有的
    TypeScript 中表达 service-grade contract，并让 file provider 成为第一个
    conformance backend；不重建第二个 Python 语义权威。
 3. **Stage 2A/2B——并行实现 provider。** NoKV owner 验证 NoKV adapter 与存储
    包络；PostgreSQL owner 实现通用 service/provider。两者复用同一套 LoopX
    transition 与 receipt 语义。
-4. **Stage 3——单向 shadow parity。** 本地控制面文件仍是唯一 authority；将已
-   提交观察投影到候选 provider。Provider parity 只对比 Todo/claim、lease fence、
+4. **Stage 2C——晋升本地 canonical file aggregate。** 先在不读取其决策结果的前提下，
+   把现有 Markdown/task-lease writer shadow 到 `FileAuthorityStore`；验证 parity、
+   crash recovery、migration 与一键 rollback。随后通过一个单独评审的 promotion，
+   让 file aggregate 成为本地 coordination authority，并 fence legacy writer；
+   只有晋升后 Markdown 与 task-lease 文件才退为 projection。
+5. **Stage 3——远端单向 shadow parity。** 晋升后的本地 `FileAuthorityStore` 仍是
+   唯一 authority；将已提交观察投影到 NoKV 或 PostgreSQL 候选。Provider parity
+   只对比 Todo/claim、lease fence、
    operation receipt、projection head 与 cursor。Turn admission、quota、settlement、
    inbox 与 run history 仍是独立 ledger；shadow 只记录验证端到端组合所需的 typed
    reference。不做双向同步，也不允许 provider 回写 file。
-5. **Stage 4——TEST ONLY canary。** 用一个 Goal、两个 Agent 验证：不重复 claim
+6. **Stage 4——TEST ONLY canary。** 用一个 Goal、两个 Agent 验证：不重复 claim
    、过期与 fencing 正确、重启后继续，以及网络失败时 coordination write
    fail-closed。同一个 canary 还要分别观察：外部 effect 不重复、inbox steering
    改变后续决策、settlement 幂等且 exactly-once；这些是跨所属 ledger 的 composition
    proof，不是 `AuthorityStore` conformance claim。
-6. **Stage 5——切换唯一 authority source。** 只有经过评审的晋升，才能让 shared
+7. **Stage 5——切换唯一 authority source。** 只有经过评审的晋升，才能让 shared
    LoopX service 成为唯一 writer。本地 `.loopx` 退为 cache、offline projection 与
    诊断材料。绝不长期维持 dual-write 或 dual-master。
 
@@ -835,14 +842,14 @@ authorization、dependency 或 gate 域凭空制造 revision；也不会把今�
 claim 与 lease verb 偷换成上文的 atomic `claim_work`。后者属于未来的 shared
 aggregate。
 
-Task-lease acquire 完成 TypeScript cutover 后，这个纯 core 的 acquire 切片由
-`task_lease_acquire.ts` 持有。Python `authority_core` 对该 command 只保留 typed
-adapter：投影 normalized snapshot，调用 `task_lease.acquire.decide`，再重建
-provider-neutral `TransitionPlan`。因此，本地 lease-file transaction 与 Stage 2
-coordination executor 消费同一份 acquire decision；加锁、source 重验、文件持久化、
-provider CAS 与 receipt 构造仍分别属于各自 execution layer。Todo、renew、transfer、
-release、fence 与 handoff-mode 的其余决策继续留在 Python core，直到各自经过 review 的
-TypeScript cutover。
+Task-lease TypeScript cutover 后，acquire 由 `task_lease_acquire.ts` 持有，renew、
+transfer、release 则由 `task_lease_lifecycle_decision.ts` 的纯 seam 持有。Python
+`authority_core` 只负责投影 normalized snapshot、调用这些 decision，再重建
+provider-neutral `TransitionPlan`。因此，本地 lease-file transaction 与 coordination
+executor 消费同一份 lease decision；加锁、source 重验、文件持久化、provider CAS 与
+receipt 构造仍分别属于各自 execution layer。Todo、terminal-fence 与 handoff-mode
+决策继续留在 Python core，直到各自经过 review 的 TypeScript cutover；本地 holder /
+fence-close 锁机制属于 execution effect，而不是 provider contract。
 
 后续 provider 工作必须始终分开三层：
 
