@@ -246,17 +246,18 @@ window 仍需 differential proof 时才保留 characterization corpus；引入�
   截断 JSONL 尾行，其他损坏仍然 fail closed。
   Python 只保留 `should-run`/settlement fact projection、一次 coarse transport call 与
   legacy kernel index lock；它不再构造或写入 spend event。
-- Task-lease acquire：一笔 native TypeScript transaction 拥有 boundary decode、
-  handoff 与 owner/Todo eligibility、同 Todo 与重叠 write scope conflict、
-  compare-and-swap、generation 与 idempotency rule、per-goal mutation lock、atomic
-  lease persistence，以及 canonical result/receipt。Python 只投影带有前后 source
-  digest 的 compact registry、active-state、event-log 与 rollout-log facts，然后执行
-  一次 native transaction call。TypeScript 在 lease lock 内、decision 前和 write 紧前各
-  重验一次 source。尚未迁移的 Python renew、transfer、release 与 fence writer 会先
-  取得同一个 exclusive-create lock，再取得 legacy kernel lock，因此 cutover 期间只有
-  一个跨 runtime 串行化点。
-  NoKV/shared-goal coordination executor 通过 typed Python adapter 到达同一份纯 acquire
-  decision，因此 provider seam 后不会残留第二份 Python acquire rule engine。
+- 本地 task-lease lifecycle：native TypeScript transaction 现在拥有 acquire、renew、
+  transfer、release、terminal verification、holder verification 与 fence close。它们拥有
+  boundary decode、handoff 与 owner/Todo eligibility、同 Todo 与重叠 write scope
+  conflict、compare-and-swap、generation/idempotency rule、operation/fence receipt、
+  per-goal mutation lock、atomic lease persistence 及 canonical result。Python 只投影带有
+  前后 source digest 的 compact registry、active-state、event-log 与 rollout-log facts，
+  然后执行一次 native transaction call。TypeScript 在 lease lock 内、decision 前和
+  write 紧前重验 source。Closed fence replay 与 generation 绑定：non-required receipt
+  仅在 lease record 仍不存在时可重放；已提交 release 必须仍匹配同一 retired
+  generation；aborted close 只能在新锁下重验同一 active generation。
+  NoKV/shared-goal coordination executor 仍通过 typed Python adapter 到达纯 acquire
+  decision；#3669 跟踪的 shared-goal/NoKV lifecycle 明确不属于本次 cutover。
 
 Quota-spend cutover 删除了 Python spend-event builder 与三文件 writer。它的 bounded
 facade 会在 quota CLI 和剩余 run-index writer 进程内执行 transaction 后退出；在此
@@ -266,14 +267,21 @@ replay helper，以及这些 implementation leaf 的 public runtime handler。�
 Todo facade 只拥有 transport、external command execution、source compare-and-swap、
 legacy response projection 与实际 Markdown/event write；当 writer 与 CLI 进入 native
 TS transaction 后即可退出。剩余细粒度 Turn facade 则在 quota 与 host-adapter
-caller 进入各自 coarse transaction 后退出。Task-lease acquire 的 semantic facade、
-Python atomic provider、settlement bridge operation 与 legacy CLI result projection
-已经删除。Python 只保留 compact source projection、一次 process transport，以及供
-仍调用 `acquire_task_lease()` 的 caller 使用的 compatibility import。顶层 LoopX CLI
-与 authority-source adapter 进入 Node 后，这层 compatibility surface 即可退出；
-renew、transfer、release 与 lease fence 迁到同一 TypeScript owner 后，dual-runtime
-lock 也随之退出。Vision checkpointing 属于不同的 refresh/writeback 生命周期阶段，
-因此继续作为独立 transaction。
+caller 进入各自 coarse transaction 后退出。Task-lease semantic facade、Python atomic
+provider、settlement bridge operation 与 lifecycle rule engine 已经删除。Python 只保留
+compact source projection、一次 process transport、携带 opaque fence token/receipt id
+的 context-manager plumbing、legacy response projection，以及现有 Python caller 所需的
+compatibility import。顶层 LoopX CLI、Todo writer 与 authority-source adapter 在进程内
+调用 TypeScript transaction 后，这些 surface 即可退出。Python/TypeScript 共享锁协议
+仍服务于 Python handoff-mode transition 与其他跨 runtime holder；当不再有 Python
+writer 获取 per-goal lease lock 时即可删除。Vision checkpointing 属于不同的
+refresh/writeback 生命周期阶段，因此继续作为独立 transaction。
+
+Lifecycle receipt 可以在 transport response 丢失或 owner caller 退出后，恢复已经完成
+的 mutation 或 held/closed fence。长生命周期 fence lock 记录 Python caller PID，而不是
+managed Node server PID；stale reclaim 会先取得 token claim，并用抗路径替换的文件身份
+核验后再退役 lock。这不构成“同一 Node 进程内 handler 超时后仍并行执行时”的
+exactly-once 保证；原 handler 可能仍存活时，caller 不得启动第二笔独立 operation。
 
 #### Task-lease acquire 迁移经济账
 
@@ -287,6 +295,17 @@ lock 也随之退出。Vision checkpointing 属于不同的 refresh/writeback �
 | 迁移 scaffolding | 删除 task-lease settlement characterization、fault-matrix、incident-replay 及其 fixture 切片。以 native invariant、crash/retry、direct-CLI、adapter 与 cross-runtime lock 测试取代；不再保留 migration-only worker。 |
 | Facade 退出 | 本次删除 semantic facade、atomic provider、settlement operation 与 legacy CLI projection。仅保留 source/transport compatibility 与 cross-runtime serialization，删除条件如上。 |
 | 正确性与性能 | 公开 CLI 在 5 个 acquire/replay/failure 场景与旧实现精确匹配；20 个 focused native test、207 个 Node test、4,615 个 Python test（12 个 skip）、crash/retry 与 packaged-wheel smoke 通过。在匹配的 16 样本 full-CLI 测试中，happy-path p95 从 1,593.7 ms 变为 1,167.8 ms，replay p95 从 513.3 ms 变为 445.4 ms；中位数分别为 364.6→425.6 ms 与 343.3→351.9 ms。 |
+
+#### Task-lease lifecycle 迁移经济账
+
+| 字段 | 回执 |
+| --- | --- |
+| Canonical owner | 迁移前由 Python 围绕 native acquire transaction 拥有 renew、transfer、release、terminal/holder verification 与 fence close。迁移后由 `task_lease_lifecycle.ts` 拥有全部六个 operation、锁内持久化及 canonical receipt/result。 |
+| 删除的旧语义代码 | 删除 Python lifecycle decision、CAS、lease write 与进程内 fence rule 路径；Python 只保留 authority/source projection、managed-runtime transport、context-manager adaptation 与 legacy public payload projection。 |
+| 跨 runtime 调用 | 每个 lifecycle verb 使用一次 coarse native request/response。Held fence 有意跨 verify 和 close 两次调用，因为 caller 的 Todo mutation 位于两者之间，并持续由同一个 lock token 授权。 |
+| 恢复契约 | Operation receipt 绑定 retry identity 与 expected generation。Fence receipt 区分 acquired、held、closed；返回幂等结果前会重验当前 authority 以及当前或 retired lease generation。 |
+| 锁迁移债务 | PID liveness、token claim、stale reclaim 与抗替换文件身份使 Python/Node 共享锁可安全恢复。handoff-mode transition 与所有剩余 Python lease-lock holder 进程内迁移后，删除这层有界协议。 |
+| 非目标 | 本次 cutover 不实现 #3669 的 shared-goal/NoKV lifecycle，也不承诺 client timeout 后原 Node handler 仍运行时，第二个请求具备 exactly-once execution。 |
 
 ### Stage 3 — CLI 与 App 汇合
 

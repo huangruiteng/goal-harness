@@ -286,19 +286,22 @@ shipped Stage 2B cutovers are in place:
   Python retains `should-run`/settlement fact projection plus one coarse
   transport call and the legacy kernel index lock; it no longer constructs or
   writes the spend event.
-- Task-lease acquire: one native TypeScript transaction owns boundary decode,
-  handoff and owner/Todo eligibility, same-Todo and overlapping-write-scope
-  conflicts, compare-and-swap, generation and idempotency rules, the per-goal
-  mutation lock, atomic lease persistence, and the canonical result/receipts.
-  Python projects compact registry, active-state, event-log, and rollout-log
-  facts with before/after source digests, then makes one native transaction call.
-  TypeScript revalidates those sources under the lease lock before the decision
-  and immediately before the write. Retained Python renew, transfer, release,
-  and fence writers acquire the same exclusive-create lock before their legacy
-  kernel lock, so the cutover has one cross-runtime serialization point.
-  The NoKV/shared-goal coordination executor reaches the same pure acquire
-  decision through a typed Python adapter, so the cutover does not leave a
-  second Python acquire rule engine behind the provider seam.
+- Local task-lease lifecycle: native TypeScript transactions now own acquire,
+  renew, transfer, release, terminal verification, holder verification, and
+  fence close. They own boundary decode, handoff and owner/Todo eligibility,
+  same-Todo and overlapping-write-scope conflicts, compare-and-swap,
+  generation/idempotency rules, operation and fence receipts, the per-goal
+  mutation lock, atomic lease persistence, and canonical results. Python
+  projects compact registry, active-state, event-log, and rollout-log facts
+  with before/after source digests, then makes one native transaction call.
+  TypeScript revalidates those sources under the lease lock before decisions
+  and immediately before writes. Closed fence replay is generation-bound: a
+  non-required receipt is reusable only while no lease record exists, a
+  committed release must still match the exact retired generation, and an
+  aborted close can re-verify only the same active generation under a new lock.
+  The NoKV/shared-goal coordination executor still reaches the pure acquire
+  decision through a typed Python adapter. Extending lifecycle ownership to the
+  shared-goal/NoKV design tracked by #3669 is explicitly outside this cutover.
 
 The quota-spend cutover removes the Python spend-event builder and three-file
 writer. Its bounded facade exits when the quota CLI and remaining run-index
@@ -311,15 +314,25 @@ execution, source compare-and-swap, legacy response projection, and the actual
 Markdown/event write. It exits when those writers and the CLI move into the
 native TS transaction. The remaining fine-grained Turn facade exits after
 quota and host-adapter callers move to their own coarse transactions. The
-task-lease acquire semantic facade, atomic Python provider, settlement bridge
-operation, and legacy CLI result projection are deleted. Python retains only
-compact source projection, one process transport, and a compatibility import
-for callers that still invoke `acquire_task_lease()`. That compatibility
-surface exits when the top-level LoopX CLI and authority-source adapters run in
-Node. The dual-runtime lock exits after renew, transfer, release, and lease
-fences migrate to the same TypeScript owner. Vision checkpointing remains a
-separate refresh/writeback transaction because it does not share the
+task-lease semantic facade, atomic Python providers, settlement bridge
+operation, and lifecycle rule engine are deleted. Python retains compact source
+projection, one process transport, context-manager plumbing that carries the
+opaque fence token/receipt id, legacy response projection, and compatibility
+imports for existing Python callers. Those surfaces exit when the top-level
+LoopX CLI, Todo writers, and authority-source adapters call the TypeScript
+transactions in-process. The shared Python/TypeScript lock protocol remains for
+the Python handoff-mode transition and other cross-runtime holders; it exits
+when no Python writer acquires the per-goal lease lock. Vision checkpointing
+remains a separate refresh/writeback transaction because it does not share the
 delivery-selection lifecycle phase.
+
+Lifecycle receipts recover a completed mutation or a held/closed fence after a
+transport response is lost or the owning caller exits. Long-lived fence locks
+record the Python caller PID rather than the managed Node server PID, and stale
+reclaim uses token claims plus replacement-resistant file identity before
+retiring a lock. This is not an exactly-once guarantee for a timed-out handler
+that is still executing concurrently inside the same Node process; callers must
+not start a second independent operation while that handler may still be live.
 
 #### Task-lease acquire migration economics
 
@@ -333,6 +346,17 @@ delivery-selection lifecycle phase.
 | Migration scaffolding | The task-lease settlement characterization, fault-matrix, incident-replay, and fixture slices were deleted. Native invariant, crash/retry, direct-CLI, adapter, and cross-runtime lock tests replace them; no migration-only worker remains. |
 | Facade exit | The semantic facade, atomic provider, settlement operation, and legacy CLI projection exit in this cutover. Only source/transport compatibility and cross-runtime serialization remain, with the deletion triggers above. |
 | Correctness and performance | The public CLI matched the prior implementation in five acquire/replay/failure scenarios; 20 focused native tests, the 207-test Node suite, 4,615 Python tests (12 skipped), crash/retry and packaged-wheel smokes pass. In a matched 16-sample full-CLI run, happy-path p95 moved from 1,593.7 ms to 1,167.8 ms and replay p95 from 513.3 ms to 445.4 ms; medians were 364.6→425.6 ms and 343.3→351.9 ms respectively. |
+
+#### Task-lease lifecycle migration economics
+
+| Field | Receipt |
+| --- | --- |
+| Canonical owner | Before: Python owned renew, transfer, release, terminal/holder verification, and fence close around the native acquire transaction. After: `task_lease_lifecycle.ts` owns all six operations, their locked persistence, and their canonical receipts/results. |
+| Legacy semantic code deleted | The Python lifecycle decision, CAS, lease-write, and in-process fence rule paths are removed; Python keeps only authority/source projection, managed-runtime transport, context-manager adaptation, and legacy public payload projection. |
+| Cross-runtime calls | Each lifecycle verb uses one coarse native request/response. A held fence intentionally spans two calls, verify then close, because the caller's Todo mutation occurs between them while the same lock token remains authoritative. |
+| Recovery contract | Operation receipts fence retry identity and expected generation. Fence receipts distinguish acquired, held, and closed states; replay revalidates current authority and the current or retired lease generation before returning an idempotent result. |
+| Locking debt | PID liveness, token claims, stale reclaim, and replacement-resistant file identity make the shared lock safe across Python and Node. This bounded protocol is deleted after the handoff-mode transition and every remaining Python lease-lock holder move in-process. |
+| Out of scope | This cutover does not implement the shared-goal/NoKV lifecycle from #3669 and does not promise exactly-once execution for a second request issued while the original Node handler is still running after a client timeout. |
 
 ### Stage 3 — CLI and App convergence
 
