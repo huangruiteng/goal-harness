@@ -9,10 +9,13 @@
   },
   "scripts": {
     "test:control-plane": "node --no-warnings --experimental-strip-types --test tests/control_plane_ts/*.test.ts",
+    "test:postgresql-authority-store": "node --no-warnings --experimental-strip-types --test tests/control_plane_ts/postgresql_authority_store.integration.test.ts",
     "typecheck:control-plane": "tsc --project tsconfig.control-plane.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.0",
     "typescript": "^6.0.3"
   }
 }

@@ -323,6 +323,37 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
             )
         ):
             raise ValueError(f"route {slug} has no fast-eligible candidate")
+        fast_selector = raw.get("fast_selector")
+        compiled_fast_selector = None
+        if fast_selector is not None:
+            if not isinstance(fast_selector, Mapping):
+                raise TypeError(f"routes[{index}].fast_selector must be an object")
+            _reject_unexpected_keys(
+                fast_selector,
+                {"display_name", "fallback_policy"},
+                f"routes[{index}].fast_selector",
+            )
+            if mode == "alias" or not visible:
+                raise ValueError(
+                    f"Fast selector requires a visible concrete route: {slug}"
+                )
+            if not supports_fast:
+                raise ValueError(f"Fast selector requires Fast support: {slug}")
+            fallback_policy = _non_empty_string(
+                fast_selector.get("fallback_policy"),
+                f"routes[{index}].fast_selector.fallback_policy",
+            )
+            if fallback_policy != "fast_capable_only":
+                raise ValueError(
+                    f"route {slug} Fast selector must fail closed to Fast-capable providers"
+                )
+            compiled_fast_selector = {
+                "display_name": _non_empty_string(
+                    fast_selector.get("display_name"),
+                    f"routes[{index}].fast_selector.display_name",
+                ),
+                "fallback_policy": fallback_policy,
+            }
         max_cycles = rings[ring_id]["max_cycles"] if isinstance(ring_id, str) else 1
 
         routes.append(
@@ -347,6 +378,7 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
                 if mode != "alias"
                 else {},
                 "supports_fast": supports_fast,
+                "fast_selector": compiled_fast_selector,
                 "fast_candidates": _eligible_profiles(
                     candidates,
                     profiles,
@@ -388,13 +420,119 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
         if alias["supports_fast"] != target["supports_fast"]:
             raise ValueError(f"alias {alias['slug']} Fast support differs from target")
 
+    selector_rows: list[dict[str, Any]] = []
+    for route in routes:
+        target = (
+            non_alias_routes[route["alias_for"]]
+            if route["routing_mode"] == "alias"
+            else route
+        )
+        selector_rows.append(
+            {
+                "slug": route["slug"],
+                "route_slug": target["slug"],
+                "display_name": route["display_name"],
+                "visibility": route["visibility"],
+                "input_modalities": route["input_modalities"],
+                "reasoning_levels": route["reasoning_levels"],
+                "candidates": target["candidates"],
+                "default_service_tier": "default",
+                "request_service_tier_action": "preserve",
+                "fallback_policy": "route_default",
+            }
+        )
+        fast_selector = route["fast_selector"]
+        if fast_selector is None:
+            continue
+        selector_rows.append(
+            {
+                "slug": f"fast/{route['slug']}",
+                "route_slug": route["slug"],
+                "display_name": fast_selector["display_name"],
+                "visibility": route["visibility"],
+                "input_modalities": route["input_modalities"],
+                "reasoning_levels": route["reasoning_levels"],
+                "candidates": route["fast_candidates"],
+                "default_service_tier": "fast",
+                "request_service_tier_action": "force_priority",
+                "fallback_policy": fast_selector["fallback_policy"],
+            }
+        )
+    selector_slugs = [row["slug"] for row in selector_rows]
+    if len(selector_slugs) != len(set(selector_slugs)):
+        raise ValueError("generated Fast selector collides with a declared route slug")
+
     return {
         "schema_version": CATALOG_SCHEMA_VERSION,
         "credential_free": True,
         "default_service_tier": "default",
+        "fast_selector_prefix": "fast/",
+        "fast_request_service_tier": "priority",
         "profiles": list(profiles.values()),
         "rings": list(rings.values()),
         "routes": routes,
+        "selector_rows": selector_rows,
+    }
+
+
+def normalize_selector_request(normalization: Mapping[str, Any]) -> dict[str, Any]:
+    """Resolve one public selector before provider alias mapping or body handling."""
+
+    reject_private_material(normalization)
+    _reject_unexpected_keys(
+        normalization,
+        {"catalog_source", "model_selector", "service_tier"},
+        "normalization",
+    )
+    source = normalization.get("catalog_source")
+    if not isinstance(source, Mapping):
+        raise TypeError("normalization.catalog_source must be an object")
+    catalog = compile_catalog(source)
+    selector_slug = _non_empty_string(
+        normalization.get("model_selector"), "normalization.model_selector"
+    )
+    selectors = {row["slug"]: row for row in catalog["selector_rows"]}
+    selector = selectors.get(selector_slug)
+    if selector is None:
+        raise ValueError(f"unknown model selector: {selector_slug}")
+
+    requested_tier = normalization.get("service_tier")
+    if requested_tier is not None:
+        requested_tier = _non_empty_string(requested_tier, "normalization.service_tier")
+        if requested_tier not in {"default", "priority"}:
+            raise ValueError("normalization.service_tier must be default or priority")
+
+    tier_action: dict[str, str] = {"action": selector["request_service_tier_action"]}
+    if selector["request_service_tier_action"] == "force_priority":
+        tier_action["value"] = catalog["fast_request_service_tier"]
+    elif requested_tier is not None:
+        tier_action["value"] = requested_tier
+
+    effective_fast = (
+        selector["default_service_tier"] == "fast"
+        or requested_tier == catalog["fast_request_service_tier"]
+    )
+    eligible_candidates = selector["candidates"]
+    fallback_policy = selector["fallback_policy"]
+    if effective_fast:
+        profiles = {item["id"]: item for item in catalog["profiles"]}
+        eligible_candidates = _eligible_profiles(
+            selector["candidates"],
+            profiles,
+            required_modalities=set(),
+            require_fast=True,
+        )
+        if not eligible_candidates:
+            raise ValueError(f"selector {selector_slug} has no Fast-capable candidates")
+        fallback_policy = "fast_capable_only"
+
+    return {
+        "original_model_selector": selector_slug,
+        "normalized_model_selector": selector["route_slug"],
+        "default_service_tier": selector["default_service_tier"],
+        "service_tier": tier_action,
+        "fallback_policy": fallback_policy,
+        "eligible_candidates": eligible_candidates,
     }
 
 
@@ -518,6 +656,7 @@ def project_runtime_status(status: Mapping[str, Any]) -> dict[str, Any]:
         for item in catalog["routes"]
         if item["routing_mode"] != "alias"
     }
+    selectors = {item["slug"]: item for item in catalog["selector_rows"]}
 
     host = status.get("host_identity")
     if not isinstance(host, Mapping):
@@ -548,22 +687,27 @@ def project_runtime_status(status: Mapping[str, Any]) -> dict[str, Any]:
         },
         "status.execution_observation",
     )
-    route_slug = _non_empty_string(
+    selector_slug = _non_empty_string(
         observation.get("route_slug"), "status.execution_observation.route_slug"
     )
-    route = routes.get(route_slug)
-    if route is None:
-        raise ValueError(
-            "execution observation must reference a concrete catalog route"
-        )
+    selector = selectors.get(selector_slug)
+    if selector is None:
+        raise ValueError("execution observation must reference a catalog selector")
+    route = routes[selector["route_slug"]]
     modality = _non_empty_string(
         observation.get("modality"), "status.execution_observation.modality"
     )
     if modality not in route["input_modalities"]:
-        raise ValueError(f"route {route_slug} does not admit modality {modality}")
-    fast = _boolean(observation.get("fast"), "status.execution_observation.fast")
-    if fast and not route["supports_fast"]:
-        raise ValueError(f"route {route_slug} does not support Fast")
+        raise ValueError(f"selector {selector_slug} does not admit modality {modality}")
+    selector_defaults_fast = selector["default_service_tier"] == "fast"
+    fast = selector_defaults_fast
+    if "fast" in observation:
+        declared_fast = _boolean(
+            observation.get("fast"), "status.execution_observation.fast"
+        )
+        if selector_defaults_fast and not declared_fast:
+            raise ValueError("a Fast selector cannot report a non-Fast execution")
+        fast = declared_fast
     observed_at = _timestamp(
         observation.get("observed_at"), "status.execution_observation.observed_at"
     )
@@ -581,7 +725,7 @@ def project_runtime_status(status: Mapping[str, Any]) -> dict[str, Any]:
     ]
     if not matching_orders:
         raise ValueError(
-            f"attempted profiles are not a legal prefix for route {route_slug}"
+            f"attempted profiles are not a legal prefix for selector {selector_slug}"
         )
     outcome = _non_empty_string(
         observation.get("outcome"), "status.execution_observation.outcome"
@@ -677,7 +821,8 @@ def project_runtime_status(status: Mapping[str, Any]) -> dict[str, Any]:
         "credential_free": True,
         "host_identity": expected_host,
         "route_intent": {
-            "route_slug": route_slug,
+            "selector_slug": selector_slug,
+            "route_slug": route["slug"],
             "routing_mode": route["routing_mode"],
             "modality": modality,
             "fast": fast,
@@ -692,8 +837,11 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     reject_private_material(snapshot)
     expected_visible = {
         "auto/gpt-5.6-sol",
+        "fast/auto/gpt-5.6-sol",
         "codex-a/gpt-5.6-sol",
+        "fast/codex-a/gpt-5.6-sol",
         "codex-b/gpt-5.6-sol",
+        "fast/codex-b/gpt-5.6-sol",
         "gpt-5.6-luna",
         "ark/deepseek-v4-flash",
     }
@@ -709,7 +857,7 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     check(
         "visible_routes",
         visible == expected_visible,
-        "selector exposes exactly Auto/Prefer A/Prefer B/Luna/Ark",
+        "selector exposes Standard and Fast Sol rows plus Luna and Ark",
     )
     check(
         "hidden_alias",
@@ -725,12 +873,15 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             set(modalities.get(slug, [])) == {"text", "image"}
             for slug in (
                 "auto/gpt-5.6-sol",
+                "fast/auto/gpt-5.6-sol",
                 "codex-a/gpt-5.6-sol",
+                "fast/codex-a/gpt-5.6-sol",
                 "codex-b/gpt-5.6-sol",
+                "fast/codex-b/gpt-5.6-sol",
                 "gpt-5.6-luna",
             )
         ),
-        "Auto/Prefer A/Prefer B/Luna declare text and image",
+        "Standard/Fast Sol selectors and Luna declare text and image",
     )
     check(
         "ark_text_only",
@@ -742,17 +893,33 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "fast_projection",
         fast_models
         == {
-            "auto/gpt-5.6-sol",
-            "codex-a/gpt-5.6-sol",
-            "codex-b/gpt-5.6-sol",
-            "gpt-5.6-luna",
+            "fast/auto/gpt-5.6-sol",
+            "fast/codex-a/gpt-5.6-sol",
+            "fast/codex-b/gpt-5.6-sol",
         },
-        "Fast is exposed only for Auto/Prefer A/Prefer B/Luna",
+        "Fast is exposed only as explicit Auto/Prefer A/Prefer B sibling rows",
     )
+    selector_tiers = snapshot.get("selector_default_service_tiers")
+    if not isinstance(selector_tiers, Mapping):
+        raise TypeError("snapshot.selector_default_service_tiers must be an object")
+    standard_selectors = expected_visible - fast_models
     check(
         "fast_default_off",
-        snapshot.get("default_service_tier") == "default",
-        "Fast is available but defaults to off",
+        snapshot.get("default_service_tier") == "default"
+        and all(selector_tiers.get(slug) == "default" for slug in standard_selectors)
+        and all(selector_tiers.get(slug) == "fast" for slug in fast_models),
+        "ordinary rows stay Standard while explicit Fast rows opt into Fast",
+    )
+    normalizer = snapshot.get("request_normalizer")
+    check(
+        "request_normalizer",
+        isinstance(normalizer, Mapping)
+        and normalizer.get("active") is True
+        and normalizer.get("selector_prefix") == "fast/"
+        and normalizer.get("fast_request_service_tier") == "priority"
+        and normalizer.get("ordinary_selector_action") == "preserve"
+        and normalizer.get("effective_priority_admission") == "fast_capable_only",
+        "normalizer preserves ordinary tiers and constrains effective Fast requests",
     )
     check(
         "loopback_endpoint",
@@ -773,15 +940,30 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             "ordered_candidates": ["codex-a", "codex-b", "ark-text"],
             "fallback_tail": ["ark-text"],
         },
+        "fast/auto/gpt-5.6-sol": {
+            "entrypoint": "affinity_then_first",
+            "ordered_candidates": ["codex-a", "codex-b"],
+            "fallback_tail": [],
+        },
         "codex-a/gpt-5.6-sol": {
             "entrypoint": "codex-a",
             "ordered_candidates": ["codex-a", "codex-b", "ark-text"],
             "fallback_tail": ["ark-text"],
         },
+        "fast/codex-a/gpt-5.6-sol": {
+            "entrypoint": "codex-a",
+            "ordered_candidates": ["codex-a", "codex-b"],
+            "fallback_tail": [],
+        },
         "codex-b/gpt-5.6-sol": {
             "entrypoint": "codex-b",
             "ordered_candidates": ["codex-b", "codex-a", "ark-text"],
             "fallback_tail": ["ark-text"],
+        },
+        "fast/codex-b/gpt-5.6-sol": {
+            "entrypoint": "codex-b",
+            "ordered_candidates": ["codex-b", "codex-a"],
+            "fallback_tail": [],
         },
         "gpt-5.6-luna": {
             "entrypoint": "affinity_then_first",
@@ -811,7 +993,7 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             == expected["ordered_candidates"]
             for slug, expected in expected_traversal.items()
         ),
-        "Auto/Prefer A/Prefer B/Luna use the expected account-ring entrypoint and order",
+        "Standard/Fast Sol selectors and Luna use the expected ring entrypoint and order",
     )
     check(
         "terminal_fallback_tail",
@@ -819,7 +1001,17 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
             traversal_rows[slug].get("fallback_tail") == expected["fallback_tail"]
             for slug, expected in expected_traversal.items()
         ),
-        "Sol routes append Ark once and Luna has no heterogeneous fallback tail",
+        "only Standard Sol routes append Ark; Fast and Luna have no heterogeneous tail",
+    )
+    check(
+        "fast_capable_only",
+        all(
+            traversal_rows[slug].get("ordered_candidates")
+            in (["codex-a", "codex-b"], ["codex-b", "codex-a"])
+            and traversal_rows[slug].get("fallback_tail") == []
+            for slug in fast_models
+        ),
+        "Fast rows remain inside the A/B Fast-capable ring",
     )
     check(
         "single_cycle_traversal",
@@ -854,6 +1046,7 @@ def build_upgrade_plan(upgrade: Mapping[str, Any]) -> dict[str, Any]:
         "retry_policy",
         "transport_pool",
         "model_catalog",
+        "request_normalizer",
         "ssh_bridge",
         "modality_routing",
         "settings_revision",
@@ -876,7 +1069,19 @@ def build_upgrade_plan(upgrade: Mapping[str, Any]) -> dict[str, Any]:
             "draining_rebuild",
             "no_replay",
         ],
-        "model_catalog": ["visible_routes", "hidden_alias", "fast_default_off"],
+        "model_catalog": [
+            "visible_routes",
+            "hidden_alias",
+            "fast_selector_rows",
+            "fast_default_off",
+        ],
+        "request_normalizer": [
+            "selector_prefix_capture",
+            "priority_injection",
+            "ordinary_selector_preserved",
+            "effective_priority_admission",
+            "fast_route_no_unsupported_fallback",
+        ],
         "ssh_bridge": ["loopback_binds", "reconnect", "existing_task_resume"],
         "modality_routing": ["image_a_b", "ark_text_only", "no_eligible_fail_closed"],
         "settings_revision": [

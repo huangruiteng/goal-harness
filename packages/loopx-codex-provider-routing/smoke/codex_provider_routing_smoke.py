@@ -6,7 +6,9 @@ import copy
 import importlib
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PACKAGE_ROOT / "src"))
@@ -17,40 +19,65 @@ _run_request = cli._run_request
 REQUEST_SCHEMA_VERSION = contract.REQUEST_SCHEMA_VERSION
 build_upgrade_plan = contract.build_upgrade_plan
 compile_catalog = contract.compile_catalog
+normalize_selector_request = contract.normalize_selector_request
 project_runtime_status = contract.project_runtime_status
 qualify_snapshot = contract.qualify_snapshot
 
 
-def _source() -> dict:
-    return json.loads((PACKAGE_ROOT / "examples" / "request.json").read_text())[
-        "source"
-    ]
+def _source() -> dict[str, Any]:
+    request = cast(
+        dict[str, Any],
+        json.loads((PACKAGE_ROOT / "examples" / "request.json").read_text()),
+    )
+    return cast(dict[str, Any], request["source"])
 
 
-def _valid_snapshot() -> dict:
+def _valid_snapshot() -> dict[str, Any]:
     return {
         "visible_models": [
             "auto/gpt-5.6-sol",
+            "fast/auto/gpt-5.6-sol",
             "codex-a/gpt-5.6-sol",
+            "fast/codex-a/gpt-5.6-sol",
             "codex-b/gpt-5.6-sol",
+            "fast/codex-b/gpt-5.6-sol",
             "gpt-5.6-luna",
             "ark/deepseek-v4-flash",
         ],
         "hidden_models": ["gpt-5.6-sol"],
         "input_modalities": {
             "auto/gpt-5.6-sol": ["text", "image"],
+            "fast/auto/gpt-5.6-sol": ["text", "image"],
             "codex-a/gpt-5.6-sol": ["text", "image"],
+            "fast/codex-a/gpt-5.6-sol": ["text", "image"],
             "codex-b/gpt-5.6-sol": ["text", "image"],
+            "fast/codex-b/gpt-5.6-sol": ["text", "image"],
             "gpt-5.6-luna": ["text", "image"],
             "ark/deepseek-v4-flash": ["text"],
         },
         "fast_models": [
-            "auto/gpt-5.6-sol",
-            "codex-a/gpt-5.6-sol",
-            "codex-b/gpt-5.6-sol",
-            "gpt-5.6-luna",
+            "fast/auto/gpt-5.6-sol",
+            "fast/codex-a/gpt-5.6-sol",
+            "fast/codex-b/gpt-5.6-sol",
         ],
         "default_service_tier": "default",
+        "selector_default_service_tiers": {
+            "auto/gpt-5.6-sol": "default",
+            "fast/auto/gpt-5.6-sol": "fast",
+            "codex-a/gpt-5.6-sol": "default",
+            "fast/codex-a/gpt-5.6-sol": "fast",
+            "codex-b/gpt-5.6-sol": "default",
+            "fast/codex-b/gpt-5.6-sol": "fast",
+            "gpt-5.6-luna": "default",
+            "ark/deepseek-v4-flash": "default",
+        },
+        "request_normalizer": {
+            "active": True,
+            "selector_prefix": "fast/",
+            "fast_request_service_tier": "priority",
+            "ordinary_selector_action": "preserve",
+            "effective_priority_admission": "fast_capable_only",
+        },
         "endpoint_host": "127.0.0.1",
         "affinity_policy": "hint_revalidated_per_attempt",
         "route_traversal": {
@@ -60,16 +87,34 @@ def _valid_snapshot() -> dict:
                 "fallback_tail": ["ark-text"],
                 "max_cycles": 1,
             },
+            "fast/auto/gpt-5.6-sol": {
+                "entrypoint": "affinity_then_first",
+                "ordered_candidates": ["codex-a", "codex-b"],
+                "fallback_tail": [],
+                "max_cycles": 1,
+            },
             "codex-a/gpt-5.6-sol": {
                 "entrypoint": "codex-a",
                 "ordered_candidates": ["codex-a", "codex-b", "ark-text"],
                 "fallback_tail": ["ark-text"],
                 "max_cycles": 1,
             },
+            "fast/codex-a/gpt-5.6-sol": {
+                "entrypoint": "codex-a",
+                "ordered_candidates": ["codex-a", "codex-b"],
+                "fallback_tail": [],
+                "max_cycles": 1,
+            },
             "codex-b/gpt-5.6-sol": {
                 "entrypoint": "codex-b",
                 "ordered_candidates": ["codex-b", "codex-a", "ark-text"],
                 "fallback_tail": ["ark-text"],
+                "max_cycles": 1,
+            },
+            "fast/codex-b/gpt-5.6-sol": {
+                "entrypoint": "codex-b",
+                "ordered_candidates": ["codex-b", "codex-a"],
+                "fallback_tail": [],
                 "max_cycles": 1,
             },
             "gpt-5.6-luna": {
@@ -85,7 +130,7 @@ def _valid_snapshot() -> dict:
     }
 
 
-def _runtime_status() -> dict:
+def _runtime_status() -> dict[str, Any]:
     return {
         "catalog_source": _source(),
         "host_identity": {
@@ -96,7 +141,6 @@ def _runtime_status() -> dict:
         "execution_observation": {
             "route_slug": "auto/gpt-5.6-sol",
             "modality": "text",
-            "fast": False,
             "observed_at": "2026-09-01T08:00:00Z",
             "attempted_profiles": ["codex-b"],
             "selected_profile": "codex-b",
@@ -137,7 +181,7 @@ def _runtime_status() -> dict:
     }
 
 
-def expect_error(action, message: str) -> None:
+def expect_error(action: Callable[[], Any], message: str) -> None:
     try:
         action()
     except (TypeError, ValueError):
@@ -172,6 +216,56 @@ def main() -> int:
     assert luna["eligible_candidates"]["image"] == ["codex-a", "codex-b"]
     assert luna["reasoning_levels"] == ["low", "medium", "high", "xhigh", "max"]
     assert luna["fast_candidates"] == ["codex-a", "codex-b"]
+    selector_rows = {row["slug"]: row for row in catalog["selector_rows"]}
+    assert (
+        len([row for row in selector_rows.values() if row["visibility"] == "visible"])
+        == 8
+    )
+    assert selector_rows["auto/gpt-5.6-sol"]["default_service_tier"] == "default"
+    assert selector_rows["fast/auto/gpt-5.6-sol"]["default_service_tier"] == "fast"
+    assert selector_rows["fast/auto/gpt-5.6-sol"]["candidates"] == [
+        "codex-a",
+        "codex-b",
+    ]
+    assert "fast/gpt-5.6-luna" not in selector_rows
+
+    normalized_fast = normalize_selector_request(
+        {
+            "catalog_source": _source(),
+            "model_selector": "fast/codex-b/gpt-5.6-sol",
+            "service_tier": "default",
+        }
+    )
+    assert normalized_fast["normalized_model_selector"] == "codex-b/gpt-5.6-sol"
+    assert normalized_fast["service_tier"] == {
+        "action": "force_priority",
+        "value": "priority",
+    }
+    assert normalized_fast["eligible_candidates"] == ["codex-b", "codex-a"]
+    normalized_standard = normalize_selector_request(
+        {
+            "catalog_source": _source(),
+            "model_selector": "codex-b/gpt-5.6-sol",
+        }
+    )
+    assert normalized_standard["normalized_model_selector"] == ("codex-b/gpt-5.6-sol")
+    assert normalized_standard["service_tier"] == {"action": "preserve"}
+    normalized_standard_priority = normalize_selector_request(
+        {
+            "catalog_source": _source(),
+            "model_selector": "auto/gpt-5.6-sol",
+            "service_tier": "priority",
+        }
+    )
+    assert normalized_standard_priority["service_tier"] == {
+        "action": "preserve",
+        "value": "priority",
+    }
+    assert normalized_standard_priority["fallback_policy"] == "fast_capable_only"
+    assert normalized_standard_priority["eligible_candidates"] == [
+        "codex-a",
+        "codex-b",
+    ]
 
     runtime = project_runtime_status(_runtime_status())
     assert runtime["credential_free"] is True
@@ -194,14 +288,68 @@ def main() -> int:
     fast_fallback = _runtime_status()
     fast_fallback["execution_observation"].update(
         {
-            "route_slug": "codex-b/gpt-5.6-sol",
-            "fast": True,
+            "route_slug": "fast/codex-b/gpt-5.6-sol",
             "attempted_profiles": ["codex-b", "codex-a"],
             "selected_profile": "codex-a",
         }
     )
     runtime = project_runtime_status(fast_fallback)
+    assert runtime["route_intent"]["fast"] is True
+    assert runtime["route_intent"]["selector_slug"] == ("fast/codex-b/gpt-5.6-sol")
     assert runtime["route_intent"]["legal_attempt_orders"] == [["codex-b", "codex-a"]]
+
+    fast_to_ark = _runtime_status()
+    fast_to_ark["execution_observation"].update(
+        {
+            "route_slug": "fast/auto/gpt-5.6-sol",
+            "attempted_profiles": ["codex-a", "codex-b", "ark-text"],
+            "selected_profile": "ark-text",
+        }
+    )
+    expect_error(
+        lambda: project_runtime_status(fast_to_ark),
+        "Fast selector was allowed to fall back to a non-Fast provider",
+    )
+
+    ordinary_priority = _runtime_status()
+    ordinary_priority["execution_observation"].update(
+        {
+            "fast": True,
+            "attempted_profiles": ["codex-a", "codex-b"],
+            "selected_profile": "codex-b",
+        }
+    )
+    runtime = project_runtime_status(ordinary_priority)
+    assert runtime["route_intent"]["fast"] is True
+    assert runtime["route_intent"]["legal_attempt_orders"] == [
+        ["codex-a", "codex-b"],
+        ["codex-b", "codex-a"],
+    ]
+
+    ordinary_priority_to_ark = _runtime_status()
+    ordinary_priority_to_ark["execution_observation"].update(
+        {
+            "fast": True,
+            "attempted_profiles": ["codex-a", "codex-b", "ark-text"],
+            "selected_profile": "ark-text",
+        }
+    )
+    expect_error(
+        lambda: project_runtime_status(ordinary_priority_to_ark),
+        "ordinary selector with priority was allowed to fall back to Ark",
+    )
+
+    fast_selector_reported_standard = _runtime_status()
+    fast_selector_reported_standard["execution_observation"].update(
+        {
+            "route_slug": "fast/auto/gpt-5.6-sol",
+            "fast": False,
+        }
+    )
+    expect_error(
+        lambda: project_runtime_status(fast_selector_reported_standard),
+        "Fast selector was allowed to report a non-Fast execution",
+    )
 
     image_affinity = _runtime_status()
     image_affinity["execution_observation"]["modality"] = "image"
@@ -284,6 +432,33 @@ def main() -> int:
         lambda: compile_catalog(ambiguous_boolean), "string boolean was accepted"
     )
 
+    unsafe_fast_fallback = copy.deepcopy(_source())
+    unsafe_fast_fallback["routes"][0]["fast_selector"]["fallback_policy"] = (
+        "route_default"
+    )
+    expect_error(
+        lambda: compile_catalog(unsafe_fast_fallback),
+        "Fast selector was allowed to retain a non-Fast fallback",
+    )
+
+    colliding_fast_slug = copy.deepcopy(_source())
+    colliding_fast_slug["routes"].append(
+        {
+            "candidates": ["ark-text"],
+            "display_name": "Collision",
+            "input_modalities": ["text"],
+            "mode": "manual",
+            "reasoning_levels": ["low"],
+            "slug": "fast/auto/gpt-5.6-sol",
+            "supports_fast": False,
+            "visible": False,
+        }
+    )
+    expect_error(
+        lambda: compile_catalog(colliding_fast_slug),
+        "generated Fast selector collision was accepted",
+    )
+
     no_image_provider = copy.deepcopy(_source())
     no_image_provider["profiles"][0]["input_modalities"] = ["text"]
     no_image_provider["profiles"][1]["input_modalities"] = ["text"]
@@ -300,6 +475,31 @@ def main() -> int:
 
     snapshot = qualify_snapshot(_valid_snapshot())
     assert snapshot["qualified"] is True
+    ordinary_row_forced_fast = _valid_snapshot()
+    ordinary_row_forced_fast["selector_default_service_tiers"]["auto/gpt-5.6-sol"] = (
+        "fast"
+    )
+    failed = qualify_snapshot(ordinary_row_forced_fast)
+    assert "fast_default_off" in {
+        item["id"] for item in failed["checks"] if not item["passed"]
+    }
+
+    inactive_normalizer = _valid_snapshot()
+    inactive_normalizer["request_normalizer"]["active"] = False
+    failed = qualify_snapshot(inactive_normalizer)
+    assert "request_normalizer" in {
+        item["id"] for item in failed["checks"] if not item["passed"]
+    }
+
+    unsafe_priority_admission = _valid_snapshot()
+    unsafe_priority_admission["request_normalizer"]["effective_priority_admission"] = (
+        "route_default"
+    )
+    failed = qualify_snapshot(unsafe_priority_admission)
+    assert "request_normalizer" in {
+        item["id"] for item in failed["checks"] if not item["passed"]
+    }
+
     stale = _valid_snapshot()
     stale["affinity_policy"] = "sticky_without_revalidation"
     stale["turn_revision_matches"] = False
@@ -343,12 +543,15 @@ def main() -> int:
             "changed_seams": [
                 "transport_pool",
                 "modality_routing",
+                "request_normalizer",
                 "settings_revision",
             ],
         }
     )
     assert "h2_reuse" in plan["required_checks"]
     assert "no_eligible_fail_closed" in plan["required_checks"]
+    assert "ordinary_selector_preserved" in plan["required_checks"]
+    assert "effective_priority_admission" in plan["required_checks"]
     assert "turn_revision_match" in plan["required_checks"]
 
     response = _run_request(
@@ -361,6 +564,7 @@ def main() -> int:
     assert response["ok"] is True and response["result"]["qualified"] is True
     for example_name in (
         "request.json",
+        "normalize-request.json",
         "runtime-status.json",
         "qualification-snapshot.json",
         "upgrade-request.json",

@@ -63,6 +63,8 @@ SSH 运行面的演进；CPA PR 承载进入在线 data plane 的通用修复。
 | LoopX | [#3665](https://github.com/huangruiteng/loopx/pull/3665) | merged | 沉淀 CPA + Codex App 分层重试与延迟门禁 |
 | LoopX | [#3711](https://github.com/huangruiteng/loopx/pull/3711) | merged | 将 runbook、脚本迁移清单、无密配置和资格 contract 升级为独立 extension |
 | LoopX | [#3737](https://github.com/huangruiteng/loopx/pull/3737) | merged | 增加 Luna，并把 A/B 选择收敛为同一账号环的首选入口 |
+| LoopX | [#3804](https://github.com/huangruiteng/loopx/pull/3804) | merged | 将宿主身份、路由选择、额度与真实 attempt chain 投影为无密运行状态 |
+| LoopX | [#3805](https://github.com/huangruiteng/loopx/pull/3805) | open | 生成显式 Fast sibling rows，固化 `fast/` request normalization、默认 tier 与 A/B-only fallback |
 | CLIProxyAPI | [#5211](https://github.com/router-for-me/CLIProxyAPI/pull/5211) | merged | 被动观测 per-auth quota header 与最近请求计数；management 原始身份字段仍须由 operator adapter 脱敏 |
 | CLIProxyAPI | [#5220](https://github.com/router-for-me/CLIProxyAPI/pull/5220) | open / conflicts | provider-bound Responses history、`additional_tools` 与 Ark SSE normalizer；CI 通过但需 rebase 后再 review |
 | CLIProxyAPI | [#5261](https://github.com/router-for-me/CLIProxyAPI/pull/5261) | open / review required | ChatGPT uTLS HTTP/2 连接池、TLS session resumption 与异常重建 |
@@ -124,12 +126,12 @@ merge commit，并重新运行本文矩阵。
 | Ark Responses SSE lifecycle normalizer | candidate 与真实 endpoint 通过 | 只对显式 `is-compat: true` 的模型启用；原生 Codex stream 保持原字节路径；真实 Ark HTTP/SSE 返回完整 lifecycle |
 | A/B 环 → Ark 组合路径 | loopback 与分层 live 证据通过 | A → B、Prefer B → A 与隔离 A/B 后的 Ark tail 均已在 integrated self-use candidate 通过；公共分发仍依赖 CPA PR #5336 |
 | Route traversal readback | public contract 与 self-use live 均通过 | qualification 同时读回 entrypoint、ordered candidates、terminal tail 与 `max_cycles = 1`；只看到正确 selector 标签不能通过 |
-| Codex App selector projection | 本机与 SSH App Server readback 通过 | `model/list` 暴露 Auto、Prefer A、Prefer B、Luna、Ark 五个可见 route，并保留隐藏 `gpt-5.6-sol` 兼容 alias；C 不存在 |
+| Codex App selector projection | 本机与 SSH App Server readback 通过 | `model/list` 暴露三组 Standard/Fast Sol 行、Luna、Ark 共八个可见 selector，并保留隐藏 `gpt-5.6-sol` 兼容 alias；C 不存在 |
 | 图片能力投影 | 正向 E2E 通过，Auto 负向路径有已复现缺口 | Auto、Prefer A、Prefer B、Luna 声明 `text + image`，Ark 保持 `text`；健康 A/B 下图片到达 Codex。A/B 失败后，当前 Auto affinity 可能错误粘到 Ark，尚未做到 modality-aware fail closed |
 | 模型切换快照 | 已复现设置落盘与新 turn 启动竞态 | UI 显示已选择 B 不足以证明正在运行或重试的 turn 已采用 B；旧 turn 可能继续携带 Auto 快照。需要 durable settings revision / readback 后再启动新 turn |
-| Fast tier 投影 | A/B 既有 readback 通过；Luna/Prefer 显示待统一重验 | Auto、Prefer A、Prefer B、Luna 声明 `fast → priority`；Ark 不声明 Fast。`features.fast_mode = true` 只显示按钮，`service_tier = "default"` 保证默认关闭 |
+| Fast tier 投影 | 本机与 SSH App Server readback 通过 | Auto、Prefer A、Prefer B 各有显式 `fast/` sibling 行，默认 tier 为 `fast` 并在请求规整时强制 `priority`；普通行与 Luna 保持 `default`，Fast 行不进入 Ark |
 | SSH CPA 远端 | reverse-loopback 与 App Server 通过 | 远端只连接 loopback tunnel，不保存本机 OAuth/Ark secret；同一 SSH alias 与同一远端 `CODEX_HOME` 可继续原 task，新建 task 不删除旧 session |
-| CPA upstream review | quota PR 已合并；三个分发 PR CI 通过 | #5211 merge `ca601db0`；#5220 head `9357def` 当前 conflicts；#5261 head `c8e76e1`、#5336 head `3d038a27` mergeable；后三者仍等待 review |
+| CPA upstream review | quota PR 已合并；三个分发 PR CI 通过 | #5211 merge `ca601db0`；#5220 head `9357def` 当前 conflicts；#5261 head `c8e76e1`、#5336 head `3d038a27` 当前 blocked pending review；后三者仍等待 maintainer review |
 | 上游回归 | 候选与当前 `dev` 已集成验证 | changed packages、race 与 server build 通过；全仓仅命中既有 `internal/home` 一秒同步 flake，同一失败在干净 `origin/dev` 上 50 次复现 2 次，PR 未改该目录，也不声称该测试通过 |
 | 真实 Ark endpoint qualification | 基础 Responses 与 auto fallback 已通过 | source-built candidate 经隔离 CPA 调用真实 OpenAI-compatible endpoint：HTTP 200、唯一 terminal，output item 严格 `added/done` 配对；额度分类由公开安全的黑盒 fixture 覆盖 |
 | 当前 Codex App | self-use 配置已安装并完成 CLI / App Server readback | 主 App 与 SSH host 都指向 loopback CPA；模型目录变化需要重启或重连对应 App Server 才能刷新 UI cache，旧 task store 不复制、不删除 |
@@ -168,10 +170,13 @@ flowchart LR
 
 | 模型 ID | 行为 | 输入能力 | Fast |
 | --- | --- | --- | --- |
-| `auto/gpt-5.6-sol` | 同一 A/B 账号环；已有 task 尊重 affinity，冷启动从 A 开始；A/B 都不可用且尚未提交输出时，兼容文本请求可转 Ark | `text, image`；图片只由 A/B 承担 | 可选，默认关闭 |
-| `codex-a/gpt-5.6-sol` | Sol · Prefer A：A → B → Ark；不是 hard pin | `text, image` | 可选，默认关闭 |
-| `codex-b/gpt-5.6-sol` | Sol · Prefer B：B → A → Ark；不是 hard pin | `text, image` | 可选，默认关闭 |
-| [`gpt-5.6-luna`](https://developers.openai.com/codex/models) | Luna；复用同一个 A/B 账号环，只在 Codex A/B 间路由，不异构降级到 Ark | `text, image`；推理档位为 `low` 至 `max`，不声明 `ultra` | 可选，默认关闭 |
+| `auto/gpt-5.6-sol` | 同一 A/B 账号环；已有 task 尊重 affinity，冷启动从 A 开始；A/B 都不可用且尚未提交输出时，兼容文本请求可转 Ark | `text, image`；图片只由 A/B 承担 | Standard，默认行 |
+| `fast/auto/gpt-5.6-sol` | 与 Auto 共享同一 route；只保留 A/B Fast-capable candidates | `text, image` | Fast，强制 `priority` |
+| `codex-a/gpt-5.6-sol` | Prefer A：A → B → Ark；不是 hard pin | `text, image` | Standard，默认行 |
+| `fast/codex-a/gpt-5.6-sol` | Prefer A：A → B；不落 Ark | `text, image` | Fast，强制 `priority` |
+| `codex-b/gpt-5.6-sol` | Prefer B：B → A → Ark；不是 hard pin | `text, image` | Standard，默认行 |
+| `fast/codex-b/gpt-5.6-sol` | Prefer B：B → A；不落 Ark | `text, image` | Fast，强制 `priority` |
+| [`gpt-5.6-luna`](https://developers.openai.com/codex/models) | Luna；复用同一个 A/B 账号环，只在 Codex A/B 间路由，不异构降级到 Ark | `text, image`；推理档位为 `low` 至 `max`，不声明 `ultra` | Standard；不生成重复 Fast alias |
 | `codex-c/gpt-5.6-sol` | 预留；只有第三个订阅真实接入并通过矩阵后才暴露 | 由真实 credential 决定 | 不预声明 |
 | `ark/deepseek-v4-flash` | 手动固定到 Ark DeepSeek V4 Flash | `text` | 不支持 |
 | `gpt-5.6-sol` | 隐藏 compatibility alias；处理 App / host 继承裸 model metadata 的旧 task，实际行为与 Auto 一致 | `text, image` | 可选，默认关闭 |
@@ -189,10 +194,51 @@ failover 的分层资格验证，因此 `auto/...` 可以在该锁定 commit 上
 路径已通过，但 affinity 的负向 modality recheck 尚有已复现缺口；在该修复通过前，不能把
 “Auto 支持图片”扩写成“所有 Auto failover 路径都支持图片”。
 
-Fast 是一次 turn 的 service tier，不是独立模型。model catalog 需要同时声明
-`additional_speed_tiers: ["fast"]` 和 `service_tiers[].id: "priority"`，App 才显示按钮。
-`features.fast_mode = true` 只开放选择入口；默认配置继续使用 `service_tier = "default"`。
-只有用户手动开启 Fast 后，请求才映射为 `priority`。
+Fast 在语义上仍是一次 turn 的 service tier，不是第二个上游模型；但桌面 App 对 custom
+provider 的原生 Fast 按钮还受宿主 ChatGPT 身份投影约束，不能作为唯一入口。catalog compiler
+因此从显式声明 `fast_selector` 的普通 route 生成 `fast/<route>` sibling 行：普通行使用
+`default_service_tier = "default"`，Fast 行使用 `default_service_tier = "fast"`。CPA adapter/plugin
+必须在 alias 映射前读取原始 selector；命中 `fast/` 时去掉前缀并强制请求
+`service_tier = "priority"`。普通 selector 不改调用方传入的 tier；若原生 Fast
+入口已经传入 `priority`，normalizer 仍会按有效 Fast 状态收窄到 A/B
+Fast-capable candidates，不能落到 Ark。
+
+Fast sibling 的候选不是复制普通 route，而是按 `supports_fast` 过滤。A/B 支持 Fast，Ark 不支持，
+所以 Fast 行只能在 A/B 环内切换；没有 Fast-capable provider 时必须在首个输出前 fail closed。
+Luna 仍保持普通行：若同一个 Luna upstream 再生成重复 alias，某些 CPA/App catalog 路径会去重
+并使普通 Luna 消失。`features.fast_mode = true` 可以保留给支持原生按钮的 host，但这套显式行
+不依赖该按钮，顶层默认仍是 `service_tier = "default"`。
+
+### Fast sibling 配置与发布方法
+
+在无密 catalog source 的普通 route 上声明 Fast 行；slug 由 compiler 固定生成，不允许另写
+一份平行 route：
+
+```json
+{
+  "slug": "auto/gpt-5.6-sol",
+  "supports_fast": true,
+  "fast_selector": {
+    "display_name": "Auto · Fast · Codex A → B",
+    "fallback_policy": "fast_capable_only"
+  }
+}
+```
+
+完整字段与 A/B/Ark profile 见 [`examples/request.json`](examples/request.json)。发布顺序是：
+
+1. 对真实支持 Fast 的 profile 设置 `supports_fast: true`；不支持的 provider 保持 false。
+2. 只在需要额外菜单行的普通 route 上声明 `fast_selector`；Luna 当前不声明。
+3. 运行 `compile_catalog`，确认八个可见 `selector_rows`、普通行 tier 为 `default`、三条 Fast
+   行 tier 为 `fast`，且 Fast candidates 只有 A/B。
+4. App catalog adapter 写入这些 selector rows；CPA adapter/plugin 必须在 alias mapping 前执行
+   [`normalize_selector_request`](examples/normalize-request.json) 的同构规则。
+5. 在隔离 App Server 读回 `model/list` 与 normalizer active 状态，再切换本机/SSH 的受控 catalog
+   指针；不要覆盖唯一可回滚版本。
+6. 重启或重连同一个 App Server 以刷新目录 cache。保留原 `CODEX_HOME` 和 task store；目录升级
+   不需要删除、新建或复制 session。
+7. 任一逐行 tier、normalizer、A/B traversal 或 commit-barrier 检查失败时，恢复旧 catalog 与旧
+   adapter/plugin 指针，并重新 readback；不要只隐藏 Fast 行后继续运行不一致的 normalizer。
 
 ## 身份与路由状态双投影
 
@@ -424,7 +470,8 @@ request_max_retries = 30
 stream_max_retries = 30
 ```
 
-受控 model catalog 同时描述 Auto、Prefer A、Prefer B、Luna、Ark 五个虚拟模型 ID；未配置的 C 不写入 catalog。
+受控 model catalog 同时描述三条普通 Sol route、它们生成的三条 Fast sibling、Luna 与 Ark，
+共八个可见 selector；未配置的 C 不写入 catalog。
 App 的原生模型下拉框就是唯一手动切换入口。`30 / 30` 只保留 CPA 之外的外层恢复余量；
 credential 遍历、provider 选择和 commit barrier 仍由 CPA 独占。两层都必须遵守前文的
 提交边界和 wall-clock budget，不能无界相乘。不要再让 CC Switch 在 App 运行期间替换
@@ -432,11 +479,14 @@ credential 遍历、provider 选择和 commit barrier 仍由 CPA 独占。两层
 
 受控 catalog 至少要同时验证四类字段：
 
-1. `slug / visibility / priority`：五个可见 route 与一个隐藏 bare compatibility alias；
-2. `input_modalities`：Auto/Prefer A/Prefer B/Luna 为 `text, image`，Ark 为 `text`；
+1. `slug / visibility / priority`：八个可见 selector 与一个隐藏 bare compatibility alias；
+2. `input_modalities`：Standard/Fast Sol 与 Luna 为 `text, image`，Ark 为 `text`；
 3. `supported_reasoning_levels`：Sol 与 Luna 都只声明已验证的 `low / medium / high / xhigh / max`；
-4. `additional_speed_tiers / service_tiers`：Auto/Prefer A/Prefer B/Luna 暴露 `fast → priority`，Ark 不暴露，
-   `default_service_tier` 保持空或 default。
+4. `selector_default_service_tiers`：普通行、Luna、Ark 为 `default`，三条 `fast/` 行为 `fast`；
+5. `request_normalizer`：`fast/` 在 alias mapping 前强制 `priority`；普通行保持原请求，
+   但原请求为 `priority` 时同样启用 Fast-capable-only admission；readback 必须报告
+   `effective_priority_admission = fast_capable_only`；
+6. `route_traversal`：普通 Sol 允许一次 A/B 环后接 Ark，Fast Sol 只允许一次 A/B 环。
 
 App Server 的 `model/list` readback 是 catalog 验收面。只检查 JSON 文件内容不够，因为旧
 App Server 可能仍缓存升级前的目录。
@@ -477,7 +527,7 @@ stream_max_retries = 30
 ```
 
 远端默认使用隐藏 `gpt-5.6-sol` compatibility alias，避免旧 task 或跨 host metadata 只保存
-裸 model slug 时回落到未知模型；模型下拉框仍只显示 Auto、Prefer A、Prefer B、Luna、Ark。
+裸 model slug 时回落到未知模型；模型下拉框显示三组 Standard/Fast Sol 行、Luna 与 Ark。
 
 SSH host 的 session 安全边界：
 
@@ -493,10 +543,11 @@ SSH host 的 session 安全边界：
 1. `ssh <host-alias>` 能正常进入，远端 login shell 可以找到 `codex`；
 2. `codex --version` 达到锁定版本；
 3. reverse tunnel 两端都只监听 loopback；
-4. App Server `model/list` 返回五个可见 route、隐藏 bare alias、正确图片能力与 Fast tier；
-5. Auto 发送一张公开安全的测试图片，模型实际返回成功；
-6. 打开一个已有 task，确认历史仍在，再验证 A/B 切换；
-7. 最后才在真实工作 task 上使用。
+4. App Server `model/list` 返回八个可见 selector、隐藏 bare alias、逐行默认 tier 与正确图片能力；
+5. Fast selector 的 request-normalizer active，`fast/` 强制 `priority` 且候选不含 Ark；
+6. Auto 发送一张公开安全的测试图片，模型实际返回成功；
+7. 打开一个已有 task，确认历史仍在，再验证 A/B 切换；
+8. 最后才在真实工作 task 上使用。
 
 模型目录或 Codex CLI 更新后，已有 App Server 可能继续使用旧 cache。优先重启或重连同一个
 SSH host，再打开原 task；不要先删除 host、项目或 session store。
@@ -690,7 +741,8 @@ in-band SSE error、客户端取消和 handler 自己补出的 lifecycle event�
 | Auto / A / B 图片输入 | App admission 通过，图片实际到达 A/B；A/B 均不可用时明确失败，不降级为 Ark 文本请求 |
 | Auto affinity + 图片 + Codex 故障 | 每个 attempt 重算 required modalities；旧 Ark affinity 失效；A/B 无 eligible target 时首字节前返回 typed error |
 | Ark 图片输入 | App 或 provider 明确拒绝；不把 Ark catalog 伪装为 image-capable |
-| Fast tier | Auto/Prefer A/Prefer B/Luna 显示 Fast 按钮，但新 task 默认 `service_tier = "default"`；手动开启后请求才使用 `priority` |
+| Fast selector rows | Auto/Prefer A/Prefer B 各有 Standard 与 Fast 行；普通行和 Luna 默认 `default`，Fast 行强制 `priority`；Fast A/B 都失败时不落 Ark |
+| Fast request normalization | 在 alias mapping 前捕获原始 `fast/` selector；剥离前缀后保持同一底层 route；普通 selector 的 model/tier 不被误改 |
 | SSH host 重连 | 同 alias、同远端 `CODEX_HOME` 下旧 task 可继续；catalog/CLI 刷新不删除或复制 session store |
 | 首字节前 quota / overload | CPA 可重试下一 eligible auth；客户端只看到一条回答 |
 | 空闲 HTTP/2 连接断开 | 下一条安全请求自动重建连接；TLS session 恢复；不重复已提交输出 |
@@ -725,16 +777,16 @@ commit 作为升级候选并重跑 qualification。#5261 已进入 integrated se
 
 1. **影子验证（已完成）**：保持现有 App 不变，在隔离 home、loopback fault server 和 stale
    task 上跑完整矩阵。
-2. **单 App / 显式路由（self-use 已完成）**：App 指向固定 CPA；开放 A、B、Luna、Ark，未配置的
-   C 不出现在 selector；A/B 是同一环的两个 Prefer 入口，公共分发依赖 #5336。
+2. **单 App / 显式路由（self-use 已完成）**：App 指向固定 CPA；开放 Standard/Fast A/B、Luna、
+   Ark，未配置的 C 不出现在 selector；A/B 是同一环的两个 Prefer 入口，公共分发依赖 #5336。
 3. **Codex 账号环（self-use 已完成）**：priority + fill-first + affinity 已通过 A → B 与
    Prefer B → A；上游 #5336 合并后仍需对 exact merge commit 重跑资格验证。
 4. **跨 provider 自动切换（self-use 已启用）**：固定 build 已通过 history projection、
    `additional_tools`、Ark SSE、commit barrier、真实 Ark 与故障注入矩阵，文本请求可由
    `auto/...` 降级到 Ark；foreign compaction barrier 仍 fail closed 并走显式 fork。
-5. **本机与 SSH selector（self-use 已完成）**：五个可见 selector、hidden bare alias、图片
-   能力和 Fast default-off contract 已在两端 App Server readback 通过；上游 release 升级仍要
-   重启对应 App Server 并重复 readback。
+5. **本机与 SSH selector（self-use 已完成）**：八个可见 selector、hidden bare alias、图片
+   能力、逐行 tier 与 Fast request-normalizer contract 已在两端 App Server readback 通过；
+   上游 release 升级仍要重启对应 App Server 并重复 readback。
 6. **多模态 Auto 负向路径（待修复）**：健康 A/B 的图片 E2E 已通过；modality-aware
    affinity、A/B 全不可用时的 typed fail-closed，以及 settings revision / turn-start 竞态仍要
    修复并重跑矩阵。在此之前不宣称 Auto 图片 failover 已完整资格化。

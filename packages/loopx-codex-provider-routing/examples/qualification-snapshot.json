@@ -16,6 +16,15 @@
           "ark-text"
         ]
       },
+      "fast/auto/gpt-5.6-sol": {
+        "entrypoint": "affinity_then_first",
+        "fallback_tail": [],
+        "max_cycles": 1,
+        "ordered_candidates": [
+          "codex-a",
+          "codex-b"
+        ]
+      },
       "codex-a/gpt-5.6-sol": {
         "entrypoint": "codex-a",
         "fallback_tail": [
@@ -28,6 +37,15 @@
           "ark-text"
         ]
       },
+      "fast/codex-a/gpt-5.6-sol": {
+        "entrypoint": "codex-a",
+        "fallback_tail": [],
+        "max_cycles": 1,
+        "ordered_candidates": [
+          "codex-a",
+          "codex-b"
+        ]
+      },
       "codex-b/gpt-5.6-sol": {
         "entrypoint": "codex-b",
         "fallback_tail": [
@@ -38,6 +56,15 @@
           "codex-b",
           "codex-a",
           "ark-text"
+        ]
+      },
+      "fast/codex-b/gpt-5.6-sol": {
+        "entrypoint": "codex-b",
+        "fallback_tail": [],
+        "max_cycles": 1,
+        "ordered_candidates": [
+          "codex-b",
+          "codex-a"
         ]
       },
       "gpt-5.6-luna": {
@@ -54,10 +81,9 @@
     "default_service_tier": "default",
     "endpoint_host": "127.0.0.1",
     "fast_models": [
-      "auto/gpt-5.6-sol",
-      "codex-a/gpt-5.6-sol",
-      "codex-b/gpt-5.6-sol",
-      "gpt-5.6-luna"
+      "fast/auto/gpt-5.6-sol",
+      "fast/codex-a/gpt-5.6-sol",
+      "fast/codex-b/gpt-5.6-sol"
     ],
     "hidden_models": [
       "gpt-5.6-sol"
@@ -70,11 +96,23 @@
         "text",
         "image"
       ],
+      "fast/auto/gpt-5.6-sol": [
+        "text",
+        "image"
+      ],
       "codex-a/gpt-5.6-sol": [
         "text",
         "image"
       ],
+      "fast/codex-a/gpt-5.6-sol": [
+        "text",
+        "image"
+      ],
       "codex-b/gpt-5.6-sol": [
+        "text",
+        "image"
+      ],
+      "fast/codex-b/gpt-5.6-sol": [
         "text",
         "image"
       ],
@@ -83,12 +121,32 @@
         "image"
       ]
     },
+    "request_normalizer": {
+      "active": true,
+      "effective_priority_admission": "fast_capable_only",
+      "fast_request_service_tier": "priority",
+      "ordinary_selector_action": "preserve",
+      "selector_prefix": "fast/"
+    },
+    "selector_default_service_tiers": {
+      "ark/deepseek-v4-flash": "default",
+      "auto/gpt-5.6-sol": "default",
+      "codex-a/gpt-5.6-sol": "default",
+      "codex-b/gpt-5.6-sol": "default",
+      "fast/auto/gpt-5.6-sol": "fast",
+      "fast/codex-a/gpt-5.6-sol": "fast",
+      "fast/codex-b/gpt-5.6-sol": "fast",
+      "gpt-5.6-luna": "default"
+    },
     "settings_revision_durable": true,
     "turn_revision_matches": true,
     "visible_models": [
       "auto/gpt-5.6-sol",
+      "fast/auto/gpt-5.6-sol",
       "codex-a/gpt-5.6-sol",
+      "fast/codex-a/gpt-5.6-sol",
       "codex-b/gpt-5.6-sol",
+      "fast/codex-b/gpt-5.6-sol",
       "gpt-5.6-luna",
       "ark/deepseek-v4-flash"
     ]

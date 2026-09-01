@@ -45,11 +45,15 @@
     ],
     "routes": [
       {
-        "display_name": "Auto · Sol (A/B → Ark)",
+        "display_name": "Auto · Codex A → B → Ark",
         "entrypoint": "affinity_then_first",
         "fallback_tail": [
           "ark-text"
         ],
+        "fast_selector": {
+          "display_name": "Auto · Fast · Codex A → B",
+          "fallback_policy": "fast_capable_only"
+        },
         "input_modalities": [
           "text",
           "image"
@@ -68,11 +72,15 @@
         "visible": true
       },
       {
-        "display_name": "Sol · Prefer A",
+        "display_name": "Prefer A · Codex A → B → Ark",
         "entrypoint": "codex-a",
         "fallback_tail": [
           "ark-text"
         ],
+        "fast_selector": {
+          "display_name": "Prefer A · Fast · Codex A → B",
+          "fallback_policy": "fast_capable_only"
+        },
         "input_modalities": [
           "text",
           "image"
@@ -91,11 +99,15 @@
         "visible": true
       },
       {
-        "display_name": "Sol · Prefer B",
+        "display_name": "Prefer B · Codex B → A → Ark",
         "entrypoint": "codex-b",
         "fallback_tail": [
           "ark-text"
         ],
+        "fast_selector": {
+          "display_name": "Prefer B · Fast · Codex B → A",
+          "fallback_policy": "fast_capable_only"
+        },
         "input_modalities": [
           "text",
           "image"
@@ -114,7 +126,7 @@
         "visible": true
       },
       {
-        "display_name": "Luna · A/B",
+        "display_name": "Luna · Codex A → B",
         "entrypoint": "affinity_then_first",
         "input_modalities": [
           "text",
@@ -137,7 +149,7 @@
         "candidates": [
           "ark-text"
         ],
-        "display_name": "Ark text fallback",
+        "display_name": "Ark · DeepSeek V4 Flash",
         "input_modalities": [
           "text"
         ],

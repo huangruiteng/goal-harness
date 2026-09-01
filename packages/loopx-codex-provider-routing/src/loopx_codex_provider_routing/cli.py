@@ -11,6 +11,7 @@ from .contract import (
     RESPONSE_SCHEMA_VERSION,
     build_upgrade_plan,
     compile_catalog,
+    normalize_selector_request,
     project_runtime_status,
     qualify_snapshot,
     reject_private_material,
@@ -41,6 +42,7 @@ def _doctor() -> int:
             "doctor": "ready",
             "operations": [
                 "compile_catalog",
+                "normalize_selector_request",
                 "project_runtime_status",
                 "qualify_snapshot",
                 "upgrade_plan",
@@ -60,6 +62,7 @@ def _run_request(request: Any) -> dict[str, Any]:
     operation = request.get("operation")
     operation_fields = {
         "compile_catalog": "source",
+        "normalize_selector_request": "normalization",
         "project_runtime_status": "status",
         "qualify_snapshot": "snapshot",
         "upgrade_plan": "upgrade",
@@ -77,6 +80,13 @@ def _run_request(request: Any) -> dict[str, Any]:
         if not isinstance(source, Mapping):
             raise ValueError("compile_catalog requires object `source`")
         result = compile_catalog(source)
+    elif operation == "normalize_selector_request":
+        normalization = request.get("normalization")
+        if not isinstance(normalization, Mapping):
+            raise ValueError(
+                "normalize_selector_request requires object `normalization`"
+            )
+        result = normalize_selector_request(normalization)
     elif operation == "project_runtime_status":
         status = request.get("status")
         if not isinstance(status, Mapping):

@@ -31,13 +31,24 @@ qualification.
   Route affinity is only a hint and must be revalidated against required input
   modalities and service tier on every attempt. A terminal text-only fallback
   can serve compatible Sol requests but cannot receive image history; Luna has
-  no heterogeneous fallback tail.
+  no heterogeneous fallback tail. A route may declare one `fast_selector`;
+  the compiler then emits a `fast/<route>` sibling row whose candidates are
+  limited to Fast-capable providers and whose default tier is `fast`.
+
+`normalize_selector_request`
+: Resolves the original App model selector before provider alias mapping. A
+  `fast/` selector is stripped to its underlying route and forces the wire
+  request tier to `priority`; an ordinary selector preserves the caller's
+  service tier. If that preserved tier is `priority`, candidate admission still
+  switches to Fast-capable-only, so the native Fast entry cannot reach Ark.
+  The operation accepts no prompt, auth or request body.
 
 `qualify_snapshot`
 : Checks the content-free App/CPA readback: visible and hidden routes, input
-  modalities, Fast projection with default-off semantics, loopback binding,
-  modality-aware affinity, typed route traversal, durable settings revision
-  and commit barrier.
+  modalities, explicit Fast sibling rows, per-row default tiers, active request
+  normalization including effective-priority admission, loopback binding,
+  modality-aware affinity, typed route traversal, durable settings revision and
+  commit barrier.
 
 `project_runtime_status`
 : Joins a stable, route-independent host ChatGPT identity state with a
@@ -66,6 +77,10 @@ loopx extension run loopx-codex-provider-routing \
   --input-json packages/loopx-codex-provider-routing/examples/request.json \
   --execute \
   --format json
+loopx extension run loopx-codex-provider-routing \
+  --input-json packages/loopx-codex-provider-routing/examples/normalize-request.json \
+  --execute \
+  --format json
 ```
 
 The extension runtime owns install/enable/disable/doctor registration. Package
@@ -79,6 +94,7 @@ The earlier operator scripts split into three classes:
 | Script responsibility | Extension ownership |
 | --- | --- |
 | Secret-free profile/catalog compiler | Migrated into `compile_catalog` and strengthened with modality/service-tier eligibility |
+| Fast selector catalog generation and request-tier normalization | Migrated into `compile_catalog` plus `normalize_selector_request`; the CPA adapter remains the online enforcement point |
 | App/CPA model readback assertions | Migrated as the content-free `qualify_snapshot` contract |
 | Upgrade matrix, snapshot order and rollback triggers | Migrated as `upgrade_plan`; effect execution remains operator-owned |
 | CPA process launcher, OAuth login/reconcile, Ark key loading | Excluded; these are provider runtime and credential lifecycle, not LoopX state |
