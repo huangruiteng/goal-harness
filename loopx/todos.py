@@ -126,6 +126,9 @@ from .control_plane.todos.handoff_mode import (
     enter_todo_ownership_handoff_gate,
     resolve_todo_completion_handoff,
 )
+from .control_plane.coordination.local_authority_shadow_adapter import (
+    observe_todo_local_authority_commit as _shadow_todo,
+)
 from .control_plane.work_items.task_lease import (
     enter_terminal_todo_lease_fence,
     hold_task_lease_mutation_fence,
@@ -134,38 +137,6 @@ from .control_plane.work_items.task_lease import (
 
 
 ARCHIVE_COMPLETED_DEFAULT_MAX_ACTIVE_DONE = max(0, MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE - 2)
-
-
-def _attach_local_authority_shadow(
-    payload: dict[str, Any],
-    *,
-    registry_path: Path,
-    goal_id: str,
-    write_class: str,
-) -> dict[str, Any]:
-    """Observe a completed local mutation without changing its result."""
-
-    changed = any(
-        payload.get(field)
-        for field in ("changed", "added", "metadata_updated", "completed", "superseded")
-    )
-    if payload.get("dry_run") or not changed:
-        return payload
-    from .control_plane.coordination.local_authority_shadow_adapter import (
-        observe_local_authority_commit,
-    )
-
-    todo_id = str(payload.get("todo_id") or "none")
-    updated_at = str(payload.get("updated_at") or "unknown")
-    evidence = observe_local_authority_commit(
-        registry_path=registry_path,
-        runtime_root=None,
-        goal_id=goal_id,
-        source_operation=f"{write_class}:{todo_id}:{updated_at}",
-    )
-    if evidence is not None:
-        payload["authority_shadow"] = evidence
-    return payload
 
 
 def require_registered_todo_excluded_agents(
@@ -1202,12 +1173,7 @@ def add_goal_todo(
         write_class="todo_add",
         state_text=original,
     )
-    return _attach_local_authority_shadow(
-        payload,
-        registry_path=registry_path,
-        goal_id=goal_id,
-        write_class="todo_add",
-    )
+    return _shadow_todo(payload, registry_path, goal_id, "todo_add")
 
 
 def resolve_todo_state(
@@ -1666,12 +1632,7 @@ def update_goal_todo(
         write_class=write_class,
         state_text=original,
     )
-    return _attach_local_authority_shadow(
-        payload,
-        registry_path=registry_path,
-        goal_id=goal_id,
-        write_class=write_class,
-    )
+    return _shadow_todo(payload, registry_path, goal_id, write_class)
 
 
 def complete_goal_todo(
@@ -1902,12 +1863,8 @@ def complete_goal_todo(
                     task_lease_fence,
                     committed=bool(event_result.get("changed")) and not dry_run,
                 )
-                return _attach_local_authority_shadow(
-                    event_result,
-                    registry_path=registry_path,
-                    goal_id=goal_id,
-                    write_class="todo_complete_event_projection",
-                )
+                write_class = "todo_complete_event_projection"
+                return _shadow_todo(event_result, registry_path, goal_id, write_class)
         if not isinstance(completion_state, dict):
             raise RuntimeError(
                 "TypeScript Todo completion transaction did not authorize a commit"
@@ -2065,12 +2022,7 @@ def complete_goal_todo(
     if effective_decision_outcome:
         result["decision_outcome"] = effective_decision_outcome
     result["self_merged"] = effective_self_merged
-    return _attach_local_authority_shadow(
-        result,
-        registry_path=registry_path,
-        goal_id=goal_id,
-        write_class="todo_complete",
-    )
+    return _shadow_todo(result, registry_path, goal_id, "todo_complete")
 
 def supersede_goal_todo(
     *,
@@ -2279,12 +2231,7 @@ def supersede_goal_todo(
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,
     }
-    return _attach_local_authority_shadow(
-        result,
-        registry_path=registry_path,
-        goal_id=goal_id,
-        write_class="todo_supersede",
-    )
+    return _shadow_todo(result, registry_path, goal_id, "todo_supersede")
 
 
 def archive_completed_todos(
@@ -2335,9 +2282,4 @@ def archive_completed_todos(
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,
     }
-    return _attach_local_authority_shadow(
-        result,
-        registry_path=registry_path,
-        goal_id=goal_id,
-        write_class="todo_archive_completed",
-    )
+    return _shadow_todo(result, registry_path, goal_id, "todo_archive_completed")

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,68 @@ _LEASE_FIELDS = (
     "released_at",
     "status",
 )
+
+
+def local_authority_shadow_summary(goal: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the closed local-shadow configuration for operator readback."""
+
+    coordination = (
+        goal.get("coordination")
+        if isinstance(goal.get("coordination"), Mapping)
+        else {}
+    )
+    raw = coordination.get("authority_shadow")
+    if raw is None:
+        return {"enabled": False, "mode": None, "status": "disabled"}
+    valid = bool(
+        isinstance(raw, Mapping)
+        and set(raw) == _CONFIG_FIELDS
+        and raw.get("schema_version") == LOCAL_AUTHORITY_SHADOW_CONFIG_SCHEMA
+        and raw.get("mode") == "file_one_way"
+    )
+    return {
+        "enabled": valid,
+        "mode": raw.get("mode") if isinstance(raw, Mapping) else None,
+        "status": "enabled" if valid else "invalid",
+    }
+
+
+def validate_local_authority_shadow_change(
+    enable_file: bool,
+    clear: bool,
+) -> None:
+    """Reject contradictory CLI intent before reading or mutating the registry."""
+
+    if enable_file and clear:
+        raise ValueError(
+            "--local-authority-shadow-file cannot be combined with "
+            "--clear-local-authority-shadow"
+        )
+
+
+def apply_local_authority_shadow_change(
+    goal: dict[str, Any],
+    enable_file: bool,
+    clear: bool,
+) -> None:
+    """Apply a validated default-off local-shadow configuration change."""
+
+    if not enable_file and not clear:
+        return
+    coordination = (
+        goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
+    )
+    if clear:
+        coordination.pop("authority_shadow", None)
+    else:
+        coordination["authority_shadow"] = {
+            "schema_version": LOCAL_AUTHORITY_SHADOW_CONFIG_SCHEMA,
+            "mode": "file_one_way",
+        }
+    if coordination:
+        goal["coordination"] = coordination
+    else:
+        goal.pop("coordination", None)
 
 
 def _base_evidence(
@@ -351,8 +414,39 @@ def observe_local_authority_commit(
     )
 
 
+def observe_todo_local_authority_commit(
+    payload: dict[str, Any],
+    registry_path: Path,
+    goal_id: str,
+    write_class: str,
+) -> dict[str, Any]:
+    """Attach post-commit shadow evidence without changing the Todo verdict."""
+
+    changed = any(
+        payload.get(field)
+        for field in ("changed", "added", "metadata_updated", "completed", "superseded")
+    )
+    if payload.get("dry_run") or not changed:
+        return payload
+    todo_id = str(payload.get("todo_id") or "none")
+    updated_at = str(payload.get("updated_at") or "unknown")
+    evidence = observe_local_authority_commit(
+        registry_path=registry_path,
+        runtime_root=None,
+        goal_id=goal_id,
+        source_operation=f"{write_class}:{todo_id}:{updated_at}",
+    )
+    if evidence is not None:
+        payload["authority_shadow"] = evidence
+    return payload
+
+
 __all__ = [
     "LOCAL_AUTHORITY_SHADOW_CONFIG_SCHEMA",
     "LOCAL_AUTHORITY_SHADOW_EVIDENCE_SCHEMA",
+    "apply_local_authority_shadow_change",
+    "local_authority_shadow_summary",
     "observe_local_authority_commit",
+    "observe_todo_local_authority_commit",
+    "validate_local_authority_shadow_change",
 ]

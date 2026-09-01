@@ -34,6 +34,8 @@ from .control_plane.agents.runtime_model import (
 )
 from .control_plane.agents.supervisor import normalize_peer_supervisor
 from .control_plane.agents.work_mode import normalize_agent_work_modes
+from .control_plane.coordination import local_authority_shadow_adapter as shadow
+from .control_plane.coordination.configuration import normalize_goal_write_scope
 from .control_plane.operator_inbox_binding import local_private_config_digest
 from .control_plane.reward_memory import (
     reward_memory_goal_policy,
@@ -70,9 +72,6 @@ WAITING_ON_CHOICES = (
 MULTI_SUBAGENT_FEATURE_CHOICES = ("off", "enabled")
 DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN = 2
 AGENT_MODEL_CHOICES = tuple(model.value for model in AgentRuntimeModel)
-LOCAL_AUTHORITY_SHADOW_CONFIG_SCHEMA_VERSION = (
-    "loopx_local_authority_shadow_config_v0"
-)
 
 
 def _control_plane(goal: dict[str, Any]) -> dict[str, Any]:
@@ -224,41 +223,6 @@ def _clean_registered_agents(values: list[str] | None) -> list[str] | None:
     return agents
 
 
-def _clean_write_scope(values: list[str] | None) -> list[str] | None:
-    if values is None:
-        return None
-    scopes: list[str] = []
-    for value in values:
-        for part in str(value).split(","):
-            scope = part.strip()
-            if scope and scope not in scopes:
-                scopes.append(scope)
-    return scopes
-
-
-def _local_authority_shadow_summary(goal: Mapping[str, Any]) -> dict[str, Any]:
-    coordination = (
-        goal.get("coordination")
-        if isinstance(goal.get("coordination"), Mapping)
-        else {}
-    )
-    raw = coordination.get("authority_shadow")
-    if raw is None:
-        return {"enabled": False, "mode": None, "status": "disabled"}
-    valid = bool(
-        isinstance(raw, Mapping)
-        and set(raw) == {"schema_version", "mode"}
-        and raw.get("schema_version")
-        == LOCAL_AUTHORITY_SHADOW_CONFIG_SCHEMA_VERSION
-        and raw.get("mode") == "file_one_way"
-    )
-    return {
-        "enabled": valid,
-        "mode": raw.get("mode") if isinstance(raw, Mapping) else None,
-        "status": "enabled" if valid else "invalid",
-    }
-
-
 def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
     quota = goal_quota_config(goal)
     control_plane = compact_control_plane_policy(goal.get("control_plane"))
@@ -285,8 +249,9 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         "explore_graph": compact_explore_graph_policy(goal.get("explore_graph")),
         "orchestration": orchestration,
         "waiting_on": goal.get("waiting_on"),
-        "write_scope": _clean_write_scope(coordination.get("write_scope") or []) or [],
-        "local_authority_shadow": _local_authority_shadow_summary(goal),
+        "write_scope": normalize_goal_write_scope(coordination.get("write_scope") or [])
+        or [],
+        "local_authority_shadow": shadow.local_authority_shadow_summary(goal),
         "checkpointed_boundary_authority": checkpointed_boundary_authority_summary(
             coordination
         ),
@@ -564,11 +529,9 @@ def configure_goal(
         raise ValueError(
             "--clear-write-scope cannot be combined with --replace-write-scope"
         )
-    if local_authority_shadow_file and clear_local_authority_shadow:
-        raise ValueError(
-            "--local-authority-shadow-file cannot be combined with "
-            "--clear-local-authority-shadow"
-        )
+    shadow.validate_local_authority_shadow_change(
+        local_authority_shadow_file, clear_local_authority_shadow
+    )
     if clear_waiting_on and waiting_on:
         raise ValueError("--clear-waiting-on cannot be combined with --waiting-on")
     adding_boundary_authority = any(
@@ -668,7 +631,7 @@ def configure_goal(
         clear_todo_lifecycle_authority
     )
     supervised_agents = _clean_registered_agents(supervised_agents)
-    write_scope = _clean_write_scope(write_scope)
+    write_scope = normalize_goal_write_scope(write_scope)
     issue_fix_reviewer_notification_config = _local_private_config_path(
         issue_fix_reviewer_notification_config,
         label="reviewer notification config",
@@ -1252,10 +1215,12 @@ def configure_goal(
                 coordination["write_scope"] = write_scope
             else:
                 existing_write_scope = (
-                    _clean_write_scope(coordination.get("write_scope") or []) or []
+                    normalize_goal_write_scope(coordination.get("write_scope") or [])
+                    or []
                 )
                 coordination["write_scope"] = (
-                    _clean_write_scope([*existing_write_scope, *write_scope]) or []
+                    normalize_goal_write_scope([*existing_write_scope, *write_scope])
+                    or []
                 )
         if clear_boundary_authority:
             coordination.pop("checkpointed_boundary_authority", None)
@@ -1275,24 +1240,9 @@ def configure_goal(
             coordination["checkpointed_boundary_authority"] = [*entries, entry]
         goal["coordination"] = coordination
 
-    if local_authority_shadow_file or clear_local_authority_shadow:
-        coordination = (
-            goal.get("coordination")
-            if isinstance(goal.get("coordination"), dict)
-            else {}
-        )
-        if clear_local_authority_shadow:
-            coordination.pop("authority_shadow", None)
-        else:
-            coordination["authority_shadow"] = {
-                "schema_version": LOCAL_AUTHORITY_SHADOW_CONFIG_SCHEMA_VERSION,
-                "mode": "file_one_way",
-            }
-        if coordination:
-            goal["coordination"] = coordination
-        else:
-            goal.pop("coordination", None)
-
+    shadow.apply_local_authority_shadow_change(
+        goal, local_authority_shadow_file, clear_local_authority_shadow
+    )
     after = _settings_summary(goal)
     changed_fields = _changed_fields(before, after)
     if goal != before_goal and not changed_fields:
@@ -1331,10 +1281,7 @@ def configure_goal(
         "peer_task_coordination": deepcopy(
             after.get("peer_task_coordination") or {"enabled": False}
         ),
-        "local_authority_shadow": deepcopy(
-            after.get("local_authority_shadow")
-            or {"enabled": False, "mode": None, "status": "disabled"}
-        ),
+        "local_authority_shadow": deepcopy(after["local_authority_shadow"]),
         "lark_event_inbox": _lark_event_inbox_config_summary(goal),
         "lark_kanban_heartbeat_sync": _lark_kanban_heartbeat_config_summary(goal),
         "reward_memory": reward_memory_goal_policy_summary(goal),
