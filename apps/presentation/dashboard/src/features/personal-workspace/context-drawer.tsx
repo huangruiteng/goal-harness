@@ -318,7 +318,7 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                       placeholder={t("drawer.taskDeferPlaceholder")}
                       value={todoResumeWhen}
                     />
-                    <button className="personal-secondary-action" disabled={!normalizedTodoResumeWhen} onClick={() => void previewTodoTransition(selection.item, "defer", t("drawer.taskDefer"), normalizedTodoResumeWhen ?? undefined)} type="button">{t("timeline.review")}</button>
+                    <button className="personal-secondary-action" disabled={!normalizedTodoResumeWhen} onClick={() => void previewTodoTransition(selection.item, "defer", t("drawer.taskDefer"), normalizedTodoResumeWhen ?? undefined)} type="button">{t("drawer.taskDeferReview")}</button>
                     <small>{todoResumeWhen.trim() && !normalizedTodoResumeWhen ? t("drawer.taskDeferInvalid") : t("drawer.taskDeferSupported")}</small>
                   </label>
                   <div className="personal-task-management-secondary">
