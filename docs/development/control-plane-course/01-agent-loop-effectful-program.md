@@ -190,16 +190,17 @@ effect 不再执行。
 |---|---|---|
 | Codex App / CLI quota | validation -> durable writeback -> quota spend -> conditional terminal closeout | quota 构建 data-encoded CLI plan，并从 event/run receipt 复核原始 turn identity；只有 final no-followup 在 spend 后关闭 Goal，host scheduler 留在 settlement 外 |
 | Isolated turn driver | validation -> durable writeback -> quota spend -> conditional terminal closeout | turn driver 拥有 in-process callbacks 和 journal checkpoint；terminal closeout 失败时只重放 closeout，不重复 writeback/spend |
-| Task-lease acquire | validation -> durable lease write | task-lease 模块继续拥有 owner eligibility、conflict、file lock 和 CAS；adapter 只负责 typed orchestration |
+| Task-lease acquire | validation -> durable lease write | native TS transaction 拥有 source-CAS、owner eligibility、conflict、file lock、CAS 和 atomic write；Python 只投影 compact authority facts 并执行一次 transport call |
 
 这也是“quota 的 Effect Program 是否继承 core”的准确答案：它复用并 re-export
 core-owned algebra，再提供自己的 plan builder 和 durable receipt 查询；它不继承一个
-领域基类。Task lease 也只组合 core algebra，纯 decision 仍留在自己的 bounded
-context。
+领域基类。Task-lease acquire 已退出这种 settlement adapter 形态，由 bounded native
+transaction 直接完成 decision、durable write 与 canonical receipt projection。
 
-三个 adapter 的 authority boundary 不同：CLI 路径跨 agent/host，turn driver
-拥有 callback，task lease 调用自己的原子 persistence API。把它们塞进一个 shared
-executor 会隐藏 owner，而不是减少重复知识。当前共享层只统一语义，不统一执行权。
+这些路径的 authority boundary 不同：quota CLI 跨 agent/host，turn driver 拥有
+callback，task lease 则在自己的 native transaction 内完成原子 persistence。把它们
+塞进一个 shared executor 会隐藏 owner，而不是减少重复知识。当前共享层只统一可复用
+primitive，不统一执行权。
 
 ## 四条不变量比类名更重要
 
@@ -221,10 +222,11 @@ settlement 前建立下一条 runnable frontier；它不是 terminal closeout。
 - `test_effect_program_adapter_conformance.py` 统一验证 identity、receipt 顺序、failure、
   short-circuit 和 scheduler-outside-settlement，并用 step reorder、failure 丢失、
   effect-id 漂移、重复 side effect mutation 证明 oracle 能抓住错误；
-- `test_effect_program_fault_replay_matrix.py` 穷举合法 phase prefix 与失败点，并覆盖
-  task-lease 的 idempotent replay、参数漂移和 writeback failure；
+- `test_effect_program_fault_replay_matrix.py` 穷举仍使用 Effect Program 的合法 phase
+  prefix 与失败点；
 - `test_effect_program_incident_replay.py` 用 public-safe 事故 fixture 回放真实 adapter；
-- adapter 自己的 focused tests 继续保护领域规则。共享 algebra 不接管领域 truth。
+- native task-lease tests 独立覆盖 idempotent replay、参数漂移、source-CAS、conflict、
+  crash/retry 与 atomic write；共享 algebra 不接管领域 truth。
 
 ## 哪些路径不应该 Kleisli 化
 
@@ -247,9 +249,10 @@ routing 仍然适合普通纯函数或领域状态机。scheduler apply / ACK �
    与 durable receipt 怎样绑定原始 turn；
 3. `loopx/control_plane/turn_driver/settlement.py`：看 callback adapter 怎样从合法
    journal prefix 恢复；
-4. `loopx/control_plane/work_items/task_lease_settlement.py`：看普通核心路径怎样只把
-   orchestration 接到 algebra，仍保留领域 owner；
-5. 三个 conformance / fault-replay / incident-replay 测试：从不变量反向检查实现。
+4. `loopx/control_plane/work_items/task_lease_acquire.ts`：看 bounded transaction 怎样在
+   一个 lock boundary 内完成 source-CAS、decision 与 durable write；
+5. Effect Program 的 conformance / fault-replay / incident-replay 测试，以及
+   task-lease native focused tests：从不变量反向检查两种边界。
 
 ## 读代码前先问五个问题
 

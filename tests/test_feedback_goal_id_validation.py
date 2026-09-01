@@ -31,6 +31,13 @@ def test_validate_goal_id_rejects_unsafe_ids(goal_id: str) -> None:
         validate_goal_id(goal_id)
 
 
+def test_validate_goal_id_rejects_absolute_path_segment() -> None:
+    # Relative traversal is covered above; absolute paths must also fail closed
+    # before any runtime goals/{goal_id}/ path join.
+    with pytest.raises(ValueError, match="invalid goal_id"):
+        validate_goal_id("/etc/passwd")
+
+
 def test_append_human_reward_rejects_traversal_before_any_io(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="invalid goal_id"):
         append_human_reward(

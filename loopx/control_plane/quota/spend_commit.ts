@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 
 import type { JsonObject } from "../effect_program.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
@@ -83,6 +83,16 @@ interface QuotaSpendCommitRequest {
   before: CompactQuotaDecision;
   after: CompactQuotaDecision;
   resolved_agent_id: string | null;
+}
+
+interface QuotaSpendReplayRequest {
+  schema_version: typeof QUOTA_SPEND_COMMIT_REQUEST_SCHEMA;
+  operation: "replay";
+  runtime_root: string;
+  goal_id: string;
+  effect_id: string;
+  resolved_agent_id: string | null;
+  read_only: boolean;
 }
 
 type SpendDisposition =
@@ -210,6 +220,34 @@ function compactDecision(value: unknown, label: string): CompactQuotaDecision {
     slot_minutes: decision.slot_minutes ?? null,
     spent_slots: optionalInteger(decision.spent_slots, `${label}.spent_slots`) ?? 0,
     allowed_slots: decision.allowed_slots ?? null,
+  };
+}
+
+function replayRequestObject(value: unknown): QuotaSpendReplayRequest {
+  const request = requiredObject(value, "quota.spend.commit replay params");
+  if (request.schema_version !== QUOTA_SPEND_COMMIT_REQUEST_SCHEMA) {
+    throw new EffectRuntimeRequestError("Quota spend commit request schema mismatch");
+  }
+  if (request.operation !== "replay") {
+    throw new EffectRuntimeRequestError("quota spend replay operation is invalid");
+  }
+  const runtimeRoot = requiredString(request.runtime_root, "runtime_root").trim();
+  if (!isAbsolute(runtimeRoot)) {
+    throw new EffectRuntimeRequestError("runtime_root must be absolute");
+  }
+  return {
+    schema_version: QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+    operation: "replay",
+    runtime_root: runtimeRoot,
+    goal_id: safeGoalId(request.goal_id),
+    effect_id: requiredString(request.effect_id, "effect_id").trim(),
+    resolved_agent_id: optionalString(
+      request.resolved_agent_id,
+      "resolved_agent_id",
+    )?.trim() ?? null,
+    read_only: request.read_only === undefined
+      ? false
+      : requiredBoolean(request.read_only, "read_only"),
   };
 }
 
@@ -383,7 +421,7 @@ function reasonSummary(
     case "capability_repair":
       return `${slots} automatic agent slot(s) completed as capability bridge repair work`;
     case "delivery_completion":
-      return `${slots} automatic agent slot(s) accounted after validated delivery ${String(request.preview.delivery_run_classification ?? "")}`;
+      return `${slots} automatic agent slot(s) accounted after validated delivery ${optionalString(request.preview.delivery_run_classification, "preview.delivery_run_classification") ?? ""}`;
     case "safe_bypass":
       return `${slots} automatic agent slot(s) completed as safe-bypass work`;
   }
@@ -596,16 +634,196 @@ function repairedTruncatedTail(
   return `${validPrefixText}${expectedLine.toString("utf8")}`;
 }
 
+type EffectIdentityResolution =
+  | { kind: "absent" }
+  | { kind: "matched"; record: JsonObject }
+  | { kind: "conflict"; reason: string };
+
+function effectIdentityValue(
+  value: unknown,
+): { value: string | null; malformed: boolean } {
+  if (value === null || value === undefined || value === "") {
+    return { value: null, malformed: false };
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return { value: null, malformed: true };
+  }
+  return { value: value.trim(), malformed: false };
+}
+
+function resolveEffectIdentity(
+  record: JsonObject,
+  expectedEffectId: string,
+): EffectIdentityResolution {
+  const rawMetadata = record.quota_spend_commit;
+  const recordEffect = effectIdentityValue(record.effect_ref);
+  const recordReferencesExpected = recordEffect.value === expectedEffectId;
+  const metadataPresent = rawMetadata !== undefined;
+  const metadata = metadataPresent ? jsonObject(rawMetadata) : null;
+  if (metadataPresent && metadata === null) {
+    if (!recordReferencesExpected) return { kind: "absent" };
+    return {
+      kind: "conflict",
+      reason: "quota spend index row has malformed effect metadata",
+    };
+  }
+  const metadataEffect = effectIdentityValue(metadata?.effect_id);
+  const referencesExpected = metadataEffect.value === expectedEffectId ||
+    recordReferencesExpected;
+  if (!referencesExpected) return { kind: "absent" };
+  if (
+    metadataEffect.malformed ||
+    recordEffect.malformed ||
+    (metadataPresent && metadataEffect.value === null)
+  ) {
+    return {
+      kind: "conflict",
+      reason: "quota spend index row has malformed effect identity",
+    };
+  }
+  if (
+    metadataEffect.value !== null &&
+    recordEffect.value !== null &&
+    metadataEffect.value !== recordEffect.value
+  ) {
+    return {
+      kind: "conflict",
+      reason: "quota spend index row has conflicting effect identities",
+    };
+  }
+  return { kind: "matched", record };
+}
+
 function matchingIndexRecord(
   records: readonly JsonObject[],
   effectId: string,
-): JsonObject | null {
+): EffectIdentityResolution {
   for (const record of [...records].reverse()) {
-    const metadata = jsonObject(record.quota_spend_commit);
-    if (metadata?.effect_id === effectId) return record;
-    if (record.effect_ref === effectId) return record;
+    if (record.classification !== QUOTA_SLOT_SPENT_CLASSIFICATION) continue;
+    const resolution = resolveEffectIdentity(record, effectId);
+    if (resolution.kind !== "absent") return resolution;
   }
-  return null;
+  return { kind: "absent" };
+}
+
+async function evaluateQuotaSpendReplay(
+  value: unknown,
+): Promise<QuotaSpendCommitResult> {
+  const request = replayRequestObject(value);
+  const indexPath = join(
+    request.runtime_root,
+    "goals",
+    request.goal_id,
+    "runs",
+    "index.jsonl",
+  );
+  const evaluate = async (): Promise<QuotaSpendCommitResult> => {
+    const content = await readOptionalText(indexPath);
+    const candidateResolution = matchingIndexRecord(
+      indexRecords(content),
+      request.effect_id,
+    );
+    if (candidateResolution.kind === "conflict") {
+      return {
+        schema_version: QUOTA_SPEND_COMMIT_RESULT_SCHEMA,
+        effect_id: request.effect_id,
+        status: "conflict",
+        written: false,
+        replayed: false,
+        repaired: false,
+        conflict: true,
+        request_digest: sha256(canonicalJson(value)),
+        index_digest: await quotaSpendIndexDigest(indexPath),
+        reason: candidateResolution.reason,
+        record: null,
+        payload: {
+          ok: false,
+          appended: false,
+          replay_found: true,
+          goal_id: request.goal_id,
+          effect_ref: request.effect_id,
+          reason: candidateResolution.reason,
+        },
+        reason_code: "effect_id_conflict",
+      };
+    }
+    const candidate = candidateResolution.kind === "matched"
+      ? candidateResolution.record
+      : null;
+    const basePayload: JsonObject = {
+      ok: false,
+      appended: false,
+      replay_found: candidate !== null,
+      goal_id: request.goal_id,
+      effect_ref: request.effect_id,
+    };
+    if (candidate === null) {
+      return {
+        schema_version: QUOTA_SPEND_COMMIT_RESULT_SCHEMA,
+        effect_id: request.effect_id,
+        status: "preview",
+        written: false,
+        replayed: false,
+        repaired: false,
+        conflict: false,
+        request_digest: sha256(canonicalJson(value)),
+        index_digest: await quotaSpendIndexDigest(indexPath),
+        reason: "quota spend replay was not found",
+        record: null,
+        payload: basePayload,
+      };
+    }
+    const candidateGoalId = typeof candidate.goal_id === "string"
+      ? candidate.goal_id.trim()
+      : "";
+    const candidateAgentId = typeof candidate.agent_id === "string"
+      ? candidate.agent_id.trim()
+      : "";
+    if (
+      candidateGoalId !== request.goal_id ||
+      !request.resolved_agent_id ||
+      candidateAgentId !== request.resolved_agent_id
+    ) {
+      return {
+        schema_version: QUOTA_SPEND_COMMIT_RESULT_SCHEMA,
+        effect_id: request.effect_id,
+        status: "preview",
+        written: false,
+        replayed: false,
+        repaired: false,
+        conflict: false,
+        request_digest: sha256(canonicalJson(value)),
+        index_digest: await quotaSpendIndexDigest(indexPath),
+        reason: "quota spend replay requires the same valid agent identity",
+        record: null,
+        payload: { ...basePayload, reason: "agent identity mismatch" },
+      };
+    }
+    return {
+      schema_version: QUOTA_SPEND_COMMIT_RESULT_SCHEMA,
+      effect_id: request.effect_id,
+      status: "replayed",
+      written: false,
+      replayed: true,
+      repaired: false,
+      conflict: false,
+      request_digest: sha256(canonicalJson(value)),
+      index_digest: await quotaSpendIndexDigest(indexPath),
+      reason: "quota spend replayed for the same provider effect",
+      record: candidate,
+      payload: {
+        ...candidate,
+        ...basePayload,
+        ok: true,
+        idempotent_replay: true,
+        agent_id: candidateAgentId,
+        reason: "quota spend replayed for the same provider effect",
+      },
+    };
+  };
+  return request.read_only
+    ? await evaluate()
+    : await withFileMutationLock(indexPath, evaluate);
 }
 
 function indexRecordFor(
@@ -879,17 +1097,13 @@ async function ensureMarkdownArtifact(
   return false;
 }
 
-async function ensureReceiptArtifacts(
+async function readReceiptIndex(
   receipt: QuotaSpendCommitReceipt,
-): Promise<boolean> {
-  let repaired = false;
-  repaired = await ensureJsonArtifact(receipt.json_path, receipt.record) || repaired;
-  repaired = await ensureMarkdownArtifact(receipt.markdown_path, receipt.markdown) || repaired;
+): Promise<{ content: string | null; records: JsonObject[]; repaired: boolean }> {
   const indexBytes = await readOptionalBytes(receipt.index_path);
   let content = indexBytes === null ? null : indexBytes.toString("utf8");
-  let records: JsonObject[];
   try {
-    records = indexRecords(content);
+    return { content, records: indexRecords(content), repaired: false };
   } catch (error) {
     const recovered = indexBytes === null
       ? null
@@ -902,10 +1116,28 @@ async function ensureReceiptArtifacts(
     if (recovered === null) throw error;
     await atomicWriteText(receipt.index_path, recovered);
     content = recovered;
-    records = indexRecords(content);
-    repaired = true;
+    return { content, records: indexRecords(content), repaired: true };
   }
-  const match = matchingIndexRecord(records, receipt.effect_id);
+}
+
+async function ensureReceiptArtifacts(
+  receipt: QuotaSpendCommitReceipt,
+): Promise<boolean> {
+  let repaired = false;
+  repaired = await ensureJsonArtifact(receipt.json_path, receipt.record) || repaired;
+  repaired = await ensureMarkdownArtifact(receipt.markdown_path, receipt.markdown) || repaired;
+  const index = await readReceiptIndex(receipt);
+  repaired = index.repaired || repaired;
+  const matchResolution = matchingIndexRecord(index.records, receipt.effect_id);
+  if (matchResolution.kind === "conflict") {
+    throw new EffectRuntimeRequestError(
+      matchResolution.reason,
+      "effect_id_conflict",
+    );
+  }
+  const match = matchResolution.kind === "matched"
+    ? matchResolution.record
+    : null;
   if (match) {
     const metadata = jsonObject(match.quota_spend_commit);
     if (metadata?.request_digest !== receipt.request_digest) {
@@ -915,7 +1147,7 @@ async function ensureReceiptArtifacts(
       );
     }
   } else {
-    const prefix = content ?? "";
+    const prefix = index.content ?? "";
     if (prefix && !prefix.endsWith("\n")) {
       await atomicWriteText(
         receipt.index_path,
@@ -932,6 +1164,10 @@ async function ensureReceiptArtifacts(
 export async function evaluateQuotaSpendCommit(
   value: unknown,
 ): Promise<QuotaSpendCommitResult> {
+  const rawRequest = requiredObject(value, "quota.spend.commit params");
+  if (rawRequest.operation === "replay") {
+    return await evaluateQuotaSpendReplay(rawRequest);
+  }
   const request = requestObject(value);
   const fingerprint = requestDigest(request);
   const record = buildSpendRecord(request, fingerprint);
@@ -1021,7 +1257,7 @@ export async function evaluateQuotaSpendCommit(
         fingerprint,
         repaired ? "repaired" : "replayed",
         await quotaSpendIndexDigest(indexPath),
-        String(replayPayload.reason),
+        optionalString(replayPayload.reason, "replay payload reason") ?? "",
         existingReceipt.record,
         replayPayload,
       );
@@ -1047,8 +1283,20 @@ export async function evaluateQuotaSpendCommit(
       );
     }
     const currentRecords = indexRecords(currentIndexContent);
-    const duplicate = matchingIndexRecord(currentRecords, request.effect_id);
-    if (duplicate) {
+    const duplicateResolution = matchingIndexRecord(currentRecords, request.effect_id);
+    if (duplicateResolution.kind === "conflict") {
+      return result(
+        request,
+        fingerprint,
+        "conflict",
+        currentDigest,
+        duplicateResolution.reason,
+        null,
+        { ...request.preview, ok: false, appended: false },
+        { reason_code: "effect_id_conflict" },
+      );
+    }
+    if (duplicateResolution.kind === "matched") {
       return result(
         request,
         fingerprint,

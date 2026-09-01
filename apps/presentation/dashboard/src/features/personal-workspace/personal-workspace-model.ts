@@ -56,6 +56,8 @@ export type WorkspaceGoal = {
   agentLabel?: string;
   agentSentence: string;
   agentTodos: WorkspaceAgentTodo[];
+  /** Completed agent Todo count from the status payload; item lists only carry open Todos. */
+  doneTodoCount?: number;
   goalId: string;
   latestActivity?: string;
   needsYou?: string | null;
@@ -164,7 +166,7 @@ export type WorkspaceActionPreview = {
     | "gate.resolve"
     | "run.correct";
   agentLabel?: string;
-  fields: Array<{ label: string; value: string }>;
+  fields: Array<{ key: string; label: string; value: string }>;
   goalId?: string;
   lifecycleOperation?: "stop" | "resume" | "delete";
   impact: string;
@@ -308,7 +310,12 @@ export type PersonalWorkspaceCallbacks = {
   onRetryResumeRun?: (run: WorkspaceRun) => void | Promise<void>;
   onStartNewRunSession?: (run: WorkspaceRun) => void | Promise<void>;
   onUpdateSchedule?: (schedule: WorkspaceSchedule, operation: "edit" | "pause" | "resume" | "run_now" | "stop") => void | Promise<void>;
-  onSendMessage?: (message: string, agentId: string, goalId: string | null, attachments?: WorkspaceImageAttachment[]) => void | Promise<void>;
+  onSendMessage?: (
+    message: string,
+    agentId: string,
+    goalId: string | null,
+    attachments?: WorkspaceImageAttachment[],
+  ) => void | WorkspaceActionPreviewRequest | Promise<void | WorkspaceActionPreviewRequest>;
   onSelectAgent?: (agentId: string) => void;
   onSelectChannel?: (channel: WorkspaceChannel) => void;
   onSelectGoal?: (goalId: string | null) => void;

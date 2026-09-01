@@ -369,7 +369,10 @@ This succession decision is durable Todo state. A later progress observation,
 vision ACK, coverage-exhausted result, or rewritten rationale cannot substitute
 for it. Every new completion therefore retains an opaque completion identity.
 A quota-bound completion still permits only the receipt-backed same-turn
-`todo complete --no-follow-up` recovery. An ordinary unscoped completion gets a
+`todo complete` transition for agent advancement work. Complete the matching
+accountable `refresh-state` and `quota spend-slot` first; explicit
+`same_agent_non_delivery` work, monitors, user actions, and user gates keep
+their existing lifecycle paths. An ordinary unscoped completion gets a
 stable `local_completion_*` identity; if a later `refresh-state` discovers that
 the finished Goal has no real successor, its typed rejection may project
 `--completion-identity-key` for one direct lifecycle reentry. That command is
@@ -378,6 +381,12 @@ valid only for the exact already-completed Todo, its matching local identity,
 It cannot be supplied for an open Todo or used as a quota turn identity.
 Otherwise add/link a real successor. Do not create a user gate merely to
 silence a succession warning.
+
+Compatibility host adapters whose established transaction completes the Todo
+before writing the same-turn refresh and quota receipts must explicitly mark
+their non-repository work `same_agent_non_delivery`. Repository advancement
+through those adapters fails closed with a typed settlement blocker until the
+adapter adopts a writeback-and-spend-before-completion transaction.
 
 This keeps the active checklist honest without making LoopX a heavyweight
 project-management state machine.

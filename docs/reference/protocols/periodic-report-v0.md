@@ -66,6 +66,30 @@ artifact/document digest, or mention markup authored into report content,
 title, or footer fails closed before send. This keeps relevance in the core
 contract and provider identity on the extension side.
 
+The shipped execution path is `loopx periodic-report deliver-goal-channel`.
+Its delivery intent must contain exactly two ordered HTTPS announcements: the
+hosted report entry, then the Lark document entry. They are sent as two
+independently idempotent messages and each one must pass exact readback. The
+command does not accept a chat, profile, App identity, or sender override. Instead,
+the Lark extension resolves the current Goal's local-private Goal Channel
+binding and requires `mode=project_bot`, Bot sender identity, a non-default
+profile, exact Bot App id and display name, and an enabled Lark channel.
+Before sending, it live-verifies that the bound profile authenticates as the
+same Bot App and can reach the same chat. After sending, it reads back the
+exact interactive card from that chat and requires the provider-native message
+sender to be an `app` whose id equals the bound Bot App id. Revalidating the
+profile alone is not sender proof.
+Missing bindings, local-user mode, identity drift, or incomplete readback fail
+closed; no environment-default or user-identity fallback exists.
+
+The governed pending-intent consumer persists the normalized generation bundle
+and writes one blocked, agent-owned delivery successor before creating the
+approval gate. The gate links to that successor and covers its exact decision
+scope. Approval removes only that scope and resumes the successor, making the
+external action visible to quota; rejection or cancellation keeps it blocked.
+This prevents an approved report from disappearing into a quiet terminal or
+monitor-only projection.
+
 `periodic_report_project_progress_projection_v0` is the built-in,
 domain-neutral source input. It groups typed project facts into progress,
 capability evolution, risks, next actions, and supporting evidence, with no
@@ -159,8 +183,9 @@ candidate facts. The built-in kinds are:
   and a successor is established or the goal is terminal;
 - `primary_goal_outcome`: the primary delivery outcome is validated and has a
   durable writeback;
-- `bounded_segment_milestone`: a named, bounded work segment completed or
-  entered replan and was durably written back, even when open todos remain;
+- `bounded_segment_milestone`: an evidence-linked material checkpoint closed
+  the current vision and the resulting successor frontier or terminal Goal was
+  durably settled, even when unrelated Todos remain open;
 - `material_decision`: an approved, rejected, or cancelled decision changed
   the execution route and was durably recorded;
 - `material_blocker`: a new or escalated P0 blocker stops the primary path;
@@ -181,20 +206,56 @@ the selected and coalesced ids, every suppression reason, cooldown state, and
 the report kind (`cadence_digest`, `milestone_update`, `exception_update`, or
 `manual_update`).
 
-`bounded_segment_milestone` accepts only `segment_ref`, `transition`,
-`delivered_count`, `remaining_todo_count`, and `durable_writeback` facts.
-`segment_ref` and `transition` are required. Counts are non-negative and
-default to zero when omitted. A `segment_completed` or `replan_entered`
-transition is material only after `durable_writeback=true`;
-`vision_checkpoint` remains non-material. Remaining todos do not suppress an
-otherwise material segment milestone. The trigger has priority 40, between
-`material_decision` and `cadence_due`, maps to `milestone_update`, and obeys
-the normal profile cooldown.
+`bounded_segment_milestone` is derived from the same goal-vision and frontier
+facts that drive autonomous replan, but it is a stricter success-path result.
+It requires a satisfied evidence-linked material outcome checkpoint, a closed
+current vision, durable writeback, and one of these continuation settlements:
+
+- the Goal is terminal; or
+- an active Goal emitted the existing `vision_successor_required` transition,
+  the matching replan semantic delta was accepted, and the successor vision
+  plus its owned frontier were durably established.
+
+The producer deduplicates by the closed-vision revision and frontier identity.
+Ordinary Todo completion, Todo-count thresholds, elapsed time, setup work, and
+generic replan causes such as blockers, succession gaps, long Todo chains, or
+monitor exhaustion are evidence or control-plane context only; they never
+prove stage completion. No Todo declaration or second Stage lifecycle is
+introduced. Remaining unrelated Todos do not suppress an otherwise valid
+closed-vision milestone. The trigger has priority 40, maps to
+`milestone_update`, and obeys the normal profile cooldown.
 
 An eligible decision may be embedded as `trigger_receipt` in a
 `periodic_report_run_request_v0`. Its `report_key` and `report_kind` then
 participate in run identity, so a milestone update and a scheduled digest over
 the same evidence window cannot collide.
+
+### Post-writeback hook boundary
+
+The optional automatic path uses the provider-neutral TypeScript
+`post_writeback` capability-hook contract. The CLI composition root registers
+`periodic_report.runtime_trigger` only when the Goal's local control-plane
+configuration explicitly enables a periodic-report profile. Core dispatches
+only after the primary `refresh-state` durable writeback and exact settlement
+readback have succeeded with complete Goal, Agent, Todo, Turn, and effect
+identity. The best-effort rollout-event log is not dispatch authority.
+
+The hook input contains only the committed receipt identity, stable state
+revision, and derived `periodic_report_stage_completion_receipt_v0`. Its result
+is an idempotent `periodic_report.trigger_evaluation` intent with an empty write
+scope. Core validates registration, input, result, and the sidecar receipt in
+TypeScript, then stores the bounded receipt separately from the primary
+transaction. Terminal replay skips provider invocation. A transient provider
+or result-contract failure persists a `retryable_failure` receipt with a stable
+dispatch reference and monotonic attempt count; exact replay may atomically
+advance that receipt to `intent_recorded` or `not_applicable`. Conflicts and
+optional hook failures remain isolated and cannot roll back the primary
+writeback or alter quota-spend eligibility.
+
+Recorded trigger intent means neither report generation nor publication. A
+later governed executor must evaluate the intent, and composition, rendering,
+content checks, owner approval, and external sink delivery remain separately
+authorized steps.
 
 ## Request and identity
 

@@ -63,6 +63,7 @@ def build_codex_app_settlement_plan(
     *,
     goal_id: str,
     agent_id: str,
+    command_prefix: str = "loopx",
     todo_id: str | None = None,
     replan_obligation_id: str | None = None,
     scoped_cli_args: str,
@@ -74,6 +75,7 @@ def build_codex_app_settlement_plan(
     return build_turn_scoped_cli_settlement_plan(
         goal_id=goal_id,
         agent_id=agent_id,
+        command_prefix=command_prefix,
         todo_id=todo_id,
         replan_obligation_id=replan_obligation_id,
         scoped_cli_args=scoped_cli_args,
@@ -88,6 +90,7 @@ def build_turn_scoped_cli_settlement_plan(
     *,
     goal_id: str,
     agent_id: str,
+    command_prefix: str = "loopx",
     todo_id: str | None = None,
     replan_obligation_id: str | None = None,
     scoped_cli_args: str,
@@ -125,19 +128,20 @@ def build_turn_scoped_cli_settlement_plan(
         if delivery_boundary == "in_flight_continuation"
         else ""
     )
+    cli_prefix = command_prefix.strip() or "loopx"
     terminal_closeout = (
-        f"loopx todo complete --goal-id {shlex.quote(goal_id)}{binding_arg}"
+        f"{cli_prefix} todo complete --goal-id {shlex.quote(goal_id)}{binding_arg}"
         f"{lifecycle_actor_args}{turn_arg} --evidence '<validated evidence>'"
         " --no-follow-up"
     )
     writeback = (
-        f"loopx refresh-state --goal-id {shlex.quote(goal_id)} "
+        f"{cli_prefix} refresh-state --goal-id {shlex.quote(goal_id)} "
         "--classification <validated_progress> --delivery-batch-scale <scale> "
         f"--delivery-outcome <outcome>{boundary_arg}{binding_arg}{turn_arg}"
         f"{scoped_cli_args}"
     )
     spend = (
-        f"loopx quota spend-slot --goal-id {shlex.quote(goal_id)} --slots 1 "
+        f"{cli_prefix} quota spend-slot --goal-id {shlex.quote(goal_id)} --slots 1 "
         f"--source {quota_spend_source} --execute{binding_arg}{turn_arg}"
         f"{scoped_cli_args}"
     )

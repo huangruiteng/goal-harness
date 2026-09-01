@@ -103,7 +103,7 @@ lifecycle 选择，不是所有贡献的默认终点。
 
 ## 版本基线
 
-当前内容以 LoopX GitHub release `v0.5.2` 为发布锚点；本地命令示例已按 `loopx 0.5.2` 的
+当前内容以 LoopX GitHub release `v0.5.3` 为发布锚点；本地命令示例已按 `loopx 0.5.3` 的
 公开 CLI 与协议表面复核。该版本要求 Python 3.11+ 与 Node.js 22.6+；后者运行由 LoopX 自动管理、
 空闲后退出的 TypeScript Effect runtime，用户不需要手工维护 daemon。
 
@@ -129,7 +129,7 @@ node --version
 
 ### 如何理解当前 TypeScript 改造
 
-`v0.5.2` 不是“已经把 LoopX 全部重写成 TypeScript”。当前发布基线是：
+`v0.5.3` 不是“已经把 LoopX 全部重写成 TypeScript”。当前发布基线是：
 
 - TypeScript 已拥有 Effect Program、Turn settlement、Todo completion、quota delivery routing、
   workspace causality、scheduler transition/state 等迁移切片的 canonical semantics；
@@ -140,18 +140,18 @@ node --version
 - 当前 `main` 已进入 transaction-payoff phase：后续以完整 transaction cutover 和删除旧语义
   为进展单位，不继续堆 leaf helper 与 bridge。
 
-发布态以 `v0.5.2` tag 和 release notes 为准；迁移阶段、下一批 cutover 与最终 CLI/App 收敛以
+发布态以 `v0.5.3` tag 和 release notes 为准；迁移阶段、下一批 cutover 与最终 CLI/App 收敛以
 [TypeScript Control-Plane Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/)
 的当前状态为准。RFC 中的 Stage 3/4 仍是后续方向，不应写成已经发布。
 
-### 从 `v0.4.4` 阅读基线升级到 `v0.5.2`
+### 从 `v0.4.4` 阅读基线升级到 `v0.5.3`
 
 如果你读过旧版 Dev Book，优先校准四个变化：
 
-| 主题 | `v0.5.2` 已发布事实 | 深入入口 |
+| 主题 | `v0.5.3` 已发布事实 | 深入入口 |
 | --- | --- | --- |
 | Control Plane | 多个高风险 decision/effect 已迁入 typed TypeScript transaction owner；Python facade 仍承担迁移期边界 | [迁移 RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/) |
-| Operator surface | Personal Workspace 已提供 Goal、Task、Chat 和 read-only status source 入口；界面不是新的事实源 | [Dashboard README](https://github.com/huangruiteng/loopx/blob/v0.5.2/apps/presentation/dashboard/README.md) |
+| Operator surface | Personal Workspace 已提供 Goal、Task、Chat 和 read-only status source 入口；界面不是新的事实源 | [Dashboard README](https://github.com/huangruiteng/loopx/blob/v0.5.3/apps/presentation/dashboard/README.md) |
 | Host runtime | Codex、Claude Code、OpenCode、Pi、KunlunCode、DeepSeek Harness 与 custom runner 具有不同 activation/stop contract | [Runtime Connector Catalog](/loopx/docs/integrations/runtime-connector-catalog/) |
 | Capability / Provider | Capability 由 package-owned catalog entry、真实 command 和 durable validation 共同定义；Provider/Extension 不继承 Kernel authority | [Capability Catalog](/loopx/docs/capabilities/) |
 

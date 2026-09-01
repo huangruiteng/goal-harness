@@ -32,6 +32,44 @@ def test_source_checkout_contains_packaged_workflow_skills() -> None:
         assert (Path(source["skills_root"]) / skill_id / "SKILL.md").is_file()
 
 
+def test_pip_target_distribution_finds_filtered_data_file_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    distribution_root = tmp_path / "runtime" / "site-packages"
+    module_file = distribution_root / "loopx" / "workflow_skill_install.py"
+    module_file.parent.mkdir(parents=True)
+    module_file.write_text("# fixture\n", encoding="utf-8")
+    skills_root = distribution_root / "share" / "loopx" / "skills"
+    for skill_id in PACKAGED_HOST_SKILL_IDS:
+        skill_dir = skills_root / skill_id
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(f"# {skill_id}\n", encoding="utf-8")
+
+    class TargetDistribution:
+        version = "0.5.3"
+        files: tuple[Path, ...] = ()
+
+        @staticmethod
+        def locate_file(path: str) -> Path:
+            return distribution_root / path
+
+    monkeypatch.setattr(install_module, "__file__", str(module_file))
+    monkeypatch.setattr(
+        install_module,
+        "distribution",
+        lambda package: TargetDistribution() if package == "loopx" else None,
+    )
+
+    source = resolve_workflow_skill_source()
+
+    assert source["available"] is True
+    assert source["kind"] == "python_distribution"
+    assert source["skills_root"] == skills_root
+    assert source["source_root"] == distribution_root
+    assert source["distribution_version"] == "0.5.3"
+
+
 def test_install_is_idempotent_and_uninstall_removes_managed_skills(
     tmp_path: Path,
 ) -> None:

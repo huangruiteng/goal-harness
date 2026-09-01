@@ -1,0 +1,15 @@
+{
+  "operation": "upgrade_plan",
+  "schema_version": "loopx_codex_provider_routing_request_v0",
+  "upgrade": {
+    "changed_seams": [
+      "history_projection",
+      "transport_pool",
+      "model_catalog",
+      "modality_routing",
+      "settings_revision"
+    ],
+    "current_ref": "public-current-ref",
+    "target_ref": "public-target-ref"
+  }
+}

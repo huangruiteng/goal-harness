@@ -8,14 +8,21 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from loopx.extensions.lark import inbox_reactions as inbox_reactions_module
 from loopx.extensions.lark.event_inbox import load_lark_event_inbox_config
 from loopx.extensions.lark.inbox_reactions import (
     complete_lark_event_inbox_reactions,
+    ensure_lark_event_inbox_received_reaction,
     lark_inbox_reaction_receipts,
     mark_lark_event_inbox_processing,
     record_lark_inbox_reaction,
 )
-from loopx.extensions.lark.inbox_reply import reply_lark_event_inbox
+from loopx.extensions.lark.inbox_reply import (
+    reply_lark_event_inbox,
+    send_lark_inbox_message,
+)
 
 
 def _fixture(tmp_path: Path, *, lifecycle: bool = True) -> tuple[Path, Path, Path]:
@@ -37,6 +44,8 @@ def _fixture(tmp_path: Path, *, lifecycle: bool = True) -> tuple[Path, Path, Pat
                 "processing_reaction_emoji": "OnIt",
             }
         )
+    else:
+        reply["received_reaction_emoji"] = ""
     config.write_text(
         json.dumps(
             {
@@ -118,6 +127,195 @@ class ReactionRunner:
         raise AssertionError(call)
 
 
+def test_received_reaction_boundary_acknowledges_pending_message_once(
+    tmp_path: Path,
+) -> None:
+    config, inbox, project = _fixture(tmp_path)
+    created: list[tuple[str, str]] = []
+
+    def create(message_id: str, emoji_type: str) -> str:
+        created.append((message_id, emoji_type))
+        return "reaction_Get"
+
+    def delete(_message_id: str, _reaction_id: str) -> bool:
+        return True
+
+    event = {"message_id": "om_reaction_fixture"}
+    first = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event=event,
+        create_reaction=create,
+        delete_reaction=delete,
+    )
+    duplicate = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event=event,
+        create_reaction=create,
+        delete_reaction=delete,
+    )
+
+    assert first["status"] == "received"
+    assert duplicate["status"] == "already_received"
+    assert created == [("om_reaction_fixture", "Get")]
+    assert (
+        lark_inbox_reaction_receipts(
+            inbox=inbox,
+            message_id="om_reaction_fixture",
+        )["received"]["reaction_id"]
+        == "reaction_Get"
+    )
+
+
+def test_received_reaction_boundary_is_independent_of_attention_kind(
+    tmp_path: Path,
+) -> None:
+    config, _inbox, project = _fixture(tmp_path)
+    created: list[tuple[str, str]] = []
+
+    result = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event={
+            "message_id": "om_reaction_fixture",
+            "mentions": [{"name": "Another Bot"}],
+        },
+        create_reaction=lambda message_id, emoji_type: (
+            created.append((message_id, emoji_type)) or "reaction_Get"
+        ),
+        delete_reaction=lambda _message_id, _reaction_id: True,
+    )
+
+    assert result["status"] == "received"
+    assert result["captured_pending"] is True
+    assert created == [("om_reaction_fixture", "Get")]
+
+
+def test_received_reaction_boundary_does_not_react_after_settlement(
+    tmp_path: Path,
+) -> None:
+    config, inbox, project = _fixture(tmp_path)
+    (inbox / "processed.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "lark_event_inbox_processed_v0",
+                "message_ids": ["om_reaction_fixture"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    created: list[tuple[str, str]] = []
+
+    result = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event={
+            "message_id": "om_reaction_fixture",
+            "mentions": [{"name": "Project Review Bot"}],
+        },
+        create_reaction=lambda message_id, emoji_type: (
+            created.append((message_id, emoji_type)) or "reaction_Get"
+        ),
+        delete_reaction=lambda _message_id, _reaction_id: True,
+    )
+
+    assert result["status"] == "already_settled"
+    assert result["external_writes_performed"] is False
+    assert created == []
+
+
+def test_received_reaction_receipt_failure_reports_provider_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, _inbox, project = _fixture(tmp_path)
+    real_record = inbox_reactions_module.record_lark_inbox_reaction
+    monkeypatch.setattr(
+        "loopx.extensions.lark.inbox_reactions.record_lark_inbox_reaction",
+        lambda **_kwargs: (_ for _ in ()).throw(OSError("fixture receipt failure")),
+    )
+
+    result = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event={
+            "message_id": "om_reaction_fixture",
+            "mentions": [{"name": "Project Review Bot"}],
+        },
+        create_reaction=lambda _message_id, _emoji_type: "reaction_Get",
+        delete_reaction=lambda _message_id, _reaction_id: True,
+    )
+
+    assert result["status"] == "receipt_failed"
+    assert result["blocker"] == "lark_inbox_received_reaction_receipt_failed"
+    assert result["created_count"] == 1
+    assert result["external_writes_performed"] is True
+    monkeypatch.setattr(
+        "loopx.extensions.lark.inbox_reactions.record_lark_inbox_reaction",
+        real_record,
+    )
+    created: list[tuple[str, str]] = []
+    recovered = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event={"message_id": "om_reaction_fixture"},
+        create_reaction=lambda message_id, emoji_type: (
+            created.append((message_id, emoji_type)) or "reaction_duplicate"
+        ),
+        delete_reaction=lambda _message_id, _reaction_id: True,
+    )
+
+    assert recovered["status"] == "receipt_recovered"
+    assert recovered["external_writes_performed"] is False
+    assert created == []
+
+
+def test_received_reaction_uncertain_operation_never_repeats_provider_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, _inbox, project = _fixture(tmp_path)
+    real_write = inbox_reactions_module._write_received_operation
+    write_count = 0
+
+    def fail_created_receipt(**kwargs: object) -> None:
+        nonlocal write_count
+        write_count += 1
+        if write_count == 2:
+            raise OSError("fixture operation receipt failure")
+        real_write(**kwargs)
+
+    monkeypatch.setattr(
+        inbox_reactions_module,
+        "_write_received_operation",
+        fail_created_receipt,
+    )
+    created: list[tuple[str, str]] = []
+    first = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event={"message_id": "om_reaction_fixture"},
+        create_reaction=lambda message_id, emoji_type: (
+            created.append((message_id, emoji_type)) or "reaction_Get"
+        ),
+        delete_reaction=lambda _message_id, _reaction_id: False,
+    )
+    second = ensure_lark_event_inbox_received_reaction(
+        project=project,
+        config_path=config,
+        event={"message_id": "om_reaction_fixture"},
+        create_reaction=lambda message_id, emoji_type: (
+            created.append((message_id, emoji_type)) or "reaction_duplicate"
+        ),
+        delete_reaction=lambda _message_id, _reaction_id: False,
+    )
+
+    assert first["status"] == "operation_receipt_failed"
+    assert first["blocker"] == "lark_inbox_received_reaction_provider_outcome_uncertain"
+    assert second["status"] == "provider_outcome_uncertain"
+    assert second["external_writes_performed"] is False
+    assert created == [("om_reaction_fixture", "Get")]
+
+
 class ReplyRunner:
     def __init__(
         self,
@@ -126,12 +324,14 @@ class ReplyRunner:
         fail_reaction_delete: bool = False,
         readback_text: str | None = None,
         readback_mentions: list[dict[str, Any]] | None = None,
+        include_mentioned_member: bool = True,
     ) -> None:
         self.calls: list[list[str]] = []
         self.matching_readback = matching_readback
         self.fail_reaction_delete = fail_reaction_delete
         self.readback_text = readback_text
         self.readback_mentions = readback_mentions
+        self.include_mentioned_member = include_mentioned_member
 
     def __call__(self, args: Sequence[str]) -> dict[str, Any]:
         call = list(args)
@@ -154,6 +354,24 @@ class ReplyRunner:
             }
         if call[3:6] == ["im", "chats", "get"]:
             return {"returncode": 0, "stdout": "{}", "stderr": ""}
+        if "chat.members" in call and "get" in call:
+            return {
+                "returncode": 0,
+                "stdout": json.dumps(
+                    {
+                        "items": [
+                            {
+                                "member_id": (
+                                    "ou_public_reviewer"
+                                    if self.include_mentioned_member
+                                    else "ou_someone_else"
+                                )
+                            }
+                        ]
+                    }
+                ),
+                "stderr": "",
+            }
         if "+messages-reply" in call or "+messages-send" in call:
             if "--dry-run" in call:
                 reply_text = call[call.index("--text") + 1]
@@ -558,6 +776,30 @@ def test_reply_rejects_literal_backslash_n_before_provider(tmp_path: Path) -> No
     assert runner.calls == []
 
 
+def test_reply_rejects_literal_notification_mention_before_provider(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner()
+
+    try:
+        reply_lark_event_inbox(
+            project=project,
+            config_path=config,
+            message_id="om_reaction_fixture",
+            text="@PublicReviewer please review",
+            execute=False,
+            runner=runner,
+        )
+    except ValueError as exc:
+        assert "structured <at ...> node" in str(exc)
+    else:
+        raise AssertionError(
+            "literal notification mention must fail before provider calls"
+        )
+    assert runner.calls == []
+
+
 def test_multiline_readback_must_preserve_line_structure(tmp_path: Path) -> None:
     config, _, project = _fixture(tmp_path, lifecycle=False)
     runner = ReplyRunner(readback_text="line one line two")
@@ -641,6 +883,184 @@ def test_rendered_mention_name_does_not_override_identity_mismatch(
     assert result["reply_verified"] is False
 
 
+def test_structured_mention_requires_exact_chat_member_before_send(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(include_mentioned_member=False)
+
+    result = reply_lark_event_inbox(
+        project=project,
+        config_path=config,
+        message_id="om_reaction_fixture",
+        text='<at open_id="ou_public_reviewer">Public Reviewer</at> please review',
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "gate_required"
+    assert result["blocker"] == "lark_inbox_reply_mention_identity_unresolved"
+    assert not any(
+        "+messages-send" in call or "+messages-reply" in call for call in runner.calls
+    )
+
+
+def test_structured_mention_queries_the_declared_member_identity_kind(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(
+        readback_text="@_user_1 please review",
+        readback_mentions=[
+            {
+                "key": "@_user_1",
+                "name": "Public Reviewer",
+                "id": {"open_id": "ou_public_reviewer"},
+            }
+        ],
+    )
+
+    result = send_lark_inbox_message(
+        project=project,
+        config_path=config,
+        text='<at open_id="ou_public_reviewer">Public Reviewer</at> please review',
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is True
+    member_call = next(call for call in runner.calls if "chat.members" in call)
+    assert member_call[member_call.index("--member-id-type") + 1] == "open_id"
+
+
+def test_plain_reply_rejects_unexpected_provider_mention(tmp_path: Path) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(
+        readback_text="please review",
+        readback_mentions=[
+            {
+                "key": "@_user_1",
+                "name": "Unexpected Reviewer",
+                "id": {"open_id": "ou_unexpected_reviewer"},
+            }
+        ],
+    )
+
+    result = reply_lark_event_inbox(
+        project=project,
+        config_path=config,
+        message_id="om_reaction_fixture",
+        text="please review",
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "sent_unverified"
+    assert result["reply_verified"] is False
+
+
+def test_top_level_send_uses_same_mention_safe_delivery_contract(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner(
+        readback_text="@_user_1 please review",
+        readback_mentions=[
+            {
+                "key": "@_user_1",
+                "name": "Public Reviewer",
+                "id": {"open_id": "ou_public_reviewer"},
+            }
+        ],
+    )
+
+    result = send_lark_inbox_message(
+        project=project,
+        config_path=config,
+        text='<at open_id="ou_public_reviewer">Public Reviewer</at> please review',
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is True
+    assert result["schema_version"] == "lark_outbound_message_v0"
+    assert result["status"] == "sent_verified"
+    assert result["placement"] == "chat_root"
+    assert any(
+        "+messages-send" in call and "--dry-run" not in call for call in runner.calls
+    )
+    assert not any("+messages-reply" in call for call in runner.calls)
+
+
+def test_top_level_send_rejects_literal_mention_before_provider(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner()
+
+    with pytest.raises(ValueError, match="structured <at"):
+        send_lark_inbox_message(
+            project=project,
+            config_path=config,
+            text="@PublicReviewer please review",
+            execute=True,
+            runner=runner,
+        )
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '<at email="reviewer@example.com">Public Reviewer</at> please review',
+        '<at open_id="ou_public_reviewer">Public Reviewer',
+        "Public Reviewer</at> please review",
+    ],
+)
+def test_top_level_send_rejects_malformed_or_unsupported_mention_nodes(
+    tmp_path: Path,
+    text: str,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner()
+
+    with pytest.raises(ValueError, match="malformed or unsupported <at> node"):
+        send_lark_inbox_message(
+            project=project,
+            config_path=config,
+            text=text,
+            execute=True,
+            runner=runner,
+        )
+
+    assert runner.calls == []
+
+
+def test_top_level_send_rejects_overlong_text_instead_of_truncating_mention(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path, lifecycle=False)
+    runner = ReplyRunner()
+    text = (
+        "x" * 1160
+        + '<at open_id="ou_public_reviewer">Public Reviewer</at> please review'
+    )
+
+    with pytest.raises(ValueError, match="exceeds the 1200-character"):
+        send_lark_inbox_message(
+            project=project,
+            config_path=config,
+            text=text,
+            execute=True,
+            runner=runner,
+        )
+
+    assert runner.calls == []
+
+
 def test_unverified_reply_preserves_processing_reaction(tmp_path: Path) -> None:
     config, inbox, project = _fixture(tmp_path)
     record_lark_inbox_reaction(
@@ -720,7 +1140,7 @@ def test_processing_config_requires_distinct_received_reaction(
     else:
         raise AssertionError("equal lifecycle reactions must fail closed")
 
-    payload["reply"].pop("received_reaction_emoji")
+    payload["reply"]["received_reaction_emoji"] = ""
     payload["reply"]["processing_reaction_emoji"] = "OnIt"
     config.write_text(json.dumps(payload), encoding="utf-8")
     try:
@@ -729,6 +1149,24 @@ def test_processing_config_requires_distinct_received_reaction(
         assert "requires received_reaction_emoji" in str(exc)
     else:
         raise AssertionError("processing without received must fail closed")
+
+
+def test_received_reaction_defaults_to_get_and_can_be_explicitly_disabled(
+    tmp_path: Path,
+) -> None:
+    config, _, project = _fixture(tmp_path)
+    payload = json.loads(config.read_text(encoding="utf-8"))
+    payload["reply"].pop("received_reaction_emoji")
+    payload["reply"].pop("processing_reaction_emoji")
+    config.write_text(json.dumps(payload), encoding="utf-8")
+
+    defaulted = load_lark_event_inbox_config(project=project, config_path=config)
+    assert defaulted["reply"]["received_reaction_emoji"] == "Get"
+
+    payload["reply"]["received_reaction_emoji"] = ""
+    config.write_text(json.dumps(payload), encoding="utf-8")
+    disabled = load_lark_event_inbox_config(project=project, config_path=config)
+    assert disabled["reply"]["received_reaction_emoji"] == ""
 
 
 def test_malformed_receipt_ledger_fails_closed(tmp_path: Path) -> None:

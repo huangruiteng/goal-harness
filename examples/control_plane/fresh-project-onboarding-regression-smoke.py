@@ -6,6 +6,9 @@ Covers:
               so the emitted command is accepted by ``loopx todo add``.
   - Defect 2: ``agent-onboard`` on a project with no ``.loopx/registry.json``
               must return a typed gate, not raise ``FileNotFoundError``.
+  - Guided takeover: when bootstrap already provides a runnable Todo frontier,
+                     authoring is projected as a typed Todo delta instead of an
+                     unconditional ``write_ordered_todos`` step.
 
 See: https://github.com/huangruiteng/loopx/issues/3092
 Fix: https://github.com/huangruiteng/loopx/pull/3093
@@ -74,6 +77,50 @@ def _register_agent_in_registry(registry_path: Path, goal_id: str, agent_id: str
         json.dumps(registry, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+def _require_guided_todo_delta_template(
+    guided_packet: dict[str, object],
+    *,
+    label: str,
+) -> str:
+    """Require the typed authoring path used by fresh bootstrap fixtures."""
+    transaction = guided_packet.get("guided_transaction", {})
+    ordered_steps = (
+        transaction.get("ordered_steps", [])
+        if isinstance(transaction, dict)
+        else []
+    )
+    steps = [step for step in ordered_steps if isinstance(step, dict)]
+    legacy_steps = [
+        step for step in steps if step.get("id") == "write_ordered_todos"
+    ]
+    delta_steps = [step for step in steps if step.get("id") == "apply_todo_delta"]
+
+    check(f"{label}: legacy Todo authoring is absent", not legacy_steps)
+    check(f"{label}: contains exactly one Todo delta", len(delta_steps) == 1)
+    if len(delta_steps) != 1:
+        return ""
+
+    delta_step = delta_steps[0]
+    todo_delta = delta_step.get("todo_delta", {})
+    check(
+        f"{label}: Todo delta uses the guided takeover schema",
+        isinstance(todo_delta, dict)
+        and todo_delta.get("schema_version") == "loopx_guided_todo_delta_v0",
+    )
+    check(
+        f"{label}: Todo delta exposes a runnable frontier",
+        isinstance(todo_delta, dict)
+        and todo_delta.get("runnable_frontier_count", 0) >= 1
+        and bool(todo_delta.get("frontier")),
+    )
+    template = delta_step.get("add_new_command_template", "")
+    check(
+        f"{label}: Todo delta exposes an add-new template",
+        isinstance(template, str) and bool(template),
+    )
+    return template if isinstance(template, str) else ""
 
 
 # ---------------------------------------------------------------------------
@@ -169,54 +216,48 @@ def test_guided_template_acceptance(project: Path, goal_id: str) -> None:
         host_surface="claude-code",
         goal_text="regression test for #3092",
     )
-    transaction = guided_packet.get("guided_transaction", {})
-    ordered_steps = transaction.get("ordered_steps", [])
-
-    # Find the write_ordered_todos step.
-    todo_step = next(
-        (s for s in ordered_steps if s.get("id") == "write_ordered_todos"),
-        None,
+    # Fresh bootstrap seeds one runnable advancement Todo, so this fixture must
+    # not accept the frontier-free legacy authoring path.
+    template = _require_guided_todo_delta_template(
+        guided_packet,
+        label="guided packet",
     )
-    check("guided packet contains write_ordered_todos step", todo_step is not None)
 
-    if todo_step:
-        template = todo_step.get("command_template", "")
+    # Defect 1 core assertion: template must use --claimed-by, not --agent-id.
+    check(
+        "template does NOT contain --agent-id",
+        "--agent-id" not in template,
+    )
+    check(
+        "template contains --claimed-by",
+        "--claimed-by" in template,
+    )
 
-        # Defect 1 core assertion: template must use --claimed-by, not --agent-id.
-        check(
-            "template does NOT contain --agent-id",
-            "--agent-id" not in template,
-        )
-        check(
-            "template contains --claimed-by",
-            "--claimed-by" in template,
-        )
+    print("\n=== Scenario 3: todo add with --claimed-by accepted ===")
 
-        print("\n=== Scenario 3: todo add with --claimed-by accepted ===")
-
-        # Run a concrete todo add using the correct --claimed-by pattern.
-        todo_result = run_cli(
-            "--registry", str(registry_path),
-            "todo", "add",
-            "--goal-id", goal_id,
-            "--project", str(project),
-            "--role", "agent",
-            "--claimed-by", agent_id,
-            "--task-class", "advancement_task",
-            "--action-kind", "verify",
-            "--text", "[P0] regression guard for #3092",
-            check=False,
-        )
-        check("todo add exits 0", todo_result.returncode == 0)
-        try:
-            todo_payload = json.loads(todo_result.stdout)
-        except (json.JSONDecodeError, ValueError):
-            todo_payload = {}
-        check("todo add returns ok: true", todo_payload.get("ok") is True)
-        check(
-            "todo add returns a todo_id",
-            bool(todo_payload.get("todo_id")),
-        )
+    # Run a concrete todo add using the correct --claimed-by pattern.
+    todo_result = run_cli(
+        "--registry", str(registry_path),
+        "todo", "add",
+        "--goal-id", goal_id,
+        "--project", str(project),
+        "--role", "agent",
+        "--claimed-by", agent_id,
+        "--task-class", "advancement_task",
+        "--action-kind", "verify",
+        "--text", "[P0] regression guard for #3092",
+        check=False,
+    )
+    check("todo add exits 0", todo_result.returncode == 0)
+    try:
+        todo_payload = json.loads(todo_result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        todo_payload = {}
+    check("todo add returns ok: true", todo_payload.get("ok") is True)
+    check(
+        "todo add returns a todo_id",
+        bool(todo_payload.get("todo_id")),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -311,26 +352,18 @@ def test_clean_second_run() -> None:
             host_surface="claude-code",
             goal_text="second run check",
         )
-        todo_step = next(
-            (
-                s
-                for s in guided.get("guided_transaction", {}).get(
-                    "ordered_steps", []
-                )
-                if s.get("id") == "write_ordered_todos"
-            ),
-            None,
+        template = _require_guided_todo_delta_template(
+            guided,
+            label="second-run guided packet",
         )
-        if todo_step:
-            template = todo_step.get("command_template", "")
-            check(
-                "second-run: template uses --claimed-by",
-                "--claimed-by" in template,
-            )
-            check(
-                "second-run: template does not use --agent-id",
-                "--agent-id" not in template,
-            )
+        check(
+            "second-run: template uses --claimed-by",
+            "--claimed-by" in template,
+        )
+        check(
+            "second-run: template does not use --agent-id",
+            "--agent-id" not in template,
+        )
 
         if registry_path.exists():
             todo_result = run_cli(

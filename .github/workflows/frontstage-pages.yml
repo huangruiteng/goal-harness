@@ -10,6 +10,7 @@ on:
       - "README.md"
       - "README.zh-CN.md"
       - "apps/presentation/dashboard/**"
+      - "loopx/web/chat/**"
       - "apps/presentation/site/**"
       - "docs/**"
       - "loopx/capabilities/**"
@@ -42,6 +43,7 @@ on:
       - "README.md"
       - "README.zh-CN.md"
       - "apps/presentation/dashboard/**"
+      - "loopx/web/chat/**"
       - "apps/presentation/site/**"
       - "docs/**"
       - "loopx/capabilities/**"
@@ -74,10 +76,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: frontstage-pages
-  # A stalled Pages deployment previously occupied this group for two days and
-  # starved every later run (all queued runs were cancelled). Pages deploys are
-  # quick and idempotent, so a newer run may safely supersede a stale one.
+  group: frontstage-pages-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'deployment' }}
+  # Keep production deploys in one lane, but isolate each pull request so an
+  # unrelated PR or main push cannot cancel its validation run.
   cancel-in-progress: true
 
 jobs:
@@ -113,6 +114,18 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+
+      - name: Verify packaged Personal Workspace is current
+        working-directory: apps/presentation/dashboard
+        run: |
+          npm run build:chat
+          if [[ -n "$(git -C ../../.. status --short --untracked-files=all -- loopx/web/chat)" ]]; then
+            git -C ../../.. status --short --untracked-files=all -- loopx/web/chat
+            echo "Tracked packaged Dashboard assets differ from a clean source build." >&2
+            exit 1
+          fi
+          ./node_modules/.bin/playwright install --with-deps chromium
+          npm run smoke:personal-workspace-packaged
 
       - name: Install docs dependencies
         run: |

@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+FIXTURE_RUNTIME_ROOT = str((REPO_ROOT / "fixtures/runtime").resolve())
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -126,7 +127,7 @@ def assert_scheduler_advisory_does_not_override_goal_should_run() -> None:
     payload = {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 4,
         "run_count": 4,
         "attention_queue": {"items": [meta_item, creator_item, side_bypass_item, gated_item]},
@@ -289,7 +290,7 @@ def assert_focus_wait_should_run() -> None:
     payload = {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 1,
         "attention_queue": {"items": [focus_item]},
@@ -358,7 +359,7 @@ def assert_outcome_floor_recovery_should_run() -> None:
     payload = {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 1,
         "attention_queue": {"items": [recovery_item]},
@@ -468,7 +469,7 @@ def assert_outcome_floor_projected_blocker_quiet_noop() -> None:
     payload = {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 1,
         "attention_queue": {"items": [recovery_item]},
@@ -542,7 +543,7 @@ def assert_control_plane_health_self_repair_should_run() -> None:
     payload = {
         "ok": False,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 1,
         "attention_queue": {"items": [health_item, meta_item]},
@@ -589,7 +590,7 @@ def assert_control_plane_self_repair_default_off() -> None:
     payload = {
         "ok": False,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 1,
         "attention_queue": {"items": [health_item, ordinary_item]},
@@ -621,7 +622,7 @@ def assert_control_plane_waiting_projection_self_repair_should_run() -> None:
     payload = {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 1,
         "attention_queue": {"items": [meta_item]},
@@ -701,7 +702,7 @@ def post_handoff_meta_fixture(
     return {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 1,
         "attention_queue": {"items": [meta_item]},
@@ -839,7 +840,7 @@ def assert_attention_queue_overrides_stale_run_history() -> None:
     payload = {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 1,
         "attention_queue": {"items": [current_item]},
@@ -910,7 +911,7 @@ def assert_project_asset_backed_no_evidence_should_run() -> None:
     payload = {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 1,
         "attention_queue": {"items": [project_item]},
@@ -983,7 +984,7 @@ def assert_heartbeat_recommendation_lifecycle() -> None:
     payload = {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 2,
         "run_count": 2,
         "attention_queue": {"items": [first_map_item, mapped_item]},
@@ -1129,7 +1130,7 @@ def assert_goal_boundary_in_should_run() -> None:
     payload = {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 1,
         "attention_queue": {"items": [delivery_item]},
@@ -1184,7 +1185,7 @@ def assert_decision_freshness_warning_in_should_run() -> None:
     payload = {
         "ok": True,
         "registry": "./fixtures/registry.json",
-        "runtime_root": "./fixtures/runtime",
+        "runtime_root": FIXTURE_RUNTIME_ROOT,
         "goal_count": 1,
         "run_count": 3,
         "attention_queue": {"items": [stale_item]},
@@ -1249,7 +1250,7 @@ def assert_safe_bypass_slot_preview(status_payload: dict) -> None:
         slots=1,
     )
     assert rejected["ok"] is False, rejected
-    assert "accountable delivery writeback" in rejected["reason"], rejected
+    assert "Turn settlement writeback" in rejected["reason"], rejected
 
     with tempfile.TemporaryDirectory(prefix="loopx-safe-bypass-spend-") as tmp:
         runtime_root = Path(tmp)
@@ -1396,6 +1397,7 @@ def main() -> int:
     assert_default_quota_is_duty_cycle()
     assert_rolling_window_ledger_expires_old_spends()
     status_payload = build_status_fixture()
+    status_payload["runtime_root"] = FIXTURE_RUNTIME_ROOT
     plan = build_quota_plan(status_payload, mode="plan")
     markdown = render_quota_markdown(plan)
     assert_plan_shape(plan, markdown)

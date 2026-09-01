@@ -24,8 +24,12 @@ from ....capabilities.periodic_report.bindings import (
 from ....capabilities.periodic_report.core import _reject_raw_keys
 from .message_card import build_lark_markdown_reply_card
 
-LarkSendEffect = Callable[[Mapping[str, Any], str], Mapping[str, Any]]
+LarkSendEffect = Callable[
+    [Mapping[str, Any], str, Mapping[str, Any]], Mapping[str, Any]
+]
 LarkReadbackEffect = Callable[[str], Mapping[str, Any]]
+LarkGoalChannelResolver = Callable[[str], Mapping[str, Any]]
+LarkGoalChannelVerifier = Callable[[Mapping[str, Any]], bool]
 LarkRecipientMentionRenderer = Callable[[str], str]
 MiaodaPublishEffect = Callable[[Mapping[str, Any], str, str], Mapping[str, Any]]
 MiaodaReadbackEffect = Callable[[str, str], Mapping[str, Any]]
@@ -38,6 +42,22 @@ _LARK_MENTION_MARKUP_RE = re.compile(r"<\s*at\b", re.IGNORECASE)
 _LARK_RENDERED_MENTION_RE = re.compile(
     r"^<at\b[^>]*>[^<>]*</at>$",
     re.IGNORECASE,
+)
+_GOAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
+_LARK_CHAT_ID_RE = re.compile(r"^oc_[A-Za-z0-9_-]+$")
+_LARK_APP_ID_RE = re.compile(r"^cli_[A-Za-z0-9_-]+$")
+_LARK_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+_CALLER_IDENTITY_OVERRIDE_KEYS = frozenset(
+    {
+        "bot_app_id",
+        "bot_display_name",
+        "chat_id",
+        "identity_mode",
+        "lark_profile",
+        "profile",
+        "sender_identity",
+        "sender_profile",
+    }
 )
 
 
@@ -92,6 +112,56 @@ def _render_lark_mentions(
     return " ".join(mentions)
 
 
+def _goal_channel_delivery_route(
+    goal_id: object,
+    resolve_goal_channel: LarkGoalChannelResolver,
+) -> dict[str, Any]:
+    safe_goal_id = _required_text(goal_id, "goal_id")
+    if not _GOAL_ID_RE.fullmatch(safe_goal_id):
+        raise ValueError("goal_id must be a stable LoopX Goal id")
+    binding = dict(resolve_goal_channel(safe_goal_id))
+    channel = binding.get("channel")
+    identity = binding.get("identity")
+    if (
+        binding.get("goal_id") != safe_goal_id
+        or binding.get("provider") != "lark"
+        or binding.get("enabled") is not True
+        or not isinstance(channel, Mapping)
+        or not isinstance(identity, Mapping)
+    ):
+        raise ValueError(
+            "periodic report delivery requires the enabled Lark Goal Channel binding"
+        )
+    chat_id = str(channel.get("chat_id") or "").strip()
+    sender_profile = str(identity.get("sender_profile") or "").strip()
+    sender_identity = str(identity.get("sender_identity") or "").strip()
+    bot_app_id = str(identity.get("bot_app_id") or "").strip()
+    bot_display_name = str(identity.get("bot_display_name") or "").strip()
+    cli_bin = str(identity.get("cli_bin") or "lark-cli").strip()
+    if (
+        identity.get("mode") != "project_bot"
+        or sender_identity != "bot"
+        or not _LARK_CHAT_ID_RE.fullmatch(chat_id)
+        or not _LARK_PROFILE_RE.fullmatch(sender_profile)
+        or sender_profile.lower() == "default"
+        or not _LARK_APP_ID_RE.fullmatch(bot_app_id)
+        or not bot_display_name
+        or not cli_bin
+    ):
+        raise ValueError(
+            "periodic report delivery requires a complete project_bot Goal Channel identity"
+        )
+    return {
+        "goal_id": safe_goal_id,
+        "chat_id": chat_id,
+        "sender_profile": sender_profile,
+        "sender_identity": sender_identity,
+        "bot_app_id": bot_app_id,
+        "bot_display_name": bot_display_name,
+        "cli_bin": cli_bin,
+    }
+
+
 def _https_url(value: object, label: str) -> str:
     url = _required_text(value, label)
     parsed = urlsplit(url)
@@ -142,6 +212,8 @@ def periodic_report_lark_sink_adapter(
     *,
     send: LarkSendEffect,
     readback: LarkReadbackEffect,
+    resolve_goal_channel: LarkGoalChannelResolver,
+    verify_goal_channel: LarkGoalChannelVerifier,
     render_recipient_mention: LarkRecipientMentionRenderer | None = None,
     sink_id: str = "lark_delivery",
 ) -> PeriodicReportSinkAdapter:
@@ -153,6 +225,16 @@ def periodic_report_lark_sink_adapter(
     ) -> dict[str, Any]:
         if artifact.get("schema_version") != ARTIFACT_SCHEMA:
             raise ValueError(f"artifact must use {ARTIFACT_SCHEMA}")
+        override_keys = sorted(_CALLER_IDENTITY_OVERRIDE_KEYS.intersection(context))
+        if override_keys:
+            raise ValueError(
+                "periodic report sender identity is owned by Goal Channel; "
+                f"caller overrides are forbidden: {', '.join(override_keys)}"
+            )
+        route = _goal_channel_delivery_route(
+            context.get("goal_id"),
+            resolve_goal_channel,
+        )
         has_document = context.get("document") is not None
         has_audience_policy = context.get("audience_policy") is not None
         if has_document != has_audience_policy:
@@ -186,6 +268,8 @@ def periodic_report_lark_sink_adapter(
             "idempotency_key": idempotency_key,
             "schedule_policy_applied": False,
             "business_evidence_judged": False,
+            "goal_channel_bound": True,
+            "sender_identity_required": "project_bot",
         }
         if announcement_plan is not None:
             base["announcement_plan"] = announcement_plan
@@ -197,6 +281,10 @@ def periodic_report_lark_sink_adapter(
                 "readback_verified": False,
                 "external_writes_performed": False,
             }
+        if verify_goal_channel(route) is not True:
+            raise ValueError(
+                "periodic report Goal Channel sender identity could not be verified"
+            )
         recipient_ids = (
             list(announcement_plan["mentioned_recipient_ids"])
             if announcement_plan is not None
@@ -214,7 +302,7 @@ def periodic_report_lark_sink_adapter(
             title=title,
             footer=footer,
         )
-        sent = dict(send(card, idempotency_key))
+        sent = dict(send(card, idempotency_key, route))
         receipt_ref = _required_text(
             sent.get("receipt_ref") or sent.get("message_id"), "Lark receipt_ref"
         )
@@ -222,13 +310,22 @@ def periodic_report_lark_sink_adapter(
         observed_ref = str(
             observed.get("receipt_ref") or observed.get("message_id") or ""
         ).strip()
-        verified = observed.get("verified") is True and observed_ref == receipt_ref
+        verified = bool(
+            observed.get("verified") is True
+            and observed_ref == receipt_ref
+            and str(observed.get("chat_id") or "") == route["chat_id"]
+            and str(observed.get("sender_app_id") or "") == route["bot_app_id"]
+            and str(observed.get("sender_identity") or "") == "bot"
+            and str(observed.get("sender_evidence_source") or "") == "message_readback"
+        )
         return {
             **base,
             "status": "sent" if verified else "unknown",
             "retryable": not verified,
             "receipt_ref": receipt_ref,
             "readback_verified": verified,
+            "goal_channel_verified": verified,
+            "sender_identity_verified": verified,
             "external_writes_performed": True,
         }
 

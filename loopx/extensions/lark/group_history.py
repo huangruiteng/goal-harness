@@ -18,6 +18,11 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .event_collector import _executable_prefix, load_lark_event_collector_config
+from .event_collector_runtime import (
+    _is_profile_self_message,
+    _profile_app_id,
+    _sender_identity,
+)
 from .event_inbox import EVENT_SCHEMA_VERSION, MESSAGE_ID_PATTERN
 from .group_history_cursor import (
     group_history_cursor_digest,
@@ -181,12 +186,20 @@ def _provider_page(payload: object) -> tuple[list[Mapping[str, Any]], bool, str 
 
 
 def _canonical_events(
-    messages: Sequence[Mapping[str, Any]], *, chat_id: str
-) -> tuple[list[dict[str, Any]], int, int]:
+    messages: Sequence[Mapping[str, Any]],
+    *,
+    chat_id: str,
+    profile_app_id: str | None = None,
+) -> tuple[list[dict[str, Any]], int, int, int]:
     events: list[dict[str, Any]] = []
     skipped_count = 0
     invalid_count = 0
+    self_message_skipped_count = 0
     for message in messages:
+        if _is_profile_self_message(message, profile_app_id=profile_app_id):
+            skipped_count += 1
+            self_message_skipped_count += 1
+            continue
         if message.get("deleted") is True:
             skipped_count += 1
             continue
@@ -216,7 +229,7 @@ def _canonical_events(
             if field in message:
                 event[field] = message[field]
         events.append(event)
-    return events, skipped_count, invalid_count
+    return events, skipped_count, invalid_count, self_message_skipped_count
 
 
 def _normalized_url(raw: str) -> str | None:
@@ -452,9 +465,24 @@ def catch_up_lark_group_history(
     try:
         payload = json.loads(result.stdout)
         messages, has_more, next_page_token = _provider_page(payload)
-        events, skipped_count, invalid_count = _canonical_events(
+        profile_app_id = (
+            _profile_app_id(
+                runner=runner,
+                command_prefix=command_prefix,
+                profile=str(config["profile"]),
+            )
+            if any(_sender_identity(message)[0] == "app" for message in messages)
+            else None
+        )
+        (
+            events,
+            skipped_count,
+            invalid_count,
+            self_message_skipped_count,
+        ) = _canonical_events(
             messages,
             chat_id=str(route["chat_id"]),
+            profile_app_id=profile_app_id,
         )
     except (json.JSONDecodeError, TypeError, ValueError):
         return _failed_receipt(
@@ -491,6 +519,7 @@ def catch_up_lark_group_history(
             "accepted_count": int(ingest["accepted_count"]),
             "duplicate_count": int(ingest["duplicate_count"]),
             "skipped_count": skipped_count,
+            "self_message_skipped_count": self_message_skipped_count,
             "history_complete": not has_more,
             "link_evidence": evidence,
             "external_read_performed": True,
@@ -555,6 +584,7 @@ def catch_up_lark_group_history(
         "accepted_count": int(ingest["accepted_count"]),
         "duplicate_count": int(ingest["duplicate_count"]),
         "skipped_count": skipped_count,
+        "self_message_skipped_count": self_message_skipped_count,
         "history_complete": not has_more,
         "link_evidence": evidence,
         "external_read_performed": True,

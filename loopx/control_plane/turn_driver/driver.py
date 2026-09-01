@@ -52,6 +52,14 @@ class LoopXTurnRoute(str, Enum):
     CONTRACT_ERROR = "contract_error"
 
 
+class FailedTurnSessionRecoveryError(ValueError):
+    """Typed public-safe refusal to resume a failed Turn's Host Session."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
@@ -209,17 +217,28 @@ def reconcile_failed_turn_session_request(
         session_binding=session_binding,
     )
     if session_error:
-        raise ValueError(f"failed-Turn recovery {session_error}")
+        status = str(session.get("binding_status") or "")
+        reason = {
+            "missing_turn_lineage": "turn_lineage_missing",
+            "unsupported_schema": "session_binding_schema_unsupported",
+            "identity_mismatch": "session_binding_identity_mismatch",
+        }.get(status, "session_binding_rejected")
+        raise FailedTurnSessionRecoveryError(
+            reason,
+            f"failed-Turn recovery {session_error}",
+        )
     if session.get("action") != "resume":
-        raise ValueError(
-            "failed-Turn recovery requires a compatible persisted session binding"
+        raise FailedTurnSessionRecoveryError(
+            "session_binding_missing",
+            "failed-Turn recovery requires a compatible persisted session binding",
         )
 
     planned_session = _mapping(request.get("session"))
     planned_action = str(planned_session.get("action") or "")
     if planned_action not in {"start_new", "resume"}:
-        raise ValueError(
-            "failed-Turn recovery requires a start_new or resume session action"
+        raise FailedTurnSessionRecoveryError(
+            "planned_session_action_unsupported",
+            "failed-Turn recovery requires a start_new or resume session action",
         )
     if planned_action == "resume":
         return dict(request)

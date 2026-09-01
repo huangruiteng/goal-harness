@@ -17,6 +17,54 @@ export type DeliveryOutcome = (typeof DELIVERY_OUTCOMES)[number];
 export type MaterialDeliveryOutcome =
   (typeof MATERIAL_DELIVERY_OUTCOMES)[number];
 
+const STABLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const PROGRESS_DELIVERY_OUTCOMES = new Set<DeliveryOutcome>([
+  "outcome_progress",
+  "primary_goal_outcome",
+]);
+
+function jsonObject(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function stableIdentifier(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const candidate = String(value).trim();
+  return candidate && STABLE_ID_PATTERN.test(candidate) ? candidate : null;
+}
+
+export function isTurnScopedSettlementOutcome(
+  deliveryOutcome: unknown,
+  progressObservation: unknown,
+  expectedSettlementBindingId: string | null,
+): boolean {
+  const normalizedOutcome = String(deliveryOutcome ?? "").trim() as DeliveryOutcome;
+  if (PROGRESS_DELIVERY_OUTCOMES.has(normalizedOutcome)) return true;
+  if (
+    normalizedOutcome !== "outcome_gap" ||
+    expectedSettlementBindingId === null
+  ) {
+    return false;
+  }
+  const observation = jsonObject(progressObservation);
+  if (
+    !observation ||
+    observation.schema_version !== "typed_progress_observation_v0" ||
+    observation.result_class !== "blocked" ||
+    stableIdentifier(observation.work_item_id) !== expectedSettlementBindingId ||
+    stableIdentifier(observation.blocker_id) === null ||
+    !Array.isArray(observation.evidence_ids) ||
+    observation.evidence_ids.length === 0
+  ) {
+    return false;
+  }
+  return observation.evidence_ids.every(
+    (evidenceId) => stableIdentifier(evidenceId) !== null,
+  );
+}
+
 export function decodeOptionalDeliveryOutcome(
   value: unknown,
   label = "delivery_outcome",

@@ -42,8 +42,9 @@ sync: it is a pre-decision capability hook with the following ordering:
 turn-start hook
   -> read one bounded provider page per route
   -> commit and read back owner-private inbox events and cursor
+  -> ACK each newly read pending human message with one idempotent reaction
   -> recompute quota inbox urgency in the same CLI invocation
-  -> agent_read_required=true when new events were accepted
+  -> agent_read_required=true when pending messages were newly read by the hook
   -> selected inbox lane drains private message content before ordinary work
   -> Agent chooses steering / Goal replan / context capture /
      continue-current-work / no-follow-up
@@ -51,7 +52,8 @@ turn-start hook
 ```
 
 Core owns the provider-neutral hook registration, output budget, allowed
-owner-private write scopes, failure isolation, and `agent_read_required`
+owner-private write scopes, the narrow `provider_message_reaction` external
+write scope, failure isolation, and `agent_read_required`
 contract. The Lark extension owns history pagination, provider-envelope
 validation, private cursors, and inbox readback. The CLI composition root runs
 the hook before status/quota projection. Raw content remains only in the local
@@ -199,22 +201,42 @@ messages; use `configured_chat_all` for complete collaboration threads:
     "sender_identity": "bot",
     "bot_display_name": "Project Review Bot",
     "chat_id": "oc_<local-private-chat-id>",
-    "received_reaction_emoji": "Get",
     "processing_reaction_emoji": "OnIt"
   }
 }
 ```
 
-`reply.received_reaction_emoji` is optional and belongs to the same explicit
-sender boundary as source-thread replies. When configured, the collector adds
-that reaction only after an event is accepted into the inbox and classified as
-a direct mention, direct question, or verified reply to the configured bot.
-The reaction is a best-effort receipt: provider failure increments compact
-failure accounting but does not discard the inbox event or grant execution
-authority. Ordinary group conversation does not receive the reaction.
+For every reply-enabled Inbox, a missing `reply.received_reaction_emoji`
+defaults to `Get`. Set it explicitly to the empty string to disable this
+provider write. The reaction belongs to the same explicit sender boundary as
+source-thread replies, but only the Agent's turn-start hook may create it:
+realtime collection persists events without reacting, and the hook writes the
+reaction only after it has read and confirmed a still-pending human message.
+The receipt therefore means "read into the Agent processing chain"; it does not
+mean "collector stored the event", "the Bot was mentioned", "a reply is due",
+or "processing completed". Mention, reply, question, and material-review
+classification remain independent scheduling and response decisions.
+
+The hook records its first read in owner-private state independently of this
+optional provider write. Thus a message captured earlier by the realtime
+collector still requires Agent reading even when reactions are explicitly
+disabled. Failed reactions are retried from this durable pending-read set while
+the message remains unsettled, including after the bounded history cursor has
+moved beyond the message timestamp. Provider failure increments compact
+failure accounting but does not discard the Inbox event or grant execution
+authority. Replay uses one aggregate bounded attempt budget per turn-start
+dispatch. A collector-scoped private cursor rotates route priority across
+dispatches, while each route keeps its own private round-robin message cursor.
+The public receipt exposes only attempt and deferred counts, never cursor or
+message identities. Messages with a durable received/processing receipt are
+skipped without another provider call. A new reply in an old topic has a new
+provider message identity, so the forward history tail captures it independently
+of topic age and acknowledgement backlog.
 
 `reply.processing_reaction_emoji` is optional and requires a distinct
-`received_reaction_emoji`. When both are configured, the host should run
+received reaction. The default `Get` satisfies that requirement; when the read
+acknowledgement is explicitly disabled, processing reaction must also be
+disabled. When both are configured, the host should run
 `lark-inbox processing` immediately before interpreting an actionable item.
 LoopX first adds the processing reaction and then removes the received
 reaction. A verified source-thread reply removes any remaining lifecycle
@@ -223,11 +245,13 @@ retryable cleanup status instead of claiming completion.
 
 Reaction ids are stored only in an owner-private receipt ledger under the
 configured inbox. Each message transition is serialized with a private
-per-message lock. LoopX deletes only reaction ids returned by writes made
-through the configured bot profile; it never deletes another participant's
-reaction by emoji type. The receipt ledger is fail-closed: malformed state is
-not ignored, and a provider reaction that cannot be recorded is rolled back
-best-effort.
+per-message lock. A prepared/created operation receipt fences provider creation
+before and after the external effect: a reaction whose normal receipt could not
+be persisted is recovered from the known reaction id without another create;
+an outcome that became uncertain before its id was durably recorded blocks
+replay instead of risking a duplicate. LoopX deletes only reaction ids returned
+by writes made through the configured bot profile; it never deletes another
+participant's reaction by emoji type. Malformed private state fails closed.
 
 The reply path never uses the machine default profile. Before any send it
 verifies that the named profile resolves to the expected bot and that the bot
@@ -325,8 +349,13 @@ Missing `lark-cli` produces a non-blocking install hint. Reply-target
 verification also requires the configured bot to read messages in the selected
 chat. Bot-identity group-history catch-up requires the application scopes
 `im:message.group_msg` and `im:message.group_msg.include_bot:read`; the latter
-keeps Bot-authored messages in the paginated result. When the Bot list-messages
-history path reports provider error `230027`, LoopX must surface both scopes
+keeps Bot-authored messages in the provider result. Before inbox ingestion,
+realtime collection and bounded history sync both compare a provider-typed
+`app` sender with the exact app identity verified for the configured profile.
+An exact self match is counted and skipped; other apps and unresolved
+identities remain visible so an identity lookup failure cannot silently lose a
+message. When the Bot list-messages history path reports provider error `230027`,
+LoopX must surface both scopes
 and an official API page bound to the selected App id. The operator enables
 the application scopes and publishes a new App
 version; this is not a user OAuth login. These requirements belong to the
@@ -499,6 +528,36 @@ metadata. Verification therefore compares the normalized visible-text template
 and requires every mention to resolve to the identity requested at send time.
 A missing, extra, ambiguous, or differently resolved mention remains
 `sent_unverified`; display-name or raw-markup similarity alone is not accepted.
+Notification-style literal `@Name` text is rejected before any provider call;
+resolve the exact chat member and supply a structured `<at ...>` node. The same
+outbound verifier is used by top-level reviewer notifications, so reply and
+proactive-send paths cannot disagree about what constitutes a delivered
+mention. Both paths perform a provider dry-run before sending and verify the
+created message rather than treating its message id as delivery proof.
+
+Use the configured proactive-send surface instead of a raw provider command:
+
+```bash
+loopx lark-inbox send \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --route-key project-feedback \
+  --text '<at open_id="ou_example">Example Reviewer</at> please review' \
+  --provider-preflight
+
+loopx lark-inbox send \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --route-key project-feedback \
+  --text '<at open_id="ou_example">Example Reviewer</at> please review' \
+  --execute
+```
+
+`route_key` selects one isolated requirement/chat binding under a multi-chat
+collector and fails closed when missing or unknown. The top-level send neither
+requires nor fabricates a source message, so its verified placement is always
+`chat_root`; source-message replies continue to preserve source-context
+placement and reaction cleanup.
 
 ## Bounded history reconciliation
 
@@ -519,7 +578,9 @@ or NDJSON into the generic importer:
 Ingest validates ids and schema, deduplicates by `message_id`, writes only to
 the configured local-private inbox, and returns counts rather than message
 content. It does not acknowledge imported messages; the domain agent must still
-write each actionable effect before ACK.
+write each actionable effect before ACK. Provider-backed realtime and history
+ingress also report `self_message_skipped_count`; raw generic imports cannot
+claim this verification because they do not own the configured Bot identity.
 
 Reviewer notification dedupe uses durable lifecycle receipts first, then exact
 PR-link evidence in the persisted `configured_chat_all` inbox, and finally a

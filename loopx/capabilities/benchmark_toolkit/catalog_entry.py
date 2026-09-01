@@ -123,26 +123,6 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "command": (
-                "loopx benchmark plan-fidelity "
-                "--action-kind implementation "
-                "--action-kind independent_validation "
-                "--role-action-kind technical_work=implementation "
-                "--role-action-kind independent_validation=independent_validation "
-                "--required-role-count technical_work=1 "
-                "--required-role-count independent_validation=1 "
-                "--require-qualified --format json"
-            ),
-            "purpose": (
-                "Reduce a provider's exact public-safe Todo action kinds to stable "
-                "treatment-plan roles before closeout."
-            ),
-            "write_boundary": (
-                "read-only typed plan facts; emits semantic counts and blockers, "
-                "never Todo text or raw action-kind values"
-            ),
-        },
-        {
-            "command": (
                 "loopx benchmark experiment-board-upsert --goal-id <goal-id> "
                 "--row-json <compact-row.json> --execute --format json"
             ),
@@ -207,14 +187,33 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "command": (
+                "loopx benchmark concurrency-tune --goal-id <goal-id> "
+                "--feedback-json <feedback.json> "
+                "--resource-headroom-json <receipt.json> "
+                "[--execute] --format json"
+            ),
+            "purpose": (
+                "Adapt desired occupancy inside the operator-owned hard ceiling "
+                "from compact runner health and resource headroom."
+            ),
+            "write_boundary": (
+                "preview by default; execute changes only target occupancy, never "
+                "hard or role caps, active runs, raw metrics, or launch authority"
+            ),
+        },
+        {
+            "command": (
                 "loopx benchmark integrity-qualification "
                 "--trajectory-json <private.json> "
                 "--runtime-attestation-json <attestation.json> "
+                "[--restricted-access-adjudication-json <compact.json>] "
                 "--require-qualified --format json"
             ),
             "purpose": (
                 "Reduce private ATIF tool evidence and runner-owned isolation "
-                "facts to a compact integrity qualification receipt."
+                "facts to a compact integrity qualification receipt; scanner "
+                "suspicion remains eligible unless post-run causal review confirms "
+                "restricted disclosure and use."
             ),
             "write_boundary": (
                 "read-only private local inputs; emits hashes, counts, and "
@@ -268,11 +267,12 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "backfill_when_concurrency_status_reports_underfilled",
             "qualify_source_revision_before_each_new_run_admission",
             "qualify_resource_headroom_when_the_envelope_requires_a_receipt",
+            "tune_target_occupancy_from_fresh_runner_feedback_when_opted_in",
             "atomically_admit_case_slot_before_runner_launch",
             "upsert_preregistered_or_running_row_when_a_run_starts",
             "classify_exact_runtime_observation_during_active_monitor_cycles",
             "require_runtime_continuity_before_terminal_closeout_write",
-            "qualify_treatment_plan_roles_from_typed_action_kinds",
+            "adjudicate_restricted_access_suspicion_after_solver_and_score_terminal",
             "upsert_terminal_score_countability_effort_and_insight_status",
             "release_case_slot_after_terminal_or_runner_invalid_transition",
             "read_matched_comparisons_before_selecting_the_next_arm",
@@ -316,6 +316,12 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "loopx benchmark concurrency-release --goal-id <goal-id> "
                 "--run-id <run-id> --execute --format json"
             ),
+            "tune": (
+                "loopx benchmark concurrency-tune --goal-id <goal-id> "
+                "--feedback-json <feedback.json> "
+                "--resource-headroom-json <receipt.json> "
+                "[--execute] --format json"
+            ),
         },
         "concurrency_boundary": (
             "The envelope owns capacity admission only. A benchmark runner remains "
@@ -327,24 +333,6 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "Keep diagnostic-only explore rows separate and make paired claims "
             "only from matched_pair_countable comparisons."
         ),
-        "treatment_plan_fidelity": {
-            "stable_roles": [
-                "technical_work",
-                "independent_validation",
-                "review_refine",
-            ],
-            "matching": "provider_declared_exact_action_kind_tokens",
-            "required_boundary": (
-                "Use typed action_kind values through the benchmark plan-fidelity "
-                "reducer; do not infer semantic roles from Todo title text, "
-                "substrings, or one provider's preferred spelling."
-            ),
-            "authority_boundary": (
-                "Plan-role qualification proves only declared Todo shape; it does "
-                "not prove ordering, task coverage, validation independence, "
-                "technical correctness, integrity, or score countability."
-            ),
-        },
     },
     "four_arm_study": {
         "benchmark_start_hint": (
@@ -387,6 +375,45 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "The monitor may launch replacements only under separately granted "
             "runner authority; the envelope grants no model, verifier, upload, or "
             "submission authority."
+        ),
+    },
+    "campaign_monitor_handoff": {
+        "lane_boundary": (
+            "A continuous_monitor observes and records campaign transitions; "
+            "repository delivery, runner repair, experiment redesign, and other "
+            "bounded work belong in an independent advancement_task."
+        ),
+        "material_transition_command": (
+            "loopx quota monitor-poll --goal-id <goal-id> "
+            "--todo-id <monitor-todo-id> --agent-id <registered-agent> "
+            "--result-hash <public-safe-hash> --material-change "
+            '--next-agent-todo "<bounded public-safe work>" '
+            "--next-action-kind <action-kind> "
+            "--next-task-repository <git-repository> "
+            "--next-required-capability <capability> --execute --format json"
+        ),
+        "material_transition_result": {
+            "monitor_status": "open",
+            "successor_task_class": "advancement_task",
+            "successor_relationship": "independent_runnable_work",
+            "quota_spend": False,
+        },
+        "external_wait_command": (
+            "loopx todo update --goal-id <goal-id> "
+            "--todo-id <waiting-advancement-todo-id> "
+            "--agent-id <registered-agent> --status open "
+            "--resume-when monitor_changed:<monitor-todo-id> "
+            "--successor-todo-id <independent-runnable-successor-id> "
+            '--reason "<public-safe external-wait rationale>" --format json'
+        ),
+        "external_wait_result": (
+            "Keep the waiting advancement Todo visible but non-runnable until the "
+            "monitor generation advances. Do not mark it blocked, and do not use "
+            "the monitor itself as executable delivery work."
+        ),
+        "unchanged_policy": (
+            "An unchanged poll records monitor evidence only; it creates no "
+            "successor and spends no delivery quota."
         ),
     },
     "post_run_case_analysis": {
@@ -489,6 +516,33 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "evidence, why the outcome happened, whether it was expected, and what "
             "LoopX should test or change next."
         ),
+        "restricted_access_adjudication": {
+            "hint": (
+                "When the integrity scan marks restricted access as suspected, "
+                "inspect the real solver trajectory, tool results, and final "
+                "workspace after terminal scoring. Keep the run countable unless "
+                "restricted material was actually disclosed and causally entered "
+                "a solving or validation decision."
+            ),
+            "artifact_template": {
+                "schema_version": "benchmark_restricted_access_adjudication_v0",
+                "decision": "<qualified_with_warning-or-confirmed_cheating>",
+                "reviewer_role": "post_run_analyst",
+                "reviewed_surfaces": [
+                    "solver_trajectory",
+                    "tool_results",
+                    "final_workspace",
+                ],
+                "restricted_material_disclosed": "<true-or-false>",
+                "causal_use_observed": "<true-or-false>",
+                "evidence_id": "<public-safe-pointer>",
+            },
+            "decision_rule": (
+                "Only disclosed=true plus causal_use=true may be "
+                "confirmed_cheating; all other reviewed suspicion remains "
+                "qualified_with_warning."
+            ),
+        },
         "role_boundary": {
             "solver": (
                 "must not access hidden tests, grader or verifier sources, expected "
@@ -551,6 +605,16 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
         },
         {
+            "schema_version": "benchmark_adaptive_concurrency_policy_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.adaptive_concurrency",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
+            "schema_version": "benchmark_concurrency_feedback_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.adaptive_concurrency",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
             "schema_version": "benchmark_source_revision_fence_v0",
             "module": "loopx.capabilities.benchmark_toolkit.source_revision_fence",
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
@@ -567,6 +631,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "schema_version": "benchmark_integrity_qualification_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.integrity",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
+            "schema_version": "benchmark_restricted_access_adjudication_v0",
             "module": "loopx.capabilities.benchmark_toolkit.integrity",
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
         },
@@ -611,6 +680,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         "Source revision qualification is read-only and caller-observed: it does not fetch, install, update a checkout, or rewrite an already admitted run.",
         "Raw trajectories are private local inputs to integrity qualification and are never copied into receipts, ledgers, docs, or PR artifacts.",
         "A clean trajectory scan is not isolation proof: runner-owned permission and verifier-order attestations are mandatory and fail closed when absent.",
+        "Automated restricted-access matches are countable suspicion only; confirmed cheating requires post-run agent evidence of both disclosure and causal use.",
         "Concurrent Docker runs must bind runtime evidence to one exact job-owned container; image-only discovery is not sufficient.",
         "Admission-ledger occupancy never proves runner liveness; active health requires a resolved exact-job receipt and a live exact runner owner after startup grace.",
         "Integrity qualification establishes countability eligibility only; an independent official result and matched experiment contract are still required.",

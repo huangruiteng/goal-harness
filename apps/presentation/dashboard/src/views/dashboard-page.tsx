@@ -42,6 +42,7 @@ import {
   type ChatSessionSnapshot,
   type ChatSessionSummary,
   type ChatImageAttachment,
+  type ProtectedActionProposal,
   type TodoProposal,
 } from "../data/chat";
 import { Button } from "../components/ui/button";
@@ -66,8 +67,42 @@ import {
   type WorkspaceWorker,
   type WorkspaceGoalNotification,
   type WorkspaceActionPreview,
+  type WorkspaceActionPreviewRequest,
 } from "../features/personal-workspace/personal-workspace-model";
 import { routeWorkspaceInput } from "../features/personal-workspace/personal-workspace-router";
+
+const protectedOperationLabels: Record<ProtectedActionProposal["operation"], string> = {
+  delete: "删除",
+  deploy: "部署",
+  merge: "合并",
+  payment: "付款",
+  release: "发布",
+};
+
+function semanticProtectedActionPreview(
+  goalId: string,
+  message: string,
+  proposal: ProtectedActionProposal,
+): WorkspaceActionPreviewRequest | null {
+  const normalizedMessage = message.replace(/\s+/gu, " ").trim().toLowerCase();
+  const normalizedTarget = proposal.target.replace(/\s+/gu, " ").trim().toLowerCase();
+  if (!normalizedTarget || !normalizedMessage.includes(normalizedTarget)) return null;
+  return {
+    actionKind: "goal.update",
+    context: {
+      goal_id: goalId,
+      kind: "goal",
+      natural_language: message,
+      semantic_proposal: {
+        operation: proposal.operation,
+        target: proposal.target,
+      },
+    },
+    idempotencyKey: `workspace-semantic-protected-${goalId}-${Date.now().toString(36)}`,
+    normalizedParameters: { goal_id: goalId, status: "operator_gate_requested" },
+    summary: `请求受保护操作：${protectedOperationLabels[proposal.operation]} · ${proposal.target}`,
+  };
+}
 import type { StatusSourceControl } from "../features/personal-workspace/status-source-switcher";
 import { ensureSshSource } from "../data/ssh-host-catalog";
 import {
@@ -434,6 +469,7 @@ type PersonalGoalItem = {
   agentId: string;
   agentSentence: string;
   agentTodos: PersonalAgentTodoItem[];
+  doneTodoCount: number;
   goalId: string;
   latestActivity?: string;
   needsYou?: string | null;
@@ -703,8 +739,8 @@ function personalTodoText(todo: TodoItem) {
   return compactShareText(todo.title ?? todo.text, 112);
 }
 
-function personalAgentTodos(row: GoalDirectoryRow): PersonalAgentTodoItem[] {
-  return (getShareTodos(row, "agent")?.items ?? []).map((todo) => ({
+function personalAgentTodoFromItem(todo: TodoItem, row: GoalDirectoryRow): PersonalAgentTodoItem {
+  return {
     claimedBy: todo.claimed_by ?? null,
     done: todo.done,
     evidence: todo.evidence ? compactShareText(todo.evidence, 96) : null,
@@ -714,7 +750,42 @@ function personalAgentTodos(row: GoalDirectoryRow): PersonalAgentTodoItem[] {
     taskClass: todo.task_class ?? null,
     text: personalTodoText(todo),
     todoId: todo.todo_id?.trim() || `${row.goal.id}:agent:${todo.index}`,
-  }));
+  };
+}
+
+function personalAgentTodos(row: GoalDirectoryRow): PersonalAgentTodoItem[] {
+  return (getShareTodos(row, "agent")?.items ?? []).map((todo) => personalAgentTodoFromItem(todo, row));
+}
+
+/**
+ * Projected completion facts for a Goal. The status payload reports completed
+ * Todos as a count (project_asset.agent_todos.done) plus a bounded
+ * recent-completed lane; the items list itself only carries open Todos.
+ */
+function personalAgentTodoFacts(row: GoalDirectoryRow): {
+  doneTodoCount: number;
+  nextTodoText: string | null;
+  recentCompleted: PersonalAgentTodoItem[];
+} {
+  const assetTodos = row.queueItem?.project_asset?.agent_todos;
+  const queueTodos = row.queueItem?.agent_todos;
+  const items = assetTodos?.items?.length ? assetTodos.items : queueTodos?.items ?? [];
+  const doneFromCount = assetTodos?.done ?? queueTodos?.done_count ?? null;
+  const doneFromItems = items.filter((todo) => todo.done).length;
+  const doneTodoCount = Math.max(doneFromCount ?? 0, doneFromItems);
+  const seenTodoIds = new Set(
+    items
+      .map((todo) => todo.todo_id?.trim())
+      .filter((value): value is string => Boolean(value)),
+  );
+  const recentCompleted = (assetTodos?.recent_completed_advancement_items ?? [])
+    .filter((todo) => !todo.todo_id?.trim() || !seenTodoIds.has(todo.todo_id.trim()))
+    .map((todo) => personalAgentTodoFromItem(todo, row));
+  const firstOpen = items.find((todo) => !todo.done);
+  const nextTodoText = cleanShareText(assetTodos?.next ?? "")
+    || (firstOpen ? cleanShareText(firstOpen.title ?? "") || cleanShareText(firstOpen.text ?? "") : "")
+    || null;
+  return { doneTodoCount, nextTodoText, recentCompleted };
 }
 
 function personalValidationSentence(value: string | null | undefined) {
@@ -1081,6 +1152,7 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
     const needsYouTodo = allUserTodos.find((todo) => todo.goalId === goal.id);
     const needsYou = needsYouTodo?.text ?? null;
     const goalAgentTodos = personalAgentTodos(row);
+    const agentTodoFacts = personalAgentTodoFacts(row);
     const goalAgentRows = agentRows.filter(
       (agent) => agent.goalIds.includes(goal.id) && !/unassigned|unknown/i.test(agent.agentId),
     );
@@ -1092,6 +1164,7 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
       goalAgentRows.find((agent) => /codex/i.test(agent.agentId)) ??
       goalAgentRows[0];
     const nextSentence = [
+      agentTodoFacts.nextTodoText,
       row.queueItem?.recommended_action,
       row.latestRun?.recommended_action,
       personalAgentSentence(payload, row, state),
@@ -1101,7 +1174,8 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
       activationState: goal.activation_state,
       agentId: agentRow?.agentId ?? "codex",
       agentSentence: personalAgentSentence(payload, row, state),
-      agentTodos: goalAgentTodos,
+      agentTodos: [...goalAgentTodos, ...agentTodoFacts.recentCompleted],
+      doneTodoCount: agentTodoFacts.doneTodoCount,
       goalId: goal.id,
       latestActivity: row.latestRun?.generated_at ?? "",
       needsYou,
@@ -1868,6 +1942,14 @@ function PersonalGoalHome({
           ...current,
           [targetContextId]: [...(current[targetContextId] ?? []), ...cards],
         }));
+      }
+      if (targetContextId !== "manager" && response.protected_action) {
+        const protectedPreview = semanticProtectedActionPreview(
+          targetContextId,
+          question,
+          response.protected_action,
+        );
+        if (protectedPreview) return protectedPreview;
       }
     } catch (error) {
       const userInterrupted = interruptedContexts.current.delete(targetContextId);

@@ -1,0 +1,18 @@
+# Public-safe field shape only. Replace placeholders in an operator-owned
+# private config; this extension never writes a Codex home.
+model = "gpt-5.6-sol"
+model_provider = "local-cpa"
+model_catalog_json = "<CONTROLLED_MODEL_CATALOG_JSON>"
+service_tier = "default"
+
+[features]
+fast_mode = true
+
+[model_providers.local-cpa]
+name = "CPA · Codex A → B → text fallback"
+base_url = "http://127.0.0.1:<LOOPBACK_CPA_PORT>/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
+request_max_retries = 30
+stream_max_retries = 30

@@ -111,9 +111,9 @@ from ..todos.user_gate import (
 )
 from ..todos.write_hint import build_todo_write_hint
 from ..turn_driver.delivery_continuity import evaluate_delivery_route
-from ..work_items.action_portfolio import qualify_action_selection
-from ..work_items.planning_projection import (
-    build_quota_planning_projections,
+from ..work_items.action_portfolio import (
+    build_quota_planning_packet,
+    qualify_action_selection,
 )
 from ..work_items.execution_obligation import build_execution_obligation
 from ..work_items.goal_route_hint import build_goal_route_hint
@@ -125,11 +125,11 @@ from ..work_items.interaction_contract import (
 from ..work_items.interaction_contract import (
     user_channel_action_required as _user_channel_action_required,
 )
+from ..work_items.primary_action import protocol_action_text as _protocol_action_text
+from ..work_items.progress_observation import build_replan_action_packet
 from ..work_items.user_action_frontier import (
     user_action_owns_empty_agent_lane_from_summaries as _user_action_owns_empty_agent_lane,
 )
-from ..work_items.primary_action import protocol_action_text as _protocol_action_text
-from ..work_items.progress_observation import build_replan_action_packet
 from ..work_items.work_lane import (
     work_lane_contract_is_due_monitor_attempt,
     work_lane_contract_is_receipt_bound_monitor_settled,
@@ -139,6 +139,16 @@ from .settlement_precedence import (
     clear_quota_action_projections,
 )
 from .should_run_prepare import _QuotaDecisionPreparation
+
+
+def _interaction_runtime_root(
+    runtime_root: str | Path | None,
+    status_payload: Mapping[str, Any],
+) -> str | None:
+    if runtime_root:
+        return str(runtime_root)
+    raw_runtime_root = status_payload.get("runtime_root")
+    return str(raw_runtime_root) if raw_runtime_root else None
 
 
 def _compact_autonomous_candidate_context(
@@ -738,7 +748,7 @@ def _planning_projections(
         and not route.receipt_bound_replan_decision
         and not prepared.agent_monitor_only
     )
-    return build_quota_planning_projections(
+    return build_quota_planning_packet(
         projection_enabled=projection_enabled,
         include_detail=include_detail,
         goal_id=prepared.safe_goal_id,
@@ -1116,6 +1126,7 @@ def _build_quota_should_run_payload(
     *,
     turn_instance_id: str | None = None,
     include_agent_todo_detail: bool = False,
+    runtime_root: str | Path | None = None,
 ) -> dict[str, Any]:
     agent_scope_action = _agent_scope_frontier_action(route.effective_action)
     execution_obligation = _execution_obligation(
@@ -1441,6 +1452,7 @@ def _build_quota_should_run_payload(
         available_capabilities=prepared.runtime_available_capabilities,
         scheduler_execution_context=prepared.resolved_scheduler_context,
         turn_instance_id=turn_instance_id,
+        runtime_root=_interaction_runtime_root(runtime_root, prepared.status_payload),
     )
     payload["scheduler_hint"] = _scheduler_hint(
         payload,
@@ -1467,6 +1479,7 @@ def _build_quota_should_run_payload(
         available_capabilities=prepared.runtime_available_capabilities,
         scheduler_execution_context=prepared.resolved_scheduler_context,
         turn_instance_id=turn_instance_id,
+        runtime_root=_interaction_runtime_root(runtime_root, prepared.status_payload),
     )
     payload["protocol_action_packet"] = build_protocol_action_packet(payload)
     return payload

@@ -28,6 +28,14 @@ def register_turn_commands(
     inspect_journal.add_argument("--goal-id", required=True)
     inspect_journal.add_argument("--agent-id", required=True)
     inspect_journal.add_argument("--turn-key", required=True)
+    inspect_journal.add_argument(
+        "--retry-failed-turn",
+        action="store_true",
+        help=(
+            "Evaluate an explicit failed-Turn retry, including any current "
+            "Host Session binding check."
+        ),
+    )
 
     plan = command_sub.add_parser(
         "plan",

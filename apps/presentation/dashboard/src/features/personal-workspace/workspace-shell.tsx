@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
+import { useWorkspaceI18n } from "./i18n";
+
 export function WorkspaceShell({
   drawer,
   drawerOpen,
@@ -17,6 +19,7 @@ export function WorkspaceShell({
   sidebar: ReactNode;
   theme?: "brutal" | "paper";
 }) {
+  const { t } = useWorkspaceI18n();
   const sidebarRef = useRef<HTMLElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
@@ -54,7 +57,7 @@ export function WorkspaceShell({
     <section className={`personal-workspace-shell${drawerOpen ? " has-drawer" : ""}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}`} data-pw-theme={theme}>
       {mobileSidebarOpen ? <button aria-hidden className="personal-sidebar-backdrop" onClick={onCloseMobileSidebar} tabIndex={-1} type="button" /> : null}
       <aside
-        aria-label={mobileSidebarOpen ? "Goal 导航" : undefined}
+        aria-label={mobileSidebarOpen ? t("header.goalNavigation") : undefined}
         aria-modal={mobileSidebarOpen ? true : undefined}
         className="personal-workspace-sidebar"
         data-workspace-sidebar
@@ -62,7 +65,7 @@ export function WorkspaceShell({
         role={mobileSidebarOpen ? "dialog" : undefined}
       >
         <div className="personal-workspace-sidebar-inner">
-          {mobileSidebarOpen ? <button className="personal-sr-only" onClick={onCloseMobileSidebar} type="button">关闭 Goal 导航</button> : null}
+          {mobileSidebarOpen ? <button className="personal-sr-only" onClick={onCloseMobileSidebar} type="button">{t("common.close")} {t("header.goalNavigation")}</button> : null}
           {sidebar}
         </div>
       </aside>

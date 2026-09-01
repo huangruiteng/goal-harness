@@ -11,7 +11,8 @@ product_contract_source: owner-confirmed-design
 
 Give a visible DeepSeek Harness (DSH) Session a small, native LoopX surface:
 
-- `/loopx-init` installs or repairs the LoopX CLI and DSH-facing LoopX Skills;
+- plugin startup installs or repairs the LoopX CLI and DSH-facing LoopX Skills
+  before its Loader row becomes ready; `/loopx-init` remains the repair entry;
 - the `loopx` Skill teaches the model to use the authoritative LoopX CLI;
 - one globally loaded but passive Driver becomes eligible only after the exact
   Session successfully invokes the `loopx` Skill, then continues quota-approved
@@ -45,13 +46,22 @@ inbox, same-session execution, and UI-transport authority.
 
 The new integration must not repurpose the existing `dsh` alias.
 
-## `/loopx-init` Contract
+## Automatic Initialization And `/loopx-init` Repair Contract
 
-`/loopx-init` is a global DSH UI command available after the plugin has been
-installed. Its settled native `CommandResult` remains the authoritative result
-rendered by the command UI. The plugin also queues bounded, model-visible status
-prompts through the exact receiving Agent, but neither their delivery nor the
-model replies participate in installation or reload decisions.
+The plugin's init row automatically runs the typed initialization sequence and
+awaits it before the row becomes ready. A startup failure is reduced to safe
+stage/kind diagnostics, does not fail DSH boot, and leaves `/loopx-init`
+available as a global repair command. Automatic startup queues no Agent input
+and spends no model calls. For an explicit repair, the settled native
+`CommandResult` remains authoritative; bounded model-visible status prompts do
+not participate in installation or reload decisions.
+
+The init row publishes a typed `loopxBootstrap` service only after that
+success or safe failure settles. The plugin patch adds the service to the
+existing Web server and Web runtime injection lists, turning DSH's printed URL
+into the host-visible readiness boundary. The failure value contains only the
+safe stage and cause kind; it releases DSH startup without granting LoopX
+readiness or hiding the repair command.
 
 The command accepts no free-form input. Invalid input returns the usage error
 before any followup or CLI probe. An exact invocation performs this bounded
@@ -61,8 +71,16 @@ sequence:
    CLI and DSH workflow skills are being checked or installed.
 2. Probe a usable `loopx` executable and the DSH-native workflow-skill
    installation capability.
-3. If the CLI is missing or incompatible, run the documented installer once:
-   `python3 -m pip install --upgrade loopx`.
+3. If the CLI is missing or incompatible, run one fixed-argv private install:
+   `<compatible-python> -m pip install --upgrade --target
+   <agents-home>/runtime/dsh-loopx-plugin/site-packages 'loopx>=0.5.3'`, then
+   write a managed launcher beside that target. An explicit `PYTHON_BIN` wins;
+   otherwise the plugin probes `python3` and named Python 3.11-3.14
+   executables, then keeps the selected interpreter and launcher for readback,
+   Driver/GoalBar calls, and generated skill commands. This does not mutate an
+   externally managed system Python or use `--break-system-packages`.
+   The package requirement is `loopx>=0.5.3`, the first release contract whose
+   Python wheel includes the workflow-skill resources.
 4. Resolve the resulting executable again; fail if it is still unavailable.
 5. Run `loopx workflow-skills --install --skills-dir ~/.agents/skills
    --host-surface deepseek-harness-native`.
@@ -76,18 +94,18 @@ sequence:
    failure facts, then return the native result. Neither surface exposes raw
    subprocess output or local absolute paths.
 
-A valid, uncancelled execution therefore normally adds two model calls: one
-start turn and one result turn, including when initialization fails. A cancelled
-execution leaves only the already queued start turn, and invalid input adds no
-model call. Both followups instruct the model not to call tools, run commands,
-reinstall, or expand diagnostics. Queue failures are logged safely, never
-retried, and cannot alter the native result or cause a second install mutation.
+A valid, uncancelled explicit `/loopx-init` execution normally adds two model
+calls: one start turn and one result turn, including when initialization fails.
+A cancelled execution leaves only the already queued start turn, and invalid
+input adds no model call. Both followups instruct the model not to call tools,
+run commands, reinstall, or expand diagnostics. Queue failures are logged
+safely, never retried, and cannot alter the native result or cause a second
+install mutation.
 
-DSH restart guidance is based only on the actual skill mutation statuses.
 `skillsChanged` is true when any packaged skill is `created` or `updated`, or
 when the entry skill is `created`, `updated`, or
-`upgraded_legacy_managed`; these outcomes require one DSH restart to reload the
-skills. A CLI-only change and an all-`unchanged` skill result require no restart.
+`upgraded_legacy_managed`. DSH's filesystem skill provider invalidates its
+catalog and loads every successful mutation without a restart.
 
 A healthy compatible LoopX CLI is preserved rather than upgraded. Subprocesses
 use fixed argv without a shell, honor the command AbortSignal, and are never
@@ -101,8 +119,8 @@ reservations, do not activate the Driver, and do not change Driver admission
 authority or command barriers.
 
 This command cannot install the plugin that defines it. `install.sh` remains
-the plugin bootstrap and tells the user to run `/loopx-init` after profile
-installation.
+the source-checkout plugin bootstrap and tells the user to start DSH and use
+`/loopx`; it does not require an explicit initialization command.
 When DSH configures `DSH_AGENTS_HOME`, the command uses its `skills` child;
 `~/.agents/skills` is the default.
 
@@ -234,7 +252,8 @@ Retain the existing `install.sh` approach:
 3. install or update the tarball in the DSH `web` profile;
 4. read the profile back and verify exactly the `loopx-init` command row and
    Driver row in dependency order;
-5. retain the built artifact and print `/loopx-init` as the next action.
+5. retain the built artifact and print DSH startup plus `/loopx` use as the
+   next action.
 
 The installer no longer requires LoopX to be present before the plugin can be
 installed.
@@ -263,11 +282,14 @@ Focused validation must cover:
 - `/loopx-init` healthy-skip, missing-CLI install, incompatible-CLI repair,
   package failure, Skill failure, and readback failure, with one install
   mutation at most;
+- automatic startup awaiting the same successful initialization before
+  readiness, exposing skills immediately, and isolating a safe failure while
+  retaining the repair command;
 - invalid init arguments producing no followup or probe; start/result ordering;
   two followups for uncancelled success or failure; only the start followup for
   cancellation; and followup queue failure preserving the native result;
 - actual `created`, `updated`, `unchanged`, and `upgraded_legacy_managed` skill
-  status projection, CLI-only changes requiring no restart, and incomplete or
+  status projection, hot loading without restart, and incomplete or
   unknown status failing closed;
 - init followup source isolation from the Driver reservation source, bounded
   safe messages, and no raw subprocess output or local absolute paths;
@@ -299,12 +321,11 @@ Focused validation must cover:
 
 ## Definition Of Done
 
-- A user installs the plugin, runs `/loopx-init`, sees bounded start and result
-  feedback, and receives an authoritative native result for the verified LoopX
-  CLI plus DSH-native Skills.
-- the result requests a DSH restart only after an actual skill create, update,
-  or managed legacy-entry upgrade, and explicitly requires none for CLI-only or
-  all-unchanged outcomes.
+- A user installs the plugin, starts DSH, and can invoke `/loopx <task>` without
+  a separate initialization command or restart; `/loopx-init` remains a bounded
+  explicit repair path.
+- successful skill creation, update, or managed legacy-entry upgrade becomes
+  visible through DSH's live skill catalog without a restart.
 - a task handled through the `loopx` Skill uses authoritative CLI calls, not a
   plugin `/loopx` command, semantic routing, or model tools.
 - an inactive Session performs no LoopX call or timer work; only a successfully

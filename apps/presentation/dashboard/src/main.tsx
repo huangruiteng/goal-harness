@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 
+import { WorkspaceI18nProvider } from "./features/personal-workspace/i18n";
 import { router } from "./router";
 import "./styles.css";
 
@@ -23,6 +24,8 @@ const queryClient = new QueryClient({
 
 createRoot(root).render(
   <QueryClientProvider client={queryClient}>
-    <RouterProvider router={router} />
+    <WorkspaceI18nProvider>
+      <RouterProvider router={router} />
+    </WorkspaceI18nProvider>
   </QueryClientProvider>,
 );

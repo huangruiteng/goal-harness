@@ -17,6 +17,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from ..file_lock import process_is_alive
+
 EFFECT_RUNTIME_REQUEST_SCHEMA_VERSION = "loopx_effect_runtime_request_v0"
 EFFECT_RUNTIME_RESPONSE_SCHEMA_VERSION = "loopx_effect_runtime_response_v1"
 EFFECT_RUNTIME_INFO_SCHEMA_VERSION = "loopx_effect_runtime_info_v0"
@@ -324,52 +326,7 @@ def _probe_node() -> tuple[str, str | None, str | None]:
 
 
 def _pid_is_alive(value: object) -> bool:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        return False
-    if os.name == "nt":
-        # Windows signal 0 is CTRL_C_EVENT, not the side-effect-free POSIX
-        # existence probe provided by kill(pid, 0).
-        return _windows_pid_is_alive(value)
-    try:
-        os.kill(value, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
-def _windows_pid_is_alive(pid: int) -> bool:
-    """Probe a Windows process without sending a console control event."""
-
-    import ctypes
-    from ctypes import wintypes
-
-    synchronize = 0x00100000
-    wait_timeout = 0x00000102
-    error_access_denied = 5
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    open_process = kernel32.OpenProcess
-    open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    open_process.restype = wintypes.HANDLE
-    wait_for_single_object = kernel32.WaitForSingleObject
-    wait_for_single_object.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-    wait_for_single_object.restype = wintypes.DWORD
-    close_handle = kernel32.CloseHandle
-    close_handle.argtypes = [wintypes.HANDLE]
-    close_handle.restype = wintypes.BOOL
-
-    handle = open_process(synchronize, False, pid)
-    if not handle:
-        # An access-denied process still exists; it is merely outside the
-        # caller's query authority.
-        return bool(getattr(ctypes, "get_last_error")() == error_access_denied)
-    try:
-        return bool(wait_for_single_object(handle, 0) == wait_timeout)
-    finally:
-        close_handle(handle)
+    return process_is_alive(value)
 
 
 def _start_lock_holder_pid(path: Path) -> int | None:

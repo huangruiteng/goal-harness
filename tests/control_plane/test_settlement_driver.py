@@ -102,6 +102,35 @@ def test_turn_settlement_passes_stable_effect_refs_to_new_callbacks() -> None:
     ]
 
 
+def test_malformed_nonterminal_completion_does_not_spend_quota() -> None:
+    calls = {"writeback": 0, "spend": 0}
+
+    def writeback() -> dict[str, object]:
+        calls["writeback"] += 1
+        return {"ok": True, "appended": True}
+
+    def spend() -> dict[str, object]:
+        calls["spend"] += 1
+        return {"ok": True, "appended": True}
+
+    result = execute_turn_driver_settlement(
+        TRANSACTION,
+        transaction_phases=PHASES,
+        completed_phases=PHASES[:3],
+        writeback_payload=None,
+        quota_spend_payload=None,
+        turn_result_kind="validated_completion",
+        writeback=writeback,
+        spend=spend,
+        checkpoint=lambda _step, _payload, _phases: None,
+    )
+
+    assert result.failure is not None
+    assert result.failure.step_kind is SettlementStepKind.DURABLE_WRITEBACK
+    assert result.failure.kind.value == "receipt_missing"
+    assert calls == {"writeback": 1, "spend": 0}
+
+
 def test_turn_settlement_checkpoints_committed_readback_without_reexecution() -> None:
     effect_ref = f"{IDENTITY.effect_id}#durable_writeback"
     events: list[str] = []

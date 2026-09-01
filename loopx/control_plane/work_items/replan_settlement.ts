@@ -100,6 +100,10 @@ export function projectTodoLifecycleSettlementReentry(value: unknown): JsonObjec
     throw new EffectRuntimeRequestError("Todo lifecycle reentry request schema mismatch");
   }
   const goalId = requireNonEmptyString(request.goal_id, "goal_id");
+  const runtimeRoot = optionalNonEmptyString(request.runtime_root, "runtime_root");
+  const commandPrefix = runtimeRoot === null
+    ? "loopx"
+    : `loopx --runtime-root ${shellArgument(runtimeRoot)}`;
   if (!Array.isArray(request.triggers) || request.triggers.length === 0) {
     throw new EffectRuntimeRequestError("triggers must be a non-empty array");
   }
@@ -140,7 +144,7 @@ export function projectTodoLifecycleSettlementReentry(value: unknown): JsonObjec
         : ["--turn-instance-id", completionIdentityKey];
     return (
       `when no real successor remains for completed Todo ${todoId}: ` +
-      `loopx todo complete --goal-id ${shellArgument(goalId)} ` +
+      `${commandPrefix} todo complete --goal-id ${shellArgument(goalId)} ` +
       `--todo-id ${shellArgument(todoId)}` +
       argumentSuffix(completionIdentityArgs) +
       argumentSuffix(lifecycleActorArgs) +
@@ -150,7 +154,7 @@ export function projectTodoLifecycleSettlementReentry(value: unknown): JsonObjec
   nextCliActions.push(
     "otherwise link or create one real runnable successor for the exact " +
       "completed Todo; do not create lifecycle-only filler",
-    `loopx --format json quota should-run --goal-id ${shellArgument(goalId)}` +
+    `${commandPrefix} --format json quota should-run --goal-id ${shellArgument(goalId)}` +
       argumentSuffix(quotaScopedArgs),
   );
   return {

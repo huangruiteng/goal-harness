@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .control_plane.runtime.time import now_local_iso
+from .control_plane.runtime.public_safety import public_safe_compact_text
 from .control_plane.todos.active_state_editing import (
     TODO_SECTION_HEADINGS,
     insertion_anchor,
@@ -65,6 +66,12 @@ HEARTBEAT_OPT_IN_DECLINED_INSTRUCTION = (
     "on-demand unless the user later opts in."
 )
 CODEX_APP_HEARTBEAT_CHOICES = {"ask", "yes", "no"}
+ONBOARDING_CONNECTION_VALIDATION_AGENT = "agent"
+ONBOARDING_CONNECTION_VALIDATION_PROVIDER_PREVALIDATED = "provider-prevalidated"
+ONBOARDING_CONNECTION_VALIDATION_CHOICES = {
+    ONBOARDING_CONNECTION_VALIDATION_AGENT,
+    ONBOARDING_CONNECTION_VALIDATION_PROVIDER_PREVALIDATED,
+}
 
 
 def slugify_goal_id(value: str) -> str:
@@ -74,6 +81,12 @@ def slugify_goal_id(value: str) -> str:
 
 def default_goal_id(project: Path) -> str:
     return f"{slugify_goal_id(project.name)}-goal"
+
+
+def derive_goal_display_name(goal_text: str | None) -> str | None:
+    """Derive a public-safe display title from user-supplied goal text."""
+
+    return public_safe_compact_text(goal_text, limit=132)
 
 
 def now_iso() -> str:
@@ -141,6 +154,16 @@ def normalize_codex_app_heartbeat(value: str | None) -> str:
     choice = (value or "ask").strip().lower()
     if choice not in CODEX_APP_HEARTBEAT_CHOICES:
         raise ValueError("codex_app_heartbeat must be one of: ask, yes, no")
+    return choice
+
+
+def normalize_onboarding_connection_validation(value: str | None) -> str:
+    choice = (value or ONBOARDING_CONNECTION_VALIDATION_AGENT).strip().lower()
+    if choice not in ONBOARDING_CONNECTION_VALIDATION_CHOICES:
+        raise ValueError(
+            "onboarding_connection_validation must be one of: "
+            "agent, provider-prevalidated"
+        )
     return choice
 
 
@@ -574,6 +597,7 @@ def build_goal_entry(
     goal_doc: Path | None,
     adapter_kind: str,
     adapter_status: str,
+    onboarding_connection_validation: str,
     next_probe: str | None,
     spawn_allowed: bool,
     max_children: int,
@@ -591,6 +615,19 @@ def build_goal_entry(
                 "role": "primary_goal_document",
             }
         )
+    adapter = {
+        "kind": adapter_kind,
+        "status": adapter_status,
+    }
+    if (
+        onboarding_connection_validation
+        == ONBOARDING_CONNECTION_VALIDATION_PROVIDER_PREVALIDATED
+    ):
+        adapter["connection_validation"] = {
+            "owner": "provider",
+            "status": "prevalidated",
+            "agent_todo_required": False,
+        }
     return {
         "id": goal_id,
         **({"display_name": display_name} if display_name else {}),
@@ -601,10 +638,7 @@ def build_goal_entry(
         "repo": str(project),
         "state_file": relative_state_file(project, state_file),
         "authority_sources": authority_sources,
-        "adapter": {
-            "kind": adapter_kind,
-            "status": adapter_status,
-        },
+        "adapter": adapter,
         "spawn_policy": {
             "mode": (
                 MULTI_SUBAGENT_ORCHESTRATION_MODE
@@ -686,6 +720,7 @@ def bootstrap_project(
     execution_outcome_must_advance: list[str] | None = None,
     execution_turn_granularity: str | None = None,
     onboarding_scan_enabled: bool = True,
+    onboarding_connection_validation: str = ONBOARDING_CONNECTION_VALIDATION_AGENT,
     accept_onboarding_agent_todos: bool = False,
     begin_autonomous_advance: bool = False,
     codex_app_heartbeat: str = "ask",
@@ -694,7 +729,6 @@ def bootstrap_project(
     onboarding_max_top_level_files: int = 24,
     preserve_todos: bool = False,
     display_name: str | None = None,
-    include_connection_validation: bool = True,
     force: bool,
     dry_run: bool,
     sync_global: bool,
@@ -702,6 +736,12 @@ def bootstrap_project(
 ) -> dict[str, Any]:
     project = project.expanduser().resolve()
     codex_app_heartbeat = normalize_codex_app_heartbeat(codex_app_heartbeat)
+    onboarding_connection_validation = normalize_onboarding_connection_validation(
+        onboarding_connection_validation
+    )
+    include_connection_validation = (
+        onboarding_connection_validation == ONBOARDING_CONNECTION_VALIDATION_AGENT
+    )
     registry_path = registry_path.expanduser()
     if not registry_path.is_absolute():
         registry_path = project / registry_path
@@ -751,6 +791,7 @@ def bootstrap_project(
         goal_doc=goal_doc,
         adapter_kind=adapter_kind,
         adapter_status=adapter_status,
+        onboarding_connection_validation=onboarding_connection_validation,
         next_probe=next_probe,
         spawn_allowed=spawn_allowed,
         max_children=max_children,
@@ -893,6 +934,7 @@ def bootstrap_project(
                 "accept_onboarding_agent_todos": accept_onboarding_agent_todos,
                 "begin_autonomous_advance": begin_autonomous_advance,
                 "codex_app_heartbeat": codex_app_heartbeat,
+                "onboarding_connection_validation": onboarding_connection_validation,
                 "onboarding_acceptance_required": bool(onboarding_scan and not accept_onboarding_agent_todos),
                 "autonomous_advance_choice_required": bool(onboarding_scan and not begin_autonomous_advance),
                 "heartbeat_opt_in_required": heartbeat_required,
@@ -972,6 +1014,7 @@ def bootstrap_project(
         "accept_onboarding_agent_todos": accept_onboarding_agent_todos,
         "begin_autonomous_advance": begin_autonomous_advance,
         "codex_app_heartbeat": codex_app_heartbeat,
+        "onboarding_connection_validation": onboarding_connection_validation,
         "onboarding_acceptance_required": bool(onboarding_scan and not accept_onboarding_agent_todos),
         "autonomous_advance_choice_required": bool(onboarding_scan and not begin_autonomous_advance),
         "heartbeat_opt_in_required": heartbeat_required,
@@ -1035,6 +1078,10 @@ def render_bootstrap_markdown(payload: dict[str, Any]) -> str:
         f"- onboarding_acceptance_required: `{payload.get('onboarding_acceptance_required')}`",
         f"- autonomous_advance_choice_required: `{payload.get('autonomous_advance_choice_required')}`",
         f"- codex_app_heartbeat: `{payload.get('codex_app_heartbeat')}`",
+        (
+            "- onboarding_connection_validation: "
+            f"`{payload.get('onboarding_connection_validation')}`"
+        ),
         f"- heartbeat_opt_in_required: `{payload.get('heartbeat_opt_in_required')}`",
         f"- host_loop_activation_required: `{payload.get('host_loop_activation_required')}`",
         f"- onboarding_todos_written: `{payload.get('onboarding_todos_written')}`",

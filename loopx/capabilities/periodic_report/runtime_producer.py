@@ -23,6 +23,7 @@ from .triggers import (
 
 RUNTIME_TRIGGER_REQUEST_SCHEMA = "periodic_report_runtime_trigger_request_v0"
 RUNTIME_PRODUCER_RECEIPT_SCHEMA = "periodic_report_runtime_producer_v0"
+STAGE_COMPLETION_SCHEMA = "periodic_report_stage_completion_receipt_v0"
 _MAX_RELEVANT_ROLLOUT_EVENTS = 4096
 
 _SAFE_BOUNDARY_FIELDS = (
@@ -63,7 +64,7 @@ def _safe_durable_event(
     if event.get("goal_id") != goal_id:
         return None
     kind = str(event.get("event_kind") or "").strip()
-    if kind not in {"todo_complete", "refresh_state"}:
+    if kind not in {"todo_complete", "refresh_state", "quota_should_run"}:
         return None
     recorded_at = _timestamp(event.get("recorded_at"), f"{label}.recorded_at")
     if not window_start <= _parsed_timestamp(recorded_at) <= window_end:
@@ -77,12 +78,67 @@ def _safe_durable_event(
         if isinstance(event.get("details"), Mapping)
         else {}
     )
+    stage_completion: dict[str, Any] | None = None
+    raw_stage_identity = details.get("stage_identity")
+    if raw_stage_identity is not None:
+        if details.get("stage_completion_schema") != STAGE_COMPLETION_SCHEMA:
+            raise ValueError(
+                f"{label}.details.stage_completion_schema must use "
+                f"{STAGE_COMPLETION_SCHEMA}"
+            )
+        stage_identity = _token(
+            raw_stage_identity, f"{label}.details.stage_identity"
+        )
+        closed_vision_revision = _text(
+            details.get("closed_vision_revision"),
+            f"{label}.details.closed_vision_revision",
+            maximum=128,
+        )
+        frontier_identity = _text(
+            details.get("frontier_identity"),
+            f"{label}.details.frontier_identity",
+            maximum=256,
+        )
+        transition = _token(
+            details.get("stage_transition"),
+            f"{label}.details.stage_transition",
+        )
+        acceptance = _token(
+            details.get("stage_acceptance"),
+            f"{label}.details.stage_acceptance",
+        )
+        completed_at = _timestamp(
+            details.get("stage_completed_at", recorded_at),
+            f"{label}.details.stage_completed_at",
+        )
+        event_status = str(event.get("status") or "").strip()
+        if (
+            (
+                kind == "refresh_state"
+                and event_status in {"appended", "receipt_repaired"}
+                or kind == "quota_should_run"
+                and event_status in {"normal_run", "should-run"}
+            )
+            and transition in {"successor_frontier_settled", "goal_terminal"}
+            and acceptance == "validated"
+            and details.get("stage_outcome_checkpoint_satisfied") is True
+            and details.get("stage_durable_writeback_required") is True
+        ):
+            stage_completion = {
+                "stage_identity": stage_identity,
+                "closed_vision_revision": closed_vision_revision,
+                "frontier_identity": frontier_identity,
+                "transition": transition,
+                "completed_at": completed_at,
+                "completion_receipt_ref": f"stage:{stage_identity}",
+            }
     return {
         "event_id": event_id,
         "event_kind": kind,
         "recorded_at": recorded_at,
         "todo_id": str(event.get("todo_id") or "").strip() or None,
         "replan_recorded": details.get("autonomous_replan_recorded") is True,
+        "stage_completion": stage_completion,
     }
 
 
@@ -124,6 +180,11 @@ def build_periodic_report_runtime_trigger_decision(
     aggregation = policy.get("aggregation")
     if not isinstance(aggregation, Mapping):
         raise ValueError("trigger_policy.aggregation is required for runtime promotion")
+    if aggregation.get("stage_completion_required") is not True:
+        raise ValueError(
+            "runtime promotion requires trigger_policy.aggregation."
+            "stage_completion_required=true"
+        )
 
     segment = _object(payload.get("segment"), "segment")
     segment_ref = _token(segment.get("segment_ref"), "segment.segment_ref")
@@ -187,43 +248,65 @@ def build_periodic_report_runtime_trigger_decision(
     transition: str | None = None
     contributing: list[dict[str, Any]] = []
     delivered_count = 0
-    if aggregation["promote_replan"] and replans:
-        boundary_event = replans[0]
-        transition = "replan_entered"
-        contributing = [boundary_event]
-        delivered_count = sum(
-            event["recorded_at"] <= boundary_event["recorded_at"]
+    selected_stage_completion: dict[str, Any] | None = None
+    stage_events: list[dict[str, Any]] = []
+    seen_stage_identities: set[str] = set()
+    for event in relevant:
+        stage_completion = event.get("stage_completion")
+        if not isinstance(stage_completion, Mapping):
+            continue
+        stage_identity = str(stage_completion.get("stage_identity") or "")
+        if not stage_identity or stage_identity in seen_stage_identities:
+            continue
+        seen_stage_identities.add(stage_identity)
+        stage_events.append(event)
+    boundary_event = stage_events[0] if stage_events else None
+    if boundary_event is not None:
+        completions_at_boundary = [
+            event
             for event in completions
-        )
-    else:
-        threshold = aggregation.get("todo_completed_threshold")
-        if threshold is not None and len(completions) >= int(threshold):
-            transition = "segment_completed"
-            contributing = completions[: int(threshold)]
-            delivered_count = int(threshold)
+            if event["recorded_at"] <= boundary_event["recorded_at"]
+        ]
+        transition = "segment_completed"
+        contributing = [boundary_event]
+        delivered_count = len(completions_at_boundary)
 
     source_ref = f"rollout-window:{goal_id}:{segment_ref}"
     if transition:
         evidence_ids = [str(event["event_id"]) for event in contributing]
+        stage_completion = dict(contributing[-1]["stage_completion"])
+        selected_stage_completion = stage_completion
+        source_ref = f"{source_ref}:{stage_completion['stage_identity']}"
         candidate = {
             "trigger_kind": "bounded_segment_milestone",
             "observed_at": str(contributing[-1]["recorded_at"]),
             "source_ref": source_ref,
-            "evidence_digest": _event_digest(evidence_ids),
+            "evidence_digest": _event_digest(
+                [str(stage_completion["stage_identity"])]
+            ),
             "facts": {
                 "segment_ref": segment_ref,
                 "transition": transition,
                 "delivered_count": delivered_count,
                 "remaining_todo_count": remaining_todo_count,
                 "durable_writeback": True,
+                "acceptance": "validated",
+                "completed_at": stage_completion["completed_at"],
+                "completion_receipt_ref": stage_completion[
+                    "completion_receipt_ref"
+                ],
+                "stage_identity": stage_completion["stage_identity"],
+                "closed_vision_revision": stage_completion[
+                    "closed_vision_revision"
+                ],
+                "frontier_identity": stage_completion["frontier_identity"],
+                "stage_transition": stage_completion["transition"],
+                "outcome_checkpoint_satisfied": True,
+                "status": "completed",
             },
         }
         status = "promoted"
-        reason = (
-            "durable_replan_observed"
-            if transition == "replan_entered"
-            else "todo_completion_threshold_reached"
-        )
+        reason = "authoritative_stage_completion_observed"
     else:
         evidence_ids = [str(event["event_id"]) for event in relevant]
         candidate = {
@@ -234,7 +317,7 @@ def build_periodic_report_runtime_trigger_decision(
             "facts": {},
         }
         status = "not_promoted"
-        reason = "promotion_conditions_not_met"
+        reason = "authoritative_stage_completion_missing"
 
     trigger_request: dict[str, Any] = {
         "schema_version": "periodic_report_trigger_request_v0",
@@ -255,6 +338,8 @@ def build_periodic_report_runtime_trigger_decision(
         "window": {"start_at": start_at, "end_at": end_at},
         "todo_completed_count": len(completions),
         "replan_event_count": len(replans),
+        "stage_completion_count": len(stage_events),
+        "selected_stage_completion": selected_stage_completion,
         "contributing_event_ids": evidence_ids,
         "transition": transition,
         "boundary": {

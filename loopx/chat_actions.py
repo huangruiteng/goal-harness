@@ -863,7 +863,7 @@ class ChatActionService(
                 adapter_kind=str((source_goal.get("adapter") or {}).get("kind") or "generic_project_goal_v0"),
                 adapter_status="connected",
                 display_name=str(parameters.get("title") or "").strip() or None,
-                include_connection_validation=False,
+                onboarding_connection_validation="provider-prevalidated",
                 next_probe=None,
                 spawn_allowed=False,
                 max_children=0,

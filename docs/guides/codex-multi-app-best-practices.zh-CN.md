@@ -3,7 +3,7 @@
 ## 定位
 
 面向在单台 macOS 上同时运行多个 Codex / ChatGPT App（例如官方 GPT 版 + DeepSeek 版）的操作者 runbook。
-与 [Codex App 多 Provider 切换](codex-app-provider-switching.md) 互补：那边讲「同一个 App 内切换 provider」，这里讲「多个 App 并存、隔离与排障」。
+与 [Codex App 多 Provider 切换](../../packages/loopx-codex-provider-routing/RUNBOOK.md) 互补：那边讲「同一个 App 内切换 provider」，这里讲「多个 App 并存、隔离与排障」。
 
 本文来自 2026-08-22 的真实线上故障复盘，包含结论、证据和可复现的检查命令。
 
@@ -103,7 +103,7 @@ ps -Ao state= | awk 'substr($1,1,1)=="Z"{z++} END{print z+0}'   # zombie 回到�
 
 - 定位：跨平台桌面配置 / Provider 切换器，管理 Claude Code、Codex、OpenCode、Gemini CLI 的 provider 配置、认证与模型目录。
 - 在我们方案中的角色：管理 DS home 的 provider（DeepSeek / 方舟 / OpenCode Go），**不碰 GPT home**；切换时统一写回 `CODEX_HOME/config.toml`。
-- 注意点：模型 catalog 与 `contextWindow` 必须维护一致口径（见 `codex-app-provider-switching.md` 的窗口/compaction 小节），避免切换后 catalog 被简化覆盖。
+- 注意点：模型 catalog 与 `contextWindow` 必须维护一致口径（见 [provider routing runbook](../../packages/loopx-codex-provider-routing/RUNBOOK.md) 的窗口/compaction 小节），避免切换后 catalog 被简化覆盖。
 - 变体：`cc-switch-cli`（CLI）、`cc-switch-web`、`LoongPort`（中转站增强版）等；均属同一思路。
 
 ### 运行时韧性层：AgentSwap（bojieli/agentswap）

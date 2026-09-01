@@ -42,6 +42,14 @@ promote a proposal beyond that status.
 
 ## Drafts Under Review
 
+- [Intelligent Review and Dynamic Presentation Surfaces v0](intelligent-review-presentation-surfaces-v0.md)
+  ([中文版](intelligent-review-presentation-surfaces-v0.zh-CN.md)): compile
+  canonical action, attention, planning, evidence, and receipt facts into
+  role- and channel-aware interaction and presentation plans, so reversible
+  verified actions can stay direct, real decisions remain focused, cards,
+  graphs, reports, dashboards, and living documents can be chosen dynamically,
+  and every sink declares completeness and readback without making models or
+  frontends authoritative.
 - [Provider-Neutral Post-Writeback Capability Hooks v0](provider-neutral-post-writeback-capability-hooks-v0.md)
   ([中文版](provider-neutral-post-writeback-capability-hooks-v0.zh-CN.md)):
   dispatch installed capability policy only after a committed durable receipt,
@@ -79,6 +87,11 @@ promote a proposal beyond that status.
 
 ## Draft Integration Proposals
 
+- [Obelisk Session Evidence Provider v0](obelisk-session-evidence-provider-v0.md)
+  ([中文版](obelisk-session-evidence-provider-v0.zh-CN.md)): evaluate an
+  optional, read-only historical-evidence provider for typed Replan cold paths,
+  defaulting to same-agent and same-repository history while keeping retrieval,
+  Replan settlement, memory lifecycle, and action authority separate.
 - [LoopX Desktop Execution Frontends v0](desktop-execution-frontends-v0.md)
   ([中文版](desktop-execution-frontends-v0.zh-CN.md)): support both
   attachment to an externally owned Codex App session and a LoopX-managed Pi or

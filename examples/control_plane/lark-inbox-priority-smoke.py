@@ -152,6 +152,7 @@ def main() -> None:
                     "message_id": "om_direct_question",
                     "create_time": "2026-07-15T00:00:00Z",
                     "content": "@Project Review Bot 这个结论呢？",
+                    "addressed_to_bot": True,
                 }
             ),
             encoding="utf-8",

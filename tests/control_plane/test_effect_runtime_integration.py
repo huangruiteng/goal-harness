@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -16,24 +15,45 @@ import pytest
 from loopx.control_plane import effect_runtime
 
 
+_TURN_KEY = "sha256:" + "a" * 64
+_TODO_ID = "todo_fixture0001"
+
+
+def _effect_id(label: str) -> str:
+    return f"fixture-goal:fixture-agent:{_TODO_ID}:{label}"
+
+
 def _journal(effect_id: str) -> dict[str, object]:
+    goal_id, agent_id, todo_id, turn_instance_id = effect_id.split(":", 3)
     return {
         "schema_version": "loopx_turn_journal_v0",
-        "goal_id": "fixture-goal",
-        "turn_key": "sha256:" + "a" * 64,
+        "goal_id": goal_id,
+        "turn_key": _TURN_KEY,
         "status": "in_progress",
-        "completed_phases": ["host_execute"],
+        "completed_phases": [],
         "plan": {
-            "transaction": {"settlement_plan": {"identity": {"effect_id": effect_id}}}
+            "turn_envelope": {
+                "goal_id": goal_id,
+                "agent_id": agent_id,
+                "action": {"selected_todo": {"todo_id": todo_id}},
+            },
+            "transaction": {
+                "turn_key": _TURN_KEY,
+                "turn_instance_id": turn_instance_id,
+                "settlement_plan": {
+                    "schema_version": "quota_settlement_plan_v1",
+                    "identity": {
+                        "schema_version": "quota_settlement_identity_v0",
+                        "effect_id": effect_id,
+                        "goal_id": goal_id,
+                        "agent_id": agent_id,
+                        "todo_id": todo_id,
+                        "turn_instance_id": turn_instance_id,
+                    },
+                },
+            },
         },
     }
-
-
-def _digest(path: Path) -> str | None:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except FileNotFoundError:
-        return None
 
 
 def _raw_runtime_response(
@@ -56,16 +76,14 @@ def _raw_runtime_response(
     return decoded
 
 
-def test_windows_pid_liveness_uses_a_non_signaling_probe(monkeypatch) -> None:
-    calls: list[int] = []
-    fake_os = SimpleNamespace(name="nt")
+def test_runtime_pid_liveness_delegates_to_shared_non_signaling_probe(monkeypatch) -> None:
+    calls: list[object] = []
 
-    def probe(pid: int) -> bool:
+    def probe(pid: object) -> bool:
         calls.append(pid)
         return True
 
-    monkeypatch.setattr(effect_runtime, "os", fake_os)
-    monkeypatch.setattr(effect_runtime, "_windows_pid_is_alive", probe)
+    monkeypatch.setattr(effect_runtime, "process_is_alive", probe)
 
     assert effect_runtime._pid_is_alive(1234) is True
     assert calls == [1234]
@@ -92,7 +110,6 @@ def test_managed_runtime_is_reused_and_restart_safe_for_typed_write(
             "path": str(journal_path),
             "journal": payload,
             "expected_effect_id": effect_id,
-            "expected_previous_sha256": None,
         },
     )
     assert committed["appended"] is True
@@ -115,7 +132,6 @@ def test_managed_runtime_is_reused_and_restart_safe_for_typed_write(
             "path": str(journal_path),
             "journal": payload,
             "expected_effect_id": effect_id,
-            "expected_previous_sha256": _digest(journal_path),
         },
     )
     assert replayed["appended"] is False
@@ -178,14 +194,15 @@ def test_typed_write_rejects_cross_effect_overwrite(
     monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: runtime_dir)
     monkeypatch.setenv("LOOPX_EFFECT_RUNTIME_IDLE_MS", "1000")
     journal_path = tmp_path / "turn.json"
-    first = _journal("effect-one")
+    first_effect_id = _effect_id("effect-one")
+    second_effect_id = _effect_id("effect-two")
+    first = _journal(first_effect_id)
     effect_runtime.effect_runtime_result(
         "turn_journal.write",
         {
             "path": str(journal_path),
             "journal": first,
-            "expected_effect_id": "effect-one",
-            "expected_previous_sha256": None,
+            "expected_effect_id": first_effect_id,
         },
     )
 
@@ -194,9 +211,8 @@ def test_typed_write_rejects_cross_effect_overwrite(
             "turn_journal.write",
             {
                 "path": str(journal_path),
-                "journal": _journal("effect-two"),
-                "expected_effect_id": "effect-two",
-                "expected_previous_sha256": _digest(journal_path),
+                "journal": _journal(second_effect_id),
+                "expected_effect_id": second_effect_id,
             },
         )
     except effect_runtime.EffectRuntimeConflict as exc:
@@ -214,7 +230,7 @@ def test_typed_write_rejects_cross_effect_overwrite(
     )
 
 
-def test_typed_write_serializes_same_effect_checkpoints_with_cas(
+def test_typed_write_serializes_conflicting_transitions_without_caller_cas(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -230,12 +246,30 @@ def test_typed_write_serializes_same_effect_checkpoints_with_cas(
             "path": str(journal_path),
             "journal": initial,
             "expected_effect_id": effect_id,
-            "expected_previous_sha256": None,
         },
     )
-    expected_previous_sha256 = _digest(journal_path)
-    first = {**initial, "status": "committed"}
-    second = {**initial, "status": "failed"}
+    advanced = {
+        **initial,
+        "completed_phases": ["host_execute", "typed_result"],
+    }
+    effect_runtime.effect_runtime_result(
+        "turn_journal.write",
+        {
+            "path": str(journal_path),
+            "journal": advanced,
+            "expected_effect_id": effect_id,
+        },
+    )
+    first = {
+        **advanced,
+        "status": "stopped",
+        "completed_phases": ["host_execute", "typed_result", "validation"],
+    }
+    second = {
+        **advanced,
+        "status": "failed",
+        "receipt": {"turn_key": _TURN_KEY, "failed_phase": "validation"},
+    }
 
     def commit(payload: dict[str, object]) -> dict[str, object] | RuntimeError:
         try:
@@ -245,7 +279,6 @@ def test_typed_write_serializes_same_effect_checkpoints_with_cas(
                     "path": str(journal_path),
                     "journal": payload,
                     "expected_effect_id": effect_id,
-                    "expected_previous_sha256": expected_previous_sha256,
                 },
             )
         except RuntimeError as exc:
@@ -258,8 +291,7 @@ def test_typed_write_serializes_same_effect_checkpoints_with_cas(
     failure = next(outcome for outcome in outcomes if isinstance(outcome, RuntimeError))
     assert isinstance(failure, effect_runtime.EffectRuntimeConflict)
     assert failure.error_kind == "conflict"
-    assert failure.diagnostic_code == "compare_and_swap_conflict"
-    assert "compare-and-swap precondition failed" in str(failure)
+    assert failure.diagnostic_code == "journal_transition_conflict"
     assert json.loads(journal_path.read_text(encoding="utf-8")) in (first, second)
     success = next(outcome for outcome in outcomes if isinstance(outcome, dict))
     assert success["appended"] is True
@@ -284,17 +316,18 @@ def test_successive_same_effect_checkpoints_receive_distinct_operation_ids(
             "path": str(journal_path),
             "journal": initial,
             "expected_effect_id": effect_id,
-            "expected_previous_sha256": None,
         },
     )
-    successor = {**initial, "status": "committed"}
+    successor = {
+        **initial,
+        "completed_phases": ["host_execute", "typed_result"],
+    }
     second = effect_runtime.effect_runtime_result(
         "turn_journal.write",
         {
             "path": str(journal_path),
             "journal": successor,
             "expected_effect_id": effect_id,
-            "expected_previous_sha256": _digest(journal_path),
         },
     )
 
@@ -325,7 +358,6 @@ def test_retry_safe_typed_write_recovers_after_unexpected_runtime_exit(
             "path": str(journal_path),
             "journal": payload,
             "expected_effect_id": effect_id,
-            "expected_previous_sha256": None,
         },
         retry_safe=True,
     )
@@ -661,9 +693,8 @@ def test_corrupt_persisted_journal_maps_to_bounded_internal_failure(
             "turn_journal.write",
             {
                 "path": str(journal_path),
-                "journal": _journal("effect-one"),
-                "expected_effect_id": "effect-one",
-                "expected_previous_sha256": _digest(journal_path),
+                "journal": _journal(_effect_id("effect-one")),
+                "expected_effect_id": _effect_id("effect-one"),
             },
         )
 

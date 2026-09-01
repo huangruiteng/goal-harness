@@ -68,6 +68,110 @@ test("complete Turn settlement constructs one ordered receipt chain", () => {
   });
 });
 
+test("Turn settlement rejects an unknown result_kind at the typed boundary", () => {
+  assert.throws(
+    () => reduceTurnSettlementTransaction(request({ turn_result_kind: "done" })),
+    /turn_result_kind is unsupported/,
+  );
+});
+
+test("non-terminal completion requires a durable continuing Todo outcome", () => {
+  const reduced = reduceTurnSettlementTransaction(
+    request({ turn_result_kind: "validated_completion" }),
+  );
+
+  assert.equal(reduced.result.failure?.kind, "receipt_missing");
+  assert.equal(reduced.result.failure?.step_kind, "durable_writeback");
+});
+
+test("non-terminal completion accepts a durable continuing Todo outcome", () => {
+  const reduced = reduceTurnSettlementTransaction(
+    request({
+      turn_result_kind: "validated_completion",
+      writeback_payload: {
+        ok: true,
+        appended: true,
+        completion: { todo_id: "todo", continuation: "active_goal" },
+      },
+    }),
+  );
+
+  assert.equal(reduced.result.failure, null);
+  assert.deepEqual(
+    (reduced.settlement_result as Record<string, unknown>).turn_outcome,
+    {
+      schema_version: "loopx_turn_settlement_outcome_v0",
+      result_kind: "validated_completion",
+      completed_phases: [...phases.slice(0, 5)],
+      failed_phase: null,
+      completion: { todo_id: "todo", continuation: "active_goal" },
+    },
+  );
+});
+
+test("successful successor completion is included in the canonical outcome", () => {
+  const reduced = reduceTurnSettlementTransaction(
+    request({
+      turn_result_kind: "validated_completion",
+      writeback_payload: {
+        ok: true,
+        appended: true,
+        completion: {
+          todo_id: "todo",
+          continuation: "successor",
+          successor_todo_ids: ["next"],
+        },
+      },
+    }),
+  );
+
+  assert.equal(reduced.result.failure, null);
+  assert.deepEqual(
+    (reduced.settlement_result as Record<string, unknown>).turn_outcome?.completion,
+    {
+      todo_id: "todo",
+      continuation: "successor",
+      successor_todo_ids: ["next"],
+    },
+  );
+});
+
+test("successor completion requires durable successor Todo ids", () => {
+  const reduced = reduceTurnSettlementTransaction(
+    request({
+      turn_result_kind: "validated_completion",
+      writeback_payload: {
+        ok: true,
+        appended: true,
+        completion: { todo_id: "todo", continuation: "successor" },
+      },
+    }),
+  );
+
+  assert.equal(reduced.result.failure?.kind, "receipt_missing");
+  assert.match(
+    reduced.result.failure?.reason ?? "",
+    /successor completion requires successor Todo ids/,
+  );
+});
+
+test("terminal closeout requires a validated completion result", () => {
+  const reduced = reduceTurnSettlementTransaction(
+    request({
+      turn_result_kind: "validated_progress",
+      terminal_closeout_required: true,
+    }),
+  );
+
+  assert.equal(reduced.decision, "failed");
+  assert.equal(reduced.result.failure?.kind, "terminal_closeout_rejected");
+  assert.equal(reduced.result.failure?.step_kind, "terminal_closeout");
+  assert.match(
+    reduced.result.failure?.reason ?? "",
+    /terminal closeout requires a validated completion result/,
+  );
+});
+
 test("preflight authorizes ordered providers without settling early", () => {
   const reduced = reduceTurnSettlementTransaction(
     request({
@@ -84,12 +188,6 @@ test("preflight authorizes ordered providers without settling early", () => {
       action: "prepare_and_execute",
       effect_ref: `${identity.effect_id}#durable_writeback`,
       completed_phases: [...phases.slice(0, 4)],
-    },
-    {
-      step_kind: "quota_spend",
-      action: "prepare_and_execute",
-      effect_ref: `${identity.effect_id}#quota_spend`,
-      completed_phases: [...phases.slice(0, 5)],
     },
   ]);
   assert.equal(reduced.result, null);
@@ -109,6 +207,7 @@ test("mismatched replay fails before accepting committed provider outcomes", () 
 test("writeback rejection retains validation receipt and typed failure", () => {
   const reduced = reduceTurnSettlementTransaction(
     request({
+      turn_result_kind: "validated_progress",
       completed_phases: [...phases.slice(0, 3)],
       writeback_payload: null,
       quota_spend_payload: null,
@@ -127,6 +226,15 @@ test("writeback rejection retains validation receipt and typed failure", () => {
   assert.deepEqual(
     reduced.result.receipts.map((receipt) => receipt.step_kind),
     ["validation"],
+  );
+  assert.deepEqual(
+    (reduced.settlement_result as Record<string, unknown>).turn_outcome,
+    {
+      schema_version: "loopx_turn_settlement_outcome_v0",
+      result_kind: "writeback_failed",
+      completed_phases: [...phases.slice(0, 3)],
+      failed_phase: "durable_writeback",
+    },
   );
 });
 
@@ -158,6 +266,7 @@ test("internal settlement contradictions remain internal failures", () => {
 test("terminal closeout joins the same transaction after spend", () => {
   const reduced = reduceTurnSettlementTransaction(
     request({
+      turn_result_kind: "validated_completion",
       terminal_closeout_required: true,
       terminal_closeout_payload: {
         ok: true,
@@ -176,6 +285,16 @@ test("terminal closeout joins the same transaction after spend", () => {
       "quota_spend",
       "terminal_closeout",
     ],
+  );
+  assert.deepEqual(
+    (reduced.settlement_result as Record<string, unknown>).turn_outcome,
+    {
+      schema_version: "loopx_turn_settlement_outcome_v0",
+      result_kind: "validated_completion",
+      completed_phases: [...phases.slice(0, 5)],
+      failed_phase: null,
+      completion: { todo_id: "todo", continuation: "no_followup" },
+    },
   );
 });
 
@@ -220,12 +339,6 @@ test("prepared provider attempts authorize one identity-bound readback", () => {
         absent: "execute",
         unknown: "fail_closed",
       },
-    },
-    {
-      step_kind: "quota_spend",
-      action: "prepare_and_execute",
-      effect_ref: `${identity.effect_id}#quota_spend`,
-      completed_phases: [...phases.slice(0, 5)],
     },
   ]);
 });

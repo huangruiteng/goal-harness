@@ -54,12 +54,7 @@ from .control_plane.quota.scheduler_ack import (
     record_quota_scheduler_ack_for_decision,
 )
 from .control_plane.quota.settlement import (
-    find_quota_spend_run_by_effect_ref,
-    find_settlement_spend_run,
-    infer_persisted_heartbeat_settlement_identity,
-    require_settlement_spend,
-    require_settlement_writeback,
-    resolve_heartbeat_settlement_identity,
+    read_heartbeat_settlement,
     settlement_result_payload,
 )
 from .control_plane.quota.slot_accounting import (
@@ -73,6 +68,7 @@ from .control_plane.quota.slot_accounting import (
     record_quota_slot_spend_from_preview,
     record_quota_slot_void_from_preview,
 )
+from .control_plane.quota.spend_commit import replay_quota_spend_by_effect_ref
 from .control_plane.quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
     TURN_SCOPED_SLOT_SPEND_SOURCES,
@@ -876,6 +872,7 @@ def build_quota_should_run(
     receipt_bound_terminal_phase: ReceiptBoundTerminalPhase | None = None,
     receipt_bound_replan_obligation_id: str | None = None,
     turn_instance_id: str | None = None,
+    runtime_root: str | Path | None = None,
 ) -> dict[str, Any]:
     from .control_plane.quota.should_run import (
         build_quota_should_run as _build_quota_should_run,
@@ -899,6 +896,7 @@ def build_quota_should_run(
         receipt_bound_terminal_phase=receipt_bound_terminal_phase,
         receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
         turn_instance_id=turn_instance_id,
+        runtime_root=runtime_root,
     )
 
 
@@ -1236,15 +1234,15 @@ def spend_quota_slot(
                 "effect_ref": normalized_effect_ref,
                 "reason": "effect-bound quota spend requires runtime_root",
             }
-        prior_effect_run = find_quota_spend_run_by_effect_ref(
+        replay = replay_quota_spend_by_effect_ref(
             Path(str(raw_runtime_root)).expanduser(),
             goal_id=safe_goal_id,
             effect_ref=normalized_effect_ref,
+            agent_id=agent_id,
+            read_only=not execute,
         )
-        if prior_effect_run is not None:
-            prior_agent_id = normalize_todo_claimed_by(prior_effect_run.get("agent_id"))
-            requested_agent_id = normalize_todo_claimed_by(agent_id)
-            if requested_agent_id and prior_agent_id != requested_agent_id:
+        if replay.get("replay_found"):
+            if not replay.get("ok"):
                 return {
                     "ok": False,
                     "mode": "spend-slot",
@@ -1252,7 +1250,9 @@ def spend_quota_slot(
                     "appended": False,
                     "goal_id": safe_goal_id,
                     "effect_ref": normalized_effect_ref,
-                    "reason": "effect_ref already belongs to a different agent",
+                    "reason": (
+                        "effect_ref replay requires the same valid agent identity"
+                    ),
                 }
             return {
                 "ok": True,
@@ -1261,7 +1261,7 @@ def spend_quota_slot(
                 "appended": False,
                 "idempotent_replay": True,
                 "goal_id": safe_goal_id,
-                "agent_id": prior_agent_id or None,
+                "agent_id": replay.get("agent_id"),
                 "effect_ref": normalized_effect_ref,
                 "reason": "quota spend replayed for the same provider effect",
             }
@@ -1282,6 +1282,7 @@ def spend_quota_slot(
         and not todo_id
         and not replan_obligation_id
     )
+    settlement_readback = None
     if (
         not turn_instance_id
         and raw_runtime_root
@@ -1290,12 +1291,19 @@ def spend_quota_slot(
             or recover_unbound_visible_goal
         )
     ):
-        inferred_result = infer_persisted_heartbeat_settlement_identity(
+        settlement_readback = read_heartbeat_settlement(
             Path(str(raw_runtime_root)).expanduser(),
             goal_id=safe_goal_id,
             agent_id=agent_id,
             todo_id=todo_id,
+            turn_instance_id=None,
+            infer_turn_instance_id=True,
             allow_unbound_binding=recover_unbound_visible_goal,
+        )
+        inferred_result = (
+            settlement_readback.identity
+            if settlement_readback is not None
+            else None
         )
         if inferred_result is not None:
             if inferred_result.failure is not None or inferred_result.value is None:
@@ -1319,14 +1327,18 @@ def spend_quota_slot(
                 replan_obligation_id = identity.replan_obligation_id
     if turn_instance_id and raw_runtime_root:
         runtime_root = Path(str(raw_runtime_root)).expanduser()
-        guard_result = resolve_heartbeat_settlement_identity(
-            runtime_root,
-            goal_id=safe_goal_id,
-            agent_id=agent_id,
-            todo_id=todo_id,
-            turn_instance_id=turn_instance_id,
-            replan_obligation_id=replan_obligation_id,
-        )
+        if settlement_readback is None:
+            settlement_readback = read_heartbeat_settlement(
+                runtime_root,
+                goal_id=safe_goal_id,
+                agent_id=agent_id,
+                todo_id=todo_id,
+                turn_instance_id=turn_instance_id,
+                replan_obligation_id=replan_obligation_id,
+            )
+        if settlement_readback is None:
+            raise RuntimeError("exact settlement readback unexpectedly returned not-found")
+        guard_result = settlement_readback.identity
         if guard_result.failure is not None or guard_result.value is None:
             return {
                 "ok": False,
@@ -1342,17 +1354,7 @@ def spend_quota_slot(
                 "settlement_result": settlement_result_payload(guard_result),
             }
         identity = guard_result.value
-        spent_result = guard_result.bind(
-            lambda resolved: require_settlement_writeback(
-                runtime_root,
-                resolved,
-            )
-        ).bind(
-            lambda _writeback: require_settlement_spend(
-                runtime_root,
-                identity,
-            )
-        )
+        spent_result = settlement_readback.settlement
         if spent_result.failure is None:
             return {
                 "ok": True,
@@ -1369,7 +1371,7 @@ def spend_quota_slot(
                 "settlement_result": settlement_result_payload(spent_result),
                 "reason": "quota spend receipt replayed for the same settlement identity",
             }
-        prior_spend_run = find_settlement_spend_run(runtime_root, identity)
+        prior_spend_run = settlement_readback.spend_run
         if prior_spend_run is not None:
             return {
                 "ok": True,

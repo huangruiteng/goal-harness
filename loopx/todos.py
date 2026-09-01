@@ -92,6 +92,7 @@ from .control_plane.todos.list_projection import (
     EXPLICIT_LIMIT_OVERLAY_FULL_DETAIL_COLD_PATH,
     compact_agent_lane_todo_summary,
     compact_explicit_limit_todo_summary,
+    compact_thin_todo_list_payload,
     compact_todo_projection_overlay,
     todo_item_relations,
     todo_list_projection_contract,
@@ -374,6 +375,7 @@ def list_goal_todos(
     state_file: Path | None = None,
     runtime_root_arg: str | None = None,
     limit: int | None = None,
+    thin: bool = False,
 ) -> dict[str, Any]:
     normalized_todo_id = normalize_todo_id(todo_id) if todo_id else None
     if todo_id and not normalized_todo_id:
@@ -561,7 +563,7 @@ def list_goal_todos(
         )
     if projection_fields.get("state_event_projection_warning"):
         payload["state_event_projection_warning"] = projection_fields["state_event_projection_warning"]
-    return payload
+    return compact_thin_todo_list_payload(payload) if thin else payload
 
 
 def add_todo_to_lines(

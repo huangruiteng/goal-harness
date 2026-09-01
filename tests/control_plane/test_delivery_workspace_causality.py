@@ -7,6 +7,7 @@ from loopx.control_plane.quota.settlement_workspace_causality import (
     delivery_workspace_causality_event_fields,
     delivery_workspace_causality_from_event_details,
     missing_delivery_workspace_resolution,
+    resolve_settlement_workspace_requirement,
 )
 
 
@@ -141,3 +142,80 @@ def test_event_causality_rejects_cross_todo_replay() -> None:
         )
         is None
     )
+
+
+def test_typed_autonomous_replan_binding_is_explicit_non_repository() -> None:
+    assert resolve_settlement_workspace_requirement(
+        None,
+        settlement_binding_kind="autonomous_replan",
+    ) == {
+        "schema_version": "settlement_workspace_requirement_v0",
+        "settlement_binding_kind": "autonomous_replan",
+        "requirement": "not_required",
+        "source": "typed_settlement_identity",
+        "reason": "autonomous_replan_is_non_repository_control_plane_work",
+    }
+
+
+def test_missing_todo_causality_remains_fail_closed() -> None:
+    requirement = resolve_settlement_workspace_requirement(
+        None,
+        settlement_binding_kind="todo",
+    )
+
+    assert requirement["requirement"] == "unknown"
+    assert requirement["reason"] == "todo_delivery_contract_not_available"
+
+
+def test_complete_legacy_todo_settlement_can_finish_quota_accounting() -> None:
+    effect_id = "goal:agent:todo_legacy:turn-1"
+    requirement = resolve_settlement_workspace_requirement(
+        None,
+        settlement_binding_kind="todo",
+        legacy_settlement_evidence={
+            "schema_version": "legacy_settlement_receipt_evidence_v0",
+            "settlement_effect_id": effect_id,
+            "delivery_workspace_present": False,
+            "receipts": [
+                {
+                    "step_kind": "validation",
+                    "status": "committed",
+                    "effect_id": effect_id,
+                },
+                {
+                    "step_kind": "durable_writeback",
+                    "status": "committed",
+                    "effect_id": effect_id,
+                },
+            ],
+        },
+    )
+
+    assert requirement == {
+        "schema_version": "settlement_workspace_requirement_v0",
+        "settlement_binding_kind": "todo",
+        "requirement": "not_required",
+        "source": "legacy_settlement_receipts",
+        "reason": "pre_causality_settlement_already_committed",
+    }
+
+
+def test_partial_legacy_todo_settlement_remains_fail_closed() -> None:
+    requirement = resolve_settlement_workspace_requirement(
+        None,
+        settlement_binding_kind="todo",
+        legacy_settlement_evidence={
+            "schema_version": "legacy_settlement_receipt_evidence_v0",
+            "settlement_effect_id": "effect-1",
+            "delivery_workspace_present": False,
+            "receipts": [
+                {
+                    "step_kind": "validation",
+                    "status": "committed",
+                    "effect_id": "effect-1",
+                }
+            ],
+        },
+    )
+
+    assert requirement["requirement"] == "unknown"

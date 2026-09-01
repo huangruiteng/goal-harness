@@ -71,6 +71,14 @@ the task's normal tools instead of imposing this workflow.
    score_countable:false}`. Keep the same stable `run_id` for every transition.
 
 4. **Preview and upsert terminal score, countability, effort, and insight.**
+   First run integrity qualification. An automated restricted-access match is a
+   countable suspicion, not a cheating verdict. After solver and scoring are
+   terminal, inspect the real solver trajectory, tool results, and final
+   workspace. Pass a compact
+   `benchmark_restricted_access_adjudication_v0` only after that review; confirm
+   cheating only when restricted material was actually disclosed and causally
+   entered a solving or validation decision.
+
    ```bash
    loopx benchmark experiment-board-upsert --goal-id <GOAL_ID> \
      --row-json <terminal-row.json> --execute --format json
@@ -110,6 +118,10 @@ the task's normal tools instead of imposing this workflow.
   fetch, install, or launch. It blocks new admissions only.
 - `integrity-qualification` reduces private trajectory and runner isolation
   evidence to a compact public-safe receipt (hashes, counts, reason codes).
+- Scanner hits for restricted source access or host-boundary escape probes set
+  `restricted_access_review=suspected` while keeping the run score-eligible. Use
+  `--restricted-access-adjudication-json` for the post-run agent decision; only
+  confirmed disclosure plus causal use disqualifies the score.
 - `classify-artifacts` classifies benchmark artifact paths without reading them;
   use it before reading or publishing any candidate artifact.
 - The solver lane must not read hidden tests, verifier sources, gold answers, or
@@ -126,6 +138,16 @@ the task's normal tools instead of imposing this workflow.
   `continuous_monitor` todo. Refresh aggregate score/coverage and write
   `benchmark_case_insight_v0` on material scored-case transitions, with bounded
   periodic reviews while the campaign remains active.
+- Treat that monitor as an observation lane, not executable delivery. When a
+  material poll discovers bounded repository, runner-repair, or experiment work,
+  use `quota monitor-poll --material-change --next-agent-todo` with explicit
+  `--next-action-kind`, repository, and required capabilities so it creates an
+  independent runnable `advancement_task`. An unchanged poll creates no successor
+  and spends no delivery quota.
+- If the main campaign advancement Todo is waiting for a monitor transition, keep
+  it `open` and pair `resume_when=monitor_changed:<monitor-todo-id>` with an
+  already-created independent runnable successor. Do not mark the wait `blocked`,
+  and do not treat the monitor itself as delivery work.
 - Report only public-safe conclusions (countable baselines, countable
   treatments, matched pairs, aggregate primary metric by arm, improved/flat/
   regressed pair counts). Never copy raw private evidence into a user update.

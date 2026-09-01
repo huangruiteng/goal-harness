@@ -15,8 +15,10 @@ from loopx.control_plane.testing.cli_output_differential import (
 from loopx.control_plane.testing.cli_output_semantics import (
     action_portfolio_schema_versions,
     action_signature_coverages,
+    guided_todo_delta_schema_versions,
     planning_horizon_schema_versions,
     planning_inventory_detail_schema_versions,
+    runtime_root_command_route_count,
 )
 
 
@@ -40,7 +42,9 @@ def _row(**overrides: object) -> dict[str, object]:
         "action_signature_coverages": ["turn_envelope_action_dimensions_v0"],
         "action_portfolio_schema_versions": [],
         "planning_horizon_schema_versions": [],
+        "guided_todo_delta_schema_versions": [],
         "planning_inventory_detail_schema_versions": [],
+        "runtime_root_command_route_count": 0,
     }
     row.update(overrides)
     return row
@@ -145,6 +149,17 @@ def test_measurement_records_semantic_shape_without_runtime_hash_noise() -> None
             },
         }
     ) == ["todo_planning_inventory_detail_v0"]
+    assert guided_todo_delta_schema_versions(
+        {
+            "steps": [
+                {
+                    "todo_delta": {
+                        "schema_version": "loopx_guided_todo_delta_v0"
+                    }
+                }
+            ]
+        }
+    ) == ["loopx_guided_todo_delta_v0"]
 
     with_observability_field = json.loads(payload("third-runtime", "third-source"))
     with_observability_field["action_signature"]["diagnostic_note"] = "new"
@@ -328,6 +343,47 @@ def test_quota_action_portfolio_v2_context_migration_is_declared() -> None:
     ]
 
 
+def test_guided_todo_delta_schema_migration_requires_review() -> None:
+    candidate = _row(
+        guided_todo_delta_schema_versions=["loopx_guided_todo_delta_v0"],
+    )
+
+    result = compare_cli_output_receipts(_receipt(_row()), _receipt(candidate))
+
+    assert result["ok"] is True
+    assert result["review_required"] is True
+    assert result["rows"][0]["review_signals"] == [
+        "guided todo delta schema migrated: none -> loopx_guided_todo_delta_v0"
+    ]
+
+
+def test_guided_todo_delta_migration_still_fails_above_bounded_growth() -> None:
+    candidate = _row(
+        guided_todo_delta_schema_versions=["loopx_guided_todo_delta_v0"],
+        chars=40_513,
+    )
+
+    result = compare_cli_output_receipts(_receipt(_row()), _receipt(candidate))
+
+    assert result["ok"] is False
+    assert "chars grew by 513; allowance is 512" in (
+        result["rows"][0]["failures"]
+    )
+
+
+def test_unknown_guided_todo_delta_schema_migration_fails_closed() -> None:
+    candidate = _row(
+        guided_todo_delta_schema_versions=["loopx_guided_todo_delta_v1"],
+    )
+
+    result = compare_cli_output_receipts(_receipt(_row()), _receipt(candidate))
+
+    assert result["ok"] is False
+    assert result["rows"][0]["failures"] == [
+        "guided todo delta schema coverage changed"
+    ]
+
+
 def test_unknown_action_portfolio_schema_migration_fails_closed() -> None:
     candidate = _row(
         action_portfolio_schema_versions=["quota_action_portfolio_v3"],
@@ -456,6 +512,131 @@ def test_planning_inventory_detail_migration_is_bounded_and_fail_closed() -> Non
     assert unknown_result["rows"][0]["failures"] == [
         "planning inventory detail schema coverage changed"
     ]
+
+
+def test_runtime_root_route_growth_has_per_route_budget() -> None:
+    base = _row(
+        chars=1_000,
+        utf8_bytes=1_000,
+        lines=10,
+        compact_payload_chars=1_000,
+        action_signature_sha256=None,
+        action_signature_coverages=[],
+    )
+    candidate = _row(
+        chars=1_320,
+        utf8_bytes=1_320,
+        lines=10,
+        compact_payload_chars=1_320,
+        action_signature_sha256=None,
+        action_signature_coverages=[],
+        runtime_root_command_route_count=2,
+    )
+
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+
+    assert result["ok"] is True
+    assert result["review_required"] is True
+    assert result["rows"][0]["allowances"] == {
+        "chars": 320,
+        "utf8_bytes": 320,
+        "lines": 2,
+        "compact_payload_chars": 320,
+    }
+    assert result["rows"][0]["review_signals"] == [
+        "runtime-root command route coverage added: 2 executable route(s)"
+    ]
+
+
+def test_runtime_root_route_growth_still_fails_above_per_route_budget() -> None:
+    base = _row(
+        chars=1_000,
+        utf8_bytes=1_000,
+        lines=10,
+        compact_payload_chars=1_000,
+        action_signature_sha256=None,
+        action_signature_coverages=[],
+    )
+    candidate = _row(
+        chars=1_321,
+        utf8_bytes=1_321,
+        lines=10,
+        compact_payload_chars=1_321,
+        action_signature_sha256=None,
+        action_signature_coverages=[],
+        runtime_root_command_route_count=2,
+    )
+
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+
+    assert result["ok"] is False
+    assert "chars grew by 321; allowance is 320" in result["rows"][0]["failures"]
+
+
+def test_invalid_runtime_root_route_count_does_not_grant_budget() -> None:
+    base = _row(
+        chars=1_000,
+        utf8_bytes=1_000,
+        lines=10,
+        compact_payload_chars=1_000,
+    )
+    candidate = _row(
+        chars=1_097,
+        utf8_bytes=1_097,
+        lines=10,
+        compact_payload_chars=1_097,
+        runtime_root_command_route_count=True,
+    )
+
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+
+    assert result["ok"] is False
+    assert result["rows"][0]["allowances"] == {
+        "chars": 64,
+        "utf8_bytes": 128,
+        "lines": 2,
+        "compact_payload_chars": 64,
+    }
+
+
+def test_runtime_root_route_count_only_matches_executable_command_prefixes() -> None:
+    text = (
+        "  loopx --runtime-root /tmp/indented refresh-state\n"
+        "loopx --runtime-root /tmp/runtime refresh-state\n"
+        "{\"command\": \"loopx --runtime-root '/tmp/runtime root' quota spend-slot\"}\n"
+        "- expanded: `loopx --runtime-root /tmp/runtime heartbeat-prompt`\n"
+        "Use --runtime-root PATH to select a runtime.\n"
+        "The command is loopx --runtime-root /tmp/runtime.\n"
+        "loopx --runtime-root"
+    )
+
+    assert runtime_root_command_route_count(text) == 4
+
+
+def test_runtime_root_route_allowance_is_fail_closed_for_invalid_counts() -> None:
+    base = _row(
+        chars=1_000,
+        utf8_bytes=1_000,
+        lines=10,
+        compact_payload_chars=1_000,
+        runtime_root_command_route_count=0,
+    )
+    candidate = _row(
+        chars=1_000,
+        utf8_bytes=1_000,
+        lines=10,
+        compact_payload_chars=1_000,
+        runtime_root_command_route_count="2",
+    )
+
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+
+    assert result["rows"][0]["allowances"] == {
+        "chars": 64,
+        "utf8_bytes": 128,
+        "lines": 2,
+        "compact_payload_chars": 64,
+    }
 
 
 def test_observed_shape_removal_is_a_review_signal_not_a_permanent_red_light() -> None:

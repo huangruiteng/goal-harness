@@ -44,6 +44,7 @@ def _observe(
     complete: bool = True,
     previous: dict[str, object] | None = None,
     handled: list[str] | None = None,
+    projected: list[str] | None = None,
 ) -> dict[str, object]:
     return build_pull_request_review_queue_observation(
         repository="owner/repo",
@@ -51,6 +52,7 @@ def _observe(
         result_completeness={"complete": complete},
         previous_observation=previous,
         handled_exact_heads=handled or [],
+        projected_exact_heads=projected or [],
     )
 
 
@@ -70,7 +72,7 @@ def test_incomplete_queue_is_not_observed_and_preserves_baseline() -> None:
 
     recovered = _observe([_pr(1)], previous=result)
     assert recovered["observation_state"] == "observed_unchanged"
-    assert recovered["candidate"] is None
+    assert recovered["candidate"]["number"] == 1
 
     advanced = _observe(
         [_pr(1), _pr(2)],
@@ -103,37 +105,46 @@ def test_initial_complete_observation_selects_one_exact_head_candidate() -> None
     assert result["external_write_performed"] is False
 
 
-def test_unchanged_observation_emits_no_duplicate_candidate() -> None:
+def test_unacknowledged_candidate_replays_on_unchanged_observation() -> None:
     first = _observe([_pr(1), _pr(2)])
     repeated = _observe([_pr(1), _pr(2)], previous=first)
 
     assert repeated["observation_state"] == "observed_unchanged"
     assert repeated["changed_pr_numbers"] == []
-    assert repeated["candidate"]["number"] == 2
-    assert repeated["pending_candidate_exact_head"] == f"2@{2:040d}"
+    assert repeated["candidate"]["number"] == 1
+    assert repeated["pending_candidate_exact_head"] == f"1@{1:040d}"
+    assert repeated["projected_candidate_exact_heads"] == []
 
 
-def test_round_robin_rotates_through_projected_candidates() -> None:
+def test_round_robin_rotates_only_after_explicit_projection_ack() -> None:
     first = _observe([_pr(1), _pr(2), _pr(3)])
     assert first["candidate"]["number"] == 1
-    assert first["projected_candidate_exact_heads"] == [f"1@{1:040d}"]
+    assert first["projected_candidate_exact_heads"] == []
 
-    second = _observe([_pr(1), _pr(2), _pr(3)], previous=first)
+    second = _observe(
+        [_pr(1), _pr(2), _pr(3)],
+        previous=first,
+        projected=[f"1@{1:040d}"],
+    )
     assert second["candidate"]["number"] == 2
-    assert second["projected_candidate_exact_heads"] == [
-        f"1@{1:040d}",
-        f"2@{2:040d}",
-    ]
+    assert second["projected_candidate_exact_heads"] == [f"1@{1:040d}"]
 
-    third = _observe([_pr(1), _pr(2), _pr(3)], previous=second)
+    third = _observe(
+        [_pr(1), _pr(2), _pr(3)],
+        previous=second,
+        projected=[f"2@{2:040d}"],
+    )
     assert third["candidate"]["number"] == 3
     assert third["projected_candidate_exact_heads"] == [
         f"1@{1:040d}",
         f"2@{2:040d}",
-        f"3@{3:040d}",
     ]
 
-    exhausted = _observe([_pr(1), _pr(2), _pr(3)], previous=third)
+    exhausted = _observe(
+        [_pr(1), _pr(2), _pr(3)],
+        previous=third,
+        projected=[f"3@{3:040d}"],
+    )
     assert exhausted["candidate"] is None
     assert exhausted["pending_candidate_exact_head"] == f"3@{3:040d}"
     assert exhausted["projected_candidate_count"] == 3
@@ -141,7 +152,7 @@ def test_round_robin_rotates_through_projected_candidates() -> None:
 
 def test_round_robin_accepts_handled_rotated_candidate() -> None:
     first = _observe([_pr(1), _pr(2)])
-    second = _observe([_pr(1), _pr(2)], previous=first)
+    second = _observe([_pr(1), _pr(2)], previous=first, projected=[f"1@{1:040d}"])
 
     assert second["candidate"]["number"] == 2
     handled_second = _observe(
@@ -167,7 +178,7 @@ def test_handled_exact_head_advances_unchanged_backlog() -> None:
 
     still_pending = _observe([_pr(1), _pr(2)], previous=repeated)
     assert still_pending["observation_state"] == "observed_unchanged"
-    assert still_pending["candidate"] is None
+    assert still_pending["candidate"]["number"] == 2
     assert still_pending["pending_candidate_exact_head"] == f"2@{2:040d}"
 
 
@@ -234,8 +245,11 @@ def test_handled_exact_head_must_match_prior_candidate() -> None:
 
 def test_exact_review_fingerprint_change_selects_changed_pr_only() -> None:
     first = _observe([_pr(1), _pr(2)])
+    first_acknowledged = _observe(
+        [_pr(1), _pr(2)], previous=first, projected=[f"1@{1:040d}"]
+    )
     changed = [_pr(1), _pr(2, decision="CHANGES_REQUESTED", head="f" * 40)]
-    result = _observe(changed, previous={"autonomous_review": first})
+    result = _observe(changed, previous={"autonomous_review": first_acknowledged})
 
     assert result["observation_state"] == "material_transition"
     assert result["changed_pr_numbers"] == [2]
@@ -248,9 +262,14 @@ def test_exact_review_fingerprint_change_selects_changed_pr_only() -> None:
 
 def test_check_only_change_does_not_preempt_older_backlog() -> None:
     first = _observe([_pr(1), _pr(2), _pr(3)])
+    first_acknowledged = _observe(
+        [_pr(1), _pr(2), _pr(3)],
+        previous=first,
+        projected=[f"1@{1:040d}"],
+    )
     changed = [_pr(1), _pr(2), _pr(3, failures=["pytest"])]
 
-    result = _observe(changed, previous=first)
+    result = _observe(changed, previous=first_acknowledged)
 
     assert result["observation_state"] == "material_transition"
     assert result["changed_pr_numbers"] == [3]
@@ -273,8 +292,11 @@ def test_new_head_after_changes_requested_gets_one_fast_feedback_slot() -> None:
 
 def test_check_draft_and_mergeability_changes_are_material() -> None:
     first = _observe([_pr(1), _pr(2)])
+    first_acknowledged = _observe(
+        [_pr(1), _pr(2)], previous=first, projected=[f"1@{1:040d}"]
+    )
     changed = [_pr(1), _pr(2, merge_state="BLOCKED", failures=["pytest"])]
-    result = _observe(changed, previous=first)
+    result = _observe(changed, previous=first_acknowledged)
     assert result["changed_pr_numbers"] == [2]
     assert result["candidate"]["number"] == 2
 
@@ -369,3 +391,33 @@ def test_incomplete_observation_preserves_active_backlog_when_pending() -> None:
 
     assert incomplete["review_backlog"]["actionable_unhandled_count"] == 2
     assert incomplete["review_backlog"]["recommended_poll_interval_minutes"] == 3
+
+
+def test_legacy_emission_cursors_are_replayed_instead_of_stranded() -> None:
+    legacy = _observe([_pr(1), _pr(2)])
+    legacy["schema_version"] = "pull_request_review_queue_observation_v0"
+    legacy.pop("candidate_projection_ack_semantics")
+    legacy["candidate"] = None
+    legacy["pending_candidate_exact_head"] = f"2@{2:040d}"
+    legacy["projected_candidate_exact_heads"] = [f"1@{1:040d}", f"2@{2:040d}"]
+    legacy["projected_candidate_count"] = 2
+
+    recovered = _observe([_pr(1), _pr(2)], previous=legacy)
+
+    assert recovered["candidate"]["number"] == 1
+    assert recovered["projected_candidate_exact_heads"] == []
+    assert recovered["candidate_projection_ack_semantics"] == "explicit_v1"
+
+
+def test_projection_ack_must_match_prior_candidate() -> None:
+    first = _observe([_pr(1), _pr(2)])
+    try:
+        _observe(
+            [_pr(1), _pr(2)],
+            previous=first,
+            projected=[f"2@{2:040d}"],
+        )
+    except ValueError as exc:
+        assert "prior candidate" in str(exc)
+    else:
+        raise AssertionError("an unselected exact head was acknowledged as projected")

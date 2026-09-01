@@ -5,6 +5,7 @@ import { MarkdownText } from "./markdown";
 import { OutputRow } from "./cards/output-row";
 import { RunRow } from "./cards/run-row";
 import { ScheduleRow } from "./cards/schedule-row";
+import { useWorkspaceI18n } from "./i18n";
 import type { WorkspaceDrawerSelection, WorkspaceGoal, WorkspaceTimelineItem } from "./personal-workspace-model";
 
 export function ChannelTimeline({
@@ -16,12 +17,13 @@ export function ChannelTimeline({
   onSelect: (selection: WorkspaceDrawerSelection) => void;
   selectedGoal: WorkspaceGoal | null;
 }) {
+  const { t } = useWorkspaceI18n();
   if (items.length === 0) {
     return (
       <div className="personal-timeline-empty">
         <span><Sparkles size={20} /></span>
-        <strong>{selectedGoal ? "这个 Goal 还没有新动态" : "今天的工作区很安静"}</strong>
-        <p>{selectedGoal ? "你可以直接询问进度或下发新的纠偏信息。" : "向 LoopX 管家描述一个 Goal，或询问今天最值得关注的事情。"}</p>
+        <strong>{selectedGoal ? t("timeline.emptyGoal") : t("timeline.emptyWorkspace")}</strong>
+        <p>{selectedGoal ? t("timeline.emptyGoalDescription") : t("timeline.emptyWorkspaceDescription")}</p>
       </div>
     );
   }
@@ -31,11 +33,11 @@ export function ChannelTimeline({
     || (item.kind === "proposal" && ["applied", "stale", "error", "gated"].includes(item.proposal.status))
     || (item.kind === "run" && item.run.status === "completed"));
   const liveAnnouncement = latestAnnounceable?.kind === "message"
-    ? `${latestAnnounceable.message.agentLabel ?? "LoopX 管家"}：${latestAnnounceable.message.pending ? "正在回复" : latestAnnounceable.message.text}`
+    ? `${latestAnnounceable.message.agentLabel ?? t("header.manager")}：${latestAnnounceable.message.pending ? t("timeline.pending") : latestAnnounceable.message.text}`
     : latestAnnounceable?.kind === "proposal"
       ? `${latestAnnounceable.proposal.title}：${latestAnnounceable.proposal.status}`
       : latestAnnounceable?.kind === "run"
-        ? `${latestAnnounceable.run.title}：已完成`
+        ? t("timeline.runCompleted", { run: latestAnnounceable.run.title })
         : "";
 
   const gatedItems = items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "proposal" }> =>
@@ -62,7 +64,7 @@ export function ChannelTimeline({
         <button className={`personal-proposal-row is-${item.proposal.status}`} key={item.id} onClick={() => onSelect({ item: item.proposal, kind: "proposal" })} type="button">
           <span><Sparkles size={17} /></span>
           <span><small>{item.proposal.actionKind} · {item.proposal.status}</small><strong>{item.proposal.title}</strong><p>{item.proposal.impact}</p></span>
-          <b>{item.proposal.status === "gated" ? "查看处理方式" : item.proposal.primaryLabel ?? "查看并确认"}</b>
+          <b>{item.proposal.status === "gated" ? t("timeline.review") : item.proposal.primaryLabel ?? t("timeline.reviewAndConfirm")}</b>
         </button>
       );
     }
@@ -70,10 +72,10 @@ export function ChannelTimeline({
       <article className={`personal-message is-${item.message.role}`} key={item.id}>
         {item.message.role !== "user" ? <span className="personal-message-avatar"><Bot size={17} /></span> : null}
         <div>
-          <header><strong>{item.message.role === "user" ? "你" : item.message.agentLabel ?? "LoopX 管家"}</strong>{item.message.time ? <time>{item.message.time}</time> : null}</header>
+          <header><strong>{item.message.role === "user" ? t("common.you") : item.message.agentLabel ?? t("header.manager")}</strong>{item.message.time ? <time>{item.message.time}</time> : null}</header>
           {item.message.attachments?.length ? <div className="personal-message-images">{item.message.attachments.map((attachment) => <img alt={attachment.name} key={attachment.id} src={attachment.dataUrl} />)}</div> : null}
           {item.message.role === "user" ? <p>{item.message.text}</p> : <MarkdownText text={item.message.text} />}
-          {item.message.pending ? <span className="personal-message-pending">正在整理…</span> : null}
+          {item.message.pending ? <span className="personal-message-pending">{t("timeline.pending")}</span> : null}
         </div>
       </article>
     );
@@ -86,7 +88,7 @@ export function ChannelTimeline({
         {primaryItems.map(renderItem)}
         {gatedItems.length ? (
           <details className="personal-gated-summary">
-            <summary><span><Sparkles size={16} /></span><strong>待你确认</strong><small>{gatedItems.length} 项历史 Gate</small></summary>
+            <summary><span><Sparkles size={16} /></span><strong>{t("timeline.waitingConfirmation")}</strong><small>{t("timeline.gateHistory", { count: gatedItems.length })}</small></summary>
             <div>{gatedItems.map(renderItem)}</div>
           </details>
         ) : null}

@@ -30,60 +30,67 @@ import {
   type LarkIngressMode,
   type LarkReplyMode,
 } from "../../data/chat";
+import { useWorkspaceI18n, type WorkspaceTranslate } from "./i18n";
 import type { WorkspaceGoal } from "./personal-workspace-model";
 
 type Tab = "apps" | "connections";
 
-const ingressPresentation: Record<LarkIngressMode, { label: string; detail: string }> = {
-  live_steering: {
-    label: "Steering",
-    detail: "投到当前活跃 Turn；没有精确活跃 Turn 时安全拒绝。",
-  },
-  session_queue: {
-    label: "Queuing",
-    detail: "进入同一 Agent Session 的有界 FIFO 队列，当前 Turn 完成后处理。",
-  },
-  async_inbox: {
-    label: "Async inbox",
-    detail: "写入 Agent 私有收件箱，等待后续显式 drain。",
-  },
-  direct_session: {
-    label: "Legacy direct",
-    detail: "旧连接兼容模式；保存时请选择新的三种入站模式之一。",
-  },
-};
+function ingressPresentation(mode: LarkIngressMode, t: WorkspaceTranslate): { label: string; detail: string } {
+  return {
+    live_steering: {
+      label: t("lark.ingressSteering"),
+      detail: t("lark.ingressSteeringDescription"),
+    },
+    session_queue: {
+      label: t("lark.ingressQueue"),
+      detail: t("lark.ingressQueueDescription"),
+    },
+    async_inbox: {
+      label: t("lark.ingressAsync"),
+      detail: t("lark.ingressAsyncDescription"),
+    },
+    direct_session: {
+      label: t("lark.ingressLegacy"),
+      detail: t("lark.ingressLegacyDescription"),
+    },
+  }[mode];
+}
 
-function larkConnectionHealth(connection: LarkGoalConnection): { label: string; detail: string; ready: boolean } {
+function larkConnectionHealth(connection: LarkGoalConnection, t: WorkspaceTranslate): { label: string; detail: string; ready: boolean } {
   if (connection.listener_status === "starting") {
-    return { label: "正在启动", detail: "LoopX 正在启动该 App 的消息事件监听。", ready: false };
+    return { label: t("lark.health.starting"), detail: t("lark.health.startingDetail"), ready: false };
   }
   if (connection.listener_status === "retrying") {
-    return { label: "监听重试中", detail: "事件监听暂时中断，LoopX 正在自动重试。", ready: false };
+    return { label: t("lark.health.retrying"), detail: t("lark.health.retryingDetail"), ready: false };
   }
   if (connection.listener_status === "stopped" || connection.listener_status === null) {
-    return { label: "监听未启动", detail: "请刷新连接或重新启动 LoopX 后再试。", ready: false };
+    return { label: t("lark.health.notStarted"), detail: t("lark.health.notStartedDetail"), ready: false };
   }
   if (connection.last_event_status === "message_context_permission_required") {
-    return { label: "消息上下文权限不足", detail: "已收到消息事件，但 Bot 无法按 message_id 读取事件对应消息。此读取路径与分页补读群历史是两个独立能力。", ready: false };
+    return { label: t("lark.health.messageContextPermission"), detail: t("lark.health.messageContextPermissionDetail"), ready: false };
   }
   if (connection.last_event_status === "processing_failed") {
-    return { label: "消息处理失败", detail: "已收到消息事件，但 Agent 处理失败。请查看本地诊断后重试。", ready: false };
+    return { label: t("lark.health.processingFailed"), detail: t("lark.health.processingFailedDetail"), ready: false };
   }
   if (connection.health_error_code === "invalid_routing_state") {
-    return { label: "路由配置无效", detail: "连接已安全停用，请重新选择处理方式并保存。", ready: false };
+    return { label: t("lark.health.invalidRouting"), detail: t("lark.health.invalidRoutingDetail"), ready: false };
   }
   if (connection.last_event_status === "queued_for_agent") {
-    return { label: "已进入 Agent 收件箱", detail: `消息由 ${connection.agent_id ?? "目标 Agent"} 异步处理，不会启动通用 Chat Session。`, ready: true };
+    return {
+      label: t("lark.health.queued"),
+      detail: t("lark.health.queuedDetail", { agent: connection.agent_id ?? t("lark.targetAgent") }),
+      ready: true,
+    };
   }
   if (connection.last_event_status === "ignored" && connection.last_event_reason === "not_addressed") {
     return {
-      label: "最近消息未直接 @ 机器人",
-      detail: "监听正常；当前连接只响应直接 @ 机器人或对机器人的回复。",
+      label: t("lark.health.notAddressed"),
+      detail: t("lark.health.notAddressedDetail"),
       ready: true,
     };
   }
   if (connection.last_event_status === "ignored" && connection.last_event_reason === "self_message") {
-    return { label: "监听中", detail: "已忽略机器人自身发送的消息，避免重复回复。", ready: true };
+    return { label: t("lark.health.listening"), detail: t("lark.health.ignoredSelf"), ready: true };
   }
   if (
     connection.health_error_code === "lark_event_route_mismatch"
@@ -91,50 +98,54 @@ function larkConnectionHealth(connection: LarkGoalConnection): { label: string; 
   ) {
     return {
       label: connection.last_event_reason === "route_ambiguous"
-        ? "消息匹配多个 Goal"
-        : "消息未匹配当前 Goal Topic",
+        ? t("lark.health.routeAmbiguous")
+        : t("lark.health.routeMismatch"),
       detail: connection.last_event_reason === "route_ambiguous"
-        ? "同一 Bot 和群聊存在多个完整群捕获连接。请让每个 Agent 使用独立 Bot，或只保留一个完整群连接。"
-        : "事件来自其他群聊或 Topic。请重新选择群聊并连接该 Goal，然后发送一条新的 @ 消息。",
+        ? t("lark.health.routeAmbiguousDetail")
+        : t("lark.health.routeMismatchDetail"),
       ready: false,
     };
   }
   if (["invalid_event", "binding_unavailable"].includes(connection.last_event_reason ?? "")) {
     return {
-      label: "消息无法路由到 Goal",
-      detail: "当前连接信息不完整。请重新连接该 Goal 后再发送一条新的 @ 消息。",
+      label: t("lark.health.routeUnavailable"),
+      detail: t("lark.health.routeUnavailableDetail"),
       ready: false,
     };
   }
   if (connection.last_event_status === "replied_and_acknowledged") {
-    return { label: "监听中", detail: `已处理 ${connection.event_count} 条事件，成功回复 ${connection.replied_count} 条。`, ready: true };
+    return { label: t("lark.health.listening"), detail: t("lark.health.eventProcessed", { events: connection.event_count, replies: connection.replied_count }), ready: true };
   }
   if (connection.health_error_code === "lark_event_delivery_unverified" || connection.event_count === 0) {
     return {
-      label: "事件订阅待验证",
-      detail: "长连接已启动，但尚未收到消息事件。请启用 im.message.receive_v1，开通群聊 @ 消息权限，发布新版后再发送一条新的 @ 消息。",
+      label: t("lark.health.eventUnverified"),
+      detail: t("lark.health.eventUnverifiedDetail"),
       ready: false,
     };
   }
-  return { label: connection.reply_ready ? "监听中" : "自动回复不可用", detail: `最近事件状态：${connection.last_event_status ?? "等待处理"}`, ready: connection.reply_ready };
+  return {
+    label: connection.reply_ready ? t("lark.health.listening") : t("lark.health.unavailable"),
+    detail: t("lark.health.lastStatus", { status: connection.last_event_status ?? t("lark.health.waiting") }),
+    ready: connection.reply_ready,
+  };
 }
 
 function larkGroupHistoryPermissionUrl(connection: LarkGoalConnection): string | null {
   return connection.history_permission_guidance?.api_document_url ?? null;
 }
 
-function larkErrorMessage(cause: unknown, fallback: string): string {
+function larkErrorMessage(cause: unknown, fallback: string, t: WorkspaceTranslate): string {
   if (cause instanceof ChatApiError) {
     const code = String(cause.payload.error_code ?? "");
     const messages: Record<string, string> = {
-      lark_cli_not_installed: "未发现 lark-cli。请先安装 lark-cli，然后重新启动 LoopX。",
-      lark_cli_not_executable: "已找到配置的 lark-cli，但当前无法执行。请检查安装或启动参数。",
-      lark_cli_start_failed: "lark-cli 启动失败。请检查安装状态，然后重新启动 LoopX。",
-      lark_message_permissions_required: "该 App 缺少自动回复所需的机器人权限。请开启 im:message.group_at_msg:readonly 和 im:message:send_as_bot，发布新版后回来刷新重试。",
-      lark_app_required: "请选择一个 Lark App profile。",
-      invalid_lark_app: "Lark App profile 不可用或尚未完成授权。",
-      lark_group_lookup_failed: "无法读取该机器人已加入的群。请检查机器人状态后重试。",
-      provider_api_failed: "飞书 API 调用失败，且没有生成已验证回执。请稍后重试。",
+      lark_cli_not_installed: t("lark.error.cliMissing"),
+      lark_cli_not_executable: t("lark.error.cliExecutable"),
+      lark_cli_start_failed: t("lark.error.cliStart"),
+      lark_message_permissions_required: t("lark.error.messagePermissions"),
+      lark_app_required: t("lark.error.appRequired"),
+      invalid_lark_app: t("lark.error.invalidApp"),
+      lark_group_lookup_failed: t("lark.error.groupLookup"),
+      provider_api_failed: t("lark.error.provider"),
     };
     return messages[code] ?? cause.message;
   }
@@ -156,6 +167,7 @@ export function LarkSettingsPage({
   onChanged?: () => void;
   onClose: () => void;
 }) {
+  const { t } = useWorkspaceI18n();
   const [tab, setTab] = useState<Tab>("connections");
   const [apps, setApps] = useState<LarkApp[]>([]);
   const [connections, setConnections] = useState<LarkGoalConnection[]>([]);
@@ -200,7 +212,7 @@ export function LarkSettingsPage({
       setConnections(nextConnections);
       setAppRef((current) => current || nextApps.find((app) => app.reply_ready)?.app_ref || nextApps.find((app) => app.ready)?.app_ref || nextApps[0]?.app_ref || "");
     } catch (cause) {
-      setError(larkErrorMessage(cause, "Lark 配置加载失败"));
+      setError(larkErrorMessage(cause, t("lark.error.configuration"), t));
     } finally {
       setLoading(false);
     }
@@ -240,7 +252,7 @@ export function LarkSettingsPage({
           if (!cancelled) {
             setChats([]);
             setChatId("");
-            setChatLoadError(larkErrorMessage(cause, "群聊加载失败"));
+            setChatLoadError(larkErrorMessage(cause, t("lark.error.groupLoad"), t));
           }
         })
         .finally(() => {
@@ -273,11 +285,11 @@ export function LarkSettingsPage({
             setSetupOpen(false);
           }
           if (snapshot.status === "failed") {
-            setSetupError(snapshot.error ?? "Lark App 创建失败");
+            setSetupError(snapshot.error ?? t("lark.error.appCreate"));
           }
         })
         .catch((cause: unknown) => {
-          if (!cancelled) setSetupError(larkErrorMessage(cause, "创建状态查询失败"));
+          if (!cancelled) setSetupError(larkErrorMessage(cause, t("lark.error.setupPoll"), t));
         });
     }, 650);
     return () => {
@@ -344,7 +356,7 @@ export function LarkSettingsPage({
       setSetupSnapshot(snapshot);
     } catch (cause) {
       setupPopup.current?.close();
-      setSetupError(larkErrorMessage(cause, "无法启动 Lark App 创建流程"));
+      setSetupError(larkErrorMessage(cause, t("lark.error.setupStart"), t));
     } finally {
       setSetupStarting(false);
     }
@@ -380,14 +392,14 @@ export function LarkSettingsPage({
         replyMode,
       } as const;
       const preview = await connectLarkGoalTopic({ ...input, execute: false });
-      if (!preview.ok) throw new ChatApiError(preview.public_summary ?? preview.blocker ?? "绑定预览失败", { error_code: preview.blocker ?? "provider_api_failed" });
+      if (!preview.ok) throw new ChatApiError(preview.public_summary ?? preview.blocker ?? t("lark.error.bindPreview"), { error_code: preview.blocker ?? "provider_api_failed" });
       const result = await connectLarkGoalTopic({ ...input, execute: true });
-      if (!result.ok) throw new ChatApiError(result.public_summary ?? result.blocker ?? "绑定失败", { error_code: result.blocker ?? "provider_api_failed" });
+      if (!result.ok) throw new ChatApiError(result.public_summary ?? result.blocker ?? t("lark.error.bind"), { error_code: result.blocker ?? "provider_api_failed" });
       setModalOpen(false);
       await refresh();
       onChanged?.();
     } catch (cause) {
-      setConnectError(larkErrorMessage(cause, "绑定失败"));
+      setConnectError(larkErrorMessage(cause, t("lark.error.bind"), t));
     } finally {
       setConnecting(false);
     }
@@ -404,44 +416,43 @@ export function LarkSettingsPage({
       await refresh();
       onChanged?.();
     } catch (cause) {
-      setError(larkErrorMessage(cause, "解绑失败"));
+      setError(larkErrorMessage(cause, t("lark.error.disconnect"), t));
     }
   }
 
   return (
-    <section className={`personal-lark-settings${embedded ? " is-embedded" : ""}`} aria-label="Lark configuration">
+    <section className={`personal-lark-settings${embedded ? " is-embedded" : ""}`} aria-label={t("lark.configuration")}>
       {embedded ? null : (
         <header className="personal-lark-header">
           <div>
-            <small>Goal connections</small>
+            <small>{t("settings.goalConnections")}</small>
             <h1>Lark</h1>
-            <p>管理可复用的 Lark App，并用独立 Topic 将群聊连接到 Goal。</p>
+            <p>{t("lark.description")}</p>
           </div>
-          <button aria-label="关闭 Lark 设置" className="personal-icon-button" onClick={onClose} type="button"><X size={18} /></button>
+          <button aria-label={t("lark.closeSettings")} className="personal-icon-button" onClick={onClose} type="button"><X size={18} /></button>
         </header>
       )}
 
-      <nav className="personal-lark-tabs" aria-label="Lark management sections">
-        <button aria-current={tab === "apps" ? "page" : undefined} onClick={() => setTab("apps")} type="button">Lark Apps <span>{loading ? "…" : apps.length}</span></button>
-        <button aria-current={tab === "connections" ? "page" : undefined} onClick={() => setTab("connections")} type="button">Connections <span>{loading ? "…" : connections.length}</span></button>
+      <nav className="personal-lark-tabs" aria-label={t("lark.management")}>
+        <button aria-current={tab === "apps" ? "page" : undefined} onClick={() => setTab("apps")} type="button">{t("lark.apps")} <span>{loading ? "…" : apps.length}</span></button>
+        <button aria-current={tab === "connections" ? "page" : undefined} onClick={() => setTab("connections")} type="button">{t("lark.connections")} <span>{loading ? "…" : connections.length}</span></button>
       </nav>
-
       {error ? <p className="personal-notification-error">{error}</p> : null}
-      {loading ? <div className="personal-lark-loading"><Loader2 className="is-spinning" size={18} />加载 Lark 配置…</div> : null}
+      {loading ? <div className="personal-lark-loading"><Loader2 className="is-spinning" size={18} />{t("lark.loading")}</div> : null}
 
       {!loading && tab === "apps" ? (
         <div className="personal-lark-apps">
-          <div className="personal-lark-app-toolbar"><span>{apps.length} reusable Apps</span><button className="personal-primary-action" onClick={openSetup} type="button"><Plus size={16} />New Lark App</button></div>
+          <div className="personal-lark-app-toolbar"><span>{t("lark.reusableApps", { count: apps.length })}</span><button className="personal-primary-action" onClick={openSetup} type="button"><Plus size={16} />{t("lark.newApp")}</button></div>
           <div className="personal-lark-app-grid">
             {apps.map((app) => (
               <article className="personal-lark-app-card" key={app.app_ref}>
                 <span className="personal-lark-app-avatar"><Bot size={19} /></span>
                 <div><strong>{app.label}</strong><small>{app.brand} · lark-cli profile</small></div>
-                <em className={app.reply_ready ? "is-ready" : "is-off"}>{app.reply_ready ? "Auto reply ready" : app.ready ? "Needs message permissions" : "Needs setup"}</em>
-                <p>{connections.filter((connection) => connection.app_ref === app.app_ref).length} Goal connections{app.ready && !app.reply_ready ? " · 自动回复暂不可用" : ""}</p>
+                <em className={app.reply_ready ? "is-ready" : "is-off"}>{app.reply_ready ? t("lark.autoReplyReady") : app.ready ? t("lark.needsMessagePermissions") : t("lark.needsSetup")}</em>
+                <p>{t("lark.goalConnections", { count: connections.filter((connection) => connection.app_ref === app.app_ref).length })}{app.ready && !app.reply_ready ? ` · ${t("lark.autoReplyUnavailable")}` : ""}</p>
               </article>
             ))}
-            {apps.length === 0 ? <p className="personal-lark-empty">还没有可用的 lark-cli App profile。</p> : null}
+            {apps.length === 0 ? <p className="personal-lark-empty">{t("lark.noProfiles")}</p> : null}
           </div>
         </div>
       ) : null}
@@ -449,34 +460,34 @@ export function LarkSettingsPage({
       {!loading && tab === "connections" ? (
         <div className="personal-lark-connections">
           <div className="personal-lark-toolbar">
-            <label><Search size={16} /><input aria-label="搜索 Lark connections" onChange={(event) => setQuery(event.target.value)} placeholder="搜索 App、群、Goal 或 Topic" type="search" value={query} /></label>
-            <button className="personal-primary-action" disabled={apps.length === 0 || goals.length === 0} onClick={() => openConnect()} type="button"><Plus size={16} />Connect Lark App</button>
+            <label><Search size={16} /><input aria-label={t("lark.searchConnections")} onChange={(event) => setQuery(event.target.value)} placeholder={t("lark.searchPlaceholder")} type="search" value={query} /></label>
+            <button className="personal-primary-action" disabled={apps.length === 0 || goals.length === 0} onClick={() => openConnect()} type="button"><Plus size={16} />{t("lark.connectApp")}</button>
           </div>
-          <div className="personal-lark-table" role="table" aria-label="Lark Goal Topic connections">
-            <div className="personal-lark-table-head" role="row"><span>Connection</span><span>Goal</span><span>Capture</span><span>Processing</span><span>Actions</span></div>
+          <div className="personal-lark-table" role="table" aria-label={t("lark.goalTopicConnections")}>
+            <div className="personal-lark-table-head" role="row"><span>{t("lark.connection")}</span><span>{t("common.goal")}</span><span>{t("lark.capture")}</span><span>{t("lark.processing")}</span><span>{t("common.actions")}</span></div>
             {filteredConnections.map((connection) => (
               <div className="personal-lark-table-row" key={connection.goal_id} role="row">
                 <span>
                   <strong>{connection.chat_name}</strong>
-                  <small>{connection.app_label} · {larkConnectionHealth(connection).label}</small>
-                  <small>{larkConnectionHealth(connection).detail}</small>
+                  <small>{connection.app_label} · {larkConnectionHealth(connection, t).label}</small>
+                  <small>{larkConnectionHealth(connection, t).detail}</small>
                   {connection.health_error_code === "lark_event_delivery_unverified" ? (
-                    <a href="https://open.feishu.cn/document/server-docs/im-v1/message/events/receive?lang=zh-CN" rel="noreferrer" target="_blank"><ExternalLink size={12} />查看飞书事件配置</a>
+                    <a href="https://open.feishu.cn/document/server-docs/im-v1/message/events/receive?lang=zh-CN" rel="noreferrer" target="_blank"><ExternalLink size={12} />{t("lark.openEventSettings")}</a>
                   ) : null}
                   {larkGroupHistoryPermissionUrl(connection) ? (
-                    <a href={larkGroupHistoryPermissionUrl(connection) ?? undefined} rel="noreferrer" target="_blank"><ExternalLink size={12} />历史补读权限（独立能力）</a>
+                    <a href={larkGroupHistoryPermissionUrl(connection) ?? undefined} rel="noreferrer" target="_blank"><ExternalLink size={12} />{t("lark.historyPermission")}</a>
                   ) : null}
                 </span>
                 <span><strong>{connection.goal_title}</strong><small># {connection.topic_name}</small></span>
-                <span>{connection.capture_scope === "addressed_only" ? "Mentions only" : "All topic messages"}</span>
-                <span><strong>{ingressPresentation[connection.ingress_mode].label}</strong><small>{connection.agent_id ?? ingressPresentation[connection.ingress_mode].detail}</small></span>
+                <span>{connection.capture_scope === "addressed_only" ? t("lark.mentionsOnly") : t("lark.allTopicMessages")}</span>
+                <span><strong>{ingressPresentation(connection.ingress_mode, t).label}</strong><small>{connection.agent_id ?? ingressPresentation(connection.ingress_mode, t).detail}</small></span>
                 <span className="personal-lark-row-actions">
-                  <button aria-label={`配置 ${connection.goal_title}`} onClick={() => openConnectionEditor(connection)} type="button"><Settings2 size={15} /></button>
-                  <button aria-label={`解绑 ${connection.goal_title}`} className={disconnectGoalId === connection.goal_id ? "is-confirm" : ""} onClick={() => void disconnect(connection.goal_id)} type="button"><Unlink size={15} />{disconnectGoalId === connection.goal_id ? "确认" : null}</button>
+                  <button aria-label={t("lark.settingsConfigure", { goal: connection.goal_title })} onClick={() => openConnectionEditor(connection)} type="button"><Settings2 size={15} /></button>
+                  <button aria-label={t("lark.settingsDisconnect", { goal: connection.goal_title })} className={disconnectGoalId === connection.goal_id ? "is-confirm" : ""} onClick={() => void disconnect(connection.goal_id)} type="button"><Unlink size={15} />{disconnectGoalId === connection.goal_id ? t("common.confirm") : null}</button>
                 </span>
               </div>
             ))}
-            {filteredConnections.length === 0 ? <p className="personal-lark-empty">暂无匹配的连接。</p> : null}
+            {filteredConnections.length === 0 ? <p className="personal-lark-empty">{t("lark.noConnections")}</p> : null}
           </div>
         </div>
       ) : null}
@@ -484,27 +495,27 @@ export function LarkSettingsPage({
       {modalOpen ? (
         <div className="personal-lark-modal-backdrop" role="presentation">
           <section aria-labelledby="connect-lark-title" aria-modal="true" className="personal-lark-modal" role="dialog">
-            <header><div><small>Goal Topic connection</small><h2 id="connect-lark-title">{editingGoalId ? "Edit Lark Connection" : "Connect Lark App"}</h2></div><button aria-label="关闭连接弹窗" onClick={() => setModalOpen(false)} type="button"><X size={18} /></button></header>
-            <label><span>Lark App</span><select aria-label="Lark App" disabled={loading} onChange={(event) => { if (event.target.value === "__register__") openSetup(); else setAppRef(event.target.value); }} value={appRef}>{loading ? <option value="">正在加载可用的 Lark Apps…</option> : <>{apps.map((app) => <option disabled={!app.ready} key={app.app_ref} value={app.app_ref}>{app.label}{app.reply_ready ? "" : app.ready ? " · Needs message permissions" : " · Needs setup"}</option>)}<option value="__register__">＋ Register another Lark App — Create through Feishu</option></>}</select></label>
-            {selectedApp?.ready && !selectedApp.reply_ready ? <div className="personal-lark-group-state is-error" role="alert">该 App 能发送建联消息，但缺少接收群聊 @ 消息或自动回复所需的机器人权限。请开启 <code>im:message.group_at_msg:readonly</code>、<code>im:message.send_as_bot</code> 和事件 <code>im.message.receive_v1</code>，发布新版后刷新。</div> : null}
+            <header><div><small>Goal Topic connection</small><h2 id="connect-lark-title">{editingGoalId ? t("lark.editConnection") : t("lark.connectApp")}</h2></div><button aria-label={t("lark.closeConnection")} onClick={() => setModalOpen(false)} type="button"><X size={18} /></button></header>
+            <label><span>{t("lark.appProfile")}</span><select aria-label={t("lark.appProfile")} disabled={loading} onChange={(event) => { if (event.target.value === "__register__") openSetup(); else setAppRef(event.target.value); }} value={appRef}>{loading ? <option value="">{t("lark.appLoading")}</option> : <>{apps.map((app) => <option disabled={!app.ready} key={app.app_ref} value={app.app_ref}>{app.label}{app.reply_ready ? "" : app.ready ? ` · ${t("lark.needsMessagePermissions")}` : ` · ${t("lark.needsSetup")}`}</option>)}<option value="__register__">{t("lark.registerAnother")}</option></>}</select></label>
+            {selectedApp?.ready && !selectedApp.reply_ready ? <div className="personal-lark-group-state is-error" role="alert">{t("lark.appPermissions")}</div> : null}
             <label>
-              <span>Group chat</span>
-              <input aria-label="搜索飞书群" onChange={(event) => setChatQuery(event.target.value)} placeholder="搜索该机器人已加入的群" type="search" value={chatQuery} />
-              {chatLoading ? <div className="personal-lark-group-state" role="status"><Loader2 className="is-spinning" size={15} />正在读取该机器人已加入的群…</div> : null}
+              <span>{t("lark.groupChat")}</span>
+              <input aria-label={t("lark.groupSearch")} onChange={(event) => setChatQuery(event.target.value)} placeholder={t("lark.groupSearch")} type="search" value={chatQuery} />
+              {chatLoading ? <div className="personal-lark-group-state" role="status"><Loader2 className="is-spinning" size={15} />{t("lark.groupLoading")}</div> : null}
               {!chatLoading && chatLoadError ? <div className="personal-lark-group-state is-error" role="alert">{chatLoadError}</div> : null}
-              {!chatLoading && !chatLoadError && chats.length === 0 ? <div className="personal-lark-group-state" role="status">该机器人尚未加入可连接的群。请先在飞书群设置中添加这个机器人，再回来刷新或搜索。</div> : null}
-              {!chatLoading && !chatLoadError && chats.length > 0 ? <select aria-label="Group chat" onChange={(event) => setChatId(event.target.value)} value={chatId}>{chats.map((chat) => <option key={chat.chat_id} value={chat.chat_id}>{chat.chat_name}</option>)}</select> : null}
+              {!chatLoading && !chatLoadError && chats.length === 0 ? <div className="personal-lark-group-state" role="status">{t("lark.groupEmpty")}</div> : null}
+              {!chatLoading && !chatLoadError && chats.length > 0 ? <select aria-label={t("lark.groupChat")} onChange={(event) => setChatId(event.target.value)} value={chatId}>{chats.map((chat) => <option key={chat.chat_id} value={chat.chat_id}>{chat.chat_name}</option>)}</select> : null}
             </label>
-            <label><span>Bind to Goal</span><select aria-label="Bind to Goal" onChange={(event) => { const nextGoalId = event.target.value; setGoalId(nextGoalId); setAgentId(goals.find((goal) => goal.goalId === nextGoalId)?.agentId ?? ""); }} value={goalId}>{goals.map((goal) => <option key={goal.goalId} value={goal.goalId}>{goal.title}</option>)}</select></label>
-            <label className="personal-lark-check"><input checked readOnly type="checkbox" /><span><strong>Create Goal topic automatically</strong><small>A dedicated topic will be created for this Goal.</small></span></label>
-            <label><span>Topic preview</span><div className="personal-lark-topic-preview"><MessageSquareText size={15} /># {selectedGoal?.title ?? selectedGoal?.goalId ?? "Goal"}</div></label>
-            <label><span>Capture scope</span><select aria-label="Capture scope" onChange={(event) => setCaptureScope(event.target.value as LarkCaptureScope)} value={captureScope}><option value="addressed_only">Only messages that mention or reply to the App</option><option value="configured_chat_all">All messages in this Goal topic</option></select><small>决定哪些 Topic 消息会进入 LoopX；不会扩大 Agent 权限。</small></label>
-            <fieldset aria-label="Agent ingress" className="personal-lark-ingress"><legend>Agent ingress</legend><div>{(["live_steering", "session_queue", "async_inbox"] as const).map((mode) => <label className={ingressMode === mode ? "is-active" : ""} key={mode}><input aria-label={ingressPresentation[mode].label} checked={ingressMode === mode} name="lark-agent-ingress" onChange={() => setIngressMode(mode)} type="radio" value={mode} /><span><strong>{ingressPresentation[mode].label}</strong><small>{ingressPresentation[mode].detail}</small></span></label>)}</div></fieldset>
-            <label><span>Target Agent</span><select aria-label="Target Agent" onChange={(event) => setAgentId(event.target.value)} value={agentId}><option value={selectedGoal?.agentId ?? ""}>{selectedGoal?.agentLabel ?? selectedGoal?.agentId ?? "No Agent configured"}</option></select><small>只能投递给当前 Goal 已注册的 Agent；此选择不授予新权限。Steering 与 Queuing 会绑定该 Goal 当前的精确 Session。</small></label>
-            <label><span>Reply mode</span><select aria-label="Reply mode" onChange={(event) => setReplyMode(event.target.value as LarkReplyMode)} value={replyMode}><option value="topic_reply">Topic reply</option></select><small>当前只支持在来源 Topic 内回复，避免跨群或跨 Goal 投递。</small></label>
-            <p className="personal-lark-cardinality"><Check size={15} />One Lark App · many Goals · one topic per Goal</p>
+            <label><span>{t("lark.bindGoal")}</span><select aria-label={t("lark.bindGoal")} onChange={(event) => { const nextGoalId = event.target.value; setGoalId(nextGoalId); setAgentId(goals.find((goal) => goal.goalId === nextGoalId)?.agentId ?? ""); }} value={goalId}>{goals.map((goal) => <option key={goal.goalId} value={goal.goalId}>{goal.title}</option>)}</select></label>
+            <label className="personal-lark-check"><input checked readOnly type="checkbox" /><span><strong>{t("lark.createAutomatically")}</strong><small>{t("lark.createAutomaticallyDescription")}</small></span></label>
+            <label><span>{t("lark.topicPreview")}</span><div className="personal-lark-topic-preview"><MessageSquareText size={15} /># {selectedGoal?.title ?? selectedGoal?.goalId ?? "Goal"}</div></label>
+            <label><span>{t("lark.captureScope")}</span><select aria-label={t("lark.captureScope")} onChange={(event) => setCaptureScope(event.target.value as LarkCaptureScope)} value={captureScope}><option value="addressed_only">{t("lark.captureAddressed")}</option><option value="configured_chat_all">{t("lark.captureAll")}</option></select><small>{t("lark.captureScopeDescription")}</small></label>
+            <fieldset aria-label={t("lark.agentIngress")} className="personal-lark-ingress"><legend>{t("lark.agentIngress")}</legend><div>{(["live_steering", "session_queue", "async_inbox"] as const).map((mode) => { const presentation = ingressPresentation(mode, t); return <label className={ingressMode === mode ? "is-active" : ""} key={mode}><input aria-label={presentation.label} checked={ingressMode === mode} name="lark-agent-ingress" onChange={() => setIngressMode(mode)} type="radio" value={mode} /><span><strong>{presentation.label}</strong><small>{presentation.detail}</small></span></label>; })}</div></fieldset>
+            <label><span>{t("lark.targetAgent")}</span><select aria-label={t("lark.targetAgent")} onChange={(event) => setAgentId(event.target.value)} value={agentId}><option value={selectedGoal?.agentId ?? ""}>{selectedGoal?.agentLabel ?? selectedGoal?.agentId ?? t("lark.noAgentConfigured")}</option></select><small>{t("lark.targetAgentDescription")}</small></label>
+            <label><span>{t("lark.replyMode")}</span><select aria-label={t("lark.replyMode")} onChange={(event) => setReplyMode(event.target.value as LarkReplyMode)} value={replyMode}><option value="topic_reply">{t("lark.topicReply")}</option></select><small>{t("lark.replyModeDescription")}</small></label>
+            <p className="personal-lark-cardinality"><Check size={15} />{t("lark.cardinality")}</p>
             {connectError ? <p className="personal-notification-error">{connectError}</p> : null}
-            <footer><button className="personal-secondary-action" onClick={() => setModalOpen(false)} type="button">Cancel</button><button className="personal-primary-action" disabled={loading || !appRef || !selectedApp?.reply_ready || !goalId || !chatId || !agentId || connecting} onClick={() => void connect()} type="button">{connecting ? <Loader2 className="is-spinning" size={15} /> : null}{editingGoalId ? "Save connection" : "Connect"}</button></footer>
+            <footer><button className="personal-secondary-action" onClick={() => setModalOpen(false)} type="button">{t("lark.cancel")}</button><button className="personal-primary-action" disabled={loading || !appRef || !selectedApp?.reply_ready || !goalId || !chatId || !agentId || connecting} onClick={() => void connect()} type="button">{connecting ? <Loader2 className="is-spinning" size={15} /> : null}{editingGoalId ? t("lark.saveConnection") : t("lark.connect")}</button></footer>
           </section>
         </div>
       ) : null}
@@ -512,23 +523,23 @@ export function LarkSettingsPage({
       {setupOpen ? (
         <div className="personal-lark-modal-backdrop is-setup" role="presentation">
           <section aria-labelledby="new-lark-app-title" aria-modal="true" className="personal-lark-modal personal-lark-setup-modal" role="dialog">
-            <header><div><small>Reusable workspace App</small><h2 id="new-lark-app-title">New Lark App</h2></div><button aria-label="关闭创建弹窗" onClick={() => void closeSetup()} type="button"><X size={18} /></button></header>
+            <header><div><small>{t("lark.reusableWorkspaceApp")}</small><h2 id="new-lark-app-title">{t("lark.newApp")}</h2></div><button aria-label={t("lark.closeCreate")} onClick={() => void closeSetup()} type="button"><X size={18} /></button></header>
             {!setupSnapshot ? (
               <>
-                <p className="personal-lark-setup-copy">LoopX 将通过 lark-cli 打开飞书官方创建页面。应用凭证保存在系统 Keychain，LoopX 只保留 profile 引用。</p>
-                <label><span>Profile name</span><input aria-label="Profile name" autoComplete="off" onChange={(event) => setSetupAppRef(event.target.value)} placeholder="loopx-workspace-bot" value={setupAppRef} /></label>
-                <label><span>Region</span><select aria-label="Region" onChange={(event) => setSetupBrand(event.target.value as "feishu" | "lark")} value={setupBrand}><option value="feishu">Feishu</option><option value="lark">Lark</option></select></label>
-                {setupAppRef && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(setupAppRef) ? <p className="personal-notification-error">Profile 只能包含字母、数字、点、下划线和连字符。</p> : null}
+                <p className="personal-lark-setup-copy">{t("lark.setupCopy")}</p>
+                <label><span>{t("lark.profileName")}</span><input aria-label={t("lark.profileName")} autoComplete="off" onChange={(event) => setSetupAppRef(event.target.value)} placeholder="loopx-workspace-bot" value={setupAppRef} /></label>
+                <label><span>{t("lark.region")}</span><select aria-label={t("lark.region")} onChange={(event) => setSetupBrand(event.target.value as "feishu" | "lark")} value={setupBrand}><option value="feishu">Feishu</option><option value="lark">Lark</option></select></label>
+                {setupAppRef && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(setupAppRef) ? <p className="personal-notification-error">{t("lark.profileValidation")}</p> : null}
               </>
             ) : (
               <div className="personal-lark-setup-progress">
                 <span className={`personal-lark-setup-icon is-${setupSnapshot.status}`}>{setupSnapshot.status === "ready" ? <Check size={22} /> : <Loader2 className={setupSnapshot.status === "failed" ? "" : "is-spinning"} size={22} />}</span>
-                <div><strong>{setupSnapshot.status === "ready" ? "App 已创建" : setupSnapshot.status === "failed" ? "创建失败" : "等待飞书完成创建"}</strong><p>{setupSnapshot.status === "waiting_for_feishu" ? "请在新窗口中完成飞书授权，完成后会自动回到这里。" : setupSnapshot.status === "starting" ? "正在生成飞书官方创建链接…" : setupSnapshot.error}</p></div>
-                {setupSnapshot.verification_url ? <a href={setupSnapshot.verification_url} rel="noreferrer" target="_blank"><ExternalLink size={15} />重新打开飞书</a> : null}
+                <div><strong>{setupSnapshot.status === "ready" ? t("lark.appCreated") : setupSnapshot.status === "failed" ? t("lark.appCreateFailed") : t("lark.waitingFeishu")}</strong><p>{setupSnapshot.status === "waiting_for_feishu" ? t("lark.waitingFeishuDescription") : setupSnapshot.status === "starting" ? t("lark.waitingLink") : setupSnapshot.error}</p></div>
+                {setupSnapshot.verification_url ? <a href={setupSnapshot.verification_url} rel="noreferrer" target="_blank"><ExternalLink size={15} />{t("lark.reopenFeishu")}</a> : null}
               </div>
             )}
             {setupError ? <p className="personal-notification-error">{setupError}</p> : null}
-            <footer><button className="personal-secondary-action" onClick={() => void closeSetup()} type="button">Cancel</button>{!setupSnapshot ? <button className="personal-primary-action" disabled={setupStarting || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(setupAppRef)} onClick={() => void startSetup()} type="button">{setupStarting ? <Loader2 className="is-spinning" size={15} /> : <ExternalLink size={15} />}Continue in Feishu</button> : null}</footer>
+            <footer><button className="personal-secondary-action" onClick={() => void closeSetup()} type="button">{t("lark.cancel")}</button>{!setupSnapshot ? <button className="personal-primary-action" disabled={setupStarting || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(setupAppRef)} onClick={() => void startSetup()} type="button">{setupStarting ? <Loader2 className="is-spinning" size={15} /> : <ExternalLink size={15} />}{t("lark.continueFeishu")}</button> : null}</footer>
           </section>
         </div>
       ) : null}

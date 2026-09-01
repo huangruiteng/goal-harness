@@ -77,6 +77,7 @@ test("Todo lifecycle reentry preserves exact completion identities", () => {
     projectTodoLifecycleSettlementReentry({
       schema_version: TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
       goal_id: "goal-example",
+      runtime_root: "/tmp/loopx runtime",
       triggers: [
         {
           kind: "completed_advancement_without_successor",
@@ -115,10 +116,10 @@ test("Todo lifecycle reentry preserves exact completion identities", () => {
         },
       ],
       next_cli_actions: [
-        "when no real successor remains for completed Todo todo_111111111111: loopx todo complete --goal-id goal-example --todo-id todo_111111111111 --turn-instance-id turn-implement --agent-id current-agent --no-follow-up --note '<public-safe no-follow-up rationale>'",
-        "when no real successor remains for completed Todo todo_222222222222: loopx todo complete --goal-id goal-example --todo-id todo_222222222222 --completion-identity-key local_completion_2fdda7fd139a77f97e72ca43d6e6a72a --agent-id current-agent --no-follow-up --note '<public-safe no-follow-up rationale>'",
+        "when no real successor remains for completed Todo todo_111111111111: loopx --runtime-root '/tmp/loopx runtime' todo complete --goal-id goal-example --todo-id todo_111111111111 --turn-instance-id turn-implement --agent-id current-agent --no-follow-up --note '<public-safe no-follow-up rationale>'",
+        "when no real successor remains for completed Todo todo_222222222222: loopx --runtime-root '/tmp/loopx runtime' todo complete --goal-id goal-example --todo-id todo_222222222222 --completion-identity-key local_completion_2fdda7fd139a77f97e72ca43d6e6a72a --agent-id current-agent --no-follow-up --note '<public-safe no-follow-up rationale>'",
         "otherwise link or create one real runnable successor for the exact completed Todo; do not create lifecycle-only filler",
-        "loopx --format json quota should-run --goal-id goal-example --agent-id current-agent --available-capability shell",
+        "loopx --runtime-root '/tmp/loopx runtime' --format json quota should-run --goal-id goal-example --agent-id current-agent --available-capability shell",
       ],
     },
   );
@@ -129,11 +130,29 @@ test("Todo lifecycle reentry rejects untyped succession triggers", () => {
     () => projectTodoLifecycleSettlementReentry({
       schema_version: TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
       goal_id: "goal-example",
+      runtime_root: "/tmp/loopx runtime",
       triggers: [{ kind: "vision_acceptance_gap", todo_id: "todo_1" }],
       lifecycle_actor_args: [],
       quota_scoped_args: [],
     }),
     /kind is unsupported/,
+  );
+});
+
+test("Todo lifecycle reentry rejects a non-string runtime root", () => {
+  assert.throws(
+    () => projectTodoLifecycleSettlementReentry({
+      schema_version: TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
+      goal_id: "goal-example",
+      runtime_root: 42,
+      triggers: [{
+        kind: "completed_advancement_without_successor",
+        todo_id: "todo_1",
+      }],
+      lifecycle_actor_args: [],
+      quota_scoped_args: [],
+    }),
+    /runtime_root must be a non-empty string/,
   );
 });
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from ...quota import (
@@ -132,6 +133,7 @@ def build_quota_paused_should_run_payload(
     codex_app_current_rrule: Any,
     codex_app_automation_id: Any = None,
     resolved_scheduler_context: SchedulerExecutionContextResolution,
+    runtime_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Project one canonical hard-pause contract with no lane contradiction.
 
@@ -214,6 +216,13 @@ def build_quota_paused_should_run_payload(
         payload,
         available_capabilities=None,
         scheduler_execution_context=resolved_scheduler_context,
+        runtime_root=(
+            str(runtime_root)
+            if runtime_root
+            else str(status_payload.get("runtime_root"))
+            if status_payload.get("runtime_root")
+            else None
+        ),
     )
     payload["scheduler_hint"] = _scheduler_hint(
         payload,
@@ -248,6 +257,7 @@ def build_quota_should_run(
     receipt_bound_terminal_phase: ReceiptBoundTerminalPhase | None = None,
     receipt_bound_replan_obligation_id: str | None = None,
     turn_instance_id: str | None = None,
+    runtime_root: str | Path | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = str(goal_id or "").strip()
     resolved_scheduler_context = resolve_scheduler_execution_context(
@@ -294,6 +304,7 @@ def build_quota_should_run(
                 codex_app_current_rrule=codex_app_current_rrule,
                 codex_app_automation_id=codex_app_automation_id,
                 resolved_scheduler_context=resolved_scheduler_context,
+                runtime_root=runtime_root,
             )
         prepared = _prepare_quota_should_run_item(
             status_payload,
@@ -323,6 +334,7 @@ def build_quota_should_run(
             route,
             turn_instance_id=turn_instance_id,
             include_agent_todo_detail=include_agent_todo_detail,
+            runtime_root=runtime_root,
         )
     if health_item:
         return {

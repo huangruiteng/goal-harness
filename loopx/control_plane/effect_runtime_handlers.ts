@@ -10,6 +10,7 @@ import {
   settlementIdentityPayload,
   settlementPlanPayload,
   settlementResultPayload,
+  SETTLEMENT_BINDING_KINDS,
   SETTLEMENT_FAILURE_KINDS,
   SETTLEMENT_STEP_KINDS,
   type JsonObject,
@@ -43,6 +44,7 @@ import {
 } from "./governed_capability.ts";
 import { evaluateDeliveryWorkspaceCausality } from "./quota/settlement_workspace_causality.ts";
 import { evaluateQuotaSpendCommit } from "./quota/spend_commit.ts";
+import { readQuotaSettlement } from "./quota/settlement_readback.ts";
 import { evaluateDeliveryWorkspace } from "./agents/delivery_workspace.ts";
 import {
   interpretTurnJournal,
@@ -76,16 +78,21 @@ import {
   evaluateDeliveryRoute,
 } from "./turn_driver/delivery_continuity.ts";
 import { reduceTurnSettlementTransaction } from "./turn_driver/settlement.ts";
+import { evaluateHostTodoCompletion } from "./turn_driver/host_todo_completion.ts";
 import {
   projectReplanSettlementContract,
   projectTodoLifecycleSettlementReentry,
 } from "./work_items/replan_settlement.ts";
-import { reduceTaskLeaseAcquire } from "./work_items/task_lease_settlement.ts";
 import {
   projectQuotaActionPortfolio,
   qualifyActionSelection,
 } from "./work_items/action_portfolio.ts";
 import { projectQuotaPlanningHorizon } from "./work_items/planning_horizon.ts";
+import {
+  evaluateTaskLeaseAcquireDecision,
+  evaluateTaskLeaseWriteScopesOverlap,
+  executeTaskLeaseAcquire,
+} from "./work_items/task_lease_acquire.ts";
 import {
   projectTodoPlanningInventory,
   projectTodoPlanningInventoryDetail,
@@ -93,6 +100,10 @@ import {
 import {
   validateInteractionProjectionHookInvocation,
   validateInteractionProjectionHookRegistration,
+  validatePostWritebackHookInput,
+  validatePostWritebackHookInvocation,
+  validatePostWritebackHookReceipt,
+  validatePostWritebackHookRegistration,
   validateTurnStartHookInvocation,
   validateTurnStartHookRegistration,
 } from "./capability_hooks.ts";
@@ -252,12 +263,36 @@ function turnJournalInspectionRequest(
   ) {
     throw new EffectRuntimeRequestError("Turn-journal interpretation request schema mismatch");
   }
+  let sessionRecoveryCheck: TurnJournalInspectionRequest["session_recovery_check"] = null;
+  if (request.session_recovery_check !== null && request.session_recovery_check !== undefined) {
+    const check = requiredObject(
+      request.session_recovery_check,
+      "turn_journal.inspect session_recovery_check",
+    );
+    const kind = requiredString(check.kind, "turn_journal.inspect session_recovery_check.kind");
+    const outcome = requiredString(
+      check.outcome,
+      "turn_journal.inspect session_recovery_check.outcome",
+    );
+    if (kind !== "host_session_binding" || !["passed", "failed"].includes(outcome)) {
+      throw new EffectRuntimeRequestError(
+        "Turn-journal session recovery check is unsupported",
+      );
+    }
+    sessionRecoveryCheck = {
+      kind,
+      outcome: outcome as "passed" | "failed",
+      ...(typeof check.reason === "string" ? { reason: check.reason } : {}),
+    };
+  }
   return {
     schema_version: request.schema_version,
     journal: requiredObject(request.journal, "turn_journal.inspect journal"),
     goal_id: requiredString(request.goal_id, "turn_journal.inspect goal_id"),
     agent_id: requiredString(request.agent_id, "turn_journal.inspect agent_id"),
     turn_key: requiredString(request.turn_key, "turn_journal.inspect turn_key"),
+    retry_failed: request.retry_failed === true,
+    session_recovery_check: sessionRecoveryCheck,
   };
 }
 
@@ -308,6 +343,10 @@ export function createEffectRuntimeHandlers(
       evaluateDeliveryWorkspaceCausality,
     ],
     ["quota.spend.commit", evaluateQuotaSpendCommit],
+    ["quota.settlement.read", readQuotaSettlement],
+    ["task_lease.acquire.decide", evaluateTaskLeaseAcquireDecision],
+    ["task_lease.acquire.native", executeTaskLeaseAcquire],
+    ["task_lease.write_scopes.overlap", evaluateTaskLeaseWriteScopesOverlap],
     [
       "effect.program_from_ordered_steps",
       (params) => effectProgramFromOrderedSteps(
@@ -389,6 +428,33 @@ export function createEffectRuntimeHandlers(
       }),
     ],
     [
+      "capability_hook.post_writeback.validate_registration",
+      (params) => validatePostWritebackHookRegistration(params.registration),
+    ],
+    [
+      "capability_hook.post_writeback.validate_input",
+      (params) => validatePostWritebackHookInput({
+        registration: params.registration,
+        hook_input: params.hook_input,
+      }),
+    ],
+    [
+      "capability_hook.post_writeback.validate",
+      (params) => validatePostWritebackHookInvocation({
+        registration: params.registration,
+        hook_input: params.hook_input,
+        result: params.result,
+      }),
+    ],
+    [
+      "capability_hook.post_writeback.validate_receipt",
+      (params) => validatePostWritebackHookReceipt({
+        registration: params.registration,
+        hook_input: params.hook_input,
+        receipt: params.receipt,
+      }),
+    ],
+    [
       "settlement.identity",
       (params) => settlementIdentity(settlementIdentityInput(params)),
     ],
@@ -422,6 +488,14 @@ export function createEffectRuntimeHandlers(
     [
       "settlement.receipt_bound_replay_phase",
       (params) => receiptBoundReplayPhase({
+        binding_kind: params.binding_kind === undefined
+          ? undefined
+          : requireStringLiteral(
+            params.binding_kind,
+            SETTLEMENT_BINDING_KINDS,
+            "binding_kind",
+            "binding_kind has an unsupported settlement binding kind",
+          ),
         completion_receipt_present: params.completion_receipt_present === true,
         durable_writeback_present: params.durable_writeback_present === true,
         quota_spend_present: params.quota_spend_present === true,
@@ -465,7 +539,7 @@ export function createEffectRuntimeHandlers(
       ),
     ],
     ["turn.settlement.reduce", reduceTurnSettlementTransaction],
-    ["task_lease.acquire.reduce", reduceTaskLeaseAcquire],
+    ["turn.host_todo_completion.evaluate", evaluateHostTodoCompletion],
     ["work_item.replan_settlement.project", projectReplanSettlementContract],
     [
       "work_item.replan_settlement.reentry",

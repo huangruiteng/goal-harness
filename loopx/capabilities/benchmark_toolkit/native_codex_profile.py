@@ -382,13 +382,15 @@ def render_native_codex_goal_prompt(
     runtime_registry_bound = runtime_registry_path is None
     if runtime_registry_path is not None:
         runtime_registry = str(Path(runtime_registry_path).expanduser().resolve())
-        if _DEFAULT_GLOBAL_REGISTRY_TOKEN not in task_body:
-            raise NativeCodexProfileError("goal_prompt_default_registry_token_missing")
-        task_body = task_body.replace(_DEFAULT_GLOBAL_REGISTRY_TOKEN, runtime_registry)
-        runtime_registry_bound = (
-            runtime_registry in task_body
-            and _DEFAULT_GLOBAL_REGISTRY_TOKEN not in task_body
-        )
+        if _DEFAULT_GLOBAL_REGISTRY_TOKEN in task_body:
+            task_body = task_body.replace(
+                _DEFAULT_GLOBAL_REGISTRY_TOKEN, runtime_registry
+            )
+            runtime_registry_bound = runtime_registry in task_body
+        else:
+            # Explicit runtime-root commands resolve their own global registry;
+            # no separate --registry token is emitted or needs rewriting.
+            runtime_registry_bound = str(runtime) in task_body
         if not runtime_registry_bound:
             raise NativeCodexProfileError("goal_prompt_runtime_registry_not_bound")
 

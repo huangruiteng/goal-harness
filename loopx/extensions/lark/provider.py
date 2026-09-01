@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from importlib import import_module
 import sys
 from collections.abc import Sequence
-
+from importlib import import_module
 
 REQUIRED_EXPORTS = {
     "loopx.extensions.lark.event_collector": (
@@ -19,14 +18,15 @@ REQUIRED_EXPORTS = {
         "inspect_lark_event_inbox",
         "project_lark_event_inbox_urgency",
     ),
-    "loopx.extensions.lark.inbox_reply": ("reply_lark_event_inbox",),
+    "loopx.extensions.lark.inbox_reply": (
+        "reply_lark_event_inbox",
+        "send_lark_inbox_message",
+    ),
     "loopx.extensions.lark.inbox_reactions": (
         "complete_lark_event_inbox_reactions",
         "mark_lark_event_inbox_processing",
     ),
-    "loopx.extensions.lark.reviewer_notification": (
-        "lark_reviewer_notification_sink",
-    ),
+    "loopx.extensions.lark.reviewer_notification": ("lark_reviewer_notification_sink",),
     "loopx.extensions.lark.goal_channel": (
         "doctor_lark_goal_channel",
         "notify_lark_goal_channel_gate",
@@ -36,6 +36,9 @@ REQUIRED_EXPORTS = {
     "loopx.extensions.lark.presentation.periodic_report": (
         "periodic_report_lark_sink_adapter",
         "periodic_report_miaoda_html_sink_adapter",
+    ),
+    "loopx.extensions.lark.periodic_report_delivery": (
+        "deliver_periodic_report_to_goal_channel",
     ),
     "loopx.extensions.lark.presentation.kanban": (
         "lark_kanban_doctor",
@@ -77,7 +80,9 @@ def run(argv: Sequence[str] | None = None) -> int:
 def main() -> int:
     try:
         return run()
-    except Exception as exc:
+    # The provider executable is a process boundary: redact every implementation
+    # failure to its public exception type instead of leaking payload details.
+    except Exception as exc:  # noqa: BLE001
         print(f"LoopX Lark provider failed: {type(exc).__name__}", file=sys.stderr)
         return 2
 

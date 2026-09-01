@@ -540,7 +540,7 @@ def complete_event_projected_goal_todo(
             "next_todos": [],
             "state_file": str(context.get("state_file") or ""),
             "project": str(context.get("project") or "") or None,
-            "updated_at": None,
+            "updated_at": item.get("updated_at"),
             "source": "event_log",
         }
     next_unblocks_todo_id = todo_id if next_agent_todo else None

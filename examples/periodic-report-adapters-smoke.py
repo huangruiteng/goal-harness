@@ -77,6 +77,20 @@ def main() -> None:
         periodic_report_lark_sink_adapter(
             send=forbidden_effect,
             readback=forbidden_effect,
+            resolve_goal_channel=lambda goal_id: {
+                "goal_id": goal_id,
+                "provider": "lark",
+                "enabled": True,
+                "channel": {"chat_id": "oc_example_reports"},
+                "identity": {
+                    "mode": "project_bot",
+                    "sender_profile": "example-reporter",
+                    "sender_identity": "bot",
+                    "bot_app_id": "cli_example_reporter",
+                    "bot_display_name": "Example Reporter",
+                },
+            },
+            verify_goal_channel=lambda _route: True,
         )
     )
     registry.register_sink(
@@ -129,7 +143,11 @@ def main() -> None:
     lark_preview = registry.deliver(
         "lark_delivery",
         artifact,
-        {"execute": False, "idempotency_key": "preview-lark_delivery"},
+        {
+            "execute": False,
+            "goal_id": "example-goal",
+            "idempotency_key": "preview-lark_delivery",
+        },
     )
     archive_preview = registry.deliver(
         "openviking_archive",

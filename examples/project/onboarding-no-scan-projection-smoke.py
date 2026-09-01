@@ -12,6 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GOAL_ID = "fresh-no-scan-projection"
+PROVIDER_GOAL_ID = "fresh-provider-prevalidated-projection"
 DOMAIN_GOAL_ID = "fresh-domain-owned-projection"
 
 
@@ -116,6 +117,66 @@ def main() -> int:
         assert broken_check["ok"] is True, broken_check
         assert broken_check["summary"]["warnings"] == 1, broken_check
         assert any("state_projection_gap" in warning for warning in broken_check["warnings"]), broken_check
+
+        provider_project, provider_readme = initialize_project(root, "provider-project")
+        provider_registry = provider_project / ".loopx" / "registry.json"
+        provider_connected = run_cli(
+            provider_registry,
+            runtime,
+            "connect",
+            "--project",
+            str(provider_project),
+            "--goal-id",
+            PROVIDER_GOAL_ID,
+            "--objective",
+            "Validate provider-owned connection onboarding.",
+            "--domain",
+            "engineering",
+            "--goal-doc",
+            str(provider_readme),
+            "--adapter-kind",
+            "read_only_project_map_v0",
+            "--adapter-status",
+            "connected-read-only",
+            "--codex-app-heartbeat",
+            "no",
+            "--no-onboarding-scan",
+            "--onboarding-connection-validation",
+            "provider-prevalidated",
+            "--no-global-sync",
+        )
+        assert provider_connected["ok"] is True, provider_connected
+        assert (
+            provider_connected["onboarding_connection_validation"]
+            == "provider-prevalidated"
+        ), provider_connected
+
+        provider_state_file = (
+            provider_project
+            / ".codex"
+            / "goals"
+            / PROVIDER_GOAL_ID
+            / "ACTIVE_GOAL_STATE.md"
+        )
+        provider_state_text = provider_state_file.read_text(encoding="utf-8")
+        assert "action_kind=onboarding_connection_validation" not in provider_state_text
+        assert "Run `loopx check` against the project registry" not in provider_state_text
+        provider_goal = json.loads(provider_registry.read_text(encoding="utf-8"))["goals"][0]
+        assert provider_goal["adapter"]["connection_validation"] == {
+            "owner": "provider",
+            "status": "prevalidated",
+            "agent_todo_required": False,
+        }, provider_goal
+
+        provider_check = run_cli(
+            provider_registry,
+            runtime,
+            "check",
+            "--scan-path",
+            str(provider_readme),
+        )
+        assert provider_check["ok"] is True, provider_check
+        assert provider_check["summary"]["warnings"] == 0, provider_check
 
         domain_project, domain_readme = initialize_project(root, "domain-project")
         domain_registry = domain_project / ".loopx" / "registry.json"

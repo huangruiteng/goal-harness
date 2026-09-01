@@ -4,11 +4,11 @@ import hashlib
 import json
 import re
 import subprocess
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any
 
 from ...file_lock import exclusive_file_lock
 from .event_inbox import (
@@ -20,19 +20,24 @@ from .event_inbox import (
 )
 from .private_json import write_private_json_atomic
 
-
 REACTION_RECEIPTS_SCHEMA_VERSION = "lark_event_inbox_reaction_receipts_v0"
+TURN_START_READS_SCHEMA_VERSION = "lark_event_inbox_turn_start_reads_v0"
+RECEIVED_OPERATION_SCHEMA_VERSION = "lark_event_inbox_received_operation_v0"
+PROCESSED_STATE_FILENAME = "processed.json"
 REACTION_PHASES = {"received", "processing"}
+RECEIVED_OPERATION_PHASES = {"prepared", "created"}
 REACTION_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,200}")
 CommandRunner = Callable[[Sequence[str]], Mapping[str, Any]]
+ReactionCreator = Callable[[str, str], str | None]
+ReactionDeleter = Callable[[str, str], bool]
 
 
 def _default_runner(args: Sequence[str]) -> Mapping[str, Any]:
     result = subprocess.run(
         list(args),
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
+        check=False,
         timeout=10,
     )
     return {
@@ -72,11 +77,7 @@ def _find_string_by_key(value: object, key: str) -> str | None:
         )
     if isinstance(value, list):
         return next(
-            (
-                found
-                for child in value
-                if (found := _find_string_by_key(child, key))
-            ),
+            (found for child in value if (found := _find_string_by_key(child, key))),
             None,
         )
     return None
@@ -88,13 +89,10 @@ def _contains_string_by_key(value: object, key: str, expected: str) -> bool:
         if isinstance(candidate, str) and candidate.strip() == expected:
             return True
         return any(
-            _contains_string_by_key(child, key, expected)
-            for child in value.values()
+            _contains_string_by_key(child, key, expected) for child in value.values()
         )
     if isinstance(value, list):
-        return any(
-            _contains_string_by_key(child, key, expected) for child in value
-        )
+        return any(_contains_string_by_key(child, key, expected) for child in value)
     return False
 
 
@@ -107,10 +105,156 @@ def _operation_lock_target(inbox: Path, message_id: str) -> Path:
     return inbox / "reactions" / f"operation-{bucket}"
 
 
+def _turn_start_reads_path(inbox: Path) -> Path:
+    return inbox / "reactions" / "turn-start-reads.json"
+
+
+def _received_operation_path(inbox: Path, message_id: str) -> Path:
+    digest = hashlib.sha256(message_id.encode("utf-8")).hexdigest()
+    return inbox / "reactions" / "received-operations" / f"{digest}.json"
+
+
+def _load_turn_start_reads(inbox: Path) -> set[str]:
+    path = _turn_start_reads_path(inbox)
+    if not path.is_file():
+        return set()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("lark inbox turn-start reads are unreadable") from exc
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("schema_version") != TURN_START_READS_SCHEMA_VERSION
+        or not isinstance(payload.get("message_ids"), list)
+    ):
+        raise ValueError("lark inbox turn-start reads schema is invalid")
+    message_ids = payload["message_ids"]
+    if any(
+        not isinstance(message_id, str) or not MESSAGE_ID_PATTERN.fullmatch(message_id)
+        for message_id in message_ids
+    ):
+        raise ValueError("lark inbox turn-start read entry is invalid")
+    return set(message_ids)
+
+
+def record_lark_inbox_turn_start_read(*, inbox: Path, message_id: str) -> bool:
+    """Record the first Agent-owned turn-start read independently of reactions."""
+
+    normalized = str(message_id or "").strip()
+    if not MESSAGE_ID_PATTERN.fullmatch(normalized):
+        raise ValueError("turn-start read requires a valid Lark message id")
+    path = _turn_start_reads_path(inbox)
+    with exclusive_file_lock(path, operation="lark_inbox_turn_start_reads"):
+        message_ids = _load_turn_start_reads(inbox)
+        if normalized in message_ids:
+            return False
+        if not _captured_pending_message(inbox=inbox, message_id=normalized):
+            return False
+        message_ids.add(normalized)
+        write_private_json_atomic(
+            path,
+            {
+                "schema_version": TURN_START_READS_SCHEMA_VERSION,
+                "message_ids": sorted(message_ids),
+                "updated_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        return True
+
+
+def lark_inbox_pending_turn_start_read_message_ids(*, inbox: Path) -> list[str]:
+    """Return locally durable turn-start reads that remain pending settlement."""
+
+    path = _turn_start_reads_path(inbox)
+    with exclusive_file_lock(path, operation="lark_inbox_turn_start_reads"):
+        message_ids = _load_turn_start_reads(inbox)
+        processed = _load_processed(inbox / PROCESSED_STATE_FILENAME)
+        captured = {
+            str(event["message_id"])
+            for event_path in (inbox.glob("*.json") if inbox.is_dir() else [])
+            if event_path.name != PROCESSED_STATE_FILENAME
+            if (event := _event_from_file(event_path)) is not None
+            if isinstance(event.get("message_id"), str)
+        }
+        pending = message_ids.intersection(captured).difference(processed)
+        if pending != message_ids:
+            write_private_json_atomic(
+                path,
+                {
+                    "schema_version": TURN_START_READS_SCHEMA_VERSION,
+                    "message_ids": sorted(pending),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                },
+            )
+        receipts = _load_receipts(_receipt_path(inbox))
+        return sorted(
+            message_id
+            for message_id in pending
+            if not REACTION_PHASES.intersection(receipts.get(message_id, {}))
+        )
+
+
+def _load_received_operation(*, inbox: Path, message_id: str) -> dict[str, str] | None:
+    path = _received_operation_path(inbox, message_id)
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("lark inbox received operation is unreadable") from exc
+    phase = str(payload.get("phase") or "") if isinstance(payload, Mapping) else ""
+    emoji_type = (
+        str(payload.get("emoji_type") or "") if isinstance(payload, Mapping) else ""
+    )
+    reaction_id = (
+        str(payload.get("reaction_id") or "") if isinstance(payload, Mapping) else ""
+    )
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("schema_version") != RECEIVED_OPERATION_SCHEMA_VERSION
+        or payload.get("message_id") != message_id
+        or phase not in RECEIVED_OPERATION_PHASES
+        or not REACTION_EMOJI_PATTERN.fullmatch(emoji_type)
+        or (phase == "created" and not REACTION_ID_PATTERN.fullmatch(reaction_id))
+        or (phase == "prepared" and reaction_id)
+    ):
+        raise ValueError("lark inbox received operation schema is invalid")
+    result = {"phase": phase, "emoji_type": emoji_type}
+    if reaction_id:
+        result["reaction_id"] = reaction_id
+    return result
+
+
+def _write_received_operation(
+    *,
+    inbox: Path,
+    message_id: str,
+    phase: str,
+    emoji_type: str,
+    reaction_id: str = "",
+) -> None:
+    payload = {
+        "schema_version": RECEIVED_OPERATION_SCHEMA_VERSION,
+        "message_id": message_id,
+        "phase": phase,
+        "emoji_type": emoji_type,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    if reaction_id:
+        payload["reaction_id"] = reaction_id
+    write_private_json_atomic(_received_operation_path(inbox, message_id), payload)
+
+
+def _clear_received_operation(*, inbox: Path, message_id: str) -> None:
+    path = _received_operation_path(inbox, message_id)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 @contextmanager
-def lark_inbox_reaction_lock(
-    *, inbox: Path, message_id: str
-) -> Iterator[None]:
+def lark_inbox_reaction_lock(*, inbox: Path, message_id: str) -> Iterator[None]:
     normalized = str(message_id or "").strip()
     if not MESSAGE_ID_PATTERN.fullmatch(normalized):
         raise ValueError("reaction lock requires a valid Lark message id")
@@ -150,7 +294,7 @@ def _load_receipts(path: Path) -> dict[str, dict[str, dict[str, str]]]:
         raise ValueError("lark inbox reaction receipts schema is invalid")
     raw_receipts = payload.get("receipts")
     if not isinstance(raw_receipts, Mapping):
-        raise ValueError("lark inbox reaction receipts payload is invalid")
+        raise TypeError("lark inbox reaction receipts payload is invalid")
     receipts: dict[str, dict[str, dict[str, str]]] = {}
     for raw_message_id, raw_phases in raw_receipts.items():
         message_id = str(raw_message_id)
@@ -196,7 +340,7 @@ def _update_receipts(
             {
                 "schema_version": REACTION_RECEIPTS_SCHEMA_VERSION,
                 "receipts": receipts,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -359,17 +503,249 @@ def _delete_reaction(
     )
 
 
-def _captured_pending_message(
-    *, inbox: Path, message_id: str
-) -> bool:
-    if message_id in _load_processed(inbox / "processed.json"):
+def _captured_pending_message(*, inbox: Path, message_id: str) -> bool:
+    if message_id in _load_processed(inbox / PROCESSED_STATE_FILENAME):
         return False
     return any(
         event.get("message_id") == message_id
         for path in (inbox.glob("*.json") if inbox.is_dir() else [])
-        if path.name != "processed.json"
+        if path.name != PROCESSED_STATE_FILENAME
         if (event := _event_from_file(path)) is not None
     )
+
+
+def _received_reaction_result(
+    *,
+    status: str,
+    ok: bool,
+    configured: bool,
+    captured_pending: bool,
+    created_count: int = 0,
+    external_writes_performed: bool | None = None,
+    blocker: str | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "ok": ok,
+        "schema_version": "lark_event_inbox_received_reaction_v0",
+        "status": status,
+        "configured": configured,
+        "captured_pending": captured_pending,
+        "read_ack_attempted": status in {"received", "failed", "receipt_failed"},
+        "created_count": created_count,
+        "external_writes_performed": (
+            created_count > 0
+            if external_writes_performed is None
+            else external_writes_performed
+        ),
+        "private_sender_profile_captured": False,
+        "private_message_id_captured": False,
+        "private_reaction_id_captured": False,
+        "raw_provider_payload_captured": False,
+    }
+    if blocker:
+        result["blocker"] = blocker
+    return result
+
+
+def ensure_lark_event_inbox_received_reaction_locked(
+    *,
+    config: Mapping[str, Any],
+    event: Mapping[str, Any],
+    create_reaction: ReactionCreator,
+    delete_reaction: ReactionDeleter,
+) -> dict[str, Any]:
+    """Idempotently acknowledge one message read by the turn-start hook.
+
+    The caller owns the per-message reaction lock.  The message may have been
+    captured by any ingress, but only Agent turn-start consumption invokes this
+    boundary.  Attention classification remains independent and decides reply
+    priority rather than whether the read acknowledgement is written.
+    """
+
+    message_id = str(event.get("message_id") or "").strip()
+    if not MESSAGE_ID_PATTERN.fullmatch(message_id):
+        raise ValueError("received reaction requires a valid Lark message id")
+    inbox = config["inbox_path"]
+    # Settlement and provider reaction creation must be one lifecycle
+    # transition. Otherwise an Agent can ACK the message after the pending
+    # check but before the reaction receipt is persisted, leaving a reaction on
+    # an already-settled message.
+    with exclusive_file_lock(
+        inbox / ".state" / "settlement",
+        operation="lark_inbox_received_reaction_settlement",
+    ):
+        reply = config["reply"]
+        emoji_type = str(reply.get("received_reaction_emoji") or "")
+        if not emoji_type:
+            return _received_reaction_result(
+                status="not_configured",
+                ok=True,
+                configured=False,
+                captured_pending=False,
+            )
+        if not _captured_pending_message(inbox=inbox, message_id=message_id):
+            return _received_reaction_result(
+                status="already_settled",
+                ok=True,
+                configured=True,
+                captured_pending=False,
+            )
+        receipts = lark_inbox_reaction_receipts(
+            inbox=inbox,
+            message_id=message_id,
+        )
+        if receipts.get("received") is not None:
+            _clear_received_operation(inbox=inbox, message_id=message_id)
+            return _received_reaction_result(
+                status="already_received",
+                ok=True,
+                configured=True,
+                captured_pending=True,
+            )
+        if receipts.get("processing") is not None:
+            _clear_received_operation(inbox=inbox, message_id=message_id)
+            return _received_reaction_result(
+                status="already_processing",
+                ok=True,
+                configured=True,
+                captured_pending=True,
+            )
+        operation = _load_received_operation(inbox=inbox, message_id=message_id)
+        if operation and operation["emoji_type"] != emoji_type:
+            return _received_reaction_result(
+                status="operation_config_changed",
+                ok=False,
+                configured=True,
+                captured_pending=True,
+                blocker="lark_inbox_received_reaction_operation_config_changed",
+            )
+        if operation and operation["phase"] == "prepared":
+            return _received_reaction_result(
+                status="provider_outcome_uncertain",
+                ok=False,
+                configured=True,
+                captured_pending=True,
+                blocker="lark_inbox_received_reaction_provider_outcome_uncertain",
+            )
+        if operation and operation["phase"] == "created":
+            reaction_id = operation["reaction_id"]
+            try:
+                record_lark_inbox_reaction(
+                    inbox=inbox,
+                    message_id=message_id,
+                    phase="received",
+                    reaction_id=reaction_id,
+                    emoji_type=emoji_type,
+                )
+            except (OSError, TypeError, ValueError):
+                return _received_reaction_result(
+                    status="receipt_failed",
+                    ok=False,
+                    configured=True,
+                    captured_pending=True,
+                    external_writes_performed=False,
+                    blocker="lark_inbox_received_reaction_receipt_failed",
+                )
+            _clear_received_operation(inbox=inbox, message_id=message_id)
+            return _received_reaction_result(
+                status="receipt_recovered",
+                ok=True,
+                configured=True,
+                captured_pending=True,
+            )
+        _write_received_operation(
+            inbox=inbox,
+            message_id=message_id,
+            phase="prepared",
+            emoji_type=emoji_type,
+        )
+        created_reaction_id = create_reaction(message_id, emoji_type)
+        if created_reaction_id is None:
+            _clear_received_operation(inbox=inbox, message_id=message_id)
+            return _received_reaction_result(
+                status="failed",
+                ok=False,
+                configured=True,
+                captured_pending=True,
+                blocker="lark_inbox_received_reaction_create_failed",
+            )
+        try:
+            _write_received_operation(
+                inbox=inbox,
+                message_id=message_id,
+                phase="created",
+                emoji_type=emoji_type,
+                reaction_id=created_reaction_id,
+            )
+        except (OSError, TypeError, ValueError):
+            cleaned_up = delete_reaction(message_id, created_reaction_id)
+            if cleaned_up:
+                _clear_received_operation(inbox=inbox, message_id=message_id)
+            return _received_reaction_result(
+                status="operation_receipt_failed",
+                ok=False,
+                configured=True,
+                captured_pending=True,
+                created_count=int(not cleaned_up),
+                external_writes_performed=True,
+                blocker=(
+                    "lark_inbox_received_reaction_operation_receipt_failed"
+                    if cleaned_up
+                    else "lark_inbox_received_reaction_provider_outcome_uncertain"
+                ),
+            )
+        try:
+            record_lark_inbox_reaction(
+                inbox=inbox,
+                message_id=message_id,
+                phase="received",
+                reaction_id=created_reaction_id,
+                emoji_type=emoji_type,
+            )
+        except (OSError, TypeError, ValueError):
+            return _received_reaction_result(
+                status="receipt_failed",
+                ok=False,
+                configured=True,
+                captured_pending=True,
+                created_count=1,
+                external_writes_performed=True,
+                blocker="lark_inbox_received_reaction_receipt_failed",
+            )
+        _clear_received_operation(inbox=inbox, message_id=message_id)
+        return _received_reaction_result(
+            status="received",
+            ok=True,
+            configured=True,
+            captured_pending=True,
+            created_count=1,
+        )
+
+
+def ensure_lark_event_inbox_received_reaction(
+    *,
+    project: str | Path,
+    config_path: str | Path,
+    event: Mapping[str, Any],
+    create_reaction: ReactionCreator,
+    delete_reaction: ReactionDeleter,
+) -> dict[str, Any]:
+    """Lock and ACK one turn-start-read pending message."""
+
+    config = load_lark_event_inbox_config(project=project, config_path=config_path)
+    if not config["enabled"]:
+        raise ValueError("lark event inbox is not enabled")
+    message_id = str(event.get("message_id") or "").strip()
+    if not MESSAGE_ID_PATTERN.fullmatch(message_id):
+        raise ValueError("received reaction requires a valid Lark message id")
+    inbox = config["inbox_path"]
+    with lark_inbox_reaction_lock(inbox=inbox, message_id=message_id):
+        return ensure_lark_event_inbox_received_reaction_locked(
+            config=config,
+            event=event,
+            create_reaction=create_reaction,
+            delete_reaction=delete_reaction,
+        )
 
 
 def _operation_result(

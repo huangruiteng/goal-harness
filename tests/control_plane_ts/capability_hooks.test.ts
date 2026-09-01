@@ -3,12 +3,232 @@ import test from "node:test";
 
 import {
   CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION,
+  CAPABILITY_INTENT_SCHEMA_VERSION,
   INTERACTION_PROJECTION_HOOK_RESULT_SCHEMA_VERSION,
+  POST_WRITEBACK_HOOK_INPUT_SCHEMA_VERSION,
+  POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION,
+  POST_WRITEBACK_HOOK_REGISTRATION_SCHEMA_VERSION,
+  POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION,
   TURN_START_HOOK_REGISTRATION_SCHEMA_VERSION,
   TURN_START_HOOK_RESULT_SCHEMA_VERSION,
   validateInteractionProjectionHookInvocation,
+  validatePostWritebackHookInput,
+  validatePostWritebackHookInvocation,
+  validatePostWritebackHookReceipt,
   validateTurnStartHookInvocation,
 } from "../../loopx/control_plane/capability_hooks.ts";
+
+function postWritebackRegistration(overrides: Record<string, unknown> = {}) {
+  return {
+    schema_version: POST_WRITEBACK_HOOK_REGISTRATION_SCHEMA_VERSION,
+    hook_id: "periodic_report.stage_completion",
+    capability_id: "periodic-report",
+    policy_version: "weekly-v1",
+    phase: "post_writeback",
+    event_kinds: ["refresh_state", "todo_complete"],
+    intent_kinds: ["periodic_report.trigger_evaluation"],
+    budget: {
+      max_invocations_per_dispatch: 1,
+      max_input_bytes: 64 * 1024,
+      max_result_bytes: 16 * 1024,
+    },
+    failure_policy: "isolate",
+    requested_read_scope: ["stage_completion"],
+    requested_write_scope: [],
+    ...overrides,
+  };
+}
+
+function postWritebackInput(overrides: Record<string, unknown> = {}) {
+  return {
+    schema_version: POST_WRITEBACK_HOOK_INPUT_SCHEMA_VERSION,
+    receipt: {
+      schema_version: "loopx_rollout_event_v0",
+      event_id: "evt-stage-1",
+      event_kind: "refresh_state",
+      status: "appended",
+      recorded_at: "2026-08-30T01:00:00+08:00",
+      durable: true,
+    },
+    identity: {
+      goal_id: "goal-1",
+      agent_id: "agent-1",
+      todo_id: "todo-1",
+      turn_instance_id: "turn-1",
+      effect_id: "goal-1:agent-1:todo-1:turn-1",
+    },
+    state_version: "vision-revision-2",
+    projection: {
+      stage_completion: {
+        schema_version: "periodic_report_stage_completion_receipt_v0",
+        stage_identity: "stage-123",
+      },
+    },
+    ...overrides,
+  };
+}
+
+function postWritebackResult(overrides: Record<string, unknown> = {}) {
+  return {
+    schema_version: POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION,
+    hook_id: "periodic_report.stage_completion",
+    capability_id: "periodic-report",
+    phase: "post_writeback",
+    status: "intent",
+    intent: {
+      schema_version: CAPABILITY_INTENT_SCHEMA_VERSION,
+      intent_kind: "periodic_report.trigger_evaluation",
+      idempotency_key: "periodic-report:stage-123",
+      source_receipt_id: "evt-stage-1",
+      payload: {
+        stage_identity: "stage-123",
+      },
+      requested_write_scope: [],
+    },
+    ...overrides,
+  };
+}
+
+test("post-writeback hook admits one receipt-bound effect-free intent", () => {
+  const input = validatePostWritebackHookInput({
+    registration: postWritebackRegistration(),
+    hook_input: postWritebackInput(),
+  });
+  assert.equal((input.receipt as Record<string, unknown>).durable, true);
+
+  const result = validatePostWritebackHookInvocation({
+    registration: postWritebackRegistration(),
+    hook_input: postWritebackInput(),
+    result: postWritebackResult(),
+  });
+  assert.equal(result.status, "intent");
+  assert.equal(
+    (result.intent as Record<string, unknown>).source_receipt_id,
+    "evt-stage-1",
+  );
+});
+
+test("post-writeback hook admits durable Todo completion events", () => {
+  const input = postWritebackInput();
+  (input.receipt as Record<string, unknown>).event_kind = "todo_complete";
+
+  const admitted = validatePostWritebackHookInput({
+    registration: postWritebackRegistration(),
+    hook_input: input,
+  });
+
+  assert.equal(
+    (admitted.receipt as Record<string, unknown>).event_kind,
+    "todo_complete",
+  );
+});
+
+test("post-writeback hook rejects pending receipts, undeclared reads, and write authority", () => {
+  const pending = postWritebackInput();
+  (pending.receipt as Record<string, unknown>).durable = false;
+  assert.throws(
+    () => validatePostWritebackHookInput({
+      registration: postWritebackRegistration(),
+      hook_input: pending,
+    }),
+    /durable event/,
+  );
+
+  assert.throws(
+    () => validatePostWritebackHookInput({
+      registration: postWritebackRegistration(),
+      hook_input: postWritebackInput({ projection: { raw_task: "private" } }),
+    }),
+    /requested_read_scope/,
+  );
+
+  const withWrite = postWritebackResult();
+  (withWrite.intent as Record<string, unknown>).requested_write_scope = ["lark_send"];
+  assert.throws(
+    () => validatePostWritebackHookInvocation({
+      registration: postWritebackRegistration(),
+      hook_input: postWritebackInput(),
+      result: withWrite,
+    }),
+    /cannot grant write scope/,
+  );
+});
+
+test("post-writeback hook binds intent to the exact durable receipt", () => {
+  const mismatched = postWritebackResult();
+  (mismatched.intent as Record<string, unknown>).source_receipt_id = "evt-other";
+  assert.throws(
+    () => validatePostWritebackHookInvocation({
+      registration: postWritebackRegistration(),
+      hook_input: postWritebackInput(),
+      result: mismatched,
+    }),
+    /does not bind/,
+  );
+
+  assert.throws(
+    () => validatePostWritebackHookInvocation({
+      registration: postWritebackRegistration(),
+      hook_input: postWritebackInput(),
+      result: postWritebackResult({ intent: [] }),
+    }),
+    /object/,
+  );
+});
+
+test("post-writeback hook requires the complete settlement identity", () => {
+  const incomplete = postWritebackInput();
+  (incomplete.identity as Record<string, unknown>).todo_id = null;
+  assert.throws(
+    () => validatePostWritebackHookInput({
+      registration: postWritebackRegistration(),
+      hook_input: incomplete,
+    }),
+    /todo_id/,
+  );
+});
+
+test("post-writeback sidecar receipt revalidates the exact typed intent", () => {
+  const receipt = validatePostWritebackHookReceipt({
+    registration: postWritebackRegistration(),
+    hook_input: postWritebackInput(),
+    receipt: {
+      schema_version: POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION,
+      dispatch_id: `pwh_${"a".repeat(64)}`,
+      hook_id: "periodic_report.stage_completion",
+      capability_id: "periodic-report",
+      source_receipt_id: "evt-stage-1",
+      status: "intent_recorded",
+      intent: (postWritebackResult().intent as Record<string, unknown>),
+      error_code: null,
+      attempt_count: 1,
+      recorded_at: "2026-08-30T01:00:00+08:00",
+    },
+  });
+  assert.equal(receipt.status, "intent_recorded");
+
+  assert.throws(
+    () => validatePostWritebackHookReceipt({
+      registration: postWritebackRegistration(),
+      hook_input: postWritebackInput(),
+      receipt: { ...receipt, source_receipt_id: "evt-other" },
+    }),
+    /identity/,
+  );
+
+  const retryable = validatePostWritebackHookReceipt({
+    registration: postWritebackRegistration(),
+    hook_input: postWritebackInput(),
+    receipt: {
+      ...receipt,
+      status: "retryable_failure",
+      intent: null,
+      error_code: "producer_failed",
+      attempt_count: 2,
+    },
+  });
+  assert.equal(retryable.status, "retryable_failure");
+});
 
 function registration(overrides: Record<string, unknown> = {}) {
   return {
@@ -105,6 +325,55 @@ test("verified capability candidate projects separate preparation and delivery a
   );
 });
 
+test("pending capability intent projects local generation without delivery authority", () => {
+  const result = validateInteractionProjectionHookInvocation({
+    registration: {
+      schema_version: CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION,
+      hook_id: "periodic_report.pending_intent",
+      capability_id: "periodic-report",
+      phase: "interaction_projection",
+      projection_slots: ["pending_capability_intent"],
+      budget: { max_invocations_per_dispatch: 1, max_result_bytes: 16384 },
+      failure_policy: "isolate",
+      requested_read_scope: ["post_writeback_intent_journal"],
+      requested_write_scope: [],
+    },
+    result: {
+      schema_version: INTERACTION_PROJECTION_HOOK_RESULT_SCHEMA_VERSION,
+      hook_id: "periodic_report.pending_intent",
+      capability_id: "periodic-report",
+      phase: "interaction_projection",
+      status: "candidate",
+      projection_slot: "pending_capability_intent",
+      payload: {
+        schema_version: "pending_capability_intent_projection_v0",
+        capability_id: "periodic-report",
+        intent_kind: "periodic_report.trigger_evaluation",
+        idempotency_key: "periodic-report:stage-example",
+        intent_digest: `sha256:${"a".repeat(64)}`,
+        goal_id: "goal-example",
+        agent_id: "agent-example",
+        state: "pending",
+        action_kind: "consume_periodic_report_intent",
+        action_summary: "Generate the exact local report draft.",
+        command: "loopx periodic-report consume-pending --goal-id goal-example --agent-id agent-example --execute",
+        generation_authorized: true,
+        external_delivery_authorized: false,
+        agent_read_required: true,
+      },
+    },
+  });
+  assert.equal(result.status, "projected");
+  assert.equal(
+    (result.projection as JsonObject).external_delivery_authorized,
+    false,
+  );
+  assert.equal(
+    (result.projection as JsonObject).agent_read_required,
+    true,
+  );
+});
+
 test("uninstalled or drifted provider is diagnostic-only", () => {
   const external = {
     ...status(true),
@@ -171,6 +440,7 @@ function turnStartResult(overrides: Record<string, unknown> = {}) {
     observation_count: 2,
     agent_read_required: true,
     external_reads_performed: true,
+    external_writes_performed: false,
     local_private_state_mutated: true,
     private_content_returned: false,
     provider_payload_returned: false,
@@ -235,6 +505,26 @@ test("turn-start empty, provider failure, and owner-private write scopes stay di
       }),
       result: turnStartResult(),
     }),
-    /not owner-private/,
+    /not admitted/,
   );
+
+  assert.throws(
+    () => validateTurnStartHookInvocation({
+      registration: turnStartRegistration(),
+      result: turnStartResult({ external_writes_performed: true }),
+    }),
+    /undeclared external write/,
+  );
+
+  const reacted = validateTurnStartHookInvocation({
+    registration: turnStartRegistration({
+      requested_write_scope: [
+        "owner_private_inbox",
+        "owner_private_cursor",
+        "provider_message_reaction",
+      ],
+    }),
+    result: turnStartResult({ external_writes_performed: true }),
+  });
+  assert.equal(reacted.external_writes_performed, true);
 });

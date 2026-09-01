@@ -12,9 +12,10 @@ usage() {
 Usage: ./install.sh [--help]
 
 Build and install the DSH LoopX host plugin into the DSH web profile. This
-installs `/loopx-init`, the same-session Driver, and the loopback-only GoalBar
-Host/Client faces. LoopX itself is not a prerequisite; run `/loopx-init` inside
-DSH afterward to install or upgrade the LoopX CLI and its DSH skills.
+installs the automatic LoopX initializer, `/loopx-init` repair command, the
+same-session Driver, and the loopback-only GoalBar Host/Client faces. LoopX
+itself is not a prerequisite; starting DSH installs or verifies the LoopX CLI
+and its DSH skills before the plugin row becomes ready.
 
 Environment:
   DSH_BIN=/path/to/dsh  Override the package-local DSH CLI.
@@ -126,5 +127,5 @@ printf '%s' "$profile_dump" | node -e '
 }
 
 echo "install: installed and verified $PACKAGE_NAME@$PACKAGE_VERSION"
-echo "install: next, run /loopx-init inside DSH"
+echo "install: next, start DSH and use /loopx with your task"
 echo "install: artifact retained at $tarball"

@@ -5,49 +5,91 @@ from typing import Any
 
 from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
 from .planning_inventory import (
+    build_quota_planning_inventory_request,
     compact_planning_candidate,
 )
 
-
-ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION = "quota_action_portfolio_request_v1"
-ACTION_PORTFOLIO_SCHEMA_VERSION = "quota_action_portfolio_v2"
 ACTION_SELECTION_QUALIFICATION_REQUEST_SCHEMA_VERSION = (
     "action_selection_qualification_request_v0"
 )
 ACTION_SELECTION_QUALIFICATION_SCHEMA_VERSION = "action_selection_qualification_v0"
+QUOTA_PLANNING_PACKET_REQUEST_SCHEMA_VERSION = "quota_planning_packet_request_v0"
+QUOTA_PLANNING_PACKET_SCHEMA_VERSION = "quota_planning_packet_v0"
 
 
 def _compact_candidate(value: Mapping[str, Any]) -> dict[str, Any] | None:
     return compact_planning_candidate(value)
 
 
-def build_quota_action_portfolio(
-    *,
-    planning_inventory: Mapping[str, Any] | None,
-    max_alternative_actions: int = 2,
-) -> dict[str, Any] | None:
-    """Project action choice from the shared TypeScript-owned inventory."""
+def _frontier_acceptance_gaps(
+    projection: Mapping[str, Any] | None,
+) -> list[Any]:
+    if not isinstance(projection, Mapping):
+        return []
+    acceptance_gaps = projection.get("acceptance_gaps")
+    return acceptance_gaps if isinstance(acceptance_gaps, list) else []
 
-    if not isinstance(planning_inventory, Mapping):
-        return None
+
+def build_quota_planning_packet(
+    *,
+    projection_enabled: bool,
+    include_detail: bool,
+    goal_id: str,
+    selected: Mapping[str, Any] | None,
+    agent_id: str | None,
+    agent_todo_summary: Mapping[str, Any] | None,
+    agent_todo_source_items: list[dict[str, Any]],
+    capability_gate: Mapping[str, Any] | None,
+    blocked_priority_fallback: Mapping[str, Any] | None,
+    goal_frontier_projection: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Project every requested planning lens through one TypeScript request."""
+
+    if not projection_enabled and not include_detail:
+        return {}
+    inventory_request = build_quota_planning_inventory_request(
+        goal_id=goal_id,
+        selected=selected,
+        agent_id=agent_id,
+        agent_todo_summary=agent_todo_summary,
+        agent_todo_source_items=agent_todo_source_items,
+        capability_gate=capability_gate,
+        blocked_priority_fallback=blocked_priority_fallback,
+    )
+    if inventory_request is None:
+        return {}
     try:
         projected = effect_runtime_result(
             "work_item.action_portfolio.project",
             {
-                "schema_version": ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION,
-                "planning_inventory": dict(planning_inventory),
-                "max_alternative_actions": max_alternative_actions,
+                "schema_version": QUOTA_PLANNING_PACKET_REQUEST_SCHEMA_VERSION,
+                "planning_inventory_request": inventory_request,
+                "projection_enabled": projection_enabled,
+                "include_detail": include_detail,
+                "acceptance_gaps": _frontier_acceptance_gaps(
+                    goal_frontier_projection
+                ),
             },
         )
     except EffectRuntimeRejected as exc:
         raise ValueError(str(exc)) from None
-    if projected is None:
-        return None
     if not isinstance(projected, Mapping) or (
-        projected.get("schema_version") != ACTION_PORTFOLIO_SCHEMA_VERSION
+        projected.get("schema_version") != QUOTA_PLANNING_PACKET_SCHEMA_VERSION
     ):
-        raise RuntimeError("TypeScript quota action portfolio shape mismatch")
-    return dict(projected)
+        raise RuntimeError("TypeScript quota planning packet shape mismatch")
+    result: dict[str, Any] = {}
+    for field in (
+        "action_portfolio",
+        "planning_horizon",
+        "agent_todo_planning_inventory",
+    ):
+        value = projected.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, Mapping):
+            raise TypeError(f"TypeScript quota planning packet {field} mismatch")
+        result[field] = dict(value)
+    return result
 
 
 def qualify_action_selection(

@@ -616,6 +616,13 @@ def build_project_asset_todo_summary(
             summary["next_index"] = open_items[0].get("index")
         if open_items[0].get("claimed_by"):
             summary["next_claimed_by"] = open_items[0].get("claimed_by")
+    recent_completed_items = [
+        _project_asset_display_todo_item(dict(item))
+        for item in todos.get("recent_completed_advancement_items", [])
+        if isinstance(item, dict)
+    ][:item_limit]
+    if recent_completed_items:
+        summary["recent_completed_advancement_items"] = recent_completed_items
     monitor_writeback = todos.get("monitor_writeback")
     if isinstance(monitor_writeback, dict):
         summary["monitor_writeback"] = dict(monitor_writeback)

@@ -63,6 +63,7 @@ from .visible_goal import (
 from ...project_prompt import (
     render_accountable_progress_refresh_command,
     render_available_capability_args,
+    render_cli_command_prefix,
     render_cli_preflight,
     render_quota_guard_command,
     render_quota_spend_command,
@@ -109,6 +110,7 @@ def _select_task_body_renderer(
 def _heartbeat_regeneration_commands(
     *,
     cli_bin: str,
+    runtime_root: str | Path | None,
     goal_id: str,
     active_state_arg: str,
     agent_args: str,
@@ -120,10 +122,124 @@ def _heartbeat_regeneration_commands(
         f" --goal-id {goal_id}{active_state_arg}{agent_args}"
         f"{capability_args}{scheduler_args}{turn_identity_arg}"
     )
+    command_prefix = render_cli_command_prefix(
+        cli_bin=cli_bin,
+        runtime_root=runtime_root,
+    )
     return tuple(
-        f"{cli_bin} heartbeat-prompt --{mode}{suffix}"
+        f"{command_prefix} heartbeat-prompt --{mode}{suffix}"
         for mode in ("full", "compact", "brief", "thin")
     )
+
+
+def _heartbeat_prompt_commands(
+    *,
+    goal_id: str,
+    cli_bin: str,
+    runtime_root: str | Path | None,
+    normalized_agent_id: str | None,
+    normalized_available_capabilities: tuple[str, ...],
+    task_body_available_capabilities: tuple[str, ...],
+    runtime_profile: str | None,
+    scheduler_execution_context: Any,
+    native_goal_host: bool,
+    traex_visible_goal: bool,
+    active_state_arg: str,
+    agent_args: str,
+    capability_args: str,
+    turn_identity_arg: str,
+) -> dict[str, str | None]:
+    quota_guard_command = render_quota_guard_command(
+        goal_id,
+        cli_bin=cli_bin,
+        runtime_root=runtime_root,
+        agent_id=normalized_agent_id,
+        available_capabilities=normalized_available_capabilities,
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+        heartbeat_turn_receipt=not native_goal_host,
+    )
+    quota_spend_command = render_quota_spend_command(
+        goal_id,
+        source=(
+            VISIBLE_GOAL_SLOT_SPEND_SOURCE
+            if native_goal_host
+            else DEFAULT_SLOT_SPEND_SOURCE
+        ),
+        cli_bin=cli_bin,
+        runtime_root=runtime_root,
+        agent_id=normalized_agent_id,
+        available_capabilities=normalized_available_capabilities,
+    )
+    task_body_quota_guard_command = quota_guard_command
+    task_body_quota_spend_command = quota_spend_command
+    if traex_visible_goal:
+        task_body_quota_guard_command = render_quota_guard_command(
+            goal_id,
+            cli_bin=cli_bin,
+            runtime_root=runtime_root,
+            agent_id=normalized_agent_id,
+            available_capabilities=task_body_available_capabilities,
+            runtime_profile=runtime_profile,
+            scheduler_execution_context=scheduler_execution_context,
+        )
+        task_body_quota_spend_command = render_quota_spend_command(
+            goal_id,
+            source=VISIBLE_GOAL_SLOT_SPEND_SOURCE,
+            cli_bin=cli_bin,
+            runtime_root=runtime_root,
+            agent_id=normalized_agent_id,
+        )
+    scheduler_args = render_scheduler_execution_args(
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+    )
+    (
+        expanded_prompt_command,
+        compact_prompt_command,
+        brief_prompt_command,
+        thin_prompt_command,
+    ) = _heartbeat_regeneration_commands(
+        cli_bin=cli_bin,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        active_state_arg=active_state_arg,
+        agent_args=agent_args,
+        capability_args=capability_args,
+        scheduler_args=scheduler_args,
+        turn_identity_arg=turn_identity_arg,
+    )
+    pr_review_pre_quota_command = (
+        f"{render_cli_command_prefix(cli_bin=cli_bin, runtime_root=runtime_root)} "
+        f"heartbeat-prequota -g {shlex.quote(goal_id)} "
+        f"-a {shlex.quote(normalized_agent_id)}"
+        if normalized_agent_id
+        and "external_evidence_poll" in normalized_available_capabilities
+        else None
+    )
+    return {
+        "quota_guard_command": quota_guard_command,
+        "quota_spend_command": quota_spend_command,
+        "task_body_quota_guard_command": task_body_quota_guard_command,
+        "task_body_quota_spend_command": task_body_quota_spend_command,
+        "refresh_state_command": render_refresh_state_command(
+            goal_id,
+            cli_bin=cli_bin,
+            runtime_root=runtime_root,
+            agent_id=normalized_agent_id,
+        ),
+        "progress_refresh_state_command": render_accountable_progress_refresh_command(
+            goal_id,
+            cli_bin=cli_bin,
+            runtime_root=runtime_root,
+            agent_id=normalized_agent_id,
+        ),
+        "pr_review_pre_quota_command": pr_review_pre_quota_command,
+        "expanded_prompt_command": expanded_prompt_command,
+        "compact_prompt_command": compact_prompt_command,
+        "brief_prompt_command": brief_prompt_command,
+        "thin_prompt_command": thin_prompt_command,
+    }
 
 
 def build_heartbeat_prompt(
@@ -139,6 +255,7 @@ def build_heartbeat_prompt(
     brief: bool = False,
     thin: bool = False,
     cli_bin: str = "loopx",
+    runtime_root: str | Path | None = None,
     agent_id: str | None = None,
     agent_scopes: list[str] | tuple[str, ...] | None = None,
     agent_profile: dict[str, Any] | None = None,
@@ -272,79 +389,23 @@ def build_heartbeat_prompt(
         compact=compact or brief,
         thin=thin,
     )
-    quota_guard_command = render_quota_guard_command(
-        goal_id,
-        cli_bin=cli_bin,
-        agent_id=normalized_agent_id,
-        available_capabilities=normalized_available_capabilities,
-        runtime_profile=runtime_profile,
-        scheduler_execution_context=scheduler_execution_context,
-        heartbeat_turn_receipt=not native_goal_host,
-    )
-    quota_spend_command = render_quota_spend_command(
-        goal_id,
-        source=(
-            VISIBLE_GOAL_SLOT_SPEND_SOURCE
-            if native_goal_host
-            else DEFAULT_SLOT_SPEND_SOURCE
-        ),
-        cli_bin=cli_bin,
-        agent_id=normalized_agent_id,
-        available_capabilities=normalized_available_capabilities,
-    )
-    task_body_quota_guard_command = quota_guard_command
-    task_body_quota_spend_command = quota_spend_command
-    if traex_visible_goal:
-        task_body_quota_guard_command = render_quota_guard_command(
-            goal_id,
-            cli_bin=cli_bin,
-            agent_id=normalized_agent_id,
-            available_capabilities=task_body_available_capabilities,
-            runtime_profile=runtime_profile,
-            scheduler_execution_context=scheduler_execution_context,
-        )
-        task_body_quota_spend_command = render_quota_spend_command(
-            goal_id,
-            source=VISIBLE_GOAL_SLOT_SPEND_SOURCE,
-            cli_bin=cli_bin,
-            agent_id=normalized_agent_id,
-        )
-    refresh_state_command = render_refresh_state_command(
-        goal_id,
-        cli_bin=cli_bin,
-        agent_id=normalized_agent_id,
-    )
-    progress_refresh_state_command = render_accountable_progress_refresh_command(
-        goal_id,
-        cli_bin=cli_bin,
-        agent_id=normalized_agent_id,
-    )
-    cli_preflight = render_cli_preflight(cli_bin=cli_bin)
-    pr_review_pre_quota_command = (
-        f"{cli_bin} heartbeat-prequota -g {shlex.quote(goal_id)} "
-        f"-a {shlex.quote(normalized_agent_id)}"
-        if normalized_agent_id
-        and "external_evidence_poll" in normalized_available_capabilities
-        else ""
-    )
-    scheduler_args = render_scheduler_execution_args(
-        runtime_profile=runtime_profile,
-        scheduler_execution_context=scheduler_execution_context,
-    )
-    (
-        expanded_prompt_command,
-        compact_prompt_command,
-        brief_prompt_command,
-        thin_prompt_command,
-    ) = _heartbeat_regeneration_commands(
-        cli_bin=cli_bin,
+    commands = _heartbeat_prompt_commands(
         goal_id=goal_id,
+        cli_bin=cli_bin,
+        runtime_root=runtime_root,
+        normalized_agent_id=normalized_agent_id,
+        normalized_available_capabilities=normalized_available_capabilities,
+        task_body_available_capabilities=task_body_available_capabilities,
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+        native_goal_host=native_goal_host,
+        traex_visible_goal=traex_visible_goal,
         active_state_arg=active_state_arg,
         agent_args=agent_args,
         capability_args=capability_args,
-        scheduler_args=scheduler_args,
         turn_identity_arg=turn_identity_arg,
     )
+    cli_preflight = render_cli_preflight(cli_bin=cli_bin)
     task_body_renderer = _select_task_body_renderer(
         traex_visible_goal=traex_visible_goal,
         ark_managed_agent_goal=ark_managed_agent_goal,
@@ -358,20 +419,20 @@ def build_heartbeat_prompt(
         active_state=active_state_text,
         cli_preflight=cli_preflight,
         pr_review_pre_quota_command=(
-            "" if traex_visible_goal else pr_review_pre_quota_command
+            "" if traex_visible_goal else commands["pr_review_pre_quota_command"] or ""
         ),
-        quota_guard_command=task_body_quota_guard_command,
-        quota_spend_command=task_body_quota_spend_command,
-        refresh_state_command=refresh_state_command,
-        progress_refresh_state_command=progress_refresh_state_command,
+        quota_guard_command=str(commands["task_body_quota_guard_command"]),
+        quota_spend_command=str(commands["task_body_quota_spend_command"]),
+        refresh_state_command=str(commands["refresh_state_command"]),
+        progress_refresh_state_command=str(commands["progress_refresh_state_command"]),
         material_queue_rule=resolved_material_rule,
         permission_rule=resolved_permission_rule,
         cli_bin=cli_bin,
         agent_scope_instruction=agent_scope_instruction,
-        expanded_prompt_command=expanded_prompt_command,
-        compact_prompt_command=compact_prompt_command,
-        brief_prompt_command=brief_prompt_command,
-        thin_prompt_command=thin_prompt_command,
+        expanded_prompt_command=str(commands["expanded_prompt_command"]),
+        compact_prompt_command=str(commands["compact_prompt_command"]),
+        brief_prompt_command=str(commands["brief_prompt_command"]),
+        thin_prompt_command=str(commands["thin_prompt_command"]),
     )
     task_body = bind_exact_turn_settlement_task_body(
         task_body,
@@ -431,15 +492,15 @@ def build_heartbeat_prompt(
             if ark_managed_agent_goal
             else {}
         ),
-        "expanded_prompt_command": expanded_prompt_command,
-        "compact_prompt_command": compact_prompt_command,
-        "brief_prompt_command": brief_prompt_command,
-        "thin_prompt_command": thin_prompt_command,
-        "pr_review_pre_quota_command": pr_review_pre_quota_command or None,
-        "quota_guard_command": quota_guard_command,
-        "quota_spend_command": quota_spend_command,
-        "refresh_state_command": refresh_state_command,
-        "progress_refresh_state_command": progress_refresh_state_command,
+        "expanded_prompt_command": commands["expanded_prompt_command"],
+        "compact_prompt_command": commands["compact_prompt_command"],
+        "brief_prompt_command": commands["brief_prompt_command"],
+        "thin_prompt_command": commands["thin_prompt_command"],
+        "pr_review_pre_quota_command": commands["pr_review_pre_quota_command"],
+        "quota_guard_command": commands["quota_guard_command"],
+        "quota_spend_command": commands["quota_spend_command"],
+        "refresh_state_command": commands["refresh_state_command"],
+        "progress_refresh_state_command": commands["progress_refresh_state_command"],
         "cli_preflight": cli_preflight,
         "material_queue_rule": resolved_material_rule,
         "permission_rule": resolved_permission_rule,
@@ -455,6 +516,8 @@ def build_heartbeat_prompt(
         ),
         "task_body": task_body,
     }
+    if runtime_root:
+        payload["runtime_root"] = str(Path(runtime_root).expanduser())
     if fine_grained:
         payload["turn_granularity"] = TURN_GRANULARITY_FINE
         payload["turn_mode"] = "fine_grained"
@@ -489,6 +552,7 @@ def build_heartbeat_prompt_error_payload(
     brief: bool = False,
     thin: bool = False,
     cli_bin: str = "loopx",
+    runtime_root: str | Path | None = None,
     agent_id: str | None = None,
     agent_scopes: list[str] | tuple[str, ...] | None = None,
     registered_agents: list[str] | tuple[str, ...] | None = None,
@@ -516,10 +580,14 @@ def build_heartbeat_prompt_error_payload(
     capability_args = render_available_capability_args(
         projected_available_capabilities
     )
-    expanded_prompt_command = f"{cli_bin} heartbeat-prompt --full --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
-    compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
-    brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
-    thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
+    command_prefix = render_cli_command_prefix(
+        cli_bin=cli_bin,
+        runtime_root=runtime_root,
+    )
+    expanded_prompt_command = f"{command_prefix} heartbeat-prompt --full --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
+    compact_prompt_command = f"{command_prefix} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
+    brief_prompt_command = f"{command_prefix} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
+    thin_prompt_command = f"{command_prefix} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
     normalized_registered_agents = normalize_registered_agents(registered_agents)
     payload = {
         "ok": False,
@@ -550,5 +618,7 @@ def build_heartbeat_prompt_error_payload(
         "interface_budget": None,
         "task_body": None,
     }
+    if runtime_root:
+        payload["runtime_root"] = str(Path(runtime_root).expanduser())
     payload["agent_model"] = AgentRuntimeModel.PEER_V1.value
     return payload

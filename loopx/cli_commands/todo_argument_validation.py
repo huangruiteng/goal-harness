@@ -73,6 +73,7 @@ TODO_OPTION_FIELDS = (
     ("--agent-id", "agent_id"),
     ("--from", "suggestion_sources"),
     ("--limit", "todo_limit"),
+    ("--thin", "todo_thin"),
     ("--trigger", "suggestion_trigger"),
     ("--state-file", "state_file"),
     ("--execute", "execute"),
@@ -278,9 +279,18 @@ def _validate_todo_option_subset(args: argparse.Namespace, allowed_fields: Itera
 def validate_todo_list_options(args: argparse.Namespace) -> None:
     _validate_todo_option_subset(
         args,
-        {"role", "todo_id", "status", "agent_id", "todo_limit", "state_file"},
+        {
+            "role",
+            "todo_id",
+            "status",
+            "agent_id",
+            "todo_limit",
+            "todo_thin",
+            "state_file",
+        },
         "todo list only accepts --goal-id, optional --role, --status, --todo-id, "
-        "--agent-id, --limit, --project, --state-file, --dry-run, and --format; "
+        "--agent-id, --limit, --thin, --project, --state-file, --dry-run, and "
+        "--format; "
         "unsupported: ",
     )
 
@@ -552,6 +562,8 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
         raise ValueError(
             "--limit is supported only by todo suggest and todo list"
         )
+    if args.todo_thin and args.todo_command != "list":
+        raise ValueError("--thin is supported only by todo list")
 
 
 def validate_capability_gap_options(args: argparse.Namespace) -> None:

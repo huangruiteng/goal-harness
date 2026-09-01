@@ -311,28 +311,69 @@ def main() -> None:
             f"checked={consistency['checked_agent_todo_count']} todos"
         )
 
-        # authority boundary
+        # authority boundary (proposal vs Stage-2 shipped truth)
         boundary = gov_slice["authority_boundary"]
         assert isinstance(boundary, list)
         assert len(boundary) >= 5, f"expected >= 5 RFC entries, got {len(boundary)}"
-        for entry in boundary:
-            assert "rfc_section" in entry
+        expected_shipped = {
+            "3 -- State Classification": False,
+            "4 -- Coordination Ledger Shape": True,
+            "5.1 -- claim_work command": True,
+            "7 -- Receipt Retention": True,
+            "8 -- Local vs Shared Mode": False,
+            "Appendix B -- handoff_mode": True,
+            "9 -- Offline/Local Boundaries": False,
+        }
+        by_section = {entry["rfc_section"]: entry for entry in boundary}
+        for section, expect_shipped in expected_shipped.items():
+            assert section in by_section, f"missing RFC section: {section}"
+            entry = by_section[section]
             assert "proposal" in entry
-            assert "shipped" in entry
             assert "shipped_equivalent" in entry
             assert "gap" in entry
-            # Verify every proposal is marked as not shipped (truth: proposal only)
-            assert entry["shipped"] is False, (
-                f"{entry['rfc_section']}: shipped must be False -- "
-                f"no RFC authority components are in production"
+            assert entry["shipped"] is expect_shipped, (
+                f"{section}: shipped={entry['shipped']!r}, "
+                f"expected {expect_shipped} after Stage-2 claim_work refresh"
             )
-        shipped_count = sum(1 for e in boundary if e["shipped"])
-        assert shipped_count == 0, (
-            f"All RFC proposals should be marked not-shipped; got {shipped_count}"
+        claim_work = by_section["5.1 -- claim_work command"]
+        claim_text = (
+            f"{claim_work['shipped_equivalent']} {claim_work['gap']}".lower()
         )
+        assert "additive" in claim_text, (
+            "claim_work must stay explicit as Stage-2 additive, not default"
+        )
+        assert "not write authority" in claim_work["gap"].lower() or (
+            "not write authority" in claim_work["shipped_equivalent"].lower()
+        ), "claim_work gap must keep leases out of write authority"
+        shipped_count = sum(1 for e in boundary if e["shipped"])
+        assert shipped_count == sum(
+            1 for value in expected_shipped.values() if value
+        ), f"unexpected shipped count: {shipped_count}"
         print(
             f"  [OK] Authority boundary: {len(boundary)} RFC sections, "
-            f"all correctly marked as proposal-only"
+            f"{shipped_count} Stage-2/handoff shipped, "
+            f"{len(boundary) - shipped_count} still proposal-only"
+        )
+
+        # ── Negative: active lease is never write authority ──
+        assert leases["active_leases"] >= 1
+        assert leases["nature"] == "optional runtime fence, not authority"
+        lease_blob = json.dumps(leases, sort_keys=True).lower()
+        for forbidden in (
+            "write authority",
+            "runtime authority",
+            "browser write",
+            "write api",
+        ):
+            assert forbidden not in lease_blob, (
+                f"leases projection must not present '{forbidden}'"
+            )
+        # Stage-2 claim_work shipped must not imply lease-as-authority
+        assert claim_work["shipped"] is True
+        assert "optional runtime fence" in leases["nature"]
+        print(
+            "  [OK] Negative: active leases remain fence-only "
+            "(not write authority / no browser write API)"
         )
 
         # ── 9. Public safety scan ──
@@ -378,12 +419,17 @@ def main() -> None:
         assert "Authority Boundary" in markdown
         assert "optional runtime fence, not authority" in markdown
         assert "Proposals shipped" in markdown
+        assert "Stage-2" in markdown or "Stage 2" in markdown or "additive" in markdown
+        assert "not write authority" in markdown.lower() or (
+            "optional fence, not write authority" in markdown.lower()
+        )
         # Verify no private markers in rendered markdown
         assert "/Users/" not in markdown
         assert "https://" not in markdown
         assert "C:\\" not in markdown
         print("  [OK] Markdown render includes all sections")
         print("  [OK] Markdown is public-safe")
+        print("  [OK] Markdown keeps Stage-2 / lease-authority boundary explicit")
 
         # ── 14. Complete the gate and verify standing authority ──
         complete_goal_todo(

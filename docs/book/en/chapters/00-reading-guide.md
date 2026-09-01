@@ -114,8 +114,8 @@ Do not bypass a newer permission or lifecycle check just to make an older exampl
 
 ## Version baseline
 
-The current release anchor is LoopX GitHub release `v0.5.2`. Local command examples were checked against
-the public `loopx 0.5.2` CLI and protocol surface. This release requires Python 3.11+ and Node.js 22.6+.
+The current release anchor is LoopX GitHub release `v0.5.3`. Local command examples were checked against
+the public `loopx 0.5.3` CLI and protocol surface. This release requires Python 3.11+ and Node.js 22.6+.
 LoopX starts and reuses its managed, idle-exiting TypeScript Effect runtime automatically; users do not
 operate that runtime as a manual daemon.
 
@@ -143,7 +143,7 @@ different version identifiers imply.
 
 ### How to read the TypeScript migration
 
-`v0.5.2` does not mean that all of LoopX has been rewritten in TypeScript. The current release baseline is:
+`v0.5.3` does not mean that all of LoopX has been rewritten in TypeScript. The current release baseline is:
 
 - TypeScript owns the canonical semantics for migrated slices of the Effect Program, Turn settlement,
   Todo completion, quota delivery routing, workspace causality, and scheduler transition/state;
@@ -154,19 +154,19 @@ different version identifiers imply.
 - current `main` is in the transaction-payoff phase: later progress is measured by complete transaction
   cutovers and deleted legacy semantics, not by accumulating leaf helpers and bridge calls.
 
-Treat the `v0.5.2` tag and release notes as the shipped baseline. Use the current status of the
+Treat the `v0.5.3` tag and release notes as the shipped baseline. Use the current status of the
 [TypeScript Control-Plane Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/)
 for later cutovers and final CLI/App convergence. RFC Stages 3 and 4 remain future direction, not shipped
 behavior.
 
-### Updating your mental model from `v0.4.4` to `v0.5.2`
+### Updating your mental model from `v0.4.4` to `v0.5.3`
 
 If you read an earlier edition of the Dev Book, recalibrate these four areas first:
 
-| Area | Shipped in `v0.5.2` | Continue with |
+| Area | Shipped in `v0.5.3` | Continue with |
 | --- | --- | --- |
 | Control Plane | Several high-risk decisions and effects have typed TypeScript transaction owners; Python facades still carry migration-time boundaries | [Migration RFC](/loopx/docs/architecture/rfcs/typescript-control-plane-migration-v0/) |
-| Operator surface | Personal Workspace exposes Goal, Task, Chat, and read-only status-source entrypoints; the UI is not a new source of truth | [Dashboard README](https://github.com/huangruiteng/loopx/blob/v0.5.2/apps/presentation/dashboard/README.md) |
+| Operator surface | Personal Workspace exposes Goal, Task, Chat, and read-only status-source entrypoints; the UI is not a new source of truth | [Dashboard README](https://github.com/huangruiteng/loopx/blob/v0.5.3/apps/presentation/dashboard/README.md) |
 | Host runtime | Codex, Claude Code, OpenCode, Pi, KunlunCode, DeepSeek Harness, and custom runners have distinct activation and stop contracts | [Runtime Connector Catalog](/loopx/docs/integrations/runtime-connector-catalog/) |
 | Capability and Provider | A Capability is defined by a package-owned catalog entry, a real command, and durable validation; a Provider or Extension does not inherit Kernel authority | [Capability Catalog](/loopx/docs/capabilities/) |
 

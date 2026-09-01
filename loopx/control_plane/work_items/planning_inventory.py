@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
 from ..todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_MONITOR,
@@ -17,13 +16,8 @@ from ..todos.projection import (
 from ..todos.summary_item import compact_todo_summary_item
 from .primary_action import protocol_action_text
 
-
 TODO_PLANNING_INVENTORY_REQUEST_SCHEMA_VERSION = (
     "todo_planning_inventory_request_v0"
-)
-TODO_PLANNING_INVENTORY_SCHEMA_VERSION = "todo_planning_inventory_v0"
-TODO_PLANNING_INVENTORY_DETAIL_SCHEMA_VERSION = (
-    "todo_planning_inventory_detail_v0"
 )
 
 
@@ -142,7 +136,7 @@ def _source_context_count(summary: Mapping[str, Any] | None) -> int:
     return sum(value for value in counts if type(value) is int and value >= 0)
 
 
-def build_quota_planning_inventory(
+def build_quota_planning_inventory_request(
     *,
     goal_id: str,
     selected: Mapping[str, Any] | None,
@@ -152,7 +146,7 @@ def build_quota_planning_inventory(
     capability_gate: Mapping[str, Any] | None,
     blocked_priority_fallback: Mapping[str, Any] | None,
 ) -> dict[str, Any] | None:
-    """Build one TS-owned inventory shared by every planning projection."""
+    """Adapt Python Todo sources into one TypeScript inventory request."""
 
     safe_agent_id = normalize_todo_claimed_by(agent_id)
     compact_selected = (
@@ -165,56 +159,19 @@ def build_quota_planning_inventory(
         for item in agent_todo_source_items
         if (compact := compact_planning_candidate(item)) is not None
     ]
-    try:
-        projected = effect_runtime_result(
-            "work_item.planning_inventory.project",
-            {
-                "schema_version": TODO_PLANNING_INVENTORY_REQUEST_SCHEMA_VERSION,
-                "goal_id": goal_id,
-                "agent_id": safe_agent_id,
-                "selected_todo": compact_selected,
-                "source_items": source_items,
-                "runnable_candidates": quota_runnable_action_candidates(
-                    agent_id=safe_agent_id,
-                    agent_todo_summary=agent_todo_summary,
-                    capability_gate=capability_gate,
-                ),
-                "unavailable_higher_priority": (
-                    unavailable_higher_priority_candidates(
-                        blocked_priority_fallback
-                    )
-                ),
-                "source_context_todo_count": _source_context_count(
-                    agent_todo_summary
-                ),
-            },
-        )
-    except EffectRuntimeRejected as exc:
-        raise ValueError(str(exc)) from None
-    if not isinstance(projected, Mapping) or (
-        projected.get("schema_version") != TODO_PLANNING_INVENTORY_SCHEMA_VERSION
-    ):
-        raise RuntimeError("TypeScript Todo planning inventory shape mismatch")
-    return dict(projected)
-
-
-def build_quota_planning_inventory_detail(
-    planning_inventory: Mapping[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Build the planning-only cold-path lens without duplicating Todo detail."""
-
-    if not isinstance(planning_inventory, Mapping):
-        return None
-    try:
-        projected = effect_runtime_result(
-            "work_item.planning_inventory.detail",
-            dict(planning_inventory),
-        )
-    except EffectRuntimeRejected as exc:
-        raise ValueError(str(exc)) from None
-    if not isinstance(projected, Mapping) or (
-        projected.get("schema_version")
-        != TODO_PLANNING_INVENTORY_DETAIL_SCHEMA_VERSION
-    ):
-        raise RuntimeError("TypeScript Todo planning inventory detail mismatch")
-    return dict(projected)
+    return {
+        "schema_version": TODO_PLANNING_INVENTORY_REQUEST_SCHEMA_VERSION,
+        "goal_id": goal_id,
+        "agent_id": safe_agent_id,
+        "selected_todo": compact_selected,
+        "source_items": source_items,
+        "runnable_candidates": quota_runnable_action_candidates(
+            agent_id=safe_agent_id,
+            agent_todo_summary=agent_todo_summary,
+            capability_gate=capability_gate,
+        ),
+        "unavailable_higher_priority": unavailable_higher_priority_candidates(
+            blocked_priority_fallback
+        ),
+        "source_context_todo_count": _source_context_count(agent_todo_summary),
+    }

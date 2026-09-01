@@ -123,6 +123,12 @@ jobs:
           from tempfile import TemporaryDirectory
 
           turn_key = "sha256:" + "a" * 64
+          journal_identity = SettlementIdentity(
+              goal_id="fixture-goal",
+              agent_id="fixture-agent",
+              todo_id="fixture-todo",
+              turn_instance_id=turn_key,
+          )
           journal = {
               "schema_version": "loopx_turn_journal_v0",
               "goal_id": "fixture-goal",
@@ -141,14 +147,15 @@ jobs:
                   "turn_envelope": {
                       "goal_id": "fixture-goal",
                       "agent_id": "fixture-agent",
+                      "action": {
+                          "selected_todo": {"todo_id": "fixture-todo"},
+                      },
                   },
                   "transaction": {
                       "turn_key": turn_key,
                       "settlement_plan": {
-                          "identity": {
-                              "goal_id": "fixture-goal",
-                              "agent_id": "fixture-agent",
-                          }
+                          "schema_version": "quota_settlement_plan_v1",
+                          "identity": journal_identity.as_dict(),
                       },
                   },
               },
@@ -174,20 +181,11 @@ jobs:
           assert readiness["status"] == "ready", readiness
           assert readiness["semantic_probe"] == "passed", readiness
           with TemporaryDirectory() as temporary_directory:
-              effect_id = identity.effect_id
+              effect_id = journal_identity.effect_id
               writable_journal = {
-                  "schema_version": "loopx_turn_journal_v0",
-                  "goal_id": "fixture-goal",
-                  "turn_key": turn_key,
+                  **journal,
                   "status": "in_progress",
-                  "completed_phases": ["host_execute"],
-                  "plan": {
-                      "transaction": {
-                          "settlement_plan": {
-                              "identity": {"effect_id": effect_id}
-                          }
-                      }
-                  },
+                  "completed_phases": [],
               }
               committed = write_turn_journal(
                   str(Path(temporary_directory) / "turn.json"),
@@ -197,7 +195,8 @@ jobs:
               assert committed["appended"] is True, committed
               assert committed["replayed"] is False, committed
           PY
-          skills_dir="${RUNNER_TEMP}/loopx-wheel-skills"
+          export CODEX_HOME="${RUNNER_TEMP}/loopx-wheel-codex"
+          skills_dir="${CODEX_HOME}/skills"
           "${RUNNER_TEMP}/loopx-wheel/bin/loopx" --format json \
             workflow-skills --install --skills-dir "${skills_dir}" \
             > "${RUNNER_TEMP}/loopx-workflow-skills-install.json"
@@ -211,6 +210,31 @@ jobs:
           assert payload["ok"] is True, payload
           assert payload["source"]["kind"] == "python_distribution", payload
           assert payload["after"]["ready"] is True, payload
+          PY
+          conflicting_bin="${RUNNER_TEMP}/loopx-conflicting-bin"
+          mkdir -p "${conflicting_bin}"
+          ln -s /usr/bin/false "${conflicting_bin}/loopx"
+          PATH="${conflicting_bin}:${PATH}" \
+            "${RUNNER_TEMP}/loopx-wheel/bin/loopx" --format json \
+            doctor --deep > "${RUNNER_TEMP}/loopx-wheel-doctor.json"
+          "${RUNNER_TEMP}/loopx-wheel/bin/python" - \
+            "${RUNNER_TEMP}/loopx-wheel-doctor.json" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert payload["ok"] is True, payload
+          assert payload["package"]["install_kind"] == "python_distribution", payload
+          assert payload["path"]["loopx"] != payload["path"]["current_invocation"]
+          validation = payload["release_candidate"]
+          checks = {item["id"]: item for item in validation["checks"]}
+          assert validation["schema_version"] == "loopx_python_distribution_checks_v0"
+          assert checks["command_package_same_distribution"]["ok"] is True, payload
+          assert checks["representative_distribution_paths"]["ok"] is True, payload
+          assert "scripts/loopx" not in validation["representative_cli"][
+              "package_paths"
+          ]["required"]
           PY
           "${RUNNER_TEMP}/loopx-wheel/bin/loopx" --format json \
             workflow-skills --uninstall --skills-dir "${skills_dir}" \

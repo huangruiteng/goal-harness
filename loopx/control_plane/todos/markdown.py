@@ -7,6 +7,72 @@ from .contract import TODO_STATUS_OPEN, todo_marker_for_status
 
 def render_todo_markdown(payload: dict[str, Any]) -> str:
     if payload.get("command") == "list":
+        if payload.get("thin"):
+            field_projection = payload.get("todo_list_field_projection")
+            field_projection = (
+                field_projection if isinstance(field_projection, dict) else {}
+            )
+            cold_paths = field_projection.get("full_detail_cold_paths") or []
+            lines = [
+                "# LoopX Todo List",
+                "",
+                f"- goal_id: `{payload.get('goal_id')}`",
+                f"- role: `{payload.get('role')}`",
+                f"- status_filter: `{payload.get('status_filter')}`",
+                f"- todo_count: `{payload.get('todo_count')}`",
+                f"- matched_todo_count: `{payload.get('matched_todo_count')}`",
+                f"- returned_todo_count: `{payload.get('returned_todo_count')}`",
+                f"- omitted_todo_count: `{payload.get('omitted_todo_count')}`",
+                (
+                    "- item_limit_per_role: `"
+                    f"{field_projection.get('item_limit_per_role')}`"
+                ),
+                f"- view: `{field_projection.get('view')}`",
+                (
+                    "- full_detail_cold_path: `"
+                    f"{cold_paths[0] if cold_paths else 'todo list without --thin'}`"
+                ),
+            ]
+            for key, heading in (
+                ("user_todos", "User Todo"),
+                ("agent_todos", "Agent Todo"),
+            ):
+                summary = payload.get(key)
+                if not isinstance(summary, dict):
+                    continue
+                lines.extend(["", f"## {heading}", ""])
+                expected_role = key.removesuffix("_todos")
+                items = [
+                    item
+                    for item in payload.get("todos") or []
+                    if isinstance(item, dict)
+                    and item.get("role") == expected_role
+                ]
+                if not items:
+                    lines.append("- none")
+                    continue
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    marker = todo_marker_for_status(
+                        item.get("status") or TODO_STATUS_OPEN
+                    )
+                    text = item.get("text") or item.get("title") or ""
+                    metadata = [
+                        f"{metadata_key}={item.get(metadata_key)}"
+                        for metadata_key in (
+                            "todo_id",
+                            "status",
+                            "claimed_by",
+                            "blocks_agent",
+                            "next_due_at",
+                        )
+                        if item.get(metadata_key)
+                    ]
+                    suffix = f" <!-- {' '.join(metadata)} -->" if metadata else ""
+                    lines.append(f"- [{marker}] {text}{suffix}")
+            return "\n".join(lines)
+
         lines = [
             "# LoopX Todo List",
             "",

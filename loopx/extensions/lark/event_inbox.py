@@ -121,9 +121,15 @@ def load_lark_event_inbox_config(
         raise ValueError(
             "lark inbox editorial_style must be concise or bullet_points_preferred"
         )
-    received_reaction_emoji = str(
-        reply_payload.get("received_reaction_emoji") or ""
-    ).strip()
+    # A reply-capable Inbox acknowledges Agent consumption by default.  Keep
+    # the missing field distinct from an explicit empty value so operators can
+    # disable the provider write without inventing a second config switch.
+    if "received_reaction_emoji" in reply_payload:
+        received_reaction_emoji = str(
+            reply_payload.get("received_reaction_emoji") or ""
+        ).strip()
+    else:
+        received_reaction_emoji = "Get" if reply_enabled else ""
     processing_reaction_emoji = str(
         reply_payload.get("processing_reaction_emoji") or ""
     ).strip()
@@ -164,9 +170,7 @@ def load_lark_event_inbox_config(
     ):
         raise ValueError("lark inbox material_review config must be an object")
     material_review_payload = (
-        material_review_payload
-        if isinstance(material_review_payload, Mapping)
-        else {}
+        material_review_payload if isinstance(material_review_payload, Mapping) else {}
     )
     material_review_enabled = material_review_payload.get("enabled") is True
     material_review_drain_limit = material_review_payload.get("drain_limit", 20)
@@ -542,8 +546,7 @@ def _material_review_ledger(inbox: Path) -> tuple[Path, dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if (
         not isinstance(payload, dict)
-        or payload.get("schema_version")
-        != MATERIAL_REVIEW_LEDGER_SCHEMA_VERSION
+        or payload.get("schema_version") != MATERIAL_REVIEW_LEDGER_SCHEMA_VERSION
         or not isinstance(payload.get("receipts"), dict)
     ):
         raise ValueError("lark material-review receipt ledger is invalid")

@@ -101,6 +101,23 @@ safe to rerun: by default it keeps an existing state file and existing registry
 entry. If the goal only needs an additional write boundary after connection,
 prefer the incremental migration path:
 
+An integration provider that already qualified the project bridge can own the
+one-time connection check explicitly:
+
+```bash
+loopx connect \
+  --goal-id project-goal \
+  --no-onboarding-scan \
+  --onboarding-connection-validation provider-prevalidated
+```
+
+The default remains `agent`, which may create a `loopx check` onboarding Todo
+for generic adapters. `provider-prevalidated` records provider ownership in the
+registry and omits that agent Todo; it does not run validation, grant tools, or
+expand the provider's authority. Use it only when the caller has already
+validated the connection. Repository scanning and connection validation remain
+separate controls.
+
 ```bash
 loopx configure-goal \
   --goal-id project-goal \

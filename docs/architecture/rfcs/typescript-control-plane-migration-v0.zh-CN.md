@@ -192,8 +192,8 @@ rollback/state-compatibility boundary。Characterization fixture 是临时迁移
 
 TypeScript Effect algebra、settlement 语义、Turn-journal interpretation、durable
 checkpoint effect、runtime lifecycle、packaging、upgrade fingerprint 与 boundary
-decoder 基础都已进入 `main`。从清理角度看，这一阶段尚未完全结束：Python 的
-细粒度 settlement surface 是兑现阶段的首要目标。
+decoder 基础都已进入 `main`。Stage 1 的 settlement facade 清理已完成：Python
+细粒度 settlement reader 已移除，coarse readback/projection 留作有界的 Stage 2B 工作。
 
 ### Stage 2A — Bounded rule-owner 证明（已交付；不再复制该模式）
 
@@ -246,12 +246,17 @@ window 仍需 differential proof 时才保留 characterization corpus；引入�
   截断 JSONL 尾行，其他损坏仍然 fail closed。
   Python 只保留 `should-run`/settlement fact projection、一次 coarse transport call 与
   legacy kernel index lock；它不再构造或写入 spend event。
-- Task-lease acquire：TypeScript 拥有 identity normalization、settlement plan
-  projection、provider failure classification、ordered receipt construction 与
-  canonical result。Python 在一次 preflight 与一次 final reduction 之间调用现有
-  atomic provider；provider 继续拥有 per-goal lock、owner eligibility、conflict、
-  compare-and-swap、idempotency 与 lease-file durability check。无效 identity 会在
-  provider 前停止；provider 后发生 crash/retry 时则重入同 key 的幂等路径。
+- Task-lease acquire：一笔 native TypeScript transaction 拥有 boundary decode、
+  handoff 与 owner/Todo eligibility、同 Todo 与重叠 write scope conflict、
+  compare-and-swap、generation 与 idempotency rule、per-goal mutation lock、atomic
+  lease persistence，以及 canonical result/receipt。Python 只投影带有前后 source
+  digest 的 compact registry、active-state、event-log 与 rollout-log facts，然后执行
+  一次 native transaction call。TypeScript 在 lease lock 内、decision 前和 write 紧前各
+  重验一次 source。尚未迁移的 Python renew、transfer、release 与 fence writer 会先
+  取得同一个 exclusive-create lock，再取得 legacy kernel lock，因此 cutover 期间只有
+  一个跨 runtime 串行化点。
+  NoKV/shared-goal coordination executor 通过 typed Python adapter 到达同一份纯 acquire
+  decision，因此 provider seam 后不会残留第二份 Python acquire rule engine。
 
 Quota-spend cutover 删除了 Python spend-event builder 与三文件 writer。它的 bounded
 facade 会在 quota CLI 和剩余 run-index writer 进程内执行 transaction 后退出；在此
@@ -261,10 +266,27 @@ replay helper，以及这些 implementation leaf 的 public runtime handler。�
 Todo facade 只拥有 transport、external command execution、source compare-and-swap、
 legacy response projection 与实际 Markdown/event write；当 writer 与 CLI 进入 native
 TS transaction 后即可退出。剩余细粒度 Turn facade 则在 quota 与 host-adapter
-caller 进入各自 coarse transaction 后退出。Task-lease Python facade 现在只包含
-transport、atomic provider 与 legacy CLI projection；当 lease persistence 与
-task-lease CLI 在 native TS transaction 中运行时即可退出。Vision checkpointing
-属于不同的 refresh/writeback 生命周期阶段，因此继续作为独立 transaction。
+caller 进入各自 coarse transaction 后退出。Task-lease acquire 的 semantic facade、
+Python atomic provider、settlement bridge operation 与 legacy CLI result projection
+已经删除。Python 只保留 compact source projection、一次 process transport，以及供
+仍调用 `acquire_task_lease()` 的 caller 使用的 compatibility import。顶层 LoopX CLI
+与 authority-source adapter 进入 Node 后，这层 compatibility surface 即可退出；
+renew、transfer、release 与 lease fence 迁到同一 TypeScript owner 后，dual-runtime
+lock 也随之退出。Vision checkpointing 属于不同的 refresh/writeback 生命周期阶段，
+因此继续作为独立 transaction。
+
+#### Task-lease acquire 迁移经济账
+
+| 字段 | 回执 |
+| --- | --- |
+| Canonical owner | 迁移前由 Python 拥有 atomic acquire provider，TypeScript 在外层做 settlement reduction。迁移后由 `task_lease_acquire.ts` 拥有完整带锁 transaction 与 canonical result。 |
+| 删除的旧语义代码 | 973 行产品代码，包括 Python provider/acquire 组合与 conflict 路径、Python↔TS settlement bridge/reducer 及 handler，以及 legacy CLI settlement projection。 |
+| 新增的 bridge 代码 | 约 641 行 gross、有界的 compatibility 产品代码，包括 compact Python authority projection 加一次 managed-runtime request、compatibility import、Python/TypeScript 共享锁协议，以及 typed NoKV/coordination decision adapter。顶层 CLI 进入 Node 后删除本地 projection 与 import；其余 lease writer 与 fence 迁移后删除 dual lock；coordination executor 进入 native runtime 后删除该 adapter。 |
+| 跨 runtime 调用 | 公开 acquire 与 replay 路径从两次 request/response reduction 降为一次 native transaction request/response。 |
+| 产品代码净增减 | 产品代码 +2,130/−1,122 行，净增 1,008 行。Test 与 fixture 单独计为 +898/−1,081，build configuration 为 +4。 |
+| 迁移 scaffolding | 删除 task-lease settlement characterization、fault-matrix、incident-replay 及其 fixture 切片。以 native invariant、crash/retry、direct-CLI、adapter 与 cross-runtime lock 测试取代；不再保留 migration-only worker。 |
+| Facade 退出 | 本次删除 semantic facade、atomic provider、settlement operation 与 legacy CLI projection。仅保留 source/transport compatibility 与 cross-runtime serialization，删除条件如上。 |
+| 正确性与性能 | 公开 CLI 在 5 个 acquire/replay/failure 场景与旧实现精确匹配；20 个 focused native test、207 个 Node test、4,615 个 Python test（12 个 skip）、crash/retry 与 packaged-wheel smoke 通过。在匹配的 16 样本 full-CLI 测试中，happy-path p95 从 1,593.7 ms 变为 1,167.8 ms，replay p95 从 513.3 ms 变为 445.4 ms；中位数分别为 364.6→425.6 ms 与 343.3→351.9 ms。 |
 
 ### Stage 3 — CLI 与 App 汇合
 

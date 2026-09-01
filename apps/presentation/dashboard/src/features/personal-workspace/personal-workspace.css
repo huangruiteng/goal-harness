@@ -92,6 +92,7 @@
 .personal-goal-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 44px; padding: 7px 5px 7px 10px; border-radius: 11px; }
 .personal-goal-lifecycle { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--pw-faint); cursor: pointer; }
 .personal-goal-lifecycle:hover { background: #fff; color: var(--pw-text); box-shadow: 0 1px 3px rgb(30 28 20 / 12%); }
+.personal-goal-lifecycle:disabled { opacity: .45; cursor: wait; }
 .personal-goal-delete:hover { color: var(--pw-danger); }
 .personal-goal-link-copy { display: grid; min-width: 0; gap: 2px; }
 .personal-goal-link-copy strong, .personal-goal-link-copy small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -330,6 +331,25 @@
 .personal-lark-tabs button { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--pw-muted); cursor: pointer; font-weight: 650; }
 .personal-lark-tabs button[aria-current="page"] { border-color: var(--pw-blue); color: var(--pw-text); }
 .personal-lark-tabs span { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 99px; background: #efeee9; color: var(--pw-muted); font-size: 10px; }
+.personal-lark-section-heading { max-width: 1180px; margin: 0 auto 18px; }
+.personal-lark-section-heading small { color: var(--pw-blue); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.personal-lark-section-heading h2 { margin: 4px 0; font-size: 21px; letter-spacing: -.025em; }
+.personal-lark-section-heading p { margin: 0; color: var(--pw-muted); font-size: 12px; line-height: 1.6; }
+.personal-lark-subtabs { margin-top: 0; }
+.personal-settings-content { max-width: 1180px; margin: 0 auto; }
+.personal-settings-card { overflow: hidden; max-width: 720px; border: 1px solid var(--pw-line); border-radius: 16px; background: var(--pw-card); box-shadow: 0 8px 30px rgb(30 28 20 / 4%); }
+.personal-settings-card > header { display: flex; align-items: center; gap: 13px; padding: 20px; border-bottom: 1px solid var(--pw-line); }
+.personal-settings-card > header h2 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
+.personal-settings-card > header p { margin: 4px 0 0; color: var(--pw-muted); font-size: 12px; line-height: 1.5; }
+.personal-settings-icon { display: grid; place-items: center; flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px; background: var(--pw-blue-soft); color: var(--pw-blue); }
+.personal-language-options { display: grid; gap: 10px; padding: 18px 20px; }
+.personal-language-options > button { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 66px; padding: 13px 15px; border: 1px solid var(--pw-line); border-radius: 12px; background: #fff; color: var(--pw-text); cursor: pointer; text-align: left; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+.personal-language-options > button:hover { border-color: var(--pw-line-strong); background: #fcfbf8; }
+.personal-language-options > button.is-selected { border-color: #9bb5f0; background: var(--pw-blue-soft); box-shadow: 0 0 0 1px rgb(47 102 232 / 8%); color: var(--pw-blue-ink); }
+.personal-language-options > button > span { display: grid; gap: 4px; }
+.personal-language-options strong { font-size: 13px; }
+.personal-language-options small { color: var(--pw-muted); font-size: 11px; font-weight: 400; line-height: 1.45; }
+.personal-settings-card > footer { padding: 13px 20px; border-top: 1px solid var(--pw-line); background: #faf9f6; color: var(--pw-faint); font-size: 11px; }
 .personal-lark-loading, .personal-lark-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 130px; color: var(--pw-muted); font-size: 13px; }
 .personal-lark-apps { max-width: 1180px; margin: 0 auto; }
 .personal-lark-app-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: var(--pw-muted); font-size: 11px; }
@@ -974,3 +994,14 @@
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-notification-badge { border: 1.5px solid #141414; border-radius: 3px; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-notification-bind select { border: 2px solid #141414; border-radius: 4px; box-shadow: 2px 2px 0 #141414; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-notification-confirm { border: 2px solid #141414; border-radius: 4px; background: #fff; box-shadow: 2px 2px 0 #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-settings-card { border: 2px solid #141414; border-radius: 4px; box-shadow: 4px 4px 0 #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-settings-icon { border: 2px solid #141414; border-radius: 4px; background: #ffe23f; color: #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-language-options > button { border: 2px solid #141414; border-radius: 4px; box-shadow: 2px 2px 0 #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-language-options > button.is-selected { background: #8fdcff; color: #141414; }
+
+@media (max-width: 720px) {
+  .personal-lark-settings { padding: 20px 16px calc(24px + env(safe-area-inset-bottom)); }
+  .personal-lark-header h1 { font-size: 24px; }
+  .personal-lark-tabs { gap: 18px; margin-top: 20px; }
+  .personal-settings-card > header, .personal-language-options { padding-right: 15px; padding-left: 15px; }
+}

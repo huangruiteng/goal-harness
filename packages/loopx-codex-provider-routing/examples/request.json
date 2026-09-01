@@ -1,0 +1,176 @@
+{
+  "operation": "compile_catalog",
+  "schema_version": "loopx_codex_provider_routing_request_v0",
+  "source": {
+    "profiles": [
+      {
+        "id": "codex-a",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "priority": 300,
+        "provider": "codex",
+        "supports_fast": true
+      },
+      {
+        "id": "codex-b",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "priority": 200,
+        "provider": "codex",
+        "supports_fast": true
+      },
+      {
+        "id": "ark-text",
+        "input_modalities": [
+          "text"
+        ],
+        "priority": 100,
+        "provider": "openai_compatibility",
+        "supports_fast": false
+      }
+    ],
+    "rings": [
+      {
+        "id": "codex-accounts",
+        "max_cycles": 1,
+        "members": [
+          "codex-a",
+          "codex-b"
+        ]
+      }
+    ],
+    "routes": [
+      {
+        "display_name": "Auto · Sol (A/B → Ark)",
+        "entrypoint": "affinity_then_first",
+        "fallback_tail": [
+          "ark-text"
+        ],
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "mode": "auto",
+        "reasoning_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "ring": "codex-accounts",
+        "slug": "auto/gpt-5.6-sol",
+        "supports_fast": true,
+        "visible": true
+      },
+      {
+        "display_name": "Sol · Prefer A",
+        "entrypoint": "codex-a",
+        "fallback_tail": [
+          "ark-text"
+        ],
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "mode": "preferred",
+        "reasoning_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "ring": "codex-accounts",
+        "slug": "codex-a/gpt-5.6-sol",
+        "supports_fast": true,
+        "visible": true
+      },
+      {
+        "display_name": "Sol · Prefer B",
+        "entrypoint": "codex-b",
+        "fallback_tail": [
+          "ark-text"
+        ],
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "mode": "preferred",
+        "reasoning_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "ring": "codex-accounts",
+        "slug": "codex-b/gpt-5.6-sol",
+        "supports_fast": true,
+        "visible": true
+      },
+      {
+        "display_name": "Luna · A/B",
+        "entrypoint": "affinity_then_first",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "mode": "auto",
+        "reasoning_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "ring": "codex-accounts",
+        "slug": "gpt-5.6-luna",
+        "supports_fast": true,
+        "visible": true
+      },
+      {
+        "candidates": [
+          "ark-text"
+        ],
+        "display_name": "Ark text fallback",
+        "input_modalities": [
+          "text"
+        ],
+        "mode": "manual",
+        "reasoning_levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "slug": "ark/deepseek-v4-flash",
+        "supports_fast": false,
+        "visible": true
+      },
+      {
+        "alias_for": "auto/gpt-5.6-sol",
+        "candidates": [],
+        "display_name": "Compatibility alias",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "mode": "alias",
+        "reasoning_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "slug": "gpt-5.6-sol",
+        "supports_fast": true,
+        "visible": false
+      }
+    ]
+  }
+}

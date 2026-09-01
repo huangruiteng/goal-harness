@@ -18,6 +18,11 @@ from .control_plane.goals.start_contract import (
     build_goal_start_contract,
     build_goal_start_prompt,
 )
+from .control_plane.goals.start_goal_todo_delta import (
+    append_todo_delta_render_line,
+    existing_runnable_agent_frontier,
+    todo_authoring_steps,
+)
 from .control_plane.scheduler.execution_context import (
     GUIDED_START_TURN_RUNTIME_PROFILES,
 )
@@ -32,6 +37,8 @@ from .project_prompt import (
     DEFAULT_HANDOFF_ADAPTER_STATUS,
     render_available_capability_args,
     render_cli_command_prefix,
+    render_goal_start_bootstrap_command,
+    render_optional_cli_arg,
     render_quota_guard_command,
     render_refresh_state_command,
     shell_arg,
@@ -210,6 +217,7 @@ def _start_goal_command(
     capability_route: str | None,
     fine_grained: bool,
     include_command_pack_detail: bool,
+    display_name: str | None = None,
 ) -> str:
     return (
         f"{render_cli_command_prefix(cli_bin=cli_bin, runtime_root=runtime_root)} "
@@ -228,6 +236,7 @@ def _start_goal_command(
             else ""
         )
         + f" --goal-text {shell_arg(goal_text)}"
+        + render_optional_cli_arg("--display-name", display_name)
         + (" --include-command-pack-detail" if include_command_pack_detail else "")
     )
 
@@ -246,6 +255,7 @@ def _start_goal_detail_command(
     available_capabilities: list[str] | None,
     capability_route: str | None,
     fine_grained: bool,
+    display_name: str | None = None,
 ) -> str:
     return _start_goal_command(
         project=project,
@@ -261,6 +271,7 @@ def _start_goal_detail_command(
         capability_route=capability_route,
         fine_grained=fine_grained,
         include_command_pack_detail=True,
+        display_name=display_name,
     )
 
 
@@ -321,6 +332,7 @@ def build_start_goal_host_surface_selection_packet(
     capability_route: str | None = None,
     fine_grained: bool = False,
     include_command_pack_detail: bool = False,
+    display_name: str | None = None,
     runtime_root_arg: str | None = None,
 ) -> dict[str, Any]:
     """Fail closed when the caller has not identified the current Codex host."""
@@ -373,6 +385,7 @@ def build_start_goal_host_surface_selection_packet(
                 else ""
             )
             + f" --goal-text {shell_arg(normalized_goal_text)}"
+            + render_optional_cli_arg("--display-name", display_name)
             + (" --include-command-pack-detail" if include_command_pack_detail else "")
         )
         choices.append(
@@ -401,6 +414,7 @@ def build_start_goal_host_surface_selection_packet(
         "writes_now": False,
         "spends_quota_now": False,
         "goal_text": normalized_goal_text,
+        "display_name": display_name,
         "blocked_by": "host_surface_selection",
         "host_surface_selection_gate": gate,
         "ordered_steps": [
@@ -430,6 +444,7 @@ def build_start_goal_host_surface_selection_packet(
         "new_peer": new_peer,
         "host_surface": None,
         "goal_text": normalized_goal_text,
+        "display_name": display_name,
         "host_surface_selection_gate": gate,
         "recommended_next_step": {
             "kind": "select_host_surface",
@@ -672,33 +687,6 @@ def _project_command(project: str, command: str) -> str:
     return "\n".join([f"cd {shell_arg(project)}", command])
 
 
-def _goal_start_bootstrap_command(
-    *,
-    project: str,
-    goal_id: str,
-    goal_text: str | None,
-    cli_bin: str,
-    runtime_root: str | None,
-    fine_grained: bool,
-) -> str:
-    objective = goal_text or "<exact /loopx goal text>"
-    lines = [
-        f"cd {shell_arg(project)}",
-        f"{render_cli_command_prefix(cli_bin=cli_bin, runtime_root=runtime_root)} bootstrap \\",
-        "  --project . \\",
-        f"  --goal-id {shell_arg(goal_id)} \\",
-        f"  --objective {shell_arg(objective)} \\",
-        f"  --adapter-kind {shell_arg(DEFAULT_HANDOFF_ADAPTER_KIND)} \\",
-        f"  --adapter-status {shell_arg(DEFAULT_HANDOFF_ADAPTER_STATUS)} \\",
-        "  --no-onboarding-scan \\",
-        "  --codex-app-heartbeat ask",
-    ]
-    if fine_grained:
-        lines[-1] += " \\"
-        lines.append("  --fine-grained")
-    return "\n".join(lines)
-
-
 def _selected_goal_capability_route(
     capability_route: str | None,
 ) -> dict[str, Any] | None:
@@ -762,6 +750,7 @@ def build_loopx_bootstrap_command_pack(
     capability_route: str | None = None,
     fine_grained: bool = False,
     resolve_linked_worktree_alias: bool = True,
+    display_name: str | None = None,
     runtime_root_arg: str | None = None,
 ) -> dict[str, Any]:
     inspection = inspect_bootstrap_connection(
@@ -888,13 +877,14 @@ def build_loopx_bootstrap_command_pack(
         runtime_root=command_runtime_root,
     )
     status_command = _project_command(resolved_project, f"{command_prefix} status")
-    goal_start_bootstrap_command = _goal_start_bootstrap_command(
+    goal_start_bootstrap_command = render_goal_start_bootstrap_command(
         project=resolved_project,
         goal_id=resolved_goal_id,
         goal_text=normalized_goal_text,
         cli_bin=cli_bin,
         runtime_root=command_runtime_root,
         fine_grained=fine_grained,
+        display_name=display_name,
     )
     goal_start_plan_prompt = build_goal_start_prompt(
         goal_text=normalized_goal_text,
@@ -975,9 +965,11 @@ def build_loopx_bootstrap_command_pack(
                 if normalized_goal_text
                 else ""
             )
+            + render_optional_cli_arg("--display-name", display_name)
         ),
         "read_only": True,
         "goal_text": normalized_goal_text,
+        "display_name": display_name,
         "project": resolved_project,
         "goal_id": resolved_goal_id,
         "agent_id": selected_agent_id,
@@ -1117,6 +1109,7 @@ def _build_multi_goal_start_selection_packet(
     capability_route: str | None,
     fine_grained: bool,
     include_command_pack_detail: bool,
+    display_name: str | None = None,
 ) -> dict[str, Any] | None:
     inspection = inspect_bootstrap_connection(
         project,
@@ -1323,6 +1316,7 @@ def _build_multi_goal_start_selection_packet(
         available_capabilities=available_capabilities,
         capability_route=capability_route,
         fine_grained=fine_grained,
+        display_name=display_name,
     )
     selected_command_pack = (
         command_pack
@@ -1391,6 +1385,7 @@ def build_start_goal_guided_packet(
     capability_route: str | None = None,
     fine_grained: bool = False,
     include_command_pack_detail: bool = False,
+    display_name: str | None = None,
     runtime_root_arg: str | None = None,
 ) -> dict[str, Any]:
     if goal_id is None:
@@ -1407,6 +1402,7 @@ def build_start_goal_guided_packet(
             capability_route=capability_route,
             fine_grained=fine_grained,
             include_command_pack_detail=include_command_pack_detail,
+            display_name=display_name,
         )
         if selection_packet is not None:
             return selection_packet
@@ -1423,6 +1419,7 @@ def build_start_goal_guided_packet(
         capability_route=capability_route,
         fine_grained=fine_grained,
         resolve_linked_worktree_alias=False,
+        display_name=display_name,
         runtime_root_arg=runtime_root_arg,
     )
     commands = command_pack.get("commands")
@@ -1446,6 +1443,7 @@ def build_start_goal_guided_packet(
                 capability_route=capability_route,
                 fine_grained=fine_grained,
                 include_command_pack_detail=False,
+                display_name=str(command_pack.get("display_name") or display_name or ""),
             )
 
         fresh_registration = identity_selection_gate.get("fresh_agent_registration")
@@ -1523,6 +1521,17 @@ def build_start_goal_guided_packet(
         if fine_grained
         else []
     )
+    project_connection = command_pack.get("project_connection")
+    guided_frontier = (
+        existing_runnable_agent_frontier(
+            project_connection,
+            resolved_goal_id=str(command_pack.get("goal_id") or ""),
+            effective_agent_id=str(command_pack.get("agent_id") or "") or None,
+        )
+        if isinstance(project_connection, dict)
+        and not isinstance(identity_selection_gate, dict)
+        else None
+    )
     guided_transaction = {
         "schema_version": GUIDED_START_SCHEMA_VERSION,
         "mode": "dry_run_preview",
@@ -1557,42 +1566,15 @@ def build_start_goal_guided_packet(
             },
             *bind_thread_steps,
             *fine_mode_steps,
-            {
-                "id": "plan_ranked_todos",
-                "kind": "model_checkpoint",
-                "prompt": commands.get("goal_start_plan_prompt"),
-                "purpose": (
-                    "produce one public-safe, small, verifiable checkpoint Todo; keep "
-                    "later options as evidence-linked planning notes"
-                    if fine_grained
-                    else "produce concise public-safe P0/P1/P2 todos before todo writeback"
-                ),
-            },
-            {
-                "id": "write_ordered_todos",
-                "kind": "operator_or_agent_actions",
-                "command_template": (
-                    f"{render_cli_command_prefix(cli_bin=cli_bin, runtime_root=command_pack.get('command_runtime_root'))} "
-                    f"todo add --goal-id "
-                    f"{shell_arg(str(command_pack.get('goal_id') or ''))} "
-                    "--project . "
-                    "--role agent "
-                    + (
-                        f"--claimed-by {shell_arg(str(command_pack.get('agent_id') or ''))} "
-                        if command_pack.get("agent_id")
-                        else "--claimed-by <agent-id> "
-                    )
-                    + "--task-class advancement_task --action-kind <action_kind> "
-                    "[--target-key <target_key>] --text '<[P0/P1/P2] ...>'"
-                ),
-                "purpose": (
-                    "write only the current checkpoint Todo; the existing replan path "
-                    "qualifies any successor after completion evidence"
-                    if fine_grained
-                    else "write todos in planner order; capability successors preserve "
-                    "the admitted action_kind and target_key for later quota re-entry"
-                ),
-            },
+            *todo_authoring_steps(
+                existing_runnable_frontier=guided_frontier,
+                plan_prompt=commands.get("goal_start_plan_prompt"),
+                fine_grained=fine_grained,
+                cli_bin=cli_bin,
+                runtime_root=command_pack.get("command_runtime_root"),
+                goal_id=str(command_pack.get("goal_id") or ""),
+                agent_id=command_pack.get("agent_id"),
+            ),
             {
                 "id": "refresh_state",
                 "kind": "state_sync",
@@ -1713,6 +1695,7 @@ def build_start_goal_guided_packet(
         available_capabilities=available_capabilities,
         capability_route=capability_route,
         fine_grained=fine_grained,
+        display_name=str(command_pack.get("display_name") or display_name or ""),
     )
     selected_command_pack = (
         command_pack
@@ -1846,6 +1829,7 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
             continue
         step_label = f"{index}. `{step.step_id}` ({step.kind}): "
         step_lines.append(step_label + str(step.purpose))
+        append_todo_delta_render_line(raw_step, step_lines)
         if command:
             rendered_command = (
                 actionable_shell_command(command)

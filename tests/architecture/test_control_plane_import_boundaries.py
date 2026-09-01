@@ -4,6 +4,8 @@ import ast
 import importlib
 from importlib.util import resolve_name
 from pathlib import Path
+import subprocess
+import sys
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -190,6 +192,35 @@ def test_control_plane_does_not_gain_outward_dependencies() -> None:
         "control-plane code must not depend on presentation, CLI, capability, or "
         f"benchmark-adapter layers; unexpected edges: {sorted(outward_dependencies)}"
     )
+
+
+def test_periodic_report_hook_does_not_break_cold_imports() -> None:
+    periodic_report_facade = (
+        PACKAGE_ROOT / "capabilities" / "periodic_report" / "__init__.py"
+    )
+    facade_imports = _resolved_imports(periodic_report_facade)
+    assert not {
+        "loopx.capabilities.periodic_report.post_writeback_hook",
+        "loopx.capabilities.periodic_report.stage_completion",
+    } & facade_imports
+
+    import_statements = (
+        "import loopx.quota",
+        (
+            "from loopx.control_plane.turn_driver.turn_journal_runtime "
+            "import interpret_turn_journal_projection"
+        ),
+    )
+
+    for statement in import_statements:
+        completed = subprocess.run(
+            [sys.executable, "-c", statement],
+            cwd=REPOSITORY_ROOT,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
 
 
 def test_core_does_not_import_experiments() -> None:

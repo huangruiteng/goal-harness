@@ -33,7 +33,7 @@ details and command prefixes still belong in compact references or cold paths.
 | `diagnose --goal-id` | explicit-limit cold path | `--limit 5` fixture matrix | status plus goal-specific quota/todo reads |
 | `review-packet --handoff-only` | absolute hot path | todo-count growth plus handoff semantic anchors | full `review-packet`, run artifacts |
 | `heartbeat-prompt --thin` | absolute hot path | agent scope and multi-agent fixture matrix | `--compact`, `--full` |
-| `todo list` | baseline and growth | todo-count growth and agent filtering semantics | role/status filters, direct todo-id lifecycle commands |
+| `todo list` | baseline and growth | todo-count growth and agent filtering semantics | `--thin`, `--limit N`, role/status filters, direct todo-id lifecycle commands |
 | `history --limit 5` | explicit-limit cold path | returned-run bound | individual run JSON/Markdown artifacts |
 | `evidence-log --thin --limit 5` | explicit-limit cold path | returned-evidence bound | referenced run-history and rollout-event artifacts |
 
@@ -60,6 +60,25 @@ selectors, TurnEnvelope output, status task-graph detail, the full review
 packet, and the brief/compact/full heartbeat prompt modes. These remain opt-in
 cold paths, but their exact stdout size and semantic anchors are regression
 contracts too.
+
+`todo list --thin` is an explicit bounded projection, not a new filtering or
+ordering mode. After the normal role, status, Todo-id, and agent filters run,
+it keeps at most two matched items per role in one top-level `todos` container.
+The hot item shape keeps `text` and omits its redundant derived `title` field so
+the maximum retained field shape stays inside the registered fixed budget.
+The payload preserves the existing `todo_count` meaning, adds full-match
+`matched_todo_count` plus `returned_todo_count` and `omitted_todo_count`, and
+repeats per-role overflow readback in `payload_compaction`. Retained strings
+and nested scope collections are bounded as declared by
+`todo_list_thin_projection_v0`, while actionable identity and gate/monitor
+relationship fields stay allowlisted. Local paths, note/evidence detail, and
+duplicate summary lanes remain omitted.
+
+`--limit N` composes by lowering the intrinsic per-role cap to `min(N, 2)`;
+it never expands the thin projection. Use `todo list` without `--thin`, the
+direct Todo-id cold path, or active state when omitted items or full fields are
+required. Omitting `--thin` restores the existing full list shape without
+changing Todo selection, ordering, quota, lifecycle, or write behavior.
 
 The start and daily command groups in the public help surface, plus
 `heartbeat-prompt`, are fail-closed inventory inputs. Each command must map to

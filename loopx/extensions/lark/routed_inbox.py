@@ -193,8 +193,7 @@ def project_routed_lark_event_inbox_urgency(
             projection.get("reply_due") is True for projection in projections
         ),
         "material_review_due": any(
-            projection.get("material_review_due") is True
-            for projection in projections
+            projection.get("material_review_due") is True for projection in projections
         ),
         "material_review_drain_limit": min(
             (
@@ -270,6 +269,33 @@ def resolve_routed_lark_inbox_config(
     if len(matches) != 1:
         raise ValueError(
             "message id must resolve to exactly one configured Lark inbox route"
+        )
+    return matches[0]
+
+
+def resolve_routed_lark_inbox_route(
+    *,
+    project: str | Path,
+    config_path: str | Path,
+    route_key: str | None,
+) -> str:
+    """Resolve one explicit top-level outbound route without exposing its target."""
+
+    kind = lark_inbox_config_kind(project=project, config_path=config_path)
+    requested = str(route_key or "").strip()
+    if kind == "inbox":
+        if requested not in {"", "default"}:
+            raise ValueError("single Lark inbox accepts only the default route")
+        return str(config_path)
+    _, routes = _collector_routes(project=project, config_path=config_path)
+    matches = [
+        str(route["event_inbox_config_ref"])
+        for route in routes
+        if str(route["route_key"]) == requested
+    ]
+    if not requested or len(matches) != 1:
+        raise ValueError(
+            "routed Lark outbound send requires exactly one configured route_key"
         )
     return matches[0]
 

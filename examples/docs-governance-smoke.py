@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import sys
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +77,58 @@ MOVED_PATHS = {
     "TRADEMARKS.md": "docs/project/trademarks.md",
 }
 
+# docs/index.md .md targets that stay outside mkdocs nav on purpose.
+# Prefer fixing mkdocs.yaml nav for public hosted entry points instead.
+DOCS_INDEX_NAV_ALLOWLIST: dict[str, str] = {}
+
+# docs/README.md catalog .md targets that stay outside mkdocs top nav on purpose.
+DOCS_CATALOG_NAV_ALLOWLIST = {
+    "architecture/README.md": "architecture tree index; RFCs linked from Reference nav",
+    "archive/README.md": "excluded from hosted site via exclude_docs",
+    "community/open-strategy-reviews.md": "community process; catalog-only entry",
+    "community/open-strategy-reviews.zh-CN.md": "zh locale sibling for community reviews",
+    "development/contributor-tasks.md": "contributor board; not a hosted docs primary page",
+    "project/authors.md": "project meta linked from README community section",
+    "project/brand-guide.md": "project meta linked from README community section",
+    "project/brand-guide.zh-CN.md": "zh locale sibling for brand guide",
+    "project/history.md": "project meta linked from README community section",
+    "project/licensing.md": "project meta linked from README community section",
+    "project/trademarks.md": "project meta linked from README community section",
+    "reference/effect-interpreter-packet.md": "deep packet doc reachable from Reference",
+    "research/README.md": "research evidence index; not a top-nav primary",
+    "update-notes/README.md": "dated progress notes; catalog-only entry",
+}
+
+# Stable README advanced-docs entry links under docs/ that must stay reachable.
+STABLE_README_DOCS_ENTRY_LINKS = (
+    "operations/README.md",
+    "quota-allocation.md",
+    "heartbeat-automation-prompt.md",
+    "status-data-contract.md",
+    "concepts/README.md",
+    "product/foundations/README.md",
+    "product/vision.md",
+    "integration.md",
+    "integrations/README.md",
+    "development/README.md",
+    "reference/README.md",
+    "development/control-plane-course/README.md",
+    "development/testing-and-quality.md",
+    "public-private-boundary.md",
+    "showcases/README.md",
+    "research/README.md",
+    "update-notes/README.md",
+    "project/technical-directions.md",
+    "development/contributor-tasks.md",
+    "project/authors.md",
+    "project/history.md",
+    "project/trademarks.md",
+    "project/brand-guide.md",
+)
+
+MD_LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\((<[^>]+>|[^)\s]+)")
+
+
 
 def read(path: str) -> str:
     return (REPO_ROOT / path).read_text(encoding="utf-8")
@@ -90,6 +143,146 @@ def subsection(text: str, heading: str) -> str:
     assert marker in text, marker
     body = text.split(marker, 1)[1]
     return body.split("\n### ", 1)[0].split("\n## ", 1)[0]
+
+
+def _normalize_md_target(raw_target: str) -> str:
+    target = raw_target.strip()
+    if target.startswith("<") and target.endswith(">"):
+        target = target[1:-1]
+    return target.split("#", 1)[0].split("?", 1)[0]
+
+
+def iter_relative_md_targets(text: str) -> list[str]:
+    targets: list[str] = []
+    for match in MD_LINK_RE.finditer(text):
+        target = _normalize_md_target(match.group(1))
+        if not target or not target.endswith(".md"):
+            continue
+        if target.startswith(("http://", "https://", "mailto:", "/")):
+            continue
+        targets.append(target)
+    return targets
+
+
+def mkdocs_nav_paths(mkdocs_text: str) -> set[str]:
+    assert "\nnav:\n" in mkdocs_text or mkdocs_text.startswith("nav:\n"), mkdocs_text
+    nav_body = mkdocs_text.split("nav:", 1)[1]
+    return set(re.findall(r"([A-Za-z0-9_./-]+\.md)", nav_body))
+
+
+def generated_docs_site_sources() -> dict[str, Path]:
+    repo_root = str(REPO_ROOT)
+    docs_dir = str(DOCS)
+    for path in (repo_root, docs_dir):
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    from capability_docs import documentation_maps
+
+    site_to_source, _source_to_site = documentation_maps()
+    return {site.as_posix(): source for site, source in site_to_source.items()}
+
+
+def resolve_docs_relative_target(source_docs_rel: str, target: str) -> Path:
+    source = DOCS / source_docs_rel
+    return (source.parent / target).resolve()
+
+
+def assert_path_in_nav_or_allowlisted(
+    *,
+    source_label: str,
+    docs_relative: str,
+    nav_paths: set[str],
+    allowlist: dict[str, str],
+) -> None:
+    if docs_relative in nav_paths:
+        return
+    reason = allowlist.get(docs_relative)
+    assert reason, (
+        f"{source_label} links to {docs_relative}, which is missing from "
+        "mkdocs.yaml nav and has no allowlist reason"
+    )
+    assert reason.strip(), f"{docs_relative}: empty allowlist reason"
+
+
+def assert_hosted_docs_nav_parity() -> None:
+    """Catch broken or orphaned hosted-docs entry points without touching README UI."""
+    mkdocs_text = read("mkdocs.yaml")
+    nav_paths = mkdocs_nav_paths(mkdocs_text)
+    assert nav_paths, "mkdocs.yaml nav must list hosted pages"
+    assert "book/**" in mkdocs_text, "Developer Book stays on its own MkDocs configs"
+
+    generated_sources = generated_docs_site_sources()
+    for nav_path in sorted(nav_paths):
+        target = DOCS / nav_path
+        if target.is_file():
+            continue
+        generated_source = generated_sources.get(nav_path)
+        assert generated_source is not None and generated_source.is_file(), (
+            f"orphaned mkdocs nav entry (missing file): {nav_path}"
+        )
+
+    docs_index = read("docs/index.md")
+    for raw_target in iter_relative_md_targets(docs_index):
+        resolved = resolve_docs_relative_target("index.md", raw_target)
+        assert resolved.exists(), f"broken docs/index.md link: {raw_target}"
+        docs_relative = str(resolved.relative_to(DOCS.resolve()))
+        assert_path_in_nav_or_allowlisted(
+            source_label="docs/index.md",
+            docs_relative=docs_relative,
+            nav_paths=nav_paths,
+            allowlist=DOCS_INDEX_NAV_ALLOWLIST,
+        )
+
+    docs_catalog = read("docs/README.md")
+    for raw_target in iter_relative_md_targets(docs_catalog):
+        if raw_target.startswith("../"):
+            resolved = (DOCS / raw_target).resolve()
+            assert resolved.exists(), f"broken docs catalog link: {raw_target}"
+            continue
+        resolved = resolve_docs_relative_target("README.md", raw_target)
+        assert resolved.exists(), f"broken docs catalog link: {raw_target}"
+        try:
+            docs_relative = str(resolved.relative_to(DOCS.resolve()))
+        except ValueError:
+            continue
+        assert_path_in_nav_or_allowlisted(
+            source_label="docs/README.md",
+            docs_relative=docs_relative,
+            nav_paths=nav_paths,
+            allowlist=DOCS_CATALOG_NAV_ALLOWLIST,
+        )
+
+    for allowlist_path, reason in {
+        **DOCS_INDEX_NAV_ALLOWLIST,
+        **DOCS_CATALOG_NAV_ALLOWLIST,
+    }.items():
+        assert reason.strip(), f"{allowlist_path}: empty allowlist reason"
+        assert allowlist_path not in nav_paths, (
+            f"{allowlist_path} is in mkdocs nav; remove the stale allowlist entry"
+        )
+        assert (DOCS / allowlist_path).is_file(), (
+            f"allowlisted docs path missing: {allowlist_path}"
+        )
+
+    for docs_relative in STABLE_README_DOCS_ENTRY_LINKS:
+        assert (DOCS / docs_relative).is_file(), (
+            f"stable README docs entry missing: {docs_relative}"
+        )
+        assert_path_in_nav_or_allowlisted(
+            source_label="README stable docs entry",
+            docs_relative=docs_relative,
+            nav_paths=nav_paths,
+            allowlist=DOCS_CATALOG_NAV_ALLOWLIST,
+        )
+
+    book_zh = read("docs/book/index.md")
+    book_en = read("docs/book/en/index.md")
+    assert "[English edition](/loopx/docs/book/en/)" in book_zh, (
+        "docs/book/index.md must cross-link the English edition"
+    )
+    assert "[简体中文版](/loopx/docs/book/)" in book_en, (
+        "docs/book/en/index.md must cross-link the Chinese edition"
+    )
 
 
 def assert_local_doc_links_resolve() -> None:
@@ -190,6 +383,18 @@ def assert_contributor_task_board_is_current() -> None:
         "| GH-C84 |",
         "| GH-C92 |",
         "| GH-C93 |",
+        "| GH-C49 |",
+        "| GH-C60 |",
+        "| GH-C62 |",
+        "| GH-C64 |",
+        "| GH-C71 |",
+        "| GH-C74 |",
+        "| GH-C75 |",
+        "| GH-C76 |",
+        "| GH-C80 |",
+        "| GH-C85 |",
+        "| GH-C95 |",
+        "| GH-C97 |",
     ):
         assert stale not in tasks, stale
 
@@ -501,6 +706,7 @@ def main() -> int:
     )
 
     assert_local_doc_links_resolve()
+    assert_hosted_docs_nav_parity()
     assert_effect_interpreter_docs_are_canonical()
     assert_contributor_task_board_is_current()
     assert_contributor_task_links_are_current()

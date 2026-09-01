@@ -75,7 +75,7 @@ def _write_checkpoint(
 
 
 def register_pr_review_command(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     add_subcommand_format: Callable[[argparse.ArgumentParser], None],
 ) -> None:
     parser = subparsers.add_parser(
@@ -124,6 +124,16 @@ def register_pr_review_command(
         ),
     )
     parser.add_argument(
+        "--projected-exact-head",
+        action="append",
+        default=[],
+        metavar="NUMBER@HEAD_OID",
+        help=(
+            "Acknowledge that one previously emitted exact-head candidate was "
+            "durably projected to its Todo target. Repeatable."
+        ),
+    )
+    parser.add_argument(
         "--handled-exact-head",
         action="append",
         default=[],
@@ -151,6 +161,8 @@ def handle_pr_review_command(
             )
         if args.handled_exact_head and not args.autonomous_observation:
             raise ValueError("--handled-exact-head requires --autonomous-observation")
+        if args.projected_exact_head and not args.autonomous_observation:
+            raise ValueError("--projected-exact-head requires --autonomous-observation")
         if args.observation_state_file and not args.autonomous_observation:
             raise ValueError(
                 "--observation-state-file requires --autonomous-observation"
@@ -199,9 +211,10 @@ def handle_pr_review_command(
             checkpoint_repository = str(
                 previous_observation.get("repository") or ""
             ).strip()
-            if checkpoint_repository and checkpoint_repository != str(
-                repository or ""
-            ).strip():
+            if (
+                checkpoint_repository
+                and checkpoint_repository != str(repository or "").strip()
+            ):
                 raise ValueError(
                     "observation state repository does not match the requested repository"
                 )
@@ -222,6 +235,7 @@ def handle_pr_review_command(
                 result_completeness=payload.get("result_completeness") or {},
                 previous_observation=previous_observation,
                 handled_exact_heads=args.handled_exact_head,
+                projected_exact_heads=args.projected_exact_head,
             )
             payload["autonomous_review"] = autonomous_review
             payload["request"]["autonomous_observation"] = True
@@ -230,6 +244,9 @@ def handle_pr_review_command(
             )
             payload["request"]["handled_exact_head_count_supplied"] = len(
                 args.handled_exact_head
+            )
+            payload["request"]["projected_exact_head_count_supplied"] = len(
+                args.projected_exact_head
             )
             payload["request"]["observation_state_file_supplied"] = bool(
                 checkpoint_path

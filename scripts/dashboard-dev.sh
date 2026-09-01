@@ -62,16 +62,25 @@ fi
 wait_for_service() {
   local service_name="$1"
   local service_url="$2"
-  "${PYTHON_BIN}" - "${service_name}" "${service_url}" <<'PY'
+  local service_pid="$3"
+  local probe_status=0
+  local service_status=0
+  "${PYTHON_BIN}" - "${service_name}" "${service_url}" "${service_pid}" <<'PY'
+import os
 import sys
 import time
 import urllib.error
 import urllib.request
 
-name, url = sys.argv[1:]
+name, url, pid_text = sys.argv[1:]
+pid = int(pid_text)
 deadline = time.monotonic() + 15
 last_error = "service did not respond"
 while time.monotonic() < deadline:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        raise SystemExit(2)
     try:
         with urllib.request.urlopen(url, timeout=1) as response:
             if response.status == 200:
@@ -83,6 +92,15 @@ while time.monotonic() < deadline:
 print(f"LoopX {name} service failed to start: {last_error}", file=sys.stderr)
 raise SystemExit(1)
 PY
+  probe_status=$?
+  if [ "${probe_status}" -eq 2 ]; then
+    wait "${service_pid}"
+    service_status=$?
+    echo "LoopX ${service_name} service exited before it became ready (exit status ${service_status})." >&2
+    echo "The original service error output is shown above." >&2
+    return 1
+  fi
+  return "${probe_status}"
 }
 
 cleanup() {
@@ -212,14 +230,14 @@ STATUS_PID=$!
   --port 8767 \
   --codex-bin "${CODEX_BIN}" \
   --claude-bin "${CLAUDE_BIN}" \
-  "${LARK_CLI_ARGS[@]}" \
+  ${LARK_CLI_ARGS[@]+"${LARK_CLI_ARGS[@]}"} \
   --no-open &
 CHAT_PID=$!
 
-if ! wait_for_service "status" "http://127.0.0.1:8766/healthz"; then
+if ! wait_for_service "status" "http://127.0.0.1:8766/healthz" "${STATUS_PID}"; then
   exit 1
 fi
-if ! wait_for_service "Chat" "http://127.0.0.1:8767/api/chat/capabilities"; then
+if ! wait_for_service "Chat" "http://127.0.0.1:8767/api/chat/capabilities" "${CHAT_PID}"; then
   exit 1
 fi
 

@@ -6,7 +6,7 @@ import type {
   WorkspaceModel,
   WorkspaceTimelineItem,
 } from "./personal-workspace-model";
-import { attentionAgeLabel } from "./personal-workspace-model";
+import { localizedAttentionAge, useWorkspaceI18n } from "./i18n";
 
 /**
  * Goal Tasks tab: one kanban surface that merges owner decisions ("待确认")
@@ -31,6 +31,7 @@ export function GoalTasksView({
   onSelect: (selection: WorkspaceDrawerSelection) => void;
   userTodos: WorkspaceModel["userTodos"];
 }) {
+  const { t } = useWorkspaceI18n();
   const attentionItems = userTodos
     .filter((todo) => todo.goalId === goal.goalId)
     .map((todo) => ({ ...todo, goalTitle: goal.title }));
@@ -57,46 +58,46 @@ export function GoalTasksView({
   return (
     <>
       {latestUserMessage ? (
-        <section aria-label="最近对话与 Task 状态" className="personal-task-chat-receipt">
+        <section aria-label={t("tasks.chatRecent")} className="personal-task-chat-receipt">
           <span className="personal-task-chat-icon"><MessageSquareText size={18} /></span>
           <div>
-            <header><strong>{replyPending ? "已发送给 Agent" : latestReply ? "Agent 已回复" : "最近对话"}</strong><small>{goal.agentLabel ?? goal.agentId}</small></header>
-            <p className="is-user"><b>你</b>{latestUserMessage.text}</p>
-            {latestReply && !latestReply.pending ? <p className="is-assistant"><b>Agent</b>{latestReply.text}</p> : null}
+            <header><strong>{replyPending ? t("tasks.chatPending") : latestReply ? t("tasks.chatAgentReplied") : t("tasks.chatRecent")}</strong><small>{goal.agentLabel ?? goal.agentId}</small></header>
+            <p className="is-user"><b>{t("common.you")}</b>{latestUserMessage.text}</p>
+            {latestReply && !latestReply.pending ? <p className="is-assistant"><b>{t("common.agent")}</b>{latestReply.text}</p> : null}
             <small>{replyPending
-              ? "正在处理；只有经过确认的任务操作才会更新 Tasks。"
-              : "本次对话没有直接修改 Tasks。需要执行时，可先转成 Task 草稿并确认。"}</small>
+              ? t("tasks.chatPendingDescription")
+              : t("tasks.chatUnchangedDescription")}</small>
           </div>
           <footer>
-            <button onClick={onOpenChat} type="button"><MessageSquareText size={14} />查看回复</button>
-            {latestReply && !replyPending && onDraftTaskFromMessage ? <button onClick={() => onDraftTaskFromMessage(latestReply.text)} type="button"><ListPlus size={14} />转为 Task</button> : null}
+            <button onClick={onOpenChat} type="button"><MessageSquareText size={14} />{t("tasks.chatViewReply")}</button>
+            {latestReply && !replyPending && onDraftTaskFromMessage ? <button onClick={() => onDraftTaskFromMessage(latestReply.text)} type="button"><ListPlus size={14} />{t("tasks.convertToTask")}</button> : null}
           </footer>
         </section>
       ) : null}
       <div className="personal-task-kanban">
       <section className="personal-object-list">
         <header>
-          <strong><i className="personal-kanban-dot tone-attention" />待确认</strong>
+          <strong><i className="personal-kanban-dot tone-attention" />{t("timeline.waitingConfirmation")}</strong>
           <span>{attentionItems.length}</span>
         </header>
         {attentionItems.map((attention) => {
-          const age = attentionAgeLabel(attention.updatedAt);
+          const age = localizedAttentionAge(attention.updatedAt, t);
           return (
             <button key={attention.todoId} onClick={() => onSelect({ item: attention, kind: "attention" })} type="button">
               <span aria-hidden="true" className="is-attention">!</span>
               <strong>{attention.text}</strong>
               <small>
-                <span className={`personal-row-status ${attention.blocking ? "is-blocking" : "is-pending"}`}>{attention.blocking ? "阻塞" : "待处理"}</span>
-                {age ? <span className="personal-task-age">已等待 {age}</span> : null}
+                <span className={`personal-row-status ${attention.blocking ? "is-blocking" : "is-pending"}`}>{attention.blocking ? t("tasks.blocked") : t("tasks.pending")}</span>
+                {age ? <span className="personal-task-age">{t("tasks.waitingAge", { age })}</span> : null}
               </small>
             </button>
           );
         })}
-        {!attentionItems.length ? <p className="personal-task-empty">没有待确认的任务。</p> : null}
+        {!attentionItems.length ? <p className="personal-task-empty">{t("tasks.emptyConfirm")}</p> : null}
       </section>
       <section className="personal-object-list">
         <header>
-          <strong><i className="personal-kanban-dot tone-progress" />待执行 / 进行中</strong>
+          <strong><i className="personal-kanban-dot tone-progress" />{t("tasks.pendingAndRunning")}</strong>
           <span>{openAgentTodos.length}</span>
         </header>
         {openAgentTodos.map((todo) => {
@@ -108,50 +109,52 @@ export function GoalTasksView({
                 <span>○</span><strong>{todo.text}</strong>
                 <small>
                   {todo.priority ? <span className={`personal-priority-badge is-${todo.priority.toLowerCase()}`}>{todo.priority}</span> : null}
-                  {todo.status === "blocked" ? <span className="personal-priority-badge is-blocked">受阻</span> : null}
-                  {execution ? <span className="personal-task-session-status">{execution.status === "running" || execution.status === "queued" ? "执行中" : execution.status === "failed" ? "Session 异常" : "等待继续"}</span> : null}
-                  {!execution ? <span className="personal-task-session-status">待执行</span> : null}
+                  {todo.status === "blocked" ? <span className="personal-priority-badge is-blocked">{t("tasks.blocked")}</span> : null}
+                  {execution ? <span className="personal-task-session-status">{execution.status === "running" || execution.status === "queued" ? t("runs.running") : execution.status === "failed" ? t("tasks.sessionError") : t("common.waiting")}</span> : null}
+                  {!execution ? <span className="personal-task-session-status">{t("tasks.waiting")}</span> : null}
                   {todo.claimedBy ?? goal.agentLabel ?? goal.agentId}
                 </small>
               </button>
               <div className="personal-task-card-actions">
-                {execution ? <button className="personal-task-session-link" aria-label={`查看执行过程：${todo.text}`} onClick={() => onSelect({ item: execution, kind: "run" })} title={execution.status === "completed" ? "查看结果" : "查看执行过程"} type="button"><ExternalLink size={14} /><span>{execution.status === "completed" ? "查看结果" : "查看执行过程"}</span></button> : null}
-                {onQuickComplete ? <button aria-label={`标记完成：${todo.text}`} onClick={() => onQuickComplete(enriched)} title="标记完成" type="button"><Check size={14} /></button> : null}
-                <button aria-label={`更多操作：${todo.text}`} onClick={() => onSelect({ item: enriched, kind: "todo" })} title="更多操作" type="button"><MoreHorizontal size={14} /></button>
+                {execution ? <button className="personal-task-session-link" aria-label={t("tasks.openExecution", { name: todo.text })} onClick={() => onSelect({ item: execution, kind: "run" })} title={execution.status === "completed" ? t("tasks.viewResult") : t("tasks.viewExecution")} type="button"><ExternalLink size={14} /><span>{execution.status === "completed" ? t("tasks.viewResult") : t("tasks.viewExecution")}</span></button> : null}
+                {onQuickComplete ? <button aria-label={t("tasks.markComplete", { name: todo.text })} onClick={() => onQuickComplete(enriched)} title={t("tasks.completed")} type="button"><Check size={14} /></button> : null}
+                <button aria-label={t("tasks.moreActions", { name: todo.text })} onClick={() => onSelect({ item: enriched, kind: "todo" })} title={t("common.actions")} type="button"><MoreHorizontal size={14} /></button>
               </div>
             </div>
           );
         })}
-        {!openAgentTodos.length ? <p className="personal-task-empty">没有待执行或进行中的任务。</p> : null}
+        {!openAgentTodos.length ? <p className="personal-task-empty">{t("tasks.emptyRunning")}</p> : null}
       </section>
       <section className="personal-object-list">
         <header>
-          <strong><i className="personal-kanban-dot tone-schedule" />定时与持续</strong>
+          <strong><i className="personal-kanban-dot tone-schedule" />{t("tasks.scheduled")}</strong>
           <span>{scheduleItems.length}</span>
         </header>
         {scheduleItems.map((item) => (
           <button key={item.id} onClick={() => onSelect({ item: item.schedule, kind: "schedule" })} type="button">
-            <span>◷</span><strong>{item.schedule.label}</strong><small>{item.schedule.status === "paused" ? "已暂停" : "执行中"}</small>
+            <span>◷</span><strong>{item.schedule.label}</strong><small>{item.schedule.status === "paused" ? t("schedule.paused") : t("schedule.active")}</small>
           </button>
         ))}
-        {!scheduleItems.length ? <p className="personal-task-empty">没有定时任务。</p> : null}
+        {!scheduleItems.length ? <p className="personal-task-empty">{t("tasks.emptySchedules")}</p> : null}
       </section>
       <section className="personal-object-list">
         <header>
-          <strong><i className="personal-kanban-dot tone-done" />已完成</strong>
-          <span>{doneAgentTodos.length}</span>
+          <strong><i className="personal-kanban-dot tone-done" />{t("tasks.completed")}</strong>
+          <span>{Math.max(goal.doneTodoCount ?? 0, doneAgentTodos.length)}</span>
         </header>
         {doneAgentTodos.map((todo) => (
           <button key={todo.todoId} onClick={() => onSelect({ item: { ...todo, goalId: goal.goalId, goalTitle: goal.title, ownerLabel: todo.claimedBy ?? goal.agentLabel ?? goal.agentId }, kind: "todo" })} type="button">
             <span className="is-done">✓</span><strong>{todo.text}</strong><small>{todo.claimedBy ?? goal.agentLabel ?? goal.agentId}</small>
           </button>
         ))}
-        {!doneAgentTodos.length ? <p className="personal-task-empty">还没有完成的任务。</p> : null}
+        {!doneAgentTodos.length ? <p className="personal-task-empty">{(goal.doneTodoCount ?? 0) > 0
+          ? t("tasks.completedSummary", { count: goal.doneTodoCount ?? 0 })
+          : t("tasks.emptyCompleted")}</p> : null}
       </section>
       </div>
       {isEmpty ? (
         <p className="personal-task-empty">
-          这个 Goal 还没有任务。用下面的输入框描述下一步，LoopX 会先展示待确认操作。
+          {t("tasks.emptyGoal")}
         </p>
       ) : null}
     </>

@@ -31,8 +31,8 @@ def test_root_license_is_canonical_apache_2_with_historical_notices() -> None:
 
 def test_python_distributions_declare_apache_2() -> None:
     root_project = _project_metadata("pyproject.toml")
-    assert root_project["version"] == "0.5.2"
-    assert '__version__ = "0.5.2"' in (ROOT / "loopx/__init__.py").read_text()
+    assert root_project["version"] == "0.5.3"
+    assert '__version__ = "0.5.3"' in (ROOT / "loopx/__init__.py").read_text()
     assert root_project["license"] == "Apache-2.0"
     assert set(root_project["license-files"]) == {"LICENSE", "NOTICE", "LICENSE-MIT"}
 

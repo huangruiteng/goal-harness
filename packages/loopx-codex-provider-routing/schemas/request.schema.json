@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "operation": {
+          "const": "compile_catalog"
+        },
+        "snapshot": false,
+        "upgrade": false
+      },
+      "required": [
+        "source"
+      ]
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "qualify_snapshot"
+        },
+        "source": false,
+        "upgrade": false
+      },
+      "required": [
+        "snapshot"
+      ]
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "upgrade_plan"
+        },
+        "snapshot": false,
+        "source": false
+      },
+      "required": [
+        "upgrade"
+      ]
+    }
+  ],
+  "properties": {
+    "operation": {
+      "enum": [
+        "compile_catalog",
+        "qualify_snapshot",
+        "upgrade_plan"
+      ]
+    },
+    "schema_version": {
+      "const": "loopx_codex_provider_routing_request_v0"
+    },
+    "snapshot": {
+      "type": "object"
+    },
+    "source": {
+      "type": "object"
+    },
+    "upgrade": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "operation"
+  ],
+  "type": "object"
+}

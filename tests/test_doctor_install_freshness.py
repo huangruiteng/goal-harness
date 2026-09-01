@@ -462,11 +462,13 @@ def test_python_distribution_ignores_archive_manifest_version(tmp_path: Path) ->
     assert freshness["manifest_package_version_matches_runtime"] is False
 
 
+@pytest.mark.parametrize("filename", ["loopx", "loopx.exe"])
 def test_current_python_console_script_is_recognized(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
 ) -> None:
-    console_script = tmp_path / "venv" / "bin" / "loopx"
+    console_script = tmp_path / "venv" / "bin" / filename
     console_script.parent.mkdir(parents=True)
     console_script.write_text("#!/bin/sh\n", encoding="utf-8")
     monkeypatch.setattr("loopx.doctor.sys.argv", [str(console_script), "doctor"])

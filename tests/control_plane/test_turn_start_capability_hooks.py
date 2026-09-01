@@ -17,6 +17,7 @@ def _result(**overrides: object) -> dict[str, object]:
         "observation_count": 1,
         "agent_read_required": True,
         "external_reads_performed": True,
+        "external_writes_performed": False,
         "local_private_state_mutated": True,
         "private_content_returned": False,
         "provider_payload_returned": False,
@@ -68,3 +69,28 @@ def test_turn_start_hooks_are_single_flight_by_identity() -> None:
 
     assert dispatch["invoked_count"] == 1
     assert dispatch["failures"][0]["error_code"] == "duplicate_hook_id"
+
+
+def test_turn_start_external_write_requires_reaction_scope() -> None:
+    rejected = dispatch_turn_start_hooks(
+        [_hook(lambda: _result(external_writes_performed=True))]
+    )
+
+    assert rejected["results"] == []
+    assert rejected["failures"][0]["error_code"] == "contract_rejected"
+
+    admitted = TurnStartHookRegistration(
+        hook_id="operator_inbox.turn_start_sync",
+        capability_id="operator-inbox",
+        requested_read_scope=("provider_history",),
+        requested_write_scope=(
+            "owner_private_inbox",
+            "owner_private_cursor",
+            "provider_message_reaction",
+        ),
+        producer=lambda: _result(external_writes_performed=True),
+    )
+    dispatch = dispatch_turn_start_hooks([admitted])
+
+    assert dispatch["failures"] == []
+    assert dispatch["results"][0]["external_writes_performed"] is True

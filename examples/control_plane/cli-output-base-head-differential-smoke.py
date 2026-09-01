@@ -144,7 +144,16 @@ def main() -> int:
         shutil.copy2(SEMANTICS_SOURCE, semantics_source)
 
         _run(
-            ["git", "worktree", "add", "--detach", str(base_root), base_ref],
+            [
+                "git",
+                "-c",
+                f"core.hooksPath={os.devnull}",
+                "worktree",
+                "add",
+                "--detach",
+                str(base_root),
+                base_ref,
+            ],
             cwd=REPO_ROOT,
         )
         try:
@@ -174,7 +183,15 @@ def main() -> int:
             )
         finally:
             _run(
-                ["git", "worktree", "remove", "--force", str(base_root)],
+                [
+                    "git",
+                    "-c",
+                    f"core.hooksPath={os.devnull}",
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(base_root),
+                ],
                 cwd=REPO_ROOT,
             )
 

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loopx-codex-provider-routing"
+version = "0.1.0"
+description = "Public-safe Codex multi-provider routing integration for LoopX"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.scripts]
+loopx-codex-provider-routing = "loopx_codex_provider_routing.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

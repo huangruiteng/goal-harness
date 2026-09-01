@@ -290,12 +290,15 @@ def main() -> int:
         task_body = str(prompt_payload["task_body"])
         assert "host_action=pause_or_delete_current_heartbeat" in task_body, task_body
         assert "automation_update" in task_body and "stop" in task_body, task_body
-        assert "lark_event_inbox" in task_body, task_body
+        assert (
+            "`agent_read_required`" in task_body or "lark_event_inbox" in task_body
+        ), task_body
         assert "drain" in task_body and "ACK" in task_body, task_body
         assert "Graph-on" not in task_body, task_body
         assert "Generic Kanban" not in task_body, task_body
         if prompt_payload is not payload:
-            assert "drain_command" in task_body, task_body
+            if "lark_event_inbox" in task_body:
+                assert "drain_command" in task_body, task_body
             assert "writeback" in task_body, task_body
     thin_task = str(thin_payload["task_body"])
     assert default_payload["task_body"] == thin_payload["task_body"], default_payload
@@ -591,8 +594,8 @@ def main() -> int:
         "no-change=`surface_only`/no spend",
         "unchanged->`--vision-unchanged-reason`",
         "guard receipt; 2 stalls->replan",
-        "`lark_event_inbox`: reply_due",
-        "drain_command/reply-readback/ACK",
+        "`agent_read_required`",
+        "drain/read/triage before work; settle/ACK",
         "P0 blocked: safe P1/P2; monitor quiet/no-spend",
         "No project branches",
         "No learning queue unless asked",

@@ -19,6 +19,22 @@ from loopx.presentation.renderers.periodic_report_markdown import (
 )
 
 
+def _goal_channel_binding(goal_id: str) -> dict[str, Any]:
+    return {
+        "goal_id": goal_id,
+        "provider": "lark",
+        "enabled": True,
+        "channel": {"chat_id": "oc_weekly_progress"},
+        "identity": {
+            "mode": "project_bot",
+            "sender_profile": "weekly-progress-bot",
+            "sender_identity": "bot",
+            "bot_app_id": "cli_weekly_progress",
+            "bot_display_name": "Weekly Progress",
+        },
+    }
+
+
 def _document() -> dict[str, Any]:
     source = build_periodic_report_source_result(
         source_id="project_progress",
@@ -107,7 +123,7 @@ def _registry(
 ) -> PeriodicReportAdapterRegistry:
     registry = PeriodicReportAdapterRegistry()
 
-    def send(card: dict[str, Any], _key: str) -> dict[str, str]:
+    def send(card: dict[str, Any], _key: str, _route: dict[str, Any]) -> dict[str, str]:
         sent_cards.append(card)
         return {"message_id": "om_report_example"}
 
@@ -118,7 +134,16 @@ def _registry(
     registry.register_sink(
         periodic_report_lark_sink_adapter(
             send=send,
-            readback=lambda ref: {"verified": True, "message_id": ref},
+            readback=lambda ref: {
+                "verified": True,
+                "message_id": ref,
+                "chat_id": "oc_weekly_progress",
+                "sender_app_id": "cli_weekly_progress",
+                "sender_identity": "bot",
+                "sender_evidence_source": "message_readback",
+            },
+            resolve_goal_channel=_goal_channel_binding,
+            verify_goal_channel=lambda _route: True,
             render_recipient_mention=render if with_renderer else None,
         )
     )
@@ -214,6 +239,7 @@ def test_lark_preview_exposes_plan_without_render_or_send() -> None:
         artifact,
         {
             "execute": False,
+            "goal_id": "project-goal",
             "idempotency_key": "audience-preview",
             "document": document,
             "audience_policy": _audience_policy(),
@@ -241,6 +267,7 @@ def test_lark_execute_renders_only_relevant_recipients() -> None:
         artifact,
         {
             "execute": True,
+            "goal_id": "project-goal",
             "idempotency_key": "audience-live",
             "document": document,
             "audience_policy": _audience_policy(),
@@ -276,6 +303,7 @@ def test_lark_unrelated_report_sends_without_mentions() -> None:
         artifact,
         {
             "execute": True,
+            "goal_id": "project-goal",
             "idempotency_key": "unrelated-live",
             "document": document,
             "audience_policy": policy,
@@ -305,6 +333,7 @@ def test_lark_matched_recipient_without_renderer_fails_before_send() -> None:
             artifact,
             {
                 "execute": True,
+                "goal_id": "project-goal",
                 "idempotency_key": "missing-renderer",
                 "document": document,
                 "audience_policy": _audience_policy(),
@@ -328,6 +357,7 @@ def test_lark_manual_mention_markup_cannot_bypass_audience_policy() -> None:
             artifact,
             {
                 "execute": True,
+                "goal_id": "project-goal",
                 "idempotency_key": "manual-mention",
                 "title": '<at user_id="unrelated_owner">owner</at>',
             },

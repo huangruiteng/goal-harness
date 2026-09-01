@@ -21,6 +21,9 @@ from .presets import (
 from .profile import build_periodic_report_activation
 from .runtime_producer import build_periodic_report_runtime_trigger_decision
 from .triggers import build_periodic_report_trigger_decision
+from .pending_intent import consume_pending_periodic_report_intent
+from ...paths import resolve_runtime_root
+from ...registry import read_json
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -86,6 +89,17 @@ def register_periodic_report_commands(
         required=True,
         help="Path to periodic_report_runtime_trigger_request_v0 JSON.",
     )
+    consume_pending = commands.add_parser(
+        "consume-pending",
+        help=(
+            "Render one pending durable intent to local artifacts and create an "
+            "exact-payload approval gate without external delivery."
+        ),
+    )
+    add_subcommand_format(consume_pending)
+    consume_pending.add_argument("--goal-id", required=True)
+    consume_pending.add_argument("--agent-id", required=True)
+    consume_pending.add_argument("--execute", action="store_true")
     evaluate_runtime.add_argument(
         "--rollout-events-jsonl",
         required=True,
@@ -283,6 +297,7 @@ def handle_periodic_report_command(
     args: argparse.Namespace,
     *,
     runtime_root_arg: str | None,
+    registry_path: Path,
     output_format: FormatSelector,
     print_payload: PrintPayload,
     provider_command_handlers: Sequence[ProviderCommandHandler] = (),
@@ -293,6 +308,7 @@ def handle_periodic_report_command(
         result = handle_provider_command(
             args,
             runtime_root_arg=runtime_root_arg,
+            registry_path=registry_path,
             output_format=output_format,
             print_payload=print_payload,
         )
@@ -323,6 +339,17 @@ def handle_periodic_report_command(
                     Path(args.rollout_events_jsonl).expanduser(),
                     strict=True,
                 ),
+            )
+        elif args.periodic_report_command == "consume-pending":
+            registry = read_json(registry_path)
+            payload = consume_pending_periodic_report_intent(
+                registry_path=registry_path,
+                runtime_root=resolve_runtime_root(
+                    registry, runtime_root_arg, registry_path=registry_path
+                ),
+                goal_id=args.goal_id,
+                agent_id=args.agent_id,
+                execute=bool(args.execute),
             )
         else:
             request = _load_json_object(args.request_json)

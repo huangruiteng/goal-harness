@@ -1,0 +1,1055 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from collections.abc import Mapping
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from ...control_plane.capability_hooks import (
+    INTERACTION_PROJECTION_HOOK_RESULT_SCHEMA_VERSION,
+    POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION,
+    InteractionProjectionHookRegistration,
+)
+from ...control_plane.todos.active_state_todo_parser import parse_active_state_todos
+from ...registry import (
+    atomic_write_json,
+    find_registry_goal,
+    read_json,
+    resolve_state_file,
+)
+from ...todos import add_goal_todo
+from ...presentation.renderers.periodic_report_html import render_periodic_report_html
+from ...presentation.renderers.periodic_report_markdown import (
+    render_periodic_report_markdown,
+)
+from .adapters import (
+    build_periodic_report_document,
+    build_periodic_report_source_result,
+)
+from .bindings import build_periodic_report_generation_bundle
+from .core import _reject_raw_keys
+from .post_writeback_hook import (
+    PERIODIC_REPORT_POST_WRITEBACK_HOOK_ID,
+    PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT,
+    evaluate_periodic_report_trigger_evaluation_intent,
+)
+from .project_progress_snapshot import build_project_progress_snapshot
+
+
+PENDING_INTENT_SCHEMA = "pending_capability_intent_projection_v0"
+CONSUMPTION_RECEIPT_SCHEMA = "periodic_report_intent_consumption_receipt_v0"
+EDITORIAL_REQUEST_SCHEMA = "periodic_report_editorial_request_v0"
+EDITORIAL_RESPONSE_SCHEMA = "periodic_report_editorial_response_v0"
+HOOK_ID = "periodic_report.pending_intent"
+CAPABILITY_ID = "periodic-report"
+_DISPATCH_RE = re.compile(r"^pwh_[0-9a-f]{64}\.json$")
+_IDENTITY_RE = re.compile(r"^[a-z][a-z0-9_.:-]{2,127}$")
+_CHINESE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
+_ANALYSIS_SECTION_CONTRACT = (
+    ("overview", "全景判断"),
+    ("problem_map", "问题版图"),
+    ("causal_analysis", "重点因果下钻"),
+    ("coverage_and_actions", "版本覆盖与处置"),
+    ("next_actions", "下一步"),
+)
+_SECTION_CONTENT_KINDS = {
+    "overview": "decision",
+    "problem_map": "risk",
+    "causal_analysis": "progress",
+    "coverage_and_actions": "outcome",
+    "next_actions": "next_action",
+}
+
+
+def _canonical_digest(value: object) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _intent_key(intent: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        str(intent.get("idempotency_key") or "").encode("utf-8")
+    ).hexdigest()[:24]
+
+
+def _attempt_dir(
+    runtime_root: Path,
+    goal_id: str,
+    intent: Mapping[str, Any],
+    *,
+    rejection_revision: str | None = None,
+) -> Path:
+    base = runtime_root / "goals" / goal_id / "periodic_reports" / _intent_key(intent)
+    return base / f"retry-{rejection_revision}" if rejection_revision else base
+
+
+def _receipt_path(
+    runtime_root: Path,
+    goal_id: str,
+    intent: Mapping[str, Any],
+    *,
+    rejection_revision: str | None = None,
+) -> Path:
+    return (
+        _attempt_dir(
+            runtime_root,
+            goal_id,
+            intent,
+            rejection_revision=rejection_revision,
+        )
+        / "receipt.json"
+    )
+
+
+def _editorial_request_path(
+    runtime_root: Path,
+    goal_id: str,
+    intent: Mapping[str, Any],
+    *,
+    rejection_revision: str | None = None,
+) -> Path:
+    return (
+        _attempt_dir(
+            runtime_root,
+            goal_id,
+            intent,
+            rejection_revision=rejection_revision,
+        )
+        / "editorial_request.json"
+    )
+
+
+def _editorial_response_path(
+    runtime_root: Path,
+    goal_id: str,
+    intent: Mapping[str, Any],
+    *,
+    rejection_revision: str | None = None,
+) -> Path:
+    return (
+        _attempt_dir(
+            runtime_root,
+            goal_id,
+            intent,
+            rejection_revision=rejection_revision,
+        )
+        / "editorial.json"
+    )
+
+
+def _decision_scope_text(value: object) -> str:
+    if isinstance(value, Mapping):
+        return ":".join(
+            str(value.get(field) or "")
+            for field in ("kind", "granularity", "scope_key")
+        )
+    return str(value or "")
+
+
+def _superseding_approval_revision(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    agent_id: str,
+    receipt: Mapping[str, Any],
+) -> str | None:
+    approval_scope = str(receipt.get("approval_scope") or "")
+    if receipt.get("status") != "approval_pending" or not approval_scope:
+        return None
+    registry = read_json(registry_path)
+    goal = find_registry_goal(registry, goal_id)
+    if not isinstance(goal, Mapping):
+        return None
+    repo = Path(str(goal.get("repo") or "")).expanduser()
+    state_path = resolve_state_file(repo, str(goal.get("state_file") or ""))
+    if state_path is None or not state_path.is_file():
+        return None
+    parsed = parse_active_state_todos(
+        state_path.read_text(encoding="utf-8"),
+        goal=dict(goal),
+        state_path=state_path,
+        item_limit=None,
+    )
+    user_summary = parsed.get("user_todos")
+    items = user_summary.get("items") if isinstance(user_summary, Mapping) else []
+    superseding = [
+        item
+        for item in items or []
+        if isinstance(item, Mapping)
+        and item.get("status") == "done"
+        and item.get("action_kind")
+        in {"approve_periodic_report_payload", "cancel_periodic_report_payload"}
+        and item.get("decision_outcome") in {"reject", "cancel"}
+        and _decision_scope_text(item.get("decision_scope")) == approval_scope
+        and str(item.get("bound_agent") or item.get("blocks_agent") or "") == agent_id
+    ]
+    if not superseding:
+        return None
+    latest = max(superseding, key=lambda item: str(item.get("updated_at") or ""))
+    revision = f"{latest.get('todo_id')}:{latest.get('updated_at')}"
+    return hashlib.sha256(revision.encode("utf-8")).hexdigest()[:16]
+
+
+def _load_consumption_receipt(
+    path: Path, *, intent_digest: str
+) -> Mapping[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(receipt, Mapping)
+        or receipt.get("schema_version") != CONSUMPTION_RECEIPT_SCHEMA
+        or receipt.get("intent_digest") != intent_digest
+        or receipt.get("status") != "approval_pending"
+    ):
+        return None
+    return receipt
+
+
+def _next_attempt_revision(
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    goal_id: str,
+    agent_id: str,
+    intent: Mapping[str, Any],
+) -> tuple[bool, str | None]:
+    """Return whether an intent is actionable and its immutable attempt revision."""
+
+    base = _attempt_dir(runtime_root, goal_id, intent)
+    receipt_paths = [base / "receipt.json"]
+    if base.is_dir():
+        receipt_paths.extend(sorted(base.glob("retry-*/receipt.json")))
+    intent_digest = _canonical_digest(intent)
+    receipts = [
+        receipt
+        for path in receipt_paths
+        if (receipt := _load_consumption_receipt(path, intent_digest=intent_digest))
+        is not None
+    ]
+    if not receipts:
+        return True, None
+
+    candidate_revisions: list[str] = []
+    for receipt in receipts:
+        revision = _superseding_approval_revision(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            receipt=receipt,
+        )
+        if revision is None:
+            return False, None
+        retry_receipt = _receipt_path(
+            runtime_root,
+            goal_id,
+            intent,
+            rejection_revision=revision,
+        )
+        if (
+            _load_consumption_receipt(retry_receipt, intent_digest=intent_digest)
+            is None
+        ):
+            candidate_revisions.append(revision)
+
+    if not candidate_revisions:
+        return False, None
+    # Sequential approval gates yield one unconsumed rejection. Sorting keeps
+    # malformed or manually duplicated state deterministic without overwriting
+    # any earlier frozen attempt.
+    return True, sorted(candidate_revisions)[-1]
+
+
+def _valid_sidecar_intent(
+    value: object, *, dispatch_id: str, goal_id: str, agent_id: str
+) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    if (
+        value.get("schema_version") != POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION
+        or value.get("dispatch_id") != dispatch_id
+        or value.get("status") != "intent_recorded"
+        or value.get("hook_id") != PERIODIC_REPORT_POST_WRITEBACK_HOOK_ID
+        or value.get("capability_id") != CAPABILITY_ID
+        or value.get("error_code") is not None
+        or type(value.get("attempt_count")) is not int
+        or int(value["attempt_count"]) < 1
+    ):
+        return None
+    intent = value.get("intent")
+    if not isinstance(intent, Mapping):
+        return None
+    if intent.get("source_receipt_id") != value.get("source_receipt_id"):
+        return None
+    try:
+        decision = evaluate_periodic_report_trigger_evaluation_intent(intent)
+    except ValueError:
+        return None
+    if decision.get("eligible") is not True:
+        return None
+    payload = intent.get("payload")
+    stage = payload.get("stage_completion") if isinstance(payload, Mapping) else None
+    if not isinstance(stage, Mapping) or stage.get("agent_id") != agent_id:
+        return None
+    if not goal_id or not agent_id:
+        return None
+    return dict(intent)
+
+
+def pending_periodic_report_intents(
+    *, registry_path: Path, runtime_root: Path, goal_id: str, agent_id: str
+) -> list[dict[str, Any]]:
+    """Read only exact, eligible, unconsumed intents for one Goal/Agent."""
+
+    if not _IDENTITY_RE.fullmatch(goal_id) or not _IDENTITY_RE.fullmatch(agent_id):
+        return []
+    sidecars = runtime_root / "goals" / goal_id / "post_writeback_hooks"
+    if not sidecars.is_dir():
+        return []
+    pending: list[dict[str, Any]] = []
+    for path in sorted(sidecars.iterdir()):
+        if not path.is_file() or not _DISPATCH_RE.fullmatch(path.name):
+            continue
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        intent = _valid_sidecar_intent(
+            value,
+            dispatch_id=path.stem,
+            goal_id=goal_id,
+            agent_id=agent_id,
+        )
+        if intent is None:
+            continue
+        actionable, _revision = _next_attempt_revision(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            intent=intent,
+        )
+        if not actionable:
+            continue
+        pending.append(intent)
+    return pending
+
+
+def periodic_report_pending_intent_interaction_hook(
+    *, registry_path: Path, runtime_root: Path, goal_id: str, agent_id: str | None
+) -> InteractionProjectionHookRegistration:
+    normalized_agent_id = str(agent_id or "").strip()
+
+    def produce() -> Mapping[str, Any]:
+        intents = (
+            pending_periodic_report_intents(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=goal_id,
+                agent_id=normalized_agent_id,
+            )
+            if normalized_agent_id
+            else []
+        )
+        if not intents:
+            return {
+                "schema_version": INTERACTION_PROJECTION_HOOK_RESULT_SCHEMA_VERSION,
+                "hook_id": HOOK_ID,
+                "capability_id": CAPABILITY_ID,
+                "phase": "interaction_projection",
+                "status": "not_applicable",
+                "projection_slot": None,
+                "payload": None,
+            }
+        intent = intents[0]
+        return {
+            "schema_version": INTERACTION_PROJECTION_HOOK_RESULT_SCHEMA_VERSION,
+            "hook_id": HOOK_ID,
+            "capability_id": CAPABILITY_ID,
+            "phase": "interaction_projection",
+            "status": "candidate",
+            "projection_slot": "pending_capability_intent",
+            "payload": {
+                "schema_version": PENDING_INTENT_SCHEMA,
+                "capability_id": CAPABILITY_ID,
+                "intent_kind": PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT,
+                "idempotency_key": str(intent["idempotency_key"]),
+                "intent_digest": _canonical_digest(intent),
+                "goal_id": goal_id,
+                "agent_id": normalized_agent_id,
+                "state": "pending",
+                "action_kind": "consume_periodic_report_intent",
+                "action_summary": (
+                    "Prepare the typed report facts, author the required Chinese "
+                    "analysis narrative, then freeze one locally validated draft."
+                ),
+                "command": (
+                    "loopx periodic-report consume-pending "
+                    f"--goal-id {goal_id} --agent-id {normalized_agent_id} --execute"
+                ),
+                "generation_authorized": True,
+                "external_delivery_authorized": False,
+                "agent_read_required": True,
+            },
+        }
+
+    return InteractionProjectionHookRegistration(
+        hook_id=HOOK_ID,
+        capability_id=CAPABILITY_ID,
+        projection_slots=("pending_capability_intent",),
+        requested_read_scope=("post_writeback_intent_journal",),
+        producer=produce,
+    )
+
+
+def _progress_facts(
+    *, registry_path: Path, goal_id: str, agent_id: str, completed_at: str
+) -> list[dict[str, Any]]:
+    snapshot = build_project_progress_snapshot(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        completed_at=completed_at,
+    )
+    if not isinstance(snapshot, Mapping):
+        raise ValueError("periodic-report has no public-safe progress items")
+    return _progress_facts_from_snapshot(
+        snapshot,
+        goal_id=goal_id,
+        completed_at=completed_at,
+    )
+
+
+def _progress_facts_from_snapshot(
+    snapshot: Mapping[str, Any], *, goal_id: str, completed_at: str
+) -> list[dict[str, Any]]:
+    if (
+        snapshot.get("schema_version")
+        != "periodic_report_project_progress_projection_v0"
+        or snapshot.get("goal_id") != goal_id
+        or snapshot.get("observed_at") != completed_at
+    ):
+        raise ValueError("periodic-report progress snapshot identity is invalid")
+    raw_items = snapshot.get("items")
+    if not isinstance(raw_items, list):
+        raise ValueError("periodic-report progress snapshot items are invalid")
+    facts: list[dict[str, Any]] = []
+    seen_source_refs: set[str] = set()
+    for index, raw_item in enumerate(raw_items):
+        if not isinstance(raw_item, Mapping):
+            raise ValueError(
+                f"periodic-report progress snapshot item {index} is invalid"
+            )
+        item_id = str(raw_item.get("item_id") or "").strip()
+        title = " ".join(str(raw_item.get("title") or "").split())
+        summary = " ".join(str(raw_item.get("summary") or "").split())
+        source_ref = str(raw_item.get("source_ref") or "").strip()
+        content_kind = str(raw_item.get("content_kind") or "").strip()
+        if not item_id or not title or not summary or not source_ref:
+            raise ValueError("periodic-report progress snapshot item is incomplete")
+        if source_ref in seen_source_refs:
+            raise ValueError("periodic-report progress snapshot source is duplicated")
+        raw_completed_at = str(raw_item.get("completed_at") or "").strip()
+        if content_kind == "outcome":
+            status = "done"
+            completed = _validated_snapshot_timestamp(
+                raw_completed_at,
+                observed_at=completed_at,
+            )
+        elif content_kind == "next_action":
+            status = "open"
+            completed = None
+        else:
+            raise ValueError("periodic-report progress snapshot item kind is invalid")
+        fact: dict[str, Any] = {
+            "fact_id": item_id,
+            "title": title[:500],
+            "summary": summary[:1000],
+            "status": status,
+            "source_ref": source_ref,
+        }
+        if completed is not None:
+            fact["completed_at"] = completed
+        facts.append(fact)
+        seen_source_refs.add(source_ref)
+    if not facts:
+        raise ValueError("periodic-report has no public-safe progress items")
+    return facts
+
+
+def _validated_snapshot_timestamp(value: str, *, observed_at: str) -> str:
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        boundary = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(
+            "periodic-report progress snapshot timestamp is invalid"
+        ) from exc
+    if timestamp.tzinfo is None or boundary.tzinfo is None or timestamp > boundary:
+        raise ValueError("periodic-report progress snapshot timestamp is invalid")
+    return value
+
+
+def _build_editorial_request(
+    *,
+    intent: Mapping[str, Any],
+    runtime_root: Path,
+    goal_id: str,
+    agent_id: str,
+    completed_at: str,
+    facts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    work_window = _actual_work_window(
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        facts=facts,
+        completed_at=completed_at,
+    )
+    request: dict[str, Any] = {
+        "schema_version": EDITORIAL_REQUEST_SCHEMA,
+        "goal_id": goal_id,
+        "agent_id": agent_id,
+        "intent_digest": _canonical_digest(intent),
+        "language": "zh-CN",
+        "narrative_contract": {
+            "contract_id": "analysis_from_overview_to_depth_v1",
+            "section_order": [item[0] for item in _ANALYSIS_SECTION_CONTRACT],
+            "section_titles": dict(_ANALYSIS_SECTION_CONTRACT),
+            "requirements": [
+                "Lead with the current overall judgment, not a work log.",
+                "Map the complete problem space before selecting deep dives.",
+                "Trace the highest-value findings to evidence-backed causes.",
+                "Separate current-version coverage from historical evidence.",
+                "Keep report-building work out of the analysis mainline.",
+                "Write audience-facing Chinese while preserving necessary technical terms.",
+            ],
+        },
+        "completed_at": completed_at,
+        "actual_work_window": work_window,
+        "facts": facts,
+        "boundary": {
+            "agent_authors_business_judgment": True,
+            "cli_validates_and_freezes": True,
+            "external_writes_performed": False,
+        },
+    }
+    request["request_digest"] = _canonical_digest(request)
+    return request
+
+
+def _actual_work_window(
+    *,
+    runtime_root: Path,
+    goal_id: str,
+    agent_id: str,
+    facts: list[dict[str, Any]],
+    completed_at: str,
+) -> dict[str, str]:
+    end = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+    observed: list[datetime] = []
+    run_index = runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
+    if run_index.is_file():
+        try:
+            rows = run_index.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            rows = []
+        for raw_row in rows:
+            try:
+                row = json.loads(raw_row)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, Mapping) or row.get("agent_id") != agent_id:
+                continue
+            raw = str(row.get("generated_at") or "").strip()
+            try:
+                value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if value.tzinfo is None or end.tzinfo is None:
+                continue
+            value = value.astimezone(end.tzinfo)
+            if value <= end:
+                observed.append(value)
+    for fact in facts:
+        raw = str(fact.get("completed_at") or fact.get("updated_at") or "").strip()
+        if not raw:
+            continue
+        try:
+            value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if value.tzinfo is None or end.tzinfo is None:
+            continue
+        value = value.astimezone(end.tzinfo)
+        if value <= end:
+            observed.append(value)
+    start = min(observed, default=end)
+    # The document protocol requires a non-empty half-open window. A stage with
+    # only one timestamp still represents that exact completion instant.
+    document_start = start if start < end else end - timedelta(microseconds=1)
+    display_tz = end.tzinfo
+    timezone_label = "UTC"
+    registry_tz = None
+    try:
+        from zoneinfo import ZoneInfo
+
+        registry_tz = ZoneInfo("Asia/Shanghai")
+    except (ImportError, ValueError):
+        registry_tz = None
+    if registry_tz is not None:
+        display_tz = registry_tz
+        timezone_label = "北京时间"
+    display_start = start.astimezone(display_tz)
+    display_end = end.astimezone(display_tz)
+    offset = display_end.utcoffset()
+    if offset not in {timedelta(hours=8), timedelta(0)}:
+        total_minutes = int((offset or timedelta()).total_seconds() // 60)
+        sign = "+" if total_minutes >= 0 else "-"
+        hours, minutes = divmod(abs(total_minutes), 60)
+        timezone_label = f"UTC{sign}{hours:02d}:{minutes:02d}"
+    if start == end:
+        period_label = f"{display_end:%Y-%m-%d %H:%M}（{timezone_label}）"
+    else:
+        period_label = (
+            f"{display_start:%Y-%m-%d %H:%M} — "
+            f"{display_end:%Y-%m-%d %H:%M}"
+            f"（{timezone_label}）"
+        )
+    return {
+        "start_at": document_start.isoformat(),
+        "end_at": end.isoformat(),
+        "period_label": period_label,
+        "source": "agent_run_history_or_report_facts",
+    }
+
+
+def _load_frozen_editorial_request(
+    *,
+    request_path: Path,
+    intent_digest: str,
+    goal_id: str,
+    agent_id: str,
+) -> dict[str, Any] | None:
+    if not request_path.is_file():
+        return None
+    try:
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("periodic-report editorial request is unreadable") from exc
+    if not isinstance(request, Mapping):
+        raise ValueError("periodic-report editorial request must be an object")
+    request = dict(request)
+    recorded_digest = request.pop("request_digest", None)
+    if (
+        request.get("schema_version") != EDITORIAL_REQUEST_SCHEMA
+        or request.get("intent_digest") != intent_digest
+        or request.get("goal_id") != goal_id
+        or request.get("agent_id") != agent_id
+        or recorded_digest != _canonical_digest(request)
+    ):
+        raise ValueError("periodic-report editorial request identity is invalid")
+    request["request_digest"] = recorded_digest
+    return request
+
+
+def _chinese_density(value: object) -> float:
+    text = str(value or "")
+    chinese = len(_CHINESE_RE.findall(text))
+    letters = sum(character.isalpha() for character in text)
+    return chinese / max(letters, 1)
+
+
+def _load_editorial_response(
+    *, request: Mapping[str, Any], response_path: Path
+) -> dict[str, Any]:
+    try:
+        response = json.loads(response_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("periodic-report editorial response is unreadable") from exc
+    if not isinstance(response, Mapping):
+        raise ValueError("periodic-report editorial response must be an object")
+    _reject_raw_keys(response, "periodic-report editorial response")
+    if (
+        response.get("schema_version") != EDITORIAL_RESPONSE_SCHEMA
+        or response.get("request_digest") != request.get("request_digest")
+        or response.get("language") != "zh-CN"
+    ):
+        raise ValueError("periodic-report editorial response identity is invalid")
+    title = " ".join(str(response.get("title") or "").split())
+    if not title or _chinese_density(title) < 0.45:
+        raise ValueError("periodic-report editorial title must be Chinese-first")
+    work_window = request.get("actual_work_window")
+    if not isinstance(work_window, Mapping):
+        raise ValueError("periodic-report actual work window is missing")
+    expected_period_label = str(work_window.get("period_label") or "")
+    supplied_period_label = str(response.get("period_label") or "")
+    if supplied_period_label and supplied_period_label != expected_period_label:
+        raise ValueError(
+            "periodic-report editorial period_label must match the actual work window"
+        )
+    raw_sections = response.get("sections")
+    if not isinstance(raw_sections, list):
+        raise ValueError("periodic-report editorial sections must be a list")
+    expected_ids = [item[0] for item in _ANALYSIS_SECTION_CONTRACT]
+    section_ids = [
+        str(section.get("section_id") or "")
+        for section in raw_sections
+        if isinstance(section, Mapping)
+    ]
+    if section_ids != expected_ids or len(raw_sections) != len(expected_ids):
+        raise ValueError(
+            "periodic-report editorial sections must follow the overview-to-depth contract"
+        )
+    allowed_refs = {
+        str(fact.get("source_ref") or "")
+        for fact in request.get("facts") or []
+        if isinstance(fact, Mapping)
+    }
+    normalized_sections: list[dict[str, Any]] = []
+    narrative_text: list[str] = [title]
+    item_total = 0
+    for order, ((section_id, expected_title), raw_section) in enumerate(
+        zip(_ANALYSIS_SECTION_CONTRACT, raw_sections, strict=True), start=1
+    ):
+        if not isinstance(raw_section, Mapping):
+            raise ValueError("periodic-report editorial section is invalid")
+        section_title = " ".join(str(raw_section.get("title") or "").split())
+        if section_title != expected_title:
+            raise ValueError(
+                f"periodic-report editorial section {section_id} title is invalid"
+            )
+        raw_items = raw_section.get("items")
+        if not isinstance(raw_items, list) or not raw_items:
+            raise ValueError(
+                f"periodic-report editorial section {section_id} must not be empty"
+            )
+        normalized_items: list[dict[str, Any]] = []
+        for index, raw_item in enumerate(raw_items):
+            if not isinstance(raw_item, Mapping):
+                raise ValueError("periodic-report editorial item is invalid")
+            item = dict(raw_item)
+            if item.get("item_id") is not None:
+                raise ValueError(
+                    "periodic-report editorial item_id is assigned by the consumer"
+                )
+            if (
+                item.get("value_rank") is not None
+                or item.get("content_kind") is not None
+            ):
+                raise ValueError(
+                    "periodic-report editorial ordering and semantics are assigned by the consumer"
+                )
+            source_ref = str(item.get("source_ref") or "")
+            if source_ref not in allowed_refs:
+                raise ValueError(
+                    "periodic-report editorial item must reference a supplied fact"
+                )
+            item["item_id"] = f"{section_id}_{index + 1}"
+            item["value_rank"] = order * 10 + index
+            item["content_kind"] = _SECTION_CONTENT_KINDS[section_id]
+            narrative_text.extend(
+                [str(item.get("title") or ""), str(item.get("summary") or "")]
+            )
+            if section_id == "causal_analysis":
+                details = item.get("details")
+                if not isinstance(details, list) or len(details) < 2:
+                    raise ValueError(
+                        "causal analysis items require at least two evidence/boundary details"
+                    )
+            normalized_items.append(item)
+            item_total += 1
+        normalized_sections.append(
+            {
+                "section_id": section_id,
+                "title": section_title,
+                "order": order * 10,
+                "items": normalized_items,
+            }
+        )
+    if item_total < 6 or _chinese_density(" ".join(narrative_text)) < 0.45:
+        raise ValueError(
+            "periodic-report editorial response must contain a substantive Chinese narrative"
+        )
+    highlights = response.get("highlights")
+    if not isinstance(highlights, list) or not 2 <= len(highlights) <= 4:
+        raise ValueError("periodic-report editorial response requires 2-4 highlights")
+    highlight_text = " ".join(
+        f"{highlight.get('value', '')} {highlight.get('label', '')} "
+        f"{highlight.get('detail', '')}"
+        for highlight in highlights
+        if isinstance(highlight, Mapping)
+    )
+    if _chinese_density(highlight_text) < 0.45:
+        raise ValueError("periodic-report editorial highlights must be Chinese-first")
+    return {
+        "title": title,
+        "editorial": {
+            "language": "zh-CN",
+            "kicker": str(response.get("kicker") or "阶段分析周报"),
+            "period_label": expected_period_label,
+            "highlights": highlights,
+        },
+        "sections": normalized_sections,
+    }
+
+
+def _build_authored_source(
+    authored: Mapping[str, Any], *, completed_at: str
+) -> dict[str, Any]:
+    return build_periodic_report_source_result(
+        source_id="project_progress",
+        source_kind="validated_project_progress",
+        status="complete",
+        observed_at=completed_at,
+        sections=list(authored["sections"]),
+        retryable=False,
+    )
+
+
+def consume_pending_periodic_report_intent(
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    goal_id: str,
+    agent_id: str,
+    execute: bool,
+) -> dict[str, Any]:
+    intents = pending_periodic_report_intents(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+    )
+    if not intents:
+        return {
+            "ok": True,
+            "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
+            "status": "no_pending_intent",
+            "external_writes_performed": False,
+        }
+    intent = intents[0]
+    trigger = evaluate_periodic_report_trigger_evaluation_intent(intent)
+    payload = intent["payload"]
+    stage = payload["stage_completion"]
+    completed_at = str(stage["completed_at"])
+    project_progress = payload.get("project_progress")
+    facts = (
+        _progress_facts_from_snapshot(
+            project_progress,
+            goal_id=goal_id,
+            completed_at=completed_at,
+        )
+        if isinstance(project_progress, Mapping)
+        else _progress_facts(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            completed_at=completed_at,
+        )
+    )
+    actionable, rejection_revision = _next_attempt_revision(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        intent=intent,
+    )
+    if not actionable:
+        return {
+            "ok": True,
+            "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
+            "status": "no_pending_intent",
+            "external_writes_performed": False,
+        }
+    request_path = _editorial_request_path(
+        runtime_root,
+        goal_id,
+        intent,
+        rejection_revision=rejection_revision,
+    )
+    response_path = _editorial_response_path(
+        runtime_root,
+        goal_id,
+        intent,
+        rejection_revision=rejection_revision,
+    )
+    intent_digest = _canonical_digest(intent)
+    editorial_request = _load_frozen_editorial_request(
+        request_path=request_path,
+        intent_digest=intent_digest,
+        goal_id=goal_id,
+        agent_id=agent_id,
+    ) or _build_editorial_request(
+        intent=intent,
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        completed_at=completed_at,
+        facts=facts,
+    )
+    if not response_path.is_file():
+        result = {
+            "ok": True,
+            "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
+            "status": "editorial_required",
+            "goal_id": goal_id,
+            "agent_id": agent_id,
+            "intent_digest": intent_digest,
+            "agent_read_required": True,
+            "editorial_contract": editorial_request["narrative_contract"],
+            "editorial_request_path": str(request_path),
+            "editorial_response_path": str(response_path),
+            "external_writes_performed": False,
+        }
+        if execute:
+            request_path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(request_path, editorial_request)
+        return result
+    authored = _load_editorial_response(
+        request=editorial_request,
+        response_path=response_path,
+    )
+    source = _build_authored_source(authored, completed_at=completed_at)
+    work_window = editorial_request["actual_work_window"]
+    profile_ref = payload["profile_ref"]
+    document = build_periodic_report_document(
+        title=str(authored["title"]),
+        generated_at=completed_at,
+        period_window={
+            "start_at": str(work_window["start_at"]),
+            "end_at": str(work_window["end_at"]),
+        },
+        profile={
+            "profile_id": profile_ref["profile_id"],
+            "profile_version": profile_ref["profile_version"],
+        },
+        sources=[source],
+        editorial=dict(authored["editorial"]),
+        trigger_receipt=trigger,
+    )
+    markdown = render_periodic_report_markdown(document)
+    html = render_periodic_report_html(document)
+    bundle = build_periodic_report_generation_bundle(
+        document=document, artifacts=[markdown, html]
+    )
+    generation = bundle["generation_receipt"]
+    digest_suffix = str(generation["generation_id"]).split("_")[-1][:16]
+    result: dict[str, Any] = {
+        "ok": True,
+        "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
+        "status": "preview",
+        "goal_id": goal_id,
+        "agent_id": agent_id,
+        "intent_digest": intent_digest,
+        "generation_receipt": generation,
+        "content_checks": {
+            "schema_version": "periodic_report_content_checks_v0",
+            "document_normalized": True,
+            "artifact_digests_verified": True,
+            "html_self_contained": html.get("external_dependencies") == [],
+            "matching_document_digest": (
+                html.get("document_digest") == markdown.get("document_digest")
+            ),
+            "language_is_zh_cn": True,
+            "analysis_narrative_validated": True,
+            "evidence_lineage_validated": True,
+            "external_writes_performed": False,
+        },
+        "approval_scope": f"direction:action:periodic_report_{digest_suffix}",
+        "external_writes_performed": False,
+    }
+    if not execute:
+        return result
+
+    receipt_path = _receipt_path(
+        runtime_root,
+        goal_id,
+        intent,
+        rejection_revision=rejection_revision,
+    )
+    artifact_dir = receipt_path.parent
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    markdown_path = artifact_dir / "report.md"
+    html_path = artifact_dir / "report.html"
+    generation_bundle_path = artifact_dir / "generation-bundle.json"
+    markdown_path.write_text(str(markdown["content"]), encoding="utf-8")
+    html_path.write_text(str(html["content"]), encoding="utf-8")
+    atomic_write_json(generation_bundle_path, bundle)
+    approval_scope = str(result["approval_scope"])
+    delivery = add_goal_todo(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        role="agent",
+        text=(
+            "[P0] Deliver the approved periodic report as two independent Goal "
+            "Channel messages: the report entry and the Lark document entry for "
+            f"{generation['generation_id']}."
+        ),
+        status="blocked",
+        note=(
+            "Use only the frozen generation consumption receipt and the current "
+            "Goal Channel project_bot binding; do not fall back to a user or "
+            "default Bot identity."
+        ),
+        task_class="advancement_task",
+        action_kind="deliver_periodic_report_goal_channel",
+        task_domain="provider_delivery",
+        capability_binding_ref=f"periodic-report:{digest_suffix}",
+        required_write_scopes=["goal_channel/lark/messages"],
+        required_capabilities=["network", "lark_bot_message_write"],
+        target_capabilities=["periodic_report", "goal_channel"],
+        required_decision_scopes=[approval_scope],
+        claimed_by=agent_id,
+        agent_id=agent_id,
+    )
+    gate = add_goal_todo(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        role="user",
+        text=(
+            "[P0] 审阅并批准精确冻结的中文阶段分析周报 "
+            f"{generation['generation_id']}；批准前不得发布妙搭或发送群消息。"
+        ),
+        note=(
+            f"HTML digest {html['content_digest']}; Markdown digest "
+            f"{markdown['content_digest']}; approval grants only the exact frozen payload."
+        ),
+        task_class="user_gate",
+        action_kind="approve_periodic_report_payload",
+        decision_scope=approval_scope,
+        bound_agent=agent_id,
+        blocks_agent=agent_id,
+        unblocks_todo_id=str(delivery["todo_id"]),
+        agent_id=agent_id,
+    )
+    durable = {
+        **result,
+        "status": "approval_pending",
+        "approval_todo_id": gate.get("todo_id"),
+        "delivery_todo_id": delivery.get("todo_id"),
+        "artifacts": {
+            "html_path": str(html_path),
+            "html_digest": html["content_digest"],
+            "markdown_path": str(markdown_path),
+            "markdown_digest": markdown["content_digest"],
+            "generation_bundle_path": str(generation_bundle_path),
+        },
+    }
+    atomic_write_json(receipt_path, durable)
+    return durable
+
+
+__all__ = [
+    "consume_pending_periodic_report_intent",
+    "pending_periodic_report_intents",
+    "periodic_report_pending_intent_interaction_hook",
+]

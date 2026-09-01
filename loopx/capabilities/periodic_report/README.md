@@ -88,17 +88,71 @@ material facts are coalesced into one report and previously covered trigger
 ids are deduplicated.
 
 An enabled custom profile may also declare `trigger_policy.aggregation` with a
-bounded `window_seconds`, an optional `todo_completed_threshold`, and
-`promote_replan`. The `evaluate-runtime-trigger` command reads the durable
-public-safe rollout event log supplied by the caller, deduplicates completed
-Todo ids, and promotes either the threshold crossing or a durable
-`autonomous_replan_recorded` refresh into the normal
-`bounded_segment_milestone` decision. The producer performs no provider call or
-external write; an eligible receipt continues through the existing
-`compose-run`, renderer, and separately authorized sink boundaries.
+bounded `window_seconds` and `stage_completion_required=true`. Stage completion
+reuses the existing goal-vision, outcome-checkpoint, and frontier-replan facts:
+the current vision must close through an evidence-linked material checkpoint,
+and the Goal must either become terminal or durably settle the existing
+`vision_successor_required` transition into a successor vision and owned
+frontier. The `evaluate-runtime-trigger` command promotes only that derived
+success-path receipt into `bounded_segment_milestone`.
+
+No Todo predeclaration or separate Stage lifecycle is required. Todo count,
+elapsed time, ordinary completion, and blocker/stall/long-chain/monitor replans
+remain context and never produce a report by themselves. The producer performs
+no provider call or external write; an eligible receipt continues through the
+existing `compose-run`, renderer, and separately authorized approval and sink
+boundaries.
 The CLI streams the append-only log and applies the 4,096-row capacity limit
 only after goal, segment-window, and relevant-kind filtering. Malformed durable
 rows and an oversized relevant window fail closed.
+
+### Automatic post-writeback intent
+
+Automatic milestone evaluation is default-off. A project may opt the built-in
+weekly profile into the generic post-writeback hook at its local registry
+composition boundary:
+
+```json
+{
+  "control_plane": {
+    "periodic_report": {
+      "enabled": true,
+      "profile_preset": "weekly"
+    }
+  }
+}
+```
+
+After a committed `refresh-state` writeback with complete
+Goal/Agent/Todo/Turn/effect identity, core dispatches the TypeScript-validated
+`post_writeback` hook outside the primary transaction. The capability receives
+only a bounded stage-completion projection and its public-safe progress
+snapshot, both captured at the writeback boundary. It may propose one
+idempotent `periodic_report.trigger_evaluation` intent. Core checkpoints that
+proposal in a replay-safe sidecar. A transient failure is durably recorded as
+`retryable_failure`; the next exact replay advances its attempt and may replace
+it with `intent_recorded` or `not_applicable`, while terminal replay returns the
+original receipt without invoking the provider again. Disabled profiles,
+incomplete settlement identity, ordinary
+Todo completion, and generic replan produce no provider invocation or intent.
+
+The intent is not a report and grants no generation, publication, connector,
+network, credential, or sink authority. A separate governed executor may
+evaluate it into the normal trigger decision. Report composition, Miaoda HTML,
+content review, explicit owner approval, and any group delivery remain later
+independent gates.
+
+`quota should-run` reads eligible `intent_recorded` sidecars for the exact Goal
+and Agent. A pending intent takes precedence over monitor-quiet and terminal
+no-follow-up projection and returns one TypeScript-validated governed command.
+That command may render provider-free local HTML and Markdown, run content
+checks, persist the normalized generation bundle, and create one blocked
+delivery successor plus one approval Todo bound to that successor and frozen
+generation digest. Exact replay does not rerender or duplicate either Todo.
+Approval consumes only that successor's decision scope and resumes it, so
+normal Todo/quota selection can see the required delivery work. Miaoda
+publication and group delivery remain unauthorized until that exact Todo is
+approved.
 
 Project-specific scheduled reports should be layered as profiles and adapters.
 For example, a maintenance profile may choose a local timezone and weekly
@@ -130,6 +184,17 @@ those verified `<at>` elements before the report. A match without a renderer,
 a mismatched document/artifact digest, or provider mention markup embedded in
 the artifact, title, or footer fails before send. The core therefore owns
 relevance while the Lark extension owns provider identity and wire rendering.
+
+The bundled execution command is `periodic-report deliver-goal-channel`. It
+derives the destination and sender exclusively from the current Goal's enabled
+Goal Channel binding. Only a verified `project_bot` profile is valid; the
+request cannot provide a chat id, profile, Bot App id, display name, or sender
+identity. The intent instead supplies exactly two ordered HTTPS entries—the
+hosted report and the Lark document. Execution sends two independent messages,
+verifies the bound Bot and chat before send, then requires exact
+interactive-card, chat, and Bot-identity readback for both. Missing or drifted
+identity, either missing message, or a partial readback fails closed without a
+user/default-Bot fallback.
 
 This is a built-in capability, not an extension: callers need the trigger,
 idempotency, retry, and receipt contract even when no provider is installed.

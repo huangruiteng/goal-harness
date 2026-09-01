@@ -19,10 +19,6 @@ from .event_inbox import (
     _event_attention_kind,
     ingest_lark_event_inbox,
 )
-from .inbox_reactions import (
-    lark_inbox_reaction_lock,
-    record_lark_inbox_reaction,
-)
 
 APP_ID_PATTERN = re.compile(r"cli_[A-Za-z0-9_-]+")
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -43,7 +39,7 @@ def _run_json(
             check=False,
             timeout=timeout_seconds,
         )
-    except subprocess.TimeoutExpired:
+    except (OSError, subprocess.SubprocessError):
         return {}
     if result.returncode != 0:
         return {}
@@ -223,6 +219,17 @@ def _sender_identity(message: Mapping[str, Any]) -> tuple[str, str]:
     return sender_type, sender_id
 
 
+def _is_profile_self_message(
+    message: Mapping[str, Any], *, profile_app_id: str | None
+) -> bool:
+    """Match only a provider-typed app sender to the verified profile app id."""
+
+    if profile_app_id is None:
+        return False
+    sender_type, sender_id = _sender_identity(message)
+    return sender_type == "app" and sender_id == profile_app_id
+
+
 def enrich_lark_event_reply_context(
     event: Mapping[str, Any],
     *,
@@ -266,6 +273,8 @@ def enrich_lark_event_reply_context(
         if field in current:
             enriched[field] = current[field]
     current_sender_type, current_sender_id = _sender_identity(current)
+    if current_sender_type:
+        enriched["sender_type"] = current_sender_type
     if current_sender_id:
         enriched["sender_id"] = current_sender_id
 
@@ -466,8 +475,7 @@ def run_lark_event_collector(
     captured_count = 0
     verified_count = 0
     reply_to_bot_count = 0
-    received_reaction_count = 0
-    received_reaction_failure_count = 0
+    self_message_skipped_count = 0
     routed_chat_ids: set[str] = set()
     profile_app_id: str | None = None
     profile_identity_checked = False
@@ -485,6 +493,20 @@ def run_lark_event_collector(
             if route is None:
                 continue
             inbox = route["inbox"]
+            sender_type, _sender_id = _sender_identity(payload)
+            if sender_type == "app" and not profile_identity_checked:
+                profile_app_id = _profile_app_id(
+                    runner=runner,
+                    command_prefix=command_prefix,
+                    profile=str(config["profile"]),
+                )
+                profile_identity_checked = True
+            if _is_profile_self_message(
+                payload,
+                profile_app_id=profile_app_id,
+            ):
+                self_message_skipped_count += 1
+                continue
             needs_reply_lookup = lark_event_requires_reply_context_lookup(
                 payload,
                 bot_display_name=str(inbox["reply"].get("bot_display_name") or ""),
@@ -519,67 +541,33 @@ def run_lark_event_collector(
                         "reply_to_bot": False,
                     }
                 )
+            if _is_profile_self_message(
+                enriched,
+                profile_app_id=profile_app_id,
+            ):
+                self_message_skipped_count += 1
+                continue
             message_id = str(enriched.get("message_id") or "")
             if not MESSAGE_ID_PATTERN.fullmatch(message_id):
                 continue
-            with lark_inbox_reaction_lock(
-                inbox=inbox["inbox_path"],
-                message_id=message_id,
-            ):
-                result = ingest_lark_event_inbox(
-                    project=config["project"],
-                    config_path=route["event_inbox_config_ref"],
-                    events=[
-                        {
-                            "schema_version": "lark_event_inbox_event_v0",
-                            **enriched,
-                            "route_key": route["route_key"],
-                        }
-                    ],
-                    execute=True,
-                )
-                if int(result.get("accepted_count") or 0) == 0:
-                    continue
-                captured_count += 1
-                routed_chat_ids.add(chat_id)
-                verified_count += int(enriched.get("reply_context_verified") is True)
-                reply_to_bot_count += int(enriched.get("reply_to_bot") is True)
-                attention_kind = _event_attention_kind(
-                    enriched,
-                    bot_display_name=str(inbox["reply"].get("bot_display_name") or ""),
-                    capture_scope="configured_chat_all",
-                )
-                received_reaction_emoji = str(
-                    inbox["reply"].get("received_reaction_emoji") or ""
-                )
-                if attention_kind is not None and received_reaction_emoji:
-                    reaction_id = _create_lark_event_received_reaction(
-                        enriched,
-                        runner=runner,
-                        command_prefix=command_prefix,
-                        profile=str(config["profile"]),
-                        emoji_type=received_reaction_emoji,
-                    )
-                    if reaction_id:
-                        try:
-                            record_lark_inbox_reaction(
-                                inbox=inbox["inbox_path"],
-                                message_id=message_id,
-                                phase="received",
-                                reaction_id=reaction_id,
-                                emoji_type=received_reaction_emoji,
-                            )
-                        except (OSError, ValueError):
-                            _delete_lark_event_reaction(
-                                runner=runner,
-                                command_prefix=command_prefix,
-                                profile=str(config["profile"]),
-                                message_id=message_id,
-                                reaction_id=reaction_id,
-                            )
-                            reaction_id = None
-                    received_reaction_count += int(reaction_id is not None)
-                    received_reaction_failure_count += int(reaction_id is None)
+            result = ingest_lark_event_inbox(
+                project=config["project"],
+                config_path=route["event_inbox_config_ref"],
+                events=[
+                    {
+                        "schema_version": "lark_event_inbox_event_v0",
+                        **enriched,
+                        "route_key": route["route_key"],
+                    }
+                ],
+                execute=True,
+            )
+            if int(result.get("accepted_count") or 0) == 0:
+                continue
+            captured_count += 1
+            routed_chat_ids.add(chat_id)
+            verified_count += int(enriched.get("reply_context_verified") is True)
+            reply_to_bot_count += int(enriched.get("reply_to_bot") is True)
         returncode = process.wait()
     finally:
         if process.poll() is None:
@@ -605,9 +593,14 @@ def run_lark_event_collector(
         "multi_chat_routing": len(config["routes"]) > 1,
         "reply_context_verified_count": verified_count,
         "reply_to_bot_count": reply_to_bot_count,
-        "received_reaction_count": received_reaction_count,
-        "received_reaction_failure_count": received_reaction_failure_count,
-        "external_writes_performed": received_reaction_count > 0,
+        # Retain the collector receipt shape while making its no-write
+        # boundary explicit. Read acknowledgements are emitted by turn-start.
+        "received_reaction_count": 0,
+        "received_reaction_failure_count": 0,
+        "self_message_skipped_count": self_message_skipped_count,
+        # Collection proves durable capture only.  Provider acknowledgement is
+        # owned by the Agent's next turn-start read boundary.
+        "external_writes_performed": False,
         "profile_identity_checked": profile_identity_checked,
         "profile_identity_verified": profile_app_id is not None,
         "chat_ids_returned": False,

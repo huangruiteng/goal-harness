@@ -17,10 +17,10 @@
           "status": "committed",
           "completed_phases": ["host_execute", "typed_result", "validation", "durable_writeback", "quota_spend", "scheduler_apply", "scheduler_ack"],
           "plan": {
-            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent", "action": {"selected_todo": {"todo_id": "todo_fixture0001"}}},
             "transaction": {
               "turn_key": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+              "settlement_plan": {"schema_version": "quota_settlement_plan_v1", "identity": {"schema_version": "quota_settlement_identity_v0", "effect_id": "fixture-goal:fixture-agent:todo_fixture0001:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "goal_id": "fixture-goal", "agent_id": "fixture-agent", "todo_id": "todo_fixture0001", "turn_instance_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
             }
           },
           "host_result": {"turn_key": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
@@ -44,10 +44,10 @@
           "status": "stopped",
           "completed_phases": ["host_execute", "typed_result"],
           "plan": {
-            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent", "action": {"selected_todo": {"todo_id": "todo_fixture0001"}}},
             "transaction": {
               "turn_key": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+              "settlement_plan": {"schema_version": "quota_settlement_plan_v1", "identity": {"schema_version": "quota_settlement_identity_v0", "effect_id": "fixture-goal:fixture-agent:todo_fixture0001:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "goal_id": "fixture-goal", "agent_id": "fixture-agent", "todo_id": "todo_fixture0001", "turn_instance_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}
             }
           },
           "host_result": {"turn_key": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
@@ -71,10 +71,10 @@
           "status": "failed",
           "completed_phases": [],
           "plan": {
-            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent", "action": {"selected_todo": {"todo_id": "todo_fixture0001"}}},
             "transaction": {
               "turn_key": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+              "settlement_plan": {"schema_version": "quota_settlement_plan_v1", "identity": {"schema_version": "quota_settlement_identity_v0", "effect_id": "fixture-goal:fixture-agent:todo_fixture0001:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "goal_id": "fixture-goal", "agent_id": "fixture-agent", "todo_id": "todo_fixture0001", "turn_instance_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}
             }
           }
         }
@@ -96,10 +96,10 @@
           "status": "committed",
           "completed_phases": ["host_execute"],
           "plan": {
-            "turn_envelope": {"goal_id": "other-goal", "agent_id": "fixture-agent"},
+            "turn_envelope": {"goal_id": "other-goal", "agent_id": "fixture-agent", "action": {"selected_todo": {"todo_id": "todo_fixture0001"}}},
             "transaction": {
               "turn_key": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-              "settlement_plan": {"identity": {"goal_id": "other-goal", "agent_id": "fixture-agent"}}
+              "settlement_plan": {"schema_version": "quota_settlement_plan_v1", "identity": {"schema_version": "quota_settlement_identity_v0", "effect_id": "other-goal:fixture-agent:todo_fixture0001:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "goal_id": "other-goal", "agent_id": "fixture-agent", "todo_id": "todo_fixture0001", "turn_instance_id": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}}
             }
           }
         }
@@ -121,10 +121,10 @@
           "status": "committed",
           "completed_phases": ["host_execute"],
           "plan": {
-            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "other-agent"},
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "other-agent", "action": {"selected_todo": {"todo_id": "todo_fixture0001"}}},
             "transaction": {
               "turn_key": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "other-agent"}}
+              "settlement_plan": {"schema_version": "quota_settlement_plan_v1", "identity": {"schema_version": "quota_settlement_identity_v0", "effect_id": "fixture-goal:other-agent:todo_fixture0001:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "goal_id": "fixture-goal", "agent_id": "other-agent", "todo_id": "todo_fixture0001", "turn_instance_id": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}
             }
           }
         }
@@ -146,10 +146,10 @@
           "status": "committed",
           "completed_phases": ["host_execute"],
           "plan": {
-            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent", "action": {"selected_todo": {"todo_id": "todo_fixture0001"}}},
             "transaction": {
               "turn_key": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+              "settlement_plan": {"schema_version": "quota_settlement_plan_v1", "identity": {"schema_version": "quota_settlement_identity_v0", "effect_id": "fixture-goal:fixture-agent:todo_fixture0001:sha256:1111111111111111111111111111111111111111111111111111111111111111", "goal_id": "fixture-goal", "agent_id": "fixture-agent", "todo_id": "todo_fixture0001", "turn_instance_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}}
             }
           },
           "host_result": {"turn_key": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}
@@ -172,10 +172,10 @@
           "status": "committed",
           "completed_phases": ["host_execute", "validation"],
           "plan": {
-            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent", "action": {"selected_todo": {"todo_id": "todo_fixture0001"}}},
             "transaction": {
               "turn_key": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+              "settlement_plan": {"schema_version": "quota_settlement_plan_v1", "identity": {"schema_version": "quota_settlement_identity_v0", "effect_id": "fixture-goal:fixture-agent:todo_fixture0001:sha256:2222222222222222222222222222222222222222222222222222222222222222", "goal_id": "fixture-goal", "agent_id": "fixture-agent", "todo_id": "todo_fixture0001", "turn_instance_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222"}}
             }
           }
         }
@@ -197,10 +197,10 @@
           "status": "in_progress",
           "completed_phases": ["host_execute"],
           "plan": {
-            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent", "action": {"selected_todo": {"todo_id": "todo_fixture0001"}}},
             "transaction": {
               "turn_key": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+              "settlement_plan": {"schema_version": "quota_settlement_plan_v1", "identity": {"schema_version": "quota_settlement_identity_v0", "effect_id": "fixture-goal:fixture-agent:todo_fixture0001:sha256:3333333333333333333333333333333333333333333333333333333333333333", "goal_id": "fixture-goal", "agent_id": "fixture-agent", "todo_id": "todo_fixture0001", "turn_instance_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333"}}
             }
           }
         }
@@ -222,10 +222,10 @@
           "status": "retired",
           "completed_phases": ["host_execute"],
           "plan": {
-            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent", "action": {"selected_todo": {"todo_id": "todo_fixture0001"}}},
             "transaction": {
               "turn_key": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+              "settlement_plan": {"schema_version": "quota_settlement_plan_v1", "identity": {"schema_version": "quota_settlement_identity_v0", "effect_id": "fixture-goal:fixture-agent:todo_fixture0001:sha256:4444444444444444444444444444444444444444444444444444444444444444", "goal_id": "fixture-goal", "agent_id": "fixture-agent", "todo_id": "todo_fixture0001", "turn_instance_id": "sha256:4444444444444444444444444444444444444444444444444444444444444444"}}
             }
           }
         }
@@ -247,10 +247,10 @@
           "status": "committed",
           "completed_phases": ["host_execute", null],
           "plan": {
-            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"},
+            "turn_envelope": {"goal_id": "fixture-goal", "agent_id": "fixture-agent", "action": {"selected_todo": {"todo_id": "todo_fixture0001"}}},
             "transaction": {
               "turn_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
-              "settlement_plan": {"identity": {"goal_id": "fixture-goal", "agent_id": "fixture-agent"}}
+              "settlement_plan": {"schema_version": "quota_settlement_plan_v1", "identity": {"schema_version": "quota_settlement_identity_v0", "effect_id": "fixture-goal:fixture-agent:todo_fixture0001:sha256:5555555555555555555555555555555555555555555555555555555555555555", "goal_id": "fixture-goal", "agent_id": "fixture-agent", "todo_id": "todo_fixture0001", "turn_instance_id": "sha256:5555555555555555555555555555555555555555555555555555555555555555"}}
             }
           }
         }

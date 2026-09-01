@@ -17,9 +17,7 @@ from .heartbeat_receipt import (
     upgrade_identityless_heartbeat_receipt,
 )
 from .settlement import (
-    require_settlement_spend,
-    require_settlement_writeback,
-    resolve_heartbeat_settlement_identity,
+    read_heartbeat_settlement,
     settlement_result_payload,
 )
 from .settlement_workspace_causality import (
@@ -335,7 +333,7 @@ def attach_spend_settlement_result(
     turn_instance_id: str,
     replan_obligation_id: str | None = None,
 ) -> None:
-    guard_result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         runtime_root,
         goal_id=goal_id,
         agent_id=agent_id,
@@ -343,21 +341,13 @@ def attach_spend_settlement_result(
         turn_instance_id=turn_instance_id,
         replan_obligation_id=replan_obligation_id,
     )
-    identity = guard_result.value
+    if readback is None:
+        raise RuntimeError("exact settlement readback unexpectedly returned not-found")
+    identity = readback.identity.value
     if identity is None:
-        settlement_result = guard_result
+        settlement_result = readback.identity
     else:
-        settlement_result = guard_result.bind(
-            lambda resolved: require_settlement_writeback(
-                runtime_root,
-                resolved,
-            )
-        ).bind(
-            lambda _writeback: require_settlement_spend(
-                runtime_root,
-                identity,
-            )
-        )
+        settlement_result = readback.settlement
     payload["settlement_result"] = settlement_result_payload(settlement_result)
     if settlement_result.failure is not None:
         payload["ok"] = False

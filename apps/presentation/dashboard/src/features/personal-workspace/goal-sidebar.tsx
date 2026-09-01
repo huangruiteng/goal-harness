@@ -1,5 +1,6 @@
 import { Bot, ChevronDown, ChevronRight, Pause, Plus, RotateCcw, Settings2, Trash2 } from "lucide-react";
 
+import { localizedGoalState, useWorkspaceI18n } from "./i18n";
 import type { WorkspaceGoal } from "./personal-workspace-model";
 import { StatusSourceSwitcher, type StatusSourceControl } from "./status-source-switcher";
 
@@ -16,6 +17,7 @@ const goalStateClass: Record<WorkspaceGoal["state"], string> = {
 export function GoalSidebar({
   attentionCount,
   goals,
+  lifecycleBusyGoalIds,
   onRequestGoalCreate,
   onOpenSettings,
   onRequestGoalLifecycle,
@@ -25,6 +27,7 @@ export function GoalSidebar({
 }: {
   attentionCount: number;
   goals: WorkspaceGoal[];
+  lifecycleBusyGoalIds?: ReadonlySet<string>;
   onRequestGoalCreate?: () => void;
   onOpenSettings?: () => void;
   onRequestGoalLifecycle?: (goal: WorkspaceGoal, operation: "stop" | "resume" | "delete") => void;
@@ -32,6 +35,7 @@ export function GoalSidebar({
   selectedGoalId: string | null;
   statusSourceControl?: StatusSourceControl;
 }) {
+  const { locale, t } = useWorkspaceI18n();
   const activeGoals = goals.filter((goal) => goal.activationState !== "stopped");
   const stoppedGoals = goals.filter((goal) => goal.activationState === "stopped");
   const goalRow = (goal: WorkspaceGoal, stopped: boolean) => (
@@ -45,27 +49,28 @@ export function GoalSidebar({
         <span className={`personal-goal-state-dot ${goalStateClass[goal.state]}`} />
         <span className="personal-goal-link-copy">
           <strong>{goal.title}</strong>
-          <small>{goal.state}{goal.needsYou && !stopped ? " · 需要你" : ""}</small>
+          <small>{localizedGoalState(goal.state, locale)}{goal.needsYou && !stopped ? ` · ${t("home.lane.needsYou")}` : ""}</small>
         </span>
         <ChevronRight size={15} />
       </button>
       {onRequestGoalLifecycle ? (
         <>
           <button
-            aria-label={`${stopped ? "恢复" : "停止"} ${goal.title}`}
+            aria-label={`${stopped ? t("sidebar.resume") : t("sidebar.stop")} ${goal.title}`}
             className="personal-goal-lifecycle"
+            disabled={lifecycleBusyGoalIds?.has(goal.goalId)}
             onClick={() => onRequestGoalLifecycle(goal, stopped ? "resume" : "stop")}
-            title={stopped ? "恢复 Goal" : "停止 Goal"}
+            title={stopped ? t("sidebar.resumeGoal") : t("sidebar.stopGoal")}
             type="button"
           >
             {stopped ? <RotateCcw size={13} /> : <Pause size={13} />}
           </button>
           {stopped ? (
             <button
-              aria-label={`删除 ${goal.title}`}
+              aria-label={`${t("sidebar.delete")} ${goal.title}`}
               className="personal-goal-lifecycle personal-goal-delete"
               onClick={() => onRequestGoalLifecycle(goal, "delete")}
-              title="删除 Goal"
+              title={t("sidebar.deleteGoal")}
               type="button"
             >
               <Trash2 size={13} />
@@ -79,12 +84,12 @@ export function GoalSidebar({
     <div className="personal-goal-directory">
       <div className="personal-sidebar-brand">
         <span className="personal-brand-mark"><Bot size={18} /></span>
-        <span><strong>LoopX</strong><small>个人 Agent 工作区</small></span>
+        <span><strong>LoopX</strong><small>{t("sidebar.product")}</small></span>
       </div>
 
       {statusSourceControl ? <StatusSourceSwitcher {...statusSourceControl} /> : null}
 
-      <nav aria-label="工作区频道" className="personal-sidebar-nav">
+      <nav aria-label={t("home.workspace")} className="personal-sidebar-nav">
         <button
           aria-current={selectedGoalId === null ? "page" : undefined}
           className="personal-manager-link"
@@ -92,14 +97,14 @@ export function GoalSidebar({
           type="button"
         >
           <span className="personal-manager-icon"><Bot size={17} /></span>
-          <span>LoopX 管家</span>
+          <span>{t("sidebar.manager")}</span>
           {attentionCount > 0 ? <span className="personal-sidebar-count">{attentionCount}</span> : null}
           <ChevronRight size={15} />
         </button>
 
         <div className="personal-sidebar-section-title">
           <span>Goals</span>
-          <span className="personal-sidebar-title-actions"><small>{activeGoals.length}</small>{onRequestGoalCreate ? <button aria-label="创建 Goal" onClick={onRequestGoalCreate} type="button"><Plus size={15} /></button> : null}</span>
+          <span className="personal-sidebar-title-actions"><small>{activeGoals.length}</small>{onRequestGoalCreate ? <button aria-label={t("sidebar.createGoal")} onClick={onRequestGoalCreate} type="button"><Plus size={15} /></button> : null}</span>
         </div>
         <div className="personal-goal-list">
           {activeGoals.map((goal) => goalRow(goal, false))}
@@ -108,7 +113,7 @@ export function GoalSidebar({
           <details className="personal-stopped-goals">
             <summary>
               <ChevronDown size={13} />
-              <span>已停止</span>
+              <span>{t("sidebar.stopped")}</span>
               <small>{stoppedGoals.length}</small>
             </summary>
             <div className="personal-goal-list is-stopped">
@@ -120,7 +125,7 @@ export function GoalSidebar({
 
       <div className="personal-sidebar-footer">
         {onOpenSettings ? (
-          <button className="personal-sidebar-utility" onClick={onOpenSettings} type="button"><Settings2 size={17} /><span>设置</span></button>
+          <button className="personal-sidebar-utility" onClick={onOpenSettings} type="button"><Settings2 size={17} /><span>{t("settings.open")}</span></button>
         ) : null}
       </div>
     </div>

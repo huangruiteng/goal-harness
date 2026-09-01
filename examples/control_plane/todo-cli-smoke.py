@@ -277,6 +277,9 @@ def main() -> int:
             "--text",
             AGENT_TODO,
         )
+        # Omit-note negative (GH-C97): an add without --note must not invent a note.
+        assert legacy_agent["added"] is True, legacy_agent
+        assert not legacy_agent.get("note"), legacy_agent
         legacy_claim = run_cli_error(
             legacy_registry_path,
             "todo",

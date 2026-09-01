@@ -10,6 +10,9 @@ from ..capabilities.explore.composition_frontier import (
 from ..capabilities.repository_change_window import (
     repository_delivery_interaction_hook,
 )
+from ..capabilities.periodic_report.pending_intent import (
+    periodic_report_pending_intent_interaction_hook,
+)
 from ..control_plane.quota.cli_projection import (
     compact_quota_monitor_poll_cli_payload,
     compact_quota_should_run_cli_payload,
@@ -39,6 +42,7 @@ from ..control_plane.quota.settlement_cli import (
     render_existing_heartbeat_receipt_payload,
 )
 from ..control_plane.quota.turn_envelope import build_turn_envelope
+from ..control_plane.effect_runtime import EffectRuntimeRejected
 from ..control_plane.scheduler.execution_context import (
     GUIDED_START_TURN_RUNTIME_PROFILES,
 )
@@ -463,6 +467,28 @@ def _attach_turn_start_hook_dispatch(
         payload["turn_start_capability_hook_dispatch"] = dict(dispatch)
 
 
+
+def _render_turn_envelope_payload(
+    payload: dict[str, object],
+    scheduler_context: object,
+) -> dict[str, object]:
+    """Render the Turn envelope, degrading to the typed payload on rejection.
+
+    The envelope is an additive hot-path view over a decided payload. A typed
+    validation/failure payload has no interaction contract to project, so a
+    renderer rejection keeps the typed diagnostic itself (with the skip reason)
+    instead of masking it with a crash (issue #3687).
+    """
+    try:
+        return build_turn_envelope(
+            payload,
+            scheduler_execution_context=scheduler_context,
+        )
+    except EffectRuntimeRejected as envelope_error:
+        degraded = dict(payload)
+        degraded["turn_envelope_skipped"] = str(envelope_error)[:200]
+        return degraded
+
 def handle_quota_command(
     args: argparse.Namespace,
     *,
@@ -508,6 +534,12 @@ def handle_quota_command(
         if args.quota_command == "should-run":
             interaction_projection_hooks = (
                 repository_delivery_interaction_hook(repo_path=Path.cwd()),
+                periodic_report_pending_intent_interaction_hook(
+                    registry_path=registry_path,
+                    runtime_root=runtime_root,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                ),
             )
             (
                 heartbeat_receipt_existing,
@@ -877,9 +909,9 @@ def handle_quota_command(
                     replan_obligation_id=rollout_replan_obligation_id,
                 )
     if bool(getattr(args, "turn_envelope", False)):
-        payload = build_turn_envelope(
+        payload = _render_turn_envelope_payload(
             payload,
-            scheduler_execution_context=scheduler_context,
+            context.scheduler_context if context is not None else None,
         )
     elif args.quota_command == "should-run":
         payload = compact_quota_should_run_cli_payload(

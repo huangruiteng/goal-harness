@@ -160,6 +160,9 @@ launch packet. The `start --execute` command opens visible Codex CLI lanes
 through the generic multi-agent kernel; lane-authored evidence still has to be
 written back through LoopX state before the demo can claim progress. See the
 [auto-research command path](../../demo/auto_research/README.md).
+For the shipped stop marker, `--attach` takeover, and state-aware wake cycle,
+use the contributor
+[stop/takeover/wake walkthrough](../guides/auto-research-stop-takeover-wake-walkthrough.md).
 
 ### Review Agent Work
 

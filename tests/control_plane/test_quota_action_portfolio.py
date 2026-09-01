@@ -184,6 +184,24 @@ def test_sticky_primary_exposes_bounded_agent_selection_on_every_hot_path() -> N
     assert envelope["compaction"]["within_budget"] is True
 
 
+def test_explicit_action_selection_preserves_runtime_root_route() -> None:
+    packet = build_quota_should_run(
+        _legacy_future_primary_status(),
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        turn_instance_id="turn-portfolio-002",
+        available_capabilities=["fallback_runner"],
+        runtime_root="/tmp/loopx runtime",
+    )
+
+    selection_command = packet["interaction_contract"]["cli_channel"][
+        "selection_command"
+    ]
+    assert selection_command["route_prefix"] == (
+        "loopx --runtime-root '/tmp/loopx runtime' --format json"
+    )
+
+
 def test_typed_future_monitor_selects_ready_work_and_preserves_priority() -> None:
     future_monitor = quota_todo_item(
         todo_id=PRIMARY_ID,

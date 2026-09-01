@@ -1,21 +1,12 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ...rollout_event_log import load_rollout_events, rollout_event_log_path
-from ...turn_identity import normalize_turn_instance_id
-from ..todos.contract import (
-    normalize_todo_claimed_by,
-    normalize_todo_id,
-    normalize_todo_replan_obligation_id,
-)
-from ..work_items.delivery_outcome import (
-    ACCOUNTABLE_DELIVERY_OUTCOMES,
-    normalize_delivery_outcome,
-)
+from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
+from ..settlement_driver import decode_settlement_result
 from .effect_program import (
     SETTLEMENT_IDENTITY_SCHEMA_VERSION,
     SETTLEMENT_PLAN_SCHEMA_VERSION,
@@ -30,21 +21,39 @@ from .effect_program import (
     SettlementStepKind,
     ReceiptBoundMonitorPhase,
     ReceiptBoundReplayPhase,
-    ReceiptBoundTerminalPhase,
     build_codex_app_settlement_plan,
     build_turn_scoped_cli_settlement_plan,
     settlement_binding_args,
-    receipt_bound_monitor_phase,
-    receipt_bound_replay_phase,
     settlement_result_payload,
     settlement_step_command,
 )
-from .heartbeat_receipt import find_heartbeat_receipt
-from .monitor_poll import find_quota_monitor_poll_turn
-from .settlement_workspace_causality import (
-    delivery_workspace_causality_from_event_details,
+
+QUOTA_SETTLEMENT_READBACK_REQUEST_SCHEMA = (
+    "loopx_quota_settlement_readback_request_v0"
 )
-from ..settlement_driver import effect_ids_match, settlement_receipt
+QUOTA_SETTLEMENT_READBACK_RESULT_SCHEMA = (
+    "loopx_quota_settlement_readback_result_v0"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class QuotaSettlementReadback:
+    identity: SettlementResult[SettlementIdentity]
+    writeback: SettlementResult[dict[str, Any]]
+    spend: SettlementResult[dict[str, Any]]
+    delivery: SettlementResult[dict[str, Any]]
+    settlement: SettlementResult[dict[str, Any]]
+    terminal_closeout: SettlementResult[dict[str, Any]]
+    terminal_settlement: SettlementResult[dict[str, Any]]
+    workspace_causality: dict[str, str] | None
+    writeback_run: dict[str, Any] | None
+    spend_run: dict[str, Any] | None
+    heartbeat_receipt: dict[str, Any] | None
+    writeback_event: dict[str, Any] | None
+    spend_event: dict[str, Any] | None
+    completion_event: dict[str, Any] | None
+    monitor_phase: ReceiptBoundMonitorPhase | None
+    replay_phase: ReceiptBoundReplayPhase | None
 
 __all__ = [
     "SETTLEMENT_IDENTITY_SCHEMA_VERSION",
@@ -60,643 +69,120 @@ __all__ = [
     "SettlementStepKind",
     "build_codex_app_settlement_plan",
     "build_turn_scoped_cli_settlement_plan",
-    "find_quota_spend_run_by_effect_ref",
-    "find_settlement_spend_run",
-    "find_settlement_step_event",
-    "find_settlement_writeback",
-    "infer_persisted_heartbeat_settlement_identity",
-    "receipt_bound_monitor_settlement_phase",
-    "receipt_bound_replay_settlement_phase",
-    "receipt_bound_terminal_settlement_phase",
-    "require_settlement_spend",
-    "require_settlement_terminal_closeout",
-    "require_settlement_writeback",
-    "resolve_heartbeat_settlement_identity",
-    "resolve_settlement_delivery_workspace_causality",
+    "read_heartbeat_settlement",
     "settlement_binding_args",
     "settlement_result_payload",
     "settlement_step_command",
 ]
 
 
-def receipt_bound_monitor_settlement_phase(
-    runtime_root: Path,
+def _readback_result(
+    payload: Any,
     *,
-    goal_id: str,
-    agent_id: str | None,
-    todo_id: str | None,
-    turn_instance_id: str | None,
-) -> ReceiptBoundMonitorPhase | None:
-    """Resolve the typed phase for one receipt-bound monitor turn.
-
-    A missing matching poll remains explicitly ``poll_due`` even when mutable
-    Todo scheduling metadata has moved into the future.  An unchanged poll is
-    terminal by itself.  A material poll is terminal only after the exact
-    heartbeat identity has both durable writeback and quota-spend receipts.
-    ``None`` is reserved for an invalid receipt identity or runtime failure.
-    """
-
-    normalized_agent_id = normalize_todo_claimed_by(agent_id)
-    normalized_todo_id = normalize_todo_id(todo_id)
-    try:
-        normalized_turn_id = normalize_turn_instance_id(turn_instance_id)
-    except ValueError:
-        return None
-    if not normalized_agent_id or not normalized_todo_id or not normalized_turn_id:
-        return None
-    poll = find_quota_monitor_poll_turn(
-        runtime_root,
-        goal_id=goal_id,
-        agent_id=normalized_agent_id,
-        turn_instance_id=normalized_turn_id,
-    )
-    if not isinstance(poll, Mapping):
-        return receipt_bound_monitor_phase(
-            poll_present=False,
-            material_change=False,
-            durable_writeback_present=False,
-            quota_spend_present=False,
-        )
-    if normalize_todo_id(poll.get("todo_id")) != normalized_todo_id:
-        return receipt_bound_monitor_phase(
-            poll_present=False,
-            material_change=False,
-            durable_writeback_present=False,
-            quota_spend_present=False,
-        )
-    material_change = poll.get("material_change") is True
-    if not material_change:
-        return receipt_bound_monitor_phase(
-            poll_present=True,
-            material_change=False,
-            durable_writeback_present=False,
-            quota_spend_present=False,
-        )
-    identity_result = resolve_heartbeat_settlement_identity(
-        runtime_root,
-        goal_id=goal_id,
-        agent_id=normalized_agent_id,
-        todo_id=normalized_todo_id,
-        turn_instance_id=normalized_turn_id,
-    )
-    identity = identity_result.value
-    durable_writeback_present = bool(
-        identity is not None
-        and require_settlement_writeback(runtime_root, identity).value is not None
-    )
-    quota_spend_present = bool(
-        identity is not None
-        and require_settlement_spend(runtime_root, identity).value is not None
-    )
-    return receipt_bound_monitor_phase(
-        poll_present=True,
-        material_change=True,
-        durable_writeback_present=durable_writeback_present,
-        quota_spend_present=quota_spend_present,
-    )
-
-
-def receipt_bound_replay_settlement_phase(
-    runtime_root: Path,
-    *,
-    goal_id: str,
-    agent_id: str | None,
-    todo_id: str | None,
-    turn_instance_id: str | None,
-    replan_obligation_id: str | None = None,
-) -> ReceiptBoundReplayPhase | None:
-    """Resolve settled replay for the exact persisted receipt identity.
-
-    Replay is complete only after the original Todo has a matching completion,
-    durable writeback, and quota-spend receipt. The completion may establish an
-    ordinary successor or close the goal terminally; either way that successor
-    belongs to a fresh turn. A partial chain remains pending and cannot suppress
-    live work selection.
-    """
-
-    identity_result = resolve_heartbeat_settlement_identity(
-        runtime_root,
-        goal_id=goal_id,
-        agent_id=agent_id,
-        todo_id=todo_id,
-        turn_instance_id=turn_instance_id,
-        replan_obligation_id=replan_obligation_id,
-    )
-    identity = identity_result.value
-    if identity is None:
-        return None
-    completion_receipt_present = (
-        find_settlement_step_event(
-            runtime_root,
-            identity,
-            event_kind="todo_complete",
-        )
-        is not None
-    )
-    durable_writeback_present = (
-        require_settlement_writeback(runtime_root, identity).value is not None
-    )
-    quota_spend_present = (
-        require_settlement_spend(runtime_root, identity).value is not None
-    )
-    return receipt_bound_replay_phase(
-        completion_receipt_present=completion_receipt_present,
-        durable_writeback_present=durable_writeback_present,
-        quota_spend_present=quota_spend_present,
-    )
-
-
-def receipt_bound_terminal_settlement_phase(
-    runtime_root: Path,
-    *,
-    goal_id: str,
-    agent_id: str | None,
-    todo_id: str | None,
-    turn_instance_id: str | None,
-    replan_obligation_id: str | None = None,
-) -> ReceiptBoundTerminalPhase | None:
-    """Compatibility alias for the pre-successor replay resolver."""
-
-    return receipt_bound_replay_settlement_phase(
-        runtime_root,
-        goal_id=goal_id,
-        agent_id=agent_id,
-        todo_id=todo_id,
-        turn_instance_id=turn_instance_id,
-        replan_obligation_id=replan_obligation_id,
-    )
-
-
-def resolve_settlement_delivery_workspace_causality(
-    runtime_root: Path,
-    identity: SettlementIdentity,
-) -> dict[str, str] | None:
-    receipt_event = find_heartbeat_receipt(
-        runtime_root,
-        goal_id=identity.goal_id,
-        agent_id=identity.agent_id,
-        turn_instance_id=identity.turn_instance_id,
-    )
-    if not isinstance(receipt_event, Mapping):
-        return None
-    details_value = receipt_event.get("details")
-    details = details_value if isinstance(details_value, Mapping) else {}
-    return delivery_workspace_causality_from_event_details(
-        details,
-        todo_id=identity.todo_id,
-    )
-
-
-def _identity_mismatch(reason: str) -> SettlementResult[SettlementIdentity]:
-    return SettlementResult.failed(
-        kind=SettlementFailureKind.IDENTITY_MISMATCH,
-        step_kind=SettlementStepKind.VALIDATION,
-        reason=reason,
-    )
-
-
-def resolve_heartbeat_settlement_identity(
-    runtime_root: Path,
-    *,
-    goal_id: str,
-    agent_id: str | None,
-    todo_id: str | None,
-    turn_instance_id: str | None,
-    replan_obligation_id: str | None = None,
-) -> SettlementResult[SettlementIdentity]:
-    normalized_agent_id = normalize_todo_claimed_by(agent_id)
-    normalized_todo_id = normalize_todo_id(todo_id)
-    normalized_replan_obligation_id = normalize_todo_replan_obligation_id(
-        replan_obligation_id
-    )
-    try:
-        normalized_turn_id = normalize_turn_instance_id(turn_instance_id)
-    except ValueError as exc:
-        return SettlementResult.failed(
-            kind=SettlementFailureKind.INVALID_IDENTITY,
-            step_kind=SettlementStepKind.VALIDATION,
-            reason=str(exc),
-        )
-    if (
-        not normalized_agent_id
-        or not normalized_turn_id
-        or bool(normalized_todo_id) == bool(normalized_replan_obligation_id)
-    ):
-        return SettlementResult.failed(
-            kind=SettlementFailureKind.INVALID_IDENTITY,
-            step_kind=SettlementStepKind.VALIDATION,
-            reason=(
-                "turn-scoped settlement requires agent_id, turn_instance_id, and "
-                "exactly one todo_id or replan_obligation_id"
-            ),
-        )
-    try:
-        receipt_event = find_heartbeat_receipt(
-            runtime_root,
-            goal_id=goal_id,
-            agent_id=normalized_agent_id,
-            turn_instance_id=normalized_turn_id,
-        )
-    except ValueError as exc:
-        return _identity_mismatch(str(exc))
-    if receipt_event is None:
-        return SettlementResult.failed(
-            kind=SettlementFailureKind.RECEIPT_MISSING,
-            step_kind=SettlementStepKind.VALIDATION,
-            reason=(
-                "matching quota should-run heartbeat receipt is missing; rerun the "
-                "guard with the same turn_instance_id"
-            ),
-        )
-    details_value = receipt_event.get("details")
-    details = details_value if isinstance(details_value, Mapping) else {}
-    receipt_todo_id = normalize_todo_id(details.get("todo_id"))
-    receipt_replan_obligation_id = normalize_todo_replan_obligation_id(
-        details.get("replan_obligation_id")
-    )
-    if (
-        receipt_todo_id != normalized_todo_id
-        or receipt_replan_obligation_id != normalized_replan_obligation_id
-    ):
-        return SettlementResult.failed(
-            kind=SettlementFailureKind.IDENTITY_MISMATCH,
-            step_kind=SettlementStepKind.VALIDATION,
-            reason=(
-                "settlement binding does not match the original quota guard: "
-                f"receipt todo={receipt_todo_id or 'missing'} and "
-                "replan_obligation_id="
-                f"{receipt_replan_obligation_id or 'missing'}, requested "
-                f"todo={normalized_todo_id or 'missing'} and "
-                "replan_obligation_id="
-                f"{normalized_replan_obligation_id or 'missing'}"
-            ),
-        )
-    identity = SettlementIdentity(
-        goal_id=goal_id,
-        agent_id=normalized_agent_id,
-        todo_id=normalized_todo_id,
-        turn_instance_id=normalized_turn_id,
-        replan_obligation_id=normalized_replan_obligation_id,
-    )
-    receipt_effect_id = str(details.get("settlement_effect_id") or "").strip()
-    if not effect_ids_match(receipt_effect_id, identity.effect_id):
-        return SettlementResult.failed(
-            kind=SettlementFailureKind.IDENTITY_MISMATCH,
-            step_kind=SettlementStepKind.VALIDATION,
-            reason=(
-                "settlement effect does not match the original quota guard: "
-                f"receipt effect is {receipt_effect_id} but expected "
-                f"{identity.effect_id}"
-            ),
-        )
-    event_id = str(receipt_event.get("event_id") or "").strip() or None
-    return SettlementResult.pure(
-        identity,
-        receipts=(
-            settlement_receipt(
-                identity,
-                step_kind=SettlementStepKind.VALIDATION,
-                source_ref=f"rollout_event:{event_id}" if event_id else None,
-            ),
+    identity: bool = False,
+) -> SettlementResult[Any]:
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("TypeScript quota settlement readback result shape mismatch")
+    result = payload.get("result")
+    projection = payload.get("payload")
+    if not isinstance(result, Mapping) or not isinstance(projection, Mapping):
+        raise RuntimeError("TypeScript quota settlement readback result shape mismatch")
+    return decode_settlement_result(
+        result,
+        value_decoder=(
+            SettlementIdentity.from_runtime_payload if identity else None
         ),
+        projection_payload=projection,
     )
 
 
-def _run_index_records(runtime_root: Path, goal_id: str) -> list[dict[str, Any]]:
-    index_path = runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
-    if not index_path.exists():
-        return []
-    records: list[dict[str, Any]] = []
-    try:
-        lines = index_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    for line in lines:
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(record, dict):
-            records.append(record)
-    return records
+def _optional_readback_record(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise RuntimeError("TypeScript quota settlement readback result shape mismatch")
+    return dict(value)
 
 
-def infer_persisted_heartbeat_settlement_identity(
+def read_heartbeat_settlement(
     runtime_root: Path,
     *,
     goal_id: str,
     agent_id: str | None,
     todo_id: str | None,
+    turn_instance_id: str | None,
+    replan_obligation_id: str | None = None,
+    infer_turn_instance_id: bool = False,
     allow_unbound_binding: bool = False,
-) -> SettlementResult[SettlementIdentity] | None:
-    """Recover the latest typed heartbeat identity when a caller omits identity fields.
+) -> QuotaSettlementReadback | None:
+    """Read one complete heartbeat settlement through the TS domain owner."""
 
-    This is a compatibility recovery seam, not a second source of truth. It
-    considers only the newest same-agent accountable writeback or spend, and
-    then revalidates that candidate against the original heartbeat guard.
-    Callers normally supply the Todo binding and omit only the Turn. A visible
-    Goal delivery-completion path may opt into recovering both binding and Turn
-    from a fully typed persisted run after the frontier has already replanned.
-    Unrelated lineages and legacy untyped runs fall back to the existing
-    frontier binding rules.
-    """
-
-    normalized_agent_id = normalize_todo_claimed_by(agent_id)
-    normalized_todo_id = normalize_todo_id(todo_id)
-    if not normalized_agent_id or (
-        not normalized_todo_id and not allow_unbound_binding
+    try:
+        payload = effect_runtime_result(
+            "quota.settlement.read",
+            {
+                "schema_version": QUOTA_SETTLEMENT_READBACK_REQUEST_SCHEMA,
+                "runtime_root": str(runtime_root.expanduser()),
+                "goal_id": goal_id,
+                "agent_id": agent_id,
+                "todo_id": todo_id,
+                "turn_instance_id": turn_instance_id,
+                "replan_obligation_id": replan_obligation_id,
+                "infer_turn_instance_id": infer_turn_instance_id,
+                "allow_unbound_binding": allow_unbound_binding,
+            },
+        )
+    except EffectRuntimeRejected as exc:
+        raise ValueError(str(exc)) from None
+    if not isinstance(payload, Mapping) or (
+        payload.get("schema_version")
+        != QUOTA_SETTLEMENT_READBACK_RESULT_SCHEMA
     ):
+        raise RuntimeError("TypeScript quota settlement readback result shape mismatch")
+    if payload.get("found") is False:
+        if set(payload) != {"schema_version", "found"}:
+            raise RuntimeError(
+                "TypeScript quota settlement readback result shape mismatch"
+            )
         return None
-
-    candidate: dict[str, Any] | None = None
-    for run in reversed(_run_index_records(runtime_root, goal_id)):
-        run_agent_id = normalize_todo_claimed_by(run.get("agent_id"))
-        if run_agent_id and run_agent_id != normalized_agent_id:
-            continue
-        classification = str(run.get("classification") or "").strip()
-        delivery_outcome = normalize_delivery_outcome(run.get("delivery_outcome"))
-        if classification == "quota_slot_voided":
-            continue
-        if classification == "quota_scheduler_ack":
-            continue
-        if classification == "quota_monitor_poll" and run.get("material_change") is not True:
-            continue
-        if (
-            classification == "state_refreshed"
-            and delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES
-        ):
-            continue
-        if (
-            classification == "quota_slot_spent"
-            or delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES
-        ):
-            candidate = run
-            break
-        return None
-
-    if candidate is None:
-        return None
-    candidate_agent_id = normalize_todo_claimed_by(candidate.get("agent_id"))
-    if allow_unbound_binding and candidate_agent_id != normalized_agent_id:
-        return _identity_mismatch(
-            "persisted settlement identity mismatch: accountable run is not "
-            "bound to the requesting Agent"
-        )
-    persisted_value = candidate.get("settlement_identity")
-    persisted = persisted_value if isinstance(persisted_value, Mapping) else {}
-    candidate_todo_id = normalize_todo_id(candidate.get("todo_id"))
-    candidate_replan_obligation_id = normalize_todo_replan_obligation_id(
-        candidate.get("replan_obligation_id")
+    if payload.get("found") is not True:
+        raise RuntimeError("TypeScript quota settlement readback result shape mismatch")
+    workspace_causality = _optional_readback_record(
+        payload.get("workspace_causality")
     )
-    if normalized_todo_id:
-        if candidate_todo_id != normalized_todo_id:
-            return None
-        candidate_replan_obligation_id = None
-    else:
-        if not persisted:
-            return _identity_mismatch(
-                "unbound visible-goal settlement recovery requires a fully "
-                "typed persisted identity"
-            )
-        persisted_todo_id = normalize_todo_id(persisted.get("todo_id"))
-        persisted_replan_obligation_id = normalize_todo_replan_obligation_id(
-            persisted.get("replan_obligation_id")
-        )
-        if bool(persisted_todo_id) == bool(persisted_replan_obligation_id):
-            return _identity_mismatch(
-                "persisted settlement identity must contain exactly one Todo or "
-                "autonomous replan binding"
-            )
-        if candidate_todo_id != persisted_todo_id:
-            return _identity_mismatch(
-                "persisted settlement identity mismatch: Todo binding differs "
-                "from the accountable run"
-            )
-        if candidate_replan_obligation_id != persisted_replan_obligation_id:
-            return _identity_mismatch(
-                "persisted settlement identity mismatch: autonomous replan "
-                "binding differs from the accountable run"
-            )
-        candidate_todo_id = persisted_todo_id
-        candidate_replan_obligation_id = persisted_replan_obligation_id
-    candidate_turn_id = str(candidate.get("turn_instance_id") or "").strip()
-    persisted_turn_id = str(persisted.get("turn_instance_id") or "").strip()
-    if allow_unbound_binding:
-        if not candidate_turn_id or candidate_turn_id != persisted_turn_id:
-            return _identity_mismatch(
-                "persisted settlement identity mismatch: turn_instance_id differs "
-                "from the accountable run"
-            )
-    if not candidate_turn_id:
-        return None
-
-    identity = SettlementIdentity(
-        goal_id=goal_id,
-        agent_id=normalized_agent_id,
-        todo_id=candidate_todo_id,
-        turn_instance_id=candidate_turn_id,
-        replan_obligation_id=candidate_replan_obligation_id,
-    )
-    for field, expected in identity.as_dict().items():
-        actual = str(persisted.get(field) or "").strip()
-        if (allow_unbound_binding and actual != expected) or (
-            not allow_unbound_binding and actual and actual != expected
-        ):
-            return _identity_mismatch(
-                "persisted settlement identity mismatch: "
-                f"{field} is {actual or 'missing'} but expected {expected}"
-            )
-
-    return resolve_heartbeat_settlement_identity(
-        runtime_root,
-        goal_id=goal_id,
-        agent_id=normalized_agent_id,
-        todo_id=identity.todo_id,
-        turn_instance_id=candidate_turn_id,
-        replan_obligation_id=identity.replan_obligation_id,
-    )
-
-
-def find_settlement_writeback(
-    runtime_root: Path,
-    identity: SettlementIdentity,
-) -> dict[str, Any] | None:
-    for run in reversed(_run_index_records(runtime_root, identity.goal_id)):
-        if str(run.get("turn_instance_id") or "") != identity.turn_instance_id:
-            continue
-        if not _run_matches_settlement_binding(run, identity):
-            continue
-        run_agent_id = normalize_todo_claimed_by(run.get("agent_id"))
-        if run_agent_id != identity.agent_id:
-            continue
-        if (
-            normalize_delivery_outcome(run.get("delivery_outcome"))
-            not in ACCOUNTABLE_DELIVERY_OUTCOMES
-        ):
-            continue
-        return run
-    return None
-
-
-def _run_matches_settlement_binding(
-    run: Mapping[str, Any],
-    identity: SettlementIdentity,
-) -> bool:
-    return bool(
-        normalize_todo_id(run.get("todo_id")) == identity.todo_id
-        and normalize_todo_replan_obligation_id(
-            run.get("replan_obligation_id")
-        )
-        == identity.replan_obligation_id
-    )
-
-
-def find_settlement_step_event(
-    runtime_root: Path,
-    identity: SettlementIdentity,
-    *,
-    event_kind: str,
-) -> dict[str, Any] | None:
-    events = load_rollout_events(rollout_event_log_path(runtime_root, identity.goal_id))
-    for event in reversed(events):
-        if event.get("event_kind") != event_kind:
-            continue
-        if str(event.get("goal_id") or "") != identity.goal_id:
-            continue
-        if str(event.get("agent_id") or "") != identity.agent_id:
-            continue
-        if str(event.get("run_id") or "") != identity.turn_instance_id:
-            continue
-        details_value = event.get("details")
-        details = details_value if isinstance(details_value, Mapping) else {}
-        if str(details.get("settlement_effect_id") or "") != identity.effect_id:
-            continue
-        return event
-    return None
-
-
-def require_settlement_terminal_closeout(
-    runtime_root: Path,
-    identity: SettlementIdentity,
-) -> SettlementResult[dict[str, Any]]:
-    receipt_event = find_settlement_step_event(
-        runtime_root,
-        identity,
-        event_kind="todo_complete",
-    )
-    details_value = receipt_event.get("details") if receipt_event else None
-    details = details_value if isinstance(details_value, Mapping) else {}
-    if receipt_event is None or details.get("no_followup") is not True:
-        return SettlementResult.failed(
-            kind=SettlementFailureKind.RECEIPT_MISSING,
-            step_kind=SettlementStepKind.TERMINAL_CLOSEOUT,
-            reason="matching terminal no-follow-up closeout receipt is missing",
-        )
-    event_id = str(receipt_event.get("event_id") or "").strip()
-    return SettlementResult.pure(
-        receipt_event,
-        receipts=(
-            settlement_receipt(
-                identity,
-                step_kind=SettlementStepKind.TERMINAL_CLOSEOUT,
-                source_ref=f"rollout_event:{event_id}" if event_id else None,
-            ),
+    monitor_phase = payload.get("monitor_phase")
+    replay_phase = payload.get("replay_phase")
+    if monitor_phase not in {None, "poll_due", "settlement_pending", "settled"} or (
+        replay_phase not in {None, "open", "settlement_pending", "settled"}
+    ):
+        raise RuntimeError("TypeScript quota settlement readback result shape mismatch")
+    return QuotaSettlementReadback(
+        identity=_readback_result(payload.get("identity"), identity=True),
+        writeback=_readback_result(payload.get("writeback")),
+        spend=_readback_result(payload.get("spend")),
+        delivery=_readback_result(payload.get("delivery")),
+        settlement=_readback_result(payload.get("settlement")),
+        terminal_closeout=_readback_result(payload.get("terminal_closeout")),
+        terminal_settlement=_readback_result(payload.get("terminal_settlement")),
+        workspace_causality=(
+            {str(key): str(value) for key, value in workspace_causality.items()}
+            if workspace_causality is not None
+            else None
         ),
-    )
-
-
-def require_settlement_writeback(
-    runtime_root: Path,
-    identity: SettlementIdentity,
-) -> SettlementResult[dict[str, Any]]:
-    run = find_settlement_writeback(runtime_root, identity)
-    receipt_event = find_settlement_step_event(
-        runtime_root,
-        identity,
-        event_kind="refresh_state",
-    )
-    if run is None or receipt_event is None:
-        return SettlementResult.failed(
-            kind=SettlementFailureKind.WRITEBACK_MISSING,
-            step_kind=SettlementStepKind.DURABLE_WRITEBACK,
-            reason=(
-                "matching accountable refresh-state receipt is missing for the "
-                "original settlement identity"
-            ),
-        )
-    event_id = str(receipt_event.get("event_id") or "").strip()
-    return SettlementResult.pure(
-        run,
-        receipts=(
-            settlement_receipt(
-                identity,
-                step_kind=SettlementStepKind.DURABLE_WRITEBACK,
-                source_ref=f"rollout_event:{event_id}" if event_id else None,
-            ),
+        writeback_run=_optional_readback_record(payload.get("writeback_run")),
+        spend_run=_optional_readback_record(payload.get("spend_run")),
+        heartbeat_receipt=_optional_readback_record(payload.get("heartbeat_receipt")),
+        writeback_event=_optional_readback_record(payload.get("writeback_event")),
+        spend_event=_optional_readback_record(payload.get("spend_event")),
+        completion_event=_optional_readback_record(payload.get("completion_event")),
+        monitor_phase=(
+            ReceiptBoundMonitorPhase(str(monitor_phase))
+            if monitor_phase is not None
+            else None
         ),
-    )
-
-
-def find_settlement_spend_run(
-    runtime_root: Path,
-    identity: SettlementIdentity,
-) -> dict[str, Any] | None:
-    for run in reversed(_run_index_records(runtime_root, identity.goal_id)):
-        if str(run.get("classification") or "") != "quota_slot_spent":
-            continue
-        if str(run.get("turn_instance_id") or "") != identity.turn_instance_id:
-            continue
-        if not _run_matches_settlement_binding(run, identity):
-            continue
-        if normalize_todo_claimed_by(run.get("agent_id")) != identity.agent_id:
-            continue
-        return run
-    return None
-
-
-def find_quota_spend_run_by_effect_ref(
-    runtime_root: Path,
-    *,
-    goal_id: str,
-    effect_ref: str,
-) -> dict[str, Any] | None:
-    """Return the durable quota run for one provider-owned effect attempt."""
-
-    normalized_effect_ref = str(effect_ref or "").strip()
-    if not normalized_effect_ref:
-        return None
-    for run in reversed(_run_index_records(runtime_root, goal_id)):
-        if str(run.get("classification") or "") != "quota_slot_spent":
-            continue
-        if str(run.get("effect_ref") or "") == normalized_effect_ref:
-            return run
-    return None
-
-
-def require_settlement_spend(
-    runtime_root: Path,
-    identity: SettlementIdentity,
-) -> SettlementResult[dict[str, Any]]:
-    run = find_settlement_spend_run(runtime_root, identity)
-    receipt_event = find_settlement_step_event(
-        runtime_root,
-        identity,
-        event_kind="quota_spend",
-    )
-    if run is None or receipt_event is None:
-        return SettlementResult.failed(
-            kind=SettlementFailureKind.RECEIPT_MISSING,
-            step_kind=SettlementStepKind.QUOTA_SPEND,
-            reason="matching quota spend receipt is missing",
-        )
-    event_id = str(receipt_event.get("event_id") or "").strip()
-    return SettlementResult.pure(
-        run,
-        receipts=(
-            settlement_receipt(
-                identity,
-                step_kind=SettlementStepKind.QUOTA_SPEND,
-                source_ref=f"rollout_event:{event_id}" if event_id else None,
-            ),
+        replay_phase=(
+            ReceiptBoundReplayPhase(str(replay_phase))
+            if replay_phase is not None
+            else None
         ),
     )

@@ -22,8 +22,8 @@ from ..todos.contract import (
     normalize_todo_replan_obligation_id,
 )
 from ..work_items.delivery_outcome import (
-    ACCOUNTABLE_DELIVERY_OUTCOMES,
     normalize_delivery_outcome,
+    qualifies_turn_scoped_settlement,
 )
 from .decision_summary import compact_quota_decision, quota_decision_agent_id
 from .monitor_poll import QUOTA_MONITOR_POLL_CLASSIFICATION
@@ -33,15 +33,14 @@ from .settlement import (
     SettlementIdentity,
     SettlementResult,
     SettlementStepKind,
-    infer_persisted_heartbeat_settlement_identity,
-    require_settlement_writeback,
-    resolve_heartbeat_settlement_identity,
-    resolve_settlement_delivery_workspace_causality,
+    read_heartbeat_settlement,
     settlement_result_payload,
 )
 from .settlement_workspace_causality import (
+    LEGACY_SETTLEMENT_RECEIPT_EVIDENCE_SCHEMA_VERSION,
     completed_todo_workspace_causality,
     missing_delivery_workspace_resolution,
+    resolve_settlement_workspace_requirement,
 )
 from .settlement_validation import completion_validation_spend_error
 from .spend_sources import (
@@ -148,48 +147,31 @@ def _resolve_preview_settlement(
         return {}
 
     runtime_root = Path(str(raw_runtime_root)).expanduser()
-    result = (
-        resolve_heartbeat_settlement_identity(
-            runtime_root,
-            goal_id=goal_id,
-            agent_id=agent_id,
-            todo_id=todo_id,
-            turn_instance_id=turn_instance_id,
-            replan_obligation_id=replan_obligation_id,
-        )
-        if turn_instance_id
-        else infer_persisted_heartbeat_settlement_identity(
-            runtime_root,
-            goal_id=goal_id,
-            agent_id=agent_id,
-            todo_id=todo_id,
-            allow_unbound_binding=(
-                source == VISIBLE_GOAL_SLOT_SPEND_SOURCE
-                and not todo_id
-                and not replan_obligation_id
-            ),
-        )
+    readback = read_heartbeat_settlement(
+        runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        todo_id=todo_id,
+        turn_instance_id=turn_instance_id,
+        replan_obligation_id=replan_obligation_id,
+        infer_turn_instance_id=not bool(turn_instance_id),
+        allow_unbound_binding=(
+            source == VISIBLE_GOAL_SLOT_SPEND_SOURCE
+            and not todo_id
+            and not replan_obligation_id
+        ),
     )
-    if result is None:
+    if readback is None:
         return {}
+    result = readback.identity
     identity = result.value if result.failure is None else None
-    delivery_workspace_causality = (
-        resolve_settlement_delivery_workspace_causality(runtime_root, identity)
-        if identity is not None
-        else None
-    )
     if identity is not None:
-        result = result.bind(
-            lambda resolved: require_settlement_writeback(
-                runtime_root,
-                resolved,
-            )
-        )
+        result = readback.delivery
     return {
         "identity": identity,
         "result": result,
         "delivery_run": result.value if result.failure is None else None,
-        "delivery_workspace_causality": delivery_workspace_causality,
+        "delivery_workspace_causality": readback.workspace_causality,
         "reason": result.failure.reason if result.failure is not None else None,
     }
 
@@ -362,19 +344,20 @@ def _is_quota_neutral_state_refresh(run: dict[str, Any]) -> bool:
     )
 
 
-def _latest_unspent_accountable_delivery_run(
+def _latest_unspent_turn_settlement_run(
     runtime_root: Path,
     goal_id: str,
     *,
     agent_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """Return the latest same-agent delivery that still needs accounting.
+    """Return the latest same-agent Turn settlement that still needs accounting.
 
     Unchanged monitor polls, scheduler acknowledgements, and plain state
     refreshes are quota-neutral. They may occur after validation and before
     accounting, so they must not hide the accountable run. A state refresh
-    with an explicit non-accountable delivery outcome and other non-delivery
-    events remain fail closed.
+    with a non-settling delivery outcome and other non-delivery events remain
+    fail closed. A typed blocked ``outcome_gap`` settles the Turn without being
+    reclassified as delivery progress.
     """
 
     safe_agent_id = normalize_todo_claimed_by(agent_id)
@@ -397,35 +380,96 @@ def _latest_unspent_accountable_delivery_run(
         if _is_quota_neutral_state_refresh(run):
             continue
         delivery_outcome = normalize_delivery_outcome(run.get("delivery_outcome"))
-        if delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES:
+        if qualifies_turn_scoped_settlement(
+            delivery_outcome,
+            run.get("progress_observation")
+            if isinstance(run.get("progress_observation"), dict)
+            else None,
+            work_item_id=normalize_todo_id(run.get("todo_id")),
+            replan_obligation_id=normalize_todo_replan_obligation_id(
+                run.get("replan_obligation_id")
+            ),
+        ):
             return run
         return None
     return None
 
 
+def _settlement_workspace_requirement(
+    delivery_workspace_causality: dict[str, Any] | None,
+    settlement_identity: SettlementIdentity | None,
+    settlement_result: SettlementResult[dict[str, Any]] | None,
+    delivery_completion_run: dict[str, Any] | None,
+) -> dict[str, str] | None:
+    if settlement_identity is None:
+        return None
+    return resolve_settlement_workspace_requirement(
+        delivery_workspace_causality,
+        settlement_binding_kind=settlement_identity.binding_kind.value,
+        legacy_settlement_evidence=(
+            {
+                "schema_version": (
+                    LEGACY_SETTLEMENT_RECEIPT_EVIDENCE_SCHEMA_VERSION
+                ),
+                "settlement_effect_id": settlement_identity.effect_id,
+                "delivery_workspace_present": bool(
+                    isinstance(delivery_completion_run, dict)
+                    and delivery_completion_run.get("delivery_workspace") is not None
+                ),
+                "receipts": [
+                    {
+                        "step_kind": receipt.step_kind.value,
+                        "status": receipt.status,
+                        "effect_id": receipt.effect_id,
+                    }
+                    for receipt in settlement_result.receipts
+                ],
+            }
+            if settlement_result is not None
+            and settlement_result.failure is None
+            else None
+        ),
+    )
+
+
+def _workspace_requirement_value(
+    settlement_workspace_requirement: dict[str, Any] | None,
+    delivery_workspace_causality: dict[str, Any] | None,
+) -> str:
+    return str(
+        (settlement_workspace_requirement or {}).get("requirement")
+        or (delivery_workspace_causality or {}).get("requirement")
+        or ""
+    )
+
+
 def _missing_delivery_workspace_preview(
     *,
     delivery_workspace_causality: dict[str, Any] | None,
+    settlement_workspace_requirement: dict[str, Any] | None,
     delivery_workspace: dict[str, Any] | None,
     goal_id: str,
     slots: int,
     agent_id: str | None,
     before: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if not delivery_workspace_causality or delivery_workspace_identity(
-        delivery_workspace
-    ):
+    if delivery_workspace_identity(delivery_workspace):
+        return None
+    requirement = _workspace_requirement_value(
+        settlement_workspace_requirement, delivery_workspace_causality
+    )
+    if not requirement or requirement == "not_required":
         return None
     resolution = missing_delivery_workspace_resolution(
         delivery_workspace_causality
     )
-    if resolution is None or resolution["decision"] == "omit_snapshot":
+    if resolution is not None and resolution["decision"] == "omit_snapshot":
         return None
-    requirement = resolution["requirement"]
     reason = (
         "quota spend requires a valid delivery workspace snapshot for "
         f"settlement causality requirement {requirement}"
-        if resolution["decision"] == "require_snapshot"
+        if resolution is not None
+        and resolution["decision"] == "require_snapshot"
         else (
             "quota spend requires an explicit Todo delivery contract; declare "
             "repository/write requirements or mark the Todo as explicit "
@@ -444,6 +488,7 @@ def _missing_delivery_workspace_preview(
         "reason": reason,
         "delivery_workspace": delivery_workspace,
         "delivery_workspace_causality": delivery_workspace_causality,
+        "settlement_workspace_requirement": settlement_workspace_requirement,
         "delivery_workspace_resolution": resolution,
         "delivery_workspace_validated": False,
         "before": before,
@@ -578,7 +623,7 @@ def build_quota_slot_preview_for_decision(
         and before.get("capability_repair_allowed") is True
     )
     delivery_completion_run = delivery_completion_run or (
-        _latest_unspent_accountable_delivery_run(
+        _latest_unspent_turn_settlement_run(
             Path(str(raw_runtime_root)).expanduser(),
             safe_goal_id,
             agent_id=safe_requested_agent_id,
@@ -591,6 +636,12 @@ def build_quota_slot_preview_for_decision(
         goal_id=safe_goal_id,
         settlement_identity=settlement_identity,
         causality=delivery_workspace_causality,
+    )
+    settlement_workspace_requirement = _settlement_workspace_requirement(
+        delivery_workspace_causality,
+        settlement_identity,
+        settlement_result,
+        delivery_completion_run,
     )
     safe_bypass_without_delivery = (
         safe_bypass_requested and delivery_completion_run is None
@@ -607,7 +658,7 @@ def build_quota_slot_preview_for_decision(
             "registry_mutated": False,
             "reason": (
                 "safe-bypass quota spend requires a latest "
-                "unspent accountable delivery writeback"
+                "unspent Turn settlement writeback"
             ),
             "before": before,
             "after": None,
@@ -621,6 +672,7 @@ def build_quota_slot_preview_for_decision(
     )
     missing_delivery_workspace_preview = _missing_delivery_workspace_preview(
         delivery_workspace_causality=delivery_workspace_causality,
+        settlement_workspace_requirement=settlement_workspace_requirement,
         delivery_workspace=raw_delivery_workspace,
         goal_id=safe_goal_id,
         slots=safe_slots,
@@ -629,8 +681,8 @@ def build_quota_slot_preview_for_decision(
     )
     if missing_delivery_workspace_preview:
         return missing_delivery_workspace_preview
-    workspace_requirement = str(
-        (delivery_workspace_causality or {}).get("requirement") or ""
+    workspace_requirement = _workspace_requirement_value(
+        settlement_workspace_requirement, delivery_workspace_causality
     )
     raw_delivery_workspace_identity = delivery_workspace_identity(
         raw_delivery_workspace
@@ -828,6 +880,7 @@ def build_quota_slot_preview_for_decision(
         else None,
         "delivery_workspace": delivery_workspace,
         "delivery_workspace_causality": delivery_workspace_causality,
+        "settlement_workspace_requirement": settlement_workspace_requirement,
         "delivery_workspace_validated": delivery_workspace_validated,
     }
 

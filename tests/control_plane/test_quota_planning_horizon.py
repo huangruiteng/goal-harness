@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
+from pytest import MonkeyPatch
+
 from loopx.control_plane.effect_program import interpret_quota_should_run_packet
+from loopx.control_plane.effect_runtime import effect_runtime_result
 from loopx.control_plane.quota.cli_projection import (
     compact_quota_should_run_cli_payload,
 )
 from loopx.control_plane.quota.should_run import build_quota_should_run
-from loopx.control_plane.work_items.planning_horizon import (
-    build_quota_planning_horizon,
-)
-from loopx.control_plane.work_items.planning_inventory import (
-    build_quota_planning_inventory,
-)
 from loopx.control_plane.quota.turn_envelope import (
     ACTION_SIGNATURE_COVERAGE_V3,
     PLANNING_HORIZON_DETAIL_REFS_REF,
@@ -26,8 +26,8 @@ from loopx.control_plane.testing.quota_fixtures import (
     quota_status_payload,
     quota_todo_item,
 )
+from loopx.control_plane.work_items import action_portfolio as action_portfolio_module
 from loopx.status import build_task_graph_projection
-
 
 GOAL_ID = ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_GOAL_ID
 AGENT_ID = ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_AGENT_ID
@@ -221,57 +221,50 @@ def test_agent_todo_detail_expands_claim_semantics_from_the_shared_inventory() -
     )
 
 
-def test_many_monitors_degrade_horizon_completeness_without_breaking_quota() -> None:
-    selected = quota_todo_item(
-        todo_id="todo_monitor_selected",
-        index=1,
-        priority="P0",
-        title="Deliver the selected non-monitor slice.",
-        claimed_by=AGENT_ID,
-    )
-    monitors = [
-        quota_todo_item(
-            todo_id=f"todo_monitor_{index:03d}",
-            index=index + 2,
-            priority="P1",
-            title=f"Observe monitor target {index}.",
-            claimed_by=AGENT_ID,
-            task_class="continuous_monitor",
-            action_kind="monitor",
-            target_key=f"target-{index}",
-            cadence="daily",
-            next_due_at="2099-01-01T00:00:00Z",
-            watch_only=True,
-        )
-        for index in range(33)
-    ]
-    summary = {
-        "open_count": 34,
-        "deferred_count": 0,
-        "first_executable_items": [selected],
-        "active_next_action_executable_items": [selected],
-        "executable_backlog_items": [selected],
-    }
-    inventory = build_quota_planning_inventory(
-        goal_id=GOAL_ID,
-        selected=selected,
-        agent_id=AGENT_ID,
-        agent_todo_summary=summary,
-        agent_todo_source_items=[selected, *monitors],
-        capability_gate=None,
-        blocked_priority_fallback=None,
-    )
+def test_planning_lenses_share_one_runtime_request(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    operations: list[str] = []
 
-    assert inventory is not None
-    assert len(inventory["items"]) == 34
-    horizon = build_quota_planning_horizon(
-        planning_inventory=inventory,
-        goal_frontier_projection=None,
+    def recording_effect_runtime_result(
+        method: str,
+        params: Mapping[str, Any],
+        *,
+        timeout: float = 5.0,
+        retry_safe: bool = True,
+    ) -> Any:
+        operations.append(method)
+        return effect_runtime_result(
+            method,
+            params,
+            timeout=timeout,
+            retry_safe=retry_safe,
+        )
+
+    monkeypatch.setattr(
+        action_portfolio_module,
+        "effect_runtime_result",
+        recording_effect_runtime_result,
     )
-    assert horizon is not None
-    assert len(horizon["work_items"]) == 5
-    assert horizon["completeness"]["omitted_candidate_todo_count"] == 29
-    assert horizon["completeness"]["complete"] is False
+    status = planning_horizon_strategic_context_status()
+
+    default_packet = build_quota_should_run(
+        status,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+    assert "planning_horizon" in default_packet
+    assert operations == ["work_item.action_portfolio.project"]
+
+    operations.clear()
+    detail_packet = build_quota_should_run(
+        status,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        include_agent_todo_detail=True,
+    )
+    assert "agent_todo_planning_inventory" in detail_packet
+    assert operations == ["work_item.action_portfolio.project"]
 
 
 def test_task_graph_reads_deferred_nodes_from_the_shared_planning_source() -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -14,16 +13,15 @@ from .event_inbox import (
     load_lark_event_inbox_config,
 )
 from .inbox_reactions import complete_lark_event_inbox_reactions
+from .outbound import (
+    expected_lark_mention_identities,
+    lark_member_identities,
+    lark_provider_preview_matches_outbound,
+    lark_readback_matches_outbound,
+    normalize_lark_outbound_text,
+)
 
 CommandRunner = Callable[[Sequence[str]], Mapping[str, Any]]
-
-AT_MENTION_PATTERN = re.compile(
-    r'<at\s+(?P<kind>user_id|open_id|union_id)="(?P<identity>[^"<>]+)">'
-    r"(?P<name>.*?)</at>",
-    re.IGNORECASE,
-)
-MENTION_ID_KEYS = ("open_id", "user_id", "union_id")
-FENCED_CODE_PATTERN = re.compile(r"```.*?```", re.DOTALL)
 
 
 def _default_runner(args: Sequence[str]) -> Mapping[str, Any]:
@@ -93,164 +91,6 @@ def _message(value: Any, message_id: str) -> Mapping[str, Any] | None:
     return None
 
 
-def _content_text(value: Any) -> str:
-    if isinstance(value, Mapping):
-        text = value.get("text")
-        if isinstance(text, str):
-            return text
-        content = value.get("content")
-        if content is not None:
-            return _content_text(content)
-        return ""
-    if not isinstance(value, str):
-        return ""
-    try:
-        decoded = json.loads(value)
-    except json.JSONDecodeError:
-        return value
-    return _content_text(decoded) if isinstance(decoded, Mapping) else value
-
-
-def _message_text(message: Mapping[str, Any]) -> str:
-    body = message.get("body")
-    if isinstance(body, Mapping):
-        text = _content_text(body)
-        if text:
-            return text
-    return _content_text(message.get("content"))
-
-
-def _mention_identities(mention: Mapping[str, Any]) -> set[str]:
-    identities = {
-        str(mention.get(key) or "").strip()
-        for key in MENTION_ID_KEYS
-        if str(mention.get(key) or "").strip()
-    }
-    mention_id = mention.get("id")
-    if isinstance(mention_id, Mapping):
-        identities.update(
-            str(mention_id.get(key) or "").strip()
-            for key in MENTION_ID_KEYS
-            if str(mention_id.get(key) or "").strip()
-        )
-    elif isinstance(mention_id, str) and mention_id.strip():
-        identities.add(mention_id.strip())
-    return identities
-
-
-def _canonical_expected_text(text: str) -> tuple[str, dict[str, str]]:
-    identity_tokens: dict[str, str] = {}
-
-    def replace(match: re.Match[str]) -> str:
-        identity = match.group("identity").strip()
-        token = identity_tokens.setdefault(
-            identity, f"\x00mention:{len(identity_tokens)}\x00"
-        )
-        return token
-
-    replaced = AT_MENTION_PATTERN.sub(replace, text)
-    return _normalized_lines(replaced), identity_tokens
-
-
-def _normalized_lines(value: Any) -> str:
-    lines = [" ".join(line.split()) for line in str(value or "").splitlines()]
-    while lines and not lines[0]:
-        lines.pop(0)
-    while lines and not lines[-1]:
-        lines.pop()
-    return "\n".join(lines)
-
-
-def _readback_matches_reply(*, reply_text: str, message: Mapping[str, Any]) -> bool:
-    expected_text, identity_tokens = _canonical_expected_text(reply_text)
-    actual_text = _message_text(message)
-    if not actual_text:
-        return False
-    if not identity_tokens:
-        return _normalized_lines(actual_text) == expected_text
-
-    mentions = message.get("mentions")
-    if not isinstance(mentions, list):
-        return False
-    matched_identities: set[str] = set()
-    keys_by_identity: dict[str, set[str]] = {}
-    display_text_by_identity: dict[str, set[str]] = {}
-    key_owners: dict[str, set[str]] = {}
-    display_text_owners: dict[str, set[str]] = {}
-    for mention in mentions:
-        if not isinstance(mention, Mapping):
-            return False
-        key = str(mention.get("key") or "")
-        matches = _mention_identities(mention).intersection(identity_tokens)
-        if not key or len(matches) != 1:
-            return False
-        identity = next(iter(matches))
-        matched_identities.add(identity)
-        keys_by_identity.setdefault(identity, set()).add(key)
-        key_owners.setdefault(key, set()).add(identity)
-        display_name = str(mention.get("name") or "").strip()
-        if display_name:
-            display_text = f"@{display_name}"
-            display_text_by_identity.setdefault(identity, set()).add(display_text)
-            display_text_owners.setdefault(display_text, set()).add(identity)
-    if matched_identities != set(identity_tokens):
-        return False
-    if any(len(owners) != 1 for owners in key_owners.values()):
-        return False
-
-    for identity, token in identity_tokens.items():
-        expected_count = expected_text.count(token)
-        for key in sorted(keys_by_identity.get(identity, ()), key=len, reverse=True):
-            actual_text = actual_text.replace(key, token)
-        remaining_count = expected_count - actual_text.count(token)
-        if remaining_count < 0:
-            return False
-        if remaining_count == 0:
-            continue
-        rendered_candidates = [
-            display_text
-            for display_text in display_text_by_identity.get(identity, ())
-            if display_text_owners.get(display_text) == {identity}
-            and actual_text.count(display_text) == remaining_count
-        ]
-        if len(rendered_candidates) != 1:
-            return False
-        actual_text = actual_text.replace(rendered_candidates[0], token)
-    return _normalized_lines(actual_text) == expected_text
-
-
-def _normalized_reply_text(value: Any) -> str:
-    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
-    outside_code = FENCED_CODE_PATTERN.sub("", text)
-    if r"\n" in outside_code:
-        raise ValueError(
-            "lark inbox reply contains a literal backslash-n outside fenced code; "
-            "pass real newlines"
-        )
-    return _normalized_lines(text)[:1200]
-
-
-def _provider_preview_matches_reply(
-    *, reply_text: str, payload: Mapping[str, Any]
-) -> bool:
-    data = payload.get("data")
-    api_calls = payload.get("api")
-    if not isinstance(api_calls, list) and isinstance(data, Mapping):
-        api_calls = data.get("api")
-    if not isinstance(api_calls, list):
-        return False
-    for call in api_calls:
-        if not isinstance(call, Mapping):
-            continue
-        body = call.get("body")
-        if not isinstance(body, Mapping):
-            continue
-        preview_text = _content_text(body)
-        if preview_text and _normalized_lines(preview_text) == reply_text:
-            return True
-    return False
-
-
 def _result(
     *,
     status: str,
@@ -298,40 +138,44 @@ def _result(
     return packet
 
 
-def reply_lark_event_inbox(
+def _deliver_lark_inbox_outbound(
     *,
     project: str | Path,
     config_path: str | Path,
-    message_id: str,
+    message_id: str | None,
     text: str,
     execute: bool = False,
     provider_preflight: bool = False,
     runner: CommandRunner = _default_runner,
 ) -> dict[str, Any]:
-    """Reply with the explicit inbox-configured bot and placement policy."""
+    """Deliver through one inbox-configured bot with exact provider readback."""
 
     config = load_lark_event_inbox_config(project=project, config_path=config_path)
     if not config["enabled"]:
         raise ValueError("lark event inbox is not enabled")
     source_message_id = str(message_id or "").strip()
-    if not MESSAGE_ID_PATTERN.fullmatch(source_message_id):
+    if source_message_id and not MESSAGE_ID_PATTERN.fullmatch(source_message_id):
         raise ValueError("lark inbox reply requires a valid message id")
     inbox = config["inbox_path"]
-    source_event = next(
-        (
-            event
-            for path in (inbox.glob("*.json") if inbox.is_dir() else [])
-            if path.name != "processed.json"
-            if (event := _event_from_file(path)) is not None
-            if event.get("message_id") == source_message_id
-        ),
-        None,
+    source_event = (
+        next(
+            (
+                event
+                for path in (inbox.glob("*.json") if inbox.is_dir() else [])
+                if path.name != "processed.json"
+                if (event := _event_from_file(path)) is not None
+                if event.get("message_id") == source_message_id
+            ),
+            None,
+        )
+        if source_message_id
+        else None
     )
-    if source_event is None:
+    if source_message_id and source_event is None:
         raise ValueError(
             "lark inbox reply source message is not captured by this inbox"
         )
-    reply_text = _normalized_reply_text(text)
+    reply_text = normalize_lark_outbound_text(text)
     if not reply_text:
         raise ValueError("lark inbox reply requires non-empty text")
 
@@ -348,12 +192,15 @@ def reply_lark_event_inbox(
     profile = str(reply_config["sender_profile"])
     chat_id = str(reply_config["chat_id"])
     source_is_threaded = bool(
-        source_event.get("parent_id") or source_event.get("root_id")
+        source_event and (source_event.get("parent_id") or source_event.get("root_id"))
     )
     placement = (
         "chat_root"
-        if reply_config["placement_policy"] == "source_context"
-        and not source_is_threaded
+        if source_event is None
+        or (
+            reply_config["placement_policy"] == "source_context"
+            and not source_is_threaded
+        )
         else "source_thread"
     )
     digest = hashlib.sha256(
@@ -426,6 +273,51 @@ def reply_lark_event_inbox(
             format_preflight_passed=True,
         )
 
+    expected_mentions = expected_lark_mention_identities(reply_text)
+    if expected_mentions:
+        member_identity_sets: dict[str, set[str]] = {}
+        membership_failed = False
+        for identity_kind in sorted(set(expected_mentions.values())):
+            members = _call(
+                runner,
+                base
+                + [
+                    "im",
+                    "chat.members",
+                    "get",
+                    "--chat-id",
+                    chat_id,
+                    "--member-id-type",
+                    identity_kind,
+                    "--page-all",
+                    "--as",
+                    "bot",
+                    "--format",
+                    "json",
+                ],
+            )
+            if members.get("returncode") != 0:
+                membership_failed = True
+                break
+            member_identity_sets[identity_kind] = lark_member_identities(
+                _json_object(members.get("stdout"))
+            )
+        if membership_failed or any(
+            identity not in member_identity_sets.get(identity_kind, set())
+            for identity, identity_kind in expected_mentions.items()
+        ):
+            return _result(
+                status="gate_required",
+                ok=False,
+                execute=execute,
+                receipt=receipt,
+                identity_verified=True,
+                membership_verified=True,
+                placement=placement,
+                blocker="lark_inbox_reply_mention_identity_unresolved",
+                format_preflight_passed=True,
+            )
+
     destination = (
         [
             "im",
@@ -461,8 +353,8 @@ def reply_lark_event_inbox(
     preview = _call(runner, provider_args + ["--dry-run"])
     provider_preview_verified = bool(
         preview.get("returncode") == 0
-        and _provider_preview_matches_reply(
-            reply_text=reply_text,
+        and lark_provider_preview_matches_outbound(
+            outbound_text=reply_text,
             payload=_json_object(preview.get("stdout")),
         )
     )
@@ -548,8 +440,8 @@ def reply_lark_event_inbox(
     verified = bool(
         readback.get("returncode") == 0
         and readback_message is not None
-        and _readback_matches_reply(
-            reply_text=reply_text,
+        and lark_readback_matches_outbound(
+            outbound_text=reply_text,
             message=readback_message,
         )
     )
@@ -561,6 +453,8 @@ def reply_lark_event_inbox(
             execute=True,
             runner=runner,
         )
+        if verified and source_message_id
+        else {"ok": True}
         if verified
         else None
     )
@@ -597,3 +491,55 @@ def reply_lark_event_inbox(
         provider_preview_performed=True,
         provider_preview_verified=True,
     )
+
+
+def reply_lark_event_inbox(
+    *,
+    project: str | Path,
+    config_path: str | Path,
+    message_id: str,
+    text: str,
+    execute: bool = False,
+    provider_preflight: bool = False,
+    runner: CommandRunner = _default_runner,
+) -> dict[str, Any]:
+    """Reply with the explicit inbox-configured bot and placement policy."""
+
+    return _deliver_lark_inbox_outbound(
+        project=project,
+        config_path=config_path,
+        message_id=message_id,
+        text=text,
+        execute=execute,
+        provider_preflight=provider_preflight,
+        runner=runner,
+    )
+
+
+def send_lark_inbox_message(
+    *,
+    project: str | Path,
+    config_path: str | Path,
+    text: str,
+    execute: bool = False,
+    provider_preflight: bool = False,
+    runner: CommandRunner = _default_runner,
+) -> dict[str, Any]:
+    """Send one verified chat-root message through the configured inbox bot."""
+
+    result = _deliver_lark_inbox_outbound(
+        project=project,
+        config_path=config_path,
+        message_id=None,
+        text=text,
+        execute=execute,
+        provider_preflight=provider_preflight,
+        runner=runner,
+    )
+    result["schema_version"] = "lark_outbound_message_v0"
+    blocker = result.get("blocker")
+    if isinstance(blocker, str):
+        result["blocker"] = blocker.replace(
+            "lark_inbox_reply_", "lark_outbound_message_"
+        )
+    return result

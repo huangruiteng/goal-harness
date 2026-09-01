@@ -57,10 +57,10 @@ selected PR:
 
 1. Record the packet's exact head and run its `evidence_commands`, plus focused
    repository-native validation when applicable.
-2. Fill `review_plan.result_template` using the shared
-   `agent_response_contract.review_execution_contract`. Preserve `unverified`
-   for missing evidence and give the reason; never infer `verified` from title,
-   labels, metadata risk, changed-file counts, or green CI alone.
+2. Fill `review_plan.result_template` from the shared execution contract;
+   preserve missing evidence as `unverified`. For `default_off_isolation`, run
+   its paired counterfactual across all shared surfaces; for `authority_semantics`,
+   match names to actor authority. Never infer `verified` from metadata or CI.
 3. Apply `completion_gate` literally. If an applicable requirement is missing,
    do not manufacture a detailed verdict; name the evidence gap.
 4. Render the verified result through `review_template`. The five sections are
@@ -159,19 +159,19 @@ necessary but not enough.
 
 ## Autonomous Queue
 
-For recurring observation, use the same capability:
+For recurring observation, keep one ignored checkpoint and use the same capability:
 
 ```bash
 loopx --format json pr-review --repo owner/repo --state open \
-  --autonomous-observation \
-  [--observation-state-file .local/pr-review-monitor.json] \
-  [--handled-exact-head NUMBER@HEAD_OID]
+  --autonomous-observation --observation-state-file .local/pr-review-monitor.json \
+  [--projected-exact-head NUMBER@HEAD_OID] [--handled-exact-head NUMBER@HEAD_OID]
 ```
 
-Treat `not_observed`, `observed_unchanged`, and `material_transition`
-literally. Prefer the stable ignored checkpoint across tasks; it carries the age-fair
-cursor but grants no external authority. Supply `--handled-exact-head` only after exact-head readback proves completion. Stateless callers may use
-`--previous-observation-json` instead.
+Treat `candidate` as a preview, not a durable projection. Follow this order: durable
+Todo target-key readback -> `--projected-exact-head` -> exact-head review/comment
+readback -> `--handled-exact-head`. Never send the projection ACK before the Todo
+exists, or the handled ACK before readback at that head. Observation states remain literal;
+the checkpoint grants no authority. Stateless callers may use `--previous-observation-json` instead.
 
 ## Failure
 

@@ -348,6 +348,39 @@ def test_goal_hosts_attribute_spend_to_current_progress_refresh(
     assert "no pipe/retry" in normalized_task_body
 
 
+def test_heartbeat_prompt_commands_keep_explicit_runtime_root() -> None:
+    runtime_root = Path("/tmp/loopx-runtime-root-fixture")
+
+    payload = build_heartbeat_prompt(
+        goal_id="runtime-root-fixture",
+        thin=True,
+        runtime_root=runtime_root,
+        runtime_profile="codex_cli",
+        agent_id="runtime-agent",
+        registered_agents=["runtime-agent"],
+    )
+
+    command_prefix = f"loopx --runtime-root {runtime_root}"
+
+    assert payload["quota_guard_command"].startswith(
+        f"{command_prefix} --format json quota should-run "
+    )
+    assert payload["quota_spend_command"].startswith(
+        f"{command_prefix} --format json quota spend-slot "
+    )
+    assert payload["refresh_state_command"].startswith(
+        f"{command_prefix} refresh-state "
+    )
+    assert payload["progress_refresh_state_command"].startswith(
+        f"{command_prefix} refresh-state "
+    )
+    assert payload["thin_prompt_command"].startswith(
+        f"{command_prefix} heartbeat-prompt "
+    )
+    assert '"$HOME/.codex/loopx/registry.global.json"' not in payload["task_body"]
+    assert f"--runtime-root {runtime_root}" in payload["task_body"]
+
+
 @pytest.mark.parametrize(
     "runtime_profile",
     ("ark_managed_agent_goal", "codex_app_ssh_goal"),

@@ -1,11 +1,13 @@
 import type { JsonObject } from "./effect_program.ts";
 import {
+  requireBoolean,
   requireInteger,
   requireJsonObject as requiredObject,
   requireNonEmptyString as requiredString,
   requireStringArray,
 } from "./runtime_decode.ts";
 import { projectRepositoryDeliveryGate } from "./work_items/repository_delivery.ts";
+import { projectPendingCapabilityIntent } from "./work_items/pending_capability_intent.ts";
 
 export const CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION =
   "loopx_capability_hook_registration_v0";
@@ -15,6 +17,15 @@ export const TURN_START_HOOK_REGISTRATION_SCHEMA_VERSION =
   "loopx_turn_start_capability_hook_registration_v0";
 export const TURN_START_HOOK_RESULT_SCHEMA_VERSION =
   "loopx_turn_start_capability_hook_result_v0";
+export const POST_WRITEBACK_HOOK_REGISTRATION_SCHEMA_VERSION =
+  "loopx_post_writeback_capability_hook_registration_v0";
+export const POST_WRITEBACK_HOOK_INPUT_SCHEMA_VERSION =
+  "loopx_post_writeback_capability_hook_input_v0";
+export const POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION =
+  "loopx_post_writeback_capability_hook_result_v0";
+export const POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION =
+  "loopx_post_writeback_capability_hook_receipt_v0";
+export const CAPABILITY_INTENT_SCHEMA_VERSION = "loopx_capability_intent_v0";
 
 const REGISTRATION_FIELDS = new Set([
   "schema_version",
@@ -59,14 +70,84 @@ const TURN_START_RESULT_FIELDS = new Set([
   "observation_count",
   "agent_read_required",
   "external_reads_performed",
+  "external_writes_performed",
   "local_private_state_mutated",
   "private_content_returned",
   "provider_payload_returned",
   "error_code",
 ]);
+const POST_WRITEBACK_REGISTRATION_FIELDS = new Set([
+  "schema_version",
+  "hook_id",
+  "capability_id",
+  "policy_version",
+  "phase",
+  "event_kinds",
+  "intent_kinds",
+  "budget",
+  "failure_policy",
+  "requested_read_scope",
+  "requested_write_scope",
+]);
+const POST_WRITEBACK_BUDGET_FIELDS = new Set([
+  "max_invocations_per_dispatch",
+  "max_input_bytes",
+  "max_result_bytes",
+]);
+const POST_WRITEBACK_INPUT_FIELDS = new Set([
+  "schema_version",
+  "receipt",
+  "identity",
+  "state_version",
+  "projection",
+]);
+const POST_WRITEBACK_RECEIPT_FIELDS = new Set([
+  "schema_version",
+  "event_id",
+  "event_kind",
+  "status",
+  "recorded_at",
+  "durable",
+]);
+const POST_WRITEBACK_IDENTITY_FIELDS = new Set([
+  "goal_id",
+  "agent_id",
+  "todo_id",
+  "turn_instance_id",
+  "effect_id",
+]);
+const POST_WRITEBACK_RESULT_FIELDS = new Set([
+  "schema_version",
+  "hook_id",
+  "capability_id",
+  "phase",
+  "status",
+  "intent",
+]);
+const CAPABILITY_INTENT_FIELDS = new Set([
+  "schema_version",
+  "intent_kind",
+  "idempotency_key",
+  "source_receipt_id",
+  "payload",
+  "requested_write_scope",
+]);
+const POST_WRITEBACK_SIDECAR_RECEIPT_FIELDS = new Set([
+  "schema_version",
+  "dispatch_id",
+  "hook_id",
+  "capability_id",
+  "source_receipt_id",
+  "status",
+  "intent",
+  "error_code",
+  "attempt_count",
+  "recorded_at",
+]);
 const TURN_START_WRITE_SCOPES = new Set([
   "owner_private_inbox",
   "owner_private_cursor",
+  "provider_message_reaction",
 ]);
 const TURN_START_STATUSES = new Set([
   "not_applicable",
@@ -77,6 +158,7 @@ const TURN_START_STATUSES = new Set([
   "failed",
 ]);
 const TOKEN_RE = /^[a-z][a-z0-9_.:-]{2,95}$/;
+const POLICY_VERSION_RE = /^[a-z0-9][a-z0-9_.:-]{1,95}$/;
 
 function requireExactFields(
   value: JsonObject,
@@ -230,6 +312,9 @@ export function validateInteractionProjectionHookInvocation(input: {
   }
   let projection: JsonObject | null;
   switch (slot) {
+    case "pending_capability_intent":
+      projection = projectPendingCapabilityIntent(result.payload);
+      break;
     case "repository_delivery":
       projection = projectRepositoryDeliveryGate(result.payload);
       break;
@@ -287,7 +372,7 @@ export function validateTurnStartHookRegistration(
     8,
   );
   if (writeScope.some((scope) => !TURN_START_WRITE_SCOPES.has(scope))) {
-    throw new Error("turn-start hook requested_write_scope is not owner-private");
+    throw new Error("turn-start hook requested_write_scope is not admitted");
   }
   const budget = requiredObject(registration.budget, "turn-start hook budget");
   requireExactFields(budget, BUDGET_FIELDS, "turn-start hook budget");
@@ -346,6 +431,7 @@ export function validateTurnStartHookInvocation(input: {
   for (const field of [
     "agent_read_required",
     "external_reads_performed",
+    "external_writes_performed",
     "local_private_state_mutated",
     "private_content_returned",
     "provider_payload_returned",
@@ -362,6 +448,12 @@ export function validateTurnStartHookInvocation(input: {
     registration.requested_write_scope.length === 0
   ) {
     throw new Error("turn-start hook mutated undeclared local-private state");
+  }
+  if (
+    result.external_writes_performed &&
+    !registration.requested_write_scope.includes("provider_message_reaction")
+  ) {
+    throw new Error("turn-start hook performed an undeclared external write");
   }
   const errorCode = result.error_code;
   if (errorCode !== null && (typeof errorCode !== "string" || !TOKEN_RE.test(errorCode))) {
@@ -385,6 +477,7 @@ export function validateTurnStartHookInvocation(input: {
     observationCount !== 0 ||
     result.agent_read_required ||
     result.external_reads_performed ||
+    result.external_writes_performed ||
     result.local_private_state_mutated ||
     errorCode !== null
   )) {
@@ -400,4 +493,283 @@ export function validateTurnStartHookInvocation(input: {
     throw new Error("unavailable turn-start hook cannot require unread evidence");
   }
   return { ...result };
+}
+
+export function validatePostWritebackHookRegistration(
+  value: unknown,
+): JsonObject & {
+  hook_id: string;
+  capability_id: string;
+  policy_version: string;
+  event_kinds: string[];
+  intent_kinds: string[];
+  requested_read_scope: string[];
+  max_input_bytes: number;
+  max_result_bytes: number;
+} {
+  const registration = requiredObject(value, "post-writeback hook registration");
+  requireExactFields(
+    registration,
+    POST_WRITEBACK_REGISTRATION_FIELDS,
+    "post-writeback hook registration",
+  );
+  if (
+    registration.schema_version !== POST_WRITEBACK_HOOK_REGISTRATION_SCHEMA_VERSION ||
+    registration.phase !== "post_writeback" ||
+    registration.failure_policy !== "isolate"
+  ) {
+    throw new Error("post-writeback hook registration contract is invalid");
+  }
+  const hookId = requiredString(registration.hook_id, "post-writeback hook hook_id");
+  const capabilityId = requiredString(
+    registration.capability_id,
+    "post-writeback hook capability_id",
+  );
+  const policyVersion = requiredString(
+    registration.policy_version,
+    "post-writeback hook policy_version",
+  );
+  if (
+    !TOKEN_RE.test(hookId) ||
+    !TOKEN_RE.test(capabilityId) ||
+    !POLICY_VERSION_RE.test(policyVersion)
+  ) {
+    throw new Error("post-writeback hook identity is invalid");
+  }
+  const eventKinds = boundedTokens(
+    registration.event_kinds,
+    "post-writeback hook event_kinds",
+    16,
+  );
+  const intentKinds = boundedTokens(
+    registration.intent_kinds,
+    "post-writeback hook intent_kinds",
+    16,
+  );
+  const requestedReadScope = boundedTokens(
+    registration.requested_read_scope,
+    "post-writeback hook requested_read_scope",
+    16,
+  );
+  if (eventKinds.length === 0 || intentKinds.length === 0) {
+    throw new Error("post-writeback hook kinds cannot be empty");
+  }
+  const writeScope = boundedTokens(
+    registration.requested_write_scope,
+    "post-writeback hook requested_write_scope",
+    8,
+  );
+  if (writeScope.length > 0) {
+    throw new Error("post-writeback hooks cannot request write scope");
+  }
+  const budget = requiredObject(registration.budget, "post-writeback hook budget");
+  requireExactFields(budget, POST_WRITEBACK_BUDGET_FIELDS, "post-writeback hook budget");
+  const maxInvocations = requireInteger(
+    budget.max_invocations_per_dispatch,
+    "post-writeback hook max_invocations_per_dispatch",
+  );
+  const maxInputBytes = requireInteger(
+    budget.max_input_bytes,
+    "post-writeback hook max_input_bytes",
+  );
+  const maxResultBytes = requireInteger(
+    budget.max_result_bytes,
+    "post-writeback hook max_result_bytes",
+  );
+  if (
+    maxInvocations !== 1 ||
+    maxInputBytes < 1024 ||
+    maxInputBytes > 262_144 ||
+    maxResultBytes < 1024 ||
+    maxResultBytes > 65_536
+  ) {
+    throw new Error("post-writeback hook budget is outside the admitted envelope");
+  }
+  return {
+    ...registration,
+    hook_id: hookId,
+    capability_id: capabilityId,
+    policy_version: policyVersion,
+    event_kinds: eventKinds,
+    intent_kinds: intentKinds,
+    requested_read_scope: requestedReadScope,
+    max_input_bytes: maxInputBytes,
+    max_result_bytes: maxResultBytes,
+  };
+}
+
+export function validatePostWritebackHookInput(input: {
+  registration: unknown;
+  hook_input: unknown;
+}): JsonObject {
+  const registration = validatePostWritebackHookRegistration(input.registration);
+  const hookInput = requiredObject(input.hook_input, "post-writeback hook input");
+  requireExactFields(hookInput, POST_WRITEBACK_INPUT_FIELDS, "post-writeback hook input");
+  if (hookInput.schema_version !== POST_WRITEBACK_HOOK_INPUT_SCHEMA_VERSION) {
+    throw new Error("post-writeback hook input schema is invalid");
+  }
+  if (
+    new TextEncoder().encode(JSON.stringify(hookInput)).byteLength >
+      registration.max_input_bytes
+  ) {
+    throw new Error("post-writeback hook input exceeds its budget");
+  }
+  const receipt = requiredObject(hookInput.receipt, "post-writeback receipt");
+  requireExactFields(receipt, POST_WRITEBACK_RECEIPT_FIELDS, "post-writeback receipt");
+  const eventKind = requiredString(receipt.event_kind, "post-writeback receipt event_kind");
+  if (
+    !registration.event_kinds.includes(eventKind) ||
+    requireBoolean(receipt.durable, "post-writeback receipt durable") !== true ||
+    !["appended", "committed", "receipt_repaired"].includes(
+      requiredString(receipt.status, "post-writeback receipt status"),
+    )
+  ) {
+    throw new Error("post-writeback receipt is not an admitted durable event");
+  }
+  requiredString(receipt.schema_version, "post-writeback receipt schema_version");
+  requiredString(receipt.event_id, "post-writeback receipt event_id");
+  requiredString(receipt.recorded_at, "post-writeback receipt recorded_at");
+  const identity = requiredObject(hookInput.identity, "post-writeback identity");
+  requireExactFields(identity, POST_WRITEBACK_IDENTITY_FIELDS, "post-writeback identity");
+  for (const field of POST_WRITEBACK_IDENTITY_FIELDS) {
+    requiredString(identity[field], `post-writeback identity ${field}`);
+  }
+  requiredString(hookInput.state_version, "post-writeback state_version");
+  const projection = requiredObject(hookInput.projection, "post-writeback projection");
+  if (Object.keys(projection).some((field) => !registration.requested_read_scope.includes(field))) {
+    throw new Error("post-writeback projection exceeds requested_read_scope");
+  }
+  return { ...hookInput, receipt, identity, projection };
+}
+
+export function validatePostWritebackHookInvocation(input: {
+  registration: unknown;
+  hook_input: unknown;
+  result: unknown;
+}): JsonObject {
+  const registration = validatePostWritebackHookRegistration(input.registration);
+  const hookInput = validatePostWritebackHookInput({
+    registration: input.registration,
+    hook_input: input.hook_input,
+  });
+  const result = requiredObject(input.result, "post-writeback hook result");
+  requireExactFields(result, POST_WRITEBACK_RESULT_FIELDS, "post-writeback hook result");
+  if (
+    result.schema_version !== POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION ||
+    result.hook_id !== registration.hook_id ||
+    result.capability_id !== registration.capability_id ||
+    result.phase !== "post_writeback"
+  ) {
+    throw new Error("post-writeback hook result identity is invalid");
+  }
+  if (
+    new TextEncoder().encode(JSON.stringify(result)).byteLength >
+      registration.max_result_bytes
+  ) {
+    throw new Error("post-writeback hook result exceeds its budget");
+  }
+  if (result.status === "not_applicable") {
+    if (result.intent !== null) {
+      throw new Error("not-applicable post-writeback hook result must be empty");
+    }
+    return { ...result };
+  }
+  if (result.status !== "intent") {
+    throw new Error("post-writeback hook result status is invalid");
+  }
+  const intent = requiredObject(result.intent, "post-writeback capability intent");
+  requireExactFields(intent, CAPABILITY_INTENT_FIELDS, "post-writeback capability intent");
+  if (intent.schema_version !== CAPABILITY_INTENT_SCHEMA_VERSION) {
+    throw new Error("post-writeback capability intent schema is invalid");
+  }
+  const intentKind = requiredString(intent.intent_kind, "capability intent intent_kind");
+  if (!registration.intent_kinds.includes(intentKind)) {
+    throw new Error("capability intent kind is not registered");
+  }
+  requiredString(intent.idempotency_key, "capability intent idempotency_key");
+  if (intent.source_receipt_id !== (hookInput.receipt as JsonObject).event_id) {
+    throw new Error("capability intent does not bind the durable source receipt");
+  }
+  requiredObject(intent.payload, "capability intent payload");
+  const writeScope = boundedTokens(
+    intent.requested_write_scope,
+    "capability intent requested_write_scope",
+    8,
+  );
+  if (writeScope.length > 0) {
+    throw new Error("post-writeback capability intent cannot grant write scope");
+  }
+  return { ...result, intent: { ...intent, requested_write_scope: writeScope } };
+}
+
+export function validatePostWritebackHookReceipt(input: {
+  registration: unknown;
+  hook_input: unknown;
+  receipt: unknown;
+}): JsonObject {
+  const registration = validatePostWritebackHookRegistration(input.registration);
+  const hookInput = validatePostWritebackHookInput({
+    registration: input.registration,
+    hook_input: input.hook_input,
+  });
+  const receipt = requiredObject(input.receipt, "post-writeback sidecar receipt");
+  requireExactFields(
+    receipt,
+    POST_WRITEBACK_SIDECAR_RECEIPT_FIELDS,
+    "post-writeback sidecar receipt",
+  );
+  if (
+    receipt.schema_version !== POST_WRITEBACK_HOOK_RECEIPT_SCHEMA_VERSION ||
+    receipt.hook_id !== registration.hook_id ||
+    receipt.capability_id !== registration.capability_id ||
+    !/^pwh_[0-9a-f]{64}$/.test(
+      requiredString(receipt.dispatch_id, "post-writeback dispatch_id"),
+    ) ||
+    receipt.source_receipt_id !== (hookInput.receipt as JsonObject).event_id ||
+    receipt.recorded_at !== (hookInput.receipt as JsonObject).recorded_at
+  ) {
+    throw new Error("post-writeback sidecar receipt identity is invalid");
+  }
+  const attemptCount = requireInteger(
+    receipt.attempt_count,
+    "post-writeback sidecar receipt attempt_count",
+  );
+  if (attemptCount < 1 || attemptCount > 10_000) {
+    throw new Error("post-writeback sidecar receipt attempt_count is invalid");
+  }
+  const errorCode = receipt.error_code;
+  if (
+    errorCode !== null &&
+    (typeof errorCode !== "string" || !TOKEN_RE.test(errorCode))
+  ) {
+    throw new Error("post-writeback sidecar receipt error_code is invalid");
+  }
+  if (receipt.status === "retryable_failure") {
+    if (receipt.intent !== null || errorCode === null) {
+      throw new Error("retryable sidecar receipt requires only error_code");
+    }
+    return { ...receipt, attempt_count: attemptCount };
+  }
+  if (receipt.status === "not_applicable") {
+    if (receipt.intent !== null || errorCode !== null) {
+      throw new Error("not-applicable sidecar receipt must be empty");
+    }
+    return { ...receipt, attempt_count: attemptCount };
+  }
+  if (receipt.status !== "intent_recorded" || errorCode !== null) {
+    throw new Error("post-writeback sidecar receipt status is invalid");
+  }
+  const result = validatePostWritebackHookInvocation({
+    registration: input.registration,
+    hook_input: input.hook_input,
+    result: {
+      schema_version: POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION,
+      hook_id: registration.hook_id,
+      capability_id: registration.capability_id,
+      phase: "post_writeback",
+      status: "intent",
+      intent: receipt.intent,
+    },
+  });
+  return { ...receipt, intent: result.intent, attempt_count: attemptCount };
 }

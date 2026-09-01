@@ -105,6 +105,50 @@ def _quota_spend_commit_result(
     return result
 
 
+def replay_quota_spend_by_effect_ref(
+    runtime_root: Path,
+    *,
+    goal_id: str,
+    effect_ref: str,
+    agent_id: str | None,
+    read_only: bool = False,
+) -> dict[str, Any]:
+    """Ask the native quota transaction to validate an effect replay."""
+
+    from ...runtime import validate_goal_id_path_segment
+
+    safe_goal_id = validate_goal_id_path_segment(str(goal_id or "").strip())
+    normalized_effect_ref = str(effect_ref or "").strip()
+    if not normalized_effect_ref:
+        return {
+            "ok": False,
+            "appended": False,
+            "replay_found": False,
+            "reason": "effect_ref must be a non-empty string",
+        }
+    try:
+        result = effect_runtime_result(
+            "quota.spend.commit",
+            {
+                "schema_version": QUOTA_SPEND_COMMIT_REQUEST_SCHEMA,
+                "operation": "replay",
+                "runtime_root": str(runtime_root.expanduser()),
+                "goal_id": safe_goal_id,
+                "effect_id": normalized_effect_ref,
+                "resolved_agent_id": normalize_todo_claimed_by(agent_id),
+                "read_only": read_only,
+            },
+        )
+    except EffectRuntimeRejected as exc:
+        raise ValueError(str(exc)) from None
+    if not isinstance(result, Mapping) or result.get("schema_version") != QUOTA_SPEND_COMMIT_RESULT_SCHEMA:
+        raise RuntimeError("TypeScript quota spend replay result shape mismatch")
+    payload = result.get("payload")
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("TypeScript quota spend replay omitted its payload")
+    return dict(payload)
+
+
 def build_quota_slot_spend_event(
     preview: dict[str, Any],
     *,

@@ -215,6 +215,7 @@ export const projectAssetTodoSummarySchema = z.object({
   next: z.string().optional().nullable(),
   next_index: z.number().optional().nullable(),
   items: z.array(todoItemSchema).optional().default([]),
+  recent_completed_advancement_items: z.array(todoItemSchema).optional().default([]),
 });
 
 export const dependencyBlockerSchema = z.object({

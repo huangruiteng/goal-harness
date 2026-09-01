@@ -68,6 +68,7 @@ def _add_todo(registry: Path, *, validation_command: str | None = None) -> str:
         text="Deliver one bounded change.",
         task_class="advancement_task",
         claimed_by=AGENT,
+        continuation_policy="same_agent_non_delivery",
         validation_command=validation_command,
     )
     return str(todo["todo_id"])
@@ -121,6 +122,35 @@ def test_mcp_complete_task_fails_closed_on_failing_declared_validation(
     assert payload["validation"]["passed"] is False
     assert "spend-slot" not in output
     assert "refresh-state" not in output
+    assert _agent_todo_status(state, todo_id) != "done"
+
+
+def test_mcp_advancement_completion_returns_typed_settlement_blocker(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Deliver one repository advancement.",
+        task_class="advancement_task",
+        claimed_by=AGENT,
+    )
+    todo_id = str(todo["todo_id"])
+
+    payload = _first_json_blob(
+        _control(registry).complete_task(todo_id, AGENT, "claimed done")
+    )
+
+    assert payload["ok"] is False
+    assert payload["completed"] is False
+    assert payload["changed"] is False
+    assert payload["settlement_blocked_completion"] is True
+    assert payload["settlement_identity"]["todo_id"] == todo_id
+    assert payload["settlement_result"]["failure"]["kind"] == (
+        "writeback_missing"
+    )
     assert _agent_todo_status(state, todo_id) != "done"
 
 def test_expected_lease_version_annotation_rejects_bool_at_the_boundary() -> None:

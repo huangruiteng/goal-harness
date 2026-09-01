@@ -9,12 +9,20 @@ AGENT_LANE_TODO_LIST_SUMMARY_SCHEMA_VERSION = (
 EXPLICIT_LIMIT_TODO_LIST_SUMMARY_SCHEMA_VERSION = (
     "explicit_limit_todo_list_summary_compaction_v0"
 )
+THIN_TODO_LIST_PROJECTION_SCHEMA_VERSION = "todo_list_thin_projection_v0"
+THIN_TODO_LIST_SUMMARY_SCHEMA_VERSION = "todo_list_thin_summary_compaction_v0"
 AGENT_LANE_TODO_LIST_ITEM_LIMIT = 12
 AGENT_LANE_TODO_LIST_TEXT_LIMIT = 180
+# Two items per role keeps the maximally populated retained field shape inside
+# the registered 20k/600-line JSON budget; the regression owns that invariant.
+THIN_TODO_LIST_ITEM_LIMIT_PER_ROLE = 2
+THIN_TODO_LIST_NESTED_ITEM_LIMIT = 3
+THIN_TODO_LIST_NESTED_DICT_FIELD_LIMIT = 8
 AGENT_LANE_HOT_PATH_VIEW: Literal["agent_lane_hot_path"] = "agent_lane_hot_path"
 EXPLICIT_LIMIT_COLD_PATH_VIEW: Literal["explicit_limit_cold_path"] = (
     "explicit_limit_cold_path"
 )
+THIN_EXPLICIT_VIEW: Literal["thin_explicit_view"] = "thin_explicit_view"
 TodoListProjectionView = Literal[
     "agent_lane_hot_path",
     "explicit_limit_cold_path",
@@ -74,6 +82,33 @@ _ITEM_FIELDS = (
     "watch_only",
 )
 
+THIN_TODO_LIST_ITEM_FIELDS = (
+    "todo_id",
+    "role",
+    "status",
+    "priority",
+    "text",
+    "task_class",
+    "action_kind",
+    "claimed_by",
+    "bound_agent",
+    "goal_bound",
+    "blocks_agent",
+    "global_gate",
+    "unblocks_todo_id",
+    "decision_scope",
+    "required_decision_scopes",
+    "resume_when",
+    "resume_ready",
+    "target_key",
+    "cadence",
+    "next_due_at",
+    "expires_at",
+    "watch_only",
+)
+_COMPACT_ITEM_TEXT_FIELDS = frozenset({"text", "title", "note"})
+_THIN_ITEM_TEXT_FIELDS = frozenset({"text"})
+
 
 def _compact_text(value: Any) -> Any:
     if not isinstance(value, str):
@@ -84,17 +119,242 @@ def _compact_text(value: Any) -> Any:
     return text[: AGENT_LANE_TODO_LIST_TEXT_LIMIT - 3].rstrip() + "..."
 
 
-def _compact_item(value: Any) -> Any:
+def _project_item_fields(
+    value: Any,
+    *,
+    fields: tuple[str, ...],
+    text_fields: frozenset[str],
+) -> Any:
     if not isinstance(value, dict):
         return value
     compact: dict[str, Any] = {}
-    for key in _ITEM_FIELDS:
+    for key in fields:
         child = value.get(key)
         if child is None:
             continue
         compact[key] = (
-            _compact_text(child) if key in {"text", "title", "note"} else child
+            _compact_text(child) if key in text_fields else child
         )
+    return compact
+
+
+def _compact_item(value: Any) -> Any:
+    return _project_item_fields(
+        value,
+        fields=_ITEM_FIELDS,
+        text_fields=_COMPACT_ITEM_TEXT_FIELDS,
+    )
+
+
+def _compact_thin_item(value: Any) -> Any:
+    projected = _project_item_fields(
+        value,
+        fields=THIN_TODO_LIST_ITEM_FIELDS,
+        text_fields=_THIN_ITEM_TEXT_FIELDS,
+    )
+    if not isinstance(projected, dict):
+        return projected
+    return {key: _compact_thin_value(child) for key, child in projected.items()}
+
+
+def _compact_thin_value(value: Any) -> Any:
+    """Bound every retained thin field, including nested scope metadata."""
+
+    if isinstance(value, str):
+        return _compact_text(value)
+    if isinstance(value, list):
+        return [
+            _compact_thin_value(child)
+            for child in value[:THIN_TODO_LIST_NESTED_ITEM_LIMIT]
+        ]
+    if isinstance(value, dict):
+        return {
+            key: _compact_thin_value(child)
+            for key, child in list(value.items())[
+                :THIN_TODO_LIST_NESTED_DICT_FIELD_LIMIT
+            ]
+        }
+    return value
+
+
+def _summary_source_view(value: Any) -> str:
+    if not isinstance(value, dict):
+        return "full_detail"
+    view = value.get("view")
+    if isinstance(view, str) and view:
+        return view
+    if value.get("schema_version") == AGENT_LANE_TODO_LIST_SUMMARY_SCHEMA_VERSION:
+        return AGENT_LANE_HOT_PATH_VIEW
+    return "full_detail"
+
+
+def compact_thin_todo_summary(
+    summary: dict[str, Any],
+    *,
+    role: str,
+    items_matched: int,
+    items_returned: int,
+    item_limit_per_role: int,
+) -> dict[str, Any]:
+    """Project one role summary to a bounded field-only Todo list view."""
+
+    compact: dict[str, Any] = {}
+    omitted_nonempty_lane_count = 0
+    omitted_nonempty_dict_count = 0
+    source_view = "full_detail"
+    for key, value in summary.items():
+        if isinstance(value, list):
+            if key != "items":
+                omitted_nonempty_lane_count += bool(value)
+            continue
+        if isinstance(value, dict):
+            if key == "payload_compaction":
+                source_view = _summary_source_view(value)
+            else:
+                omitted_nonempty_dict_count += bool(value)
+            continue
+        compact[key] = value
+    items_omitted = max(0, items_matched - items_returned)
+    compacted_lanes = {}
+    if items_omitted:
+        compacted_lanes["items"] = {
+            "shown": items_returned,
+            "total": items_matched,
+        }
+    compact["payload_compaction"] = {
+        "schema_version": THIN_TODO_LIST_SUMMARY_SCHEMA_VERSION,
+        "view": THIN_EXPLICIT_VIEW,
+        "source_view": source_view,
+        "role": role,
+        "items_projected_to": "todos",
+        "item_limit_per_role": item_limit_per_role,
+        "item_fields": list(THIN_TODO_LIST_ITEM_FIELDS),
+        "item_text_limit": AGENT_LANE_TODO_LIST_TEXT_LIMIT,
+        "nested_item_limit": THIN_TODO_LIST_NESTED_ITEM_LIMIT,
+        "items_matched": items_matched,
+        "items_returned": items_returned,
+        "items_omitted": items_omitted,
+        "compacted_lanes": compacted_lanes,
+        "omitted_nonempty_lane_count": omitted_nonempty_lane_count,
+        "omitted_nonempty_dict_count": omitted_nonempty_dict_count,
+        "full_detail_cold_path": "todo list without --thin or active state",
+    }
+    return compact
+
+
+def thin_todo_list_field_projection_contract(
+    *,
+    matched_todo_count: int,
+    returned_todo_count: int,
+    item_limit_per_role: int,
+    source_view: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": THIN_TODO_LIST_PROJECTION_SCHEMA_VERSION,
+        "view": THIN_EXPLICIT_VIEW,
+        "source_view": source_view,
+        "item_container": "todos",
+        "matched_todo_count": matched_todo_count,
+        "returned_todo_count": returned_todo_count,
+        "omitted_todo_count": max(
+            0,
+            matched_todo_count - returned_todo_count,
+        ),
+        "item_limit_per_role": item_limit_per_role,
+        "counts_cover_full_match": True,
+        "item_fields": list(THIN_TODO_LIST_ITEM_FIELDS),
+        "item_text_limit": AGENT_LANE_TODO_LIST_TEXT_LIMIT,
+        "nested_item_limit": THIN_TODO_LIST_NESTED_ITEM_LIMIT,
+        "nested_dict_field_limit": THIN_TODO_LIST_NESTED_DICT_FIELD_LIMIT,
+        "full_detail_cold_paths": [
+            "todo list without --thin",
+            "todo list --todo-id <id> without --thin",
+            "active state",
+        ],
+    }
+
+
+def compact_thin_todo_list_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the opt-in Todo list field and cardinality projection."""
+
+    compact = dict(payload)
+    compact.pop("state_file", None)
+    compact.pop("project", None)
+    compact.pop("filter_semantics", None)
+
+    explicit_limit = compact.get("explicit_limit")
+    item_limit_per_role = THIN_TODO_LIST_ITEM_LIMIT_PER_ROLE
+    if isinstance(explicit_limit, int):
+        item_limit_per_role = min(item_limit_per_role, explicit_limit)
+
+    source_projection = compact.get("todo_list_projection")
+    source_projection = source_projection if isinstance(source_projection, dict) else {}
+    source_view = str(source_projection.get("view") or "full_detail")
+    matched_todo_count = int(
+        source_projection.get("matched_todo_count") or compact.get("todo_count") or 0
+    )
+
+    projected_items: list[dict[str, Any]] = []
+    for key, role in (("user_todos", "user"), ("agent_todos", "agent")):
+        summary = compact.get(key)
+        if not isinstance(summary, dict):
+            continue
+        source_items = [
+            item for item in summary.get("items") or [] if isinstance(item, dict)
+        ]
+        retained_items = source_items[:item_limit_per_role]
+        projected_role_items = [_compact_thin_item(item) for item in retained_items]
+        projected_items.extend(projected_role_items)
+        items_matched = int(summary.get("total_count") or len(source_items))
+        projected = compact_thin_todo_summary(
+            summary,
+            role=role,
+            items_matched=items_matched,
+            items_returned=len(projected_role_items),
+            item_limit_per_role=item_limit_per_role,
+        )
+        compact[key] = projected
+    compact["todos"] = projected_items
+    returned_todo_count = len(projected_items)
+    omitted_todo_count = max(0, matched_todo_count - returned_todo_count)
+    compact["matched_todo_count"] = matched_todo_count
+    compact["returned_todo_count"] = returned_todo_count
+    compact["omitted_todo_count"] = omitted_todo_count
+
+    todo_id_filter = compact.get("todo_id_filter")
+    if isinstance(todo_id_filter, str):
+        matched = next(
+            (
+                item
+                for item in projected_items
+                if item.get("todo_id") == todo_id_filter
+            ),
+            None,
+        )
+        compact["todo"] = matched
+        compact["relations"] = todo_item_relations(matched) if matched else {}
+
+    overlay = compact.get("projection_overlay")
+    if isinstance(overlay, dict):
+        compact["projection_overlay"] = compact_todo_projection_overlay(
+            overlay,
+            full_detail_cold_path="todo list without --thin or active state",
+        )
+    state_event_projection = compact.get("state_event_projection")
+    if isinstance(state_event_projection, dict):
+        compact["state_event_projection"] = {
+            key: state_event_projection[key]
+            for key in ("schema_version", "source_event_count", "last_event_id")
+            if key in state_event_projection
+        }
+
+    compact["thin"] = True
+    compact["todo_list_field_projection"] = thin_todo_list_field_projection_contract(
+        matched_todo_count=matched_todo_count,
+        returned_todo_count=returned_todo_count,
+        item_limit_per_role=item_limit_per_role,
+        source_view=source_view,
+    )
     return compact
 
 

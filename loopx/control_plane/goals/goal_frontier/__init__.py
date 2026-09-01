@@ -12,7 +12,10 @@ from ...agents.profile import agent_profile_requires_vision
 from ...agents.runtime_model import peer_work_key, select_peer_for_work
 from ...runtime.time import parse_timestamp
 from ...todos.contract import normalize_todo_replan_obligation_id
-from ...todos.projection import todo_item_is_watch_only_monitor
+from ...todos.projection import (
+    todo_advancement_frontier_counts,
+    todo_item_is_watch_only_monitor,
+)
 from ...todos.succession_warning import (
     TODO_SUCCESSION_WARNING_REASON_CODE,
     todo_succession_gap_items,
@@ -765,46 +768,10 @@ def _frontier_advancement_counts(
     agent_todo_summary: dict[str, Any] | None,
     agent_id: str | None,
 ) -> dict[str, int]:
-    current_agent_advancement_count = (
-        safe_non_negative_int(agent_todo_summary.get("current_agent_claimed_advancement_count"))
-        if isinstance(agent_todo_summary, dict)
-        else 0
+    return todo_advancement_frontier_counts(
+        agent_todo_summary,
+        agent_id=agent_id,
     )
-    unclaimed_advancement_count = 0
-    other_agent_claimed_items: Any = None
-    if isinstance(agent_todo_summary, dict):
-        executable_items = agent_todo_summary.get("executable_backlog_items")
-        if isinstance(executable_items, list):
-            if agent_id:
-                current_agent_advancement_count = max(
-                    current_agent_advancement_count,
-                    _count_advancement_items(executable_items, claimed_by=agent_id),
-                )
-            unclaimed_advancement_count = _count_advancement_items(
-                executable_items,
-                claimed_by="__unclaimed__",
-            )
-        else:
-            # The unclaimed visibility lane is diagnostic and may contain work
-            # that excludes this agent. Prefer the scoped executable lane when
-            # available; retain this fallback for legacy summaries only.
-            unclaimed_advancement_count = _count_advancement_items(
-                agent_todo_summary.get("unclaimed_priority_open_items"),
-                claimed_by="__unclaimed__",
-            )
-        claim_scope = (
-            agent_todo_summary.get("claim_scope")
-            if isinstance(agent_todo_summary.get("claim_scope"), dict)
-            else {}
-        )
-        other_agent_claimed_items = claim_scope.get("other_agent_claimed_items")
-    return {
-        "current_agent_claimed_advancement_count": current_agent_advancement_count,
-        "unclaimed_advancement_count": unclaimed_advancement_count,
-        "other_agent_claimed_advancement_count": _count_advancement_items(
-            other_agent_claimed_items
-        ),
-    }
 
 
 def _compact_todo_id(item: Any) -> str | None:

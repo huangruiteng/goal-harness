@@ -16,6 +16,9 @@ CHAT_TODO_NO_WRITE_RECEIPT_SCHEMA_VERSION = "loopx_chat_todo_no_write_receipt_v0
 CHAT_REVIEW_OPEN_TAG = "<loopx-review-json>"
 CHAT_REVIEW_CLOSE_TAG = "</loopx-review-json>"
 CHAT_TODO_ACTION_KIND = "loopx_chat_proposal"
+CHAT_PROTECTED_ACTION_OPERATIONS = frozenset(
+    {"merge", "release", "deploy", "delete", "payment"}
+)
 
 _ABSOLUTE_LOCAL_PATH = re.compile(
     r"(?<![A-Za-z0-9])(?:/(?:Users|home|private|tmp|var)/[^\s`'\"<>]+|[A-Za-z]:[\\/][^\s`'\"<>]+)"
@@ -163,6 +166,41 @@ def _normalize_proposals(value: Any, *, protected_paths: Iterable[Path | str]) -
     return proposals
 
 
+def _normalize_protected_action(
+    value: Any,
+    *,
+    protected_paths: Iterable[Path | str],
+) -> dict[str, str] | None:
+    """Accept a narrow semantic proposal without granting execution authority."""
+
+    if not isinstance(value, dict):
+        return None
+    operation = _compact_line(value.get("operation"), limit=40).lower()
+    if operation not in CHAT_PROTECTED_ACTION_OPERATIONS:
+        return None
+    raw_target = _compact_line(value.get("target"), limit=200)
+    if not raw_target or _ABSOLUTE_LOCAL_PATH.search(raw_target):
+        return None
+    target = _compact_line(
+        redact_local_paths(raw_target, protected_paths=protected_paths),
+        limit=160,
+    )
+    if not target or target != raw_target[:160].strip():
+        return None
+    summary = _compact_line(
+        redact_local_paths(
+            str(value.get("summary") or ""),
+            protected_paths=protected_paths,
+        ),
+        limit=300,
+    )
+    return {
+        "operation": operation,
+        "target": target,
+        "summary": summary,
+    }
+
+
 def _normalize_gate(value: Any, *, protected_paths: Iterable[Path | str]) -> dict[str, str] | None:
     if not isinstance(value, dict):
         return None
@@ -209,6 +247,10 @@ def normalize_agent_response(
             payload.get("proposals"),
             protected_paths=protected,
         ),
+        "protected_action": _normalize_protected_action(
+            payload.get("protected_action"),
+            protected_paths=protected,
+        ),
         "gate": _normalize_gate(payload.get("gate"), protected_paths=protected),
     }
 
@@ -240,6 +282,7 @@ def parse_agent_response(
                     "schema_version": CHAT_AGENT_RESPONSE_SCHEMA_VERSION,
                     "message": redact_local_paths(salvaged, protected_paths=protected).strip(),
                     "proposals": [],
+                    "protected_action": None,
                     "gate": None,
                 }
         raw_text = raw_text[:start]
@@ -247,6 +290,7 @@ def parse_agent_response(
         "schema_version": CHAT_AGENT_RESPONSE_SCHEMA_VERSION,
         "message": redact_local_paths(raw_text, protected_paths=protected).strip(),
         "proposals": [],
+        "protected_action": None,
         "gate": None,
     }
 

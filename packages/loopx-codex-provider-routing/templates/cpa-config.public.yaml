@@ -1,0 +1,22 @@
+# Public-safe field shape only. Credential-bearing provider/auth sections are
+# intentionally omitted and must remain operator-owned.
+host: "127.0.0.1"
+port: "<LOOPBACK_CPA_PORT>"
+auth-dir: "<OPERATOR_OWNED_AUTH_DIRECTORY>"
+
+remote-management:
+  allow-remote: false
+  secret-key: ""
+
+request-retry: 10
+max-retry-credentials: 0
+max-retry-interval: 0
+
+routing:
+  strategy: "fill-first"
+  session-affinity: true
+  session-affinity-ttl: "1h"
+
+codex:
+  stream-bootstrap-buffering: true
+  optimize-multi-agent-v2: false

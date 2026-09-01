@@ -1,6 +1,7 @@
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString,
+  requireBoolean,
   requireInteger,
   requireJsonObject,
   requireNonEmptyString,
@@ -8,7 +9,15 @@ import {
 } from "../runtime_decode.ts";
 
 import type { JsonObject } from "../effect_program.ts";
-import { decodeTodoPlanningInventory } from "./planning_inventory.ts";
+import {
+  decodeTodoPlanningInventory,
+  projectTodoPlanningInventory,
+  projectTodoPlanningInventoryDetail,
+} from "./planning_inventory.ts";
+import {
+  PLANNING_HORIZON_REQUEST_SCHEMA_VERSION,
+  projectQuotaPlanningHorizon,
+} from "./planning_horizon.ts";
 
 export const ACTION_PORTFOLIO_SCHEMA_VERSION = "quota_action_portfolio_v2";
 export const ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION =
@@ -17,8 +26,13 @@ export const ACTION_SELECTION_QUALIFICATION_SCHEMA_VERSION =
   "action_selection_qualification_v0";
 export const ACTION_SELECTION_QUALIFICATION_REQUEST_SCHEMA_VERSION =
   "action_selection_qualification_request_v0";
+export const QUOTA_PLANNING_PACKET_SCHEMA_VERSION =
+  "quota_planning_packet_v0";
+export const QUOTA_PLANNING_PACKET_REQUEST_SCHEMA_VERSION =
+  "quota_planning_packet_request_v0";
 
 const MAX_ALTERNATIVE_ACTIONS = 3;
+const DEFAULT_MAX_ALTERNATIVE_ACTIONS = 2;
 
 interface ActionCandidate extends JsonObject {
   todo_id: string;
@@ -141,8 +155,7 @@ function unavailableProjection(candidate: ActionCandidate): JsonObject {
  * portfolio semantics: validation, identity de-duplication, ordering, and the
  * fallback trigger exposed to hosts and models.
  */
-export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
-  const request = requireJsonObject(value, "action_portfolio_request");
+function projectQuotaActionPortfolioV1(request: JsonObject): JsonObject | null {
   if (request.schema_version !== ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION) {
     throw new EffectRuntimeRequestError(
       `action_portfolio_request.schema_version must be ${ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION}`,
@@ -160,7 +173,7 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
   const primary = actionCandidate(primaryValue, "action_portfolio_request.primary");
   requireRunnableAdvancement(primary, "action_portfolio_request.primary");
   const maximum = request.max_alternative_actions === undefined
-    ? 2
+    ? DEFAULT_MAX_ALTERNATIVE_ACTIONS
     : requireInteger(
       request.max_alternative_actions,
       "action_portfolio_request.max_alternative_actions",
@@ -245,6 +258,62 @@ export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
       unavailableProjection,
     ),
   };
+}
+
+function projectQuotaPlanningPacket(request: JsonObject): JsonObject {
+  const projectionEnabled = requireBoolean(
+    request.projection_enabled,
+    "planning_packet_request.projection_enabled",
+  );
+  const includeDetail = requireBoolean(
+    request.include_detail,
+    "planning_packet_request.include_detail",
+  );
+  if (!Array.isArray(request.acceptance_gaps)) {
+    throw new EffectRuntimeRequestError(
+      "planning_packet_request.acceptance_gaps must be an array",
+    );
+  }
+  const inventory = projectTodoPlanningInventory(
+    requireJsonObject(
+      request.planning_inventory_request,
+      "planning_packet_request.planning_inventory_request",
+    ),
+  );
+  const projected: JsonObject = {
+    schema_version: QUOTA_PLANNING_PACKET_SCHEMA_VERSION,
+  };
+  if (projectionEnabled) {
+    const portfolio = projectQuotaActionPortfolioV1({
+      schema_version: ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION,
+      planning_inventory: inventory,
+      max_alternative_actions: DEFAULT_MAX_ALTERNATIVE_ACTIONS,
+    });
+    if (portfolio !== null) projected.action_portfolio = portfolio;
+    const horizon = projectQuotaPlanningHorizon({
+      schema_version: PLANNING_HORIZON_REQUEST_SCHEMA_VERSION,
+      planning_inventory: inventory,
+      acceptance_gaps: request.acceptance_gaps,
+    });
+    if (horizon !== null) projected.planning_horizon = horizon;
+  }
+  if (includeDetail) {
+    projected.agent_todo_planning_inventory =
+      projectTodoPlanningInventoryDetail(inventory);
+  }
+  return projected;
+}
+
+/**
+ * Project either the legacy action portfolio or the aggregate quota planning
+ * packet through the existing registered runtime operation.
+ */
+export function projectQuotaActionPortfolio(value: unknown): JsonObject | null {
+  const request = requireJsonObject(value, "action_portfolio_request");
+  if (request.schema_version === QUOTA_PLANNING_PACKET_REQUEST_SCHEMA_VERSION) {
+    return projectQuotaPlanningPacket(request);
+  }
+  return projectQuotaActionPortfolioV1(request);
 }
 
 /**

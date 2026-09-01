@@ -254,9 +254,11 @@ Lease 丢失应 fail closed。一个 worker 不应该在 lease 过期后继续�
 writeback 都必须提交当前 version。Release 会保留 inactive terminal record，
 使下一代 acquire 的 `version` 与 `lease_epoch` 单调前进，而不是回到 1。
 
-实现边界可以直接由调用图证明：`acquire_task_lease()` 的产品调用点位于
-`loopx/cli_commands/task_lease.py`，而不是 todo claim 或 quota pipeline。
-生命周期与幂等合同由 `tests/control_plane/test_task_lease.py` 和
+实现边界可以直接由调用图证明：产品 CLI 在
+`loopx/cli_commands/task_lease.py` 调用 native acquire transport，transaction owner
+是 `loopx/control_plane/work_items/task_lease_acquire.ts`，而不是 todo claim 或 quota
+pipeline。`acquire_task_lease()` 只保留 transport compatibility。生命周期与幂等合同
+由 native TS tests、`tests/control_plane/test_task_lease.py` 和
 `examples/control_plane/task-lease-runtime-smoke.py` 看护。
 
 第 9 讲介绍的 supervisor 目前只产生观察和提议。若未来增加 supervisor 建议的

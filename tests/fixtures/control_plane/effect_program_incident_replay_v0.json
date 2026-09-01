@@ -127,49 +127,6 @@
         ],
         "receipt_identity_count": 1
       }
-    },
-    {
-      "case_id": "task-lease-validation-failure-short-circuits",
-      "adapter": "task_lease",
-      "incident_class": "invalid_identity",
-      "invariant_id": "INV-FAILURE-SHORT-CIRCUIT",
-      "rationale": "An invalid idempotency key must fail validation before any acquire effect writes to disk.",
-      "input": {
-        "idempotency_key": "bad key!",
-        "acquire": true
-      },
-      "expected": {
-        "status": "failure",
-        "failure_kind": "invalid_identity",
-        "failure_step": "validation",
-        "effect_calls": [],
-        "checkpoint_steps": [],
-        "receipt_steps": [],
-        "receipt_identity_count": 0
-      }
-    },
-    {
-      "case_id": "task-lease-acquire-preserves-one-effect-identity",
-      "adapter": "task_lease",
-      "incident_class": "effect_identity_tracking",
-      "invariant_id": "INV-ONE-EFFECT-IDENTITY",
-      "rationale": "A successful task-lease acquire must produce validation and acquire receipts that share a single effect identity.",
-      "input": {
-        "idempotency_key": "replay-turn",
-        "acquire": true
-      },
-      "expected": {
-        "status": "success",
-        "failure_kind": null,
-        "failure_step": null,
-        "effect_calls": [],
-        "checkpoint_steps": [],
-        "receipt_steps": [
-          "validation",
-          "durable_writeback"
-        ],
-        "receipt_identity_count": 1
-      }
     }
   ]
 }

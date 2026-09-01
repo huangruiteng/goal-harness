@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import sys
-from pathlib import Path
 
-from . import __version__
 from .capabilities.content_ops.cli import (
     handle_content_ops_command,
     register_content_ops_commands,
@@ -47,6 +43,10 @@ from .capabilities.periodic_report.cli import (
     handle_periodic_report_command,
     register_periodic_report_commands,
 )
+from .capabilities.periodic_report.post_writeback_hook import (
+    build_periodic_report_post_writeback_projection,
+    periodic_report_post_writeback_hooks_for_goal,
+)
 from .capabilities.semantic_preference.cli import (
     handle_semantic_preference_command,
     register_semantic_preference_commands,
@@ -65,8 +65,6 @@ from .cli_commands import (
     handle_bootstrap_connect_command,
     handle_canary_command,
     handle_capability_command,
-    handle_check_command,
-    handle_diagnose_command,
     handle_doctor_command,
     handle_dreaming_command,
     handle_evidence_log_command,
@@ -85,19 +83,15 @@ from .cli_commands import (
     handle_project_lifecycle_command,
     handle_pr_review_command,
     handle_deepresearch_command,
-    handle_quota_command,
     handle_ready_score_command,
     handle_review_batch_command,
     handle_registry_admin_command,
-    handle_review_packet_command,
     handle_slash_commands_command,
-    handle_status_command,
     handle_starter_command,
     handle_summary_all_command,
     handle_support_control_command,
     handle_handoff_mode_command,
     handle_task_lease_command,
-    handle_todo_command,
     handle_version_command,
     handle_host_mode_plan_command,
     handle_worker_bridge_command,
@@ -162,47 +156,18 @@ from .help_surface import (
     render_concise_help,
     top_level_help_requested,
 )
-from .paths import DEFAULT_RUNTIME_ROOT, default_registry_path, global_registry_path
-
-
-class LoopXArgumentParser(argparse.ArgumentParser):
-    """Require complete option names across the automation-facing CLI."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        kwargs.setdefault("allow_abbrev", False)
-        super().__init__(*args, **kwargs)
-
-
-def print_payload(payload: dict[str, object], fmt: str, markdown_renderer) -> None:
-    if fmt == "json":
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-    else:
-        print(markdown_renderer(payload))
-
-
-def add_subcommand_format(arg_parser: argparse.ArgumentParser) -> None:
-    arg_parser.add_argument(
-        "--format",
-        dest="subcommand_format",
-        choices=["markdown", "json"],
-        help="Output format for this subcommand. Equivalent to global --format before the command.",
-    )
-
-
-def output_format(args: argparse.Namespace, *local_dests: str) -> str:
-    for dest in (*local_dests, "subcommand_format"):
-        value = getattr(args, dest, None)
-        if value:
-            return str(value)
-    return str(getattr(args, "format", None) or "markdown")
-
-
-def resolve_global_output_format(args: argparse.Namespace) -> str:
-    if getattr(args, "format", None):
-        return str(args.format)
-    if args.command == "quota" and getattr(args, "quota_command", None) == "should-run":
-        return "json"
-    return "markdown"
+from .cli_runtime import (
+    LoopXArgumentParser,
+    add_subcommand_format,
+    build_cli_parser,
+    dispatch_common_command,
+    enforce_native_controller_guard,
+    output_format,
+    print_payload,
+    resolve_cli_registry,
+    resolve_global_output_format,
+    user_supplied_registry,
+)
 
 
 def _demo_not_available_message(command: str) -> str:
@@ -245,18 +210,8 @@ def _register_demo_commands(
             add_subcommand_format(stub)
 
 
-def user_supplied_registry(argv: list[str] | None) -> bool:
-    values = sys.argv[1:] if argv is None else argv
-    return any(value == "--registry" or value.startswith("--registry=") for value in values)
-
-
 def build_parser() -> LoopXArgumentParser:
-    parser = LoopXArgumentParser(description="LoopX control-plane helper.")
-    parser.add_argument("--version", action="version", version=f"loopx {__version__}")
-    parser.add_argument("--registry", default=str(default_registry_path()), help="Path to a project-local registry.")
-    parser.add_argument("--runtime-root", help="Override registry common_runtime_root.")
-    parser.add_argument("--format", choices=["markdown", "json"])
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser, sub = build_cli_parser()
 
     register_version_command(sub, add_subcommand_format)
 
@@ -374,76 +329,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(raw_argv)
     args.format = resolve_global_output_format(args)
-    if os.environ.get("LOOPX_KUNLUNCODE_OUTER_CONTROLLER") == "1":
-        from .kunluncode_goal_mode.guards import native_controller_cli_write_block
+    guard_result = enforce_native_controller_guard(args)
+    if guard_result is not None:
+        return guard_result
+    registry_path, registry_was_configured = resolve_cli_registry(args, raw_argv)
 
-        native_write_block = native_controller_cli_write_block(args)
-        if native_write_block is not None:
-            print(
-                json.dumps(native_write_block, ensure_ascii=False, indent=2),
-                file=sys.stderr,
-            )
-            return 2
-    registry_path = Path(args.registry).expanduser()
-    registry_was_configured = user_supplied_registry(raw_argv) or bool(
-        os.environ.get("LOOPX_REGISTRY")
+    common_command_result = dispatch_common_command(
+        args,
+        registry_path=registry_path,
+        allow_missing_registry=not user_supplied_registry(raw_argv),
     )
-    project_register_uses_default_registry = (
-        args.command == "project"
-        and args.project_command == "register"
-        and not registry_was_configured
-    )
-    if project_register_uses_default_registry:
-        registry_path = (
-            Path(args.knowledge_root).expanduser() / ".loopx" / "registry.json"
-        )
-    if (
-        args.command
-        not in {
-            "bootstrap",
-            "bootstrap-command-pack",
-            "agent-onboard",
-            "connect",
-            "codex-cli-bootstrap-message",
-            "codex-cli-bounded-visible-pilot-adapter",
-            "codex-cli-exec-handoff",
-            "codex-cli-visible-first-response-capture-plan",
-            "codex-cli-local-driver-plan",
-            "codex-cli-local-scheduler-exec",
-            "codex-cli-local-scheduler-tick",
-            "codex-cli-one-message-loop-pilot",
-            "codex-cli-runtime-idle-detector",
-            "codex-cli-session-probe",
-            "codex-cli-visible-attach-acceptance",
-            "codex-cli-visible-local-driver-pilot",
-            "codex-cli-visible-driver-run",
-            "codex-cli-visible-driver-plan",
-            "codex-cli-visible-session-proof",
-            "demo",
-            "doctor",
-            "first-run-report",
-            "new-project-prompt",
-            "resolve-agent-thread",
-            "start-goal",
-            "slash-commands",
-            "workflow-skills",
-            "heartbeat-prompt",
-            "supervisor-event",
-            "supervisor-observe",
-            "supervisor-prompt",
-            "sync-global",
-            "uninstall-project",
-            "version",
-            "host-mode-plan",
-        }
-        and not project_register_uses_default_registry
-        and not registry_was_configured
-        and not registry_path.exists()
-    ):
-        runtime_root = Path(args.runtime_root).expanduser() if args.runtime_root else DEFAULT_RUNTIME_ROOT
-        fallback_registry = global_registry_path(runtime_root)
-        if fallback_registry.exists():
-            registry_path = fallback_registry
+    if common_command_result is not None:
+        return common_command_result
 
     version_result = handle_version_command(args, output_format=output_format, print_payload=print_payload)
     if version_result is not None:
@@ -699,6 +596,7 @@ def main(argv: list[str] | None = None) -> int:
     periodic_report_result = handle_periodic_report_command(
         args,
         runtime_root_arg=args.runtime_root,
+        registry_path=registry_path,
         output_format=output_format,
         print_payload=print_payload,
         provider_command_handlers=(handle_lark_periodic_report_command,),
@@ -754,6 +652,19 @@ def main(argv: list[str] | None = None) -> int:
         print_payload=print_payload,
         output_format=output_format,
         append_cli_rollout_event=append_cli_rollout_event,
+        post_writeback_hooks=(
+            periodic_report_post_writeback_hooks_for_goal(
+                registry_path=registry_path,
+                goal_id=args.goal_id,
+            )
+            if args.command == "refresh-state"
+            else ()
+        ),
+        post_writeback_projection_builder=(
+            build_periodic_report_post_writeback_projection
+            if args.command == "refresh-state"
+            else None
+        ),
     )
     if project_lifecycle_result is not None:
         return project_lifecycle_result
@@ -787,42 +698,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     if lark_inbox_result is not None:
         return lark_inbox_result
-
-    if args.command == "check":
-        return handle_check_command(
-            args,
-            registry_path=registry_path,
-            runtime_root_arg=args.runtime_root,
-            allow_missing_registry=not user_supplied_registry(raw_argv),
-            print_payload=print_payload,
-        )
-
-    if args.command == "status":
-        return handle_status_command(
-            args,
-            registry_path=registry_path,
-            runtime_root_arg=args.runtime_root,
-            output_format=output_format,
-            print_payload=print_payload,
-        )
-
-    if args.command == "diagnose":
-        return handle_diagnose_command(
-            args,
-            registry_path=registry_path,
-            runtime_root_arg=args.runtime_root,
-            output_format=output_format,
-            print_payload=print_payload,
-        )
-
-    if args.command == "review-packet":
-        return handle_review_packet_command(
-            args,
-            registry_path=registry_path,
-            runtime_root_arg=args.runtime_root,
-            output_format=output_format,
-            print_payload=print_payload,
-        )
 
     summary_all_result = handle_summary_all_command(
         args,
@@ -888,16 +763,6 @@ def main(argv: list[str] | None = None) -> int:
     if explore_result is not None:
         return explore_result
 
-    if args.command == "todo":
-        return handle_todo_command(
-            args,
-            registry_path=registry_path,
-            runtime_root_arg=args.runtime_root,
-            format_name=output_format(args),
-            print_payload=print_payload,
-            append_cli_rollout_event=append_cli_rollout_event,
-        )
-
     task_lease_result = handle_task_lease_command(
         args,
         registry_path=registry_path,
@@ -916,15 +781,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     if handoff_mode_result is not None:
         return handoff_mode_result
-
-    if args.command == "quota":
-        return handle_quota_command(
-            args,
-            registry_path=registry_path,
-            runtime_root_arg=args.runtime_root,
-            print_payload=print_payload,
-            append_cli_rollout_event=append_cli_rollout_event,
-        )
 
     if args.command == "auto-research":
         try:

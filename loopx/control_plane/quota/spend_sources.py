@@ -10,9 +10,8 @@ from ..scheduler.execution_context import (
     SchedulerRuntimeProfile,
     scheduler_runtime_profile_for_execution_context,
 )
-from ..todos.contract import normalize_todo_id
+from ..todos.contract import normalize_todo_id, normalize_todo_replan_obligation_id
 from .effect_program import SettlementStepKind, settlement_step_command
-
 
 DEFAULT_SLOT_SPEND_SOURCE = "heartbeat"
 VISIBLE_GOAL_SLOT_SPEND_SOURCE = "visible-goal"
@@ -61,9 +60,15 @@ def visible_goal_turn_reentry_action(
     )
     selected_value = payload.get("selected_todo")
     selected = selected_value if isinstance(selected_value, Mapping) else {}
+    replan_value = payload.get("replan_action_packet")
+    replan = replan_value if isinstance(replan_value, Mapping) else {}
+    has_settlement_binding = bool(
+        normalize_todo_id(selected.get("todo_id"))
+        or normalize_todo_replan_obligation_id(replan.get("obligation_id"))
+    )
     if (
         profile is SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE
-        and normalize_todo_id(selected.get("todo_id"))
+        and has_settlement_binding
         and settlement_plan is None
         and turn_instance_id is None
     ):
@@ -74,6 +79,7 @@ def visible_goal_turn_reentry_action(
 def build_quota_spend_action(
     goal_id: str,
     *,
+    command_prefix: str = "loopx",
     scoped_cli_args: str,
     payload: Mapping[str, Any],
     settlement_plan: Mapping[str, Any] | None,
@@ -102,7 +108,8 @@ def build_quota_spend_action(
         if todo_id and source == DEFAULT_SLOT_SPEND_SOURCE
         else ""
     )
+    cli_prefix = command_prefix.strip() or "loopx"
     return (
-        f"loopx quota spend-slot --goal-id {goal_id} --slots 1 "
+        f"{cli_prefix} quota spend-slot --goal-id {goal_id} --slots 1 "
         f"--source {source} --execute{todo_arg}{scoped_cli_args}"
     )

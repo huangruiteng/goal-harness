@@ -10,6 +10,7 @@ status_limit="${LOOPX_STATUS_LIMIT:-80}"
 status_contract_min_version="${LOOPX_STATUS_CONTRACT_MIN_VERSION:-2}"
 chat_port="${LOOPX_CHAT_PORT:-8767}"
 host="${LOOPX_DASHBOARD_HOST:-127.0.0.1}"
+chat_runtime_endpoint="$host:$chat_port"
 label_prefix="${LOOPX_LAUNCH_LABEL_PREFIX:-com.loopx}"
 
 uid="$(id -u)"
@@ -155,7 +156,7 @@ PY
 
 write_plists() {
   local status_command python_command codex_command claude_command lark_cli_command
-  local path_prefix command_path command_dir status_shell chat_shell control_plane_write_arg lark_cli_arg
+  local path_prefix command_path command_dir status_shell chat_shell control_plane_write_arg lark_cli_arg codex_home_export
   status_command="$(resolve_status_command)"
   python_command="$(resolve_loopx_python)"
   codex_command="$(resolve_optional_command codex)"
@@ -174,14 +175,18 @@ write_plists() {
   path_prefix="$path_prefix:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   control_plane_write_arg=""
   lark_cli_arg=""
+  codex_home_export=""
   if [[ "$control_plane_write_api_enabled" == "true" ]]; then
     control_plane_write_arg=" --enable-control-plane-write-api"
   fi
   if [[ -n "$lark_cli_command" ]]; then
     lark_cli_arg=" --lark-cli-bin $(shell_quote "$lark_cli_command")"
   fi
+  if [[ -n "${CODEX_HOME:-}" ]]; then
+    codex_home_export=" export CODEX_HOME=$(shell_quote "$CODEX_HOME");"
+  fi
   status_shell="export LOOPX_PYTHON=$(shell_quote "$python_command"); export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") serve-status --global-registry --host $(shell_quote "$host") --port $(shell_quote "$status_port") --limit $(shell_quote "$status_limit")$control_plane_write_arg"
-  chat_shell="export LOOPX_PYTHON=$(shell_quote "$python_command"); export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") chat --global-registry --host $(shell_quote "$host") --port $(shell_quote "$chat_port") --codex-bin $(shell_quote "$codex_command") --claude-bin $(shell_quote "$claude_command")$lark_cli_arg --no-open"
+  chat_shell="export LOOPX_PYTHON=$(shell_quote "$python_command");$codex_home_export export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") chat --global-registry --host $(shell_quote "$host") --port $(shell_quote "$chat_port") --codex-bin $(shell_quote "$codex_command") --claude-bin $(shell_quote "$claude_command")$lark_cli_arg --replace-existing-loopx-chat --no-open"
 
   mkdir -p "$launch_agents_dir" "$logs_dir"
 
@@ -259,11 +264,78 @@ bootstrap_one() {
 start_agents() {
   bootstrap_one "$status_label" "$status_plist"
   bootstrap_one "$chat_label" "$chat_plist"
+  verify_current_chat_runtime
 }
 
 stop_agents() {
   bootout_one "$chat_label" "$chat_plist"
   bootout_one "$status_label" "$status_plist"
+}
+
+expected_chat_runtime_identity() {
+  local status_command python_command
+  status_command="$(resolve_status_command)"
+  python_command="$(resolve_python_command)"
+  "$status_command" --format json doctor | "$python_command" -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+manifest = ((payload.get("release_manifest") or {}).get("manifest") or {})
+package = manifest.get("package") or {}
+source = manifest.get("source") or {}
+identity = {
+    "schema_version": "loopx_runtime_identity_v1",
+    "package_version": package.get("version"),
+    "release_id": manifest.get("release_id"),
+    "source_revision": source.get("git_commit"),
+}
+if not identity["package_version"] or not identity["release_id"]:
+    raise SystemExit(2)
+print(json.dumps(identity, sort_keys=True, separators=(",", ":")))
+'
+}
+
+chat_runtime_identity() {
+  local python_command payload
+  python_command="$(resolve_python_command)"
+  # A scheme-less curl endpoint defaults to local HTTP; managed replacement rejects non-loopback hosts.
+  payload="$(curl -fsS "$chat_runtime_endpoint/api/chat/capabilities" 2>/dev/null)"
+  "$python_command" -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+if payload.get("ok") is not True or payload.get("schema_version") != "loopx_chat_capabilities_v1":
+    raise SystemExit(2)
+identity = payload.get("runtime_identity")
+if not isinstance(identity, dict):
+    raise SystemExit(2)
+print(json.dumps(identity, sort_keys=True, separators=(",", ":")))
+' <<<"$payload"
+}
+
+verify_current_chat_runtime() {
+  local expected actual attempt
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is required to verify the restarted LoopX Chat runtime." >&2
+    return 1
+  fi
+  expected="$(expected_chat_runtime_identity)" || {
+    echo "Could not resolve the installed LoopX runtime identity." >&2
+    return 1
+  }
+  for attempt in {1..50}; do
+    actual="$(chat_runtime_identity 2>/dev/null || true)"
+    if [[ -n "$actual" && "$actual" == "$expected" ]]; then
+      echo "- chat_runtime: current release identity verified"
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "LoopX Chat did not start with the current release identity at local endpoint $chat_runtime_endpoint." >&2
+  [[ -n "${actual:-}" ]] && echo "Observed runtime identity: $actual" >&2
+  return 1
 }
 
 print_status_contract_health() {

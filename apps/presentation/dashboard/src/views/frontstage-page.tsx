@@ -21,9 +21,16 @@ import rolloutProjectionFixture from "../../../../../examples/fixtures/frontstag
 import rolloutFixture from "../../../../../examples/fixtures/long-horizon-self-iteration-rollout.public.json";
 import { frontstageRoute } from "../router";
 import {
+  actionKindTone,
+  deriveOperatorStateSignals,
+  eventClassificationTone,
+  GoalChannelEvent,
+  GoalChannelLease,
   GoalChannelProjection,
   GoalChannelTodo,
+  leaseStatusTone,
   sampleGoalChannelProjection,
+  type BadgeTone,
 } from "../data/goal-channel-frontstage";
 import { QueueItem, StatusPayload, formatStatusError } from "../data/status";
 import {
@@ -39,7 +46,6 @@ import { Button } from "../components/ui/button";
 import { Select } from "../components/ui/select";
 import { cn } from "../lib/utils";
 
-type BadgeTone = "neutral" | "success" | "warning" | "info" | "danger";
 type FrontstageSource = { kind: "demo"; label: string } | { kind: "url"; label: string };
 type FrontstageMode = "showcase" | "developer" | "ops";
 type TodoLaneFilter = "all" | "user" | "agent";
@@ -358,13 +364,18 @@ function statusTone(value?: string): BadgeTone {
   if (!value) {
     return "neutral";
   }
-  if (["done", "closed", "resolved"].includes(value)) {
+  const normalized = value.toLowerCase();
+  if (["done", "closed", "resolved"].includes(normalized)) {
     return "success";
   }
-  if (["blocked", "action_required", "waiting"].includes(value)) {
+  if (
+    ["blocked", "action_required", "waiting", "capability_wait", "workspace_repair"].includes(
+      normalized,
+    )
+  ) {
     return "warning";
   }
-  if (["failed", "error"].includes(value)) {
+  if (["failed", "error"].includes(normalized)) {
     return "danger";
   }
   return "info";
@@ -1787,9 +1798,13 @@ function TodoRow({ todo }: { todo: GoalChannelTodo }) {
         <p className="break-words text-sm font-medium leading-6 text-slate-950">{todo.title}</p>
         <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-medium text-slate-500">
           {todo.todo_id ? <span>{todo.todo_id}</span> : null}
-          {todo.action_kind ? <span>{todo.action_kind}</span> : null}
           {todo.task_class ? <span>{todo.task_class}</span> : null}
         </div>
+        {todo.action_kind ? (
+          <div className="mt-2">
+            <Badge variant={actionKindTone(todo.action_kind)}>{todo.action_kind}</Badge>
+          </div>
+        ) : null}
       </div>
       <div className="flex items-start justify-start md:justify-end">
         {todo.claimed_by ? (
@@ -3002,6 +3017,7 @@ function DeveloperOnboardingPanel() {
               ["identity", "heartbeat uses --agent-id and scoped automation identity"],
               ["health", "quota/status agree on user todos, runnable candidates, and gate state"],
               ["workspace", "workspace_guard isolates peer writes from the canonical checkout"],
+              ["capability-wait", "missing capabilities stay projected as wait/repair, not silent stalls"],
               ["handoff", "TUI steering stays visible while LoopX owns quota/status/writeback"],
             ].map(([label, value]) => (
               <div className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2" key={label}>
@@ -3250,6 +3266,7 @@ function FrontstageRoute({
       tone: "neutral",
     },
   ] satisfies Array<{ label: string; value: string; helper: string; tone: BadgeTone }>;
+  const operatorStateSignals = deriveOperatorStateSignals(projection);
 
   return (
     <main
@@ -3592,6 +3609,29 @@ function FrontstageRoute({
                 </div>
               </Panel>
 
+              <Panel icon={ListChecks} title="Operator State Legibility">
+                <div className="grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="frontstage-operator-state-legibility">
+                  {operatorStateSignals.map((signal) => (
+                    <div
+                      className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-3"
+                      data-testid={`frontstage-state-${signal.label}`}
+                      key={signal.label}
+                    >
+                      <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">
+                        {signal.label}
+                      </div>
+                      <div className="mt-2 break-words text-sm font-semibold leading-6 text-slate-950">
+                        {signal.value}
+                      </div>
+                      <p className="mt-2 text-xs font-medium leading-5 text-slate-600">{signal.helper}</p>
+                      <div className="mt-2">
+                        <Badge variant={signal.tone}>{signal.label}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+
               <div className="grid gap-4 lg:grid-cols-2">
                 <div
                   className="frontstage-ops-command-strip rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2"
@@ -3661,7 +3701,9 @@ function FrontstageRoute({
                   {projection.recent_events.map((event, index) => (
                     <div className="grid gap-3 px-4 py-3 md:grid-cols-[190px_180px_minmax(0,1fr)]" key={`${event.generated_at ?? "event"}-${index}`}>
                       <div className="font-mono text-xs text-slate-500">{event.generated_at ?? "n/a"}</div>
-                      <Badge variant="neutral">{event.classification ?? "event"}</Badge>
+                      <Badge variant={eventClassificationTone(event.classification)}>
+                        {event.classification ?? "event"}
+                      </Badge>
                       <div className="text-sm leading-6 text-slate-700">{event.summary ?? "compact event"}</div>
                     </div>
                   ))}
@@ -3698,9 +3740,21 @@ function FrontstageRoute({
                   <div className="px-4 py-3" key={`${lease.todo_id ?? "claim"}-${index}`}>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="info">{lease.owner_agent ?? "unknown"}</Badge>
-                      <Badge variant="neutral">{lease.status ?? "claim"}</Badge>
+                      <Badge variant={leaseStatusTone(lease.status)}>{lease.status ?? "claim"}</Badge>
                     </div>
                     <div className="mt-2 break-all text-xs font-medium text-slate-500">{lease.todo_id}</div>
+                    {lease.lease_until ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-600">
+                        <Badge variant="neutral">until {lease.lease_until}</Badge>
+                      </div>
+                    ) : null}
+                    {lease.write_scope?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {lease.write_scope.map((scope) => (
+                          <Badge key={scope} variant="warning">{scope}</Badge>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>

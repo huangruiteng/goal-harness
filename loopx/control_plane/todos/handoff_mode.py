@@ -379,7 +379,9 @@ def set_goal_handoff_mode(
     bypasses this check and is out of contract.
     """
 
-    from ...file_lock import exclusive_file_lock
+    from ...file_lock import (
+        exclusive_cross_runtime_file_lock as exclusive_file_lock,
+    )
     from ..work_items.task_lease import (
         runtime_root_from_registry,
         task_lease_lock_path,

@@ -15,13 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from ...runtime import validate_goal_id_path_segment
+from .driver import selected_turn_todo
 from .executor import (
     HOST_AGENT_VISION_JSON_MAX_CHARS,
     HOST_RESULT_TEXT_LIMITS,
-    BuiltInHostError,
     LOOPX_TURN_HOST_REQUEST_SCHEMA_VERSION,
 )
-from .driver import selected_turn_todo
+from .host_failure import BuiltInHostError
 from .transaction import LOOPX_TURN_RESULT_SCHEMA_VERSION, TRANSACTION_PHASES
 
 
@@ -35,6 +35,7 @@ CODEX_CLI_RESULT_KINDS = (
 )
 CODEX_CLI_SANDBOXES = ("read-only", "workspace-write")
 SESSION_ID_MAX_CHARS = 256
+OUTPUT_DRAIN_TIMEOUT_SECONDS = 2.0
 SESSION_INVALIDATING_FAILURE_CATEGORIES = frozenset(
     {
         "model_requires_newer_codex",
@@ -42,6 +43,60 @@ SESSION_INVALIDATING_FAILURE_CATEGORIES = frozenset(
         "session_missing",
     }
 )
+_FAILURE_KINDS = {
+    "auth_failed": "auth_failed",
+    "model_requires_newer_codex": "contract_rejected",
+    "output_schema_rejected": "contract_rejected",
+    "provider_capacity": "provider_capacity",
+    "provider_overloaded": "provider_overloaded",
+    "quota_exhausted": "quota_exhausted",
+    "rate_limited": "rate_limited",
+    "session_missing": "session_missing",
+    "unknown": "unknown",
+}
+_SESSION_RESUMABLE_FAILURE_CATEGORIES = frozenset(
+    {"provider_capacity", "provider_overloaded", "rate_limited"}
+)
+_STRUCTURED_FAILURE_CATEGORIES = {
+    "-32001": "provider_overloaded",
+    "authentication_failed": "auth_failed",
+    "insufficient_quota": "quota_exhausted",
+    "invalid_api_key": "auth_failed",
+    "invalid_json_schema": "output_schema_rejected",
+    "model_at_capacity": "provider_capacity",
+    "output_schema_rejected": "output_schema_rejected",
+    "quota_exceeded": "quota_exhausted",
+    "rate_limit_exceeded": "rate_limited",
+    "rate_limited": "rate_limited",
+    "server_is_overloaded": "provider_overloaded",
+    "server_overloaded": "provider_overloaded",
+    "serveroverloaded": "provider_overloaded",
+    "session_not_found": "session_missing",
+    "slow_down": "provider_overloaded",
+    "thread_not_found": "session_missing",
+    "too_many_requests": "rate_limited",
+    "unauthorized": "auth_failed",
+    "usage_not_included": "quota_exhausted",
+    "usagelimitexceeded": "quota_exhausted",
+}
+_STRUCTURED_HTTP_STATUS_CATEGORIES = {
+    401: "auth_failed",
+    429: "rate_limited",
+    503: "provider_overloaded",
+}
+_FAILURE_CATEGORY_PRIORITY = {
+    # Conflicting observations fail closed before any retryable category. Among
+    # transient classes, prefer the longer rate-limit backoff over overload.
+    "unknown": 0,
+    "session_missing": 1,
+    "model_requires_newer_codex": 1,
+    "output_schema_rejected": 1,
+    "auth_failed": 1,
+    "quota_exhausted": 1,
+    "rate_limited": 2,
+    "provider_capacity": 3,
+    "provider_overloaded": 3,
+}
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -295,8 +350,27 @@ def codex_cli_session_id_from_jsonl(value: str) -> str | None:
     return None
 
 
-def _stderr_failure_category(line: str) -> str | None:
+def _diagnostic_failure_category(line: str) -> str | None:
     text = line.lower()
+    if any(
+        marker in text
+        for marker in (
+            "selected model is at capacity",
+            "model is at capacity",
+            "provider is at capacity",
+        )
+    ):
+        return "provider_capacity"
+    if any(
+        marker in text
+        for marker in (
+            "server overloaded",
+            "server is overloaded",
+            "service overloaded",
+            "service is overloaded",
+        )
+    ):
+        return "provider_overloaded"
     if "requires a newer version of codex" in text:
         return "model_requires_newer_codex"
     if "invalid_json_schema" in text or ("output schema" in text and "invalid" in text):
@@ -308,12 +382,220 @@ def _stderr_failure_category(line: str) -> str | None:
         return "auth_failed"
     if any(
         marker in text
-        for marker in ("rate limit", "too many requests", "quota exceeded")
+        for marker in (
+            "quota exceeded",
+            "exceeded your current quota",
+            "check your plan and billing",
+            "usage is not included",
+            "upgrade to plus",
+        )
+    ):
+        return "quota_exhausted"
+    if any(
+        marker in text
+        for marker in ("rate limit", "too many requests")
     ):
         return "rate_limited"
     if "session" in text and "not found" in text:
         return "session_missing"
     return None
+
+
+def _structured_failure_category(value: Any) -> str | None:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+    return _STRUCTURED_FAILURE_CATEGORIES.get(str(value).strip().lower())
+
+
+def _meaningful_structured_value(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return False
+    return bool(str(value).strip())
+
+
+def _structured_http_status_category(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        status = int(value)
+    except (TypeError, ValueError):
+        return None
+    return _STRUCTURED_HTTP_STATUS_CATEGORIES.get(status)
+
+
+def _codex_error_info_values(container: Mapping[str, Any]) -> tuple[Any, ...]:
+    return tuple(
+        container.get(field)
+        for field in ("codex_error_info", "codexErrorInfo")
+        if container.get(field) is not None
+    )
+
+
+def _codex_error_info_category(value: Any) -> tuple[str | None, bool]:
+    if _meaningful_structured_value(value):
+        return _structured_failure_category(value), True
+    if not isinstance(value, Mapping) or not value:
+        return None, False
+    # Object variants in the app-server v2 contract carry their discriminator
+    # as the sole key and may attach an upstream HTTP status in the value.
+    if len(value) != 1:
+        return None, True
+    variant, details = next(iter(value.items()))
+    category = _structured_failure_category(variant)
+    if category is not None:
+        return category, True
+    detail = _mapping(details)
+    for field in (
+        "httpStatusCode",
+        "http_status_code",
+        "statusCode",
+        "status_code",
+    ):
+        if field in detail:
+            return _structured_http_status_category(detail.get(field)), True
+    return None, True
+
+
+def _event_error_containers(event: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    error = _mapping(event.get("error"))
+    response = _mapping(event.get("response"))
+    response_error = _mapping(response.get("error"))
+    params = _mapping(event.get("params"))
+    params_error = _mapping(params.get("error"))
+    turn = _mapping(params.get("turn"))
+    turn_error = _mapping(turn.get("error"))
+    return tuple(
+        container
+        for container in (error, response_error, params_error, turn_error)
+        if container
+    )
+
+
+def _is_failure_event(
+    event: Mapping[str, Any],
+    error_containers: tuple[dict[str, Any], ...],
+) -> bool:
+    event_type = str(event.get("type") or "")
+    method = str(event.get("method") or "")
+    if event_type in {"error", "response.failed", "turn.failed", "turn_failed"}:
+        return True
+    if method == "error":
+        return True
+    if method == "turn/completed":
+        params = _mapping(event.get("params"))
+        turn = _mapping(params.get("turn"))
+        return str(turn.get("status") or "").lower() == "failed" and bool(
+            error_containers
+        )
+    # JSON-RPC errors have no event type or method; require an exact response
+    # shape so arbitrary successful JSONL records with an `error` field do not
+    # become Host failures.
+    return (
+        not event_type
+        and not method
+        and "id" in event
+        and isinstance(event.get("error"), Mapping)
+    )
+
+
+def _event_failure_categories(
+    event: Mapping[str, Any],
+) -> tuple[str | None, str | None]:
+    """Return exact structured and fallback diagnostic classes separately."""
+
+    error_containers = _event_error_containers(event)
+    if not _is_failure_event(event, error_containers):
+        return None, None
+
+    # 1. A provider error code is the most specific signal. If it exists but is
+    # unknown, fail closed instead of reinterpreting its English message.
+    code_containers = (event, *error_containers)
+    code_categories: list[str] = []
+    for container in code_containers:
+        for field in ("code", "error_code", "errorCode"):
+            candidate = container.get(field)
+            if not _meaningful_structured_value(candidate):
+                continue
+            code_categories.append(
+                _structured_failure_category(candidate) or "unknown"
+            )
+    if code_categories:
+        return _select_failure_category(code_categories), None
+
+    # 2. Codex app-server error variants are typed discriminators too. Unknown
+    # variants are not safe to reinterpret from prose.
+    info_present = False
+    info_categories: list[str] = []
+    for container in (event, *error_containers):
+        for candidate in _codex_error_info_values(container):
+            category, present = _codex_error_info_category(candidate)
+            info_present = info_present or present
+            if category is not None:
+                info_categories.append(category)
+    if info_categories:
+        return _select_failure_category(info_categories), None
+    if info_present:
+        return "unknown", None
+
+    # 3. Some provider envelopes use error.type instead of error.code. A generic
+    # or unknown type does not suppress fallback because the provider code is
+    # still absent (for example, `type=server_error, code=null`).
+    type_categories: list[str] = []
+    for container in error_containers:
+        candidate = container.get("type")
+        if not _meaningful_structured_value(candidate):
+            continue
+        if category := _structured_failure_category(candidate):
+            type_categories.append(category)
+    if type_categories:
+        return _select_failure_category(type_categories), None
+
+    # 4. HTTP 429 is retryable only when no more-specific error code exists;
+    # this keeps `insufficient_quota` fatal even though providers often send it
+    # with an HTTP 429 transport status.
+    status_categories: list[str] = []
+    for container in (event, *error_containers):
+        for field in (
+            "httpStatusCode",
+            "http_status_code",
+            "statusCode",
+            "status_code",
+        ):
+            if field in container:
+                if category := _structured_http_status_category(container.get(field)):
+                    status_categories.append(category)
+    if status_categories:
+        return _select_failure_category(status_categories), None
+
+    # 5. Message matching is a legacy compatibility fallback only.
+    diagnostic_containers = (event, *error_containers)
+    for container in diagnostic_containers:
+        for field in ("message", "detail"):
+            candidate = container.get(field)
+            if isinstance(candidate, str):
+                category = _diagnostic_failure_category(candidate)
+                if category is not None:
+                    return None, category
+    return None, None
+
+
+def _event_failure_category(event: Mapping[str, Any]) -> str | None:
+    """Classify one error event without retaining its provider prose."""
+
+    structured, diagnostic = _event_failure_categories(event)
+    return structured or diagnostic
+
+
+def _select_failure_category(categories: list[str]) -> str | None:
+    if not categories:
+        return None
+    return min(
+        categories,
+        key=lambda category: (
+            _FAILURE_CATEGORY_PRIORITY.get(category, 99),
+            category,
+        ),
+    )
 
 
 def _terminate_process(proc: subprocess.Popen[str]) -> None:
@@ -439,7 +721,8 @@ def run_codex_cli_host(
             start_new_session=True,
         )
         observed_session: list[str] = []
-        failure_categories: list[str] = []
+        structured_failure_categories: list[str] = []
+        diagnostic_failure_categories: list[str] = []
 
         def discard_events() -> None:
             assert proc.stdout is not None
@@ -452,15 +735,20 @@ def run_codex_cli_host(
                     candidate = codex_cli_event_session_id(event)
                     if candidate and not observed_session:
                         observed_session.append(candidate)
+                    structured, diagnostic = _event_failure_categories(event)
+                    if structured:
+                        structured_failure_categories.append(structured)
+                    if diagnostic:
+                        diagnostic_failure_categories.append(diagnostic)
 
         reader = threading.Thread(target=discard_events, daemon=True)
 
         def discard_stderr() -> None:
             assert proc.stderr is not None
             for line in proc.stderr:
-                category = _stderr_failure_category(line)
-                if category and not failure_categories:
-                    failure_categories.append(category)
+                category = _diagnostic_failure_category(line)
+                if category:
+                    diagnostic_failure_categories.append(category)
 
         stderr_reader = threading.Thread(target=discard_stderr, daemon=True)
         reader.start()
@@ -476,8 +764,9 @@ def run_codex_cli_host(
             timed_out = True
             returncode = proc.returncode
         finally:
-            reader.join(timeout=2)
-            stderr_reader.join(timeout=2)
+            reader.join(timeout=OUTPUT_DRAIN_TIMEOUT_SECONDS)
+            stderr_reader.join(timeout=OUTPUT_DRAIN_TIMEOUT_SECONDS)
+        output_observation_incomplete = reader.is_alive() or stderr_reader.is_alive()
         if timed_out:
             if observed_session:
                 _store_codex_cli_session(
@@ -487,20 +776,40 @@ def run_codex_cli_host(
                 )
             raise BuiltInHostError(
                 "codex_cli_timeout",
+                failure_kind="executor_timeout",
                 recovery_kind=("resume_session" if observed_session else None),
             )
-        category = failure_categories[0] if failure_categories else "exit_nonzero"
+        category = (
+            "unknown"
+            if output_observation_incomplete
+            else (
+                _select_failure_category(structured_failure_categories)
+                or _select_failure_category(diagnostic_failure_categories)
+                or "exit_nonzero"
+            )
+        )
         if returncode != 0 and category in SESSION_INVALIDATING_FAILURE_CATEGORIES:
             _discard_codex_cli_session(runtime_root, lineage=lineage)
-        if observed_session:
-            if returncode == 0 or category not in SESSION_INVALIDATING_FAILURE_CATEGORIES:
-                _store_codex_cli_session(
-                    runtime_root,
-                    lineage=lineage,
-                    session_id=observed_session[0],
-                )
+        if observed_session and (
+            returncode == 0
+            or category not in SESSION_INVALIDATING_FAILURE_CATEGORIES
+        ):
+            _store_codex_cli_session(
+                runtime_root,
+                lineage=lineage,
+                session_id=observed_session[0],
+            )
         if returncode != 0:
-            raise BuiltInHostError(f"codex_cli_{category}")
+            raise BuiltInHostError(
+                f"codex_cli_{category}",
+                failure_kind=_FAILURE_KINDS.get(category, "unknown"),
+                recovery_kind=(
+                    "resume_session"
+                    if observed_session
+                    and category in _SESSION_RESUMABLE_FAILURE_CATEGORIES
+                    else None
+                ),
+            )
         try:
             result = json.loads(output_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:

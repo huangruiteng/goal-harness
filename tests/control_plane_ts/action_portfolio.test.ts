@@ -4,12 +4,18 @@ import test from "node:test";
 import {
   ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION,
   ACTION_SELECTION_QUALIFICATION_REQUEST_SCHEMA_VERSION,
+  QUOTA_PLANNING_PACKET_REQUEST_SCHEMA_VERSION,
   projectQuotaActionPortfolio,
   qualifyActionSelection,
 } from "../../loopx/control_plane/work_items/action_portfolio.ts";
 import {
+  PLANNING_HORIZON_REQUEST_SCHEMA_VERSION,
+  projectQuotaPlanningHorizon,
+} from "../../loopx/control_plane/work_items/planning_horizon.ts";
+import {
   TODO_PLANNING_INVENTORY_REQUEST_SCHEMA_VERSION,
   projectTodoPlanningInventory,
+  projectTodoPlanningInventoryDetail,
 } from "../../loopx/control_plane/work_items/planning_inventory.ts";
 
 function candidate(todoId: string, text: string, priority: string) {
@@ -33,9 +39,35 @@ function request(
   maxAlternativeActions?: number,
 ) {
   const sourceItems = [primary, ...candidates, ...unavailable];
+  const planningInventoryRequest = {
+    schema_version: TODO_PLANNING_INVENTORY_REQUEST_SCHEMA_VERSION,
+    goal_id: "action-portfolio-fixture",
+    agent_id: "codex-main",
+    selected_todo: primary,
+    source_items: sourceItems,
+    runnable_candidates: [primary, ...candidates],
+    unavailable_higher_priority: unavailable,
+    source_context_todo_count: new Set(sourceItems.map((item) => item.todo_id)).size,
+  };
   return {
     schema_version: ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION,
-    planning_inventory: projectTodoPlanningInventory({
+    planning_inventory: projectTodoPlanningInventory(planningInventoryRequest),
+    ...(maxAlternativeActions === undefined
+      ? {}
+      : { max_alternative_actions: maxAlternativeActions }),
+  };
+}
+
+function planningPacketRequest(
+  primary: Record<string, unknown>,
+  candidates: Record<string, unknown>[],
+  unavailable: Record<string, unknown>[] = [],
+  overrides: Record<string, unknown> = {},
+) {
+  const sourceItems = [primary, ...candidates, ...unavailable];
+  return {
+    schema_version: QUOTA_PLANNING_PACKET_REQUEST_SCHEMA_VERSION,
+    planning_inventory_request: {
       schema_version: TODO_PLANNING_INVENTORY_REQUEST_SCHEMA_VERSION,
       goal_id: "action-portfolio-fixture",
       agent_id: "codex-main",
@@ -44,12 +76,110 @@ function request(
       runnable_candidates: [primary, ...candidates],
       unavailable_higher_priority: unavailable,
       source_context_todo_count: new Set(sourceItems.map((item) => item.todo_id)).size,
-    }),
-    ...(maxAlternativeActions === undefined
-      ? {}
-      : { max_alternative_actions: maxAlternativeActions }),
+    },
+    projection_enabled: true,
+    include_detail: true,
+    acceptance_gaps: [],
+    ...overrides,
   };
 }
+
+test("planning packet composes every requested lens from one inventory", () => {
+  const primary = candidate("todo_primary001", "Run the primary slice.", "P0");
+  const alternative = candidate(
+    "todo_fallback001",
+    "Run the fallback slice.",
+    "P1",
+  );
+  const packetRequest = planningPacketRequest(primary, [alternative], [], {
+    acceptance_gaps: [{
+      kind: "vision_acceptance_gap",
+      acceptance_summary: "Prove the aggregate interface before closeout.",
+    }],
+  });
+  const planningInventoryRequest = packetRequest.planning_inventory_request;
+  const inventory = projectTodoPlanningInventory(planningInventoryRequest);
+  const portfolio = projectQuotaActionPortfolio({
+    schema_version: ACTION_PORTFOLIO_REQUEST_SCHEMA_VERSION,
+    planning_inventory: inventory,
+    max_alternative_actions: 2,
+  });
+  const horizon = projectQuotaPlanningHorizon({
+    schema_version: PLANNING_HORIZON_REQUEST_SCHEMA_VERSION,
+    planning_inventory: inventory,
+    acceptance_gaps: packetRequest.acceptance_gaps,
+  });
+
+  assert.deepEqual(projectQuotaActionPortfolio(packetRequest), {
+    schema_version: "quota_planning_packet_v0",
+    action_portfolio: portfolio,
+    planning_horizon: horizon,
+    agent_todo_planning_inventory: projectTodoPlanningInventoryDetail(inventory),
+  });
+});
+
+test("planning packet gates optional lenses without leaking its inventory", () => {
+  const primary = candidate("todo_primary001", "Run the only slice.", "P0");
+  const result = projectQuotaActionPortfolio(planningPacketRequest(
+    primary,
+    [],
+    [],
+    { projection_enabled: false, include_detail: true },
+  ));
+
+  assert.equal(result?.schema_version, "quota_planning_packet_v0");
+  assert.equal("planning_inventory" in (result ?? {}), false);
+  assert.equal("action_portfolio" in (result ?? {}), false);
+  assert.equal("planning_horizon" in (result ?? {}), false);
+  assert.equal("agent_todo_planning_inventory" in (result ?? {}), true);
+});
+
+test("planning packet rejects malformed projection gates", () => {
+  const primary = candidate("todo_primary001", "Run the only slice.", "P0");
+  assert.throws(
+    () => projectQuotaActionPortfolio(planningPacketRequest(
+      primary,
+      [],
+      [],
+      { projection_enabled: "yes" },
+    )),
+    /projection_enabled must be a boolean/,
+  );
+  assert.throws(
+    () => projectQuotaActionPortfolio(planningPacketRequest(
+      primary,
+      [],
+      [],
+      { acceptance_gaps: "not-an-array" },
+    )),
+    /acceptance_gaps must be an array/,
+  );
+});
+
+test("planning packet preserves bounded horizon completeness", () => {
+  const primary = candidate("todo_primary001", "Run the primary slice.", "P0");
+  const monitors = Array.from({ length: 33 }, (_, index) => ({
+    ...candidate(
+      `todo_monitor${String(index).padStart(3, "0")}`,
+      `Observe monitor ${index}.`,
+      "P1",
+    ),
+    task_class: "continuous_monitor",
+    next_due_at: "2099-01-01T00:00:00Z",
+  }));
+  const packetRequest = planningPacketRequest(primary, []);
+  packetRequest.planning_inventory_request.source_items = [primary, ...monitors];
+  packetRequest.planning_inventory_request.runnable_candidates = [primary];
+  packetRequest.planning_inventory_request.source_context_todo_count = 34;
+
+  const result = projectQuotaActionPortfolio(packetRequest);
+  const horizon = result?.planning_horizon as Record<string, unknown>;
+  const completeness = horizon.completeness as Record<string, unknown>;
+
+  assert.equal((horizon.work_items as unknown[]).length, 5);
+  assert.equal(completeness.omitted_candidate_todo_count, 29);
+  assert.equal(completeness.complete, false);
+});
 
 test("action portfolio exposes one recommendation and bounded selectable alternatives", () => {
   const primary = candidate("todo_primary001", "Run the primary slice.", "P0");

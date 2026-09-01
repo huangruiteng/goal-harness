@@ -72,6 +72,7 @@ def project_replan_writeback_rejection(
     *,
     goal_id: str,
     agent_id: str | None,
+    runtime_root: str | None = None,
 ) -> dict[str, Any]:
     """Project exact recovery actions without weakening the writeback gate."""
 
@@ -94,6 +95,7 @@ def project_replan_writeback_rejection(
         goal_id=goal_id,
         lifecycle_actor_args=scoped_cli_args,
         scoped_cli_args=scoped_cli_args,
+        runtime_root=runtime_root,
     )
     triggers = (
         lifecycle_reentry["triggers"]
@@ -111,6 +113,7 @@ def project_replan_writeback_rejection(
             quota_spend_action="",
             settlement_chain_ready=False,
             lifecycle_actor_args=scoped_cli_args,
+            runtime_root=runtime_root,
         )
     )
     return {

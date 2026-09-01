@@ -23,6 +23,7 @@ import { ChannelTimeline } from "./channel-timeline";
 import { ContextDrawer } from "./context-drawer";
 import { GoalSidebar } from "./goal-sidebar";
 import { GoalTasksView } from "./goal-tasks-view";
+import { localizedGoalState, localizedSessionStatus, useWorkspaceI18n, type WorkspaceTranslate } from "./i18n";
 import { MarkdownText } from "./markdown";
 import type {
   PersonalWorkspaceCallbacks,
@@ -38,7 +39,7 @@ import type {
   WorkspaceSystemHealth,
   WorkspaceTimelineItem,
 } from "./personal-workspace-model";
-import { goalTitleFor, workspaceHomeLaneForGoal, workspaceSessionStatusLabel } from "./personal-workspace-model";
+import { goalTitleFor, workspaceHomeLaneForGoal } from "./personal-workspace-model";
 import { routeWorkspaceInput } from "./personal-workspace-router";
 import { WorkspaceSettingsPage } from "./workspace-settings-page";
 import { WorkspaceShell } from "./workspace-shell";
@@ -64,28 +65,21 @@ export function sanitizeTaskDraftFromReply(reply: string): string {
 function dedupeProposals(proposals: WorkspaceActionPreview[]): WorkspaceActionPreview[] {
   const latest = new Map<string, WorkspaceActionPreview>();
   proposals.forEach((proposal) => {
-    const subject = proposal.fields.find((field) => field.label === "todo id")?.value ?? "";
+    const subject = proposal.fields.find((field) => field.key === "todo_id")?.value ?? "";
     const key = [proposal.actionKind, proposal.goalId ?? "", subject, proposal.title].join(":");
     latest.set(key, proposal);
   });
   return [...latest.values()];
 }
 
-const activeHomeLanes = [
-  { description: "等待你的决定、授权或补充信息", key: "needs_you", label: "需要你" },
-  { description: "Agent 正在推进并持续回传进展", key: "running", label: "执行中" },
-  { description: "持续监控，出现变化时再提醒你", key: "observing", label: "观察中" },
-  { description: "已经安排，等待时间或前置条件", key: "scheduled", label: "已安排" },
-] as const;
-
-function activityTimeLabel(value?: string) {
-  if (!value) return "等待首次活动";
+function activityTimeLabel(value: string | undefined, locale: string, t: WorkspaceTranslate) {
+  if (!value) return t("home.noFirstActivity");
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   const today = new Date();
-  const time = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(parsed);
-  if (parsed.toDateString() === today.toDateString()) return `今天 ${time}`;
-  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(parsed);
+  const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false }).format(parsed);
+  if (parsed.toDateString() === today.toDateString()) return t("home.todayAt", { time });
+  return new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(parsed);
 }
 
 function ManagerHomeBoard({
@@ -97,6 +91,13 @@ function ManagerHomeBoard({
   onSelectGoal: (goalId: string) => void;
   systemHealth?: WorkspaceSystemHealth;
 }) {
+  const { locale, t } = useWorkspaceI18n();
+  const activeHomeLanes = [
+    { description: t("home.lane.needsYouDescription"), key: "needs_you", label: t("home.lane.needsYou") },
+    { description: t("home.lane.runningDescription"), key: "running", label: t("home.lane.running") },
+    { description: t("home.lane.observingDescription"), key: "observing", label: t("home.lane.observing") },
+    { description: t("home.lane.scheduledDescription"), key: "scheduled", label: t("home.lane.scheduled") },
+  ] as const;
   const active = Object.fromEntries(activeHomeLanes.map((lane) => [lane.key, [] as WorkspaceGoal[]])) as Record<(typeof activeHomeLanes)[number]["key"], WorkspaceGoal[]>;
   const history: WorkspaceGoal[] = [];
   const stopped: WorkspaceGoal[] = [];
@@ -111,16 +112,16 @@ function ManagerHomeBoard({
       <span className="personal-home-goal-meta"><i />{goal.agentLabel ?? goal.agentId}</span>
       <strong>{goal.title}</strong>
       <p>{goal.needsYou ?? goal.nextSentence}</p>
-      <footer><span>{goal.state}</span><small title={goal.latestActivity}>{goal.latestActivity ? activityTimeLabel(goal.latestActivity) : goal.agentTodos.length ? `${goal.agentTodos.length} 个 Task` : "尚无活动"}</small></footer>
+      <footer><span>{localizedGoalState(goal.state, locale)}</span><small title={goal.latestActivity}>{goal.latestActivity ? activityTimeLabel(goal.latestActivity, locale, t) : goal.agentTodos.length ? t("home.taskCount", { count: goal.agentTodos.length }) : t("home.noActivity")}</small></footer>
     </button>
   );
   return (
-    <section aria-label="Goal 工作区" className="personal-home-board">
+    <section aria-label={t("home.workspace")} className="personal-home-board">
       {systemHealth && (!systemHealth.ok || systemHealth.issues.length > 0 || systemHealth.freshnessWarning) ? (
         <div className="personal-system-health-banner" role="alert">
           <div className="personal-system-health-header">
             <AlertCircle size={15} />
-            <strong>系统健康：{systemHealth.summary}</strong>
+            <strong>{t("home.systemHealth", { summary: systemHealth.summary })}</strong>
             {systemHealth.freshnessWarning ? <small>（{systemHealth.freshnessWarning}）</small> : null}
           </div>
           {systemHealth.issues.length > 0 ? (
@@ -138,18 +139,18 @@ function ManagerHomeBoard({
             <header><span><i />{lane.label}</span><b>{active[lane.key].length}</b></header>
             <p>{lane.description}</p>
             <div className="personal-home-lane-list">
-              {active[lane.key].length ? active[lane.key].map(goalCard) : <span className="personal-home-empty">当前没有</span>}
+              {active[lane.key].length ? active[lane.key].map(goalCard) : <span className="personal-home-empty">{t("home.empty")}</span>}
             </div>
           </section>
         ))}
       </div>
       <details className="personal-home-history">
-        <summary><span>历史</span><b>{history.length}</b><small>已完成的 Goal</small></summary>
-        <div>{history.length ? history.map(goalCard) : <span className="personal-home-empty">还没有已完成的 Goal</span>}</div>
+        <summary><span>{t("home.history")}</span><b>{history.length}</b><small>{t("home.completedGoals")}</small></summary>
+        <div>{history.length ? history.map(goalCard) : <span className="personal-home-empty">{t("home.noCompletedGoals")}</span>}</div>
       </details>
       {stopped.length ? (
         <details className="personal-home-history is-stopped">
-          <summary><span>已停止</span><b>{stopped.length}</b><small>保留状态，可随时恢复</small></summary>
+          <summary><span>{t("home.stopped")}</span><b>{stopped.length}</b><small>{t("home.preservedState")}</small></summary>
           <div>{stopped.map(goalCard)}</div>
         </details>
       ) : null}
@@ -172,6 +173,7 @@ function ManagerConversationTray({
   onOpenConversation: () => void;
   title?: string;
 }) {
+  const { t } = useWorkspaceI18n();
   const latestUserIndex = messages.reduce((latest, message, index) => message.role === "user" ? index : latest, 0);
   const latestExchange = messages.slice(Math.max(0, latestUserIndex));
   const visibleMessages = latestExchange.slice(-3);
@@ -187,32 +189,32 @@ function ManagerConversationTray({
   }, [onClose]);
 
   return (
-    <aside aria-label="对话回执" className="personal-manager-conversation-tray">
+    <aside aria-label={t("conversation.receipt")} className="personal-manager-conversation-tray">
       <header>
         <span>
           <Bot size={16} />
-          <strong>{title ?? "管家对话"}</strong>
-          <small>{messages.at(-1)?.pending ? "正在回复" : "刚刚"}</small>
+          <strong>{title ?? t("conversation.title")}</strong>
+          <small>{messages.at(-1)?.pending ? t("conversation.replying") : t("common.recently")}</small>
         </span>
         <div className="personal-manager-conversation-actions">
           {onDraftTask && latestAssistantMessage ? (
             <button
               className="personal-manager-conversation-btn"
               onClick={() => onDraftTask(latestAssistantMessage.text)}
-              title="将 Agent 最新回复转为 Task 草稿"
+              title={t("conversation.convertHint")}
               type="button"
             >
               <ListPlus size={13} />
-              <span>转为 Task</span>
+              <span>{t("conversation.toTask")}</span>
             </button>
           ) : null}
-          <button className="personal-manager-conversation-link" onClick={onOpenConversation} type="button">查看完整对话</button>
+          <button className="personal-manager-conversation-link" onClick={onOpenConversation} type="button">{t("conversation.full")}</button>
           {onClose ? (
             <button
-              aria-label="关闭对话回执"
+              aria-label={t("conversation.close")}
               className="personal-manager-conversation-close"
               onClick={onClose}
-              title="关闭对话回执"
+              title={t("conversation.close")}
               type="button"
             >
               <X size={14} />
@@ -223,10 +225,10 @@ function ManagerConversationTray({
       <div aria-live="polite" className="personal-manager-conversation-messages">
         {visibleMessages.map((message) => (
           <article className={`is-${message.role}`} key={message.id}>
-            <strong>{message.role === "user" ? "你" : message.agentLabel ?? agentLabel ?? "LoopX 管家"}</strong>
+            <strong>{message.role === "user" ? t("common.you") : message.agentLabel ?? agentLabel ?? t("header.manager")}</strong>
             <div className="personal-manager-conversation-bubble">
               {message.role === "user" ? <p>{message.text}</p> : <MarkdownText text={message.text} />}
-              {message.pending ? <small>正在整理…</small> : null}
+              {message.pending ? <small>{t("conversation.agentPending")}</small> : null}
             </div>
           </article>
         ))}
@@ -240,27 +242,28 @@ function SessionRecordHeader({ onClose, onOpenDetails, run }: {
   onOpenDetails: () => void;
   run: WorkspaceRun;
 }) {
+  const { t } = useWorkspaceI18n();
   return (
-    <section aria-label="执行 Session 运行记录" className="personal-session-record">
+    <section aria-label={t("session.record")} className="personal-session-record">
       <header>
-        <span><Bot size={17} />执行 Session · 运行记录</span>
-        <button aria-label="退出运行记录" onClick={onClose} type="button"><X size={15} /></button>
+        <span><Bot size={17} />{t("session.record")}</span>
+        <button aria-label={t("session.closeRecord")} onClick={onClose} type="button"><X size={15} /></button>
       </header>
       <div>
         <strong>{run.title}</strong>
-        <p>当前时间线已切换到这次 Session 的消息与 Turn 记录。</p>
+        <p>{t("session.recordDescription")}</p>
       </div>
       <dl>
         <div><dt>Agent</dt><dd>{run.agentLabel}</dd></div>
-        <div><dt>状态</dt><dd>{workspaceSessionStatusLabel(run.sessionStatus ?? run.status)}</dd></div>
+        <div><dt>{t("common.status")}</dt><dd>{localizedSessionStatus(run.sessionStatus ?? run.status, t)}</dd></div>
         <div><dt>Session</dt><dd title={run.sessionId}>{run.sessionId}</dd></div>
       </dl>
-      <button className="personal-secondary-action" onClick={onOpenDetails} type="button">Session 详情</button>
+      <button className="personal-secondary-action" onClick={onOpenDetails} type="button">{t("session.details")}</button>
     </section>
   );
 }
 
-function defaultTimeline(model: WorkspaceModel, selectedGoalId: string | null): WorkspaceTimelineItem[] {  const items: WorkspaceTimelineItem[] = [];
+function defaultTimeline(model: WorkspaceModel, selectedGoalId: string | null, t: WorkspaceTranslate): WorkspaceTimelineItem[] {  const items: WorkspaceTimelineItem[] = [];
   if (selectedGoalId === null) {
     model.userTodos.slice(0, 4).forEach((attention) => items.push({
       attention: { ...attention, goalTitle: attention.goalTitle ?? goalTitleFor(model, attention.goalId) },
@@ -273,14 +276,17 @@ function defaultTimeline(model: WorkspaceModel, selectedGoalId: string | null): 
       run: {
         agentId: goal.agentId,
         agentLabel: goal.agentLabel ?? goal.agentId,
-        completedSteps: goal.agentTodos.filter((todo) => todo.done).length,
+        completedSteps: goal.doneTodoCount ?? goal.agentTodos.filter((todo) => todo.done).length,
         goalId: goal.goalId,
         goalTitle: goal.title,
         latestActivity: goal.agentSentence,
         runId: `goal:${goal.goalId}`,
         status: "running",
         title: goal.nextSentence,
-        totalSteps: goal.agentTodos.length || 1,
+        totalSteps: Math.max(
+          (goal.doneTodoCount ?? 0) + goal.agentTodos.filter((todo) => !todo.done).length,
+          1,
+        ),
       },
     }));
     return items;
@@ -306,14 +312,17 @@ function defaultTimeline(model: WorkspaceModel, selectedGoalId: string | null): 
     run: {
       agentId: goal.agentId,
       agentLabel: goal.agentLabel ?? goal.agentId,
-      completedSteps: goal.agentTodos.filter((todo) => todo.done).length,
+      completedSteps: goal.doneTodoCount ?? goal.agentTodos.filter((todo) => todo.done).length,
       goalId: goal.goalId,
       goalTitle: goal.title,
       latestActivity: goal.agentSentence,
       runId: `goal:${goal.goalId}`,
       status: goal.state === "推进中" ? "running" : goal.state === "需修复" ? "failed" : "waiting",
       title: goal.nextSentence,
-      totalSteps: goal.agentTodos.length || 1,
+      totalSteps: Math.max(
+        (goal.doneTodoCount ?? 0) + goal.agentTodos.filter((todo) => !todo.done).length,
+        1,
+      ),
     },
   });
   goal.agentTodos.filter((todo) => todo.taskClass === "continuous_monitor").forEach((todo) => {
@@ -331,16 +340,16 @@ function defaultTimeline(model: WorkspaceModel, selectedGoalId: string | null): 
         label: monitorRun.run.latestActivity || monitorRun.run.title,
         runId: monitorRun.run.runId,
         status: monitorRun.run.status === "waiting" || monitorRun.run.status === "queued" ? "running" : monitorRun.run.status,
-        timestamp: goal.latestActivity || "最近活动",
+        timestamp: goal.latestActivity || t("common.recently"),
       }] : [],
       goalId: goal.goalId,
       label: todo.text,
-      schedule: todo.evidence ?? "由 LoopX continuous_monitor Todo 驱动",
+      schedule: todo.evidence ?? t("schedule.summary"),
       scheduleId: todo.todoId,
       scheduleKind: "monitor",
       sessionId: monitorRun?.run.sessionId,
       status: todo.done || todo.status === "paused" ? "paused" : "active",
-      stopCondition: "Goal 完成或 owner 停止",
+      stopCondition: t("drawer.scheduleDefaultStop"),
       target: todo.text,
       timezone: "Asia/Shanghai",
     },
@@ -349,7 +358,7 @@ function defaultTimeline(model: WorkspaceModel, selectedGoalId: string | null): 
   const heartbeatProposal = model.timeline?.find((item): item is Extract<WorkspaceTimelineItem, { kind: "proposal" }> =>
     item.kind === "proposal" && item.proposal.actionKind === "heartbeat.bind" && item.proposal.goalId === goal.goalId);
   if (heartbeatProposal) {
-    const field = (label: string) => heartbeatProposal.proposal.fields.find((item) => item.label === label)?.value;
+    const field = (key: string) => heartbeatProposal.proposal.fields.find((item) => item.key === key)?.value;
     items.push({
       id: `schedule:${goal.goalId}:heartbeat`,
       kind: "schedule",
@@ -357,14 +366,14 @@ function defaultTimeline(model: WorkspaceModel, selectedGoalId: string | null): 
         agentId: goal.agentId,
         executionHistory: [],
         goalId: goal.goalId,
-        label: `推进 ${goal.title}`,
-        nextRunAt: "等待宿主调度确认",
-        notificationRule: field("notification policy") ?? "仅在需要你时通知",
-        schedule: field("cadence") ?? "由 heartbeat-prompt 生命周期驱动",
+        label: `${t("schedule.heartbeat")} · ${goal.title}`,
+        nextRunAt: t("drawer.schedulePending"),
+        notificationRule: t("drawer.scheduleDefaultNotification"),
+        schedule: field("cadence") ?? t("schedule.summary"),
         scheduleId: `${goal.goalId}:heartbeat`,
         scheduleKind: "heartbeat",
         status: heartbeatProposal.proposal.status === "applied" ? "active" : "draft",
-        stopCondition: field("stop condition") ?? "Goal 完成或 owner 停止",
+        stopCondition: field("stop_condition") ?? t("drawer.scheduleDefaultStop"),
         timezone: field("timezone") ?? "Asia/Shanghai",
       },
     });
@@ -379,20 +388,24 @@ function proposalStatus(status: TypedActionProposal["status"]): WorkspaceActionP
   return status;
 }
 
-function proposalFields(parameters: Record<string, unknown>) {
+function proposalFields(parameters: Record<string, unknown>, t: WorkspaceTranslate) {
   const fieldLabels: Record<string, string> = {
-    agent_id: "Agent",
-    completion_criteria: "完成标准",
-    execution_boundary: "执行边界",
-    goal_id: "Goal ID",
-    operation: "操作",
-    reason: "原因",
-    initial_todos: "首个任务",
-    objective: "目标",
-    permission: "权限",
-    stop_condition: "停止条件",
-    title: "标题",
-    workspace_ref: "执行工作区",
+    agent_id: t("proposal.field.agentId"),
+    cadence: t("proposal.field.cadence"),
+    completion_criteria: t("proposal.field.completionCriteria"),
+    execution_boundary: t("proposal.field.executionBoundary"),
+    goal_id: t("proposal.field.goalId"),
+    heartbeat: t("proposal.field.heartbeat"),
+    initial_todos: t("proposal.field.initialTodos"),
+    objective: t("proposal.field.objective"),
+    operation: t("proposal.field.operation"),
+    permission: t("proposal.field.permission"),
+    reason: t("proposal.field.reason"),
+    stop_condition: t("proposal.field.stopCondition"),
+    target: t("proposal.field.target"),
+    timezone: t("proposal.field.timezone"),
+    title: t("proposal.field.title"),
+    workspace_ref: t("proposal.field.workspace"),
   };
   const priority = ["title", "objective", "completion_criteria", "execution_boundary", "permission", "agent_id", "workspace_ref", "initial_todos", "heartbeat", "stop_condition", "goal_id"];
   return Object.entries(parameters)
@@ -402,12 +415,13 @@ function proposalFields(parameters: Record<string, unknown>) {
       return (leftIndex < 0 ? priority.length : leftIndex) - (rightIndex < 0 ? priority.length : rightIndex);
     })
     .slice(0, 10)
-    .map(([label, value]) => ({
-    label: fieldLabels[label] ?? label.replaceAll("_", " "),
-    value: label === "workspace_ref"
+    .map(([key, value]) => ({
+    key,
+    label: fieldLabels[key] ?? key.replaceAll("_", " "),
+    value: key === "workspace_ref"
       ? value === "current"
-        ? "当前本地工作区（未绑定 Repository）"
-        : `${String(value ?? "当前工作区")}（仅提供执行环境，不会自动关联仓库）`
+        ? t("proposal.workspace.current")
+        : t("proposal.workspace.named", { workspace: String(value ?? "current") })
       : Array.isArray(value) ? value.join(" · ") : typeof value === "object" && value !== null
       ? JSON.stringify(value)
       : String(value ?? "—"),
@@ -424,54 +438,63 @@ function lifecycleOperationFor(proposal: TypedActionProposal): GoalLifecycleOper
     : undefined;
 }
 
-function proposalImpact(proposal: TypedActionProposal, lifecycleOperation?: GoalLifecycleOperation): string {
-  if (proposal.action_kind === "goal.create") {
-    return "确认后会创建 Goal 和首个 Todo，并让选定 Agent 开始首轮推进。";
-  }
-  if (proposal.action_kind === "goal.lifecycle") {
-    if (lifecycleOperation === "stop") {
-      return "确认后会停止自动推进，并将 Goal 移入折叠的「已停止」列表；历史、Todo 和证据都会保留，可随时恢复。";
-    }
-    if (lifecycleOperation === "delete") {
-      return "确认后会从 source registry 和 global registry 移除这个已停止 Goal；项目文件、历史状态文件和备份不会被删除。";
-    }
-    return "确认后会恢复 Goal 的自动调度资格并移回 Active Goals；实际执行仍受 quota、Gate 和 Todo 约束。";
-  }
-  return proposal.permission_classification === "protected"
-    ? "该操作需要通过受保护的 LoopX 写入服务完成。"
-    : "确认后会调用规范 LoopX 服务写入状态。";
-}
-
-function proposalPrimaryLabel(proposal: TypedActionProposal, lifecycleOperation?: GoalLifecycleOperation): string {
-  if (proposal.action_kind === "goal.create") return "创建 Goal 并开始首轮";
-  if (proposal.action_kind === "goal.lifecycle") {
-    if (lifecycleOperation === "stop") return "停止 Goal";
-    if (lifecycleOperation === "delete") return "删除 Goal";
-    return "恢复 Goal";
-  }
-  if (proposal.action_kind === "todo.create" && proposal.normalized_parameters.start_execution === true) {
-    return "创建任务并开始执行";
-  }
-  return "确认并应用";
-}
-
-function workspaceProposal(proposal: TypedActionProposal): WorkspaceActionPreview {
+function workspaceProposal(proposal: TypedActionProposal, t: WorkspaceTranslate): WorkspaceActionPreview {
   const lifecycleOperation = lifecycleOperationFor(proposal);
+  const title = typeof proposal.normalized_parameters.title === "string"
+    ? proposal.normalized_parameters.title
+    : typeof proposal.normalized_parameters.goal_id === "string"
+      ? proposal.normalized_parameters.goal_id
+      : "";
+  const target = typeof proposal.normalized_parameters.target === "string"
+    ? proposal.normalized_parameters.target
+    : "";
+  const localizedSummary = proposal.action_kind === "goal.create"
+    ? t("proposal.summary.goalCreate", { title })
+    : proposal.action_kind === "heartbeat.bind"
+      ? t("proposal.summary.heartbeat")
+      : proposal.action_kind === "monitor.create"
+        ? t("proposal.summary.monitor", { target })
+        : proposal.action_kind === "goal.lifecycle" && lifecycleOperation === "stop"
+          ? t("proposal.summary.lifecycleStop", { title })
+          : proposal.action_kind === "goal.lifecycle" && lifecycleOperation === "delete"
+            ? t("proposal.summary.lifecycleDelete", { title })
+            : proposal.action_kind === "goal.lifecycle"
+              ? t("proposal.summary.lifecycleResume", { title })
+        : proposal.summary;
   return {
     actionKind: proposal.action_kind,
-    fields: proposalFields(proposal.normalized_parameters),
+    fields: proposalFields(proposal.normalized_parameters, t),
     goalId: typeof proposal.normalized_parameters.goal_id === "string" ? proposal.normalized_parameters.goal_id : undefined,
-    impact: proposalImpact(proposal, lifecycleOperation),
+    impact: proposal.action_kind === "goal.create"
+      ? t("proposal.impact.goalCreate")
+      : proposal.action_kind === "goal.lifecycle" && lifecycleOperation === "stop"
+        ? t("proposal.impact.lifecycleStop")
+        : proposal.action_kind === "goal.lifecycle" && lifecycleOperation === "delete"
+          ? t("proposal.impact.lifecycleDelete")
+        : proposal.action_kind === "goal.lifecycle"
+          ? t("proposal.impact.lifecycleResume")
+      : proposal.permission_classification === "protected"
+      ? t("proposal.impact.protected")
+      : t("proposal.impact.default"),
     previewId: proposal.proposal_id,
     lifecycleOperation,
     gate: proposal.gate ? {
       kind: String(proposal.gate.kind ?? "protected_action"),
       nextAction: typeof proposal.gate.next_action === "string" ? proposal.gate.next_action : undefined,
-      summary: String(proposal.gate.summary ?? "需要宿主确认"),
+      summary: String(proposal.gate.summary ?? t("proposal.gate.default")),
     } : undefined,
-    primaryLabel: proposalPrimaryLabel(proposal, lifecycleOperation),
+    primaryLabel: proposal.action_kind === "goal.create" ? t("proposal.primary.goalCreate")
+      : proposal.action_kind === "goal.lifecycle" && lifecycleOperation === "stop"
+        ? t("proposal.primary.lifecycleStop")
+        : proposal.action_kind === "goal.lifecycle" && lifecycleOperation === "delete"
+          ? t("proposal.primary.lifecycleDelete")
+        : proposal.action_kind === "goal.lifecycle"
+          ? t("proposal.primary.lifecycleResume")
+      : proposal.action_kind === "todo.create" && proposal.normalized_parameters.start_execution === true
+        ? t("proposal.primary.todoStart")
+        : t("proposal.primary.apply"),
     status: proposalStatus(proposal.status),
-    title: proposal.summary,
+    title: localizedSummary,
   };
 }
 
@@ -486,41 +509,41 @@ function compactGoalSlug(value: string) {
   return `goal-${(hash >>> 0).toString(36)}`;
 }
 
-function goalTitleFromMessage(message: string) {
+function goalTitleFromMessage(message: string, t: WorkspaceTranslate) {
   const quoted = message.match(/[「“"]([^」”"]{2,80})[」”"]/u)?.[1];
   if (quoted) return quoted.trim();
   return message
-    .replace(/^(请|帮我|我想|给我|创建|新建|设置)+/u, "")
+    .replace(/^(请|帮我|我想|给我|创建|新建|设置|please|i want to|create|set up)+/iu, "")
     .replace(/(一个|新的)?\s*(goal|目标)/giu, "")
     .replace(/[，。！？].*$/u, "")
     .trim()
-    .slice(0, 80) || "新的个人 Goal";
+    .slice(0, 80) || t("goal.defaultTitle");
 }
 
 function structuredFieldFromMessage(message: string, labels: string[]) {
   for (const line of message.split(/\r?\n/u)) {
     const trimmed = line.trim();
     for (const label of labels) {
-      const match = trimmed.match(new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\s*[：:]\\s*(.*)$`, "u"));
+      const match = trimmed.match(new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\s*[：:]\\s*(.*)$`, "iu"));
       if (match?.[1]?.trim()) return match[1].trim();
     }
   }
   return "";
 }
 
-function structuredGoalIntentFromMessage(message: string) {
-  const target = structuredFieldFromMessage(message, ["目标"]);
-  const completion = structuredFieldFromMessage(message, ["完成标准"]);
-  const boundary = structuredFieldFromMessage(message, ["执行边界（可选）", "执行边界", "边界"]);
-  const title = (target || goalTitleFromMessage(message)).split(/[。；;\n]/u)[0].trim().slice(0, 80) || "新的个人 Goal";
-  const objective = [target || title, completion ? `完成标准：${completion}` : "", boundary ? `执行边界：${boundary}` : ""]
+function structuredGoalIntentFromMessage(message: string, t: WorkspaceTranslate) {
+  const target = structuredFieldFromMessage(message, ["目标", "Objective"]);
+  const completion = structuredFieldFromMessage(message, ["完成标准", "Completion criteria"]);
+  const boundary = structuredFieldFromMessage(message, ["执行边界（可选）", "执行边界", "边界", "Execution boundary (optional)", "Execution boundary", "Boundary"]);
+  const title = (target || goalTitleFromMessage(message, t)).split(/[。；;\n]/u)[0].trim().slice(0, 80) || t("goal.defaultTitle");
+  const objective = [target || title, completion ? t("goal.objectiveCompletion", { criteria: completion }) : "", boundary ? t("goal.objectiveBoundary", { boundary }) : ""]
     .filter(Boolean)
     .join("\n");
-  const readOnly = /(只读|不调用外部工具|不修改(?:仓库|代码|状态)|read.?only)/iu.test(boundary || message);
+  const readOnly = /(只读|不调用外部工具|不修改(?:仓库|代码|状态)|read.?only|do not (?:call|use) external tools|do not modify (?:repositories|repository|code|state))/iu.test(boundary || message);
   return {
     completionCriteria: completion,
     executionBoundary: boundary,
-    initialTodos: completion ? [`按完成标准推进：${completion}`] : [],
+    initialTodos: completion ? [t("goal.initialTodo", { criteria: completion })] : [],
     objective,
     permission: readOnly ? "read_only" : "workspace_write_on_confirmation",
     title,
@@ -528,31 +551,31 @@ function structuredGoalIntentFromMessage(message: string) {
 }
 
 function cadenceFromMessage(message: string) {
-  const minutes = message.match(/每\s*(\d{1,3})\s*分钟/u)?.[1];
+  const minutes = message.match(/(?:每|every)\s*(\d{1,3})\s*(?:分钟|minutes?)/iu)?.[1];
   if (minutes) return `${minutes}m`;
-  const hours = message.match(/每\s*(\d{1,2})\s*小时/u)?.[1];
+  const hours = message.match(/(?:每|every)\s*(\d{1,2})\s*(?:小时|hours?)/iu)?.[1];
   if (hours) return `${hours}h`;
-  if (/每小时/u.test(message)) return "1h";
-  if (/每天|每日|早上|上午/u.test(message)) return "1d";
+  if (/每小时|every hour|hourly/iu.test(message)) return "1h";
+  if (/每天|每日|早上|上午|daily|every day/iu.test(message)) return "1d";
   return "1d";
 }
 
-function unsupportedCalendarScheduleReason(message: string) {
-  if (/(每周|星期|周[一二三四五六日天]|\d{1,2}\s*[：:]\s*\d{2})/u.test(message)) {
-    return "当前定时检查不支持精确到星期或时刻的日历计划。请改用固定间隔，例如“每 30 分钟”“每 2 小时”或“每天”；草稿已保留，没有生成待确认操作。";
+function unsupportedCalendarScheduleReason(message: string, t: WorkspaceTranslate) {
+  if (/(每周|星期|周[一二三四五六日天]|weekly|every\s+(?:mon|tues|wednes|thurs|fri|satur|sun)day|\d{1,2}\s*[：:]\s*\d{2})/iu.test(message)) {
+    return t("schedule.unsupportedCalendar");
   }
   return null;
 }
 
-function monitorTargetFromMessage(message: string) {
-  return structuredFieldFromMessage(message, ["检查内容", "监控内容", "目标"])
-    || message.replace(/^(为当前 Goal )?(添加|配置|创建)?\s*(定时检查|监控)[：:]?/u, "").split(/\r?\n/u)[0].trim()
-    || "检查当前 Goal 的阻塞、进度与新产出";
+function monitorTargetFromMessage(message: string, t: WorkspaceTranslate) {
+  return structuredFieldFromMessage(message, ["检查内容", "监控内容", "目标", "Check target", "Monitor target", "Target"])
+    || message.replace(/^(?:为当前 Goal |for the current Goal )?(?:添加|配置|创建|add|configure|create)?\s*(?:定时检查|监控|scheduled check|monitor)[：:]?/iu, "").split(/\r?\n/u)[0].trim()
+    || t("schedule.defaultTarget");
 }
 
 function stopConditionFromMessage(message: string) {
   if (/(mr|pr).{0,8}(合并|merge)/iu.test(message)) return "pr_merged";
-  if (/发布完成|上线完成/u.test(message)) return "release_complete";
+  if (/发布完成|上线完成|release (?:is )?complete|deployment (?:is )?complete/iu.test(message)) return "release_complete";
   return "goal_complete";
 }
 
@@ -582,10 +605,10 @@ const acceptedImageTypes = new Set(["image/png", "image/jpeg", "image/webp", "im
 const maxImageAttachmentBytes = 5 * 1024 * 1024;
 const maxImageAttachmentCount = 4;
 
-function readImageAttachment(file: File): Promise<WorkspaceImageAttachment> {
+function readImageAttachment(file: File, t: WorkspaceTranslate): Promise<WorkspaceImageAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error(`无法读取图片 ${file.name}`));
+    reader.onerror = () => reject(new Error(t("composer.imageReadError", { name: file.name })));
     reader.onload = () => resolve({
       dataUrl: String(reader.result ?? ""),
       id: crypto.randomUUID(),
@@ -615,6 +638,7 @@ export function PersonalWorkspacePage({
   selectedGoalId?: string | null;
   statusSourceControl?: StatusSourceControl;
 }) {
+  const { locale, t } = useWorkspaceI18n();
   const [localGoalId, setLocalGoalId] = useState<string | null>(controlledGoalId ?? null);
   const [localAgentId, setLocalAgentId] = useState(controlledAgentId ?? agents.find((agent) => agent.available)?.agentId ?? "codex");
   const [selection, setSelection] = useState<WorkspaceDrawerSelection | null>(null);
@@ -639,6 +663,7 @@ export function PersonalWorkspacePage({
   const [imageAttachments, setImageAttachments] = useState<WorkspaceImageAttachment[]>([]);
   const [imageAttachmentError, setImageAttachmentError] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [lifecycleBusyGoalIds, setLifecycleBusyGoalIds] = useState<ReadonlySet<string>>(() => new Set());
   const [refreshState, setRefreshState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [sessionProposalIds, setSessionProposalIds] = useState<string[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -655,6 +680,7 @@ export function PersonalWorkspacePage({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const channelScrollRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const lifecyclePendingGoalIdsRef = useRef(new Set<string>());
   const [digest, setDigest] = useState<{ attention: number; done: number; failed: number } | null>(null);
   const selectedGoalId = controlledGoalId === undefined ? localGoalId : controlledGoalId;
   const selectedAgentId = controlledAgentId ?? localAgentId;
@@ -731,21 +757,23 @@ export function PersonalWorkspacePage({
           executionHistory: [],
           goalId: proposal.goalId!,
           label: proposal.title,
-          nextRunAt: proposal.status === "applied" ? "等待下次宿主唤醒" : "等待宿主确认",
-          notificationRule: "仅在需要你时通知",
-          schedule: proposal.fields.find((field) => field.label === "cadence")?.value ?? "由 heartbeat-prompt 生命周期驱动",
+          nextRunAt: t("drawer.schedulePending"),
+          notificationRule: t("drawer.scheduleDefaultNotification"),
+          schedule: proposal.fields.find((field) => field.key === "cadence")?.value ?? t("schedule.summary"),
           scheduleId: `${proposal.goalId}:heartbeat`,
           scheduleKind: "heartbeat" as const,
           status: proposal.status === "applied" ? "active" as const : "draft" as const,
-          stopCondition: proposal.fields.find((field) => field.label === "stop condition")?.value ?? "Goal 完成或 owner 停止",
-          timezone: proposal.fields.find((field) => field.label === "timezone")?.value ?? "Asia/Shanghai",
+          stopCondition: proposal.fields.find((field) => field.key === "stop_condition")?.value ?? t("drawer.scheduleDefaultStop"),
+          timezone: proposal.fields.find((field) => field.key === "timezone")?.value ?? "Asia/Shanghai",
         },
       }));
     const merged: WorkspaceTimelineItem[] = [
-      ...defaultTimeline(model, managerProjectionId),
+      ...defaultTimeline(model, managerProjectionId, t),
       ...(model.timeline ?? []),
       ...heartbeatSchedules,
-      ...dedupeProposals(Object.values(proposals)).map((proposal) => ({ id: `proposal:${proposal.previewId}`, kind: "proposal" as const, proposal })),
+      ...dedupeProposals(Object.values(proposals))
+        .filter((proposal) => proposal.actionKind !== "heartbeat.bind" || proposal.status !== "applied")
+        .map((proposal) => ({ id: `proposal:${proposal.previewId}`, kind: "proposal" as const, proposal })),
     ];
     const projected = [...new Map(merged.map((item) => [item.id, item])).values()]
       .filter((item) => item.kind !== "proposal"
@@ -760,7 +788,7 @@ export function PersonalWorkspacePage({
       if (item.kind === "schedule") return item.schedule.goalId === selectedGoalId;
       return item.output.goalId === selectedGoalId;
     });
-  }, [managerProjectionId, model, proposals, selectedAgentId, selectedGoalId, sessionProposalIds]);
+  }, [managerProjectionId, model, proposals, selectedAgentId, selectedGoalId, sessionProposalIds, t]);
   const visibleTimelineItems = useMemo(() => {
     if (!activeSessionRun) return items;
     return items.filter((item) => {
@@ -898,7 +926,7 @@ export function PersonalWorkspacePage({
         const restored = Object.fromEntries(stored
           .filter((proposal) => ["ready", "gated", "deferred", "applying"].includes(proposal.status))
           .map((proposal) => {
-            const projected = workspaceProposal(proposal);
+            const projected = workspaceProposal(proposal, t);
             return [projected.previewId, projected];
           }));
         setProposals((current) => ({ ...current, ...restored }));
@@ -907,15 +935,18 @@ export function PersonalWorkspacePage({
         // The workspace remains usable when the optional local proposal store is unavailable.
       });
     return () => { cancelled = true; };
-  }, [readOnly, selectedGoalId]);
+  }, [readOnly, selectedGoalId, t]);
 
-  async function createPreview(request: WorkspaceActionPreviewRequest) {
-    if (readOnly) throw new Error("远端 SSH 隧道来源是只读投影，不能执行控制面写入。");
+  async function createPreview(
+    request: WorkspaceActionPreviewRequest,
+    options: { select?: boolean } = {},
+  ) {
+    if (readOnly) throw new Error(t("source.readOnlyWriteError"));
     let local: WorkspaceActionPreview;
     try {
       local = callbacks.onPreviewAction
         ? await callbacks.onPreviewAction(request)
-        : workspaceProposal(await previewTypedAction(request));
+        : workspaceProposal(await previewTypedAction(request), t);
     } catch (error) {
       if (!(error instanceof ChatApiError) || error.payload.error_code !== "action_preview_gate") throw error;
       const rawGate = error.payload.gate && typeof error.payload.gate === "object"
@@ -934,31 +965,35 @@ export function PersonalWorkspacePage({
         || gateKind === "agent_identity_selection_required";
       local = {
         actionKind: request.actionKind,
-        fields: workspaceCandidates.map((candidate) => ({ label: candidate.label, value: candidate.workspaceRef })),
+        fields: workspaceCandidates.map((candidate) => ({
+          key: `workspace_ref:${candidate.workspaceRef}`,
+          label: candidate.label,
+          value: candidate.workspaceRef,
+        })),
         gate: {
           kind: gateKind,
           nextAction: typeof rawGate.next_action === "string" ? rawGate.next_action : undefined,
-          summary: String(rawGate.summary ?? "请选择 Goal 所属工作区。"),
+          summary: String(rawGate.summary ?? t("proposal.workspaceGate.defaultSummary")),
         },
         impact: requiresAgentBinding
-          ? "先完成 Agent 身份绑定，再重新检查原操作；当前没有写入 Goal。"
-          : "选择工作区后会重新展示待确认操作，选择本身不会写入状态。",
+          ? t("proposal.workspaceGate.agentImpact")
+          : t("proposal.workspaceGate.selectionImpact"),
         previewId: `workspace-choice-${Date.now().toString(36)}`,
         sourceRequest: request,
         status: "gated",
-        title: requiresAgentBinding ? "先绑定 Agent" : "选择 Goal 工作区",
+        title: requiresAgentBinding ? t("proposal.workspaceGate.agentTitle") : t("proposal.workspaceGate.selectionTitle"),
         workspaceCandidates,
       };
     }
     setSessionProposalIds((current) => current.includes(local.previewId) ? current : [...current, local.previewId]);
     setProposals((current) => ({ ...current, [local.previewId]: local }));
-    setSelection({ item: local, kind: "proposal" });
+    if (options.select !== false) setSelection({ item: local, kind: "proposal" });
     return local;
   }
 
   function requestGoalCreate() {
     selectGoal(null);
-    setComposerDraft(`manager:${selectedAgentId}`, "我想创建一个长期 Goal：\n目标：\n完成标准：\n执行边界（可选）：\n关联仓库（可选）：\n通知方式（可选）：");
+    setComposerDraft(`manager:${selectedAgentId}`, t("composer.createGoalTemplate"));
     window.requestAnimationFrame(() => composerRef.current?.focus());
   }
 
@@ -969,12 +1004,18 @@ export function PersonalWorkspacePage({
       stop: "Stopped from the owner workspace",
     };
     const summaryByOperation: Record<GoalLifecycleOperation, string> = {
-      delete: `删除 Goal：${goal.title}`,
-      resume: `恢复 Goal：${goal.title}`,
-      stop: `停止 Goal：${goal.title}`,
+      delete: t("proposal.summary.lifecycleDelete", { title: goal.title }),
+      resume: t("proposal.summary.lifecycleResume", { title: goal.title }),
+      stop: t("proposal.summary.lifecycleStop", { title: goal.title }),
     };
     try {
-      await createPreview({
+      if (operation === "stop") {
+        if (lifecyclePendingGoalIdsRef.current.has(goal.goalId)) return;
+        lifecyclePendingGoalIdsRef.current.add(goal.goalId);
+        setLifecycleBusyGoalIds(new Set(lifecyclePendingGoalIdsRef.current));
+        setSelection(null);
+      }
+      const proposal = await createPreview({
         actionKind: "goal.lifecycle",
         context: { kind: "goal_directory", goal_id: goal.goalId },
         idempotencyKey: `workspace-goal-${operation}-${goal.goalId}-${Date.now().toString(36)}`,
@@ -984,21 +1025,35 @@ export function PersonalWorkspacePage({
           reason: reasonByOperation[operation],
         },
         summary: summaryByOperation[operation],
-      });
+      }, { select: operation !== "stop" });
+      if (operation === "stop") {
+        if (proposal.status === "ready") {
+          await applyProposal(proposal, { presentation: "feedback" });
+        } else {
+          setSelection({ item: proposal, kind: "proposal" });
+        }
+      }
     } catch (error) {
-      setActionFeedback(`操作失败：${error instanceof Error ? error.message : String(error)}`);
+      setActionFeedback(t("feedback.executionFailed", {
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      if (operation === "stop") {
+        lifecyclePendingGoalIdsRef.current.delete(goal.goalId);
+        setLifecycleBusyGoalIds(new Set(lifecyclePendingGoalIdsRef.current));
+      }
     }
   }
 
   function prepareScheduleDraft(kind: "heartbeat" | "monitor", goalId: string | null) {
     if (!goalId) {
       setComposer(kind === "heartbeat"
-        ? "设置 Heartbeat：\nGoal：\n频率：每天\n停止条件：Goal 完成\n通知：仅在需要我时"
-        : "配置定时检查：\nGoal：\n检查内容：\n频率：每 2 小时\n停止条件：Goal 完成");
+        ? t("composer.heartbeatTemplateWithoutGoal")
+        : t("composer.monitorTemplateWithoutGoal"));
     } else {
       setComposer(kind === "heartbeat"
-        ? "为当前 Goal 设置 Heartbeat：\n频率：每天\n停止条件：Goal 完成\n通知：仅在需要我时"
-        : "为当前 Goal 添加定时检查：\n检查内容：\n频率（支持 30 分钟 / 2 小时 / 每天）：每 2 小时\n停止条件：Goal 完成");
+        ? t("composer.heartbeatTemplate")
+        : t("composer.monitorTemplate"));
     }
     setSelection(null);
     window.requestAnimationFrame(() => composerRef.current?.focus());
@@ -1013,7 +1068,7 @@ export function PersonalWorkspacePage({
       return;
     }
     if (!goalId) {
-      setComposer(kind === "heartbeat" ? "为哪个 Goal 设置 Heartbeat？" : "为哪个 Goal 添加定时检查？");
+      setComposer(kind === "heartbeat" ? t("composer.heartbeatGoalQuestion") : t("composer.monitorGoalQuestion"));
       return;
     }
     const timestamp = Date.now().toString(36);
@@ -1032,12 +1087,125 @@ export function PersonalWorkspacePage({
         cadence: cadenceFromMessage(intent),
         goal_id: goalId,
         stop_condition: stopConditionFromMessage(intent),
-        target: monitorTargetFromMessage(intent),
+        target: monitorTargetFromMessage(intent, t),
         target_key: `goal-${goalId}`,
         timezone: "Asia/Shanghai",
       },
-      summary: kind === "heartbeat" ? "为当前 Goal 设置 Heartbeat" : `为当前 Goal 创建定时检查：${monitorTargetFromMessage(intent)}`,
+      summary: kind === "heartbeat"
+        ? t("proposal.summary.heartbeat")
+        : t("proposal.summary.monitor", { target: monitorTargetFromMessage(intent, t) }),
     });
+  }
+
+  async function applyProposal(
+    proposal: WorkspaceActionPreview,
+    options: { presentation?: "drawer" | "feedback" } = {},
+  ) {
+    const showDrawer = options.presentation !== "feedback";
+    const lifecycleChange = proposal.actionKind === "goal.lifecycle"
+      && proposal.goalId
+      && (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "resume")
+      ? {
+          goalId: proposal.goalId,
+          next: proposal.lifecycleOperation === "stop" ? "stopped" as const : "active" as const,
+          previous: model.goals.find((goal) => goal.goalId === proposal.goalId)?.activationState
+            ?? (proposal.lifecycleOperation === "stop" ? "active" as const : "stopped" as const),
+        }
+      : null;
+    setActionFeedback(t("feedback.applying", { title: proposal.title }));
+    const applying = { ...proposal, status: "applying" as const };
+    setProposals((current) => ({ ...current, [proposal.previewId]: applying }));
+    if (showDrawer) setSelection({ item: applying, kind: "proposal" });
+    if (lifecycleChange) {
+      callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.next);
+    }
+    try {
+      if (callbacks.onApplyProposal) {
+        await callbacks.onApplyProposal(proposal);
+        const applied = { ...proposal, status: "applied" as const };
+        setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
+        if (showDrawer) setSelection({ item: applied, kind: "proposal" });
+        setActionFeedback(t("feedback.completed", { title: proposal.title }));
+        if (proposal.actionKind === "goal.lifecycle") {
+          if (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "delete") {
+            selectGoal(null);
+          }
+          if (proposal.lifecycleOperation === "delete" && proposal.goalId) {
+            callbacks.onGoalDeleted?.(proposal.goalId);
+          }
+          const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
+          void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
+        }
+        return;
+      }
+      const result = await applyTypedAction(proposal.previewId);
+      const applied = workspaceProposal(result.proposal, t);
+      setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
+      if (showDrawer) setSelection({ item: applied, kind: "proposal" });
+      if (result.proposal.status !== "applied" || result.proposal.receipt?.projection_verified !== true) {
+        if (lifecycleChange) {
+          callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
+        }
+        setActionFeedback(
+          result.proposal.status === "stale"
+            ? t("feedback.stale")
+            : t("feedback.notCompleted", { status: result.proposal.status }),
+        );
+        return;
+      }
+      setActionFeedback(t("feedback.completed", { title: applied.title }));
+      // Keep the success receipt visible for reviewed actions. Direct actions
+      // surface the same result through the persistent feedback receipt.
+      if (applied.actionKind === "todo.create") {
+        await callbacks.onRefresh?.();
+      }
+      if (applied.actionKind === "goal.lifecycle" && (applied.lifecycleOperation === "stop" || applied.lifecycleOperation === "delete")) {
+        selectGoal(null);
+      }
+      if (applied.actionKind === "goal.lifecycle" && applied.lifecycleOperation === "delete" && applied.goalId) {
+        callbacks.onGoalDeleted?.(applied.goalId);
+      }
+      if (applied.actionKind === "goal.lifecycle") {
+        const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
+        void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
+      }
+    } catch (error) {
+      if (lifecycleChange) {
+        callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
+      }
+      if (error instanceof ChatApiError && error.payload.error_code === "protected_action") {
+        const rawGate = error.payload.gate;
+        const gate = rawGate && typeof rawGate === "object" ? rawGate as Record<string, unknown> : {};
+        const gated = {
+          ...proposal,
+          gate: {
+            kind: String(gate.kind ?? "protected_action"),
+            nextAction: typeof gate.next_action === "string" ? gate.next_action : undefined,
+            summary: String(gate.summary ?? error.message),
+          },
+          status: "gated" as const,
+        };
+        setProposals((current) => ({ ...current, [proposal.previewId]: gated }));
+        // A newly discovered authority gate always deserves review, including
+        // when the action started on the direct path.
+        setSelection({ item: gated, kind: "proposal" });
+        setActionFeedback(t("feedback.gateRequired", { summary: gated.gate.summary }));
+        if (proposal.actionKind === "goal.create" && proposal.goalId) {
+          callbacks.onRefresh?.();
+          selectGoal(proposal.goalId);
+        }
+        return;
+      }
+      const stale = error instanceof Error && /stale|状态.*变化|conflict/i.test(error.message);
+      const failed = {
+        ...proposal,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        status: (stale ? "stale" : "error") as "stale" | "error",
+      };
+      setProposals((current) => ({ ...current, [proposal.previewId]: failed }));
+      if (showDrawer) setSelection({ item: failed, kind: "proposal" });
+      setActionFeedback(t("feedback.executionFailed", { error: failed.errorMessage }));
+    }
   }
 
   const drawerCallbacks: PersonalWorkspaceCallbacks = {
@@ -1063,109 +1231,7 @@ export function PersonalWorkspacePage({
       setSelectedGoalTab("files");
       callbacks.onOpenOutput?.(output);
     },
-    onApplyProposal: async (proposal) => {
-      const lifecycleChange = proposal.actionKind === "goal.lifecycle"
-        && proposal.goalId
-        && (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "resume")
-        ? {
-            goalId: proposal.goalId,
-            next: proposal.lifecycleOperation === "stop" ? "stopped" as const : "active" as const,
-            previous: model.goals.find((goal) => goal.goalId === proposal.goalId)?.activationState
-              ?? (proposal.lifecycleOperation === "stop" ? "active" as const : "stopped" as const),
-          }
-        : null;
-      setActionFeedback(`正在执行：${proposal.title}`);
-      setProposals((current) => ({ ...current, [proposal.previewId]: { ...proposal, status: "applying" } }));
-      setSelection({ item: { ...proposal, status: "applying" }, kind: "proposal" });
-      if (lifecycleChange) {
-        callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.next);
-      }
-      try {
-        if (callbacks.onApplyProposal) {
-          await callbacks.onApplyProposal(proposal);
-          const applied = { ...proposal, status: "applied" as const };
-          setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
-          setSelection({ item: applied, kind: "proposal" });
-          setActionFeedback(`已完成：${proposal.title}`);
-          if (proposal.actionKind === "goal.lifecycle") {
-            if (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "delete") {
-              selectGoal(null);
-            }
-            if (proposal.lifecycleOperation === "delete" && proposal.goalId) {
-              callbacks.onGoalDeleted?.(proposal.goalId);
-            }
-            const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
-            void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
-          }
-          return;
-        }
-        const result = await applyTypedAction(proposal.previewId);
-        const applied = workspaceProposal(result.proposal);
-        setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
-        setSelection({ item: applied, kind: "proposal" });
-        if (result.proposal.status !== "applied" || result.proposal.receipt?.projection_verified !== true) {
-          if (lifecycleChange) {
-            callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
-          }
-          setActionFeedback(
-            result.proposal.status === "stale"
-              ? "状态已变化，操作未执行，请重新生成确认预览。"
-              : `操作未完成：${result.proposal.status}`,
-          );
-          return;
-        }
-        setActionFeedback(`已完成：${applied.title}`);
-        // Keep the success receipt visible. Refresh and navigation happen when
-        // the user chooses the explicit "进入 Goal" action in the drawer.
-        if (applied.actionKind === "todo.create") {
-          await callbacks.onRefresh?.();
-        }
-        if (applied.actionKind === "goal.lifecycle" && (applied.lifecycleOperation === "stop" || applied.lifecycleOperation === "delete")) {
-          selectGoal(null);
-        }
-        if (applied.actionKind === "goal.lifecycle" && applied.lifecycleOperation === "delete" && applied.goalId) {
-          callbacks.onGoalDeleted?.(applied.goalId);
-        }
-        if (applied.actionKind === "goal.lifecycle") {
-          const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
-          void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
-        }
-      } catch (error) {
-        if (lifecycleChange) {
-          callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
-        }
-        if (error instanceof ChatApiError && error.payload.error_code === "protected_action") {
-          const rawGate = error.payload.gate;
-          const gate = rawGate && typeof rawGate === "object" ? rawGate as Record<string, unknown> : {};
-          const gated = {
-            ...proposal,
-            gate: {
-              kind: String(gate.kind ?? "protected_action"),
-              nextAction: typeof gate.next_action === "string" ? gate.next_action : undefined,
-              summary: String(gate.summary ?? error.message),
-            },
-            status: "gated" as const,
-          };
-          setProposals((current) => ({ ...current, [proposal.previewId]: gated }));
-          setSelection({ item: gated, kind: "proposal" });
-          setActionFeedback(`需要你确认：${gated.gate.summary}`);
-          if (proposal.actionKind === "goal.create" && proposal.goalId) {
-            callbacks.onRefresh?.();
-            selectGoal(proposal.goalId);
-          }
-          return;
-        }
-        const stale = error instanceof Error && /stale|状态.*变化|conflict/i.test(error.message);
-        const failed = {
-          ...proposal,
-          errorMessage: error instanceof Error ? error.message : String(error),
-          status: (stale ? "stale" : "error") as "stale" | "error",
-        };
-        setProposals((current) => ({ ...current, [proposal.previewId]: failed }));
-        setSelection({ item: failed, kind: "proposal" });
-        setActionFeedback(`执行失败：${failed.errorMessage}`);
-      }
-    },
+    onApplyProposal: applyProposal,
     onCancelProposal: async (proposal) => {
       setSelection(null);
       setProposals((current) => {
@@ -1178,11 +1244,11 @@ export function PersonalWorkspacePage({
         if (!callbacks.onCancelProposal) await cancelTypedAction(proposal.previewId);
       } catch (error) {
         setProposals((current) => ({ ...current, [proposal.previewId]: proposal }));
-        setActionFeedback(`取消失败：${error instanceof Error ? error.message : String(error)}`);
+        setActionFeedback(t("feedback.cancelFailed", { error: error instanceof Error ? error.message : String(error) }));
       }
     },
     onTransitionProposal: async (proposal, transition) => {
-      const transitioned = workspaceProposal(await transitionTypedAction(proposal.previewId, transition));
+      const transitioned = workspaceProposal(await transitionTypedAction(proposal.previewId, transition), t);
       setSessionProposalIds((current) => current.includes(transitioned.previewId) ? current : [...current, transitioned.previewId]);
       setProposals((current) => {
         const next = { ...current };
@@ -1265,7 +1331,7 @@ export function PersonalWorkspacePage({
 
   async function sendMessage(messageOverride?: string) {
     const pendingImages = messageOverride ? [] : imageAttachments;
-    const message = (messageOverride ?? composer).trim() || (pendingImages.length ? "请结合这些图片分析当前 Goal，并告诉我下一步。" : "");
+    const message = (messageOverride ?? composer).trim() || (pendingImages.length ? t("composer.imageAnalysisPrompt") : "");
     if (!message || sending) return;
     if (!messageOverride) {
       setComposer("");
@@ -1277,7 +1343,8 @@ export function PersonalWorkspacePage({
       if (pendingImages.length) {
         if (!selectedGoalId) setManagerConversationReceiptVisible(true);
         else if (selectedGoalTab !== "chat") setGoalConversationReceiptVisible(true);
-        await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId, pendingImages);
+        const semanticPreview = await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId, pendingImages);
+        if (semanticPreview) await createPreview(semanticPreview);
         return;
       }
       const intentRoute = routeWorkspaceInput(message, {
@@ -1287,13 +1354,13 @@ export function PersonalWorkspacePage({
       });
       if (intentRoute.route === "clarify") {
         setComposer(message);
-        setActionFeedback(intentRoute.missingFields.includes("resume_when")
-          ? "暂缓 Todo 需要可自动判断的恢复条件。请补充 todo_done:<todo_id>、pr_merged:[owner/repo]#<number> 或 capacity_available:<capability>。"
-          : "这句话包含多个可能修改状态的操作。请一次描述一项操作，我会逐项展示确认预览。");
+        let clarification = t("composer.clarifySingleAction");
+        if (intentRoute.missingFields.includes("resume_when")) clarification = t("composer.clarifyDefer");
+        setActionFeedback(clarification);
         return;
       }
       if (intentRoute.actionKind === "goal.create") {
-        const intent = structuredGoalIntentFromMessage(message);
+        const intent = structuredGoalIntentFromMessage(message, t);
         const goalId = compactGoalSlug(intent.title);
         await createPreview({
           actionKind: "goal.create",
@@ -1316,7 +1383,7 @@ export function PersonalWorkspacePage({
             title: intent.title,
             workspace_ref: "current",
           },
-          summary: `创建 Goal：${intent.title}`,
+          summary: t("proposal.summary.goalCreate", { title: intent.title }),
         });
         return;
       }
@@ -1325,7 +1392,7 @@ export function PersonalWorkspacePage({
         return;
       }
       if (selectedGoalId && intentRoute.actionKind === "monitor.create") {
-        const scheduleError = unsupportedCalendarScheduleReason(message);
+        const scheduleError = unsupportedCalendarScheduleReason(message, t);
         if (scheduleError) {
           setComposer(message);
           setActionFeedback(scheduleError);
@@ -1401,33 +1468,24 @@ export function PersonalWorkspacePage({
         });
         return;
       }
-      if (selectedGoalId && intentRoute.actionKind === "goal.update") {
-        await createPreview({
-          actionKind: "goal.update",
-          context: { kind: "goal", goal_id: selectedGoalId, natural_language: message },
-          idempotencyKey: `workspace-protected-${selectedGoalId}-${Date.now().toString(36)}`,
-          normalizedParameters: { goal_id: selectedGoalId, status: "operator_gate_requested" },
-          summary: `请求受保护操作：${message.slice(0, 160)}`,
-        });
-        return;
-      }
       if (!selectedGoalId) setManagerConversationReceiptVisible(true);
       else if (selectedGoalTab !== "chat") setGoalConversationReceiptVisible(true);
-      await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId);
+      const semanticPreview = await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId);
+      if (semanticPreview) await createPreview(semanticPreview);
     } catch (error) {
       if (!messageOverride) {
         setComposer(message);
         setImageAttachments(pendingImages);
       }
-      const errorMessage = error instanceof Error ? error.message : "消息发送失败，请稍后重试。";
-      setActionFeedback(`发送失败：${errorMessage}`);
+      const errorMessage = error instanceof Error ? error.message : t("feedback.sendGenericError");
+      setActionFeedback(t("feedback.sendFailed", { error: errorMessage }));
     } finally {
       setSending(false);
     }
   }
 
   const selectedAgentLabel = agents.find((agent) => agent.agentId === selectedAgentId)?.label ?? selectedAgentId;
-  const goalDraftActive = !selectedGoal && composer.startsWith("我想创建一个长期 Goal：");
+  const goalDraftActive = !selectedGoal && composer.startsWith(t("composer.createGoalDraftLead"));
   const goalRunningCount = items.filter((item) =>
     item.kind === "run"
     && Boolean(item.run.sessionId)
@@ -1442,23 +1500,23 @@ export function PersonalWorkspacePage({
     const invalid = selected.find((file) => !acceptedImageTypes.has(file.type));
     const oversized = selected.find((file) => file.size > maxImageAttachmentBytes);
     if (available <= 0) {
-      setImageAttachmentError(`最多添加 ${maxImageAttachmentCount} 张图片。`);
+      setImageAttachmentError(t("composer.imageCountError", { count: maxImageAttachmentCount }));
       return;
     }
     if (invalid) {
-      setImageAttachmentError("支持 PNG、JPEG、WebP 和 GIF 图片。");
+      setImageAttachmentError(t("composer.imageTypeError"));
       return;
     }
     if (oversized) {
-      setImageAttachmentError(`单张图片不能超过 ${maxImageAttachmentBytes / 1024 / 1024}MB。`);
+      setImageAttachmentError(t("composer.imageSizeError", { size: maxImageAttachmentBytes / 1024 / 1024 }));
       return;
     }
     try {
-      const loaded = await Promise.all(selected.map(readImageAttachment));
+      const loaded = await Promise.all(selected.map((file) => readImageAttachment(file, t)));
       setImageAttachments((current) => [...current, ...loaded].slice(0, maxImageAttachmentCount));
-      setImageAttachmentError(files.length > selected.length ? `最多添加 ${maxImageAttachmentCount} 张图片。` : null);
+      setImageAttachmentError(files.length > selected.length ? t("composer.imageCountError", { count: maxImageAttachmentCount }) : null);
     } catch (error) {
-      setImageAttachmentError(error instanceof Error ? error.message : "图片读取失败。");
+      setImageAttachmentError(error instanceof Error ? error.message : t("composer.imageReadGenericError"));
     } finally {
       if (imageInputRef.current) imageInputRef.current.value = "";
     }
@@ -1518,7 +1576,9 @@ export function PersonalWorkspacePage({
   return (
     <WorkspaceShell
       drawer={drawerSelection ? <ContextDrawer agents={agents} callbacks={effectiveDrawerCallbacks} goalNotifications={model.goalNotifications ?? []} goals={workspaceGoals} larkConnections={readOnly ? [] : larkConnections} onClose={() => {
-        if (drawerSelection.kind === "proposal" && ["applied", "rejected"].includes(drawerSelection.item.status)) {
+        if (drawerSelection.kind === "proposal"
+          && ["applied", "rejected"].includes(drawerSelection.item.status)
+          && !(drawerSelection.item.actionKind === "heartbeat.bind" && drawerSelection.item.status === "applied")) {
           setProposals((current) => {
             const next = { ...current };
             delete next[drawerSelection.item.previewId];
@@ -1565,19 +1625,19 @@ export function PersonalWorkspacePage({
           />
           <div className="personal-channel-scroll" ref={channelScrollRef}>
             {!selectedGoal && !managerChatOpen && digest && (digest.done + digest.failed + digest.attention) > 0 ? (
-              <section className="personal-digest-card" aria-label="你不在的时候">
-                <strong>你不在的时候</strong>
+              <section className="personal-digest-card" aria-label={t("digest.away")}>
+                <strong>{t("digest.away")}</strong>
                 <div className="personal-digest-stats">
-                  <span><b>{digest.done}</b>完成</span>
-                  <span><b>{digest.failed}</b>异常</span>
-                  <span><b>{digest.attention}</b>等你确认</span>
+                  <span><b>{digest.done}</b>{t("digest.completed")}</span>
+                  <span><b>{digest.failed}</b>{t("digest.failed")}</span>
+                  <span><b>{digest.attention}</b>{t("digest.needsYou")}</span>
                 </div>
               </section>
             ) : null}
             {!selectedGoal && !managerChatOpen ? (
               <section className="personal-manager-greeting">
                 <span><Bot size={20} /></span>
-                <div><strong>你好，我是 LoopX 管家</strong><p>你有 {managerNeedsYouCount} 项需要处理，其中 {managerBlockingCount} 项正在阻塞 Agent。</p></div>
+                <div><strong>{t("home.greeting")}</strong><p>{t("home.waitingCount", { count: managerNeedsYouCount })} {t("home.blockingSummary", { count: managerBlockingCount })}</p></div>
               </section>
             ) : null}
             {selectedGoal && selectedGoalTab === "tasks" ? (
@@ -1587,7 +1647,7 @@ export function PersonalWorkspacePage({
                 onDraftTaskFromMessage={readOnly ? undefined : (reply) => {
                   const taskDraft = sanitizeTaskDraftFromReply(reply);
                   setComposer(`创建一个 Task：${taskDraft}`);
-                  setActionFeedback("已根据回复生成 Task 草稿。编辑后发送，LoopX 会先展示确认预览。");
+                  setActionFeedback(t("feedback.taskDraftCreated"));
                   window.requestAnimationFrame(() => composerRef.current?.focus());
                 }}
                 onOpenChat={() => setSelectedGoalTab("chat")}
@@ -1602,7 +1662,7 @@ export function PersonalWorkspacePage({
                 userTodos={model.userTodos}
               />
             ) : selectedGoal && selectedGoalTab === "files" ? (
-              <section className="personal-object-list"><header><strong>Files & Outputs</strong><span>{items.filter((item) => item.kind === "output").length}</span></header>{items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "output" }> => item.kind === "output").map((item) => <button key={item.id} onClick={() => setSelection({ item: item.output, kind: "output" })} type="button"><span>↗</span><strong>{item.output.title}</strong><p>{item.output.summary ?? item.output.safePreview ?? item.output.kind ?? "公开安全产出"}</p><small title={item.output.createdAt}>{[item.output.goalTitle, item.output.todoId ? `Task ${item.output.todoId}` : null, activityTimeLabel(item.output.createdAt)].filter(Boolean).join(" · ")}</small></button>)}</section>
+              <section className="personal-object-list"><header><strong>{t("files.title")}</strong><span>{items.filter((item) => item.kind === "output").length}</span></header>{items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "output" }> => item.kind === "output").map((item) => <button key={item.id} onClick={() => setSelection({ item: item.output, kind: "output" })} type="button"><span>↗</span><strong>{item.output.title}</strong><p>{item.output.summary ?? item.output.safePreview ?? item.output.kind ?? t("files.emptySummary")}</p><small title={item.output.createdAt}>{[item.output.goalTitle, item.output.todoId ? `${t("common.task")} ${item.output.todoId}` : null, activityTimeLabel(item.output.createdAt, locale, t)].filter(Boolean).join(" · ")}</small></button>)}</section>
             ) : !selectedGoal && !managerChatOpen ? (
               <ManagerHomeBoard goals={workspaceGoals} onSelectGoal={selectGoal} systemHealth={model.systemHealth} />
             ) : !selectedGoal ? (
@@ -1622,7 +1682,7 @@ export function PersonalWorkspacePage({
           </div>
           <div className="personal-composer-wrap">
             {readOnly ? (
-              <div className="personal-read-only-notice"><strong>远端只读投影</strong><span>你可以查看 Goal、Task、证据与运行状态；写入、纠偏和 Agent 会话仍留在来源主机。</span></div>
+              <div className="personal-read-only-notice"><strong>{t("source.readOnlyNoticeTitle")}</strong><span>{t("source.readOnlyNoticeDescription")}</span></div>
             ) : <>
             {!selectedGoal && !managerChatOpen && managerConversationReceiptVisible && managerMessages.length ? (
               <ManagerConversationTray
@@ -1641,7 +1701,7 @@ export function PersonalWorkspacePage({
                 onDraftTask={selectedGoalTab === "tasks" ? (reply) => {
                   const taskDraft = sanitizeTaskDraftFromReply(reply);
                   setComposer(`创建一个 Task：${taskDraft}`);
-                  setActionFeedback("已根据回复生成 Task 草稿。编辑后发送，LoopX 会先展示确认预览。");
+                  setActionFeedback(t("feedback.taskDraftCreated"));
                   window.requestAnimationFrame(() => composerRef.current?.focus());
                 } : undefined}
                 onOpenConversation={() => {
@@ -1654,34 +1714,34 @@ export function PersonalWorkspacePage({
             {actionFeedback ? (
               <div className="personal-action-feedback" role="status">
                 <span>{actionFeedback}</span>
-                <button aria-label="关闭操作回执" onClick={() => setActionFeedback(null)} type="button"><X size={14} /></button>
+                <button aria-label={t("common.closeActionReceipt")} onClick={() => setActionFeedback(null)} type="button"><X size={14} /></button>
               </div>
             ) : null}
             <p className="personal-composer-hint">
               {selectedGoal
                 ? goalRunningCount > 0
-                  ? `${selectedAgentLabel} 正在执行 ${goalRunningCount} 个任务 · 你的消息作为纠偏进入本会话，不会打断执行`
-                  : `你的消息由 ${selectedAgentLabel} 在本 Goal 的会话中接收`
-                : "你的消息由 LoopX 管家跨 Goal 接收，支持全局询问与创建 Goal"}
+                  ? t("composer.goalRunningHint", { agent: selectedAgentLabel, count: goalRunningCount })
+                  : t("composer.goalMessageHint", { agent: selectedAgentLabel })
+                : t("composer.managerMessageHint")}
             </p>
             {selectedGoal ? (
               <div className="personal-quick-prompts">
-                <button aria-label="将“我现在该做什么”填入编辑框" className="is-draft" onClick={() => fillQuickPrompt("我现在该做什么？")} title="填入编辑框，确认后再发送" type="button"><MessageCircleQuestion size={13} /><span>询问下一步</span><small className="personal-prompt-subtle">草稿</small></button>
-                <button className="is-immediate" disabled={sending} onClick={() => void sendMessage("请给我一份当前 Goal 的进度报告：已完成、执行中、阻塞和下一步。")} title="点击后立即向当前 Agent 发送请求" type="button"><Send size={13} /><span>向 Agent 获取进度报告</span><em className="personal-prompt-badge">立即发送</em></button>
-                <button aria-label="配置定时检查" className="is-draft" onClick={() => prepareScheduleDraft("monitor", selectedGoalId)} title="先填写检查内容、频率和停止条件，不会立即创建" type="button"><CalendarClock size={13} /><span>配置定时检查</span><small className="personal-prompt-subtle">草稿</small></button>
+                <button aria-label={t("composer.nextAction")} className="is-draft" onClick={() => fillQuickPrompt(t("composer.nextActionPrompt"))} title={t("composer.prepareDraft")} type="button"><MessageCircleQuestion size={13} /><span>{t("composer.nextAction")}</span><small className="personal-prompt-subtle">{t("composer.draft")}</small></button>
+                <button className="is-immediate" disabled={sending} onClick={() => void sendMessage(t("composer.agentProgressPrompt"))} title={t("composer.immediate")} type="button"><Send size={13} /><span>{t("composer.agentProgress")}</span><em className="personal-prompt-badge">{t("composer.immediate")}</em></button>
+                <button aria-label={t("composer.monitor")} className="is-draft" onClick={() => prepareScheduleDraft("monitor", selectedGoalId)} title={t("composer.monitorHint")} type="button"><CalendarClock size={13} /><span>{t("composer.monitor")}</span><small className="personal-prompt-subtle">{t("composer.draft")}</small></button>
               </div>
             ) : (
               <div className="personal-quick-prompts">
-                <button aria-label="将“有哪些 Goal 正在等我”填入编辑框" className="is-draft" onClick={() => fillQuickPrompt("有哪些 Goal 正在等我？我现在该优先处理什么？")} title="填入编辑框，确认后再发送" type="button"><MessageCircleQuestion size={13} /><span>询问全局待办</span><small className="personal-prompt-subtle">草稿</small></button>
-                <button className="is-immediate" disabled={sending} onClick={() => void sendMessage("请帮我汇总所有活跃 Goal 的最新进展与阻塞。")} title="点击后立即向 LoopX 管家获取全局进展" type="button"><Send size={13} /><span>汇总所有 Goal 进展</span><em className="personal-prompt-badge">立即发送</em></button>
-                <button aria-label="创建新 Goal" className="is-draft" onClick={requestGoalCreate} title="填入 Goal 模板草稿，检查后再创建" type="button"><Plus size={13} /><span>创建新 Goal</span><small className="personal-prompt-subtle">草稿</small></button>
+                <button aria-label={t("composer.globalTasks")} className="is-draft" onClick={() => fillQuickPrompt(t("composer.globalTasksPrompt"))} title={t("composer.prepareDraft")} type="button"><MessageCircleQuestion size={13} /><span>{t("composer.globalTasks")}</span><small className="personal-prompt-subtle">{t("composer.draft")}</small></button>
+                <button className="is-immediate" disabled={sending} onClick={() => void sendMessage(t("composer.globalProgressPrompt"))} title={t("composer.immediate")} type="button"><Send size={13} /><span>{t("composer.globalProgress")}</span><em className="personal-prompt-badge">{t("composer.immediate")}</em></button>
+                <button aria-label={t("composer.createGoal")} className="is-draft" onClick={requestGoalCreate} title={t("composer.createGoalHint")} type="button"><Plus size={13} /><span>{t("composer.createGoal")}</span><small className="personal-prompt-subtle">{t("composer.draft")}</small></button>
               </div>
             )}
-            {goalDraftActive ? <div className="personal-goal-draft-status" role="status"><strong>Goal 草稿</strong><span>补充内容后发送，LoopX 会先展示待确认操作。</span></div> : null}
-            {imageAttachments.length ? <div className="personal-composer-images" aria-label="待发送图片">{imageAttachments.map((attachment) => (
+            {goalDraftActive ? <div className="personal-goal-draft-status" role="status"><strong>{t("composer.createGoalDraft")}</strong><span>{t("composer.createGoalDraftDescription")}</span></div> : null}
+            {imageAttachments.length ? <div className="personal-composer-images" aria-label={t("composer.imagesPending")}>{imageAttachments.map((attachment) => (
               <figure key={attachment.id}>
                 <img alt={attachment.name} src={attachment.dataUrl} />
-                <button aria-label={`移除图片 ${attachment.name}`} onClick={() => setImageAttachments((current) => current.filter((item) => item.id !== attachment.id))} type="button"><X size={13} /></button>
+                <button aria-label={t("composer.sentImageAlt", { name: attachment.name })} onClick={() => setImageAttachments((current) => current.filter((item) => item.id !== attachment.id))} type="button"><X size={13} /></button>
               </figure>
             ))}</div> : null}
             {imageAttachmentError ? <p className="personal-composer-error" role="alert">{imageAttachmentError}</p> : null}
@@ -1701,18 +1761,18 @@ export function PersonalWorkspacePage({
             >
               <span><Bot size={17} />{agents.find((agent) => agent.agentId === selectedAgentId)?.label ?? selectedAgentId}</span>
               <button
-                aria-label="添加图片"
+                aria-label={t("composer.addImage")}
                 className="personal-composer-attach"
                 disabled={sending || imageAttachments.length >= maxImageAttachmentCount}
                 onClick={() => imageInputRef.current?.click()}
-                title="选择、粘贴或拖入图片"
+                title={t("composer.attachImageHint")}
                 type="button"
               >
                 <Paperclip size={17} />
               </button>
-              <input accept="image/png,image/jpeg,image/webp,image/gif" aria-label="图片文件选择器" className="personal-composer-file-input" disabled={sending || imageAttachments.length >= maxImageAttachmentCount} multiple onChange={(event) => void selectImages(event.target.files)} ref={imageInputRef} type="file" />
+              <input accept="image/png,image/jpeg,image/webp,image/gif" aria-label={t("composer.imagePicker")} className="personal-composer-file-input" disabled={sending || imageAttachments.length >= maxImageAttachmentCount} multiple onChange={(event) => void selectImages(event.target.files)} ref={imageInputRef} type="file" />
               <textarea
-                aria-label="向 LoopX 发送消息"
+                aria-label={t("composer.sendMessage")}
                 onChange={(event) => setComposer(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -1721,12 +1781,12 @@ export function PersonalWorkspacePage({
                   }
                 }}
                 onPaste={handleComposerPaste}
-                placeholder={selectedGoal ? `询问或纠偏 ${selectedGoal.title}…` : "问问 LoopX 管家，或描述一个新 Goal…"}
+                placeholder={selectedGoal ? t("composer.goalPlaceholder", { goal: selectedGoal.title }) : t("composer.managerPlaceholder")}
                 ref={composerRef}
                 rows={1}
                 value={composer}
               />
-              <button aria-label={goalDraftActive ? "检查并创建 Goal" : "发送"} disabled={(!composer.trim() && imageAttachments.length === 0) || sending} onClick={() => void sendMessage()} title={goalDraftActive ? "检查 Goal 内容并进入确认" : "发送消息"} type="button"><Send size={18} /></button>
+              <button aria-label={goalDraftActive ? t("composer.createGoal") : t("composer.send")} disabled={(!composer.trim() && imageAttachments.length === 0) || sending} onClick={() => void sendMessage()} title={goalDraftActive ? t("composer.createGoalHint") : t("composer.sendMessageHint")} type="button"><Send size={18} /></button>
             </div>
             </>}
           </div>
@@ -1736,6 +1796,7 @@ export function PersonalWorkspacePage({
         <GoalSidebar
           attentionCount={managerNeedsYouCount}
           goals={workspaceGoals}
+          lifecycleBusyGoalIds={lifecycleBusyGoalIds}
           onRequestGoalCreate={readOnly ? undefined : requestGoalCreate}
           onRequestGoalLifecycle={readOnly ? undefined : (goal, operation) => void requestGoalLifecycle(goal, operation)}
           onOpenSettings={readOnly ? undefined : () => setSelection({ kind: "settings" })}

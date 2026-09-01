@@ -9,6 +9,7 @@ from typing import Any
 
 from ..capabilities.benchmark_toolkit import (
     admit_benchmark_case,
+    build_benchmark_adaptive_concurrency_policy,
     build_benchmark_concurrency_config,
     build_benchmark_concurrency_status,
     configure_benchmark_concurrency_envelope,
@@ -16,6 +17,7 @@ from ..capabilities.benchmark_toolkit import (
     read_benchmark_concurrency_envelope,
     release_benchmark_case,
     render_benchmark_concurrency_markdown,
+    tune_benchmark_concurrency_target,
 )
 
 PrintPayload = Callable[
@@ -28,6 +30,7 @@ BENCHMARK_CONCURRENCY_COMMANDS = {
     "concurrency-configure",
     "concurrency-admit",
     "concurrency-release",
+    "concurrency-tune",
 }
 
 
@@ -119,6 +122,60 @@ def register_benchmark_concurrency_commands(
     release_parser.add_argument("--run-id", required=True)
     _add_execute_argument(release_parser)
 
+    tune_parser = benchmark_subparsers.add_parser(
+        "concurrency-tune",
+        help="Adapt desired occupancy within the operator-owned hard ceiling.",
+    )
+    add_subcommand_format(tune_parser)
+    _add_location_arguments(tune_parser)
+    tune_parser.add_argument(
+        "--feedback-json",
+        required=True,
+        help="Public-safe benchmark_concurrency_feedback_v0 JSON path, or - for stdin.",
+    )
+    tune_parser.add_argument(
+        "--resource-headroom-json",
+        help="Fresh benchmark_resource_headroom_receipt_v0 JSON path.",
+    )
+    tune_parser.add_argument("--minimum-target-active-cases", type=int, default=1)
+    tune_parser.add_argument("--increase-step", type=int, default=1)
+    tune_parser.add_argument("--decrease-step", type=int, default=1)
+    tune_parser.add_argument(
+        "--saturated-healthy-windows-required", type=int, default=2
+    )
+    _add_execute_argument(tune_parser)
+
+
+def _read_json_argument(value: str) -> Any:
+    if value == "-":
+        return json.load(sys.stdin)
+    return json.loads(Path(value).expanduser().read_text(encoding="utf-8"))
+
+
+def _tune_payload(args: argparse.Namespace, *, path: Path) -> dict[str, Any]:
+    if args.feedback_json == "-" and args.resource_headroom_json == "-":
+        raise ValueError("only one JSON input may use stdin")
+    feedback = _read_json_argument(args.feedback_json)
+    resource_headroom_receipt = (
+        _read_json_argument(args.resource_headroom_json)
+        if args.resource_headroom_json
+        else None
+    )
+    policy = build_benchmark_adaptive_concurrency_policy(
+        minimum_target_active_cases=args.minimum_target_active_cases,
+        increase_step=args.increase_step,
+        decrease_step=args.decrease_step,
+        saturated_healthy_windows_required=args.saturated_healthy_windows_required,
+    )
+    return tune_benchmark_concurrency_target(
+        path,
+        policy=policy,
+        feedback=feedback,
+        resource_headroom_receipt=resource_headroom_receipt,
+        execute=args.execute,
+        agent_id=args.agent_id,
+    )
+
 
 def handle_benchmark_concurrency_command(
     args: argparse.Namespace,
@@ -160,14 +217,9 @@ def handle_benchmark_concurrency_command(
         elif args.benchmark_command == "concurrency-admit":
             resource_headroom_receipt = None
             if args.resource_headroom_json:
-                if args.resource_headroom_json == "-":
-                    resource_headroom_receipt = json.load(sys.stdin)
-                else:
-                    resource_headroom_receipt = json.loads(
-                        Path(args.resource_headroom_json)
-                        .expanduser()
-                        .read_text(encoding="utf-8")
-                    )
+                resource_headroom_receipt = _read_json_argument(
+                    args.resource_headroom_json
+                )
             payload = admit_benchmark_case(
                 path,
                 run_id=args.run_id,
@@ -177,13 +229,15 @@ def handle_benchmark_concurrency_command(
                 agent_id=args.agent_id,
                 resource_headroom_receipt=resource_headroom_receipt,
             )
-        else:
+        elif args.benchmark_command == "concurrency-release":
             payload = release_benchmark_case(
                 path,
                 run_id=args.run_id,
                 execute=args.execute,
                 agent_id=args.agent_id,
             )
+        else:
+            payload = _tune_payload(args, path=path)
         payload["goal_id"] = args.goal_id
         payload["path_recorded"] = False
     except (OSError, TypeError, ValueError):

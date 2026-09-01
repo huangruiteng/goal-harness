@@ -164,6 +164,7 @@ def assert_compact_runtime_policy_complete(
             "source": "quota_cli_invocation",
             "registry_bound": True,
             "runtime_root_bound": True,
+            "turn_instance_bound": False,
         }, (name, compact)
     else:
         assert "route_binding" not in ack_hint, (name, compact)

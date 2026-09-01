@@ -85,7 +85,9 @@ and `writes_state=false`.
 | durable `no_followup` + fresh terminal frontier + decision user action | — | `terminal` (proven Goal closure wins) |
 | continuing completion + decision user action | — | `user_action_required` |
 | `wait` | any | `wait` |
-| `host_failure` / `validation_failed` / `writeback_failed` / `quota_spend_failed` | any | `repair` (route before any successor Turn) |
+| retryable `host_failure`, attempt budget remains | delivery or wait | `wait` with a same-Turn bounded-backoff continuation |
+| retryable `host_failure`, attempt budget exhausted | any | `repair` |
+| non-retryable or legacy `host_failure` / `validation_failed` / `writeback_failed` / `quota_spend_failed` | any | `repair` (route before any successor Turn) |
 | replan-class decision action (`autonomous_replan*`) | — | `replan` |
 | repair-class decision action (`*_repair*`) | — | `repair` |
 | user action projected by decision | — | `user_action_required` |
@@ -111,6 +113,12 @@ and `writes_state=false`.
   replay gap without adding an unsigned field to `loopx_turn_envelope_v0`.
 - Every other user-action signal (from receipt or decision) routes to
   `user_action_required` before delivery dispositions.
+- A typed retryable Host failure never authorizes a different model or a new
+  Todo. The controller returns `wait` with the exact attempt, maximum attempts,
+  retry delay, `same_turn=true`, and `model_fallback_allowed=false`. The outer
+  scheduler may wake that same failed Turn with explicit retry authority after
+  the delay. Once the attempt budget is exhausted, the controller returns
+  `repair`; legacy or malformed failure metadata cannot opt into retry.
 - The fresh decision must satisfy the shared Turn envelope contract
   (`loopx_turn_envelope_v0` schema, non-empty equal signature hashes, and an
   in-budget compaction) via the same typed route the Turn plan driver uses;

@@ -173,6 +173,8 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
                 ),
                 "Treat the returned `ordered_steps` and `goal_start_contract` as authoritative. Follow their identity, capability-route, Todo, writeback, host-loop, quota, and stop/gate rules before substantive work; do not reconstruct those rules from skill memory.",
                 "If the packet exposes a goal-selection gate, rerun one exact choice before any mutation.",
+                "When authoring task Todos, treat `--action-kind` as the documented extensible public-safe token: choose a short task-relevant value such as `implement`, `test`, or `review`; do not search the LoopX source for an allowlist.",
+                "Consume a turn-start quota JSON packet exactly once: read the complete output directly or save it and query it with `jq`; never pipe a `--begin-turn` call through `head` or `tail`, and never rerun `--begin-turn` to recover hidden fields. When selection is required, choose the Todo and use `interaction_contract.cli_channel.selection_command` with the returned Turn identity before mutation.",
                 f"If arguments are empty and the host already identifies an active LoopX goal, follow its exact CLI `interaction_contract` or quota command first; otherwise inspect `{cli_bin} status` and `{cli_bin} bootstrap-command-pack --project .` before changing files.",
                 "If this session cannot mutate the host loop surface, surface the exact pasteable gate instead of claiming autonomous setup.",
             ],

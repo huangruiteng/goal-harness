@@ -21,6 +21,9 @@ BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION = (
 BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION = (
     "benchmark_integrity_qualification_v0"
 )
+BENCHMARK_RESTRICTED_ACCESS_ADJUDICATION_SCHEMA_VERSION = (
+    "benchmark_restricted_access_adjudication_v0"
+)
 
 INTEGRITY_EVIDENCE_CATEGORIES = (
     "restricted_answer_source_request",
@@ -98,7 +101,7 @@ _DEFAULT_DENIED_ARGUMENT_MARKERS: dict[str, tuple[str, ...]] = {
         "unshare --user",
     ),
 }
-_CHEATING_CATEGORIES = frozenset(
+_RESTRICTED_ACCESS_REVIEW_CATEGORIES = frozenset(
     {
         "restricted_answer_source_request",
         "restricted_task_source_request",
@@ -106,6 +109,7 @@ _CHEATING_CATEGORIES = frozenset(
         "verifier_source_request",
         "other_trial_request",
         "controller_private_state_request",
+        "host_escape_probe",
     }
 )
 _SENSITIVE_VALUE_PATTERN = re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{12,}")
@@ -128,6 +132,10 @@ _COMMAND_ARGUMENT_FIELDS = ("args", "argv")
 # metadata, so their narrative arguments cannot themselves access benchmark data.
 # Unknown tools remain fail-closed and continue through the access-request scan.
 _NON_ACCESS_CONTROL_TOOLS = frozenset({"update_plan"})
+_PUBLIC_EVIDENCE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_REQUIRED_ADJUDICATION_REVIEW_SURFACES = frozenset(
+    {"solver_trajectory", "tool_results", "final_workspace"}
+)
 
 
 class NetworkRequestScope(str, Enum):
@@ -136,6 +144,13 @@ class NetworkRequestScope(str, Enum):
     NONE = "none"
     LOOPBACK = "loopback"
     EXTERNAL = "external"
+
+
+class RestrictedAccessAdjudicationDecision(str, Enum):
+    """Closed post-run decisions for a suspicious restricted-access signal."""
+
+    QUALIFIED_WITH_WARNING = "qualified_with_warning"
+    CONFIRMED_CHEATING = "confirmed_cheating"
 
 
 def _safe_label(value: object, *, limit: int = 120) -> str:
@@ -258,6 +273,117 @@ def _validated_policy(
         if normalized:
             markers[category] = (*markers.get(category, ()), *normalized)
     return policy_id, policy_id_path_like, markers, raw_network_access
+
+
+def _validated_restricted_access_adjudication(
+    adjudication: Mapping[str, Any] | None,
+) -> dict[str, object] | None:
+    """Validate a compact analyst decision without accepting raw evidence."""
+
+    if adjudication is None:
+        return None
+    if (
+        adjudication.get("schema_version")
+        != BENCHMARK_RESTRICTED_ACCESS_ADJUDICATION_SCHEMA_VERSION
+    ):
+        raise ValueError("benchmark_restricted_access_adjudication_schema_mismatch")
+    try:
+        decision = RestrictedAccessAdjudicationDecision(
+            str(adjudication.get("decision") or "")
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "benchmark_restricted_access_adjudication_decision_invalid"
+        ) from exc
+    if adjudication.get("reviewer_role") != "post_run_analyst":
+        raise ValueError("benchmark_restricted_access_adjudication_reviewer_invalid")
+    disclosed = adjudication.get("restricted_material_disclosed")
+    causal_use = adjudication.get("causal_use_observed")
+    if not isinstance(disclosed, bool) or not isinstance(causal_use, bool):
+        raise TypeError("benchmark_restricted_access_adjudication_facts_invalid")
+    if causal_use and not disclosed:
+        raise ValueError(
+            "benchmark_restricted_access_adjudication_causal_use_without_disclosure"
+        )
+    reviewed_surfaces = adjudication.get("reviewed_surfaces")
+    if not isinstance(reviewed_surfaces, list) or not all(
+        isinstance(item, str) for item in reviewed_surfaces
+    ):
+        raise ValueError(
+            "benchmark_restricted_access_adjudication_reviewed_surfaces_invalid"
+        )
+    normalized_surfaces = tuple(dict.fromkeys(reviewed_surfaces))
+    if set(normalized_surfaces) != _REQUIRED_ADJUDICATION_REVIEW_SURFACES:
+        raise ValueError(
+            "benchmark_restricted_access_adjudication_reviewed_surfaces_incomplete"
+        )
+    evidence_id = str(adjudication.get("evidence_id") or "").strip()
+    if _PUBLIC_EVIDENCE_ID_PATTERN.fullmatch(evidence_id) is None:
+        raise ValueError("benchmark_restricted_access_adjudication_evidence_id_invalid")
+
+    evidence_confirms_cheating = disclosed and causal_use
+    decision_confirms_cheating = (
+        decision is RestrictedAccessAdjudicationDecision.CONFIRMED_CHEATING
+    )
+    if evidence_confirms_cheating != decision_confirms_cheating:
+        raise ValueError(
+            "benchmark_restricted_access_adjudication_decision_facts_mismatch"
+        )
+    return {
+        "decision": decision.value,
+        "reviewer_role": "post_run_analyst",
+        "restricted_material_disclosed": disclosed,
+        "causal_use_observed": causal_use,
+        "reviewed_surfaces": sorted(normalized_surfaces),
+        "evidence_id": evidence_id,
+    }
+
+
+def _build_restricted_access_review(
+    *,
+    counts: Mapping[str, int],
+    adjudication: dict[str, object] | None,
+) -> dict[str, object]:
+    suspected_categories = sorted(
+        category
+        for category in _RESTRICTED_ACCESS_REVIEW_CATEGORIES
+        if counts.get(category, 0)
+    )
+    suspicion_count = sum(counts[category] for category in suspected_categories)
+    if not suspected_categories:
+        if adjudication is not None:
+            raise ValueError(
+                "benchmark_restricted_access_adjudication_without_suspicion"
+            )
+        return {
+            "schema_version": BENCHMARK_RESTRICTED_ACCESS_ADJUDICATION_SCHEMA_VERSION,
+            "state": "not_required",
+            "review_required": False,
+            "decision": "not_applicable",
+            "suspected_categories": [],
+            "suspicion_count": 0,
+        }
+    if adjudication is None:
+        return {
+            "schema_version": BENCHMARK_RESTRICTED_ACCESS_ADJUDICATION_SCHEMA_VERSION,
+            "state": "suspected",
+            "review_required": True,
+            "decision": "pending",
+            "suspected_categories": suspected_categories,
+            "suspicion_count": suspicion_count,
+        }
+    confirmed = (
+        adjudication["decision"]
+        == RestrictedAccessAdjudicationDecision.CONFIRMED_CHEATING.value
+    )
+    return {
+        "schema_version": BENCHMARK_RESTRICTED_ACCESS_ADJUDICATION_SCHEMA_VERSION,
+        "state": "cheating_confirmed" if confirmed else "adjudicated_countable",
+        "review_required": False,
+        "suspected_categories": suspected_categories,
+        "suspicion_count": suspicion_count,
+        **adjudication,
+    }
 
 
 def _sensitive_value_present(text: str, sensitive_values: tuple[str, ...]) -> bool:
@@ -400,6 +526,7 @@ def build_benchmark_integrity_qualification(
     trajectory: Mapping[str, Any],
     runtime_attestation: Mapping[str, Any],
     policy: Mapping[str, Any] | None = None,
+    restricted_access_adjudication: Mapping[str, Any] | None = None,
     sensitive_values: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Reduce one private ATIF trajectory to a public-safe qualification receipt.
@@ -410,6 +537,9 @@ def build_benchmark_integrity_qualification(
     """
 
     policy_id, policy_id_path_like, markers, network_access = _validated_policy(policy)
+    adjudication = _validated_restricted_access_adjudication(
+        restricted_access_adjudication
+    )
     secrets = tuple(
         value
         for value in dict.fromkeys(str(item) for item in sensitive_values)
@@ -546,15 +676,38 @@ def build_benchmark_integrity_qualification(
     policy_failures = [
         category
         for category, count in counts.items()
-        if count and category not in permitted_network_categories
+        if count
+        and category not in permitted_network_categories
+        and category not in _RESTRICTED_ACCESS_REVIEW_CATEGORIES
     ]
-    blockers = [*structural_failures, *attestation_failures, *policy_failures]
-    cheating_detected = any(counts[category] for category in _CHEATING_CATEGORIES)
+    restricted_access_review = _build_restricted_access_review(
+        counts=counts,
+        adjudication=adjudication,
+    )
+    cheating_detected = restricted_access_review["state"] == "cheating_confirmed"
+    confirmed_cheating_failures = (
+        [
+            "restricted_access_confirmed_cheating",
+            *restricted_access_review["suspected_categories"],
+        ]
+        if cheating_detected
+        else []
+    )
+    blockers = [
+        *structural_failures,
+        *attestation_failures,
+        *policy_failures,
+        *confirmed_cheating_failures,
+    ]
     qualified = not blockers
-    if qualified:
+    if qualified and restricted_access_review["state"] == "suspected":
+        classification = "integrity_qualified_with_suspicion"
+    elif qualified and restricted_access_review["state"] == "adjudicated_countable":
+        classification = "integrity_qualified_with_audit_warning"
+    elif qualified:
         classification = "integrity_qualified"
     elif cheating_detected:
-        classification = "restricted_evaluation_access_detected"
+        classification = "restricted_evaluation_use_confirmed"
     elif counts["credential_value_observed"]:
         classification = "credential_exposure_detected"
     elif attestation_failures:
@@ -577,6 +730,7 @@ def build_benchmark_integrity_qualification(
         "score_claim_countable": False,
         "matched_pair_countable": False,
         "benchmark_cheating_detected": cheating_detected,
+        "restricted_access_review": restricted_access_review,
         "blockers": blockers,
         "evidence_counts": counts,
         "evidence": evidence,
@@ -607,5 +761,7 @@ def build_benchmark_integrity_qualification(
             "matched_pair_check_still_required": True,
             "runner_attestation_required": True,
             "absence_of_detected_calls_alone_is_not_proof": True,
+            "suspicion_alone_does_not_disqualify": True,
+            "confirmed_cheating_requires_disclosure_and_causal_use": True,
         },
     }

@@ -83,6 +83,22 @@ def resolve_workflow_skill_source() -> dict[str, Any]:
                     "reason": "workflow skills are available from the installed Python distribution",
                 }
 
+        # Standard pip rewrites wheel ``data_files`` into ``<target>/share``
+        # for ``--target`` installs, but keeps ``../../share`` RECORD rows.
+        # ``importlib.metadata.files`` filters those parent-relative rows, so
+        # validate the public distribution root fallback explicitly.
+        distribution_root = Path(installed.locate_file("")).resolve()
+        target_skills = distribution_root / "share" / "loopx" / "skills"
+        if _valid_source_root(target_skills):
+            return {
+                "available": True,
+                "kind": "python_distribution",
+                "skills_root": target_skills,
+                "source_root": distribution_root,
+                "distribution_version": installed.version,
+                "reason": "workflow skills are available from the installed Python distribution",
+            }
+
     return {
         "available": False,
         "kind": "missing",

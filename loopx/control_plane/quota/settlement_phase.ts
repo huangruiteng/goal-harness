@@ -32,6 +32,7 @@ export type ReceiptBoundReplayPhase =
   (typeof RECEIPT_BOUND_REPLAY_PHASES)[number];
 
 export interface ReceiptBoundReplaySettlementState {
+  binding_kind?: "todo" | "autonomous_replan" | "unbound";
   completion_receipt_present: boolean;
   durable_writeback_present: boolean;
   quota_spend_present: boolean;
@@ -40,7 +41,10 @@ export interface ReceiptBoundReplaySettlementState {
 export function receiptBoundReplayPhase(
   state: ReceiptBoundReplaySettlementState,
 ): ReceiptBoundReplayPhase {
-  if (!state.completion_receipt_present) return "open";
+  const bindingComplete = state.binding_kind === "autonomous_replan"
+    ? state.durable_writeback_present
+    : state.completion_receipt_present;
+  if (!bindingComplete) return "open";
   return state.durable_writeback_present && state.quota_spend_present
     ? "settled"
     : "settlement_pending";

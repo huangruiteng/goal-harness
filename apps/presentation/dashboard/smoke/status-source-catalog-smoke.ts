@@ -1,6 +1,7 @@
 import {
   activeStatusSourceForUrl,
   addSshTunnelStatusSource,
+  defaultLocalStatusSourceUrl,
   emptyStatusSourceCatalog,
   loadStatusSourceCatalog,
   localStatusSource,
@@ -43,7 +44,9 @@ class MemoryStorage {
 const baseHref = "http://127.0.0.1:5173/";
 const initial = emptyStatusSourceCatalog();
 deepEqual(initial.sources, [localStatusSource], "the default catalog contains only the local source");
+equal(defaultLocalStatusSourceUrl, "/status.json", "the built-in source stays on the Dashboard origin");
 equal(initial.sources[0].readOnly, false, "the built-in local control plane stays interactive");
+equal(statusSourceForUrl(initial, "/status.json", baseHref)?.id, "local", "the Vite-proxied default resolves to the local source");
 equal(projectedStatusSourceForUrl(initial, "/api/status.json", baseHref).readOnly, false, "a same-origin relative proxy stays local");
 equal(projectedStatusSourceForUrl(initial, "http://127.0.0.1:9999/status.json", baseHref).readOnly, true, "an unregistered loopback port does not inherit local authority");
 

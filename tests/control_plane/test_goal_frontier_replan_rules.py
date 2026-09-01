@@ -364,6 +364,37 @@ def test_todo_succession_gap_cli_actions_do_not_require_semantic_refresh() -> No
     )
 
 
+def test_todo_succession_gap_cli_actions_preserve_runtime_root() -> None:
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": "goal-example",
+            "agent_identity": {"agent_id": "current-agent"},
+            "autonomous_replan_obligation": {
+                "resolution_mode": "todo_lifecycle_settlement",
+                "triggers": [
+                    {
+                        "kind": "completed_advancement_without_successor",
+                        "todo_id": "todo_111111111111",
+                        "completion_turn_key": "turn-implement",
+                    }
+                ],
+            },
+        },
+        mode="autonomous_replan",
+        available_capabilities=["shell"],
+        runtime_root="/tmp/loopx runtime",
+    )
+
+    assert actions[0].startswith(
+        "when no real successor remains for completed Todo "
+        "todo_111111111111: loopx --runtime-root '/tmp/loopx runtime' todo complete"
+    )
+    assert actions[-1] == (
+        "loopx --runtime-root '/tmp/loopx runtime' --format json quota should-run "
+        "--goal-id goal-example --agent-id current-agent --available-capability shell"
+    )
+
+
 def test_todo_succession_gap_interaction_contract_is_model_actionable() -> None:
     contract = build_interaction_contract(
         {

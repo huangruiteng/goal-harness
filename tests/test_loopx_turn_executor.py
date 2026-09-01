@@ -10,6 +10,7 @@ import pytest
 from loopx.control_plane.turn_driver import executor as turn_executor
 from loopx.control_plane.turn_driver import (
     LOOPX_TURN_RESULT_SCHEMA_VERSION,
+    TurnRecoveryBlockedError,
     build_loopx_turn_plan,
     load_loopx_turn_plan_from_journal,
     run_loopx_turn_once,
@@ -136,9 +137,18 @@ def test_task_validation_stage_reads_result_kind_through_effect_turn(
     result = _host_result(plan, kind="wait")
     journal = {
         "schema_version": LOOPX_TURN_JOURNAL_SCHEMA_VERSION,
+        "goal_id": "fixture-goal",
+        "turn_key": plan["transaction"]["turn_key"],
         "status": "in_progress",
         "completed_phases": list(TRANSACTION_PHASES[:2]),
+        "plan": plan,
     }
+    journal_path = tmp_path / "journal.json"
+    turn_executor._write_journal(
+        journal_path,
+        {**journal, "completed_phases": []},
+    )
+    turn_executor._write_journal(journal_path, journal)
 
     completed, payload = _task_validation_stage(
         plan,
@@ -146,7 +156,7 @@ def test_task_validation_stage_reads_result_kind_through_effect_turn(
         task_validator=None,
         completed_phases=list(TRANSACTION_PHASES[:2]),
         journal=journal,
-        journal_path=tmp_path / "journal.json",
+        journal_path=journal_path,
         effects={},
     )
 
@@ -374,6 +384,48 @@ def test_run_once_explicitly_retries_failed_host_without_duplicate_effects(
     assert calls == {"host": 2, "writeback": 1, "spend": 1, "scheduler": 1}
 
 
+def test_run_once_bounds_provider_capacity_retries_without_spending_quota(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    calls = {"host": 0, "writeback": 0, "spend": 0, "scheduler": 0}
+    writeback, spend, scheduler = _callbacks(calls)
+
+    def host(_request: dict[str, object]) -> dict[str, object]:
+        calls["host"] += 1
+        raise BuiltInHostError(
+            "codex_cli_provider_capacity",
+            failure_kind="provider_capacity",
+        )
+
+    common = {
+        "host_runner": host,
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "writeback": writeback,
+        "spend": spend,
+        "scheduler": scheduler,
+    }
+
+    first = run_loopx_turn_once(plan, **common)
+    second = run_loopx_turn_once(plan, retry_failed=True, **common)
+    third = run_loopx_turn_once(plan, retry_failed=True, **common)
+
+    assert first["host_failure"]["attempt"] == 1
+    assert first["host_failure"]["retry"]["backoff_seconds"] == 30
+    assert second["host_failure"]["attempt"] == 2
+    assert second["host_failure"]["retry"]["backoff_seconds"] == 60
+    assert third["host_failure"]["attempt"] == 3
+    assert third["host_failure"]["retry"]["max_attempts"] == 3
+    with pytest.raises(TurnRecoveryBlockedError) as exc_info:
+        run_loopx_turn_once(plan, retry_failed=True, **common)
+    assert exc_info.value.decision["reason"] == "host_retry_budget_exhausted"
+    assert calls == {"host": 3, "writeback": 0, "spend": 0, "scheduler": 0}
+
+
 def test_run_once_resumes_session_observed_by_recoverable_failed_turn(
     tmp_path: Path,
 ) -> None:
@@ -419,9 +471,23 @@ def test_run_once_resumes_session_observed_by_recoverable_failed_turn(
     }
 
     failed = run_loopx_turn_once(plan, **common)
+    transaction = plan["transaction"]
+    assert isinstance(transaction, dict)
+    inspected = turn_executor.inspect_loopx_turn_journal(
+        tmp_path / "runtime",
+        goal_id="fixture-goal",
+        agent_id="codex-fixture",
+        turn_key=str(transaction["turn_key"]),
+        retry_failed=True,
+        session_binding_resolver=session_binding,
+    )
     recovered = run_loopx_turn_once(plan, retry_failed=True, **common)
 
     assert failed["reason"] == "codex_cli_timeout"
+    assert inspected["recovery_decision"]["can_continue"] is True
+    assert inspected["recovery_decision"]["resume_from"] == "host_execute"
+    assert inspected["recovery_decision"]["reinvoke_host"] is True
+    assert recovered["recovery"]["planned"] == inspected["recovery_decision"]
     assert recovered["status"] == "committed"
     assert session_actions == ["start_new", "resume"]
     assert calls == {"host": 2, "writeback": 1, "spend": 1, "scheduler": 1}
@@ -518,8 +584,24 @@ def test_run_once_recoverable_failed_turn_rejects_session_identity_drift(
     }
 
     failed = run_loopx_turn_once(plan, **common)
-    with pytest.raises(ValueError, match="session binding does not match"):
+    transaction = plan["transaction"]
+    assert isinstance(transaction, dict)
+    inspected = turn_executor.inspect_loopx_turn_journal(
+        tmp_path / "runtime",
+        goal_id="fixture-goal",
+        agent_id="codex-fixture",
+        turn_key=str(transaction["turn_key"]),
+        retry_failed=True,
+        session_binding_resolver=common["session_binding_resolver"],
+    )
+    assert inspected["recovery_decision"]["action"] == "blocked"
+    assert (
+        inspected["recovery_decision"]["reason"]
+        == "session_binding_identity_mismatch"
+    )
+    with pytest.raises(ValueError, match="session binding does not match") as exc_info:
         run_loopx_turn_once(plan, retry_failed=True, **common)
+    assert exc_info.value.decision == inspected["recovery_decision"]
 
     assert failed["reason"] == "codex_cli_timeout"
     assert calls == {"host": 1, "writeback": 0, "spend": 0, "scheduler": 0}
@@ -1161,6 +1243,205 @@ def test_run_once_recovers_after_process_exit_before_writeback(tmp_path: Path) -
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
 
 
+@pytest.mark.parametrize(
+    ("drift_kind", "expected_violations"),
+    (
+        (
+            "goal_and_agent",
+            ["goal_mismatch", "owner_mismatch", "journal_not_terminal"],
+        ),
+        (
+            "todo_binding",
+            ["settlement_binding_mismatch", "journal_not_terminal"],
+        ),
+    ),
+)
+def test_run_once_blocks_drifted_settlement_identity_before_any_provider(
+    tmp_path: Path,
+    drift_kind: str,
+    expected_violations: list[str],
+) -> None:
+    plan = _plan()
+    transaction = plan["transaction"]
+    assert isinstance(transaction, dict)
+    settlement_plan = transaction["settlement_plan"]
+    assert isinstance(settlement_plan, dict)
+    identity = settlement_plan["identity"]
+    assert isinstance(identity, dict)
+    if drift_kind == "goal_and_agent":
+        identity["goal_id"] = "other-goal"
+        identity["agent_id"] = "other-agent"
+    else:
+        identity["todo_id"] = "todo_other0002"
+    identity["effect_id"] = ":".join(
+        (
+            str(identity["goal_id"]),
+            str(identity["agent_id"]),
+            str(identity["todo_id"]),
+            str(identity["turn_instance_id"]),
+        )
+    )
+    turn_key = str(transaction["turn_key"])
+    runtime_root = tmp_path / "runtime"
+    journal_path = turn_executor.turn_journal_path(
+        runtime_root,
+        goal_id="fixture-goal",
+        turn_key=turn_key,
+    )
+    journal_path.parent.mkdir(parents=True)
+    journal_path.write_text(
+        json.dumps(
+            {
+                "schema_version": LOOPX_TURN_JOURNAL_SCHEMA_VERSION,
+                "goal_id": "fixture-goal",
+                "turn_key": turn_key,
+                "status": "in_progress",
+                "completed_phases": list(TRANSACTION_PHASES[:3]),
+                "plan": plan,
+                "host_result": _host_result(plan),
+                "task_validation": _passing_validator(plan, _host_result(plan)),
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded_plan = load_loopx_turn_plan_from_journal(
+        runtime_root,
+        goal_id="fixture-goal",
+        turn_key=turn_key,
+    )
+    inspected = turn_executor.inspect_loopx_turn_journal(
+        runtime_root,
+        goal_id="fixture-goal",
+        agent_id="codex-fixture",
+        turn_key=turn_key,
+    )
+    assert inspected["violations"] == expected_violations
+    assert inspected["journal_consistent"] is False
+    assert inspected["recovery_decision"]["action"] == "blocked"
+
+    calls = {
+        "host": 0,
+        "validation": 0,
+        "writeback": 0,
+        "writeback_readback": 0,
+        "spend": 0,
+        "spend_readback": 0,
+        "scheduler": 0,
+        "terminal_closeout": 0,
+        "terminal_closeout_readback": 0,
+    }
+
+    def unexpected_provider(name: str):
+        def invoke(*_args: object, **_kwargs: object) -> dict[str, object]:
+            calls[name] += 1
+            raise AssertionError(f"{name} provider must not run")
+
+        return invoke
+
+    with pytest.raises(TurnRecoveryBlockedError) as exc_info:
+        run_loopx_turn_once(
+            loaded_plan,
+            host_runner=unexpected_provider("host"),
+            project=tmp_path,
+            runtime_root=runtime_root,
+            goal_id="fixture-goal",
+            timeout_seconds=5,
+            execute=True,
+            task_validator=unexpected_provider("validation"),
+            writeback=unexpected_provider("writeback"),
+            writeback_resolver=unexpected_provider("writeback_readback"),
+            spend=unexpected_provider("spend"),
+            spend_resolver=unexpected_provider("spend_readback"),
+            scheduler=unexpected_provider("scheduler"),
+            terminal_closeout=unexpected_provider("terminal_closeout"),
+            terminal_closeout_resolver=unexpected_provider(
+                "terminal_closeout_readback"
+            ),
+        )
+
+    assert exc_info.value.decision == inspected["recovery_decision"]
+    assert all(count == 0 for count in calls.values())
+
+
+def test_run_once_recovers_saved_host_result_from_validation_without_host_retry(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    calls = {"host": 0, "validation": 0, "writeback": 0, "spend": 0, "scheduler": 0}
+    writeback, spend, scheduler = _callbacks(calls)
+
+    def host(_request: dict[str, object]) -> dict[str, object]:
+        calls["host"] += 1
+        return _host_result(plan)
+
+    def interrupted_validation(
+        _plan: dict[str, object],
+        _result: dict[str, object],
+    ) -> dict[str, object]:
+        calls["validation"] += 1
+        raise SystemExit(9)
+
+    common = {
+        "host_runner": host,
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "writeback": writeback,
+        "spend": spend,
+        "scheduler": scheduler,
+    }
+    with pytest.raises(SystemExit):
+        run_loopx_turn_once(
+            plan,
+            task_validator=interrupted_validation,
+            **common,
+        )
+
+    transaction = plan["transaction"]
+    assert isinstance(transaction, dict)
+    inspected = turn_executor.inspect_loopx_turn_journal(
+        tmp_path / "runtime",
+        goal_id="fixture-goal",
+        agent_id="codex-fixture",
+        turn_key=str(transaction["turn_key"]),
+    )
+    assert inspected["replay_legal"] is False
+    assert inspected["recovery_decision"]["can_continue"] is True
+    assert inspected["recovery_decision"]["resume_from"] == "validation"
+    assert inspected["recovery_decision"]["reinvoke_host"] is False
+
+    recovered = run_loopx_turn_once(
+        plan,
+        task_validator=_passing_validator,
+        **common,
+    )
+
+    assert recovered["status"] == "committed"
+    assert recovered["recovery"]["planned"] == inspected["recovery_decision"]
+    assert recovered["recovery"]["actual"] == {
+        "status": "finished",
+        "journal_status": "committed",
+        "completed_phases": list(TRANSACTION_PHASES),
+        "host_invoked": False,
+    }
+    audited = turn_executor.inspect_loopx_turn_journal(
+        tmp_path / "runtime",
+        goal_id="fixture-goal",
+        agent_id="codex-fixture",
+        turn_key=str(transaction["turn_key"]),
+    )
+    assert audited["last_recovery"] == recovered["recovery"]
+    assert calls == {
+        "host": 1,
+        "validation": 1,
+        "writeback": 1,
+        "spend": 1,
+        "scheduler": 1,
+    }
+
+
 def test_run_once_resumes_after_writeback_without_duplicate_effects(
     tmp_path: Path,
 ) -> None:
@@ -1688,10 +1969,29 @@ def test_run_once_resumes_scheduler_without_repeating_committed_effects(
         "scheduler": scheduler,
     }
     first = run_loopx_turn_once(plan, **kwargs)
+    transaction = plan["transaction"]
+    assert isinstance(transaction, dict)
+    inspected = turn_executor.inspect_loopx_turn_journal(
+        tmp_path / "runtime",
+        goal_id="fixture-goal",
+        agent_id="codex-fixture",
+        turn_key=str(transaction["turn_key"]),
+    )
     resumed = run_loopx_turn_once(plan, **kwargs)
 
     assert first["status"] == "scheduler_action_required"
+    assert inspected["replay_legal"] is False
+    assert inspected["recovery_decision"]["resume_from"] == "scheduler_apply"
+    assert inspected["recovery_decision"]["reinvoke_host"] is False
+    assert resumed["recovery"]["planned"] == inspected["recovery_decision"]
     assert resumed["status"] == "committed"
     assert resumed["effects"]["scheduler_acknowledged"] is True
     assert count_path.read_text(encoding="utf-8") == "1"
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 2}
+    audited = turn_executor.inspect_loopx_turn_journal(
+        tmp_path / "runtime",
+        goal_id="fixture-goal",
+        agent_id="codex-fixture",
+        turn_key=str(transaction["turn_key"]),
+    )
+    assert audited["last_recovery"] == resumed["recovery"]

@@ -187,11 +187,16 @@ def main() -> None:
         "read-only-map",
         "reward",
         "operator-gate",
-        "delivery_postcondition",
-        "blocks_delivery",
         "retry it before delivery",
     ):
         require(marker in module_source, f"project lifecycle module missing {marker}")
+    sink_source = (MODULE.parent / "project_lifecycle_sinks.py").read_text(encoding="utf-8")
+    for marker in (
+        "apply_external_sink_postcondition",
+        "delivery_postcondition",
+        "blocks_delivery",
+    ):
+        require(marker in sink_source, f"project lifecycle sink module missing {marker}")
     require("register_project_lifecycle_commands" in cli_source, "cli.py did not register project lifecycle commands")
     require("handle_project_lifecycle_command" in cli_source, "cli.py did not dispatch project lifecycle commands")
     require("register_project_lifecycle_commands" in init_source, "__init__ did not export project lifecycle registration")

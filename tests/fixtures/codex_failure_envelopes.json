@@ -1,0 +1,177 @@
+{
+  "schema_version": "loopx_codex_failure_envelopes_v1",
+  "cases": [
+    {
+      "name": "codex_exec_error_message_capacity",
+      "source": "openai/codex exec JSONL ThreadErrorEvent message-only contract, present from 2025-09 through current",
+      "event": {
+        "type": "error",
+        "message": "Selected model is at capacity. Please try a different model."
+      },
+      "expected": "provider_capacity"
+    },
+    {
+      "name": "codex_exec_turn_failed_quota",
+      "source": "openai/codex exec JSONL TurnFailedEvent plus current CodexErr QuotaExceeded display",
+      "event": {
+        "type": "turn.failed",
+        "error": {
+          "message": "Quota exceeded. Check your plan and billing details."
+        }
+      },
+      "expected": "quota_exhausted"
+    },
+    {
+      "name": "responses_sse_rate_limit",
+      "source": "openai/codex Responses SSE response.failed fixture shape",
+      "event": {
+        "type": "response.failed",
+        "response": {
+          "error": {
+            "code": "rate_limit_exceeded",
+            "message": "Quota exceeded."
+          }
+        }
+      },
+      "expected": "rate_limited"
+    },
+    {
+      "name": "responses_sse_insufficient_quota",
+      "source": "openai/codex Responses SSE fatal insufficient_quota fixture shape",
+      "event": {
+        "type": "response.failed",
+        "response": {
+          "error": {
+            "code": "insufficient_quota",
+            "message": "Rate limit reached."
+          }
+        }
+      },
+      "expected": "quota_exhausted"
+    },
+    {
+      "name": "responses_sse_slow_down",
+      "source": "openai/codex codex-api maps slow_down and server_is_overloaded to ServerOverloaded",
+      "event": {
+        "type": "response.failed",
+        "response": {
+          "error": {
+            "code": "slow_down",
+            "message": "Please retry."
+          }
+        }
+      },
+      "expected": "provider_overloaded"
+    },
+    {
+      "name": "app_server_v2_turn_completed_overload",
+      "source": "openai/codex app-server v2 turn/completed TurnError and CodexErrorInfo contract",
+      "event": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "thread-fixture",
+          "turn": {
+            "id": "turn-fixture",
+            "status": "failed",
+            "error": {
+              "message": "opaque",
+              "codexErrorInfo": "serverOverloaded",
+              "additionalDetails": null
+            }
+          }
+        }
+      },
+      "expected": "provider_overloaded"
+    },
+    {
+      "name": "app_server_v2_error_usage_limit",
+      "source": "openai/codex app-server v2 error notification TurnError contract",
+      "event": {
+        "method": "error",
+        "params": {
+          "error": {
+            "message": "opaque",
+            "codexErrorInfo": "usageLimitExceeded"
+          }
+        }
+      },
+      "expected": "quota_exhausted"
+    },
+    {
+      "name": "app_server_v2_object_error_http_429",
+      "source": "openai/codex app-server v2 object CodexErrorInfo httpStatusCode contract",
+      "event": {
+        "method": "error",
+        "params": {
+          "error": {
+            "message": "opaque",
+            "codexErrorInfo": {
+              "responseTooManyFailedAttempts": {
+                "httpStatusCode": 429
+              }
+            }
+          }
+        }
+      },
+      "expected": "rate_limited"
+    },
+    {
+      "name": "json_rpc_transport_overload",
+      "source": "openai/codex app-server transport OVERLOADED_ERROR_CODE response contract",
+      "event": {
+        "id": 7,
+        "error": {
+          "code": -32001,
+          "message": "Server overloaded; retry later."
+        }
+      },
+      "expected": "provider_overloaded"
+    },
+    {
+      "name": "http_429_without_provider_code",
+      "source": "provider-compatible typed HTTP failure with no more-specific error code",
+      "event": {
+        "type": "error",
+        "error": {
+          "httpStatusCode": 429,
+          "message": "opaque"
+        }
+      },
+      "expected": "rate_limited"
+    },
+    {
+      "name": "generic_error_type_allows_message_fallback",
+      "source": "provider-compatible error envelope with a generic type and no error code",
+      "event": {
+        "type": "error",
+        "error": {
+          "type": "server_error",
+          "code": null,
+          "message": "The service is overloaded."
+        }
+      },
+      "expected": "provider_overloaded"
+    },
+    {
+      "name": "unknown_code_is_fail_closed",
+      "source": "forward-compatibility guard for a future structured provider code",
+      "event": {
+        "type": "turn.failed",
+        "error": {
+          "code": "future_provider_failure",
+          "message": "Selected model is at capacity."
+        }
+      },
+      "expected": "unknown"
+    },
+    {
+      "name": "non_error_event_is_ignored",
+      "source": "openai/codex exec JSONL ItemCompletedEvent control case",
+      "event": {
+        "type": "item.completed",
+        "message": "Selected model is at capacity."
+      },
+      "expected": null
+    }
+  ]
+}

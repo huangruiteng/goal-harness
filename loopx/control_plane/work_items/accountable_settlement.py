@@ -23,12 +23,14 @@ def build_accountable_work_item_settlement_plan(
     lifecycle_actor_args: str,
     turn_instance_id: str | None,
     delivery_boundary: str | None = None,
+    command_prefix: str = "loopx",
 ) -> SettlementPlan | None:
     if runtime_profile is SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT:
         normalized_turn_instance_id = normalize_turn_instance_id(turn_instance_id)
         return build_codex_app_settlement_plan(
             goal_id=goal_id,
             agent_id=agent_id,
+            command_prefix=command_prefix,
             todo_id=todo_id,
             replan_obligation_id=replan_obligation_id,
             scoped_cli_args=scoped_cli_args,
@@ -43,6 +45,7 @@ def build_accountable_work_item_settlement_plan(
         return build_turn_scoped_cli_settlement_plan(
             goal_id=goal_id,
             agent_id=agent_id,
+            command_prefix=command_prefix,
             todo_id=todo_id,
             replan_obligation_id=replan_obligation_id,
             scoped_cli_args=scoped_cli_args,
@@ -59,6 +62,7 @@ def build_accountable_work_item_settlement_plan(
     return build_turn_scoped_cli_settlement_plan(
         goal_id=goal_id,
         agent_id=agent_id,
+        command_prefix=command_prefix,
         todo_id=todo_id,
         replan_obligation_id=replan_obligation_id,
         scoped_cli_args=scoped_cli_args,

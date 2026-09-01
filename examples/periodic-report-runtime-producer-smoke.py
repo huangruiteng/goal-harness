@@ -19,11 +19,22 @@ def main() -> None:
     events = [
         build_rollout_event(
             goal_id="sample-long-goal",
-            event_kind="todo_complete",
-            todo_id=f"todo-{index}",
-            recorded_at=f"2026-08-{20 + index:02d}T09:00:00Z",
+            event_kind="refresh_state",
+            recorded_at="2026-08-22T09:00:00Z",
+            status="appended",
+            details={
+                "stage_completion_schema": (
+                    "periodic_report_stage_completion_receipt_v0"
+                ),
+                "stage_identity": "stage-sample-closed-vision",
+                "closed_vision_revision": "2026-08-22T08:59:00Z",
+                "frontier_identity": "frontier-sample-successor",
+                "stage_transition": "successor_frontier_settled",
+                "stage_acceptance": "validated",
+                "stage_outcome_checkpoint_satisfied": True,
+                "stage_durable_writeback_required": True,
+            },
         )
-        for index in range(3)
     ]
     decision = build_periodic_report_runtime_trigger_decision(
         {
@@ -37,7 +48,8 @@ def main() -> None:
                 "aggregation": {
                     "window_seconds": 604800,
                     "todo_completed_threshold": 3,
-                    "promote_replan": True,
+                    "promote_replan": False,
+                    "stage_completion_required": True,
                 },
             },
             "segment": {
@@ -91,6 +103,9 @@ def main() -> None:
         }
     )
     assert decision["producer_receipt"]["status"] == "promoted"
+    assert decision["producer_receipt"]["reason"] == (
+        "authoritative_stage_completion_observed"
+    )
     assert run["trigger_receipt"]["report_kind"] == "milestone_update"
     assert run["boundary"]["external_writes_performed"] is False
     print("periodic-report-runtime-producer-smoke: ok")

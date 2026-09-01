@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import signal
 import shutil
 import subprocess
+import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -110,6 +113,12 @@ def test_chat_command_accepts_explicit_lark_cli_binary() -> None:
     assert args.lark_cli_bin == "custom-lark-cli"
 
 
+def test_chat_command_can_request_managed_existing_service_replacement() -> None:
+    args = build_parser().parse_args(["chat", "--replace-existing-loopx-chat"])
+
+    assert args.replace_existing_loopx_chat is True
+
+
 def test_chat_command_passes_explicit_lark_cli_binary_to_server(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -118,6 +127,25 @@ def test_chat_command_passes_explicit_lark_cli_binary_to_server(
 
     assert main(["chat", "--lark-cli-bin", "custom-lark-cli", "--no-open"]) == 0
     assert calls[0]["lark_cli_bin"] == "custom-lark-cli"
+
+
+def test_chat_command_replaces_existing_service_before_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(
+        support_control,
+        "replace_existing_loopx_chat",
+        lambda host, port: calls.append((host, port)),
+    )
+    monkeypatch.setattr(
+        support_control,
+        "serve_chat",
+        lambda **_kwargs: calls.append("serve"),
+    )
+
+    assert main(["chat", "--replace-existing-loopx-chat", "--no-open"]) == 0
+    assert calls == [("127.0.0.1", 8767), "serve"]
 
 
 def test_macos_launchagent_passes_discovered_lark_cli_without_login_shell() -> None:
@@ -129,6 +157,7 @@ def test_macos_launchagent_passes_discovered_lark_cli_without_login_shell() -> N
     assert "resolve_lark_cli_command" in script
     assert "<string>-lc</string>" not in script
     assert script.count("<string>-c</string>") == 2
+    assert 'codex_home_export=" export CODEX_HOME=' in script
 
 
 def test_dashboard_command_runs_the_dashboard_launcher(
@@ -228,6 +257,72 @@ def test_probe_existing_chat_rejects_stale_runtime_identity() -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_replace_existing_loopx_chat_stops_one_verified_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from loopx import dashboard_launcher
+
+    listener_reads = iter([[4321], []])
+    killed: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(dashboard_launcher, "_probe_existing_chat", lambda _host, _port: "stale")
+    monkeypatch.setattr(dashboard_launcher, "_listener_pids", lambda _port: next(listener_reads))
+    monkeypatch.setattr(dashboard_launcher, "_is_same_user_loopx_chat_process", lambda pid: pid == 4321)
+    monkeypatch.setattr(dashboard_launcher.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    assert dashboard_launcher.replace_existing_loopx_chat("127.0.0.1", 8767) == "stale"
+    assert killed == [(4321, signal.SIGTERM)]
+
+
+def test_replace_existing_loopx_chat_leaves_foreign_listener_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from loopx import dashboard_launcher
+
+    killed: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(dashboard_launcher, "_probe_existing_chat", lambda _host, _port: "foreign")
+    monkeypatch.setattr(dashboard_launcher.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    with pytest.raises(RuntimeError, match="unverified service"):
+        dashboard_launcher.replace_existing_loopx_chat("127.0.0.1", 8767)
+
+    assert killed == []
+
+
+def test_replace_existing_loopx_chat_rejects_non_loopback_before_process_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from loopx import dashboard_launcher
+
+    probed: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        dashboard_launcher,
+        "_probe_existing_chat",
+        lambda host, port: probed.append((host, port)) or "stale",
+    )
+
+    with pytest.raises(ValueError, match="explicit loopback"):
+        dashboard_launcher.replace_existing_loopx_chat("example.com", 8767)
+
+    assert probed == []
+
+
+def test_replace_existing_loopx_chat_rejects_unverified_same_port_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from loopx import dashboard_launcher
+
+    killed: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(dashboard_launcher, "_probe_existing_chat", lambda _host, _port: "stale")
+    monkeypatch.setattr(dashboard_launcher, "_listener_pids", lambda _port: [4321])
+    monkeypatch.setattr(dashboard_launcher, "_is_same_user_loopx_chat_process", lambda _pid: False)
+    monkeypatch.setattr(dashboard_launcher.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    with pytest.raises(RuntimeError, match="same-user LoopX Chat"):
+        dashboard_launcher.replace_existing_loopx_chat("127.0.0.1", 8767)
+
+    assert killed == []
 
 
 def test_launch_dashboard_reuses_existing_matching_chat_service(
@@ -411,6 +506,53 @@ def test_dashboard_launcher_honors_configured_python_runtime(
     commands = python_log.read_text(encoding="utf-8")
     assert "-m loopx.cli serve-status" in commands
     assert "-m loopx.cli chat" in commands
+
+
+def test_dashboard_launcher_preserves_early_service_error_context(
+    tmp_path: Path,
+) -> None:
+    release_root, dashboard_script, fake_bin = _prepare_dashboard_runtime_fixture(
+        tmp_path
+    )
+    python_wrapper = tmp_path / "python-wrapper"
+    python_wrapper.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "-m" && "$*" == *"serve-status"* ]]; then\n'
+        '  echo "distinct status startup failure" >&2\n'
+        "  exit 42\n"
+        "fi\n"
+        'if [[ "$1" == "-m" && "$*" == *" chat "* ]]; then\n'
+        "  while true; do sleep 1; done\n"
+        "fi\n"
+        f'exec "{sys.executable}" "$@"\n',
+        encoding="utf-8",
+    )
+    python_wrapper.chmod(0o755)
+
+    started_at = time.monotonic()
+    completed = subprocess.run(
+        ["bash", str(dashboard_script)],
+        cwd=release_root,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "LOOPX_PYTHON": str(python_wrapper),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=5,
+    )
+    elapsed = time.monotonic() - started_at
+
+    assert completed.returncode == 1
+    assert elapsed < 5
+    assert "distinct status startup failure" in completed.stderr
+    assert (
+        "LoopX status service exited before it became ready (exit status 42)."
+        in completed.stderr
+    )
+    assert "The original service error output is shown above." in completed.stderr
 
 
 def test_dashboard_launcher_selects_a_compatible_nvm_node(

@@ -13,8 +13,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-import loopx.pr_review as pr_review_module
-from loopx.pr_review import (
+import loopx.pr_review as pr_review_module  # noqa: E402
+from loopx.pr_review import (  # noqa: E402
     _github_search_date,
     build_pr_review_packet,
     load_pr_fixture,
@@ -46,7 +46,9 @@ def assert_public_safe(payload: dict[str, object]) -> None:
     text = json.dumps(payload, ensure_ascii=False)
     for pattern in PRIVATE_PATTERNS:
         if pattern.search(text):
-            raise AssertionError(f"pr-review payload leaked private pattern {pattern.pattern!r}")
+            raise AssertionError(
+                f"pr-review payload leaked private pattern {pattern.pattern!r}"
+            )
 
 
 def main() -> int:
@@ -74,6 +76,9 @@ def main() -> int:
         "Walk one positive path",
         "Walk one negative path",
         "omits whole files/modules is incomplete",
+        "Treat `candidate` as a preview, not a durable projection",
+        "durable Todo target-key readback -> `--projected-exact-head` -> exact-head review/comment readback -> `--handled-exact-head`",
+        "Never send the projection ACK before the Todo exists",
     ):
         assert phrase in skill_text, phrase
     assert len(skill_source.splitlines()) <= 180, len(skill_source.splitlines())
@@ -83,8 +88,11 @@ def main() -> int:
         "Implementation Execution Chain",
         "Code Volume And Simplification Review",
         "Scope-Fit And Active Call-Site Gate",
+        "Change Proportionality Gate",
     ):
-        assert duplicated_contract_heading not in skill_source, duplicated_contract_heading
+        assert duplicated_contract_heading not in skill_source, (
+            duplicated_contract_heading
+        )
 
     assert _github_search_date("2026-06-28T00:00:00+08:00") == "2026-06-27"
     assert _github_search_date("2026-06-28T00:00:00Z") == "2026-06-28"
@@ -105,7 +113,9 @@ def main() -> int:
                     "url": "https://github.com/owner/repo/pull/900",
                     "state": "OPEN",
                     "updatedAt": "2026-06-28T00:01:00Z",
-                    "files": [{"path": "src/status.py", "additions": 4, "deletions": 1}],
+                    "files": [
+                        {"path": "src/status.py", "additions": 4, "deletions": 1}
+                    ],
                     "changedFiles": 1,
                     "additions": 4,
                     "deletions": 1,
@@ -122,7 +132,9 @@ def main() -> int:
                     "updatedAt": "2026-06-27T23:59:00Z",
                     "closedAt": "2026-06-28T00:03:00Z",
                     "mergedAt": "2026-06-28T00:03:00Z",
-                    "files": [{"path": "docs/review.md", "additions": 2, "deletions": 0}],
+                    "files": [
+                        {"path": "docs/review.md", "additions": 2, "deletions": 0}
+                    ],
                     "changedFiles": 1,
                     "additions": 2,
                     "deletions": 0,
@@ -154,7 +166,9 @@ def main() -> int:
     assert fetched[1]["state"] == "MERGED", fetched
 
     payload = json.loads(
-        run_cli("--format", "json", "pr-review", "--fixture", str(FIXTURE), "--limit", "5").stdout
+        run_cli(
+            "--format", "json", "pr-review", "--fixture", str(FIXTURE), "--limit", "5"
+        ).stdout
     )
     assert payload["schema_version"] == "loopx_pr_review_command_response_v0", payload
     request = payload["request"]
@@ -188,7 +202,9 @@ def main() -> int:
     sequence = payload["review_sequence"]
     assert sequence[0]["number"] == 771, sequence
     assert any(item["number"] == 775 for item in sequence), sequence
-    assert any(item["number"] == 770 and item["state"] == "MERGED" for item in sequence), sequence
+    assert any(
+        item["number"] == 770 and item["state"] == "MERGED" for item in sequence
+    ), sequence
     assert sequence[0]["risk_hint_level"] == "medium", sequence[0]
     assert sequence[0]["main_risk_level"] == "medium", sequence[0]
     merged_sequence = next(item for item in sequence if item["number"] == 770)
@@ -201,7 +217,9 @@ def main() -> int:
     assert "Empty scaffold only" in template["purpose"], template
     assert "review_execution_contract" in template["output_hint"], template
     labels = [section["label"] for section in template["sections"]]
-    assert labels == ["动机", "改动思路", "具体改动", "对主干的风险", "我的整体评价"], template
+    assert labels == ["动机", "改动思路", "具体改动", "对主干的风险", "我的整体评价"], (
+        template
+    )
     for section in template["sections"]:
         assert section["content"] == "", section
         assert section["word_hint"], section
@@ -218,10 +236,15 @@ def main() -> int:
         section for section in template["sections"] if section["label"] == "具体改动"
     )
     assert "### 关键代码讲解" in concrete_change["agent_instruction"], concrete_change
-    assert "2-5 behavior-bearing exact-head symbols" in concrete_change["agent_instruction"], concrete_change
+    assert (
+        "2-5 behavior-bearing exact-head symbols"
+        in concrete_change["agent_instruction"]
+    ), concrete_change
     assert "headRefOid" in first["evidence_commands"][0], first["evidence_commands"]
     assert "headRefOid" in first["evidence_commands"][-1], first["evidence_commands"]
-    assert template["review_order"][0] == "docs/guides/newcomer-command-path.md", template
+    assert template["review_order"][0] == "docs/guides/newcomer-command-path.md", (
+        template
+    )
     assert first["checks"]["counts"]["success"] == 2, first["checks"]
     assert "public_docs" in first["areas"], first["areas"]
     risk_hint = first["metadata_risk_hint"]
@@ -245,6 +268,35 @@ def main() -> int:
     ]
     assert scope_fit_reqs, "scope_fit evidence requirement missing from contract"
     assert scope_fit_reqs[0]["required_when"] == "code_change", scope_fit_reqs
+    proportionality_reqs = [
+        req
+        for req in contract.get("evidence_requirements", [])
+        if req.get("evidence_id") == "change_proportionality"
+    ]
+    assert proportionality_reqs, (
+        "change_proportionality evidence requirement missing from contract"
+    )
+    assert proportionality_reqs[0]["required_when"] == "code_change"
+    assert proportionality_reqs[0]["verdict_values"] == [
+        "proportionate",
+        "disproportionate",
+        "not_yet_proven",
+    ]
+    isolation_reqs = [
+        req
+        for req in contract.get("evidence_requirements", [])
+        if req.get("evidence_id") == "default_off_isolation"
+    ]
+    assert isolation_reqs, "default_off_isolation evidence requirement missing"
+    assert isolation_reqs[0]["required_when"] == "code_change"
+    assert "paired_counterfactual_validation" in isolation_reqs[0]["fields"]
+    authority_reqs = [
+        req
+        for req in contract.get("evidence_requirements", [])
+        if req.get("evidence_id") == "authority_semantics"
+    ]
+    assert authority_reqs, "authority_semantics evidence requirement missing"
+    assert authority_reqs[0]["required_when"] == "code_change"
     code_pr = next(
         (
             p
@@ -258,7 +310,28 @@ def main() -> int:
         "review_plan"
     ]
     assert (
-        code_pr["review_plan"]["applicability"]["scope_fit_required"] is True
+        "change_proportionality" in code_pr["review_plan"]["required_evidence_ids"]
+    ), code_pr["review_plan"]
+    assert (
+        "default_off_isolation" in code_pr["review_plan"]["required_evidence_ids"]
+    ), code_pr["review_plan"]
+    assert (
+        "authority_semantics" in code_pr["review_plan"]["required_evidence_ids"]
+    ), code_pr["review_plan"]
+    assert code_pr["review_plan"]["applicability"]["scope_fit_required"] is True, (
+        code_pr["review_plan"]
+    )
+    assert (
+        code_pr["review_plan"]["applicability"]["change_proportionality_required"]
+        is True
+    ), code_pr["review_plan"]
+    assert (
+        code_pr["review_plan"]["applicability"]["default_off_isolation_required"]
+        is True
+    ), code_pr["review_plan"]
+    assert (
+        code_pr["review_plan"]["applicability"]["authority_semantics_required"]
+        is True
     ), code_pr["review_plan"]
     docs_pr = next(
         (
@@ -270,12 +343,27 @@ def main() -> int:
     )
     assert docs_pr is not None, "fixture must include a docs-only PR"
     assert docs_pr["review_plan"]["applicability"]["scope_fit_required"] is False
+    assert (
+        docs_pr["review_plan"]["applicability"]["change_proportionality_required"]
+        is False
+    )
+    assert (
+        docs_pr["review_plan"]["applicability"]["default_off_isolation_required"]
+        is False
+    )
+    assert (
+        docs_pr["review_plan"]["applicability"]["authority_semantics_required"]
+        is False
+    )
     risk_section = next(
         section
         for section in template["sections"]
         if section["label"] == "对主干的风险"
     )
     assert "scope_fit" in risk_section["agent_instruction"], risk_section
+    assert "change_proportionality" in risk_section["agent_instruction"], risk_section
+    assert "default_off_isolation" in risk_section["agent_instruction"], risk_section
+    assert "authority_semantics" in risk_section["agent_instruction"], risk_section
 
     default_payload = json.loads(
         run_cli("--format", "json", "pr-review", "--fixture", str(FIXTURE)).stdout
@@ -299,7 +387,7 @@ def main() -> int:
     assert observed["request"]["autonomous_observation"] is True, observed["request"]
     assert "autonomous_review" in observed["request"]["include"], observed["request"]
     assert (
-        observation["schema_version"] == "pull_request_review_queue_observation_v0"
+        observation["schema_version"] == "pull_request_review_queue_observation_v1"
     ), observation
     assert observation["observation_state"] == "material_transition", observation
     assert observation["candidate_count"] == 1, observation
@@ -328,7 +416,7 @@ def main() -> int:
                 str(previous_path),
             ).stdout
         )
-        progressed = json.loads(
+        acknowledged = json.loads(
             run_cli(
                 "--format",
                 "json",
@@ -340,7 +428,7 @@ def main() -> int:
                 "--autonomous-observation",
                 "--previous-observation-json",
                 str(previous_path),
-                "--handled-exact-head",
+                "--projected-exact-head",
                 "771@7710000000000000000000000000000000000000",
             ).stdout
         )
@@ -350,19 +438,15 @@ def main() -> int:
     assert (
         unchanged["autonomous_review"]["observation_state"] == "observed_unchanged"
     ), unchanged
-    assert unchanged["autonomous_review"]["candidate"]["number"] == 773, unchanged
-    assert (
-        unchanged["autonomous_review"]["projected_candidate_count"] == 2
-    ), unchanged
-    progressed_observation = progressed["autonomous_review"]
-    assert (
-        progressed_observation["observation_state"] == "observed_unchanged"
-    ), progressed
-    assert progressed_observation["candidate"]["number"] == 773, progressed
-    assert (
-        progressed_observation["projected_candidate_count"] == 1
-    ), progressed
-    assert progressed_observation["handled_exact_head_count"] == 1, progressed
+    assert unchanged["autonomous_review"]["candidate"]["number"] == 771, unchanged
+    assert unchanged["autonomous_review"]["projected_candidate_count"] == 0, unchanged
+    progressed_observation = acknowledged["autonomous_review"]
+    assert progressed_observation["observation_state"] == "observed_unchanged", (
+        acknowledged
+    )
+    assert progressed_observation["candidate"]["number"] == 773, acknowledged
+    assert progressed_observation["projected_candidate_count"] == 1, acknowledged
+    assert progressed_observation["handled_exact_head_count"] == 0, acknowledged
 
     with tempfile.TemporaryDirectory() as temp_dir:
         checkpoint_path = Path(temp_dir) / "monitor.json"
@@ -384,7 +468,9 @@ def main() -> int:
         assert checkpoint_first["request"]["observation_state_file_supplied"] is True
         assert checkpoint_first["request"]["local_checkpoint_write_performed"] is True
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-        assert checkpoint["schema_version"] == "pull_request_review_monitor_checkpoint_v0"
+        assert (
+            checkpoint["schema_version"] == "pull_request_review_monitor_checkpoint_v0"
+        )
         assert checkpoint["repository"] == "owner/repo"
 
         checkpoint_second = json.loads(
@@ -401,8 +487,26 @@ def main() -> int:
                 str(checkpoint_path),
             ).stdout
         )
-        assert checkpoint_second["autonomous_review"]["candidate"]["number"] == 773
+        assert checkpoint_second["autonomous_review"]["candidate"]["number"] == 771
         assert checkpoint_second["request"]["previous_observation_supplied"] is True
+
+        checkpoint_projected = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "pr-review",
+                "--fixture",
+                str(FIXTURE),
+                "--state",
+                "open",
+                "--autonomous-observation",
+                "--observation-state-file",
+                str(checkpoint_path),
+                "--projected-exact-head",
+                "771@7710000000000000000000000000000000000000",
+            ).stdout
+        )
+        assert checkpoint_projected["autonomous_review"]["candidate"]["number"] == 773
 
         checkpoint_handled = json.loads(
             run_cli(
@@ -528,17 +632,27 @@ def main() -> int:
     )
     saturated_completeness = saturated_source["result_completeness"]
     assert saturated_completeness["complete"] is False, saturated_completeness
-    assert saturated_completeness["source_scan_complete"] is False, saturated_completeness
-    assert saturated_completeness["observed_count_is_lower_bound"] is True, saturated_completeness
-    assert "pull_requests" not in saturated_completeness["source_scan"], saturated_completeness
+    assert saturated_completeness["source_scan_complete"] is False, (
+        saturated_completeness
+    )
+    assert saturated_completeness["observed_count_is_lower_bound"] is True, (
+        saturated_completeness
+    )
+    assert "pull_requests" not in saturated_completeness["source_scan"], (
+        saturated_completeness
+    )
     assert saturated_completeness["recommended_limit"] == 200, saturated_completeness
     assert main_risk["verification_focus"], main_risk
     assert "quota.py" not in json.dumps(main_risk), main_risk
     response_contract = payload["agent_response_contract"]
-    assert response_contract["schema_version"] == "pr_review_agent_response_contract_v0", response_contract
+    assert (
+        response_contract["schema_version"] == "pr_review_agent_response_contract_v0"
+    ), response_contract
     assert response_contract["table_only_response_allowed"] is False, response_contract
     assert response_contract["slash_prefix_dominates_intent"] is True, response_contract
-    assert response_contract["stats_only_requires_explicit_opt_out"] is True, response_contract
+    assert response_contract["stats_only_requires_explicit_opt_out"] is True, (
+        response_contract
+    )
     assert response_contract["queue_table_role"] == "preface_only", response_contract
     assert response_contract["required_packet_fields_to_preserve"] == [
         "agent_response_contract",
@@ -558,10 +672,14 @@ def main() -> int:
     ], response_contract
     depth = response_contract["explanation_depth_contract"]
     assert depth["schema_version"] == "pr_review_explanation_depth_v0", depth
-    assert depth["authority"] == "agent_response_contract.review_execution_contract", depth
+    assert depth["authority"] == "agent_response_contract.review_execution_contract", (
+        depth
+    )
     assert "may not know" in depth["reader_profile"], depth
     execution = response_contract["review_execution_contract"]
-    assert execution["schema_version"] == "pull_request_review_execution_contract_v1", execution
+    assert execution["schema_version"] == "pull_request_review_execution_contract_v2", (
+        execution
+    )
     requirements = {
         item["evidence_id"]: item for item in execution["evidence_requirements"]
     }
@@ -575,6 +693,9 @@ def main() -> int:
         "validation_matrix",
         "failure_analysis",
         "code_volume",
+        "change_proportionality",
+        "default_off_isolation",
+        "authority_semantics",
         "typed_state_rule",
         "domain_neutrality",
         "behavior_change_disclosure",
@@ -597,16 +718,44 @@ def main() -> int:
         "partly_avoidable",
         "not_yet_proven",
     ]
+    assert requirements["change_proportionality"]["verdict_values"] == [
+        "proportionate",
+        "disproportionate",
+        "not_yet_proven",
+    ]
+    assert "green CI" in requirements["change_proportionality"]["rule"]
+    assert "original problem" in requirements["change_proportionality"]["rule"]
+    assert requirements["default_off_isolation"]["verdict_values"] == [
+        "isolated",
+        "not_isolated",
+        "not_applicable",
+        "not_yet_proven",
+    ]
+    assert "paired_counterfactual_validation" in requirements[
+        "default_off_isolation"
+    ]["fields"]
+    assert requirements["authority_semantics"]["verdict_values"] == [
+        "aligned",
+        "misleading",
+        "not_applicable",
+        "not_yet_proven",
+    ]
+    assert "actual_actor_lifecycle" in requirements["authority_semantics"]["fields"]
     assert "substring denylists" in requirements["typed_state_rule"]["rule"]
     assert "domain-neutral" in requirements["domain_neutrality"]["rule"]
-    assert "silent behavior changes" in requirements["behavior_change_disclosure"][
-        "rule"
-    ]
+    assert (
+        "silent behavior changes" in requirements["behavior_change_disclosure"]["rule"]
+    )
     assert "must_attempt_work" in requirements["guidance_vs_obligation"]["rule"]
     assert "real, durable value" in requirements["durable_smoke_value"]["rule"]
     assert "same-shape batch farming" in requirements["durable_smoke_value"]["rule"]
     assert execution["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert execution["completion_gate"]["stale_head_verdict_allowed"] is False
+    assert execution["completion_gate"]["blocking_evidence_verdicts"] == {
+        "change_proportionality": ["disproportionate", "not_yet_proven"],
+        "default_off_isolation": ["not_isolated", "not_yet_proven"],
+        "authority_semantics": ["misleading", "not_yet_proven"],
+    }
     assert execution["finding_contract"]["findings_first"] is True
     first_plan = first["review_plan"]
     assert first_plan["schema_version"] == "pull_request_review_plan_v1", first_plan
@@ -616,10 +765,12 @@ def main() -> int:
     assert (
         first_plan["applicability"]["behavior_change_disclosure_required"] is False
     ), first_plan
-    assert first_plan["applicability"]["domain_neutrality_required"] is False, first_plan
-    assert (
-        first_plan["applicability"]["guidance_vs_obligation_required"] is False
-    ), first_plan
+    assert first_plan["applicability"]["domain_neutrality_required"] is False, (
+        first_plan
+    )
+    assert first_plan["applicability"]["guidance_vs_obligation_required"] is False, (
+        first_plan
+    )
     assert "symbol_map" not in first_plan["required_evidence_ids"], first_plan
     assert first_plan["result_template"]["target_exact_head"] == (
         "773@7730000000000000000000000000000000000000"
@@ -628,35 +779,46 @@ def main() -> int:
     merged_plan = merged["review_plan"]
     assert merged_plan["applicability"]["code_change"] is True, merged_plan
     assert merged_plan["applicability"]["symbol_map_required"] is True, merged_plan
-    assert merged_plan["applicability"]["negative_walkthrough_required"] is True, merged_plan
-    assert merged_plan["applicability"]["typed_state_rule_required"] is True, merged_plan
+    assert merged_plan["applicability"]["negative_walkthrough_required"] is True, (
+        merged_plan
+    )
+    assert merged_plan["applicability"]["typed_state_rule_required"] is True, (
+        merged_plan
+    )
     assert (
         merged_plan["applicability"]["behavior_change_disclosure_required"] is True
     ), merged_plan
     assert "typed_state_rule" in merged_plan["required_evidence_ids"], merged_plan
-    assert "behavior_change_disclosure" in merged_plan["required_evidence_ids"], merged_plan
+    assert "behavior_change_disclosure" in merged_plan["required_evidence_ids"], (
+        merged_plan
+    )
     assert "symbol_map" in merged_plan["required_evidence_ids"], merged_plan
     merged_risk_hint = merged["metadata_risk_hint"]
     assert merged_risk_hint["level"] == "medium", merged_risk_hint
     merged_main_risk = merged["main_regression_analysis"]
     assert merged_main_risk["risk_level"] == "high", merged_main_risk
     assert merged_main_risk["post_merge_review"] is True, merged_main_risk
-    assert any("Runtime or CLI behavior" in item for item in merged_main_risk["potential_regressions"]), merged_main_risk
+    assert any(
+        "Runtime or CLI behavior" in item
+        for item in merged_main_risk["potential_regressions"]
+    ), merged_main_risk
     assert payload["boundary"]["absolute_paths_recorded"] is False, payload["boundary"]
     assert_public_safe(payload)
 
     group_limited = json.loads(
-        run_cli("--format", "json", "pr-review", "--fixture", str(FIXTURE), "--limit", "1").stdout
+        run_cli(
+            "--format", "json", "pr-review", "--fixture", str(FIXTURE), "--limit", "1"
+        ).stdout
     )
     assert group_limited["summary"]["total_pr_count"] == 2, group_limited["summary"]
     assert group_limited["summary"]["open_pr_count"] == 1, group_limited["summary"]
     assert group_limited["summary"]["merged_pr_count"] == 1, group_limited["summary"]
-    assert group_limited["review_groups"]["unmerged"]["pr_numbers"] == [771], group_limited[
-        "review_groups"
-    ]
-    assert group_limited["review_groups"]["merged"]["pr_numbers"] == [770], group_limited[
-        "review_groups"
-    ]
+    assert group_limited["review_groups"]["unmerged"]["pr_numbers"] == [771], (
+        group_limited["review_groups"]
+    )
+    assert group_limited["review_groups"]["merged"]["pr_numbers"] == [770], (
+        group_limited["review_groups"]
+    )
     assert [item["number"] for item in group_limited["pull_requests"]] == [
         771,
         770,
@@ -695,7 +857,9 @@ def main() -> int:
     assert windowed["summary"]["total_pr_count"] == 3, windowed["summary"]
     assert windowed["summary"]["open_pr_count"] == 2, windowed["summary"]
     assert windowed["summary"]["merged_pr_count"] == 1, windowed["summary"]
-    assert any(item["number"] == 770 for item in windowed["review_sequence"]), windowed["review_sequence"]
+    assert any(item["number"] == 770 for item in windowed["review_sequence"]), windowed[
+        "review_sequence"
+    ]
 
     markdown = run_cli("pr-review", "--fixture", str(FIXTURE), "--limit", "1").stdout
     assert "# Project PR Review Queue" in markdown, markdown
@@ -709,7 +873,10 @@ def main() -> int:
     assert "agent_response_contract.review_execution_contract" in markdown, markdown
     assert "review plan: exact_head=" in markdown, markdown
     assert "remote head SHA" in markdown, markdown
-    assert "Required card headings: `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`" in markdown, markdown
+    assert (
+        "Required card headings: `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`"
+        in markdown
+    ), markdown
     assert "`关键代码讲解`" in markdown, markdown
     assert "## Unmerged PRs" in markdown, markdown
     assert "## Merged PRs" in markdown, markdown

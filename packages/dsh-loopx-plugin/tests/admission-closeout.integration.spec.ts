@@ -18,6 +18,15 @@ const goalId = 'dsh-closeout-goal'
 const agentId = 'dsh-closeout-agent'
 const todoId = 'todo_dsh_closeout'
 const turnInstanceId = 'dsh-closeout-turn-1'
+const pythonVersionProbe = 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'
+const pythonCandidates = [...new Set([
+  process.env.PYTHON_BIN,
+  'python3',
+  'python3.14',
+  'python3.13',
+  'python3.12',
+  'python3.11',
+].filter((value): value is string => value !== undefined && value.length > 0))]
 
 interface Fixture {
   readonly project: string
@@ -44,9 +53,23 @@ function array(value: unknown): unknown[] {
   return value as unknown[]
 }
 
+async function selectIntegrationPython(): Promise<string> {
+  for (const candidate of pythonCandidates) {
+    try {
+      const result = await runFile(candidate, ['-c', pythonVersionProbe], {})
+      if (result.exitCode === 0) return candidate
+    } catch {
+      // Keep probing the same supported interpreter set as the plugin bootstrap.
+    }
+  }
+  throw new Error('The real LoopX integration test requires Python 3.11+')
+}
+
+const integrationPython = selectIntegrationPython()
+
 const realLoopXRunner: FileRunner = async (_file, args, options) => {
   return runFile(
-    'python3',
+    await integrationPython,
     ['-m', 'loopx.cli', ...args],
     {
       ...options,
@@ -236,6 +259,12 @@ describe('DSH admission-to-closeout integration', () => {
     const driver = new LoopXContinuationDriver({
       isLiveAgent: () => true,
       runner: realLoopXRunner,
+      resolveCommand: async () => ({
+        file: 'loopx',
+        prefix: [],
+        skillCommand: 'loopx',
+        version: 'loopx integration checkout',
+      }),
       makeTurnInstanceId: () => turnInstanceId,
       retryDelaysMs: [0, 0],
       warn: message => { warnings.push(message) },

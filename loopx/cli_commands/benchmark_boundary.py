@@ -12,12 +12,10 @@ from ..capabilities.benchmark_toolkit import (
     BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION,
     BENCHMARK_FOUR_ARM_QUALIFICATION_SCOPE,
     BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
-    BENCHMARK_PLAN_FIDELITY_SCHEMA_VERSION,
     BENCHMARK_RUNTIME_CONTINUITY_SCHEMA_VERSION,
     BENCHMARK_SOURCE_REVISION_FENCE_SCHEMA_VERSION,
     BenchmarkEventWindowState,
     BenchmarkJobReceiptState,
-    BenchmarkPlanRole,
     BenchmarkRunnerOwnerState,
     BenchmarkRuntimeContinuityClassification,
     BenchmarkRuntimeContinuityTransition,
@@ -25,7 +23,6 @@ from ..capabilities.benchmark_toolkit import (
     build_benchmark_candidate_source_boundary,
     build_benchmark_four_arm_contract_from_spec,
     build_benchmark_integrity_qualification,
-    build_benchmark_plan_fidelity_receipt,
     build_benchmark_runtime_continuity,
     build_benchmark_runtime_observation,
     compact_benchmark_four_arm_contract,
@@ -45,7 +42,6 @@ BENCHMARK_TOOLKIT_COMMANDS = {
     "candidate-source-boundary",
     "classify-artifacts",
     "integrity-qualification",
-    "plan-fidelity",
     "four-arm-contract",
     "runtime-continuity",
     "runtime-observation",
@@ -92,55 +88,16 @@ def _render_integrity(payload: dict[str, object]) -> str:
         blocker_text = (
             "- Blockers: " + ", ".join(f"`{item}`" for item in blockers) + "\n"
         )
+    review = payload.get("restricted_access_review")
+    review = review if isinstance(review, dict) else {}
     return (
         "# Benchmark Integrity Qualification\n\n"
         f"- Classification: `{payload.get('classification')}`\n"
         f"- Integrity qualified: `{payload.get('integrity_qualified')}`\n"
         f"- Score claim eligible: `{payload.get('score_claim_eligible')}`\n"
         f"- Cheating detected: `{payload.get('benchmark_cheating_detected')}`\n"
-        + blocker_text
+        f"- Restricted access review: `{review.get('state')}`\n" + blocker_text
     )
-
-
-def _render_plan_fidelity(payload: dict[str, object]) -> str:
-    blockers = payload.get("blockers")
-    blocker_text = ""
-    if isinstance(blockers, list) and blockers:
-        blocker_text = (
-            "- Blockers: " + ", ".join(f"`{item}`" for item in blockers) + "\n"
-        )
-    return (
-        "# Benchmark Treatment Plan Fidelity\n\n"
-        f"- Classification: `{payload.get('classification')}`\n"
-        f"- Qualified: `{payload.get('qualified')}`\n"
-        f"- Classified actions: `{payload.get('classified_action_count')}`\n"
-        f"- Unclassified actions: `{payload.get('unclassified_action_count')}`\n"
-        + blocker_text
-    )
-
-
-def _parse_role_action_kinds(values: list[str]) -> dict[BenchmarkPlanRole, list[str]]:
-    contract: dict[BenchmarkPlanRole, list[str]] = {}
-    for value in values:
-        raw_role, separator, action_kind = value.partition("=")
-        if not separator:
-            raise ValueError("invalid_role_action_kind_assignment")
-        role = BenchmarkPlanRole(raw_role)
-        contract.setdefault(role, []).append(action_kind)
-    return contract
-
-
-def _parse_required_role_counts(values: list[str]) -> dict[BenchmarkPlanRole, int]:
-    required: dict[BenchmarkPlanRole, int] = {}
-    for value in values:
-        raw_role, separator, raw_count = value.partition("=")
-        if not separator:
-            raise ValueError("invalid_required_role_count_assignment")
-        role = BenchmarkPlanRole(raw_role)
-        if role in required:
-            raise ValueError("duplicate_required_benchmark_plan_role")
-        required[role] = int(raw_count)
-    return required
 
 
 def _render_four_arm_contract(payload: dict[str, object]) -> str:
@@ -278,26 +235,6 @@ def register_benchmark_boundary_commands(
     )
     continuity_parser.add_argument("--require-qualified", action="store_true")
 
-    plan_parser = benchmark_subparsers.add_parser(
-        "plan-fidelity",
-        help="Reduce exact provider Todo action kinds to stable treatment-plan roles.",
-    )
-    add_subcommand_format(plan_parser)
-    plan_parser.add_argument("--action-kind", action="append", required=True)
-    plan_parser.add_argument(
-        "--role-action-kind",
-        action="append",
-        required=True,
-        metavar="ROLE=ACTION_KIND",
-    )
-    plan_parser.add_argument(
-        "--required-role-count",
-        action="append",
-        required=True,
-        metavar="ROLE=COUNT",
-    )
-    plan_parser.add_argument("--require-qualified", action="store_true")
-
     integrity_parser = benchmark_subparsers.add_parser(
         "integrity-qualification",
         help="Reduce private trajectory and runner attestations to a compact receipt.",
@@ -306,6 +243,13 @@ def register_benchmark_boundary_commands(
     integrity_parser.add_argument("--trajectory-json", required=True)
     integrity_parser.add_argument("--runtime-attestation-json", required=True)
     integrity_parser.add_argument("--policy-json")
+    integrity_parser.add_argument(
+        "--restricted-access-adjudication-json",
+        help=(
+            "Optional compact post-run analyst decision. Suspicion remains "
+            "countable unless this confirms disclosure and causal use."
+        ),
+    )
     integrity_parser.add_argument("--sensitive-value-env", action="append", default=[])
     integrity_parser.add_argument("--require-qualified", action="store_true")
 
@@ -382,27 +326,6 @@ def _invalid_runtime_continuity_input() -> dict[str, object]:
             "event_payload_recorded": False,
             "run_identity_recorded": False,
             "path_recorded": False,
-        },
-        "write_performed": False,
-    }
-
-
-def _invalid_plan_fidelity_input() -> dict[str, object]:
-    return {
-        "schema_version": BENCHMARK_PLAN_FIDELITY_SCHEMA_VERSION,
-        "qualified": False,
-        "classification": "plan_fidelity_input_invalid",
-        "observed_role_counts": {role.value: 0 for role in BenchmarkPlanRole},
-        "required_role_counts": {},
-        "classified_action_count": 0,
-        "unclassified_action_count": 0,
-        "blockers": ["plan_fidelity_input_invalid"],
-        "exact_action_kind_matching": True,
-        "public_boundary": {
-            "todo_text_recorded": False,
-            "raw_action_kinds_recorded": False,
-            "path_recorded": False,
-            "trajectory_recorded": False,
         },
         "write_performed": False,
     }
@@ -492,20 +415,6 @@ def handle_benchmark_boundary_command(
         print_payload(payload, output_format(args), _render_runtime_continuity)
         return 1 if args.require_qualified and not payload.get("qualified") else 0
 
-    if args.benchmark_command == "plan-fidelity":
-        try:
-            payload = build_benchmark_plan_fidelity_receipt(
-                action_kinds=args.action_kind,
-                role_action_kinds=_parse_role_action_kinds(args.role_action_kind),
-                required_role_counts=_parse_required_role_counts(
-                    args.required_role_count
-                ),
-            )
-        except (TypeError, ValueError):
-            payload = _invalid_plan_fidelity_input()
-        print_payload(payload, output_format(args), _render_plan_fidelity)
-        return 1 if args.require_qualified and not payload.get("qualified") else 0
-
     if args.benchmark_command == "verify-verifier-reward":
         if args.reward_json == "-":
             raise ValueError("verify-verifier-reward requires a file path")
@@ -524,6 +433,14 @@ def handle_benchmark_boundary_command(
             if args.policy_json
             else None
         )
+        restricted_access_adjudication = (
+            _read_json_object(
+                args.restricted_access_adjudication_json,
+                "--restricted-access-adjudication-json",
+            )
+            if args.restricted_access_adjudication_json
+            else None
+        )
         sensitive_values: list[str] = []
         for env_name in args.sensitive_value_env:
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", env_name):
@@ -536,6 +453,7 @@ def handle_benchmark_boundary_command(
             trajectory=trajectory,
             runtime_attestation=attestation,
             policy=policy,
+            restricted_access_adjudication=restricted_access_adjudication,
             sensitive_values=sensitive_values,
         )
     except (OSError, UnicodeError, TypeError, ValueError):

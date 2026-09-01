@@ -203,3 +203,17 @@ credentials.
 
 For packet schemas and detailed invariants, read the
 [Material Lifecycle architecture contract](../../../docs/reference/protocols/material-lifecycle-architecture-v0.md).
+
+## Validate
+
+```bash
+python3 examples/material-lifecycle-contract-smoke.py
+python3 examples/decision-material-walkthrough-smoke.py
+python3 -m pytest -q tests/test_decision_context_material.py
+```
+
+The contract smoke covers Material Lifecycle packet and architecture readback.
+The walkthrough smoke consumes revision-bound Decision Context evidence into a
+rerank preview, keeps stale/conflicting evidence visible, omits source bodies
+and private locators, and leaves apply/cursor commits as separate owner-gated
+actions.

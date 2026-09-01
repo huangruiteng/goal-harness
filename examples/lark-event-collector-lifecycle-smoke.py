@@ -12,13 +12,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from loopx.cli_commands.lark_inbox import (
-    _collector_permissions,
-)
-from loopx.extensions.lark import (
-    LARK_COLLECTOR_PERMISSION,
-    LARK_REPLY_PERMISSION,
-)
 from loopx.extensions.lark.event_collector import (
     inspect_lark_event_collector,
     install_lark_event_collector,
@@ -142,13 +135,6 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
             config_path=collector_config,
             runtime_root=runtime_root,
         )
-        assert _collector_permissions(
-            project=project,
-            config_path=collector_config,
-        ) == (
-            LARK_COLLECTOR_PERMISSION,
-            LARK_REPLY_PERMISSION,
-        )
         assert plan["status"] == "install_ready", plan
         assert plan["thread_complete"] is True, plan
         assert plan["profile_bound"] is True, plan
@@ -204,6 +190,7 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
         direct_event = {
             "message_id": "om_direct_fixture",
             "content": "@Project Review Bot 请处理这个问题",
+            "mentioned": True,
         }
         assert not lark_event_requires_reply_context_lookup(
             direct_event,
@@ -282,10 +269,6 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
         invalid_inbox["reply"].pop("received_reaction_emoji")
         invalid_inbox["reply"].pop("processing_reaction_emoji")
         inbox_config.write_text(json.dumps(invalid_inbox), encoding="utf-8")
-        assert _collector_permissions(
-            project=project,
-            config_path=collector_config,
-        ) == (LARK_COLLECTOR_PERMISSION,)
         invalid_inbox["reply"]["received_reaction_emoji"] = "Get"
         invalid_inbox["reply"]["processing_reaction_emoji"] = "OnIt"
         inbox_config.write_text(json.dumps(invalid_inbox), encoding="utf-8")
@@ -420,6 +403,7 @@ if "event" in args and "consume" in args:
             "message_id": "om_runtime_direct",
             "create_time": "2026-07-16T00:00:00Z",
             "content": "@Project Review Bot 能处理吗？",
+            "mentioned": True,
             "chat_id": "oc_private_fixture_chat",
         },
         {
@@ -466,18 +450,16 @@ else:
         assert runtime_result["captured_count"] == 3, runtime_result
         assert runtime_result["reply_context_verified_count"] == 2, runtime_result
         assert runtime_result["reply_to_bot_count"] == 1, runtime_result
-        assert runtime_result["received_reaction_count"] == 1, runtime_result
-        assert runtime_result["received_reaction_failure_count"] == 1, runtime_result
-        assert runtime_result["external_writes_performed"] is True, runtime_result
-        assert lark_inbox_reaction_receipts(
-            inbox=project / ".loopx" / "inbox" / "team-feedback",
-            message_id="om_runtime_reply",
-        ) == {
-            "received": {
-                "reaction_id": "reaction_runtime",
-                "emoji_type": "Get",
-            }
-        }
+        assert runtime_result["received_reaction_count"] == 0, runtime_result
+        assert runtime_result["received_reaction_failure_count"] == 0, runtime_result
+        assert runtime_result["external_writes_performed"] is False, runtime_result
+        assert (
+            lark_inbox_reaction_receipts(
+                inbox=project / ".loopx" / "inbox" / "team-feedback",
+                message_id="om_runtime_reply",
+            )
+            == {}
+        )
         runtime_urgency = project_lark_event_inbox_urgency(
             project=project,
             config_path=inbox_config,

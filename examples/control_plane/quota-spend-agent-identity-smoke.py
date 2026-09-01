@@ -19,7 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.control_plane.quota.slot_accounting import (  # noqa: E402
-    _latest_unspent_accountable_delivery_run,
+    _latest_unspent_turn_settlement_run,
 )
 from loopx.control_plane.scheduler.execution_context import (  # noqa: E402
     GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
@@ -342,7 +342,7 @@ def assert_quota_neutral_events_do_not_hide_same_agent_delivery(agent_id: str) -
             "".join(json.dumps(row) + "\n" for row in neutral_runs),
             encoding="utf-8",
         )
-        selected = _latest_unspent_accountable_delivery_run(
+        selected = _latest_unspent_turn_settlement_run(
             runtime, goal_id, agent_id=agent_id
         )
         assert selected == delivery, selected
@@ -356,7 +356,7 @@ def assert_quota_neutral_events_do_not_hide_same_agent_delivery(agent_id: str) -
         }
         with index_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(material_monitor) + "\n")
-        selected = _latest_unspent_accountable_delivery_run(
+        selected = _latest_unspent_turn_settlement_run(
             runtime, goal_id, agent_id=agent_id
         )
         assert selected == material_monitor, selected
@@ -373,7 +373,7 @@ def assert_quota_neutral_events_do_not_hide_same_agent_delivery(agent_id: str) -
                 + "\n"
             )
         assert (
-            _latest_unspent_accountable_delivery_run(
+            _latest_unspent_turn_settlement_run(
                 runtime, goal_id, agent_id=agent_id
             )
             is None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -16,15 +17,14 @@ from loopx.control_plane.effect_program import (
     SettlementStepKind,
 )
 from loopx.control_plane.quota import effect_program as quota_effect_program
+from loopx.control_plane.quota import settlement as quota_settlement
 from loopx.control_plane.quota.heartbeat_receipt import (
     heartbeat_receipt_settlement_replan_obligation_id,
     heartbeat_receipt_settlement_todo_id,
 )
 from loopx.control_plane.quota.settlement import (
     build_codex_app_settlement_plan,
-    infer_persisted_heartbeat_settlement_identity,
-    require_settlement_terminal_closeout,
-    resolve_heartbeat_settlement_identity,
+    read_heartbeat_settlement,
     settlement_step_command,
 )
 from loopx.control_plane.quota.settlement_cli import (
@@ -40,6 +40,7 @@ from loopx.control_plane.work_items.interaction_contract import (
     build_interaction_contract,
     interaction_next_cli_actions,
 )
+from loopx.cli_commands.todo import _completion_settlement_error
 from loopx.rollout_event_log import rollout_event_log_path
 
 GOAL_ID = "settlement-goal"
@@ -64,6 +65,26 @@ def test_quota_reexports_the_core_settlement_algebra() -> None:
     )
     assert quota_effect_program.SettlementPlan is core_effect_program.SettlementPlan
     assert quota_effect_program.SettlementResult is core_effect_program.SettlementResult
+
+
+def test_autonomous_replan_replay_phase_settles_from_refresh_and_spend() -> None:
+    assert (
+        core_effect_program.receipt_bound_replay_phase(
+            binding_kind=core_effect_program.SettlementBindingKind.AUTONOMOUS_REPLAN,
+            completion_receipt_present=False,
+            durable_writeback_present=True,
+            quota_spend_present=True,
+        )
+        is core_effect_program.ReceiptBoundReplayPhase.SETTLED
+    )
+    assert (
+        core_effect_program.receipt_bound_replay_phase(
+            completion_receipt_present=False,
+            durable_writeback_present=True,
+            quota_spend_present=True,
+        )
+        is core_effect_program.ReceiptBoundReplayPhase.OPEN
+    )
 
 
 def test_settlement_identity_rejects_dual_binding_before_projection() -> None:
@@ -179,6 +200,198 @@ def _append_run_index_record(runtime_root: Path, record: dict) -> None:
         handle.write(json.dumps(record) + "\n")
 
 
+def test_quota_settlement_readback_returns_the_complete_typed_chain(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    identity = SettlementIdentity(GOAL_ID, AGENT_ID, TODO_ID, TURN_ID)
+    _append_guard_receipt(runtime_root, effect_id=identity.effect_id)
+    event_path = rollout_event_log_path(runtime_root, GOAL_ID)
+    with event_path.open("a", encoding="utf-8") as handle:
+        for event_id, event_kind in (
+            ("event-writeback", "refresh_state"),
+            ("event-spend", "quota_spend"),
+        ):
+            handle.write(
+                json.dumps(
+                    {
+                        "schema_version": "loopx_rollout_event_v0",
+                        "event_id": event_id,
+                        "event_kind": event_kind,
+                        "goal_id": GOAL_ID,
+                        "agent_id": AGENT_ID,
+                        "run_id": TURN_ID,
+                        "details": {"settlement_effect_id": identity.effect_id},
+                    }
+                )
+                + "\n"
+            )
+    _append_run_index_record(
+        runtime_root,
+        {
+            "classification": "state_refreshed",
+            "delivery_outcome": "outcome_progress",
+            "goal_id": GOAL_ID,
+            "agent_id": AGENT_ID,
+            "todo_id": TODO_ID,
+            "turn_instance_id": TURN_ID,
+        },
+    )
+    _append_run_index_record(
+        runtime_root,
+        {
+            "classification": "quota_slot_spent",
+            "goal_id": GOAL_ID,
+            "agent_id": AGENT_ID,
+            "todo_id": TODO_ID,
+            "turn_instance_id": TURN_ID,
+        },
+    )
+
+    with patch.object(
+        quota_settlement,
+        "effect_runtime_result",
+        wraps=quota_settlement.effect_runtime_result,
+    ) as runtime_result:
+        readback = read_heartbeat_settlement(
+            runtime_root,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            todo_id=TODO_ID,
+            turn_instance_id=TURN_ID,
+        )
+
+    assert readback is not None
+    assert runtime_result.call_count == 1
+    assert readback.identity.value == identity
+    assert readback.settlement.failure is None
+    assert [receipt.step_kind for receipt in readback.settlement.receipts] == [
+        SettlementStepKind.VALIDATION,
+        SettlementStepKind.DURABLE_WRITEBACK,
+        SettlementStepKind.QUOTA_SPEND,
+    ]
+    assert readback.spend_run is not None
+
+
+def test_advancement_completion_requires_the_complete_settlement_chain(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    identity = SettlementIdentity(GOAL_ID, AGENT_ID, TODO_ID, TURN_ID)
+    _append_guard_receipt(runtime_root, effect_id=identity.effect_id)
+
+    incomplete = read_heartbeat_settlement(
+        runtime_root,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        todo_id=TODO_ID,
+        turn_instance_id=TURN_ID,
+    )
+    assert incomplete is not None
+    error = _completion_settlement_error(
+        {
+            "role": "agent",
+            "task_class": "advancement_task",
+            "action_kind": "implement",
+            "text": "Ship the repository change.",
+        },
+        incomplete,
+        no_follow_up=False,
+    )
+    assert error is not None
+    assert error.startswith(
+        "turn-scoped advancement completion requires matching writeback and "
+        "quota spend receipts:"
+    )
+
+    settled = replace(
+        incomplete,
+        settlement=SettlementResult(
+            value={},
+            receipts=(
+                _receipt(SettlementStepKind.VALIDATION, "validation"),
+                _receipt(SettlementStepKind.DURABLE_WRITEBACK, "writeback"),
+                _receipt(SettlementStepKind.QUOTA_SPEND, "spend"),
+            ),
+            failure=None,
+        ),
+    )
+    assert (
+        _completion_settlement_error(
+            {
+                "role": "agent",
+                "task_class": "advancement_task",
+                "action_kind": "implement",
+                "text": "Ship the repository change.",
+            },
+            settled,
+            no_follow_up=False,
+        )
+        is None
+    )
+    assert (
+        _completion_settlement_error(
+            {
+                "role": "agent",
+                "task_class": "advancement_task",
+                "action_kind": "research",
+                "continuation_policy": "same_agent_non_delivery",
+                "text": "Analyze the evidence.",
+            },
+            incomplete,
+            no_follow_up=False,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("guard_state", "failure_kind"),
+    [
+        ("missing", SettlementFailureKind.RECEIPT_MISSING),
+        ("mismatched", SettlementFailureKind.IDENTITY_MISMATCH),
+    ],
+)
+def test_python_settlement_readback_fails_closed_for_invalid_or_missing_guard(
+    tmp_path: Path,
+    guard_state: str,
+    failure_kind: SettlementFailureKind,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    if guard_state == "mismatched":
+        _append_guard_receipt(runtime_root, todo_id="todo_other")
+    for classification in (
+        "quota_monitor_poll",
+        "state_refreshed",
+        "quota_slot_spent",
+    ):
+        _append_run_index_record(
+            runtime_root,
+            {
+                "classification": classification,
+                "material_change": True,
+                "goal_id": GOAL_ID,
+                "agent_id": AGENT_ID,
+                "todo_id": TODO_ID,
+                "turn_instance_id": TURN_ID,
+            },
+        )
+
+    readback = read_heartbeat_settlement(
+        runtime_root,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        todo_id=TODO_ID,
+        turn_instance_id=TURN_ID,
+    )
+
+    assert readback is not None
+    assert readback.identity.failure is not None
+    assert readback.identity.failure.kind is failure_kind
+    assert readback.monitor_phase is None
+    assert readback.replay_phase is None
+
+
 def test_terminal_closeout_receipt_rejects_ordinary_completion_event(
     tmp_path: Path,
 ) -> None:
@@ -205,8 +418,16 @@ def test_terminal_closeout_receipt_rejects_ordinary_completion_event(
         encoding="utf-8",
     )
 
-    result = require_settlement_terminal_closeout(runtime_root, identity)
+    readback = read_heartbeat_settlement(
+        runtime_root,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        todo_id=TODO_ID,
+        turn_instance_id=TURN_ID,
+    )
 
+    assert readback is not None
+    result = readback.terminal_closeout
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.RECEIPT_MISSING
     assert result.failure.step_kind is SettlementStepKind.TERMINAL_CLOSEOUT
@@ -456,6 +677,39 @@ def test_unbound_codex_app_ssh_goal_requires_a_guided_turn_before_delivery() -> 
     assert "spend-slot" not in actions[0]
 
 
+def test_unbound_codex_app_ssh_goal_requires_a_guided_turn_before_replan() -> None:
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": GOAL_ID,
+            "agent_identity": {"agent_id": AGENT_ID},
+            "execution_obligation": {
+                "kind": "autonomous_replan_required",
+                "must_attempt_work": True,
+                "delivery_allowed": True,
+            },
+            "replan_action_packet": {
+                "schema_version": "replan_action_packet_v0",
+                "obligation_id": "replan-0000000000000001",
+                "required_outcome": "semantic_delta",
+                "uncovered_frontier": {"required_any_of": ["new_surface"]},
+                "writeback_contract": {},
+                "allowed_terminal": ["blocked"],
+            },
+        },
+        mode="autonomous_replan",
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE
+        ),
+    )
+
+    assert len(actions) == 1
+    assert actions[0].startswith("loopx --format json quota should-run")
+    assert "--runtime-profile codex_app_ssh_goal" in actions[0]
+    assert actions[0].endswith("--begin-turn")
+    assert "refresh-state" not in actions[0]
+    assert "spend-slot" not in actions[0]
+
+
 def test_turn_bound_codex_app_ssh_goal_preserves_visible_goal_settlement() -> None:
     turn_instance_id = "guided-start:native-visible-goal"
 
@@ -663,10 +917,37 @@ def test_generic_cli_without_turn_identity_keeps_legacy_unbound_actions() -> Non
     assert all("--turn-instance-id" not in action for action in channel["next_cli_actions"])
 
 
+def test_interaction_contract_cli_actions_keep_runtime_root() -> None:
+    runtime_root = "/tmp/loopx-runtime-root-fixture"
+    command_prefix = f"loopx --runtime-root {runtime_root}"
+
+    contract = build_interaction_contract(
+        _generic_cli_contract_payload(),
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP
+        ),
+        turn_instance_id=TURN_ID,
+        runtime_root=runtime_root,
+    )
+
+    channel = contract["cli_channel"]
+    assert channel["next_cli_actions"][0].startswith(
+        f"{command_prefix} refresh-state "
+    )
+    assert channel["next_cli_actions"][1].startswith(
+        f"{command_prefix} quota spend-slot "
+    )
+    plan = channel["settlement_plan"]
+    for step in plan["ordered_steps"]:
+        command = step.get("command_template")
+        if command:
+            assert command.startswith(command_prefix)
+
+
 def test_guard_receipt_resolves_stable_settlement_identity(tmp_path: Path) -> None:
     _append_guard_receipt(tmp_path)
 
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -674,6 +955,8 @@ def test_guard_receipt_resolves_stable_settlement_identity(tmp_path: Path) -> No
         turn_instance_id=TURN_ID,
     )
 
+    assert readback is not None
+    result = readback.identity
     assert result.failure is None
     assert result.value is not None
     assert result.value.effect_id == (f"{GOAL_ID}:{AGENT_ID}:{TODO_ID}:{TURN_ID}")
@@ -683,7 +966,7 @@ def test_guard_receipt_resolves_stable_settlement_identity(tmp_path: Path) -> No
 def test_guard_receipt_rejects_different_todo(tmp_path: Path) -> None:
     _append_guard_receipt(tmp_path, todo_id="todo_original")
 
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -691,6 +974,8 @@ def test_guard_receipt_rejects_different_todo(tmp_path: Path) -> None:
         turn_instance_id=TURN_ID,
     )
 
+    assert readback is not None
+    result = readback.identity
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert result.failure.step_kind is SettlementStepKind.VALIDATION
@@ -699,7 +984,7 @@ def test_guard_receipt_rejects_different_todo(tmp_path: Path) -> None:
 def test_guard_receipt_rejects_different_effect_identity(tmp_path: Path) -> None:
     _append_guard_receipt(tmp_path, effect_id="different-effect")
 
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -707,6 +992,8 @@ def test_guard_receipt_rejects_different_effect_identity(tmp_path: Path) -> None
         turn_instance_id=TURN_ID,
     )
 
+    assert readback is not None
+    result = readback.identity
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert "different-effect" in result.failure.reason
@@ -719,7 +1006,7 @@ def test_guard_receipt_rejects_corrupted_dual_binding(tmp_path: Path) -> None:
         effect_id=f"{GOAL_ID}:{AGENT_ID}:{TODO_ID}:{TURN_ID}",
     )
 
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -727,6 +1014,8 @@ def test_guard_receipt_rejects_corrupted_dual_binding(tmp_path: Path) -> None:
         turn_instance_id=TURN_ID,
     )
 
+    assert readback is not None
+    result = readback.identity
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert "conflicting Todo and autonomous replan bindings" in result.failure.reason
@@ -737,7 +1026,7 @@ def test_guard_receipt_returns_typed_failure_for_effect_without_todo(
 ) -> None:
     _append_guard_receipt(tmp_path, todo_id="", effect_id="effect-without-todo")
 
-    result = resolve_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
@@ -745,6 +1034,8 @@ def test_guard_receipt_returns_typed_failure_for_effect_without_todo(
         turn_instance_id=TURN_ID,
     )
 
+    assert readback is not None
+    result = readback.identity
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert "effect identity without a Todo" in result.failure.reason
@@ -780,15 +1071,18 @@ def test_unbound_visible_goal_recovery_requires_fully_typed_same_agent_run(
         record.pop(missing_field.removeprefix("run_"), None)
     _append_run_index_record(tmp_path, record)
 
-    result = infer_persisted_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         todo_id=None,
+        turn_instance_id=None,
+        infer_turn_instance_id=True,
         allow_unbound_binding=True,
     )
 
-    assert result is not None
+    assert readback is not None
+    result = readback.identity
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
 
@@ -816,14 +1110,17 @@ def test_typed_material_poll_is_recovered_not_shadowed(tmp_path: Path) -> None:
         },
     )
 
-    result = infer_persisted_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         todo_id=TODO_ID,
+        turn_instance_id=None,
+        infer_turn_instance_id=True,
     )
 
-    assert result is not None
+    assert readback is not None
+    result = readback.identity
     assert result.value is not None
     assert result.value.turn_instance_id == TURN_ID
 
@@ -848,11 +1145,13 @@ def test_unknown_non_neutral_record_fails_closed(tmp_path: Path) -> None:
         },
     )
 
-    result = infer_persisted_heartbeat_settlement_identity(
+    readback = read_heartbeat_settlement(
         tmp_path,
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         todo_id=TODO_ID,
+        turn_instance_id=None,
+        infer_turn_instance_id=True,
     )
 
-    assert result is None
+    assert readback is None

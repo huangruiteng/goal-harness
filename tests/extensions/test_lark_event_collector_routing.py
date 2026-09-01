@@ -14,7 +14,10 @@ from loopx.extensions.lark.event_collector import (
     load_lark_event_collector_config,
     plan_lark_event_collector,
 )
-from loopx.extensions.lark.event_collector_runtime import run_lark_event_collector
+from loopx.extensions.lark.event_collector_runtime import (
+    _is_profile_self_message,
+    run_lark_event_collector,
+)
 from loopx.extensions.lark.event_inbox import inspect_lark_event_inbox
 from loopx.extensions.lark.routed_inbox import (
     acknowledge_routed_lark_event_inbox,
@@ -22,6 +25,7 @@ from loopx.extensions.lark.routed_inbox import (
     inspect_routed_lark_event_inbox,
     project_routed_lark_event_inbox_urgency,
     resolve_routed_lark_inbox_config,
+    resolve_routed_lark_inbox_route,
 )
 
 
@@ -157,6 +161,32 @@ def test_v1_plan_binds_one_profile_to_isolated_multi_chat_routes(
     assert str(project) not in serialized
 
 
+def test_top_level_outbound_route_requires_one_explicit_route_key(
+    tmp_path: Path,
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+
+    resolved = resolve_routed_lark_inbox_route(
+        project=project,
+        config_path=collector,
+        route_key="requirements-beta",
+    )
+
+    assert resolved.endswith("requirements-beta.json")
+    with pytest.raises(ValueError, match="exactly one configured route_key"):
+        resolve_routed_lark_inbox_route(
+            project=project,
+            config_path=collector,
+            route_key=None,
+        )
+    with pytest.raises(ValueError, match="exactly one configured route_key"):
+        resolve_routed_lark_inbox_route(
+            project=project,
+            config_path=collector,
+            route_key="missing-route",
+        )
+
+
 def test_v0_config_is_normalized_to_one_route(tmp_path: Path) -> None:
     project = _project(tmp_path)
     chat_id = "oc_public_fixture_single"
@@ -237,6 +267,29 @@ def test_jq_projection_filters_one_stream_to_all_configured_chats() -> None:
     assert '.chat_id == "oc_public_fixture_beta"' in projection
     assert " or " in projection
     assert "chat_id:.chat_id" in projection
+    assert "sender_type:(.sender_type // .sender.sender_type)" in projection
+    assert "sender_id:(.sender_id // .sender.id // .sender.sender_id)" in projection
+
+
+def test_self_message_match_requires_typed_app_and_exact_verified_identity() -> None:
+    identity = "cli_public_fixture_bot"
+
+    assert _is_profile_self_message(
+        {"sender_type": "app", "sender_id": identity},
+        profile_app_id=identity,
+    )
+    assert not _is_profile_self_message(
+        {"sender_type": "user", "sender_id": identity},
+        profile_app_id=identity,
+    )
+    assert not _is_profile_self_message(
+        {"sender_type": "app", "sender_id": identity},
+        profile_app_id=None,
+    )
+    assert not _is_profile_self_message(
+        {"sender_type": "app", "sender_id": "cli_public_fixture_other"},
+        profile_app_id=identity,
+    )
 
 
 def test_cli_drain_accepts_routed_collector_config(
@@ -298,7 +351,60 @@ def test_cli_drain_accepts_routed_collector_config(
     assert rendered[0]["extension_activation"] == {"enabled": True}
 
 
-def test_runtime_consumes_once_and_routes_each_chat_to_its_own_inbox(
+def test_cli_send_resolves_route_and_forwards_safe_delivery_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+    monkeypatch.setattr(
+        lark_inbox,
+        "_resolve_lark_activation",
+        lambda *_args, **_kwargs: {"enabled": True},
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_send(**kwargs: object) -> dict[str, object]:
+        calls.append(kwargs)
+        return {
+            "ok": True,
+            "schema_version": "lark_outbound_message_v0",
+            "status": "preview_ready",
+            "external_write_performed": False,
+        }
+
+    monkeypatch.setattr(lark_inbox, "send_lark_inbox_message", fake_send)
+    rendered: list[dict[str, object]] = []
+    args = argparse.Namespace(
+        command="lark-inbox",
+        lark_inbox_command="send",
+        project=str(project),
+        config=str(collector),
+        goal_id=None,
+        agent_id=None,
+        route_key="requirements-beta",
+        text='<at open_id="ou_fixture">Fixture Reviewer</at> please review',
+        provider_preflight=True,
+        execute=False,
+    )
+
+    code = lark_inbox.handle_lark_inbox_command(
+        args,
+        registry_path=tmp_path / "registry.json",
+        runtime_root_arg=None,
+        output_format=lambda _args: "json",
+        print_payload=lambda payload, *_args: rendered.append(payload),
+    )
+
+    assert code == 0
+    assert len(calls) == 1
+    assert str(calls[0]["config_path"]).endswith("requirements-beta.json")
+    assert calls[0]["provider_preflight"] is True
+    assert calls[0]["execute"] is False
+    assert rendered[0]["status"] == "preview_ready"
+    assert rendered[0]["extension_activation"] == {"enabled": True}
+
+
+def test_runtime_collector_captures_without_provider_acknowledgement(
     tmp_path: Path,
 ) -> None:
     project, collector, first_chat, second_chat = _two_route_config(tmp_path)
@@ -373,6 +479,7 @@ def test_runtime_consumes_once_and_routes_each_chat_to_its_own_inbox(
         "reply_to_bot_count": 0,
         "received_reaction_count": 0,
         "received_reaction_failure_count": 0,
+        "self_message_skipped_count": 0,
         "external_writes_performed": False,
         "profile_identity_checked": False,
         "profile_identity_verified": False,
@@ -454,6 +561,70 @@ def test_runtime_consumes_once_and_routes_each_chat_to_its_own_inbox(
         )["pending_count"]
         == 1
     )
+
+
+def test_runtime_excludes_only_verified_profile_self_messages(tmp_path: Path) -> None:
+    project, collector, first_chat, _second_chat = _two_route_config(tmp_path)
+    profile_app_id = "cli_public_fixture_bot"
+    events = [
+        {
+            "schema_version": "lark_event_inbox_event_v0",
+            "event_id": "evt-self",
+            "message_id": "om_public_self",
+            "create_time": "2026-08-25T00:00:00Z",
+            "content": "Bot delivery status",
+            "chat_id": first_chat,
+            "sender_type": "app",
+            "sender_id": profile_app_id,
+        },
+        {
+            "schema_version": "lark_event_inbox_event_v0",
+            "event_id": "evt-other-app",
+            "message_id": "om_public_other_app",
+            "create_time": "2026-08-25T00:01:00Z",
+            "content": "@Shared Context Bot please review",
+            "chat_id": first_chat,
+            "sender_type": "app",
+            "sender_id": "cli_public_fixture_other",
+            "mentions": [{"name": "Shared Context Bot"}],
+        },
+    ]
+    runtime_cli = tmp_path / "runtime-lark-cli-self-filter"
+    runtime_cli.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        f"events = {events!r}\n"
+        "for event in events:\n"
+        "    print(json.dumps(event), flush=True)\n",
+        encoding="utf-8",
+    )
+    runtime_cli.chmod(0o755)
+
+    def identity_runner(
+        argv: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
+        assert "whoami" in argv
+        return subprocess.CompletedProcess(
+            args=argv,
+            returncode=0,
+            stdout=json.dumps({"appId": profile_app_id}),
+            stderr="",
+        )
+
+    result = run_lark_event_collector(
+        project=project,
+        config_path=collector,
+        lark_cli_executable=str(runtime_cli),
+        runner=identity_runner,
+    )
+
+    assert result["self_message_skipped_count"] == 1
+    assert result["captured_count"] == 1
+    assert result["profile_identity_checked"] is True
+    assert result["profile_identity_verified"] is True
+    inbox = project / ".loopx/inbox/requirements-alpha"
+    assert not (inbox / "om_public_self.json").exists()
+    assert (inbox / "om_public_other_app.json").is_file()
 
 
 @pytest.mark.parametrize("tampered_route_key", [None, "requirements-beta"])

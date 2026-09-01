@@ -166,6 +166,23 @@ def test_runtime_capability_reentry_preserves_visible_goal_turn() -> None:
     assert contract["cli_channel"]["next_cli_actions"] == [candidate["command"]]
 
 
+def test_runtime_capability_reentry_keeps_runtime_root() -> None:
+    runtime_root = "/tmp/loopx-runtime-capability-reentry"
+    contract = build_interaction_contract(
+        _blocked_payload(missing=["network"]),
+        available_capabilities=["shell"],
+        scheduler_execution_context=MANAGED_AGENT_CONTEXT,
+        turn_instance_id="guided-start:fixture-turn",
+        runtime_root=runtime_root,
+    )
+
+    candidate = contract["cli_channel"]["runtime_capability_reentry"][
+        "candidates"
+    ][0]
+    assert candidate["command"].startswith(f"loopx --runtime-root {runtime_root} ")
+    assert contract["cli_channel"]["next_cli_actions"] == [candidate["command"]]
+
+
 def test_runtime_capability_reentry_does_not_switch_from_selected_todo() -> None:
     payload = {
         **_blocked_payload(missing=["network"]),

@@ -1,5 +1,6 @@
 """Thin pytest: host parity — agent types, scheduler bindings, Turn hosts,
-host mode plan routing, fail-closed capability routes, public safety.
+host mode plan routing, fail-closed capability routes, no-spend transition,
+public safety.
 
 Covers GH-C60 core assertions.
 """
@@ -269,6 +270,71 @@ class TestFailClosed:
                 goal_id="p", user_intent="continue_without_ui",
                 host_capabilities=["root_shell"])
         assert exc.value.to_payload()["field"] == "host_capabilities"
+
+
+# -- No-spend transition (selector stays preview-only) ------------------------
+
+class TestNoSpendTransition:
+    """Host-mode selector must never spend; spend only follows validated writeback.
+
+    GH-C60 missing slice: protocol host-mode-plan-v0 acceptance items 5–6
+    (no-spend policy + private/authority boundary) were only covered by the
+    example smoke, not by the thin host-parity pytest.
+    """
+
+    def test_no_spend_policy_covers_preview_and_quiet_paths(self):
+        p = build_host_mode_plan(
+            goal_id="p",
+            user_intent="watch_each_turn",
+            host_capabilities=["visible_session"],
+            registered_agents=["a", "b"],
+        )
+        no_spend = p["no_spend_policy"]
+        assert no_spend == {
+            "selector_preview": True,
+            "turn_plan_preview": True,
+            "quiet_monitor_skip": True,
+            "cadence_only_change": True,
+            "readiness_or_final_check": True,
+            "spends_only_after_validated_delivery_writeback": True,
+        }
+        assert _public_safe(no_spend)
+
+    def test_boundary_keeps_selector_non_authoritative(self):
+        p = build_host_mode_plan(
+            goal_id="p",
+            user_intent="watch_each_turn",
+            host_capabilities=["visible_session"],
+            registered_agents=["a", "b"],
+        )
+        boundary = p["boundary"]
+        assert boundary["selector_is_authoritative"] is False
+        assert boundary["turn_envelope_is_authoritative_for_execution"] is True
+        assert boundary["adapter_neutral"] is True
+        for key in (
+            "starts_process",
+            "writes_state",
+            "spends_quota",
+            "infers_production_permission",
+            "infers_credential_access",
+            "infers_destructive_authority",
+        ):
+            assert boundary[key] is False, (key, boundary)
+        assert _public_safe(boundary)
+
+    def test_operator_next_steps_are_marked_no_spend(self):
+        p = build_host_mode_plan(
+            goal_id="p",
+            user_intent="continue_without_ui",
+            host_capabilities=["loopx_turn"],
+            agent_id="a",
+            registered_agents=["a"],
+        )
+        steps = p["operator_next_steps"]
+        assert steps
+        assert all(step.get("no_spend") is True for step in steps), steps
+        assert steps[0]["kind"] == "stop"
+        assert _public_safe(steps)
 
 
 # -- Public safety ------------------------------------------------------------

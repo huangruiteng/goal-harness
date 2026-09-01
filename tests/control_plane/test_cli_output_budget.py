@@ -770,6 +770,8 @@ def _mode_variant_commands(
         "heartbeat_prompt_full": common + ["heartbeat-prompt", "--full", *heartbeat],
         "todo_list_limited": common
         + ["todo", "list", "--goal-id", GOAL_ID, "--limit", "3"],
+        "todo_list_thin": common
+        + ["todo", "list", "--goal-id", GOAL_ID, "--thin"],
     }
 
 
@@ -828,6 +830,7 @@ def test_manifest_covers_the_declared_agent_facing_surface_set() -> None:
         "heartbeat_prompt_compact",
         "heartbeat_prompt_full",
         "todo_list_limited",
+        "todo_list_thin",
     }
     assert set(CLI_OUTPUT_MODE_VARIANT_BY_ID) == expected_variants
     assert manifest["mode_variant_count"] == len(expected_variants)
@@ -1530,6 +1533,66 @@ def test_todo_list_explicit_limit_stays_bounded_and_default_path_unchanged(
     )
 
 
+def test_todo_list_thin_reduces_crowded_output_and_keeps_default_unchanged(
+    tmp_path: Path,
+) -> None:
+    with _stable_budget_fixture_root(tmp_path / "todo-list-thin") as stable_root:
+        project, runtime, registry_path, state_file = _write_fixture(
+            stable_root,
+            SCENARIOS[1],
+        )
+        thin_command = _mode_variant_commands(
+            project=project,
+            runtime=runtime,
+            registry_path=registry_path,
+            state_file=state_file,
+            output_format="json",
+        )["todo_list_thin"]
+        cold_default_command = [
+            "--registry",
+            str(registry_path),
+            "--runtime-root",
+            str(runtime),
+            "--format",
+            "json",
+            "todo",
+            "list",
+            "--goal-id",
+            GOAL_ID,
+        ]
+        thin_exit_code, thin_text = _invoke_cli(thin_command)
+        default_exit_code, default_text = _invoke_cli(cold_default_command)
+
+    assert thin_exit_code == 0, thin_text
+    assert default_exit_code == 0, default_text
+    spec = CLI_OUTPUT_MODE_VARIANT_BY_ID["todo_list_thin"]
+    measurement = measure_cli_output(thin_text, output_format="json")
+    assert_cli_output_mode_variant(
+        spec,
+        output_format="json",
+        text=thin_text,
+        measurement=measurement,
+    )
+    payload = json.loads(thin_text)
+    assert payload["thin"] is True
+    assert payload["todo_count"] == payload["matched_todo_count"] == 36
+    assert payload["returned_todo_count"] == len(payload["todos"]) == 2
+    assert payload["omitted_todo_count"] == 34
+    assert payload["todo_list_field_projection"]["view"] == (
+        "thin_explicit_view"
+    )
+    assert payload["todo_list_field_projection"]["item_limit_per_role"] == 2
+    assert "state_file" not in payload
+    assert "project" not in payload
+    assert len(thin_text) < len(default_text) * 0.45
+
+    default_payload = json.loads(default_text)
+    assert "thin" not in default_payload
+    assert "todo_list_field_projection" not in default_payload
+    assert default_payload["state_file"]
+    assert default_payload["project"]
+
+
 def test_todo_list_explicit_limit_bounds_monitor_and_blocker_lanes(
     tmp_path: Path,
 ) -> None:
@@ -1638,6 +1701,54 @@ def test_turn_envelope_cli_preserves_codex_app_scheduler_binding(
     assert payload["detail_ref"]["full_decision"] == (
         "loopx --format json quota should-run "
         f"--goal-id {GOAL_ID} --agent-id {AGENT_IDS[0]} --codex-app"
+    )
+
+
+def test_quota_should_run_cli_actions_keep_explicit_runtime_root(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path, _state_file = _write_fixture(
+        tmp_path,
+        SCENARIOS[0],
+    )
+
+    exit_code, text = _invoke_cli(
+        [
+            "--registry",
+            str(registry_path),
+            "--runtime-root",
+            str(runtime),
+            "--format",
+            "json",
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_IDS[0],
+            "--scan-root",
+            str(project),
+            "--runtime-profile",
+            "codex_cli",
+            "--turn-instance-id",
+            "turn-runtime-root-contract",
+        ]
+    )
+
+    assert exit_code == 0, text
+    payload = json.loads(text)
+    command_prefix = f"loopx --runtime-root {runtime}"
+    cli_channel = payload["interaction_contract"]["cli_channel"]
+    assert cli_channel["next_cli_actions"]
+    assert all(
+        action.startswith(command_prefix)
+        for action in cli_channel["next_cli_actions"]
+    )
+    settlement_plan = cli_channel["settlement_plan"]
+    assert all(
+        step["command_template"].startswith(command_prefix)
+        for step in settlement_plan["ordered_steps"]
+        if "command_template" in step
     )
 
 

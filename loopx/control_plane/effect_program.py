@@ -58,17 +58,21 @@ def receipt_bound_monitor_phase(
 
 def receipt_bound_replay_phase(
     *,
+    binding_kind: SettlementBindingKind | str | None = None,
     completion_receipt_present: bool,
     durable_writeback_present: bool,
     quota_spend_present: bool,
 ) -> ReceiptBoundReplayPhase | None:
+    params: dict[str, Any] = {
+        "completion_receipt_present": completion_receipt_present,
+        "durable_writeback_present": durable_writeback_present,
+        "quota_spend_present": quota_spend_present,
+    }
+    if binding_kind is not None:
+        params["binding_kind"] = str(binding_kind)
     result = effect_runtime_result(
         "settlement.receipt_bound_replay_phase",
-        {
-            "completion_receipt_present": completion_receipt_present,
-            "durable_writeback_present": durable_writeback_present,
-            "quota_spend_present": quota_spend_present,
-        },
+        params,
     )
     if result is None:
         return None
@@ -266,6 +270,68 @@ class SettlementIdentity:
 
     def as_dict(self) -> dict[str, str]:
         return {key: str(value) for key, value in self._runtime_payload.items()}
+
+    @classmethod
+    def from_runtime_payload(cls, payload: Any) -> SettlementIdentity:
+        """Decode a TS-owned identity without issuing a second runtime request."""
+
+        if not isinstance(payload, Mapping):
+            raise RuntimeError("TypeScript settlement identity shape mismatch")
+        schema_version = payload.get("schema_version")
+        if schema_version not in {
+            SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+            SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+        }:
+            raise RuntimeError("TypeScript settlement identity shape mismatch")
+        required = ("effect_id", "goal_id", "agent_id", "turn_instance_id")
+        if any(
+            not isinstance(payload.get(key), str) or not str(payload[key]).strip()
+            for key in required
+        ):
+            raise RuntimeError("TypeScript settlement identity shape mismatch")
+        todo_id = str(payload.get("todo_id") or "").strip() or None
+        replan_obligation_id = (
+            str(payload.get("replan_obligation_id") or "").strip() or None
+        )
+        if bool(todo_id) == bool(replan_obligation_id):
+            raise RuntimeError("TypeScript settlement identity shape mismatch")
+        binding_kind = (
+            SettlementBindingKind.TODO
+            if todo_id
+            else SettlementBindingKind.AUTONOMOUS_REPLAN
+        )
+        binding_id = todo_id or replan_obligation_id
+        if schema_version == SCOPED_SETTLEMENT_IDENTITY_SCHEMA_VERSION and (
+            payload.get("binding_kind") != binding_kind.value
+            or payload.get("binding_id") != binding_id
+        ):
+            raise RuntimeError("TypeScript settlement identity shape mismatch")
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "goal_id", str(payload["goal_id"]))
+        object.__setattr__(instance, "agent_id", str(payload["agent_id"]))
+        object.__setattr__(instance, "todo_id", todo_id)
+        object.__setattr__(
+            instance,
+            "turn_instance_id",
+            str(payload["turn_instance_id"]),
+        )
+        object.__setattr__(instance, "replan_obligation_id", replan_obligation_id)
+        object.__setattr__(
+            instance,
+            "_runtime_identity",
+            {
+                "goal_id": instance.goal_id,
+                "agent_id": instance.agent_id,
+                "todo_id": todo_id,
+                "turn_instance_id": instance.turn_instance_id,
+                "replan_obligation_id": replan_obligation_id,
+                "binding_kind": binding_kind.value,
+                "binding_id": str(binding_id),
+                "effect_id": str(payload["effect_id"]),
+            },
+        )
+        object.__setattr__(instance, "_runtime_payload", dict(payload))
+        return instance
 
 
 @dataclass(frozen=True, slots=True)

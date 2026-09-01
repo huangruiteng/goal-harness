@@ -187,6 +187,7 @@ def main() -> None:
                 "message_id": "om_direct_question",
                 "create_time": "2026-07-12T10:02:00Z",
                 "content": "@Project Review Bot 结论呢？",
+                "mentioned": True,
             },
             {
                 "schema_version": "lark_event_inbox_event_v0",
@@ -346,6 +347,14 @@ def main() -> None:
                     return successful_runner(args)
                 if args[3:6] == ["im", "chats", "get"]:
                     return {"returncode": 0, "stdout": "{}", "stderr": ""}
+                if args[3:6] == ["im", "chat.members", "get"]:
+                    return {
+                        "returncode": 0,
+                        "stdout": json.dumps(
+                            {"items": [{"member_id": "ou_reviewer_fixture"}]}
+                        ),
+                        "stderr": "",
+                    }
                 if "+messages-reply" in args:
                     if "--dry-run" in args:
                         return successful_runner(args)
