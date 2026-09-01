@@ -20,6 +20,7 @@ from .decision_scope import build_standing_decision_authority
 from .todo_summary import (
     MAX_STATUS_TODOS_PER_ROLE,
     compact_todo_group,
+    count_advancement_todos,
     normalize_todo_text,
 )
 
@@ -128,6 +129,15 @@ def parse_active_state_todos(
         item_limit=item_limit,
         include_task_orchestration_authority=include_task_orchestration_authority,
     )
+    archived_advancement_done_count = count_advancement_todos(
+        [item for item in archive_items if item.get("done") is True]
+    )
+    if agent and archived_advancement_done_count:
+        agent["archived_advancement_done_count"] = archived_advancement_done_count
+        agent["advancement_done_count"] = (
+            int(agent.get("advancement_done_count") or 0)
+            + archived_advancement_done_count
+        )
     if user:
         result["user_todos"] = user
     if agent:

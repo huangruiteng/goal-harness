@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Check, ExternalLink, ListPlus, MessageSquareText, MoreHorizontal } from "lucide-react";
 
 import type {
@@ -21,6 +22,7 @@ export function GoalTasksView({
   onOpenChat,
   onQuickComplete,
   onSelect,
+  selectedTodoId = null,
   userTodos,
 }: {
   goal: WorkspaceGoal;
@@ -29,9 +31,16 @@ export function GoalTasksView({
   onOpenChat?: () => void;
   onQuickComplete?: (todo: WorkspaceGoal["agentTodos"][number] & { goalId: string; goalTitle: string; ownerLabel: string }) => void;
   onSelect: (selection: WorkspaceDrawerSelection) => void;
+  selectedTodoId?: string | null;
   userTodos: WorkspaceModel["userTodos"];
 }) {
   const { t } = useWorkspaceI18n();
+  const selectedTodoRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!selectedTodoId) return;
+    const frame = window.requestAnimationFrame(() => selectedTodoRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedTodoId]);
   const attentionItems = userTodos
     .filter((todo) => todo.goalId === goal.goalId)
     .map((todo) => ({ ...todo, goalTitle: goal.title }));
@@ -104,8 +113,8 @@ export function GoalTasksView({
           const enriched = { ...todo, goalId: goal.goalId, goalTitle: goal.title, ownerLabel: todo.claimedBy ?? goal.agentLabel ?? goal.agentId };
           const execution = executionRuns.find((item) => item.run.todoId === todo.todoId)?.run;
           return (
-            <div className={`personal-task-card${execution ? " has-session" : ""}`} key={todo.todoId}>
-              <button onClick={() => onSelect({ item: enriched, kind: "todo" })} type="button">
+            <div className={`personal-task-card${execution ? " has-session" : ""}${selectedTodoId === todo.todoId ? " is-selected" : ""}`} key={todo.todoId} ref={selectedTodoId === todo.todoId ? (element) => { selectedTodoRef.current = element; } : undefined}>
+              <button aria-pressed={selectedTodoId === todo.todoId} onClick={() => onSelect({ item: enriched, kind: "todo" })} type="button">
                 <span>○</span><strong>{todo.text}</strong>
                 <small>
                   {todo.priority ? <span className={`personal-priority-badge is-${todo.priority.toLowerCase()}`}>{todo.priority}</span> : null}
@@ -143,7 +152,7 @@ export function GoalTasksView({
           <span>{Math.max(goal.doneTodoCount ?? 0, doneAgentTodos.length)}</span>
         </header>
         {doneAgentTodos.map((todo) => (
-          <button key={todo.todoId} onClick={() => onSelect({ item: { ...todo, goalId: goal.goalId, goalTitle: goal.title, ownerLabel: todo.claimedBy ?? goal.agentLabel ?? goal.agentId }, kind: "todo" })} type="button">
+          <button aria-pressed={selectedTodoId === todo.todoId} className={selectedTodoId === todo.todoId ? "is-selected" : undefined} key={todo.todoId} onClick={() => onSelect({ item: { ...todo, goalId: goal.goalId, goalTitle: goal.title, ownerLabel: todo.claimedBy ?? goal.agentLabel ?? goal.agentId }, kind: "todo" })} ref={selectedTodoId === todo.todoId ? (element) => { selectedTodoRef.current = element; } : undefined} type="button">
             <span className="is-done">✓</span><strong>{todo.text}</strong><small>{todo.claimedBy ?? goal.agentLabel ?? goal.agentId}</small>
           </button>
         ))}

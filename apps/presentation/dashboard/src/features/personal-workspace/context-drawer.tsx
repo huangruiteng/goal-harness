@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bell,
@@ -11,6 +11,8 @@ import {
   ExternalLink,
   GitBranch,
   MessageCircleQuestion,
+  Maximize2,
+  Minimize2,
   MoreHorizontal,
   Pause,
   Play,
@@ -59,13 +61,15 @@ const decisionTransitions = [
 
 type ContextDrawerSelection = Exclude<WorkspaceDrawerSelection, { kind: "settings" }>;
 
-export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals = [], larkConnections = [], onClose, readOnly = false, runs = [], selection }: {
+export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals = [], inspectorExpanded = false, larkConnections = [], onClose, onToggleInspectorSize, readOnly = false, runs = [], selection }: {
   agents: WorkspaceAgentOption[];
   callbacks: PersonalWorkspaceCallbacks;
   goalNotifications?: WorkspaceGoalNotification[];
   goals?: WorkspaceGoal[];
+  inspectorExpanded?: boolean;
   larkConnections?: LarkGoalConnection[];
   onClose: () => void;
+  onToggleInspectorSize?: () => void;
   readOnly?: boolean;
   runs?: WorkspaceRun[];
   selection: ContextDrawerSelection;
@@ -79,6 +83,8 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   const [todoResumeWhen, setTodoResumeWhen] = useState("");
   const closeRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const selectionIdentity = selection.kind === "run" ? `run:${selection.item.runId}`
     : selection.kind === "proposal" ? `proposal:${selection.item.previewId}`
       : selection.kind === "todo" ? `todo:${selection.item.todoId}`
@@ -95,15 +101,28 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   }, [selectionIdentity]);
 
   useEffect(() => {
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeRef.current?.focus();
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement && !drawerRef.current?.contains(activeElement)) {
+      returnFocusRef.current = activeElement;
+    }
+    const frame = window.requestAnimationFrame(() => titleRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectionIdentity]);
+
+  const closeDrawer = useCallback(() => {
+    const returnFocus = returnFocusRef.current;
+    onClose();
+    window.requestAnimationFrame(() => returnFocus?.focus());
+  }, [onClose]);
+
+  useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        closeDrawer();
         return;
       }
-      if (event.key === "Tab") {
+      if (event.key === "Tab" && selection.kind !== "todo") {
         const focusable = Array.from(drawerRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])
           .filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true");
         if (focusable.length === 0) return;
@@ -121,9 +140,8 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      previouslyFocused?.focus();
     };
-  }, [onClose]);
+  }, [closeDrawer, selection.kind]);
 
   const title = selection.kind === "attention" ? t("drawer.titleAttention")
     : selection.kind === "todo" ? t("drawer.taskDetails")
@@ -203,18 +221,23 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
   return (
     <div
       aria-labelledby="personal-drawer-title"
-      aria-modal="true"
+      aria-modal={selection.kind === "todo" ? undefined : "true"}
       className="personal-context-drawer"
       data-context-kind={selection.kind}
       ref={drawerRef}
       role="dialog"
     >
-      <header className="personal-drawer-header">
-        <div><h2 id="personal-drawer-title">{title}</h2><p>{contextLabel}</p></div>
-        <button aria-label={t("drawer.closeDetail", { context: contextLabel })} className="personal-icon-button personal-drawer-close" onClick={onClose} ref={closeRef} type="button">
-          <ArrowLeft className="personal-mobile-back" size={18} />
-          <X className="personal-desktop-close" size={18} />
-        </button>
+      <header className={`personal-drawer-header${selection.kind === "todo" ? " is-task-inspector" : ""}`}>
+        <div><h2 id="personal-drawer-title" ref={titleRef} tabIndex={-1}>{title}</h2><p>{contextLabel}</p></div>
+        <div className="personal-drawer-header-actions">
+          {selection.kind === "todo" && onToggleInspectorSize ? <button aria-label={inspectorExpanded ? t("drawer.inspectorHalf") : t("drawer.inspectorFull")} className="personal-icon-button personal-inspector-size" onClick={onToggleInspectorSize} title={inspectorExpanded ? t("drawer.inspectorHalfView") : t("drawer.inspectorFullView")} type="button">
+            {inspectorExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+          </button> : null}
+          <button aria-label={t("drawer.closeDetail", { context: contextLabel })} className="personal-icon-button personal-drawer-close" onClick={closeDrawer} ref={closeRef} type="button">
+            <ArrowLeft className="personal-mobile-back" size={18} />
+            <X className="personal-desktop-close" size={18} />
+          </button>
+        </div>
       </header>
 
       <div className="personal-drawer-body">
@@ -248,62 +271,66 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
 
         {selection.kind === "todo" ? (
           <>
-            <section className="personal-detail-card">
-              <small>{selection.item.taskClass ?? "bounded_task"}</small>
+            <section className="personal-task-inspector-summary">
+              <div className="personal-task-inspector-status">
+                <span className={selection.item.done ? "is-done" : selection.item.status === "blocked" ? "is-blocked" : "is-open"}>
+                  <i />{selection.item.done ? t("drawer.taskStatusCompleted") : selection.item.status === "blocked" ? t("drawer.taskStatusBlocked") : t("drawer.taskStatusOpen")}
+                </span>
+                {selection.item.priority ? <span>{selection.item.priority}</span> : null}
+                <span>{selection.item.taskClass === "advancement_task" ? t("drawer.taskAdvancement") : selection.item.taskClass ?? t("drawer.taskOrdinary")}</span>
+              </div>
               <h3>{selection.item.text}</h3>
+            </section>
+            <section aria-label={t("drawer.taskInfo")} className="personal-task-inspector-fields">
+              <h4>{t("drawer.taskInfo")}</h4>
               <dl>
                 <div><dt>Goal</dt><dd>{selection.item.goalTitle}</dd></div>
                 <div><dt>{t("common.owner")}</dt><dd>{selection.item.ownerLabel ?? selection.item.claimedBy ?? t("drawer.notAssigned")}</dd></div>
-                <div><dt>{t("drawer.taskType")}</dt><dd>{selection.item.taskClass ?? "Todo"}</dd></div>
-                <div><dt>{t("common.status")}</dt><dd>{selection.item.status ?? (selection.item.done ? "completed" : "open")}</dd></div>
+                <div><dt>{t("common.status")}</dt><dd>{selection.item.done ? t("drawer.taskStatusCompleted") : selection.item.status === "blocked" ? t("drawer.taskStatusBlocked") : t("drawer.taskStatusOpen")}</dd></div>
+                <div><dt>{t("drawer.priority")}</dt><dd>{selection.item.priority ?? t("drawer.notSet")}</dd></div>
                 <div><dt>{t("drawer.dependencies")}</dt><dd>{selection.item.dependencies?.join(" · ") || t("common.none")}</dd></div>
-                <div><dt>{t("drawer.nextTransition")}</dt><dd>{selection.item.nextTransition ?? "—"}</dd></div>
+                <div><dt>{t("drawer.nextTransition")}</dt><dd>{selection.item.nextTransition ?? (selection.item.done ? t("drawer.taskNextCompleted") : t("drawer.taskNextOpen"))}</dd></div>
               </dl>
             </section>
-            {!readOnly ? <div className="personal-todo-actions" aria-label={t("drawer.taskActions")}>
-              <strong className="personal-todo-actions-title">{t("common.actions")}</strong>
-              {selection.item.done ? null : (
-                <button className="personal-primary-action" onClick={() => void previewTodoTransition(selection.item, "complete", t("drawer.taskComplete"))} type="button"><Check size={17} />{t("drawer.taskComplete")}</button>
-              )}
-              <label className="personal-inline-agent-select">{t("drawer.reassign")}
-                <select aria-label={t("drawer.reassign")} onChange={(event) => setTodoAgentId(event.target.value)} value={todoAgentId}>
-                  {agents.filter((agent) => agent.available).map((agent) => <option key={agent.agentId} value={agent.agentId}>{agent.label}</option>)}
-                </select>
-                <button className="personal-secondary-action" onClick={() => void callbacks.onPreviewAction?.({
-                  actionKind: "todo.update",
-                  context: { goal_id: selection.item.goalId, kind: "todo", todo_id: selection.item.todoId },
-                  idempotencyKey: `workspace-todo-${selection.item.todoId}-reassign-${todoAgentId}-${Date.now().toString(36)}`,
-                  normalizedParameters: { agent_id: todoAgentId, goal_id: selection.item.goalId, operation: "reassign", todo_id: selection.item.todoId },
-                  summary: t("drawer.reassignSummary", { task: selection.item.text }),
-                })} type="button">{t("timeline.review")}</button>
-              </label>
-              <label className="personal-inline-agent-select personal-inline-resume-when">{t("drawer.taskDeferUntil")}
-                <input
-                  aria-label={t("drawer.taskDeferCondition")}
-                  aria-invalid={Boolean(todoResumeWhen.trim()) && !normalizedTodoResumeWhen}
-                  onChange={(event) => setTodoResumeWhen(event.target.value)}
-                  placeholder={t("drawer.taskDeferPlaceholder")}
-                  value={todoResumeWhen}
-                />
-                <button
-                  className="personal-secondary-action"
-                  disabled={!normalizedTodoResumeWhen}
-                  onClick={() => void previewTodoTransition(selection.item, "defer", t("drawer.taskDefer"), normalizedTodoResumeWhen ?? undefined)}
-                  type="button"
-                >{t("drawer.taskDeferReview")}</button>
-                <small>{todoResumeWhen.trim() && !normalizedTodoResumeWhen
-                  ? t("drawer.taskDeferInvalid")
-                  : t("drawer.taskDeferSupported")}</small>
-              </label>
-              <details className="personal-compact-menu">
-                <summary><MoreHorizontal size={17} />{t("drawer.moreActions")}</summary>
+            {!readOnly && !selection.item.done ? <div className="personal-task-inspector-actions" aria-label={t("drawer.taskActions")}>
+              <details className="personal-task-management">
+                <summary><MoreHorizontal size={16} />{t("drawer.taskManage")}</summary>
                 <div>
-                  {todoTransitions.map((transition) => (
-                    <button key={transition.operation} onClick={() => void previewTodoTransition(selection.item, transition.operation, t(transition.key))} type="button">{t(transition.key)}</button>
-                  ))}
+                  <strong>{t("drawer.reassign")}</strong>
+                  <label className="personal-inline-agent-select">{t("drawer.reassign")}
+                    <select aria-label={t("drawer.reassign")} onChange={(event) => setTodoAgentId(event.target.value)} value={todoAgentId}>
+                      {agents.filter((agent) => agent.available).map((agent) => <option key={agent.agentId} value={agent.agentId}>{agent.label}</option>)}
+                    </select>
+                    <button className="personal-secondary-action" onClick={() => void callbacks.onPreviewAction?.({
+                      actionKind: "todo.update",
+                      context: { goal_id: selection.item.goalId, kind: "todo", todo_id: selection.item.todoId },
+                      idempotencyKey: `workspace-todo-${selection.item.todoId}-reassign-${todoAgentId}-${Date.now().toString(36)}`,
+                      normalizedParameters: { agent_id: todoAgentId, goal_id: selection.item.goalId, operation: "reassign", todo_id: selection.item.todoId },
+                      summary: t("drawer.reassignSummary", { task: selection.item.text }),
+                    })} type="button">{t("timeline.review")}</button>
+                  </label>
+                  <strong>{t("drawer.taskDeferUntil")}</strong>
+                  <label className="personal-inline-agent-select personal-inline-resume-when">{t("drawer.taskDeferUntil")}
+                    <input
+                      aria-label={t("drawer.taskDeferCondition")}
+                      aria-invalid={Boolean(todoResumeWhen.trim()) && !normalizedTodoResumeWhen}
+                      onChange={(event) => setTodoResumeWhen(event.target.value)}
+                      placeholder={t("drawer.taskDeferPlaceholder")}
+                      value={todoResumeWhen}
+                    />
+                    <button className="personal-secondary-action" disabled={!normalizedTodoResumeWhen} onClick={() => void previewTodoTransition(selection.item, "defer", t("drawer.taskDefer"), normalizedTodoResumeWhen ?? undefined)} type="button">{t("drawer.taskDeferReview")}</button>
+                    <small>{todoResumeWhen.trim() && !normalizedTodoResumeWhen ? t("drawer.taskDeferInvalid") : t("drawer.taskDeferSupported")}</small>
+                  </label>
+                  <div className="personal-task-management-secondary">
+                    {todoTransitions.map((transition) => (
+                      <button key={transition.operation} onClick={() => void previewTodoTransition(selection.item, transition.operation, t(transition.key))} type="button">{t(transition.key)}</button>
+                    ))}
+                  </div>
                 </div>
               </details>
+              <button className="personal-primary-action" onClick={() => void previewTodoTransition(selection.item, "complete", t("drawer.taskComplete"))} type="button"><Check size={17} />{t("drawer.taskComplete")}</button>
             </div> : null}
+            {selection.item.done ? <div className="personal-task-completed-note"><Check size={16} /><span><strong>{t("drawer.taskCompletedTitle")}</strong><small>{t("drawer.taskCompletedNote")}</small></span></div> : null}
           </>
         ) : null}
 

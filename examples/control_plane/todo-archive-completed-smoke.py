@@ -188,6 +188,8 @@ def main() -> int:
         updated = state_path.read_text(encoding="utf-8")
         parsed_after = parse_active_state_todos(updated)
         assert parsed_after["agent_todos"]["done_count"] == 13, parsed_after
+        assert parsed_after["agent_todos"]["advancement_done_count"] == 15, parsed_after
+        assert parsed_after["agent_todos"]["archived_advancement_done_count"] == 3, parsed_after
         assert parsed_after["agent_todos"]["deferred_count"] == 1, parsed_after
         assert parsed_after["agent_todos"]["open_count"] == 2, parsed_after
         assert completed_todo_archive_warning(parsed_after["agent_todos"]) is None, parsed_after

@@ -9,12 +9,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..capabilities.benchmark_toolkit import (
-    BENCHMARK_MODEL_ROUTE_RECEIPT_SCHEMA_VERSION,
     BENCHMARK_FOUR_ARM_CONTRACT_SCHEMA_VERSION,
     BENCHMARK_FOUR_ARM_QUALIFICATION_SCOPE,
     BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
+    BENCHMARK_MODEL_ROUTE_RECEIPT_SCHEMA_VERSION,
     BENCHMARK_RUNTIME_CONTINUITY_SCHEMA_VERSION,
     BENCHMARK_SOURCE_REVISION_FENCE_SCHEMA_VERSION,
+    BENCHMARK_TREATMENT_CONTINUATION_RECEIPT_SCHEMA_VERSION,
     TRAE_BENCHMARK_EVIDENCE_SCHEMA_VERSION,
     BenchmarkEventWindowState,
     BenchmarkJobReceiptState,
@@ -27,6 +28,7 @@ from ..capabilities.benchmark_toolkit import (
     build_benchmark_integrity_qualification,
     build_benchmark_runtime_continuity,
     build_benchmark_runtime_observation,
+    build_benchmark_treatment_continuation_receipt,
     capture_traex_benchmark_evidence,
     compact_benchmark_four_arm_contract,
     compact_benchmark_source_revision_fence_receipt,
@@ -50,6 +52,7 @@ BENCHMARK_TOOLKIT_COMMANDS = {
     "runtime-observation",
     "source-revision-fence",
     "traex-evidence",
+    "treatment-continuation-receipt",
     "verify-verifier-reward",
 }
 
@@ -152,6 +155,18 @@ def _render_runtime_continuity(payload: dict[str, object]) -> str:
         f"- Qualified: `{payload.get('qualified')}`\n"
         f"- Closeout write allowed: `{payload.get('closeout_write_allowed')}`\n"
         f"- Recommended transition: `{payload.get('recommended_transition')}`\n"
+    )
+
+
+def _render_treatment_continuation(payload: dict[str, object]) -> str:
+    return (
+        "# Benchmark Treatment Continuation Receipt\n\n"
+        f"- Classification: `{payload.get('classification')}`\n"
+        f"- Startup: `{payload.get('startup_state')}`\n"
+        "- Post-start control observed: "
+        f"`{payload.get('post_start_control_observed')}`\n"
+        f"- Terminal control: `{payload.get('terminal_control_state')}`\n"
+        "- Score and countability changed: `False`\n"
     )
 
 
@@ -270,6 +285,19 @@ def register_benchmark_boundary_commands(
     integrity_parser.add_argument("--sensitive-value-env", action="append", default=[])
     integrity_parser.add_argument("--require-qualified", action="store_true")
 
+    treatment_continuation_parser = benchmark_subparsers.add_parser(
+        "treatment-continuation-receipt",
+        help=(
+            "Separate treatment control persistence from score and countability."
+        ),
+    )
+    add_subcommand_format(treatment_continuation_parser)
+    treatment_continuation_parser.add_argument(
+        "--observation-json",
+        required=True,
+        help="Compact post-run mechanism observation JSON path, or - for stdin.",
+    )
+
     traex_parser = benchmark_subparsers.add_parser(
         "traex-evidence",
         help="Convert private TraeX JSONL to ATIF and a safe route receipt.",
@@ -367,6 +395,33 @@ def _invalid_runtime_continuity_input() -> dict[str, object]:
             "event_payload_recorded": False,
             "run_identity_recorded": False,
             "path_recorded": False,
+        },
+        "write_performed": False,
+    }
+
+
+def _invalid_treatment_continuation_input() -> dict[str, object]:
+    return {
+        "schema_version": BENCHMARK_TREATMENT_CONTINUATION_RECEIPT_SCHEMA_VERSION,
+        "ok": False,
+        "classification": "input_invalid",
+        "startup_state": "unknown",
+        "observation_complete": False,
+        "post_start_control_observed": False,
+        "post_start_control_event_count": 0,
+        "terminal_control_state": "unknown",
+        "precommit_validation_state": "unknown",
+        "reason_codes": ["treatment_continuation_input_invalid"],
+        "score_semantics": {
+            "score_countability_unchanged": True,
+            "integrity_qualification_unchanged": True,
+            "treatment_fidelity_unchanged": True,
+            "claim_scope": "post_run_mechanism_analysis_only",
+        },
+        "public_boundary": {
+            "raw_content_recorded": False,
+            "path_recorded": False,
+            "run_identity_recorded": False,
         },
         "write_performed": False,
     }
@@ -487,6 +542,18 @@ def handle_benchmark_boundary_command(
             payload = _invalid_runtime_continuity_input()
         print_payload(payload, output_format(args), _render_runtime_continuity)
         return 1 if args.require_qualified and not payload.get("qualified") else 0
+
+    if args.benchmark_command == "treatment-continuation-receipt":
+        try:
+            observation = _read_json_object(
+                args.observation_json,
+                "--observation-json",
+            )
+            payload = build_benchmark_treatment_continuation_receipt(observation)
+        except (OSError, UnicodeError, TypeError, ValueError):
+            payload = _invalid_treatment_continuation_input()
+        print_payload(payload, output_format(args), _render_treatment_continuation)
+        return 0 if payload.get("ok") else 1
 
     if args.benchmark_command == "verify-verifier-reward":
         if args.reward_json == "-":

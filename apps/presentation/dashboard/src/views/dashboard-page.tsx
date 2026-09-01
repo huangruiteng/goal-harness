@@ -382,12 +382,13 @@ function firstOpenTodo(todos?: TodoGroup | null) {
 }
 
 function todosFromProjectAssetSummary(
-  summary?: { items?: TodoItem[]; total?: number; open?: number; done?: number } | null,
+  summary?: { items?: TodoItem[]; total?: number; open?: number; done?: number; advancement_done_count?: number; source_section?: string | null } | null,
   fallback?: TodoGroup | null,
   _label = "todos",
 ): TodoGroup | null {
   if (summary?.items?.length) {
     return {
+      advancement_done_count: summary.advancement_done_count ?? fallback?.advancement_done_count,
       done_count: summary.done ?? summary.items.filter((item) => item.done).length,
       items: summary.items,
       open_count: summary.open ?? summary.items.filter((item) => !item.done).length,
@@ -770,7 +771,11 @@ function personalAgentTodoFacts(row: GoalDirectoryRow): {
   const assetTodos = row.queueItem?.project_asset?.agent_todos;
   const queueTodos = row.queueItem?.agent_todos;
   const items = assetTodos?.items?.length ? assetTodos.items : queueTodos?.items ?? [];
-  const doneFromCount = assetTodos?.done ?? queueTodos?.done_count ?? null;
+  const doneFromCount = assetTodos?.advancement_done_count
+    ?? queueTodos?.advancement_done_count
+    ?? assetTodos?.done
+    ?? queueTodos?.done_count
+    ?? null;
   const doneFromItems = items.filter((todo) => todo.done).length;
   const doneTodoCount = Math.max(doneFromCount ?? 0, doneFromItems);
   const seenTodoIds = new Set(
