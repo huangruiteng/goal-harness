@@ -5,9 +5,23 @@
     {
       "properties": {
         "operation": {
+          "const": "project_runtime_status"
+        },
+        "snapshot": false,
+        "source": false,
+        "upgrade": false
+      },
+      "required": [
+        "status"
+      ]
+    },
+    {
+      "properties": {
+        "operation": {
           "const": "compile_catalog"
         },
         "snapshot": false,
+        "status": false,
         "upgrade": false
       },
       "required": [
@@ -20,6 +34,7 @@
           "const": "qualify_snapshot"
         },
         "source": false,
+        "status": false,
         "upgrade": false
       },
       "required": [
@@ -32,7 +47,8 @@
           "const": "upgrade_plan"
         },
         "snapshot": false,
-        "source": false
+        "source": false,
+        "status": false
       },
       "required": [
         "upgrade"
@@ -43,6 +59,7 @@
     "operation": {
       "enum": [
         "compile_catalog",
+        "project_runtime_status",
         "qualify_snapshot",
         "upgrade_plan"
       ]
@@ -51,6 +68,9 @@
       "const": "loopx_codex_provider_routing_request_v0"
     },
     "snapshot": {
+      "type": "object"
+    },
+    "status": {
       "type": "object"
     },
     "source": {

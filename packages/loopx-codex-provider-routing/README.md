@@ -39,6 +39,13 @@ qualification.
   modality-aware affinity, typed route traversal, durable settings revision
   and commit barrier.
 
+`project_runtime_status`
+: Joins a stable, route-independent host ChatGPT identity state with a
+  content-free CPA execution observation and symbolic A/B quota/activity.
+  It validates the actual attempt chain against the compiled route, derives
+  remaining quota and reports fallback only when more than one provider was
+  attempted. It never accepts account identity, auth-file names or tokens.
+
 `upgrade_plan`
 : Produces a bounded upgrade/rollback checklist from public current and target
   refs plus the changed seams. It never installs, switches or deletes a
@@ -76,7 +83,7 @@ The earlier operator scripts split into three classes:
 | Upgrade matrix, snapshot order and rollback triggers | Migrated as `upgrade_plan`; effect execution remains operator-owned |
 | CPA process launcher, OAuth login/reconcile, Ark key loading | Excluded; these are provider runtime and credential lifecycle, not LoopX state |
 | Direct App config writes, private snapshots and rollback copies | Excluded from v0; require an explicit permissioned execution envelope before productization |
-| Raw log/evidence collection | Excluded; callers may submit only content-free error classes and qualification booleans |
+| Raw log/evidence collection | Excluded; an operator adapter may submit only symbolic, content-free observations to `project_runtime_status` |
 
 The complete responsibility-by-responsibility mapping and credential-free
 configuration references are in [`REFERENCES.md`](REFERENCES.md).

@@ -43,6 +43,7 @@
     "operation": {
       "enum": [
         "compile_catalog",
+        "project_runtime_status",
         "qualify_snapshot",
         "upgrade_plan"
       ]

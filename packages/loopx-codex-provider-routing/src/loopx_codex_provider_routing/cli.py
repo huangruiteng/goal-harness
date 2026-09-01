@@ -11,6 +11,7 @@ from .contract import (
     RESPONSE_SCHEMA_VERSION,
     build_upgrade_plan,
     compile_catalog,
+    project_runtime_status,
     qualify_snapshot,
     reject_private_material,
 )
@@ -38,7 +39,12 @@ def _doctor() -> int:
             "schema_version": RESPONSE_SCHEMA_VERSION,
             "extension_id": EXTENSION_ID,
             "doctor": "ready",
-            "operations": ["compile_catalog", "qualify_snapshot", "upgrade_plan"],
+            "operations": [
+                "compile_catalog",
+                "project_runtime_status",
+                "qualify_snapshot",
+                "upgrade_plan",
+            ],
             "effect_boundary": "read_only_public_safe",
         }
     )
@@ -54,6 +60,7 @@ def _run_request(request: Any) -> dict[str, Any]:
     operation = request.get("operation")
     operation_fields = {
         "compile_catalog": "source",
+        "project_runtime_status": "status",
         "qualify_snapshot": "snapshot",
         "upgrade_plan": "upgrade",
     }
@@ -68,6 +75,11 @@ def _run_request(request: Any) -> dict[str, Any]:
         if not isinstance(source, Mapping):
             raise ValueError("compile_catalog requires object `source`")
         result = compile_catalog(source)
+    elif operation == "project_runtime_status":
+        status = request.get("status")
+        if not isinstance(status, Mapping):
+            raise ValueError("project_runtime_status requires object `status`")
+        result = project_runtime_status(status)
     elif operation == "qualify_snapshot":
         snapshot = request.get("snapshot")
         if not isinstance(snapshot, Mapping):

@@ -17,6 +17,7 @@ _run_request = cli._run_request
 REQUEST_SCHEMA_VERSION = contract.REQUEST_SCHEMA_VERSION
 build_upgrade_plan = contract.build_upgrade_plan
 compile_catalog = contract.compile_catalog
+project_runtime_status = contract.project_runtime_status
 qualify_snapshot = contract.qualify_snapshot
 
 
@@ -84,6 +85,58 @@ def _valid_snapshot() -> dict:
     }
 
 
+def _runtime_status() -> dict:
+    return {
+        "catalog_source": _source(),
+        "host_identity": {
+            "state": "retained",
+            "projection": "not_projected",
+            "route_binding": "none",
+        },
+        "execution_observation": {
+            "route_slug": "auto/gpt-5.6-sol",
+            "modality": "text",
+            "fast": False,
+            "observed_at": "2026-09-01T08:00:00Z",
+            "attempted_profiles": ["codex-b"],
+            "selected_profile": "codex-b",
+            "outcome": "success",
+        },
+        "account_observations": [
+            {
+                "profile_id": "codex-a",
+                "state": "ready",
+                "quota": {
+                    "observed_at": "2026-09-01T08:00:00Z",
+                    "windows": [
+                        {
+                            "id": "primary",
+                            "used_percent": 25,
+                            "window_minutes": 300,
+                            "reset_at": "2026-09-01T10:00:00Z",
+                        }
+                    ],
+                },
+                "recent_activity": {
+                    "success": 3,
+                    "failed": 1,
+                    "window_minutes": 200,
+                },
+            },
+            {
+                "profile_id": "codex-b",
+                "state": "ready",
+                "quota": None,
+                "recent_activity": {
+                    "success": 2,
+                    "failed": 0,
+                    "window_minutes": 200,
+                },
+            },
+        ],
+    }
+
+
 def expect_error(action, message: str) -> None:
     try:
         action()
@@ -119,6 +172,88 @@ def main() -> int:
     assert luna["eligible_candidates"]["image"] == ["codex-a", "codex-b"]
     assert luna["reasoning_levels"] == ["low", "medium", "high", "xhigh", "max"]
     assert luna["fast_candidates"] == ["codex-a", "codex-b"]
+
+    runtime = project_runtime_status(_runtime_status())
+    assert runtime["credential_free"] is True
+    assert runtime["host_identity"]["route_binding"] == "none"
+    assert runtime["execution"]["selected_profile"] == "codex-b"
+    assert runtime["execution"]["fallback_used"] is False
+    assert runtime["accounts"][0]["quota"]["windows"][0]["remaining_percent"] == 75
+
+    preferred_fallback = _runtime_status()
+    preferred_fallback["execution_observation"].update(
+        {
+            "route_slug": "codex-b/gpt-5.6-sol",
+            "attempted_profiles": ["codex-b", "codex-a"],
+            "selected_profile": "codex-a",
+        }
+    )
+    runtime = project_runtime_status(preferred_fallback)
+    assert runtime["execution"]["fallback_used"] is True
+
+    fast_fallback = _runtime_status()
+    fast_fallback["execution_observation"].update(
+        {
+            "route_slug": "codex-b/gpt-5.6-sol",
+            "fast": True,
+            "attempted_profiles": ["codex-b", "codex-a"],
+            "selected_profile": "codex-a",
+        }
+    )
+    runtime = project_runtime_status(fast_fallback)
+    assert runtime["route_intent"]["legal_attempt_orders"] == [["codex-b", "codex-a"]]
+
+    image_affinity = _runtime_status()
+    image_affinity["execution_observation"]["modality"] = "image"
+    runtime = project_runtime_status(image_affinity)
+    assert runtime["route_intent"]["legal_attempt_orders"] == [
+        ["codex-a", "codex-b"],
+        ["codex-b", "codex-a"],
+    ]
+
+    host_bound_to_route = _runtime_status()
+    host_bound_to_route["host_identity"]["route_binding"] = "codex-a"
+    expect_error(
+        lambda: project_runtime_status(host_bound_to_route),
+        "host identity was allowed to bind a route",
+    )
+
+    luna_to_ark = _runtime_status()
+    luna_to_ark["execution_observation"].update(
+        {
+            "route_slug": "gpt-5.6-luna",
+            "attempted_profiles": ["codex-a", "codex-b", "ark-text"],
+            "selected_profile": "ark-text",
+        }
+    )
+    expect_error(
+        lambda: project_runtime_status(luna_to_ark),
+        "Luna was allowed to select Ark",
+    )
+
+    failed_execution = _runtime_status()
+    failed_execution["execution_observation"]["outcome"] = "failed"
+    failed_execution["execution_observation"].pop("selected_profile")
+    runtime = project_runtime_status(failed_execution)
+    assert "selected_profile" not in runtime["execution"]
+
+    failed_with_selection = _runtime_status()
+    failed_with_selection["execution_observation"].update(
+        {"outcome": "failed", "selected_profile": None}
+    )
+    expect_error(
+        lambda: project_runtime_status(failed_with_selection),
+        "failed execution declared a selected profile",
+    )
+
+    identified_runtime = _runtime_status()
+    identified_runtime["account_observations"][0]["email"] = (
+        "operator" + "@" + "example.invalid"
+    )
+    expect_error(
+        lambda: project_runtime_status(identified_runtime),
+        "account identity leaked through runtime status",
+    )
 
     repeated_ring = copy.deepcopy(_source())
     repeated_ring["rings"][0]["max_cycles"] = 2
@@ -226,6 +361,7 @@ def main() -> int:
     assert response["ok"] is True and response["result"]["qualified"] is True
     for example_name in (
         "request.json",
+        "runtime-status.json",
         "qualification-snapshot.json",
         "upgrade-request.json",
     ):

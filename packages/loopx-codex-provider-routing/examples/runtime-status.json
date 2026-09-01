@@ -1,0 +1,123 @@
+{
+  "operation": "project_runtime_status",
+  "schema_version": "loopx_codex_provider_routing_request_v0",
+  "status": {
+    "account_observations": [
+      {
+        "profile_id": "codex-a",
+        "quota": {
+          "observed_at": "2026-09-01T08:00:00Z",
+          "windows": [
+            {
+              "id": "primary",
+              "reset_at": "2026-09-01T10:00:00Z",
+              "used_percent": 25,
+              "window_minutes": 300
+            }
+          ]
+        },
+        "recent_activity": {
+          "failed": 1,
+          "success": 3,
+          "window_minutes": 200
+        },
+        "state": "ready"
+      },
+      {
+        "profile_id": "codex-b",
+        "quota": null,
+        "recent_activity": {
+          "failed": 0,
+          "success": 2,
+          "window_minutes": 200
+        },
+        "state": "ready"
+      }
+    ],
+    "catalog_source": {
+      "profiles": [
+        {
+          "id": "codex-a",
+          "input_modalities": [
+            "text",
+            "image"
+          ],
+          "priority": 300,
+          "provider": "codex",
+          "supports_fast": true
+        },
+        {
+          "id": "codex-b",
+          "input_modalities": [
+            "text",
+            "image"
+          ],
+          "priority": 200,
+          "provider": "codex",
+          "supports_fast": true
+        },
+        {
+          "id": "ark-text",
+          "input_modalities": [
+            "text"
+          ],
+          "priority": 100,
+          "provider": "openai_compatibility",
+          "supports_fast": false
+        }
+      ],
+      "rings": [
+        {
+          "id": "codex-accounts",
+          "max_cycles": 1,
+          "members": [
+            "codex-a",
+            "codex-b"
+          ]
+        }
+      ],
+      "routes": [
+        {
+          "display_name": "Sol · Prefer B",
+          "entrypoint": "codex-b",
+          "fallback_tail": [
+            "ark-text"
+          ],
+          "input_modalities": [
+            "text",
+            "image"
+          ],
+          "mode": "preferred",
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "ring": "codex-accounts",
+          "slug": "codex-b/gpt-5.6-sol",
+          "supports_fast": true,
+          "visible": true
+        }
+      ]
+    },
+    "execution_observation": {
+      "attempted_profiles": [
+        "codex-b",
+        "codex-a"
+      ],
+      "fast": false,
+      "modality": "text",
+      "observed_at": "2026-09-01T08:00:00Z",
+      "outcome": "success",
+      "route_slug": "codex-b/gpt-5.6-sol",
+      "selected_profile": "codex-a"
+    },
+    "host_identity": {
+      "projection": "not_projected",
+      "route_binding": "none",
+      "state": "retained"
+    }
+  }
+}

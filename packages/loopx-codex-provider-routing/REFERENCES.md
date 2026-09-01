@@ -9,6 +9,7 @@ ports, accounts or private receipts.
 | Prototype responsibility | Disposition | Public owner |
 | --- | --- | --- |
 | Compile secret-free profiles, one-pass account rings and logical model routes | Migrated and strengthened | `contract.py::compile_catalog`; preferred entry points, terminal fallback tails, modality and Fast eligibility are explicit |
+| Project host identity separately from actual A/B routing and quota | Migrated as a public-safe adapter boundary | `contract.py::project_runtime_status`; raw CPA management responses and logs remain operator-local |
 | Generate a Codex catalog from cached model entries, start an isolated App Server, call `model/list` | Partially migrated | Catalog contract and content-free readback assertions are public; spawning the host-owned App Server remains an operator adapter |
 | Prepare/start/serve/stop CPA; reconcile A/B OAuth slots; load third-party API credentials | Private runtime boundary | Not copied. A future permissioned provider may wrap install/status/validate, but login and secret loading stay operator-owned |
 | Snapshot App/selector configuration, validate hashes and roll back selected files | Planning contract migrated | `upgrade_plan` owns order, matrix and rollback trigger; filesystem effects need a future request-bound execution envelope |
@@ -21,10 +22,12 @@ ports, accounts or private receipts.
 
 ## Configuration References
 
-The package keeps three credential-free examples:
+The package keeps four credential-free examples:
 
 - [`examples/request.json`](examples/request.json): logical profiles and model
   routes backed by one bounded account ring for `compile_catalog`;
+- [`examples/runtime-status.json`](examples/runtime-status.json): dual host and
+  route identity projection with symbolic quota/activity observations;
 - [`examples/qualification-snapshot.json`](examples/qualification-snapshot.json):
   content-free App/CPA readback for `qualify_snapshot`;
 - [`examples/upgrade-request.json`](examples/upgrade-request.json): exact public

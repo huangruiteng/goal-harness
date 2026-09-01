@@ -6,17 +6,26 @@ from itertools import pairwise
 from typing import Any
 
 CATALOG_SCHEMA_VERSION = "codex_provider_routing_catalog_v1"
+RUNTIME_STATUS_SCHEMA_VERSION = "codex_provider_routing_runtime_status_v0"
 REQUEST_SCHEMA_VERSION = "loopx_codex_provider_routing_request_v0"
 RESPONSE_SCHEMA_VERSION = "loopx_codex_provider_routing_response_v0"
 
 FORBIDDEN_KEYS = {
+    "account_id",
     "api_key",
     "access_token",
+    "auth_file",
+    "auth_index",
     "refresh_token",
     "authorization",
     "cookie",
+    "email",
+    "filename",
     "password",
+    "project_id",
     "secret",
+    "session_id",
+    "task_id",
     "token",
 }
 ALLOWED_MODALITIES = {"text", "image"}
@@ -69,6 +78,14 @@ def _boolean(value: Any, field: str, *, default: bool | None = None) -> bool:
     if not isinstance(value, bool):
         raise TypeError(f"{field} must be a boolean")
     return value
+
+
+def _reject_unexpected_keys(
+    value: Mapping[str, Any], allowed: set[str], field: str
+) -> None:
+    unexpected = sorted(set(value) - allowed)
+    if unexpected:
+        raise ValueError(f"{field} has unsupported fields: {unexpected}")
 
 
 def _compile_profiles(raw_profiles: Any) -> dict[str, dict[str, Any]]:
@@ -377,6 +394,296 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
         "profiles": list(profiles.values()),
         "rings": list(rings.values()),
         "routes": routes,
+    }
+
+
+def _timestamp(value: Any, field: str) -> str:
+    timestamp = _non_empty_string(value, field)
+    if (
+        re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z", timestamp)
+        is None
+    ):
+        raise ValueError(f"{field} must be an RFC 3339 UTC timestamp")
+    return timestamp
+
+
+def _percentage(value: Any, field: str) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise TypeError(f"{field} must be a number")
+    if not 0 <= value <= 100:
+        raise ValueError(f"{field} must be between 0 and 100")
+    return float(value)
+
+
+def _quota_windows(raw: Any, field: str) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        raise TypeError(f"{field} must be a list")
+    windows: list[dict[str, Any]] = []
+    ids: set[str] = set()
+    for index, item in enumerate(raw):
+        if not isinstance(item, Mapping):
+            raise TypeError(f"{field}[{index}] must be an object")
+        _reject_unexpected_keys(
+            item,
+            {"id", "used_percent", "window_minutes", "reset_at"},
+            f"{field}[{index}]",
+        )
+        window_id = _non_empty_string(item.get("id"), f"{field}[{index}].id")
+        if SYMBOLIC_ID_RE.fullmatch(window_id) is None:
+            raise ValueError(f"{field}[{index}].id must be a symbolic id")
+        if window_id in ids:
+            raise ValueError(f"{field} has duplicate window id: {window_id}")
+        ids.add(window_id)
+        used = _percentage(item.get("used_percent"), f"{field}[{index}].used_percent")
+        minutes = item.get("window_minutes")
+        if not isinstance(minutes, int) or isinstance(minutes, bool) or minutes <= 0:
+            raise ValueError(f"{field}[{index}].window_minutes must be positive")
+        reset_at = item.get("reset_at")
+        if reset_at is not None:
+            reset_at = _timestamp(reset_at, f"{field}[{index}].reset_at")
+        windows.append(
+            {
+                "id": window_id,
+                "used_percent": used,
+                "remaining_percent": 100.0 - used,
+                "window_minutes": minutes,
+                "reset_at": reset_at,
+            }
+        )
+    return windows
+
+
+def _eligible_route_order(
+    route: Mapping[str, Any],
+    profiles: Mapping[str, Mapping[str, Any]],
+    *,
+    modality: str,
+    fast: bool,
+) -> list[str]:
+    return _eligible_profiles(
+        route["candidates"],
+        profiles,
+        required_modalities={modality},
+        require_fast=fast,
+    )
+
+
+def _legal_attempt_orders(
+    route: Mapping[str, Any],
+    rings: Mapping[str, Mapping[str, Any]],
+    profiles: Mapping[str, Mapping[str, Any]],
+    *,
+    modality: str,
+    fast: bool,
+) -> list[list[str]]:
+    eligible = _eligible_route_order(route, profiles, modality=modality, fast=fast)
+    if route["entrypoint"] != "affinity_then_first":
+        return [eligible]
+    ring = rings[route["ring_id"]]
+    eligible_ring = [item for item in ring["members"] if item in eligible]
+    eligible_tail = [item for item in route["fallback_tail"] if item in eligible]
+    if not eligible_ring:
+        return [eligible_tail]
+    return [
+        _rotate_members(eligible_ring, entrypoint) + eligible_tail
+        for entrypoint in eligible_ring
+    ]
+
+
+def project_runtime_status(status: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and project content-free host, route and account observations."""
+
+    reject_private_material(status)
+    _reject_unexpected_keys(
+        status,
+        {
+            "schema_version",
+            "credential_free",
+            "catalog_source",
+            "host_identity",
+            "execution_observation",
+            "account_observations",
+        },
+        "status",
+    )
+    source = status.get("catalog_source")
+    if not isinstance(source, Mapping):
+        raise TypeError("status.catalog_source must be an object")
+    catalog = compile_catalog(source)
+    profiles = {item["id"]: item for item in catalog["profiles"]}
+    rings = {item["id"]: item for item in catalog["rings"]}
+    routes = {
+        item["slug"]: item
+        for item in catalog["routes"]
+        if item["routing_mode"] != "alias"
+    }
+
+    host = status.get("host_identity")
+    if not isinstance(host, Mapping):
+        raise TypeError("status.host_identity must be an object")
+    expected_host = {
+        "state": "retained",
+        "projection": "not_projected",
+        "route_binding": "none",
+    }
+    if dict(host) != expected_host:
+        raise ValueError(
+            "host identity must be retained, not projected and independent of routing"
+        )
+
+    observation = status.get("execution_observation")
+    if not isinstance(observation, Mapping):
+        raise TypeError("status.execution_observation must be an object")
+    _reject_unexpected_keys(
+        observation,
+        {
+            "route_slug",
+            "modality",
+            "fast",
+            "observed_at",
+            "attempted_profiles",
+            "selected_profile",
+            "outcome",
+        },
+        "status.execution_observation",
+    )
+    route_slug = _non_empty_string(
+        observation.get("route_slug"), "status.execution_observation.route_slug"
+    )
+    route = routes.get(route_slug)
+    if route is None:
+        raise ValueError(
+            "execution observation must reference a concrete catalog route"
+        )
+    modality = _non_empty_string(
+        observation.get("modality"), "status.execution_observation.modality"
+    )
+    if modality not in route["input_modalities"]:
+        raise ValueError(f"route {route_slug} does not admit modality {modality}")
+    fast = _boolean(observation.get("fast"), "status.execution_observation.fast")
+    if fast and not route["supports_fast"]:
+        raise ValueError(f"route {route_slug} does not support Fast")
+    observed_at = _timestamp(
+        observation.get("observed_at"), "status.execution_observation.observed_at"
+    )
+    attempted = _string_list(
+        observation.get("attempted_profiles"),
+        "status.execution_observation.attempted_profiles",
+    )
+    if not attempted:
+        raise ValueError("execution observation needs at least one attempted profile")
+    legal_orders = _legal_attempt_orders(
+        route, rings, profiles, modality=modality, fast=fast
+    )
+    matching_orders = [
+        order for order in legal_orders if attempted == order[: len(attempted)]
+    ]
+    if not matching_orders:
+        raise ValueError(
+            f"attempted profiles are not a legal prefix for route {route_slug}"
+        )
+    outcome = _non_empty_string(
+        observation.get("outcome"), "status.execution_observation.outcome"
+    )
+    if outcome not in {"success", "failed"}:
+        raise ValueError("execution outcome must be success or failed")
+    selected = observation.get("selected_profile")
+    if outcome == "success":
+        selected = _non_empty_string(
+            selected, "status.execution_observation.selected_profile"
+        )
+        if selected != attempted[-1]:
+            raise ValueError(
+                "successful selection must equal the final attempted profile"
+            )
+    elif "selected_profile" in observation:
+        raise ValueError("failed execution must not declare a selected profile")
+
+    raw_accounts = status.get("account_observations")
+    if not isinstance(raw_accounts, list):
+        raise TypeError("status.account_observations must be a list")
+    accounts: list[dict[str, Any]] = []
+    account_ids: set[str] = set()
+    for index, raw in enumerate(raw_accounts):
+        field = f"status.account_observations[{index}]"
+        if not isinstance(raw, Mapping):
+            raise TypeError(f"{field} must be an object")
+        _reject_unexpected_keys(
+            raw,
+            {"profile_id", "state", "quota", "recent_activity"},
+            field,
+        )
+        profile_id = _non_empty_string(raw.get("profile_id"), f"{field}.profile_id")
+        if profile_id in account_ids:
+            raise ValueError(f"duplicate account observation: {profile_id}")
+        if profile_id not in profiles or profiles[profile_id]["provider"] != "codex":
+            raise ValueError(
+                f"account observation must reference a Codex profile: {profile_id}"
+            )
+        account_ids.add(profile_id)
+        state = _non_empty_string(raw.get("state"), f"{field}.state")
+        if state not in {"ready", "degraded", "unavailable", "unknown"}:
+            raise ValueError(f"unsupported account state: {state}")
+        quota = raw.get("quota")
+        projected_quota = None
+        if quota is not None:
+            if not isinstance(quota, Mapping):
+                raise TypeError(f"{field}.quota must be an object")
+            _reject_unexpected_keys(quota, {"observed_at", "windows"}, f"{field}.quota")
+            projected_quota = {
+                "observed_at": _timestamp(
+                    quota.get("observed_at"), f"{field}.quota.observed_at"
+                ),
+                "windows": _quota_windows(
+                    quota.get("windows", []), f"{field}.quota.windows"
+                ),
+            }
+        activity = raw.get("recent_activity")
+        if not isinstance(activity, Mapping):
+            raise TypeError(f"{field}.recent_activity must be an object")
+        _reject_unexpected_keys(
+            activity,
+            {"success", "failed", "window_minutes"},
+            f"{field}.recent_activity",
+        )
+        projected_activity: dict[str, int] = {}
+        for key in ("success", "failed", "window_minutes"):
+            value = activity.get(key)
+            minimum = 1 if key == "window_minutes" else 0
+            if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+                raise ValueError(f"{field}.recent_activity.{key} is invalid")
+            projected_activity[key] = value
+        accounts.append(
+            {
+                "profile_id": profile_id,
+                "state": state,
+                "quota": projected_quota,
+                "recent_activity": projected_activity,
+            }
+        )
+
+    execution = {
+        "observed_at": observed_at,
+        "attempted_profiles": attempted,
+        "outcome": outcome,
+        "fallback_used": len(attempted) > 1,
+    }
+    if selected is not None:
+        execution["selected_profile"] = selected
+
+    return {
+        "schema_version": RUNTIME_STATUS_SCHEMA_VERSION,
+        "credential_free": True,
+        "host_identity": expected_host,
+        "route_intent": {
+            "route_slug": route_slug,
+            "routing_mode": route["routing_mode"],
+            "modality": modality,
+            "fast": fast,
+            "legal_attempt_orders": legal_orders,
+        },
+        "execution": execution,
+        "accounts": accounts,
     }
 
 
