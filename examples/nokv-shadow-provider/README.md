@@ -95,6 +95,14 @@ lease, gate, quota, or scheduling decisions.
   head through the production `validated_head`. Only the checks in the
   [evidence note](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0-evidence.zh-CN.md)
   are merge evidence for the revised receipt contract.
+- `authority_guard.py`: a **TEST ONLY** argv/stdin adapter that composes the
+  production authority executor with the file provider for Turn checkpoint
+  qualification. It is not a production provider selector.
+- `authority_turn_canary.py`: a deterministic two-process canary. Both LoopX
+  processes share one coordination head but use isolated Turn journals and
+  Host workspaces. It proves one pre-expiry Host admission and stale-epoch
+  settlement fencing after reclaim; it does not claim exactly-once behavior
+  for arbitrary Host workspace mutations.
 
 ## Validation boundary
 
@@ -154,6 +162,22 @@ it is evidence tooling, not a merge gate.
 ```bash
 python3 examples/nokv-shadow-provider/live_e2e.py
 ```
+
+Run the TEST ONLY Turn-composition canary with:
+
+```bash
+python3 examples/nokv-shadow-provider/authority_turn_canary.py
+```
+
+The canary drives `claim_work`, `renew_work`, expired `reclaim_work`, and
+`complete_work` through the production `CoordinationAuthorityExecutor` and a
+shared `FileCoordinationProvider`. The file provider makes the test
+deterministic; replacing that storage adapter with the existing NoKV provider
+is still a separate live qualification step. The CLI exposure is likewise
+default-off: `turn run-once --authority-guard-command-json ...` requires the
+explicit `LOOPX_SHARED_AUTHORITY_TEST_ONLY=1` environment gate and uses JSON
+argv without shell parsing. Scheduler wake-up remains an effect after the
+authority checks, never an authorization source.
 
 Run the merge-relevant deterministic regression from the repository root with:
 
