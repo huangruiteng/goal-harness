@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from loopx.capabilities.periodic_report.pending_intent import (
+    _periodic_report_delivery_binding_ref,
     consume_pending_periodic_report_intent,
     pending_periodic_report_intents,
     periodic_report_pending_intent_interaction_hook,
@@ -24,6 +25,12 @@ from loopx.control_plane.quota.live_decision import (
 
 GOAL_ID = "report-goal"
 AGENT_ID = "report-agent"
+
+
+def test_delivery_binding_ref_is_valid_when_generation_digest_starts_with_digit() -> None:
+    assert _periodic_report_delivery_binding_ref(
+        "report_generation_53429b77872cbe1130a3e2f3"
+    ) == "periodic-report:g53429b77872cbe11"
 
 
 def _intent() -> dict[str, object]:
@@ -403,6 +410,7 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
     )
     assert delivery["status"] == "blocked"
     assert delivery["action_kind"] == "deliver_periodic_report_goal_channel"
+    assert delivery["capability_binding_ref"].startswith("periodic-report:g")
     assert delivery["required_decision_scopes"][0]["scope_key"].startswith(
         "periodic_report_"
     )

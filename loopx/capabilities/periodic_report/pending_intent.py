@@ -77,6 +77,13 @@ def _intent_key(intent: Mapping[str, Any]) -> str:
     ).hexdigest()[:24]
 
 
+def _periodic_report_delivery_binding_ref(generation_id: object) -> str:
+    digest_suffix = str(generation_id).split("_")[-1][:16]
+    # Todo capability binding refs require the namespaced value to start with
+    # a letter. Generation digests are hexadecimal and may start with a digit.
+    return f"periodic-report:g{digest_suffix}"
+
+
 def _attempt_dir(
     runtime_root: Path,
     goal_id: str,
@@ -1003,7 +1010,9 @@ def consume_pending_periodic_report_intent(
         task_class="advancement_task",
         action_kind="deliver_periodic_report_goal_channel",
         task_domain="provider_delivery",
-        capability_binding_ref=f"periodic-report:{digest_suffix}",
+        capability_binding_ref=_periodic_report_delivery_binding_ref(
+            generation["generation_id"]
+        ),
         required_write_scopes=["goal_channel/lark/messages"],
         required_capabilities=["network", "lark_bot_message_write"],
         target_capabilities=["periodic_report", "goal_channel"],
