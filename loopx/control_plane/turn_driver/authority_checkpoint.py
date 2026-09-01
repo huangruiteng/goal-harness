@@ -18,8 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from ...authority import validate_public_safe_text
+from ..effect_program import SettlementStepKind
 from .driver import selected_turn_todo
 from .settlement import (
+    TurnEffectResolver,
     completion_writeback_outcome,
     invoke_result_effect,
     invoke_turn_effect,
@@ -477,6 +479,7 @@ class TurnAuthoritySettlementEffects:
     terminal_closeout: TurnEffect | None
     terminal_checkpoint: TurnTerminalCheckpoint | None
     terminal_closeout_required: bool
+    effect_resolvers: Mapping[SettlementStepKind, TurnEffectResolver]
 
 
 class TurnAuthorityCheckpointController:
@@ -615,6 +618,51 @@ class TurnAuthorityCheckpointController:
 
         return guarded
 
+    def _guarded_resolver(
+        self,
+        step_kind: SettlementStepKind,
+        resolver: TurnEffectResolver,
+    ) -> TurnEffectResolver:
+        if self._session is None:
+            return resolver
+        checkpoint = step_kind.value
+        if checkpoint not in {
+            "durable_writeback",
+            "quota_spend",
+            "terminal_closeout",
+        }:
+            raise ValueError(
+                f"unsupported prepared-effect authority step: {checkpoint}"
+            )
+
+        def revalidate_then_resolve(effect_ref: str) -> Mapping[str, Any]:
+            rejected = self._rejected_effect(
+                checkpoint,
+                effect_ref=effect_ref,
+            )
+            if rejected is not None:
+                return {
+                    "kind": "unknown",
+                    "reason": str(
+                        rejected.get("reason")
+                        or "authority rejected prepared-effect recovery"
+                    ),
+                }
+            return resolver(effect_ref)
+
+        return revalidate_then_resolve
+
+    def _guarded_resolvers(
+        self,
+        resolvers: Mapping[SettlementStepKind, TurnEffectResolver],
+    ) -> dict[SettlementStepKind, TurnEffectResolver]:
+        """Fence resolver-side receipt repair before it can write."""
+
+        return {
+            step_kind: self._guarded_resolver(step_kind, resolver)
+            for step_kind, resolver in resolvers.items()
+        }
+
     def _active_completion(self) -> dict[str, Any] | None:
         stored = self._journal.get("terminal_closeout")
         if not isinstance(stored, Mapping):
@@ -675,6 +723,7 @@ class TurnAuthorityCheckpointController:
         terminal_closeout: TurnResultEffect | None,
         spend: TurnEffect,
         terminal_checkpoint: TurnTerminalCheckpoint,
+        effect_resolvers: Mapping[SettlementStepKind, TurnEffectResolver],
     ) -> TurnAuthoritySettlementEffects:
         """Compose each checkpoint with the effect it fences."""
 
@@ -728,6 +777,7 @@ class TurnAuthorityCheckpointController:
             terminal_closeout=terminal_effect,
             terminal_checkpoint=effective_terminal_checkpoint,
             terminal_closeout_required=terminal_closeout_required,
+            effect_resolvers=self._guarded_resolvers(effect_resolvers),
         )
 
     def run_scheduler(

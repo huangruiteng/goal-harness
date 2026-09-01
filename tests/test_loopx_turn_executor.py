@@ -325,7 +325,9 @@ class _AuthorityGuard:
                 "reason": "authority lease generation is no longer current",
             }
         current = request.get("authority_binding")
-        binding = dict(current) if isinstance(current, Mapping) else _authority_binding()
+        binding = (
+            dict(current) if isinstance(current, Mapping) else _authority_binding()
+        )
         if checkpoint == self.drift_at:
             binding = _authority_binding(lease_epoch=8)
         return {"ok": True, "binding": binding}
@@ -502,9 +504,7 @@ def test_authority_guard_cannot_replace_the_admitted_lease_generation(
 
     assert payload["result_kind"] == "writeback_failed"
     assert calls == {"host": 1, "writeback": 0, "spend": 0, "scheduler": 0}
-    rejected = payload["authority_checkpoint_guard"]["checkpoints"][
-        "durable_writeback"
-    ]
+    rejected = payload["authority_checkpoint_guard"]["checkpoints"]["durable_writeback"]
     assert rejected["reason_code"] == "authority_binding_changed"
     assert payload["authority_checkpoint_guard"]["binding"]["lease_epoch"] == 7
 
@@ -568,9 +568,12 @@ def test_guarded_turn_cannot_resume_effects_without_its_authority_guard(
 
     assert failed["result_kind"] == "writeback_failed"
     assert retried["result_kind"] == "writeback_failed"
-    assert retried["authority_checkpoint_guard"]["checkpoints"][
-        "durable_writeback"
-    ]["reason_code"] == "authority_guard_missing"
+    assert (
+        retried["authority_checkpoint_guard"]["checkpoints"]["durable_writeback"][
+            "reason_code"
+        ]
+        == "authority_guard_missing"
+    )
     assert calls == {"host": 1, "writeback": 0, "spend": 0, "scheduler": 0}
 
 
@@ -605,9 +608,12 @@ def test_authority_admission_rejection_can_retry_before_first_host_effect(
     assert recovered["status"] == "committed"
     assert recovered["recovery"]["planned"]["resume_from"] == "host_execute"
     assert calls == {"host": 1, "writeback": 1, "spend": 1, "scheduler": 1}
-    assert recovered["authority_checkpoint_guard"]["checkpoints"][
-        "host_admission"
-    ]["attempt"] == 2
+    assert (
+        recovered["authority_checkpoint_guard"]["checkpoints"]["host_admission"][
+            "attempt"
+        ]
+        == 2
+    )
 
 
 def test_completion_writeback_is_fenced_before_lifecycle_mutation(
@@ -619,9 +625,7 @@ def test_completion_writeback_is_fenced_before_lifecycle_mutation(
 
     payload = run_loopx_turn_once(
         plan,
-        host_runner=lambda _request: _host_result(
-            plan, kind="validated_completion"
-        ),
+        host_runner=lambda _request: _host_result(plan, kind="validated_completion"),
         project=tmp_path,
         runtime_root=tmp_path / "runtime",
         goal_id="fixture-goal",
@@ -673,9 +677,7 @@ def test_validated_completion_closes_authority_before_quota_and_scheduler(
 
     payload = run_loopx_turn_once(
         plan,
-        host_runner=lambda _request: _host_result(
-            plan, kind="validated_completion"
-        ),
+        host_runner=lambda _request: _host_result(plan, kind="validated_completion"),
         project=tmp_path,
         runtime_root=tmp_path / "runtime",
         goal_id="fixture-goal",
@@ -701,12 +703,9 @@ def test_validated_completion_closes_authority_before_quota_and_scheduler(
         terminal_closeout=lambda _result: pytest.fail(
             "active-goal completion must not close the goal"
         ),
-        spend=lambda: (
-            calls.append("quota_spend") or {"ok": True, "appended": True}
-        ),
+        spend=lambda: calls.append("quota_spend") or {"ok": True, "appended": True},
         scheduler=lambda _spend: (
-            calls.append("scheduler")
-            or {"completed": True, "acknowledged": True}
+            calls.append("scheduler") or {"completed": True, "acknowledged": True}
         ),
         authority_checkpoint_guard=guard,
     )
@@ -720,9 +719,12 @@ def test_validated_completion_closes_authority_before_quota_and_scheduler(
         "authority_complete",
         "scheduler",
     ]
-    assert payload["authority_checkpoint_guard"]["checkpoints"][
-        "authority_complete"
-    ]["status"] == "accepted"
+    assert (
+        payload["authority_checkpoint_guard"]["checkpoints"]["authority_complete"][
+            "status"
+        ]
+        == "accepted"
+    )
 
 
 def test_authority_completion_failure_stops_quota_after_local_writeback(
@@ -734,9 +736,7 @@ def test_authority_completion_failure_stops_quota_after_local_writeback(
 
     payload = run_loopx_turn_once(
         plan,
-        host_runner=lambda _request: _host_result(
-            plan, kind="validated_completion"
-        ),
+        host_runner=lambda _request: _host_result(plan, kind="validated_completion"),
         project=tmp_path,
         runtime_root=tmp_path / "runtime",
         goal_id="fixture-goal",
@@ -781,9 +781,12 @@ def test_authority_completion_failure_stops_quota_after_local_writeback(
         "quota_spend",
         "authority_complete",
     ]
-    assert payload["authority_checkpoint_guard"]["checkpoints"][
-        "authority_complete"
-    ]["reason_code"] == "stale_lease_fence"
+    assert (
+        payload["authority_checkpoint_guard"]["checkpoints"]["authority_complete"][
+            "reason_code"
+        ]
+        == "stale_lease_fence"
+    )
 
 
 def test_terminal_completion_closes_authority_after_local_closeout(
@@ -795,9 +798,7 @@ def test_terminal_completion_closes_authority_after_local_closeout(
 
     payload = run_loopx_turn_once(
         plan,
-        host_runner=lambda _request: _host_result(
-            plan, kind="validated_completion"
-        ),
+        host_runner=lambda _request: _host_result(plan, kind="validated_completion"),
         project=tmp_path,
         runtime_root=tmp_path / "runtime",
         goal_id="fixture-goal",
@@ -825,12 +826,9 @@ def test_terminal_completion_closes_authority_after_local_closeout(
                 },
             }
         ),
-        spend=lambda: (
-            calls.append("quota_spend") or {"ok": True, "appended": True}
-        ),
+        spend=lambda: calls.append("quota_spend") or {"ok": True, "appended": True},
         scheduler=lambda _spend: (
-            calls.append("scheduler")
-            or {"completed": True, "acknowledged": True}
+            calls.append("scheduler") or {"completed": True, "acknowledged": True}
         ),
         authority_checkpoint_guard=guard,
     )
@@ -861,9 +859,7 @@ def test_terminal_authority_completion_failure_holds_scheduler(
 
     payload = run_loopx_turn_once(
         plan,
-        host_runner=lambda _request: _host_result(
-            plan, kind="validated_completion"
-        ),
+        host_runner=lambda _request: _host_result(plan, kind="validated_completion"),
         project=tmp_path,
         runtime_root=tmp_path / "runtime",
         goal_id="fixture-goal",
@@ -1183,8 +1179,7 @@ def test_run_once_recoverable_failed_turn_rejects_session_identity_drift(
     )
     assert inspected["recovery_decision"]["action"] == "blocked"
     assert (
-        inspected["recovery_decision"]["reason"]
-        == "session_binding_identity_mismatch"
+        inspected["recovery_decision"]["reason"] == "session_binding_identity_mismatch"
     )
     with pytest.raises(ValueError, match="session binding does not match") as exc_info:
         run_loopx_turn_once(plan, retry_failed=True, **common)
@@ -1313,6 +1308,147 @@ def test_provider_can_commit_before_its_journal_checkpoint(
     assert resumed["status"] == "committed"
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
     assert "effect_attempts" not in _journal(tmp_path / "runtime")
+
+
+def test_reclaimed_authority_fences_prepared_effect_receipt_repair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _plan()
+    calls = {"writeback": 0, "repair": 0, "spend": 0, "scheduler": 0}
+    provider_records: dict[str, dict[str, object]] = {}
+
+    class ReclaimableGuard(_AuthorityGuard):
+        reclaimed = False
+
+        def __call__(self, request: Mapping[str, object]) -> Mapping[str, object]:
+            if self.reclaimed:
+                self.calls.append(str(request["checkpoint"]))
+                return {
+                    "ok": False,
+                    "reason_code": "stale_lease_fence",
+                    "reason": "another agent reclaimed the expired authority lease",
+                }
+            return super().__call__(request)
+
+    guard = ReclaimableGuard()
+
+    def writeback(_result: dict[str, object], effect_ref: str) -> dict[str, object]:
+        calls["writeback"] += 1
+        payload = {"ok": True, "appended": True, "effect_ref": effect_ref}
+        provider_records[effect_ref] = payload
+        return payload
+
+    def spend() -> dict[str, object]:
+        calls["spend"] += 1
+        return {"ok": True, "appended": True}
+
+    def scheduler(_spend: dict[str, object]) -> dict[str, object]:
+        calls["scheduler"] += 1
+        return {"completed": True, "acknowledged": False}
+
+    write_journal = turn_executor._write_journal
+
+    def crash_after_provider_commit(
+        path: Path,
+        journal: Mapping[str, object],
+    ) -> None:
+        if "writeback" in journal and "quota_spend" not in journal:
+            raise RuntimeError("injected crash before writeback checkpoint")
+        write_journal(path, journal)
+
+    monkeypatch.setattr(turn_executor, "_write_journal", crash_after_provider_commit)
+    with pytest.raises(
+        RuntimeError,
+        match="injected crash before writeback checkpoint",
+    ):
+        run_loopx_turn_once(
+            plan,
+            host_runner=lambda _request: _host_result(plan),
+            project=tmp_path,
+            runtime_root=tmp_path / "runtime",
+            goal_id="fixture-goal",
+            timeout_seconds=5,
+            execute=True,
+            task_validator=_passing_validator,
+            writeback=writeback,
+            spend=spend,
+            scheduler=scheduler,
+            authority_checkpoint_guard=guard,
+        )
+
+    interrupted = _journal(tmp_path / "runtime")
+    assert interrupted["effect_attempts"]["durable_writeback"]["status"] == "prepared"
+    assert "writeback" not in interrupted
+    assert calls == {"writeback": 1, "repair": 0, "spend": 0, "scheduler": 0}
+
+    guard.reclaimed = True
+    monkeypatch.setattr(turn_executor, "_write_journal", write_journal)
+
+    def repair_resolver(effect_ref: str) -> dict[str, object]:
+        calls["repair"] += 1
+        return {"kind": "committed", "payload": provider_records[effect_ref]}
+
+    resumed = run_loopx_turn_once(
+        plan,
+        host_runner=lambda _request: pytest.fail("host must not run during recovery"),
+        project=tmp_path,
+        runtime_root=tmp_path / "runtime",
+        goal_id="fixture-goal",
+        timeout_seconds=5,
+        execute=True,
+        task_validator=_passing_validator,
+        writeback=writeback,
+        writeback_resolver=repair_resolver,
+        spend=spend,
+        scheduler=scheduler,
+        authority_checkpoint_guard=guard,
+    )
+
+    assert calls == {"writeback": 1, "repair": 0, "spend": 0, "scheduler": 0}
+    assert resumed["result_kind"] == "writeback_failed"
+    assert resumed["settlement_result"]["failure"] == {
+        "kind": "effect_outcome_unknown",
+        "step_kind": "durable_writeback",
+        "reason": "another agent reclaimed the expired authority lease",
+    }
+    assert (
+        resumed["authority_checkpoint_guard"]["checkpoints"]["durable_writeback"][
+            "reason_code"
+        ]
+        == "stale_lease_fence"
+    )
+    assert guard.calls == ["host_admission", "durable_writeback", "durable_writeback"]
+    assert (
+        _journal(tmp_path / "runtime")["effect_attempts"]
+        == interrupted["effect_attempts"]
+    )
+
+    journal_path = next(
+        (tmp_path / "runtime" / "goals" / "fixture-goal" / "turns").glob("*.json")
+    )
+    write_journal(journal_path, interrupted)
+    guard.reclaimed = False
+    guard.calls.clear()
+    current = run_loopx_turn_once(
+        plan,
+        host_runner=lambda _request: pytest.fail("host must not run during recovery"),
+        project=tmp_path,
+        runtime_root=tmp_path / "runtime",
+        goal_id="fixture-goal",
+        timeout_seconds=5,
+        execute=True,
+        task_validator=_passing_validator,
+        writeback=writeback,
+        writeback_resolver=repair_resolver,
+        spend=spend,
+        scheduler=scheduler,
+        authority_checkpoint_guard=guard,
+    )
+
+    assert current["status"] == "committed"
+    assert calls == {"writeback": 1, "repair": 1, "spend": 1, "scheduler": 1}
+    assert guard.calls == ["durable_writeback", "quota_spend", "scheduler"]
 
 
 def test_run_once_legacy_plan_without_settlement_plan_is_upgraded(

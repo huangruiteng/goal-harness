@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
+from loopx.control_plane.effect_program import SettlementStepKind
 from loopx.control_plane.turn_driver import (
     TurnAuthorityCheckpointSession,
     build_turn_authority_command_guard,
@@ -162,6 +164,12 @@ def test_completion_context_rejects_unhashable_successor_before_guard() -> None:
 
 def test_default_off_controller_does_not_parse_turn_lineage() -> None:
     journal: dict[str, object] = {}
+    resolver_calls: list[str] = []
+
+    def resolver(effect_ref: str) -> dict[str, object]:
+        resolver_calls.append(effect_ref)
+        return {"kind": "absent"}
+
     controller = build_turn_authority_checkpoint_controller(
         None,
         plan={},
@@ -188,6 +196,7 @@ def test_default_off_controller_does_not_parse_turn_lineage() -> None:
         terminal_checkpoint=lambda _payload: pytest.fail(
             "non-terminal Turn must not checkpoint closeout"
         ),
+        effect_resolvers={SettlementStepKind.QUOTA_SPEND: resolver},
     )
 
     assert controller.enabled is False
@@ -200,7 +209,95 @@ def test_default_off_controller_does_not_parse_turn_lineage() -> None:
         {"receipt": "quota"},
         terminal_closeout_required=False,
     ) == {"completed": True, "spend": {"receipt": "quota"}}
+    assert effects.effect_resolvers[SettlementStepKind.QUOTA_SPEND]("quota-ref") == {
+        "kind": "absent"
+    }
+    assert resolver_calls == ["quota-ref"]
     assert journal == {}
+
+
+@pytest.mark.parametrize(
+    "step_kind",
+    (
+        SettlementStepKind.DURABLE_WRITEBACK,
+        SettlementStepKind.QUOTA_SPEND,
+        SettlementStepKind.TERMINAL_CLOSEOUT,
+    ),
+)
+def test_prepared_effect_resolver_is_fenced_before_receipt_repair(
+    step_kind: SettlementStepKind,
+) -> None:
+    journal: dict[str, object] = {}
+    guard_calls: list[str] = []
+    resolver_calls: list[str] = []
+    binding = {
+        "schema_version": "loopx_turn_authority_binding_v0",
+        "store_identity": "file:00000000000000000000000000000001",
+        "operation_id": "operation-fixture",
+        "receipt_digest": "sha256:" + ("c" * 64),
+        "authority_revision": 1,
+        "todo_revision": 1,
+        "lease_id": "lease-fixture",
+        "lease_epoch": 1,
+        "expires_at": "2030-01-01T00:00:00.000Z",
+    }
+
+    def guard(request: Mapping[str, object]) -> Mapping[str, object]:
+        checkpoint = str(request["checkpoint"])
+        guard_calls.append(checkpoint)
+        if checkpoint == "host_admission":
+            return {"ok": True, "binding": binding}
+        return {
+            "ok": False,
+            "reason_code": "stale_lease_fence",
+            "reason": "another agent reclaimed the expired authority lease",
+        }
+
+    def resolver(effect_ref: str) -> dict[str, object]:
+        resolver_calls.append(effect_ref)
+        return {"kind": "committed", "payload": {"ok": True, "appended": True}}
+
+    controller = build_turn_authority_checkpoint_controller(
+        guard,
+        plan={
+            "turn_envelope": {
+                "goal_id": "goal-fixture",
+                "agent_id": "agent-fixture",
+                "action": {"selected_todo": {"todo_id": "todo-fixture"}},
+            }
+        },
+        transaction_plan={
+            "settlement_plan": {"identity": {"effect_id": "effect-fixture"}}
+        },
+        journal=journal,
+        turn_key="sha256:" + ("b" * 64),
+        persist=lambda: None,
+    )
+    assert controller.admit_host(
+        completed_phases=[],
+        failure=lambda reason: {"reason": reason, "receipt": {}},
+    )
+    effects = controller.settlement_effects(
+        result={"result_kind": "validated_progress"},
+        writeback=lambda _result: {"ok": True, "appended": True},
+        completion_writeback=None,
+        completion_intent=None,
+        terminal_closeout=None,
+        spend=lambda: {"ok": True, "appended": True},
+        terminal_checkpoint=lambda _payload: None,
+        effect_resolvers={step_kind: resolver},
+    )
+
+    resolution = effects.effect_resolvers[step_kind](
+        f"effect-fixture#{step_kind.value}"
+    )
+
+    assert resolution == {
+        "kind": "unknown",
+        "reason": "another agent reclaimed the expired authority lease",
+    }
+    assert guard_calls == ["host_admission", step_kind.value]
+    assert resolver_calls == []
 
 
 def test_resumed_authority_turn_without_guard_fails_closed_at_admission() -> None:

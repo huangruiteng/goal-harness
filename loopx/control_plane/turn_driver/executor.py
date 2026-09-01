@@ -1105,6 +1105,7 @@ def _typed_settlement_stage(
         terminal_closeout=terminal_closeout,
         spend=spend,
         terminal_checkpoint=journal_adapter.checkpoint_terminal,
+        effect_resolvers=effect_resolvers,
     )
     terminal_closeout_required = authority_effects.terminal_closeout_required
 
@@ -1137,7 +1138,7 @@ def _typed_settlement_stage(
         prepare=journal_adapter.prepare,
         abort=journal_adapter.abort,
         effect_attempts=journal_adapter.effect_attempts,
-        effect_resolvers=effect_resolvers,
+        effect_resolvers=authority_effects.effect_resolvers,
         turn_result_kind=str(result.get("result_kind") or "") or None,
     )
 
