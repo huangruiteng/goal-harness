@@ -1349,6 +1349,11 @@ async function main() {
     const rowHandle = page.locator(".personal-run-row").first();
     await page.getByRole("button", { name: /关闭详情/ }).press("Escape");
     await rowHandle.waitFor({ state: "visible" });
+    await page.waitForFunction(
+      () => document.activeElement?.classList.contains("personal-run-row"),
+      null,
+      { timeout: 2_000 },
+    );
     if (!(await rowHandle.evaluate((element) => element === document.activeElement))) throw new Error("Drawer Escape did not restore focus to the selected row");
 
     await page.getByRole("button", { name: /LoopX 管家/ }).first().click();
