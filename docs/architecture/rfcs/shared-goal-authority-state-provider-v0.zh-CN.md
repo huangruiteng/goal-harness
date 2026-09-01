@@ -773,6 +773,20 @@ gate/dependency ref、claim/lease field 与按 privacy class 标注的 opaque po
 | PostgreSQL provider owner | 通用 PostgreSQL provider/service；transaction isolation、认证、租户、审计与运维部署合同 |
 | 联合验证 | Provider conformance matrix、单向 shadow parity、一个 Goal/两个 Agent 的 TEST ONLY canary，以及晋升证据 |
 
+Shared control plane 是多个独立 ledger 的组合，不是一张巨大的 coordination aggregate。
+Stage 3/4 qualification 必须保持以下 ownership 与 proof 边界：
+
+| Ledger / decision | Authority 与稳定 identity | 失败边界 | Stage 3/4 证明 |
+| --- | --- | --- | --- |
+| Coordination head、Todo/claim 与 lease fence | `AuthorityStore`；`(tenant_id, goal_id)`、`operation_id`、authority revision 与 lease epoch | provider CAS/transaction 加 operation-receipt 回读 | projection、合法 claim/lease transition、fence、receipt、head 与 cursor 的 provider parity |
+| Turn admission 与 quota | 独立 Turn/quota ledger；obligation、admission、debit 与 void receipt identity | 自己的 append/幂等边界；永不吸收到 coordination commit | 端到端观察：获准工作引用已接受的 coordination head，且 quota 只记一次 |
+| Delivery、inbox 与外部 effect | 独立 delivery/inbox/provider ledger；event cursor、effect identity 与 provider receipt | connector/effect ambiguity 在所属 ledger reconcile | 端到端观察：steering 改变后续决策，且 effect 不重复 |
+| Settlement 与 run history | 独立 settlement journal 与 run ledger；settlement/phase receipt 和 run identity | 有序 settlement checkpoint 与幂等 replay | 端到端观察：跨重启 settlement exactly-once；只从 coordination state 引用，不存入其中 |
+
+只有第一行用于资格化 `AuthorityStore` 实现。其余行通过 typed reference 与 receipt
+资格化控制面组合；即使通过，也不得宣称这些状态由 coordination provider 额外持有或
+一起 transaction。
+
 实施顺序如下：
 
 1. **Stage 0——合入可恢复执行参考基础。** 将 #3669 与原生 TypeScript task-lease
@@ -786,12 +800,15 @@ gate/dependency ref、claim/lease field 与按 privacy class 标注的 opaque po
    包络；PostgreSQL owner 实现通用 service/provider。两者复用同一套 LoopX
    transition 与 receipt 语义。
 4. **Stage 3——单向 shadow parity。** 本地控制面文件仍是唯一 authority；将已
-   提交观察投影到候选 provider，对比 Todo/claim、lease fence、Turn admission、
-   quota、settlement、receipt、projection head 与 cursor。不做双向同步，也不允许
-   provider 回写 file。
+   提交观察投影到候选 provider。Provider parity 只对比 Todo/claim、lease fence、
+   operation receipt、projection head 与 cursor。Turn admission、quota、settlement、
+   inbox 与 run history 仍是独立 ledger；shadow 只记录验证端到端组合所需的 typed
+   reference。不做双向同步，也不允许 provider 回写 file。
 5. **Stage 4——TEST ONLY canary。** 用一个 Goal、两个 Agent 验证：不重复 claim
-   或 effect、过期与 fencing 正确、重启后继续、inbox steering 改变后续决策、
-   settlement 幂等且 exactly-once、网络失败时写操作 fail-closed。
+   、过期与 fencing 正确、重启后继续，以及网络失败时 coordination write
+   fail-closed。同一个 canary 还要分别观察：外部 effect 不重复、inbox steering
+   改变后续决策、settlement 幂等且 exactly-once；这些是跨所属 ledger 的 composition
+   proof，不是 `AuthorityStore` conformance claim。
 6. **Stage 5——切换唯一 authority source。** 只有经过评审的晋升，才能让 shared
    LoopX service 成为唯一 writer。本地 `.loopx` 退为 cache、offline projection 与
    诊断材料。绝不长期维持 dual-write 或 dual-master。

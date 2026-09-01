@@ -966,6 +966,22 @@ tracks. Workstream labels are responsibility boundaries, not authority grants:
 | PostgreSQL provider owner | Generic PostgreSQL provider/service; transaction isolation, authentication, tenancy, audit, and operational deployment contract |
 | Joint qualification | Provider conformance matrix, one-way shadow parity, one-Goal/two-Agent TEST ONLY canary, and promotion evidence |
 
+The shared control plane is a composition of independently owned ledgers, not
+one large coordination aggregate. Stage 3/4 qualification must preserve these
+ownership and proof boundaries:
+
+| Ledger / decision | Authority and stable identity | Failure boundary | Stage 3/4 proof |
+| --- | --- | --- | --- |
+| Coordination head, Todo/claim, and lease fence | `AuthorityStore`; `(tenant_id, goal_id)`, `operation_id`, authority revision, and lease epoch | provider CAS/transaction plus operation-receipt readback | provider parity for projection, legal claim/lease transitions, fence, receipt, head, and cursor |
+| Turn admission and quota | independent Turn/quota ledgers; obligation, admission, debit, and void receipt identities | their own append/idempotency boundary; never absorbed into a coordination commit | end-to-end observation that admitted work references the accepted coordination head and accounts quota once |
+| Delivery, inbox, and external effects | independent delivery/inbox/provider ledgers; event cursor, effect identity, and provider receipt | connector/effect ambiguity is reconciled at its owning ledger | end-to-end observation that steering changes a later decision and an effect is not duplicated |
+| Settlement and run history | independent settlement journal and run ledger; settlement/phase receipt and run identity | ordered settlement checkpoints and idempotent replay | end-to-end observation of exactly-once settlement across restart, referenced from rather than stored inside coordination state |
+
+Only the first row qualifies an `AuthorityStore` implementation. The remaining
+rows qualify control-plane composition through typed references and receipts;
+passing them must not be reported as additional state owned or transacted by
+the coordination provider.
+
 The sequence is:
 
 1. **Stage 0 - merge the recoverable reference foundation.** Integrate #3669
@@ -982,13 +998,17 @@ The sequence is:
    semantics.
 4. **Stage 3 - one-way shadow parity.** Local control-plane files remain the
    only authority while committed observations are projected to the candidate
-   provider. Compare Todo/claim, lease fence, Turn admission, quota,
-   settlement, receipt, projection head, and cursor. Do not perform bidirectional
-   synchronization or provider-to-file writes.
+   provider. Provider parity compares Todo/claim, lease fence, operation
+   receipt, projection head, and cursor. Turn admission, quota, settlement,
+   inbox, and run history remain independent ledgers: the shadow records only
+   typed references needed to verify their end-to-end composition. Do not
+   perform bidirectional synchronization or provider-to-file writes.
 5. **Stage 4 - TEST ONLY canary.** One Goal and two Agents must show no duplicate
-   claim or effect, correct expiry/fencing, restart resume, inbox steering,
-   idempotent exactly-once settlement, and fail-closed writes during network
-   failure.
+   claim, correct expiry/fencing, restart resume, and fail-closed coordination
+   writes during network failure. The same canary separately observes that no
+   external effect is duplicated, inbox steering changes a later decision,
+   and settlement is idempotent and exactly-once; those are composition proofs
+   over their owning ledgers, not `AuthorityStore` conformance claims.
 6. **Stage 5 - flip one authority source.** Only after a reviewed promotion,
    make the shared LoopX service the sole writer. Local `.loopx` state becomes
    cache, offline projection, and diagnostic material. Never keep a long-lived

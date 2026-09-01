@@ -66,6 +66,7 @@ PUBLIC_BOUNDARY_TOKENS = (
     "README",
     "AGENTS.md",
     ".github/",
+    "package-lock.json",
 )
 BENCHMARK_SENSITIVE_TOKENS = (
     "benchmark/",
