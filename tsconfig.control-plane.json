@@ -38,6 +38,7 @@
     "loopx/control_plane/work_items/delivery_outcome.ts",
     "loopx/control_plane/work_items/interaction_contract.ts",
     "loopx/control_plane/work_items/task_lease_acquire.ts",
+    "loopx/control_plane/work_items/task_lease_lifecycle.ts",
     "loopx/control_plane/work_items/task_lease_acquire_cli.ts",
     "tests/control_plane_ts/effect_program.test.ts",
     "tests/control_plane_ts/effect_runtime_errors.test.ts",

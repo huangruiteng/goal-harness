@@ -22,22 +22,36 @@ const MAX_TTL_SECONDS = 24 * 60 * 60;
 const TODO_WRITE_SCOPE_MAX_CHARS = 160;
 
 type FileState = "file" | "missing";
+export type TodoFactField =
+  | "status"
+  | "claimed_by"
+  | "excluded_agents"
+  | "role"
+  | "task_class"
+  | "bound_agent"
+  | "blocks_agent";
 
-interface SourceReceipt {
+export interface SourceReceipt {
   source_id: string;
   path: string;
   state: FileState;
   sha256: string | null;
 }
 
-interface TodoFact {
+export interface TodoFact {
   todo_id: string;
   status: string;
   claimed_by: string | null;
   excluded_agents: readonly string[];
+  role?: string;
+  task_class?: string | null;
+  bound_agent?: string | null;
+  blocks_agent?: string | null;
+  /** Fields explicitly supplied by a legacy caller snapshot, if known. */
+  provided_fields?: readonly TodoFactField[];
 }
 
-interface AuthorityFacts {
+export interface AuthorityFacts {
   handoff_mode: string;
   registered_agents: readonly string[];
   todos: ReadonlyMap<string, TodoFact>;
@@ -57,7 +71,7 @@ interface AcquireRequest {
   authority: AuthorityFacts;
 }
 
-interface LeaseRecord extends JsonObject {
+export interface LeaseRecord extends JsonObject {
   schema_version?: unknown;
   goal_id?: unknown;
   todo_id?: unknown;
@@ -134,7 +148,7 @@ export interface TaskLeaseAcquireDependencies {
 
 export type TaskLeaseAcquireEnvelope = JsonObject;
 
-class TaskLeaseAcquireError extends Error {
+export class TaskLeaseAcquireError extends Error {
   readonly code: string;
   readonly payload: JsonObject;
 
@@ -184,12 +198,12 @@ function compact(value: unknown): string {
   return compactString(value).trim().split(/\s+/u).filter(Boolean).join(" ");
 }
 
-function normalizeAgent(value: unknown): string | null {
+export function normalizeAgent(value: unknown): string | null {
   const candidate = compact(value).toLowerCase().replaceAll(" ", "-");
   return /^[a-z][a-z0-9_.:@-]{0,79}$/u.test(candidate) ? candidate : null;
 }
 
-function normalizeGoalId(value: unknown): string {
+export function normalizeGoalId(value: unknown): string {
   const goalId = stringValue(value, "goal_id").trim();
   if (
     goalId.length === 0 || goalId === "." || goalId === ".." ||
@@ -203,7 +217,7 @@ function normalizeGoalId(value: unknown): string {
   return goalId;
 }
 
-function normalizeTodoId(value: unknown, label = "todo_id"): string {
+export function normalizeTodoId(value: unknown, label = "todo_id"): string {
   const todoId = stringValue(value, label).trim().toLowerCase();
   if (!/^todo_[a-z0-9_-]{3,64}$/u.test(todoId)) {
     throw new TaskLeaseAcquireError(
@@ -214,7 +228,7 @@ function normalizeTodoId(value: unknown, label = "todo_id"): string {
   return todoId;
 }
 
-function normalizeOwner(value: unknown): string {
+export function normalizeOwner(value: unknown): string {
   const owner = normalizeAgent(stringValue(value, "owner"));
   if (owner === null) {
     throw new TaskLeaseAcquireError(
@@ -225,7 +239,7 @@ function normalizeOwner(value: unknown): string {
   return owner;
 }
 
-function normalizeIdempotencyKey(value: unknown): string {
+export function normalizeIdempotencyKey(value: unknown): string {
   const key = stringValue(value, "idempotency_key").trim();
   if (!/^[A-Za-z0-9_.:@/-]{1,160}$/u.test(key)) {
     throw new TaskLeaseAcquireError(
@@ -236,7 +250,7 @@ function normalizeIdempotencyKey(value: unknown): string {
   return key;
 }
 
-function normalizeWriteScopes(value: unknown): string[] {
+export function normalizeWriteScopes(value: unknown): string[] {
   let raw: unknown[];
   if (Array.isArray(value)) {
     raw = value;
@@ -263,7 +277,7 @@ function normalizeWriteScopes(value: unknown): string[] {
   return scopes;
 }
 
-function normalizeTtl(value: unknown): number {
+export function normalizeTtl(value: unknown): number {
   const ttl = value === null || value === undefined
     ? DEFAULT_TTL_SECONDS
     : optionalInteger(value, "ttl_seconds");
@@ -345,6 +359,12 @@ function decodeTodoFacts(value: unknown): ReadonlyMap<string, TodoFact> {
       status: compact(record.status).toLowerCase(),
       claimed_by: normalizeAgent(record.claimed_by),
       excluded_agents: excludedAgents,
+      role: typeof record.role === "string" ? compact(record.role).toLowerCase() : undefined,
+      task_class: typeof record.task_class === "string"
+        ? compact(record.task_class).toLowerCase()
+        : null,
+      bound_agent: normalizeAgent(record.bound_agent),
+      blocks_agent: normalizeAgent(record.blocks_agent),
     });
   }
   return todos;
@@ -359,6 +379,30 @@ function decodeProjectionError(value: unknown): TaskLeaseFailure | null {
     ? {}
     : requireJsonObject(error.payload, "authority.todo_projection_error.payload");
   return { code, message, payload };
+}
+
+/** Decode the compact authority projection shared by all local lease verbs. */
+export function decodeTaskLeaseAuthority(value: unknown): AuthorityFacts {
+  const authority = requireJsonObject(value, "authority");
+  const receiptsValue = authority.source_receipts;
+  if (!Array.isArray(receiptsValue) || receiptsValue.length === 0) {
+    throw new EffectRuntimeRequestError(
+      "authority.source_receipts must be a non-empty array",
+    );
+  }
+  const receipts = receiptsValue.map((receipt, index) =>
+    decodeSourceReceipt(receipt, index)
+  );
+  if (new Set(receipts.map((receipt) => receipt.source_id)).size !== receipts.length) {
+    throw new EffectRuntimeRequestError("authority source ids must be unique");
+  }
+  return {
+    handoff_mode: normalizeHandoffMode(authority.handoff_mode),
+    registered_agents: decodeRegisteredAgents(authority.registered_agent_candidates),
+    todos: decodeTodoFacts(authority.todos),
+    todo_projection_error: decodeProjectionError(authority.todo_projection_error),
+    source_receipts: receipts,
+  };
 }
 
 function normalizeHandoffMode(value: unknown): string {
@@ -378,17 +422,10 @@ function decodeRequest(value: unknown): AcquireRequest {
   if (request.schema_version !== TASK_LEASE_ACQUIRE_REQUEST_SCHEMA_VERSION) {
     throw new EffectRuntimeRequestError("Task-lease acquire request schema mismatch");
   }
-  const authority = requireJsonObject(request.authority, "authority");
-  const receiptsValue = authority.source_receipts;
-  if (!Array.isArray(receiptsValue) || receiptsValue.length === 0) {
-    throw new EffectRuntimeRequestError("authority.source_receipts must be a non-empty array");
-  }
-  const receipts = receiptsValue.map((receipt, index) =>
-    decodeSourceReceipt(receipt, index)
-  );
-  if (new Set(receipts.map((receipt) => receipt.source_id)).size !== receipts.length) {
-    throw new EffectRuntimeRequestError("authority source ids must be unique");
-  }
+  // Decode the authority envelope first.  Besides keeping the boundary
+  // fail-closed, this preserves the public error ordering used by the native
+  // CLI: a missing authority projection is reported before unrelated fields.
+  const authority = decodeTaskLeaseAuthority(request.authority);
   return {
     runtime_root: stringValue(request.runtime_root, "runtime_root"),
     goal_id: normalizeGoalId(request.goal_id),
@@ -398,25 +435,19 @@ function decodeRequest(value: unknown): AcquireRequest {
     write_scopes: normalizeWriteScopes(request.write_scopes),
     ttl_seconds: normalizeTtl(request.ttl_seconds),
     expected_version: optionalInteger(request.expected_version, "expected_version"),
-    authority: {
-      handoff_mode: normalizeHandoffMode(authority.handoff_mode),
-      registered_agents: decodeRegisteredAgents(authority.registered_agent_candidates),
-      todos: decodeTodoFacts(authority.todos),
-      todo_projection_error: decodeProjectionError(authority.todo_projection_error),
-      source_receipts: receipts,
-    },
+    authority,
   };
 }
 
-function taskLeaseDirectory(request: AcquireRequest): string {
+export function taskLeaseDirectory(request: { runtime_root: string; goal_id: string }): string {
   return join(request.runtime_root, "goals", request.goal_id, "task-leases");
 }
 
-function taskLeasePath(request: AcquireRequest): string {
+export function taskLeasePath(request: { runtime_root: string; goal_id: string; todo_id: string }): string {
   return join(taskLeaseDirectory(request), `${request.todo_id}.json`);
 }
 
-function taskLeaseLockPath(request: AcquireRequest): string {
+export function taskLeaseLockPath(request: { runtime_root: string; goal_id: string }): string {
   return join(taskLeaseDirectory(request), ".task-leases");
 }
 
@@ -470,7 +501,7 @@ function asLeaseRecord(value: unknown, path: string): LeaseRecord {
   return value as LeaseRecord;
 }
 
-async function readLease(path: string): Promise<LeaseRecord | null> {
+export async function readLease(path: string): Promise<LeaseRecord | null> {
   let text: string;
   try {
     text = await readFile(path, "utf8");
@@ -490,7 +521,7 @@ async function readLease(path: string): Promise<LeaseRecord | null> {
   }
 }
 
-function leaseInteger(
+export function leaseInteger(
   lease: LeaseRecord | null,
   field: "version" | "lease_epoch" | "acquire_ttl_seconds",
 ): number | null {
@@ -519,16 +550,16 @@ function leaseInteger(
   return number;
 }
 
-function leaseVersion(lease: LeaseRecord | null): number {
+export function leaseVersion(lease: LeaseRecord | null): number {
   return leaseInteger(lease, "version") ?? 0;
 }
 
-function leaseEpoch(lease: LeaseRecord | null): number {
+export function leaseEpoch(lease: LeaseRecord | null): number {
   if (lease === null) return 0;
   return leaseInteger(lease, "lease_epoch") ?? 1;
 }
 
-function parseLeaseTimestamp(value: string): Date | null {
+export function parseLeaseTimestamp(value: string): Date | null {
   let text = value.trim().replace(/z$/u, "Z");
   if (!text) return null;
   const hasTime = /[T ]\d{2}:\d{2}/u.test(text);
@@ -538,7 +569,7 @@ function parseLeaseTimestamp(value: string): Date | null {
   return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
 
-function leaseIsActive(lease: LeaseRecord | null, at: Date): boolean {
+export function leaseIsActive(lease: LeaseRecord | null, at: Date): boolean {
   if (
     lease?.schema_version !== TASK_LEASE_SCHEMA_VERSION ||
     lease.status !== "active"
@@ -550,11 +581,11 @@ function leaseIsActive(lease: LeaseRecord | null, at: Date): boolean {
   return expiresAt !== null && expiresAt.valueOf() > at.valueOf();
 }
 
-function utcIsoformat(value: Date): string {
+export function utcIsoformat(value: Date): string {
   return value.toISOString().replace(/\.\d{3}Z$/u, "Z");
 }
 
-function ownerRejection(
+export function ownerRejection(
   todo: TodoFact | undefined,
   owner: string | null,
   registeredAgents: readonly string[],
@@ -928,7 +959,7 @@ async function currentSourceReceipt(receipt: SourceReceipt): Promise<SourceRecei
   }
 }
 
-async function revalidateAuthoritySources(receipts: readonly SourceReceipt[]): Promise<void> {
+export async function revalidateAuthoritySources(receipts: readonly SourceReceipt[]): Promise<void> {
   const changed: string[] = [];
   const actuals = await Promise.all(receipts.map(currentSourceReceipt));
   for (let index = 0; index < receipts.length; index += 1) {

@@ -94,6 +94,7 @@ import {
   evaluateTaskLeaseWriteScopesOverlap,
   executeTaskLeaseAcquire,
 } from "./work_items/task_lease_acquire.ts";
+import { executeTaskLeaseLifecycle } from "./work_items/task_lease_lifecycle.ts";
 import {
   projectTodoPlanningInventory,
   projectTodoPlanningInventoryDetail,
@@ -348,6 +349,7 @@ export function createEffectRuntimeHandlers(
     ["quota.turn_envelope.evaluate", evaluateTurnEnvelope],
     ["task_lease.acquire.decide", evaluateTaskLeaseAcquireDecision],
     ["task_lease.acquire.native", executeTaskLeaseAcquire],
+    ["task_lease.lifecycle.native", executeTaskLeaseLifecycle],
     ["task_lease.write_scopes.overlap", evaluateTaskLeaseWriteScopesOverlap],
     [
       "effect.program_from_ordered_steps",
