@@ -1110,6 +1110,46 @@ redacted reusable conclusion. Do not feed case-specific hidden evidence into a
 later scored solver unless the experiment explicitly declares that feedback loop;
 use held-out cases before making a general product claim.
 
+### Treatment continuation receipt
+
+A qualified treatment startup and a countable score do not prove that the treatment
+control remained active after startup. After the terminal analyst has reviewed the
+authorized evidence, reduce only compact mechanism facts:
+
+```bash
+loopx benchmark treatment-continuation-receipt \
+  --observation-json <compact-post-run-observation.json> \
+  --format json
+```
+
+```json
+{
+  "schema_version": "benchmark_treatment_continuation_observation_v0",
+  "treatment_applicable": true,
+  "startup_state": "qualified",
+  "observation_complete": true,
+  "post_start_control_events": {
+    "todo_transition_count": 1,
+    "technical_replan_count": 0,
+    "control_closeout_count": 1
+  },
+  "terminal_control_state": "settled",
+  "precommit_validation_state": "observed"
+}
+```
+
+The observation names startup state, whether the review is complete, counts of
+post-start Todo transitions, technical replans, and control closeouts, terminal
+control settlement, and whether pre-commit validation was observed. It contains no
+task text, trajectory content, paths, run identity, verifier output, or score.
+
+The receipt classifies the mechanism as `sustained`, `startup_only`, `unknown`, or
+`not_applicable`. Here, `sustained` means at least one semantic control transition
+was observed after qualified startup; terminal settlement remains a separate field.
+Absence becomes `startup_only` only when the authorized post-run observation is
+complete. This receipt is analysis-only: it never changes score countability,
+integrity qualification, treatment fidelity, or matched-pair eligibility.
+
 ## Related commands
 
 ```bash

@@ -259,6 +259,21 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             ),
         },
         {
+            "command": (
+                "loopx benchmark treatment-continuation-receipt "
+                "--observation-json <compact-post-run-observation.json> "
+                "--format json"
+            ),
+            "purpose": (
+                "Separate qualified treatment startup from post-start semantic "
+                "control persistence and terminal settlement."
+            ),
+            "write_boundary": (
+                "read-only compact post-run mechanism facts; changes no score, "
+                "countability, integrity, or treatment-fidelity decision"
+            ),
+        },
+        {
             "command": "loopx benchmark classify-artifacts <paths...> --format json",
             "purpose": "Classify benchmark artifacts before reading or publishing them.",
             "write_boundary": "path classification only; no file reads or writes",
@@ -508,6 +523,51 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "direction, insight, or material runner state changed."
             ),
         },
+        "treatment_continuation_receipt": {
+            "command": (
+                "loopx benchmark treatment-continuation-receipt "
+                "--observation-json <compact-post-run-observation.json> "
+                "--format json"
+            ),
+            "classifications": [
+                "sustained",
+                "startup_only",
+                "unknown",
+                "not_applicable",
+            ],
+            "analysis_boundary": (
+                "The receipt describes mechanism persistence only. It does not "
+                "change score countability, integrity qualification, treatment "
+                "fidelity, or the experiment-board matched-pair decision."
+            ),
+            "absence_rule": (
+                "Classify startup_only only after a complete authorized post-run "
+                "review observes qualified startup and zero post-start semantic "
+                "control transitions; otherwise absence remains unknown."
+            ),
+            "observation_template": {
+                "schema_version": (
+                    "benchmark_treatment_continuation_observation_v0"
+                ),
+                "treatment_applicable": "<true-or-false>",
+                "startup_state": (
+                    "<qualified-not_qualified-unknown-or-not_applicable>"
+                ),
+                "observation_complete": "<true-or-false>",
+                "post_start_control_events": {
+                    "todo_transition_count": "<non-negative-integer>",
+                    "technical_replan_count": "<non-negative-integer>",
+                    "control_closeout_count": "<non-negative-integer>",
+                },
+                "terminal_control_state": (
+                    "<settled-unsettled-unknown-or-not_applicable>"
+                ),
+                "precommit_validation_state": (
+                    "<observed-not_observed-unknown-or-not_applicable>"
+                ),
+            },
+            "score_semantics": "unchanged",
+        },
         "active_progress_readback": {
             "workspace_basis": [
                 "recorded_start_revision_to_current_head",
@@ -632,6 +692,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
     },
     "implemented_protocols": [
+        {
+            "schema_version": "benchmark_treatment_continuation_receipt_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.treatment_continuation",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
         {
             "schema_version": "benchmark_public_progress_v0",
             "purpose": (

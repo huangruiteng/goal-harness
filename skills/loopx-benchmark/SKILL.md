@@ -88,6 +88,15 @@ the task's normal tools instead of imposing this workflow.
    `integrity_qualified=true` and `official_result_present=true`. Fill `effort`
    and set `insight.status` to `complete` after the post-run analysis.
 
+   For non-baseline arms, also reduce the reviewed mechanism facts separately:
+   ```bash
+   loopx benchmark treatment-continuation-receipt \
+     --observation-json <compact-post-run-observation.json> --format json
+   ```
+   This receipt distinguishes qualified startup from post-start semantic control
+   persistence. It is analysis-only and must not change score countability,
+   integrity qualification, treatment fidelity, or matched-pair eligibility.
+
 5. **Read matched comparisons before selecting the next arm.**
    ```bash
    loopx benchmark experiment-board-show --goal-id <GOAL_ID> --format json
@@ -155,4 +164,8 @@ the task's normal tools instead of imposing this workflow.
   final workspace, hidden tests, verifier, and failure/score details; write one
   `benchmark_case_insight_v0` explaining the decisive evidence, why the outcome
   happened, and what LoopX should test next.
+- For treatment arms, record whether qualified startup was followed by semantic
+  Todo transitions, technical replans, or control closeout. Use `startup_only`
+  only when a complete authorized post-run review observed no such transition;
+  otherwise absence is `unknown`. Keep terminal settlement separate.
 - Do not send a repetitive user update when nothing material changed.
