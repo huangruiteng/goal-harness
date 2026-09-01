@@ -149,7 +149,7 @@ def capture_followup_todos(
             if not dry_run:
                 resolved_state_file.write_text(new_text, encoding="utf-8")
 
-    return {
+    result = {
         "ok": True,
         "dry_run": dry_run,
         "changed": changed,
@@ -166,3 +166,19 @@ def capture_followup_todos(
         "items": items,
         "updated_at": updated_at if changed else None,
     }
+    if changed and not dry_run:
+        from .control_plane.coordination.local_authority_shadow_adapter import (
+            observe_local_authority_commit,
+        )
+
+        shadow = observe_local_authority_commit(
+            registry_path=registry_path,
+            runtime_root=None,
+            goal_id=goal_id,
+            source_operation=(
+                f"todo_capture_followups:{recorded_count}:{updated_at}"
+            ),
+        )
+        if shadow is not None:
+            result["authority_shadow"] = shadow
+    return result

@@ -96,6 +96,7 @@ import {
   executeTaskLeaseAcquire,
 } from "./work_items/task_lease_acquire.ts";
 import { executeTaskLeaseLifecycle } from "./work_items/task_lease_lifecycle.ts";
+import { recordLocalAuthorityShadow } from "./coordination/local_authority_shadow.ts";
 import { evaluateTaskLeaseLifecycleDecision } from "./work_items/task_lease_lifecycle_decision.ts";
 import {
   projectTodoPlanningInventory,
@@ -355,6 +356,7 @@ export function createEffectRuntimeHandlers(
     ["task_lease.lifecycle.native", executeTaskLeaseLifecycle],
     ["task_lease.write_scopes.overlap", evaluateTaskLeaseWriteScopesOverlap],
     ["quota.monitor_poll.commit", evaluateQuotaMonitorPollCommit],
+    ["coordination.local_authority_shadow.record", recordLocalAuthorityShadow],
     [
       "effect.program_from_ordered_steps",
       (params) => effectProgramFromOrderedSteps(

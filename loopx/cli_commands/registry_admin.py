@@ -494,6 +494,12 @@ def handle_registry_admin_command(
                 write_scope=args.write_scope,
                 replace_write_scope=bool(args.replace_write_scope),
                 clear_write_scope=bool(args.clear_write_scope),
+                local_authority_shadow_file=bool(
+                    args.local_authority_shadow_file
+                ),
+                clear_local_authority_shadow=bool(
+                    args.clear_local_authority_shadow
+                ),
                 waiting_on=args.waiting_on,
                 clear_waiting_on=bool(args.clear_waiting_on),
                 boundary_authority_scopes=args.boundary_authority_scope,

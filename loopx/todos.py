@@ -136,6 +136,38 @@ from .control_plane.work_items.task_lease import (
 ARCHIVE_COMPLETED_DEFAULT_MAX_ACTIVE_DONE = max(0, MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE - 2)
 
 
+def _attach_local_authority_shadow(
+    payload: dict[str, Any],
+    *,
+    registry_path: Path,
+    goal_id: str,
+    write_class: str,
+) -> dict[str, Any]:
+    """Observe a completed local mutation without changing its result."""
+
+    changed = any(
+        payload.get(field)
+        for field in ("changed", "added", "metadata_updated", "completed", "superseded")
+    )
+    if payload.get("dry_run") or not changed:
+        return payload
+    from .control_plane.coordination.local_authority_shadow_adapter import (
+        observe_local_authority_commit,
+    )
+
+    todo_id = str(payload.get("todo_id") or "none")
+    updated_at = str(payload.get("updated_at") or "unknown")
+    evidence = observe_local_authority_commit(
+        registry_path=registry_path,
+        runtime_root=None,
+        goal_id=goal_id,
+        source_operation=f"{write_class}:{todo_id}:{updated_at}",
+    )
+    if evidence is not None:
+        payload["authority_shadow"] = evidence
+    return payload
+
+
 def require_registered_todo_excluded_agents(
     *,
     registry_path: Path,
@@ -1164,11 +1196,17 @@ def add_goal_todo(
         "updated_at": updated_at if changed else None,
         **handoff_gate,
     }
-    return _attach_todo_write_correctness_dry_run_packet(
+    payload = _attach_todo_write_correctness_dry_run_packet(
         payload,
         goal_id=goal_id,
         write_class="todo_add",
         state_text=original,
+    )
+    return _attach_local_authority_shadow(
+        payload,
+        registry_path=registry_path,
+        goal_id=goal_id,
+        write_class="todo_add",
     )
 
 
@@ -1622,11 +1660,17 @@ def update_goal_todo(
         payload["external_wait_transition"] = external_wait_transition
     if monitor_poll_transition is not None:
         payload["monitor_poll_transition"] = monitor_poll_transition
-    return _attach_todo_write_correctness_dry_run_packet(
+    payload = _attach_todo_write_correctness_dry_run_packet(
         payload,
         goal_id=goal_id,
         write_class=write_class,
         state_text=original,
+    )
+    return _attach_local_authority_shadow(
+        payload,
+        registry_path=registry_path,
+        goal_id=goal_id,
+        write_class=write_class,
     )
 
 
@@ -1858,7 +1902,12 @@ def complete_goal_todo(
                     task_lease_fence,
                     committed=bool(event_result.get("changed")) and not dry_run,
                 )
-                return event_result
+                return _attach_local_authority_shadow(
+                    event_result,
+                    registry_path=registry_path,
+                    goal_id=goal_id,
+                    write_class="todo_complete_event_projection",
+                )
         if not isinstance(completion_state, dict):
             raise RuntimeError(
                 "TypeScript Todo completion transaction did not authorize a commit"
@@ -2016,7 +2065,12 @@ def complete_goal_todo(
     if effective_decision_outcome:
         result["decision_outcome"] = effective_decision_outcome
     result["self_merged"] = effective_self_merged
-    return result
+    return _attach_local_authority_shadow(
+        result,
+        registry_path=registry_path,
+        goal_id=goal_id,
+        write_class="todo_complete",
+    )
 
 def supersede_goal_todo(
     *,
@@ -2211,7 +2265,7 @@ def supersede_goal_todo(
         if changed and not dry_run:
             resolved_state_file.write_text(new_text, encoding="utf-8")
         release_verified_task_lease_fence(task_lease_fence, committed=changed and not dry_run)
-    return {
+    result = {
         "ok": True,
         "dry_run": dry_run,
         "superseded": True,
@@ -2225,6 +2279,12 @@ def supersede_goal_todo(
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,
     }
+    return _attach_local_authority_shadow(
+        result,
+        registry_path=registry_path,
+        goal_id=goal_id,
+        write_class="todo_supersede",
+    )
 
 
 def archive_completed_todos(
@@ -2266,7 +2326,7 @@ def archive_completed_todos(
         if changed and not dry_run:
             resolved_state_file.write_text(new_text, encoding="utf-8")
 
-    return {
+    result = {
         "ok": True,
         "dry_run": dry_run,
         "goal_id": goal_id,
@@ -2275,3 +2335,9 @@ def archive_completed_todos(
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,
     }
+    return _attach_local_authority_shadow(
+        result,
+        registry_path=registry_path,
+        goal_id=goal_id,
+        write_class="todo_archive_completed",
+    )

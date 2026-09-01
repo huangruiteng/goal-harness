@@ -509,4 +509,16 @@ def set_goal_handoff_mode(
             new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
             resolved_state_file.write_text(new_text, encoding="utf-8")
     payload["changed"] = True
+    from ..coordination.local_authority_shadow_adapter import (
+        observe_local_authority_commit,
+    )
+
+    evidence = observe_local_authority_commit(
+        registry_path=registry_path,
+        runtime_root=runtime_root_from_registry(registry_path, None),
+        goal_id=goal_id,
+        source_operation=f"handoff_mode_set:{previous}:{requested}",
+    )
+    if evidence is not None:
+        payload["authority_shadow"] = evidence
     return payload
