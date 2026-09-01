@@ -107,7 +107,6 @@
         "codex-b",
         "codex-a"
       ],
-      "fast": false,
       "modality": "text",
       "observed_at": "2026-09-01T08:00:00Z",
       "outcome": "success",

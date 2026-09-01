@@ -7,6 +7,7 @@
       "transport_pool",
       "model_catalog",
       "modality_routing",
+      "request_normalizer",
       "settings_revision"
     ],
     "current_ref": "public-current-ref",
