@@ -53,6 +53,35 @@ async function openFaultHelper(mode: string, maxResponseBytes?: number) {
   });
 }
 
+test("JSON-lines transport cannot bypass its open handshake", () => {
+  let processStarted = false;
+  const DirectTransport = NoKVJsonLinesTransport as unknown as new (
+    options: {
+      argv: readonly string[];
+      config: Record<string, never>;
+      process_factory: () => never;
+    },
+    constructionToken: symbol,
+  ) => NoKVJsonLinesTransport;
+
+  assert.throws(
+    () =>
+      new DirectTransport(
+        {
+          argv: ["injected-helper"],
+          config: {},
+          process_factory: () => {
+            processStarted = true;
+            throw new Error("constructor reached process creation");
+          },
+        },
+        Symbol("caller-token"),
+      ),
+    /must be created with open\(\)/,
+  );
+  assert.equal(processStarted, false);
+});
+
 registerAuthorityStoreConformance("NoKV JSON-lines process", async (t) => {
   const transport = await openSdkHelper();
   t.after(async () => await transport.close());
