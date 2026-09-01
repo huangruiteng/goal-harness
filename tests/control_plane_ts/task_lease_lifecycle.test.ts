@@ -14,8 +14,86 @@ import {
   executeTaskLeaseLifecycle,
   TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION,
 } from "../../loopx/control_plane/work_items/task_lease_lifecycle.ts";
+import { evaluateTaskLeaseLifecycleDecision } from "../../loopx/control_plane/work_items/task_lease_lifecycle_decision.ts";
 
 const ACQUIRE_NOW = new Date("2026-09-01T03:00:00.000Z");
+
+function lifecycleDecision(
+  operation: "renew" | "transfer" | "release",
+  overrides: Record<string, unknown> = {},
+) {
+  return evaluateTaskLeaseLifecycleDecision({
+    handoff_mode: "hard_lease",
+    registered_agents: ["agent-a", "agent-b"],
+    todo: {
+      todo_id: "todo_target",
+      status: "open",
+      claimed_by: null,
+      excluded_agents: [],
+    },
+    lease: {
+      present: true,
+      active: true,
+      status: "active",
+      owner: "agent-a",
+      idempotency_key: "lease-a",
+      version: 3,
+      lease_epoch: 7,
+      write_scopes: ["docs/**"],
+      acquire_ttl_seconds: 300,
+    },
+    command: {
+      operation,
+      owner: "agent-a",
+      idempotency_key: "lease-a",
+      expected_version: 3,
+      ttl_seconds: operation === "release" ? null : 600,
+      new_owner: operation === "transfer" ? "agent-b" : null,
+      new_idempotency_key: operation === "transfer" ? "lease-b" : null,
+    },
+    ...overrides,
+  });
+}
+
+test("pure lifecycle decision owns renew transfer and release generations", () => {
+  const renewed = lifecycleDecision("renew");
+  assert.equal(renewed.outcome, "apply");
+  assert.equal(renewed.next_lease?.version, 4);
+  assert.equal(renewed.next_lease?.lease_epoch, 7);
+
+  const transferred = lifecycleDecision("transfer");
+  assert.equal(transferred.outcome, "apply");
+  assert.equal(transferred.next_lease?.owner, "agent-b");
+  assert.equal(transferred.next_lease?.version, 4);
+  assert.equal(transferred.next_lease?.lease_epoch, 8);
+
+  const released = lifecycleDecision("release");
+  assert.equal(released.outcome, "apply");
+  assert.equal(released.next_lease?.active, false);
+  assert.equal(released.next_lease?.status, "released");
+});
+
+test("pure lifecycle decision keeps provider executions behind the same gates", () => {
+  const stale = lifecycleDecision("renew", {
+    command: {
+      operation: "renew",
+      owner: "agent-a",
+      idempotency_key: "lease-a",
+      expected_version: 2,
+      ttl_seconds: 600,
+      new_owner: null,
+      new_idempotency_key: null,
+    },
+  });
+  assert.equal(stale.outcome, "conflict");
+  assert.equal(stale.code, "version_mismatch");
+
+  const softClaim = lifecycleDecision("transfer", {
+    handoff_mode: "soft_claim",
+  });
+  assert.equal(softClaim.outcome, "rejected");
+  assert.equal(softClaim.code, "handoff_mode_forbids_lease");
+});
 
 async function workspace(t: TestContext): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "loopx-task-lease-lifecycle-"));

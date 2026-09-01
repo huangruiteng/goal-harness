@@ -48,6 +48,11 @@ import {
   type TodoFact,
   type TodoFactField,
 } from "./task_lease_acquire.ts";
+import {
+  decideTaskLeaseLifecycle,
+  type TaskLeaseLifecycleDecision,
+  type TaskLeaseLifecycleDecisionInput,
+} from "./task_lease_lifecycle_decision.ts";
 
 export const TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION =
   "loopx_task_lease_lifecycle_native_v0";
@@ -1491,6 +1496,62 @@ async function persistOperationReceipt(
   });
 }
 
+function ordinaryDecision(
+  request: LifecycleRequest,
+  lease: LeaseRecord | null,
+  todo: TodoFact | null,
+  at: Date,
+): TaskLeaseLifecycleDecision {
+  const input: TaskLeaseLifecycleDecisionInput = {
+    handoff_mode: request.authority?.handoff_mode ?? "legacy",
+    registered_agents: request.authority?.registered_agents ?? [],
+    todo: todo === null
+      ? null
+      : {
+          todo_id: todo.todo_id,
+          status: todo.status,
+          claimed_by: todo.claimed_by,
+          excluded_agents: todo.excluded_agents,
+        },
+    lease: lease === null
+      ? null
+      : {
+          present: true,
+          active: leaseIsActive(lease, at),
+          status: typeof lease.status === "string" ? lease.status : null,
+          owner: persistedOwner(lease),
+          idempotency_key: persistedKey(lease),
+          version: leaseVersion(lease),
+          lease_epoch: leaseEpoch(lease),
+          write_scopes: Array.isArray(lease.write_scopes)
+            ? lease.write_scopes.filter((scope): scope is string =>
+                typeof scope === "string"
+              )
+            : [],
+          // Lifecycle decisions do not depend on the original acquire TTL.
+          // Legacy records may carry an unrelated malformed value here; keep
+          // that compatibility field out of the decision instead of turning
+          // renew/release into a new validation surface.
+          acquire_ttl_seconds:
+            typeof lease.acquire_ttl_seconds === "number" &&
+              Number.isSafeInteger(lease.acquire_ttl_seconds) &&
+              lease.acquire_ttl_seconds >= 0
+              ? lease.acquire_ttl_seconds
+              : null,
+        },
+    command: {
+      operation: request.operation as "renew" | "transfer" | "release",
+      owner: request.owner!,
+      idempotency_key: request.idempotency_key!,
+      expected_version: request.expected_version,
+      ttl_seconds: request.ttl_seconds,
+      new_owner: request.new_owner,
+      new_idempotency_key: request.new_idempotency_key,
+    },
+  };
+  return decideTaskLeaseLifecycle(input);
+}
+
 async function ordinaryOperation(
   request: LifecycleRequest,
   dependencies: LifecycleDependencies,
@@ -1556,36 +1617,34 @@ async function ordinaryOperation(
     return replay;
   }
 
+  let todo: TodoFact | null = null;
   if (request.operation !== "release") {
     const authority = request.authority;
     if (!authority) throw new TaskLeaseLifecycleError("authority is required", "authority_required");
     await revalidateAuthoritySources(authority.source_receipts);
-    const todo = authorityTodo(request);
-    if (request.operation === "transfer" &&
-        !authority.registered_agents.includes(request.owner!)) {
-      throw ownerError(request, "owner_not_registered", todo);
-    }
-    const rejection = ownerRejection(
-      todo,
-      request.operation === "transfer" ? request.new_owner : request.owner,
-      authority.registered_agents,
-    );
-    if (rejection) {
-      throw ownerError(
-        request,
-        rejection,
-        todo,
-        request.operation === "transfer" ? request.new_owner : request.owner,
-      );
-    }
+    todo = authorityTodo(request);
   }
-  const actualVersion = leaseVersion(existing);
-  if (actualVersion !== request.expected_version) {
-    throw transitionError(request, "version_mismatch", existing, leasePath);
+  const decision = ordinaryDecision(request, existing, todo, at);
+  if (decision.outcome === "conflict" || decision.outcome === "rejected") {
+    if (
+      decision.code === "todo_not_found" ||
+      decision.code === "todo_not_open" ||
+      decision.code === "owner_not_registered" ||
+      decision.code === "owner_excluded_from_todo" ||
+      decision.code === "owner_conflicts_with_claim"
+    ) {
+      const rejectedOwner = request.operation === "transfer" &&
+          decision.code === "owner_not_registered" &&
+          !request.authority?.registered_agents.includes(request.owner!)
+        ? request.owner
+        : request.operation === "transfer" ? request.new_owner : request.owner;
+      throw ownerError(request, decision.code, todo, rejectedOwner);
+    }
+    throw transitionError(request, decision.code, existing, leasePath);
   }
 
   if (request.operation === "release") {
-    if (existing === null) {
+    if (decision.code === "lease_missing") {
       return {
         ok: true,
         schema_version: "task_lease_v0",
@@ -1599,14 +1658,11 @@ async function ordinaryOperation(
         settlement: lifecycleSettlement(request, "committed"),
       };
     }
-    if (existing.status === "released") {
-      if (persistedOwner(existing) !== request.owner || persistedKey(existing) !== request.idempotency_key) {
-        throw transitionError(request, "lease_cas_mismatch", existing, leasePath);
-      }
+    if (decision.code === "lease_release_replay" && existing !== null) {
       return responseForOrdinary(request, leasePath, existing, true, { released: true });
     }
-    if (persistedOwner(existing) !== request.owner || persistedKey(existing) !== request.idempotency_key) {
-      throw transitionError(request, "lease_cas_mismatch", existing, leasePath);
+    if (existing === null || decision.next_lease === null) {
+      throw transitionError(request, "invalid_lease_snapshot", existing, leasePath);
     }
     const next = releasedLease(existing, at);
     const response = responseForOrdinary(request, leasePath, next, false, { released: true });
@@ -1616,26 +1672,20 @@ async function ordinaryOperation(
     await persistOperationReceipt(request, "committed", next, response);
     return response;
   }
-
-  if (existing === null || !leaseIsActive(existing, at)) {
-    throw transitionError(request, "lease_not_active", existing, leasePath);
+  if (existing === null || decision.next_lease === null) {
+    throw transitionError(request, "invalid_lease_snapshot", existing, leasePath);
   }
-  if (persistedOwner(existing) !== request.owner || persistedKey(existing) !== request.idempotency_key) {
-    throw transitionError(request, "lease_cas_mismatch", existing, leasePath);
-  }
-  if (request.operation === "transfer" && request.new_idempotency_key === request.idempotency_key) {
-    throw transitionError(request, "idempotency_key_reuse", existing, leasePath);
-  }
+  const decidedLease = decision.next_lease;
   const next: LeaseRecord = {
     ...existing,
     ...(request.operation === "transfer"
       ? {
-          owner: request.new_owner,
-          idempotency_key: request.new_idempotency_key,
-          lease_epoch: leaseEpoch(existing) + 1,
+          owner: decidedLease.owner,
+          idempotency_key: decidedLease.idempotency_key,
+          lease_epoch: decidedLease.lease_epoch,
         }
       : {}),
-    version: actualVersion + 1,
+    version: decidedLease.version,
     updated_at: utcIsoformat(at),
     expires_at: utcIsoformat(new Date(at.valueOf() + (request.ttl_seconds ?? 0) * 1_000)),
   };
