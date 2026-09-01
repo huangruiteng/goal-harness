@@ -11,8 +11,9 @@
 - Provider API 基线：NoKV `3d75d96965`（0.11.0 线）。Python `publish_bytes`
   generation-CAS 映射已在该基线的真实 NoKV stack 上手工跑过一次（见示例 README）；
   该次运行只是映射本身的证据，不属于任何合并门槛
-- PostgreSQL 基线：目前只有合同与交付计划；本 RFC 不声称 PostgreSQL
-  provider 或 shared authority service 已经交付
+- PostgreSQL 基线：TypeScript Stage 2B candidate 已实现 store contract，且已通过
+  真实 PostgreSQL 16 transaction matrix；shared authority service、runtime caller、
+  authentication boundary 与 authority promotion 均尚未交付
 - 语言说明：[英文版](./shared-goal-authority-state-provider-v0.md)与本中文版互为
   语义镜像；两者不一致属于缺陷
 
@@ -844,6 +845,39 @@ Stage 2 的 aggregate 与 provider shadow。该 aggregate 必须把 `handoff_mod
 lineage，却不会因此获得当前权威；把恢复状态晋升为 live authority head，必须经过
 显式的 lineage 与 binding fence。
 
+#### Stage 2B PostgreSQL candidate 状态（2026-09-01）
+
+首个 PostgreSQL candidate 已实现由 LoopX 持有的 TypeScript store contract，而非
+引入第二个语义权威。Store handle 绑定 `(tenant_id, goal_id)`，只接收 service 持有的
+database pool。固定的 `loopx_control_plane` schema 将 scoped head、committed
+operation、有序 event 与有序 receipt 分开存放。一笔 SQL transaction 创建或锁住
+scoped head row，校验 opaque provider revision，以 unique constraint fence
+`operation_id`，分配 per-goal cursor，写入 commit/event/receipt，推进 projection head，
+最后提交。`COMMIT` 之前的错误会 rollback 并返回 typed `failed`；`COMMIT` 尝试开始后
+的错误返回 typed `ambiguous`，只能通过 receipt readback reconcile。Database
+incarnation metadata 由行政部署路径安装，不能被隐式重新绑定。
+
+本切片还把 strict JSON validation 与 commit normalization 从 file 实现抽到统一的
+TypeScript authority-store codec。File 与 PostgreSQL 现在运行同一套 provider-neutral
+conformance suite，覆盖 projection-plus-receipt 原子提交、CAS contention、历史 receipt
+replay、operation fencing、有序 cursor scan、返回值隔离，以及 malformed JSON 在写前
+被拒绝。
+
+真实 PostgreSQL qualification 从这里开始，而不是等到 shadow 或 canary。一个真实
+PostgreSQL 16 实例已通过九行 durable 验证：共享 conformance matrix、同一 head 的并发
+CAS、不同 tenant 复用相同 goal 与 operation id、transaction rollback 后不暴露 head
+或 receipt、已提交 transaction 丢失响应后的 receipt 恢复，以及拒绝 database
+incarnation rebind。Fake 仍可覆盖 adapter 分支，但不能证明 row lock、unique
+constraint、rollback 或 commit visibility；因此后续每个 PostgreSQL provider 切片都
+必须保留真实数据库门禁。
+
+该 candidate 仍是 coverage-only。没有 production LoopX entry point 构造它，本地模式
+保持不变，Agent 也不能获得注入的 pool。Service authentication 与 database role、
+tenant authorization/RLS、restore incarnation rotation、pool exhaustion/cancellation/
+failover、单向 shadow parity 与 authority-source promotion 仍是显式 hold。从这里到
+TEST ONLY canary，预计还需三个经 review 的切片：service trust 与 deployment boundary；
+单向 runtime shadow 加 parity；最后是有界 canary 与 promotion gate。
+
 File-backed provider shadow 属于 Stage 2；其第一个切片已通过 #3529 合入
 `main`，证据记录在下方的 Stage 2 状态小节。
 
@@ -993,7 +1027,8 @@ retention 决策，不能用一个会制造第二 writer 的诊断 CLI 代替。
 
 - §6.2 所述由 LoopX 持有的 TypeScript transaction/store boundary 与 file-provider
   conformance；
-- 在同一 boundary 后分别验证 NoKV 与 PostgreSQL provider；
+- 在同一 boundary 后继续完成 NoKV qualification，以及 PostgreSQL 剩余的 service、
+  failure 与 promotion hold；
 - 单向 shadow parity、一个 Goal/两个 Agent 的 TEST ONLY canary，以及不保留长期
   dual-write/dual-master 的单一权威源切换；
 - 显式 shared-mode migration 与 rollback/export、本地 writer 围栏、provider

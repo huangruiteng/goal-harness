@@ -12,8 +12,10 @@
   `publish_bytes` generation-CAS mapping was exercised once by hand against a
   live NoKV stack at that pin (see the example README); the run is evidence for
   the mapping only, not part of any merge gate
-- PostgreSQL baseline: contract and delivery plan only. This RFC does not claim
-  that a PostgreSQL provider or shared authority service already ships
+- PostgreSQL baseline: the TypeScript Stage 2B candidate implements the store
+  contract and has passed a real PostgreSQL 16 transaction matrix. No shared
+  authority service, runtime caller, authentication boundary, or authority
+  promotion ships yet
 - Language note: the
   [Chinese version](./shared-goal-authority-state-provider-v0.zh-CN.md) and this
   English version are semantic mirrors. A difference between them is a defect.
@@ -1049,6 +1051,46 @@ independent version domains. Likewise, a restore may preserve frozen bytes and
 lineage without granting current authority: promoting restored state to the
 live authority head requires an explicit lineage and binding fence.
 
+#### Stage 2B PostgreSQL candidate status (2026-09-01)
+
+The first PostgreSQL candidate now implements the LoopX-owned TypeScript store
+contract instead of introducing a second semantic authority. A store handle is
+bound to `(tenant_id, goal_id)` and receives only a service-owned database
+pool. Its fixed `loopx_control_plane` schema separates the scoped head,
+committed operations, ordered events, and ordered receipts. One SQL transaction
+creates or locks the scoped head row, checks the opaque provider revision,
+fences `operation_id` with a unique constraint, allocates the per-goal cursor,
+inserts the commit/events/receipts, advances the projection head, and commits.
+An error before `COMMIT` is rolled back and typed `failed`; an error after the
+`COMMIT` attempt starts is typed `ambiguous` and can be reconciled only by
+receipt readback. Database-incarnation metadata is installed administratively
+and cannot be rebound implicitly.
+
+This slice also moves strict JSON validation and commit normalization out of
+the file implementation into one TypeScript authority-store codec. File and
+PostgreSQL now run the same provider-neutral conformance suite for atomic
+projection-plus-receipt commit, CAS contention, historical receipt replay,
+operation fencing, ordered cursor scans, isolation of returned values, and
+pre-write rejection of malformed JSON.
+
+Real PostgreSQL qualification starts here, not at shadow or canary. A
+PostgreSQL 16 instance passed nine durable rows: the shared conformance matrix,
+same-head concurrent CAS, tenant-scoped reuse of the same goal and operation
+ids, transaction rollback with no visible head or receipt, receipt recovery
+after a committed transaction loses its response, and database-incarnation
+rebind refusal. A fake can still exercise adapter branches, but it cannot prove
+row locking, unique constraints, rollback, or commit visibility; every later
+PostgreSQL provider slice must therefore retain a real-database gate.
+
+The candidate remains coverage-only. No production LoopX entry point constructs
+it, local mode remains unchanged, and Agents cannot receive the injected pool.
+Service authentication and database roles, tenant authorization/RLS, restore
+incarnation rotation, pool exhaustion/cancellation/failover, one-way shadow
+parity, and authority-source promotion remain explicit holds. The expected
+route to the TEST ONLY canary is three further reviewed slices: service trust
+and deployment boundaries; one-way runtime shadow plus parity; then the bounded
+canary and promotion gate.
+
 The file-backed provider shadow is Stage 2; its first slice is merged on
 `main` through #3529, and the evidence behind it is recorded in the Stage 2
 status subsection below.
@@ -1246,7 +1288,8 @@ shipped production capability.
 
 - the LoopX-owned TypeScript transaction/store boundary and file-provider
   conformance described in Section 6.2;
-- NoKV and PostgreSQL providers qualified independently behind that boundary;
+- NoKV qualification and the remaining PostgreSQL service, failure, and
+  promotion holds behind that boundary;
 - one-way shadow parity, the one-Goal/two-Agent TEST ONLY canary, and a
   single-source authority flip with no long-lived dual-write or dual-master;
 - an explicit shared-mode migration and rollback/export operation, local
