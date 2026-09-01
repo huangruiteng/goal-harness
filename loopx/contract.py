@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -43,29 +44,75 @@ from .control_plane.todos.contract import (
 )
 
 
-LEAK_PATTERNS = {
-    "private_doc_url": re.compile(
-        "|".join(["la" + "rk" + "office", "docs" + r"\." + "internal"]),
-        re.I,
-    ),
-    "credential": re.compile(
-        "|".join(
-            [
-                "Bear" + "er" + r"\s+[A-Za-z0-9._-]+",
-                "AK" + "IA" + r"[0-9A-Z]{16}",
-                r"(?<![A-Za-z0-9_])" + "tok" + "en=",
-                r"(?<![A-Za-z0-9_])" + "pass" + "word=",
-                "Author" + "ization:",
-            ]
+@dataclass(frozen=True)
+class LeakRule:
+    pattern: re.Pattern[str]
+    required_literals: tuple[str, ...]
+
+    def is_candidate(self, folded_text: str) -> bool:
+        return any(literal in folded_text for literal in self.required_literals)
+
+
+# Required literals are only a cheap necessary condition for running a rule.
+# The regular expressions remain the sole authority for classifying a leak.
+LEAK_RULES = {
+    "private_doc_url": LeakRule(
+        pattern=re.compile(
+            "|".join(["la" + "rk" + "office", "docs" + r"\." + "internal"]),
+            re.I,
         ),
-        re.I,
+        required_literals=("lark" + "office", "docs" + ".internal"),
     ),
-    "local_private_path": re.compile(
-        "(" + "/" + "Users" + "/" + r"[^/\s]+/(?:Documents|code" + "-" + r"reading)|" + "/ext" + "_data/" + ")"
+    "credential": LeakRule(
+        pattern=re.compile(
+            "|".join(
+                [
+                    "Bear" + "er" + r"\s+[A-Za-z0-9._-]+",
+                    "AK" + "IA" + r"[0-9A-Z]{16}",
+                    r"(?<![A-Za-z0-9_])" + "tok" + "en=",
+                    r"(?<![A-Za-z0-9_])" + "pass" + "word=",
+                    "Author" + "ization:",
+                ]
+            ),
+            re.I,
+        ),
+        required_literals=(
+            "bear" + "er",
+            "ak" + "ia",
+            "tok" + "en=",
+            "pass" + "word=",
+            "author" + "ization:",
+        ),
     ),
-    "internal_task_id": re.compile(r"\bt-" + r"20\d{12}-[a-z0-9]+\b"),
-    "private_ip": re.compile(r"\b10\.\d+\.\d+\.\d+\b|\b172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+\b|\b192\.168\.\d+\.\d+\b"),
+    "local_private_path": LeakRule(
+        pattern=re.compile(
+            "("
+            + "/"
+            + "Users"
+            + "/"
+            + r"[^/\s]+/(?:Documents|code"
+            + "-"
+            + r"reading)|"
+            + "/ext"
+            + "_data/"
+            + ")"
+        ),
+        required_literals=("/" + "users/", "/ext" + "_data/"),
+    ),
+    "internal_task_id": LeakRule(
+        pattern=re.compile(r"\bt-" + r"20\d{12}-[a-z0-9]+\b"),
+        required_literals=("t-20",),
+    ),
+    "private_ip": LeakRule(
+        pattern=re.compile(
+            r"\b10\.\d+\.\d+\.\d+\b"
+            r"|\b172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+\b"
+            r"|\b192\.168\.\d+\.\d+\b"
+        ),
+        required_literals=("10.", "172.", "192.168."),
+    ),
 }
+LEAK_PATTERNS = {name: rule.pattern for name, rule in LEAK_RULES.items()}
 
 # The Lark developer console is a public product surface, even though its
 # hostname shares the tenant-document marker used by private workspaces.
@@ -138,7 +185,7 @@ def _credential_match_is_reference(line: str, match: re.Match[str]) -> bool:
 
 
 def _credential_hits_are_all_references(line: str) -> bool:
-    matches = list(LEAK_PATTERNS["credential"].finditer(line))
+    matches = list(LEAK_RULES["credential"].pattern.finditer(line))
     if not matches:
         return False
     return all(_credential_match_is_reference(line, match) for match in matches)
@@ -789,12 +836,23 @@ def scan_public_boundary(
         except OSError as exc:
             unreadable_files.append(f"{rel_or_abs(path, root)}: {exc.strerror or exc}")
             continue
+        folded_text = text.casefold()
+        candidate_rules = [
+            (name, rule)
+            for name, rule in LEAK_RULES.items()
+            if rule.is_candidate(folded_text)
+        ]
+        if not candidate_rules:
+            continue
         for line_no, line in enumerate(text.splitlines(), start=1):
-            for name, pattern in LEAK_PATTERNS.items():
+            folded_line = line.casefold()
+            for name, rule in candidate_rules:
+                if not rule.is_candidate(folded_line):
+                    continue
                 scan_line = line
                 if name == "private_doc_url":
                     scan_line = _PUBLIC_LARK_DEVELOPER_CONSOLE_HOST.sub("", scan_line)
-                if pattern.search(scan_line):
+                if rule.pattern.search(scan_line):
                     hit = f"{rel_or_abs(path, root)}:{line_no}: {name}"
                     if name == "credential" and _credential_hits_are_all_references(line):
                         credential_reference_hits.append(hit)
