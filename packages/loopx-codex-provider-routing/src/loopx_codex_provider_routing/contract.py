@@ -323,6 +323,7 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
             )
         ):
             raise ValueError(f"route {slug} has no fast-eligible candidate")
+        max_cycles = rings[ring_id]["max_cycles"] if isinstance(ring_id, str) else 1
 
         routes.append(
             {
@@ -363,7 +364,7 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
                     "traversal": "one_ring_pass_then_tail"
                     if uses_ring
                     else "ordered_candidates_once",
-                    "max_cycles": rings[ring_id]["max_cycles"] if uses_ring else 1,
+                    "max_cycles": max_cycles,
                     "commit_barrier": "before_first_visible_output_or_tool_call",
                     "foreign_history": "normalize_or_quarantine",
                 },

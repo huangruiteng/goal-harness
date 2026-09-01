@@ -64,6 +64,8 @@ def _run_request(request: Any) -> dict[str, Any]:
         "qualify_snapshot": "snapshot",
         "upgrade_plan": "upgrade",
     }
+    if not isinstance(operation, str):
+        raise ValueError(f"unsupported operation: {operation!r}")
     expected_field = operation_fields.get(operation)
     if expected_field is None:
         raise ValueError(f"unsupported operation: {operation!r}")
