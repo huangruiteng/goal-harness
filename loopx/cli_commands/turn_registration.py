@@ -120,6 +120,20 @@ def register_turn_commands(
         help="Typed recovery disposition when the independent validator rejects the result.",
     )
     run_once.add_argument(
+        "--authority-guard-command-json",
+        help=(
+            "TEST ONLY: JSON argv array for an authority checkpoint guard. "
+            "Requires LOOPX_SHARED_AUTHORITY_TEST_ONLY=1. The command reads one "
+            "checkpoint request from stdin and emits one typed result on stdout."
+        ),
+    )
+    run_once.add_argument(
+        "--authority-guard-timeout-seconds",
+        type=float,
+        default=10.0,
+        help="TEST ONLY: timeout for each authority checkpoint guard invocation.",
+    )
+    run_once.add_argument(
         "--codex-bin",
         default="codex",
         help="Codex CLI executable used by the built-in codex-cli host.",

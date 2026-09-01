@@ -1253,6 +1253,105 @@ raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "validated" else 7
     ]
 
 
+def test_turn_run_once_cli_test_only_authority_guard_is_gated_and_wired(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project, runtime, registry = _write_live_fixture(tmp_path)
+    host_project = tmp_path / "guarded-host-workspace"
+    host_project.mkdir()
+    guard_log = tmp_path / "authority-checkpoints.jsonl"
+    host_script = """
+import json
+import sys
+request = json.load(sys.stdin)
+json.dump({
+    "schema_version": "loopx_turn_result_v0",
+    "turn_key": request["turn_key"],
+    "result_kind": "validated_progress",
+    "completed_phases": ["host_execute", "typed_result"],
+    "classification": "fixture_progress",
+    "recommended_action": "Continue the public fixture",
+    "next_action": "Run the next public fixture check",
+    "delivery_batch_scale": "implementation",
+    "delivery_outcome": "outcome_progress",
+    "vision_unchanged_reason": "The fixture objective remains unchanged.",
+    "summary": "One guarded fixture advanced."
+}, sys.stdout)
+"""
+    validation_script = "import json, sys; json.load(sys.stdin); raise SystemExit(0)"
+    guard_script = """
+import json
+import pathlib
+import sys
+request = json.load(sys.stdin)
+with pathlib.Path(sys.argv[1]).open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps({"checkpoint": request["checkpoint"]}) + "\\n")
+binding = request.get("authority_binding") or {
+    "schema_version": "loopx_turn_authority_binding_v0",
+    "store_identity": "file:00000000000000000000000000000001",
+    "operation_id": "cli-guard-fixture",
+    "receipt_digest": "sha256:" + "d" * 64,
+    "authority_revision": 1,
+    "todo_revision": 1,
+    "lease_id": "lease-cli-fixture",
+    "lease_epoch": 1,
+    "expires_at": "2030-01-01T00:00:00.000Z"
+}
+json.dump({"ok": True, "binding": binding}, sys.stdout)
+"""
+    argv = [
+        "--registry",
+        str(registry),
+        "--runtime-root",
+        str(runtime),
+        "--format",
+        "json",
+        "turn",
+        "run-once",
+        "--goal-id",
+        "loopx-turn-fixture",
+        "--agent-id",
+        "codex-fixture",
+        "--project",
+        str(host_project),
+        "--host-adapter-command-json",
+        json.dumps([sys.executable, "-c", host_script]),
+        "--validation-command-json",
+        json.dumps([sys.executable, "-c", validation_script]),
+        "--authority-guard-command-json",
+        json.dumps([sys.executable, "-c", guard_script, str(guard_log)]),
+        "--scan-root",
+        str(project),
+        "--no-global-sync",
+        "--execute",
+    ]
+
+    monkeypatch.delenv("LOOPX_SHARED_AUTHORITY_TEST_ONLY", raising=False)
+    rejected_output = io.StringIO()
+    with contextlib.redirect_stdout(rejected_output):
+        rejected_exit = cli_main(argv)
+    rejected = json.loads(rejected_output.getvalue())
+    assert rejected_exit == 1
+    assert rejected["effects"]["host_invoked"] is False
+    assert "TEST ONLY" in rejected["error"]
+    assert not guard_log.exists()
+
+    monkeypatch.setenv("LOOPX_SHARED_AUTHORITY_TEST_ONLY", "1")
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(argv)
+    payload = json.loads(output.getvalue())
+
+    assert exit_code == 0, payload
+    assert payload["status"] == "committed"
+    assert payload["authority_checkpoint_guard"]["binding"]["lease_epoch"] == 1
+    assert [
+        json.loads(line)["checkpoint"]
+        for line in guard_log.read_text(encoding="utf-8").splitlines()
+    ] == ["host_admission", "durable_writeback", "quota_spend", "scheduler"]
+
+
 def test_turn_run_once_cli_completes_selected_todo_after_validation(
     tmp_path: Path,
 ) -> None:

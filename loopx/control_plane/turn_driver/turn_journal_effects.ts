@@ -185,7 +185,18 @@ function requireJournalState(journal: JsonObject): JournalState {
     const nextPhase = transactionPhases[completedPhases.length] ?? null;
     const terminalCloseoutFailure =
       failedPhase === "terminal_closeout" && completedPhases.length === 5;
-    if (!failedPhase || (failedPhase !== nextPhase && !terminalCloseoutFailure)) {
+    const authorityAdmissionFailure =
+      failedPhase === "authority_admission" &&
+      completedPhases.length === 0 &&
+      journal.result_kind === "authority_rejected";
+    if (
+      !failedPhase ||
+      (
+        failedPhase !== nextPhase &&
+        !terminalCloseoutFailure &&
+        !authorityAdmissionFailure
+      )
+    ) {
       conflict("Failed Turn journal must name the next uncompleted phase");
     }
   }

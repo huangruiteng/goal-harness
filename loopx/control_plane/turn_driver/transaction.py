@@ -32,6 +32,7 @@ class LoopXTurnResultKind(str, Enum):
     REPLAN_REQUIRED = "replan_required"
     USER_ACTION_REQUIRED = "user_action_required"
     WAIT = "wait"
+    AUTHORITY_REJECTED = "authority_rejected"
     HOST_FAILURE = "host_failure"
     VALIDATION_FAILED = "validation_failed"
     WRITEBACK_FAILED = "writeback_failed"
@@ -48,6 +49,7 @@ MATERIAL_RESULT_KINDS = {
 NO_SPEND_RESULT_KINDS = {
     LoopXTurnResultKind.USER_ACTION_REQUIRED,
     LoopXTurnResultKind.WAIT,
+    LoopXTurnResultKind.AUTHORITY_REJECTED,
     LoopXTurnResultKind.HOST_FAILURE,
     LoopXTurnResultKind.VALIDATION_FAILED,
     LoopXTurnResultKind.WRITEBACK_FAILED,
@@ -58,6 +60,7 @@ STOP_RESULT_KINDS = {
     LoopXTurnResultKind.WAIT,
 }
 FAILURE_PHASES = {
+    LoopXTurnResultKind.AUTHORITY_REJECTED: "authority_admission",
     LoopXTurnResultKind.HOST_FAILURE: "host_execute",
     LoopXTurnResultKind.VALIDATION_FAILED: "validation",
     LoopXTurnResultKind.WRITEBACK_FAILED: "durable_writeback",
@@ -313,7 +316,17 @@ def validate_loopx_turn_receipt(
         and kind is LoopXTurnResultKind.TERMINAL_CLOSEOUT_FAILED
         and completed == list(TRANSACTION_PHASES[:5])
     )
-    if failed_phase and failed_phase != expected_next and not terminal_closeout_failure:
+    authority_admission_failure = bool(
+        failed_phase == "authority_admission"
+        and kind is LoopXTurnResultKind.AUTHORITY_REJECTED
+        and completed == []
+    )
+    if (
+        failed_phase
+        and failed_phase != expected_next
+        and not terminal_closeout_failure
+        and not authority_admission_failure
+    ):
         errors.append("failed_phase must be the next uncompleted transaction phase")
     if failed_phase and kind not in FAILURE_PHASES:
         errors.append("failed_phase is only valid for a typed failure result")

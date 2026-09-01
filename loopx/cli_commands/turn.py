@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ from ..control_plane.turn_driver import (
     TurnRecoveryBlockedError,
     build_loopx_turn_command_validator,
     build_loopx_turn_plan,
+    build_turn_authority_command_guard,
     codex_cli_session_binding,
     load_loopx_turn_plan_from_journal,
     run_codex_cli_host,
@@ -239,6 +241,27 @@ def handle_turn_command(
                         "LoopX Turn resume journal belongs to another agent"
                     )
             project = Path(args.project).expanduser().resolve()
+            authority_checkpoint_guard = None
+            if args.authority_guard_command_json:
+                if os.environ.get("LOOPX_SHARED_AUTHORITY_TEST_ONLY") != "1":
+                    raise ValueError(
+                        "--authority-guard-command-json is TEST ONLY and requires "
+                        "LOOPX_SHARED_AUTHORITY_TEST_ONLY=1"
+                    )
+                raw_authority_guard_argv = json.loads(
+                    args.authority_guard_command_json
+                )
+                if not isinstance(raw_authority_guard_argv, list) or not all(
+                    isinstance(item, str) for item in raw_authority_guard_argv
+                ):
+                    raise ValueError(
+                        "--authority-guard-command-json must be a JSON string array"
+                    )
+                authority_checkpoint_guard = build_turn_authority_command_guard(
+                    raw_authority_guard_argv,
+                    project=project,
+                    timeout_seconds=args.authority_guard_timeout_seconds,
+                )
             planned_host = (
                 payload.get("host") if isinstance(payload.get("host"), dict) else {}
             )
@@ -948,6 +971,9 @@ def handle_turn_command(
                     terminal_closeout_resolver if args.execute else None
                 ),
                 scheduler=scheduler if args.execute else None,
+                authority_checkpoint_guard=(
+                    authority_checkpoint_guard if args.execute else None
+                ),
             )
         else:
             raise ValueError("turn requires the `plan` or `run-once` subcommand")

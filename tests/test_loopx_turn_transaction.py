@@ -127,6 +127,7 @@ def test_receipt_rejects_turn_lineage_drift() -> None:
 @pytest.mark.parametrize(
     ("kind", "completed", "failed_phase"),
     [
+        (LoopXTurnResultKind.AUTHORITY_REJECTED, [], "authority_admission"),
         (LoopXTurnResultKind.HOST_FAILURE, [], "host_execute"),
         (
             LoopXTurnResultKind.VALIDATION_FAILED,

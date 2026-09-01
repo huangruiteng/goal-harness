@@ -19,6 +19,7 @@ from ..effect_program import (
 from ..goals.goal_vision import normalize_goal_vision_packet
 from ..work_items.delivery_batch_scale import require_delivery_batch_scale
 from ..work_items.delivery_outcome import require_delivery_outcome
+from . import authority_checkpoint as turn_authority
 from .driver import selected_turn_todo
 from .host_failure import BuiltInHostError, project_host_failure, record_host_failure
 from .journal_store import (
@@ -41,14 +42,10 @@ from .session_recovery import (
 from .settlement import (
     TurnEffectResolver,
     TurnSettlementJournalAdapter,
-    completion_writeback_outcome,
     execute_turn_driver_settlement,
-    invoke_result_effect,
-    terminal_closeout_requirement,
     turn_settlement_failure_outcome,
     turn_settlement_outcome,
     turn_effect_resolvers,
-    verified_terminal_closeout_effect,
 )
 from .transaction import (
     LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
@@ -58,6 +55,7 @@ from .transaction import (
     build_loopx_turn_transaction_plan,
     validate_loopx_turn_receipt,
 )
+
 LOOPX_TURN_HOST_REQUEST_SCHEMA_VERSION = "loopx_turn_host_request_v0"
 LOOPX_TURN_JOURNAL_INSPECTION_SCHEMA_VERSION = "loopx_turn_journal_inspection_v1"
 LOOPX_TURN_TASK_VALIDATION_SCHEMA_VERSION = "loopx_turn_task_validation_v0"
@@ -821,6 +819,7 @@ def _execution_payload(
             else {}
         ),
         **({"todo_completion": todo_completion} if todo_completion else {}),
+        **turn_authority.authority_journal_projection(journal),
         **({"reason": journal.get("reason")} if journal.get("reason") else {}),
         **project_host_failure(journal),
         **({"recovery": dict(recovery)} if isinstance(recovery, Mapping) else {}),
@@ -1063,8 +1062,7 @@ def _ensure_turn_settlement_plan(
         execution_mode=str(host_fields.get("execution_mode") or "isolated-headless"),
         session_action=str(host_fields.get("session_action") or "resume"),
         turn_instance_id=(
-            transaction_plan.get("turn_instance_id")
-            or transaction_plan.get("turn_key")
+            transaction_plan.get("turn_instance_id") or transaction_plan.get("turn_key")
         ),
     )
     settlement_plan = built.get("settlement_plan")
@@ -1087,72 +1085,11 @@ def _typed_settlement_stage(
     spend: Spend,
     effect_resolvers: Mapping[SettlementStepKind, TurnEffectResolver],
     scheduler: Scheduler,
+    authority_checkpoints: turn_authority.TurnAuthorityCheckpointController,
 ) -> dict[str, Any]:
     transaction_plan = (
         plan.get("transaction") if isinstance(plan.get("transaction"), Mapping) else {}
     )
-
-    terminal_closeout_required = False
-    completion_intent_error: str | None = None
-    if result.get("result_kind") == LoopXTurnResultKind.VALIDATED_COMPLETION.value:
-        if (
-            completion_writeback is None
-            or completion_intent is None
-            or terminal_closeout is None
-        ):
-            raise ValueError(
-                "validated_completion requires intent, lifecycle writeback, "
-                "and terminal closeout adapters"
-            )
-        terminal_closeout_required, completion_intent_error = (
-            terminal_closeout_requirement(
-                plan=plan,
-                result=result,
-                journal=journal,
-                completion_intent=completion_intent,
-            )
-        )
-
-    def writeback_effect(effect_ref: str) -> Mapping[str, Any]:
-        if completion_intent_error:
-            return {
-                "ok": False,
-                "appended": False,
-                "reason": completion_intent_error,
-            }
-        if (
-            result.get("result_kind") == LoopXTurnResultKind.VALIDATED_COMPLETION.value
-            and not terminal_closeout_required
-        ):
-            if completion_writeback is None:
-                raise ValueError(
-                    "validated_completion requires a todo lifecycle adapter"
-                )
-            callback_payload = invoke_result_effect(
-                completion_writeback, result, effect_ref
-            )
-            completion_outcome = completion_writeback_outcome(
-                callback_payload,
-                plan=plan,
-            )
-            if completion_outcome is None:
-                return {
-                    "ok": False,
-                    "appended": False,
-                    "reason": str(
-                        callback_payload.get("reason")
-                        or callback_payload.get("error")
-                        or (
-                            "todo lifecycle adapter returned an invalid "
-                            "completion outcome"
-                        )
-                    ),
-                }
-            return {
-                **callback_payload,
-                "completion": completion_outcome,
-            }
-        return invoke_result_effect(writeback, result, effect_ref)
 
     journal_adapter = TurnSettlementJournalAdapter(
         journal,
@@ -1160,15 +1097,16 @@ def _typed_settlement_stage(
         lambda: _write_journal(journal_path, journal),
         _compact_callback,
     )
-
-    terminal_effect = None
-    terminal_checkpoint = None
-    if terminal_closeout_required:
-        assert terminal_closeout is not None
-        terminal_effect = verified_terminal_closeout_effect(
-            terminal_closeout, result=result, plan=plan
-        )
-        terminal_checkpoint = journal_adapter.checkpoint_terminal
+    authority_effects = authority_checkpoints.settlement_effects(
+        result=result,
+        writeback=writeback,
+        completion_writeback=completion_writeback,
+        completion_intent=completion_intent,
+        terminal_closeout=terminal_closeout,
+        spend=spend,
+        terminal_checkpoint=journal_adapter.checkpoint_terminal,
+    )
+    terminal_closeout_required = authority_effects.terminal_closeout_required
 
     settlement_result = execute_turn_driver_settlement(
         transaction_plan,
@@ -1184,8 +1122,8 @@ def _typed_settlement_stage(
             if isinstance(journal.get("quota_spend"), Mapping)
             else None
         ),
-        writeback=writeback_effect,
-        spend=spend,
+        writeback=authority_effects.writeback,
+        spend=authority_effects.spend,
         checkpoint=journal_adapter.checkpoint,
         committed_effect_id=_journal_committed_effect_id(journal),
         terminal_closeout_required=terminal_closeout_required,
@@ -1194,8 +1132,8 @@ def _typed_settlement_stage(
             if isinstance(journal.get("terminal_closeout"), Mapping)
             else None
         ),
-        terminal_closeout=terminal_effect,
-        terminal_checkpoint=terminal_checkpoint,
+        terminal_closeout=authority_effects.terminal_closeout,
+        terminal_checkpoint=authority_effects.terminal_checkpoint,
         prepare=journal_adapter.prepare,
         abort=journal_adapter.abort,
         effect_attempts=journal_adapter.effect_attempts,
@@ -1243,7 +1181,11 @@ def _typed_settlement_stage(
     spend_payload = dict(settlement_state.quota_spend)
     _write_journal(journal_path, journal)
 
-    scheduler_payload = scheduler(spend_payload)
+    scheduler_payload = authority_checkpoints.run_scheduler(
+        scheduler,
+        spend_payload,
+        terminal_closeout_required=terminal_closeout_required,
+    )
     journal["scheduler"] = scheduler_payload
     if scheduler_payload.get("completed") is not True:
         journal.update(
@@ -1298,6 +1240,8 @@ def run_loopx_turn_once(
     spend_resolver: TurnEffectResolver | None = None,
     terminal_closeout_resolver: TurnEffectResolver | None = None,
     scheduler: Scheduler | None = None,
+    authority_checkpoint_guard: turn_authority.TurnAuthorityCheckpointGuard
+    | None = None,
 ) -> dict[str, Any]:
     if host_runner is not None and host_argv is not None:
         raise ValueError("run-once accepts either host_argv or host_runner, not both")
@@ -1440,6 +1384,37 @@ def run_loopx_turn_once(
             payload["recovery"] = dict(journal["recovery_audit"])
             return payload
 
+        authority_checkpoints = (
+            turn_authority.build_turn_authority_checkpoint_controller(
+                authority_checkpoint_guard,
+                plan=plan,
+                transaction_plan=transaction_plan,
+                journal=journal,
+                turn_key=turn_key,
+                persist=lambda: _write_journal(journal_path, journal),
+            )
+        )
+        admitted = authority_checkpoints.admit_host(
+            completed_phases=list(journal.get("completed_phases") or []),
+            failure=lambda reason: _host_failure(
+                plan,
+                kind=LoopXTurnResultKind.AUTHORITY_REJECTED,
+                completed_phases=[],
+                failed_phase="authority_admission",
+                reason=reason,
+            ),
+        )
+        if not admitted:
+            return finish_recovery(
+                _execution_payload(
+                    plan,
+                    journal,
+                    execute=True,
+                    replayed=False,
+                    effects=effects,
+                )
+            )
+
         result, completed_phases, terminal = _host_result_stage(
             plan,
             request,
@@ -1475,22 +1450,25 @@ def run_loopx_turn_once(
         if terminal is not None:
             return finish_recovery(terminal)
 
-        return finish_recovery(_typed_settlement_stage(
-            plan,
-            result,
-            completed_phases=completed_phases,
-            journal=journal,
-            journal_path=journal_path,
-            effects=effects,
-            writeback=writeback,
-            completion_writeback=completion_writeback,
-            completion_intent=completion_intent,
-            terminal_closeout=terminal_closeout,
-            spend=spend,
-            effect_resolvers=turn_effect_resolvers(
-                writeback=writeback_resolver,
-                spend=spend_resolver,
-                terminal_closeout=terminal_closeout_resolver,
-            ),
-            scheduler=scheduler,
-        ))
+        return finish_recovery(
+            _typed_settlement_stage(
+                plan,
+                result,
+                completed_phases=completed_phases,
+                journal=journal,
+                journal_path=journal_path,
+                effects=effects,
+                writeback=writeback,
+                completion_writeback=completion_writeback,
+                completion_intent=completion_intent,
+                terminal_closeout=terminal_closeout,
+                spend=spend,
+                effect_resolvers=turn_effect_resolvers(
+                    writeback=writeback_resolver,
+                    spend=spend_resolver,
+                    terminal_closeout=terminal_closeout_resolver,
+                ),
+                scheduler=scheduler,
+                authority_checkpoints=authority_checkpoints,
+            )
+        )
