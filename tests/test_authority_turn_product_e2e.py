@@ -5,8 +5,11 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from loopx.control_plane.coordination.file_provider import FileCoordinationProvider
 from loopx.control_plane.coordination.head import bootstrap_head
@@ -622,7 +625,7 @@ def test_two_product_cli_agents_share_one_authority_and_settle_once(
     assert completion_receipts[0]["actor"]["agent_id"] == winning_agent_id
 
 
-def test_configured_inbox_wake_cannot_grant_todo_or_turn_authority(
+def test_configured_inbox_signal_cannot_grant_todo_or_turn_authority(
     tmp_path: Path,
 ) -> None:
     project, runtime, registry, _host_project = _write_product_fixture(
@@ -682,3 +685,111 @@ def test_configured_inbox_wake_cannot_grant_todo_or_turn_authority(
     assert plan["effects"]["host_invoked"] is False
     assert "authority_checkpoint_guard" not in plan
     assert not (runtime / "goals" / GOAL_ID / "turns").exists()
+
+
+def _remove_live_nokv_head(provider: Any) -> None:
+    head, generation = provider.load()
+    if head is None:
+        return
+    result = provider.client.remove(
+        provider.workbench,
+        provider.head_path,
+        generation,
+    )
+    if not isinstance(result, dict) or result.get("removed") is not True:
+        raise AssertionError("live NoKV product E2E did not remove its test head")
+
+
+@pytest.mark.skipif(
+    os.environ.get("NOKV_COORDINATION_LIVE") != "1",
+    reason="set NOKV_COORDINATION_LIVE=1 for the opt-in NoKV product E2E",
+)
+def test_two_product_cli_agents_share_one_live_nokv_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path_value = os.environ.get("NOKV_CLIENT_CONFIG_JSON", "")
+    workbench = os.environ.get("NOKV_COORDINATION_WORKBENCH", "")
+    config_path = Path(config_path_value)
+    if not config_path.is_absolute() or not config_path.is_file() or not workbench:
+        pytest.fail(
+            "live NoKV product E2E requires an absolute NOKV_CLIENT_CONFIG_JSON "
+            "and NOKV_COORDINATION_WORKBENCH"
+        )
+
+    provider_directory = REPOSITORY / "examples" / "nokv-shadow-provider"
+    sys.path.insert(0, str(provider_directory))
+    try:
+        from provider import open_nokv_coordination_provider
+    finally:
+        sys.path.pop(0)
+    from loopx.control_plane.coordination.nokv_jsonl_helper import build_client
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    suffix = uuid.uuid4().hex[:12]
+    goal_id = f"goal-authority-product-live-{suffix}"
+    todo_id = f"todo_{suffix}"
+    followup_todo_id = f"follow_{suffix}"
+
+    def open_provider(_directory: Path, selected_goal_id: str):
+        return open_nokv_coordination_provider(
+            lambda: build_client(config),
+            workbench,
+            selected_goal_id,
+        )
+
+    def live_guard_argv(
+        *,
+        store: Path,
+        clock: Path,
+        barrier: Path,
+        barrier_helper: Path,
+        agent_id: str,
+    ) -> list[str]:
+        del store
+        delegate = [
+            sys.executable,
+            str(provider_directory / "authority_guard.py"),
+            "--nokv-client-config-json",
+            str(config_path),
+            "--nokv-workbench",
+            workbench,
+            "--clock-file",
+            str(clock),
+            "--goal-id",
+            goal_id,
+            "--agent-id",
+            agent_id,
+            "--todo-id",
+            todo_id,
+            "--lease-ttl-seconds",
+            "60",
+            "--reclaim-grace-seconds",
+            "3",
+        ]
+        return [
+            sys.executable,
+            str(barrier_helper),
+            str(barrier),
+            agent_id,
+            *delegate,
+        ]
+
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "GOAL_ID", goal_id)
+    monkeypatch.setattr(module, "TODO_ID", todo_id)
+    monkeypatch.setattr(module, "FOLLOWUP_TODO_ID", followup_todo_id)
+    monkeypatch.setattr(module, "FileCoordinationProvider", open_provider)
+    monkeypatch.setattr(module, "_guard_argv", live_guard_argv)
+
+    cleanup_provider = open_provider(Path(), goal_id)
+    completed = False
+    try:
+        test_two_product_cli_agents_share_one_authority_and_settle_once(tmp_path)
+        completed = True
+    finally:
+        try:
+            _remove_live_nokv_head(cleanup_provider)
+        except Exception:
+            if completed:
+                raise

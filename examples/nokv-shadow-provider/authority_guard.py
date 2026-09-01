@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""TEST ONLY file-provider Turn authority guard.
+"""TEST ONLY file/NoKV Turn authority guard.
 
 This process adapter composes the production ``CoordinationAuthorityExecutor``
-with ``FileCoordinationProvider``.  It is qualification wiring, not a shared
-production-mode declaration: every invocation reads one Turn checkpoint on
-stdin and emits one typed result on stdout.  Claim/reclaim and renew therefore
-use the same authority core, aggregate, receipts, CAS, and store-lineage fence
-as the NoKV provider contract; no parallel lock-based oracle exists here.
+with one explicitly selected coordination provider.  It is qualification
+wiring behind the existing TEST ONLY Turn-controller environment gate, not a
+shared production-mode declaration: every invocation reads one Turn checkpoint
+on stdin and emits one typed result on stdout.  Claim/reclaim and renew
+therefore use the same authority core, aggregate, receipts, CAS, and
+store-lineage fence; no parallel lock-based oracle exists here.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import argparse
 import hashlib
 import json
 import os
+import stat
 import sys
 from collections.abc import Mapping
 from datetime import datetime
@@ -35,6 +37,14 @@ from loopx.control_plane.coordination.file_provider import (
     FileCoordinationProvider,
 )
 from loopx.control_plane.coordination.head import validated_head
+from loopx.control_plane.coordination.nokv_jsonl_helper import build_client
+from provider import (
+    NoKVCoordinationProvider,
+    open_nokv_coordination_provider,
+)
+
+CoordinationProvider = FileCoordinationProvider | NoKVCoordinationProvider
+MAX_NOKV_CLIENT_CONFIG_BYTES = 1 << 20
 
 
 def _clock(path: Path) -> float:
@@ -183,7 +193,7 @@ def _complete_authority(
     binding: Mapping[str, Any],
     *,
     executor: CoordinationAuthorityExecutor,
-    provider: FileCoordinationProvider,
+    provider: CoordinationProvider,
     clock_path: Path,
     goal_id: str,
     agent_id: str,
@@ -228,9 +238,7 @@ def _complete_authority(
             or lease.get("lease_id") != binding.get("lease_id")
             or lease.get("lease_epoch") != binding.get("lease_epoch")
         ):
-            return _rejection(
-                "stale_lease_fence", "authority lease generation changed"
-            )
+            return _rejection("stale_lease_fence", "authority lease generation changed")
         expiry = datetime.fromisoformat(str(lease["expires_at"]))
         if _clock(clock_path) >= expiry.timestamp():
             return _rejection(
@@ -289,7 +297,7 @@ def _admit(
     request: Mapping[str, Any],
     *,
     executor: CoordinationAuthorityExecutor,
-    provider: FileCoordinationProvider,
+    provider: CoordinationProvider,
     goal_id: str,
     agent_id: str,
     todo_id: str,
@@ -380,7 +388,7 @@ def _revalidate_and_renew(
     binding: Mapping[str, Any],
     *,
     executor: CoordinationAuthorityExecutor,
-    provider: FileCoordinationProvider,
+    provider: CoordinationProvider,
     clock_path: Path,
     goal_id: str,
     agent_id: str,
@@ -423,9 +431,7 @@ def _revalidate_and_renew(
     ):
         if request.get("checkpoint") in {"quota_spend", "scheduler"}:
             return {"ok": True, "binding": dict(binding)}
-        return _rejection(
-            "stale_lease_fence", "authority work is already complete"
-        )
+        return _rejection("stale_lease_fence", "authority work is already complete")
     todo = head["coordination"]["todos"].get(todo_id)
     lease = head["coordination"]["leases"].get(todo_id)
     if not isinstance(todo, Mapping) or not isinstance(lease, Mapping):
@@ -473,6 +479,47 @@ def _revalidate_and_renew(
     return {"ok": True, "binding": dict(binding)}
 
 
+def _coordination_provider(args: argparse.Namespace) -> CoordinationProvider:
+    store_directory = getattr(args, "store_directory", None)
+    config_path = getattr(args, "nokv_client_config_json", None)
+    workbench = getattr(args, "nokv_workbench", None)
+    nokv_selected = config_path is not None or workbench is not None
+    if store_directory is not None and nokv_selected:
+        raise ValueError("authority guard backend selection is invalid")
+    if (config_path is None) != (workbench is None):
+        raise ValueError("authority guard NoKV selection is incomplete")
+    if store_directory is not None:
+        return FileCoordinationProvider(store_directory, args.goal_id)
+    if config_path is None or workbench is None:
+        raise ValueError("authority guard backend is required")
+    if os.environ.get("LOOPX_SHARED_AUTHORITY_TEST_ONLY") != "1":
+        raise ValueError("NoKV authority guard requires the TEST ONLY gate")
+    if (
+        not isinstance(config_path, str)
+        or not config_path
+        or config_path.strip() != config_path
+        or not isinstance(workbench, str)
+        or not workbench
+        or workbench.strip() != workbench
+    ):
+        raise ValueError("authority guard NoKV selection is invalid")
+    config_file = Path(config_path)
+    if not config_file.is_absolute():
+        raise ValueError("authority guard NoKV config path must be absolute")
+    with config_file.open("rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("authority guard NoKV config must be a regular file")
+        encoded_config = stream.read(MAX_NOKV_CLIENT_CONFIG_BYTES + 1)
+    if len(encoded_config) > MAX_NOKV_CLIENT_CONFIG_BYTES:
+        raise ValueError("authority guard NoKV config is too large")
+    config = json.loads(encoded_config)
+    return open_nokv_coordination_provider(
+        lambda: build_client(config),
+        workbench,
+        args.goal_id,
+    )
+
+
 def evaluate(args: argparse.Namespace, request: Mapping[str, Any]) -> dict[str, Any]:
     expected = {
         "goal_id": args.goal_id,
@@ -484,7 +531,7 @@ def evaluate(args: argparse.Namespace, request: Mapping[str, Any]) -> dict[str, 
             "authority_identity_mismatch",
             "checkpoint identity does not match guard scope",
         )
-    provider = FileCoordinationProvider(args.store_directory, args.goal_id)
+    provider = _coordination_provider(args)
     clock_path = Path(args.clock_file)
     executor = CoordinationAuthorityExecutor(
         provider,
@@ -535,7 +582,9 @@ def evaluate(args: argparse.Namespace, request: Mapping[str, Any]) -> dict[str, 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--store-directory", required=True)
+    parser.add_argument("--store-directory")
+    parser.add_argument("--nokv-client-config-json")
+    parser.add_argument("--nokv-workbench")
     parser.add_argument("--clock-file", required=True)
     parser.add_argument("--goal-id", required=True)
     parser.add_argument("--agent-id", required=True)
