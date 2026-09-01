@@ -46,7 +46,7 @@ TURN_SETTLEMENT_TRANSACTION_SCHEMA_VERSION = "loopx_turn_settlement_transaction_
 TURN_SETTLEMENT_REDUCTION_SCHEMA_VERSION = "loopx_turn_settlement_reduction_v0"
 
 
-def _invoke_turn_effect(effect: TurnEffect, effect_ref: str) -> Mapping[str, Any]:
+def invoke_turn_effect(effect: TurnEffect, effect_ref: str) -> Mapping[str, Any]:
     """Invoke a provider with a stable ref while retaining zero-arg callbacks."""
 
     try:
@@ -470,7 +470,7 @@ def execute_turn_driver_settlement(
                         "terminal closeout requires an effect provider and checkpoint"
                     )
                 if should_execute:
-                    observed = dict(_invoke_turn_effect(terminal_closeout, effect_ref))
+                    observed = dict(invoke_turn_effect(terminal_closeout, effect_ref))
                 assert observed is not None
                 if committed(observed):
                     terminal_value = observed
@@ -485,7 +485,7 @@ def execute_turn_driver_settlement(
                 continue
 
             if should_execute:
-                observed = dict(_invoke_turn_effect(providers[step_kind], effect_ref))
+                observed = dict(invoke_turn_effect(providers[step_kind], effect_ref))
             assert observed is not None
             if not committed(observed):
                 if abort is not None:
@@ -570,4 +570,8 @@ def turn_settlement_failure_outcome(
         raise RuntimeError(
             "TypeScript Turn settlement failure has unsupported result_kind"
         ) from exc
-    return result_kind, tuple(str(phase) for phase in outcome["completed_phases"]), failed_phase
+    return (
+        result_kind,
+        tuple(str(phase) for phase in outcome["completed_phases"]),
+        failed_phase,
+    )

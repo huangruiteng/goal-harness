@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ from ..control_plane.turn_driver import (
     TurnRecoveryBlockedError,
     build_loopx_turn_command_validator,
     build_loopx_turn_plan,
+    build_turn_authority_command_guard,
     codex_cli_session_binding,
     load_loopx_turn_plan_from_journal,
     run_codex_cli_host,
@@ -121,6 +123,7 @@ def handle_turn_command(
             execution_mode=args.execution_mode,
             scheduler_owner=args.scheduler_owner,
         )
+
         def build_turn_decision(
             *, requested_action_todo_id: str | None = None
         ) -> dict[str, Any]:
@@ -239,6 +242,25 @@ def handle_turn_command(
                         "LoopX Turn resume journal belongs to another agent"
                     )
             project = Path(args.project).expanduser().resolve()
+            authority_checkpoint_guard = None
+            if args.authority_guard_command_json:
+                if os.environ.get("LOOPX_SHARED_AUTHORITY_TEST_ONLY") != "1":
+                    raise ValueError(
+                        "--authority-guard-command-json is TEST ONLY and requires "
+                        "LOOPX_SHARED_AUTHORITY_TEST_ONLY=1"
+                    )
+                raw_authority_guard_argv = json.loads(args.authority_guard_command_json)
+                if not isinstance(raw_authority_guard_argv, list) or not all(
+                    isinstance(item, str) for item in raw_authority_guard_argv
+                ):
+                    raise ValueError(
+                        "--authority-guard-command-json must be a JSON string array"
+                    )
+                authority_checkpoint_guard = build_turn_authority_command_guard(
+                    raw_authority_guard_argv,
+                    project=project,
+                    timeout_seconds=args.authority_guard_timeout_seconds,
+                )
             planned_host = (
                 payload.get("host") if isinstance(payload.get("host"), dict) else {}
             )
@@ -639,9 +661,7 @@ def handle_turn_command(
                         replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
                     if readback is None:
-                        raise RuntimeError(
-                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
-                        )
+                        raise RuntimeError(EXACT_SETTLEMENT_READBACK_NOT_FOUND)
                     event = readback.spend_event
                     if event is None:
                         append_settlement_event(
@@ -701,9 +721,7 @@ def handle_turn_command(
                 readback = project_durable_terminal_completion_readback(
                     todo=durable_todo,
                     expected_todo_id=todo_id,
-                    expected_completion_turn_key=(
-                        settlement_identity.turn_instance_id
-                    ),
+                    expected_completion_turn_key=(settlement_identity.turn_instance_id),
                     projection_source=projection_source,
                     existing_todo_ids=existing_todo_ids,
                 )
@@ -731,9 +749,7 @@ def handle_turn_command(
                         replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
                     if readback is None:
-                        raise RuntimeError(
-                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
-                        )
+                        raise RuntimeError(EXACT_SETTLEMENT_READBACK_NOT_FOUND)
                     run = readback.writeback_run
                     event = readback.writeback_event
                     if run is None and event is None:
@@ -775,9 +791,7 @@ def handle_turn_command(
                         replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
                     if readback is None:
-                        raise RuntimeError(
-                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
-                        )
+                        raise RuntimeError(EXACT_SETTLEMENT_READBACK_NOT_FOUND)
                     run = readback.spend_run
                     event = readback.spend_event
                     if run is not None and run.get("effect_ref") != effect_ref:
@@ -823,9 +837,7 @@ def handle_turn_command(
                         replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
                     if readback is None:
-                        raise RuntimeError(
-                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
-                        )
+                        raise RuntimeError(EXACT_SETTLEMENT_READBACK_NOT_FOUND)
                     event = readback.completion_event
                     completion = terminal_completion_readback()
                     if event is None and completion is None:
@@ -948,6 +960,9 @@ def handle_turn_command(
                     terminal_closeout_resolver if args.execute else None
                 ),
                 scheduler=scheduler if args.execute else None,
+                authority_checkpoint_guard=(
+                    authority_checkpoint_guard if args.execute else None
+                ),
             )
         else:
             raise ValueError("turn requires the `plan` or `run-once` subcommand")

@@ -95,6 +95,16 @@ lease, gate, quota, or scheduling decisions.
   head through the production `validated_head`. Only the checks in the
   [evidence note](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0-evidence.zh-CN.md)
   are merge evidence for the revised receipt contract.
+- `authority_guard.py`: a **TEST ONLY** argv/stdin adapter that composes the
+  production authority executor with either the deterministic file provider or
+  an explicitly configured NoKV provider for Turn checkpoint qualification. It
+  is not a production provider selector, and NoKV construction never falls
+  back to file authority.
+- `authority_turn_canary.py`: a deterministic two-process canary. Both LoopX
+  processes share one coordination head but use isolated Turn journals and
+  Host workspaces. It proves one pre-expiry Host admission and stale-epoch
+  settlement fencing after reclaim; it does not claim exactly-once behavior
+  for arbitrary Host workspace mutations.
 
 ## Validation boundary
 
@@ -155,6 +165,47 @@ it is evidence tooling, not a merge gate.
 python3 examples/nokv-shadow-provider/live_e2e.py
 ```
 
+Run the TEST ONLY Turn-composition canary with:
+
+```bash
+python3 examples/nokv-shadow-provider/authority_turn_canary.py
+```
+
+The opt-in product-chain test repeats its two-CLI-process race against a live
+NoKV workbench. Keep the client configuration outside the repository and run
+the test with a Python environment that contains the pinned NoKV SDK:
+
+```bash
+LOOPX_SHARED_AUTHORITY_TEST_ONLY=1 \
+NOKV_COORDINATION_LIVE=1 \
+NOKV_CLIENT_CONFIG_JSON="$PWD/.local/nokv-client.json" \
+NOKV_COORDINATION_WORKBENCH=authority-qualification \
+python3 -m pytest -q tests/test_authority_turn_product_e2e.py -k live_nokv
+```
+
+The canary drives `claim_work`, `renew_work`, expired `reclaim_work`, and
+`complete_work` through the production `CoordinationAuthorityExecutor` and a
+shared `FileCoordinationProvider`. The file provider keeps the merge test
+deterministic. A separate live qualification may select NoKV by passing the
+paired `--nokv-client-config-json` and `--nokv-workbench` guard arguments; the
+configuration is admitted through the pinned NoKV SDK builder and the typed
+provider factory. File and NoKV arguments are mutually exclusive, and an
+incomplete or unavailable NoKV selection fails closed without a file fallback.
+The config must be an absolute regular file no larger than 1 MiB. The opt-in
+live test removes its random coordination head with the exact generation after
+readback, so a shared qualification workbench does not accumulate test state.
+
+The CLI exposure is default-off: `turn run-once
+--authority-guard-command-json ...` requires the explicit
+`LOOPX_SHARED_AUTHORITY_TEST_ONLY=1` environment gate and uses JSON argv
+without shell parsing. The product-chain regression runs two real LoopX CLI
+processes through advisory Todo selection, authority admission, Host,
+writeback, quota, authority completion, scheduler evaluation, receipt
+readback, and exact Turn replay. Scheduler evaluation/projection is guarded;
+wake delivery and scheduler ACK are outside this qualification. Inbox input is
+characterized only as an urgency signal: it cannot create a Todo or grant Turn
+authority.
+
 Run the merge-relevant deterministic regression from the repository root with:
 
 ```bash
@@ -204,8 +255,9 @@ The nine current result tags are
 
 `probes.py` deliberately remains offline; use `live_e2e.py` for the real stack.
 The reference still does not establish multi-host wake delivery, automatic
-provider promotion, HA/failover, receipt compaction or GC, production
-performance, a dynamic eligibility-projection publisher, non-empty write-scope
-overlap enforcement, or a full LoopX state migration. The NoKV storage-plane
-issues linked from the RFC remain production-canary holds; a green ordered
-single-node exercise does not erase them.
+provider promotion, arbitrary Host workspace-effect exactly-once, Host
+keepalive/cancellation after lease loss, HA/failover, receipt compaction or GC,
+production performance, a dynamic eligibility-projection publisher, non-empty
+write-scope overlap enforcement, or a full LoopX state migration. The NoKV
+storage-plane issues linked from the RFC remain production-canary holds; a
+green ordered single-node exercise does not erase them.

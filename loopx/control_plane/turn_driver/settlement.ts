@@ -54,6 +54,7 @@ export const TURN_RESULT_KINDS = [
   "replan_required",
   "user_action_required",
   "wait",
+  "authority_rejected",
   "host_failure",
   "validation_failed",
   "writeback_failed",
@@ -63,6 +64,7 @@ export const TURN_RESULT_KINDS = [
 export type TurnResultKind = (typeof TURN_RESULT_KINDS)[number];
 
 const FAILED_TURN_RESULT_KINDS = [
+  "authority_rejected",
   "host_failure",
   "validation_failed",
   "writeback_failed",
