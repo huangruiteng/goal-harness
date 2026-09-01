@@ -22,7 +22,7 @@ export type AuthorityStoreProviderKind = "file" | "nokv" | "postgresql";
 export type AuthorityStoreProviderStage =
   | "stage1_implemented"
   | "stage2a_candidate"
-  | "stage2b_planned";
+  | "stage2b_candidate";
 
 export interface AuthorityStoreProviderProfile {
   stage: AuthorityStoreProviderStage;
@@ -66,17 +66,17 @@ export const AUTHORITY_STORE_PROVIDER_PROFILES = {
     ],
   },
   postgresql: {
-    stage: "stage2b_planned",
+    stage: "stage2b_candidate",
     revision_primitive: "goal_head_row_version_or_locked_revision",
     atomic_commit_mapping: "one_sql_transaction_over_head_events_and_receipts",
     receipt_and_cursor_mapping: "unique_operation_row_and_per_goal_sequence",
     store_lineage_mapping: "service_managed_database_incarnation",
     trust_boundary: "authenticated_tenant_scoped_loopx_service_role",
     qualification_holds: [
-      "provider_implementation",
-      "transaction_isolation_and_commit_ambiguity",
-      "authentication_and_tenant_isolation",
-      "audit_and_fail_closed_network_behavior",
+      "service_authentication_database_role_and_audit_policy",
+      "restore_incarnation_rotation",
+      "failover_pool_exhaustion_and_cancellation",
+      "shadow_parity_and_authority_source_promotion",
     ],
   },
 } as const satisfies Record<

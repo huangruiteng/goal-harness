@@ -16,6 +16,18 @@ import type {
   AuthorityStoreReceiptResult,
   AuthorityStoreScanResult,
 } from "./authority_store.ts";
+import {
+  AuthorityStoreProtocolError,
+  authorityUnicodeCompare,
+  canonicalAuthorityBytes,
+  canonicalAuthorityObject,
+  canonicalAuthorityObjectList,
+  hasExactAuthorityKeys,
+  isAuthorityJsonObject,
+  normalizeAuthorityStoreCommit,
+  parseAuthorityCursor,
+  requireAuthorityStoreId,
+} from "./authority_store_codec.ts";
 
 const FILE_AUTHORITY_STORE_SCHEMA = "loopx_file_authority_store_v0";
 const STORE_IDENTITY_PATTERN = /^file:[0-9a-f]{32}$/;
@@ -30,93 +42,7 @@ interface FileAuthorityStoreDocument extends JsonObject {
   committed: AuthorityStoreCommittedTransaction[];
 }
 
-class FileStoreProtocolError extends Error {}
 class FileStoreUnavailableError extends Error {}
-
-function isObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasExactKeys(value: JsonObject, keys: readonly string[]): boolean {
-  const actual = Object.keys(value).sort(pythonUnicodeCompare);
-  const expected = [...keys].sort(pythonUnicodeCompare);
-  return actual.length === expected.length &&
-    actual.every((key, index) => key === expected[index]);
-}
-
-function requireNonEmpty(value: unknown, name: string): string {
-  if (typeof value !== "string" || value.trim() !== value || value.length === 0) {
-    throw new FileStoreProtocolError(`${name} must be a non-empty trimmed string`);
-  }
-  return value;
-}
-
-function pythonUnicodeCompare(left: string, right: string): number {
-  const leftPoints = Array.from(left, (item) => item.codePointAt(0) ?? 0);
-  const rightPoints = Array.from(right, (item) => item.codePointAt(0) ?? 0);
-  const shared = Math.min(leftPoints.length, rightPoints.length);
-  for (let index = 0; index < shared; index += 1) {
-    const difference = leftPoints[index] - rightPoints[index];
-    if (difference !== 0) return difference;
-  }
-  return leftPoints.length - rightPoints.length;
-}
-
-function canonicalJson(value: unknown, stack = new Set<object>()): unknown {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new FileStoreProtocolError("JSON numbers must be finite");
-    return value;
-  }
-  if (Array.isArray(value)) {
-    if (stack.has(value)) throw new FileStoreProtocolError("JSON value must be acyclic");
-    stack.add(value);
-    try {
-      return value.map((item) => canonicalJson(item, stack));
-    } finally {
-      stack.delete(value);
-    }
-  }
-  if (!isObject(value)) throw new FileStoreProtocolError("value must be strict JSON");
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new FileStoreProtocolError("JSON objects must be plain objects");
-  }
-  if (stack.has(value)) throw new FileStoreProtocolError("JSON value must be acyclic");
-  stack.add(value);
-  try {
-    return Object.fromEntries(
-      Object.keys(value).sort(pythonUnicodeCompare).map((key) => [
-        key,
-        canonicalJson(value[key], stack),
-      ]),
-    );
-  } finally {
-    stack.delete(value);
-  }
-}
-
-function canonicalObject(value: unknown, name: string): JsonObject {
-  if (!isObject(value)) throw new FileStoreProtocolError(`${name} must be an object`);
-  return canonicalJson(value) as JsonObject;
-}
-
-function canonicalObjectList(value: unknown, name: string): JsonObject[] {
-  if (!Array.isArray(value)) throw new FileStoreProtocolError(`${name} must be an array`);
-  return value.map((item, index) => canonicalObject(item, `${name}[${index}]`));
-}
-
-function canonicalBytes(value: unknown): Buffer {
-  return Buffer.from(JSON.stringify(canonicalJson(value)), "utf8");
-}
-
-function parseCursor(value: string | null): bigint {
-  if (value === null) return 0n;
-  if (!/^[1-9]\d*$/.test(value)) throw new FileStoreProtocolError("provider cursor is invalid");
-  return BigInt(value);
-}
 
 function cloneTransaction(
   value: AuthorityStoreCommittedTransaction,
@@ -141,7 +67,7 @@ function providerRevision(
   transaction: ReturnType<typeof transactionWithoutRevision>,
 ): string {
   const digest = createHash("sha256")
-    .update(canonicalBytes({
+    .update(canonicalAuthorityBytes({
       goal_id: goalId,
       store_identity: storeIdentity,
       previous_provider_revision: previousRevision,
@@ -182,19 +108,19 @@ async function durableReplace(path: string, payload: Uint8Array): Promise<void> 
 }
 
 function decodeTransaction(value: unknown): AuthorityStoreCommittedTransaction {
-  if (!isObject(value) || !hasExactKeys(value, [
+  if (!isAuthorityJsonObject(value) || !hasExactAuthorityKeys(value, [
     "cursor", "provider_revision", "operation_id", "events", "projection", "receipts",
-  ])) throw new FileStoreProtocolError("committed transaction is invalid");
+  ])) throw new AuthorityStoreProtocolError("committed transaction is invalid");
   return {
-    cursor: requireNonEmpty(value.cursor, "transaction cursor"),
-    provider_revision: requireNonEmpty(
+    cursor: requireAuthorityStoreId(value.cursor, "transaction cursor"),
+    provider_revision: requireAuthorityStoreId(
       value.provider_revision,
       "transaction provider revision",
     ),
-    operation_id: requireNonEmpty(value.operation_id, "operation id"),
-    events: canonicalObjectList(value.events, "transaction events"),
-    projection: canonicalObject(value.projection, "transaction projection"),
-    receipts: canonicalObjectList(value.receipts, "transaction receipts"),
+    operation_id: requireAuthorityStoreId(value.operation_id, "operation id"),
+    events: canonicalAuthorityObjectList(value.events, "transaction events"),
+    projection: canonicalAuthorityObject(value.projection, "transaction projection"),
+    receipts: canonicalAuthorityObjectList(value.receipts, "transaction receipts"),
   };
 }
 
@@ -203,34 +129,34 @@ function decodeDocument(
   goalId: string,
   storeIdentity: string,
 ): FileAuthorityStoreDocument {
-  if (!isObject(value) || !hasExactKeys(value, [
+  if (!isAuthorityJsonObject(value) || !hasExactAuthorityKeys(value, [
     "schema_version", "goal_id", "provider_revision", "cursor", "store_identity",
     "head", "committed",
   ]) || value.schema_version !== FILE_AUTHORITY_STORE_SCHEMA) {
-    throw new FileStoreProtocolError("file authority store schema mismatch");
+    throw new AuthorityStoreProtocolError("file authority store schema mismatch");
   }
-  if (value.goal_id !== goalId) throw new FileStoreProtocolError("file authority store goal mismatch");
+  if (value.goal_id !== goalId) throw new AuthorityStoreProtocolError("file authority store goal mismatch");
   if (value.store_identity !== storeIdentity) {
-    throw new FileStoreProtocolError("file authority store lineage mismatch");
+    throw new AuthorityStoreProtocolError("file authority store lineage mismatch");
   }
-  const revision = requireNonEmpty(value.provider_revision, "provider revision");
-  const cursor = requireNonEmpty(value.cursor, "provider cursor");
-  const head = canonicalObject(value.head, "file authority store head");
+  const revision = requireAuthorityStoreId(value.provider_revision, "provider revision");
+  const cursor = requireAuthorityStoreId(value.cursor, "provider cursor");
+  const head = canonicalAuthorityObject(value.head, "file authority store head");
   if (!Array.isArray(value.committed)) {
-    throw new FileStoreProtocolError("file authority store history is invalid");
+    throw new AuthorityStoreProtocolError("file authority store history is invalid");
   }
   const committed = value.committed.map(decodeTransaction);
-  if (committed.length === 0 || parseCursor(cursor) !== BigInt(committed.length)) {
-    throw new FileStoreProtocolError("file authority store lineage is invalid");
+  if (committed.length === 0 || parseAuthorityCursor(cursor) !== BigInt(committed.length)) {
+    throw new AuthorityStoreProtocolError("file authority store lineage is invalid");
   }
   let previousRevision: string | null = null;
   const operationIds = new Set<string>();
   for (const [index, entry] of committed.entries()) {
-    if (parseCursor(entry.cursor) !== BigInt(index + 1)) {
-      throw new FileStoreProtocolError("file authority store cursor lineage is invalid");
+    if (parseAuthorityCursor(entry.cursor) !== BigInt(index + 1)) {
+      throw new AuthorityStoreProtocolError("file authority store cursor lineage is invalid");
     }
     if (operationIds.has(entry.operation_id)) {
-      throw new FileStoreProtocolError("file authority store operation identity is duplicated");
+      throw new AuthorityStoreProtocolError("file authority store operation identity is duplicated");
     }
     operationIds.add(entry.operation_id);
     const expectedRevision = providerRevision(
@@ -240,15 +166,15 @@ function decodeDocument(
       transactionWithoutRevision(entry),
     );
     if (entry.provider_revision !== expectedRevision) {
-      throw new FileStoreProtocolError("file authority store revision lineage is invalid");
+      throw new AuthorityStoreProtocolError("file authority store revision lineage is invalid");
     }
     previousRevision = entry.provider_revision;
   }
   const last = committed.at(-1)!;
   if (
     last.cursor !== cursor || last.provider_revision !== revision ||
-    !canonicalBytes(last.projection).equals(canonicalBytes(head))
-  ) throw new FileStoreProtocolError("file authority store head lineage is invalid");
+    !canonicalAuthorityBytes(last.projection).equals(canonicalAuthorityBytes(head))
+  ) throw new AuthorityStoreProtocolError("file authority store head lineage is invalid");
   return {
     schema_version: FILE_AUTHORITY_STORE_SCHEMA,
     goal_id: goalId,
@@ -260,23 +186,8 @@ function decodeDocument(
   };
 }
 
-function normalizeCommit(commit: AuthorityStoreCommit): AuthorityStoreCommit {
-  const expectedRevision = commit.expected_provider_revision;
-  if (
-    expectedRevision !== null &&
-    (typeof expectedRevision !== "string" || expectedRevision.length === 0)
-  ) throw new FileStoreProtocolError("expected provider revision is invalid");
-  return {
-    expected_provider_revision: expectedRevision,
-    operation_id: requireNonEmpty(commit.operation_id, "operation id"),
-    events: canonicalObjectList(commit.events, "events"),
-    next_projection: canonicalObject(commit.next_projection, "projection"),
-    receipts: canonicalObjectList(commit.receipts, "receipts"),
-  };
-}
-
 function readFailure(error: unknown): AuthorityStoreReadFailure {
-  if (error instanceof FileStoreProtocolError || error instanceof SyntaxError) {
+  if (error instanceof AuthorityStoreProtocolError || error instanceof SyntaxError) {
     return { status: "failed", reason_code: "provider_protocol_violation", reason: error.message };
   }
   return {
@@ -294,9 +205,9 @@ export class FileAuthorityStore implements AuthorityStore {
   readonly identityPath: string;
 
   constructor(directory: string, goalId: string) {
-    this.goalId = requireNonEmpty(goalId, "goal id");
+    this.goalId = requireAuthorityStoreId(goalId, "goal id");
     if (typeof directory !== "string" || directory.length === 0) {
-      throw new FileStoreProtocolError("store directory is required");
+      throw new AuthorityStoreProtocolError("store directory is required");
     }
     this.directory = resolve(directory);
     const digest = createHash("sha256").update(goalId, "utf8").digest("hex").slice(0, 16);
@@ -313,7 +224,7 @@ export class FileAuthorityStore implements AuthorityStore {
     try {
       const identity = await readFile(this.identityPath, "utf8");
       if (!STORE_IDENTITY_PATTERN.test(identity)) {
-        throw new FileStoreProtocolError("store identity does not match file:<32 lowercase hex>");
+        throw new AuthorityStoreProtocolError("store identity does not match file:<32 lowercase hex>");
       }
       await syncDirectory(this.directory);
       return identity;
@@ -324,7 +235,7 @@ export class FileAuthorityStore implements AuthorityStore {
       try {
         const identity = await readFile(this.identityPath, "utf8");
         if (!STORE_IDENTITY_PATTERN.test(identity)) {
-          throw new FileStoreProtocolError("store identity does not match file:<32 lowercase hex>");
+          throw new AuthorityStoreProtocolError("store identity does not match file:<32 lowercase hex>");
         }
         await syncDirectory(this.directory);
         return identity;
@@ -341,7 +252,7 @@ export class FileAuthorityStore implements AuthorityStore {
     try {
       return { status: "available", store_identity: await this.readStoreIdentity() };
     } catch (error) {
-      if (error instanceof FileStoreProtocolError) {
+      if (error instanceof AuthorityStoreProtocolError) {
         return { status: "failed", reason_code: "store_identity_invalid", reason: error.message };
       }
       return {
@@ -369,7 +280,7 @@ export class FileAuthorityStore implements AuthorityStore {
       return decodeDocument(JSON.parse(raw), this.goalId, identity);
     } catch (error) {
       if (error instanceof SyntaxError) {
-        throw new FileStoreProtocolError(`file authority store JSON is invalid: ${error.message}`);
+        throw new AuthorityStoreProtocolError(`file authority store JSON is invalid: ${error.message}`);
       }
       throw error;
     }
@@ -394,7 +305,7 @@ export class FileAuthorityStore implements AuthorityStore {
   async commitAuthority(commit: AuthorityStoreCommit): Promise<AuthorityStoreCommitResult> {
     let normalized: AuthorityStoreCommit;
     try {
-      normalized = normalizeCommit(commit);
+      normalized = normalizeAuthorityStoreCommit(commit);
     } catch (error) {
       return {
         status: "failed",
@@ -415,7 +326,7 @@ export class FileAuthorityStore implements AuthorityStore {
         } catch (error) {
           return {
             status: "failed",
-            reason_code: error instanceof FileStoreProtocolError
+            reason_code: error instanceof AuthorityStoreProtocolError
               ? "provider_protocol_violation"
               : "provider_read_unavailable",
             reason: error instanceof Error ? error.message : "provider read unavailable",
@@ -437,7 +348,7 @@ export class FileAuthorityStore implements AuthorityStore {
             current_cursor: current.cursor,
           };
         }
-        const cursor = (parseCursor(current?.cursor ?? null) + 1n).toString();
+        const cursor = (parseAuthorityCursor(current?.cursor ?? null) + 1n).toString();
         const base = {
           cursor,
           operation_id: normalized.operation_id,
@@ -465,7 +376,7 @@ export class FileAuthorityStore implements AuthorityStore {
           committed: [...(current?.committed ?? []), transaction],
         };
         try {
-          await this.replaceDurably(this.path, canonicalBytes(document));
+          await this.replaceDurably(this.path, canonicalAuthorityBytes(document));
         } catch (error) {
           return {
             status: "ambiguous",
@@ -489,7 +400,7 @@ export class FileAuthorityStore implements AuthorityStore {
   async readReceipt(operationId: string): Promise<AuthorityStoreReceiptResult> {
     let normalized: string;
     try {
-      normalized = requireNonEmpty(operationId, "operation id");
+      normalized = requireAuthorityStoreId(operationId, "operation id");
     } catch (error) {
       return {
         status: "failed",
@@ -517,9 +428,9 @@ export class FileAuthorityStore implements AuthorityStore {
   async scanCommitted(afterCursor: string | null, limit: number): Promise<AuthorityStoreScanResult> {
     let offset: bigint;
     try {
-      offset = parseCursor(afterCursor);
+      offset = parseAuthorityCursor(afterCursor);
       if (!Number.isSafeInteger(limit) || limit < 1) {
-        throw new FileStoreProtocolError("scan limit must be a positive safe integer");
+        throw new AuthorityStoreProtocolError("scan limit must be a positive safe integer");
       }
     } catch (error) {
       return {
@@ -533,7 +444,7 @@ export class FileAuthorityStore implements AuthorityStore {
       if (!document) {
         return { status: "page", transactions: [], next_cursor: afterCursor, has_more: false };
       }
-      const headCursor = parseCursor(document.cursor);
+      const headCursor = parseAuthorityCursor(document.cursor);
       if (offset > headCursor || offset > BigInt(Number.MAX_SAFE_INTEGER)) {
         return {
           status: "failed",
