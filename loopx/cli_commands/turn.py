@@ -123,6 +123,7 @@ def handle_turn_command(
             execution_mode=args.execution_mode,
             scheduler_owner=args.scheduler_owner,
         )
+
         def build_turn_decision(
             *, requested_action_todo_id: str | None = None
         ) -> dict[str, Any]:
@@ -248,9 +249,7 @@ def handle_turn_command(
                         "--authority-guard-command-json is TEST ONLY and requires "
                         "LOOPX_SHARED_AUTHORITY_TEST_ONLY=1"
                     )
-                raw_authority_guard_argv = json.loads(
-                    args.authority_guard_command_json
-                )
+                raw_authority_guard_argv = json.loads(args.authority_guard_command_json)
                 if not isinstance(raw_authority_guard_argv, list) or not all(
                     isinstance(item, str) for item in raw_authority_guard_argv
                 ):
@@ -662,9 +661,7 @@ def handle_turn_command(
                         replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
                     if readback is None:
-                        raise RuntimeError(
-                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
-                        )
+                        raise RuntimeError(EXACT_SETTLEMENT_READBACK_NOT_FOUND)
                     event = readback.spend_event
                     if event is None:
                         append_settlement_event(
@@ -724,9 +721,7 @@ def handle_turn_command(
                 readback = project_durable_terminal_completion_readback(
                     todo=durable_todo,
                     expected_todo_id=todo_id,
-                    expected_completion_turn_key=(
-                        settlement_identity.turn_instance_id
-                    ),
+                    expected_completion_turn_key=(settlement_identity.turn_instance_id),
                     projection_source=projection_source,
                     existing_todo_ids=existing_todo_ids,
                 )
@@ -754,9 +749,7 @@ def handle_turn_command(
                         replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
                     if readback is None:
-                        raise RuntimeError(
-                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
-                        )
+                        raise RuntimeError(EXACT_SETTLEMENT_READBACK_NOT_FOUND)
                     run = readback.writeback_run
                     event = readback.writeback_event
                     if run is None and event is None:
@@ -798,9 +791,7 @@ def handle_turn_command(
                         replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
                     if readback is None:
-                        raise RuntimeError(
-                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
-                        )
+                        raise RuntimeError(EXACT_SETTLEMENT_READBACK_NOT_FOUND)
                     run = readback.spend_run
                     event = readback.spend_event
                     if run is not None and run.get("effect_ref") != effect_ref:
@@ -846,9 +837,7 @@ def handle_turn_command(
                         replan_obligation_id=settlement_identity.replan_obligation_id,
                     )
                     if readback is None:
-                        raise RuntimeError(
-                            EXACT_SETTLEMENT_READBACK_NOT_FOUND
-                        )
+                        raise RuntimeError(EXACT_SETTLEMENT_READBACK_NOT_FOUND)
                     event = readback.completion_event
                     completion = terminal_completion_readback()
                     if event is None and completion is None:

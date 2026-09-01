@@ -570,4 +570,8 @@ def turn_settlement_failure_outcome(
         raise RuntimeError(
             "TypeScript Turn settlement failure has unsupported result_kind"
         ) from exc
-    return result_kind, tuple(str(phase) for phase in outcome["completed_phases"]), failed_phase
+    return (
+        result_kind,
+        tuple(str(phase) for phase in outcome["completed_phases"]),
+        failed_phase,
+    )

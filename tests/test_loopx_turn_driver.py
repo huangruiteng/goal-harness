@@ -1189,15 +1189,13 @@ raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "validated" else 7
         "scheduler_acknowledged": False,
     }
     state_path = (
-        project
-        / ".codex"
-        / "goals"
-        / "loopx-turn-fixture"
-        / "ACTIVE_GOAL_STATE.md"
+        project / ".codex" / "goals" / "loopx-turn-fixture" / "ACTIVE_GOAL_STATE.md"
     )
     assert "Run the next public fixture check" in state_path.read_text(encoding="utf-8")
     index_path = runtime / "goals" / "loopx-turn-fixture" / "runs" / "index.jsonl"
-    rows = [json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()]
+    rows = [
+        json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()
+    ]
     assert [row["classification"] for row in rows] == [
         "fixture_progress",
         "quota_slot_spent",
@@ -1244,8 +1242,7 @@ raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "validated" else 7
         "scheduler_acknowledged": False,
     }
     replayed_rows = [
-        json.loads(line)
-        for line in index_path.read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()
     ]
     assert [row["classification"] for row in replayed_rows] == [
         "fixture_progress",
@@ -1428,11 +1425,7 @@ raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "completed" else 7
         "continuation": "active_goal",
     }
     state_path = (
-        project
-        / ".codex"
-        / "goals"
-        / "loopx-turn-fixture"
-        / "ACTIVE_GOAL_STATE.md"
+        project / ".codex" / "goals" / "loopx-turn-fixture" / "ACTIVE_GOAL_STATE.md"
     )
     state = state_path.read_text(encoding="utf-8")
     assert "todo_id=todo_fixture0001 status=done" in state
@@ -1472,8 +1465,7 @@ raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "completed" else 7
     # Turn itself stays blocked until that replan creates a runnable successor.
     assert next_plan["route"]["kind"] == "blocked"
     assert (
-        next_plan["turn_envelope"]["effective_action"]
-        == "autonomous_replan_required"
+        next_plan["turn_envelope"]["effective_action"] == "autonomous_replan_required"
     )
     next_obligation = next_plan["turn_envelope"]["replan_action_packet"]
     assert next_obligation["decision"] == "replan_required"
@@ -1616,9 +1608,9 @@ def test_turn_run_once_cli_repairs_committed_quota_spend_after_receipt_crash(
     assert first["error"] == "injected crash before quota receipt"
     interrupted = _turn_journal(runtime)
     turn_key = interrupted["turn_key"]
-    effect_id = interrupted["plan"]["transaction"]["settlement_plan"][
-        "identity"
-    ]["effect_id"]
+    effect_id = interrupted["plan"]["transaction"]["settlement_plan"]["identity"][
+        "effect_id"
+    ]
     assert interrupted["effect_attempts"] == {
         "quota_spend": {
             "status": "prepared",
@@ -1627,10 +1619,11 @@ def test_turn_run_once_cli_repairs_committed_quota_spend_after_receipt_crash(
     }
     index_path = runtime / "goals" / "loopx-turn-fixture" / "runs" / "index.jsonl"
     rows = [
-        json.loads(line)
-        for line in index_path.read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()
     ]
-    quota_rows = [row for row in rows if row.get("classification") == "quota_slot_spent"]
+    quota_rows = [
+        row for row in rows if row.get("classification") == "quota_slot_spent"
+    ]
     assert len(quota_rows) == 1
     assert quota_rows[0]["effect_ref"] == f"{effect_id}#quota_spend"
     assert quota_rows[0]["agent_id"] == "codex-fixture"
@@ -1655,16 +1648,13 @@ def test_turn_run_once_cli_repairs_committed_quota_spend_after_receipt_crash(
     assert resumed_exit_code == 0, resumed
     assert resumed["status"] == "committed"
     replayed_rows = [
-        json.loads(line)
-        for line in index_path.read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()
     ]
-    assert sum(
-        row.get("classification") == "quota_slot_spent"
-        for row in replayed_rows
-    ) == 1
-    events_path = (
-        runtime / "goals" / "loopx-turn-fixture" / "rollout-event-log.jsonl"
+    assert (
+        sum(row.get("classification") == "quota_slot_spent" for row in replayed_rows)
+        == 1
     )
+    events_path = runtime / "goals" / "loopx-turn-fixture" / "rollout-event-log.jsonl"
     events = [
         json.loads(line)
         for line in events_path.read_text(encoding="utf-8").splitlines()
@@ -1776,11 +1766,7 @@ def test_turn_run_once_cli_terminal_recovery_rejects_unowned_completion(
 
     turn_key = payload["resume_turn_key"]
     state_path = (
-        project
-        / ".codex"
-        / "goals"
-        / "loopx-turn-fixture"
-        / "ACTIVE_GOAL_STATE.md"
+        project / ".codex" / "goals" / "loopx-turn-fixture" / "ACTIVE_GOAL_STATE.md"
     )
     state = state_path.read_text(encoding="utf-8")
     current_turn_field = f" completion_turn_key={turn_key}"
@@ -1795,12 +1781,9 @@ def test_turn_run_once_cli_terminal_recovery_rejects_unowned_completion(
         encoding="utf-8",
     )
 
-    event_path = (
-        runtime / "goals" / "loopx-turn-fixture" / "rollout-event-log.jsonl"
-    )
+    event_path = runtime / "goals" / "loopx-turn-fixture" / "rollout-event-log.jsonl"
     events = [
-        json.loads(line)
-        for line in event_path.read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()
     ]
     events_without_terminal = [
         event
@@ -1864,12 +1847,10 @@ def test_turn_run_once_cli_terminal_recovery_rejects_unowned_completion(
         "reason": "closeout readback failed",
     }
     recovered_events = [
-        json.loads(line)
-        for line in event_path.read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()
     ]
     assert not any(
-        event.get("event_kind") == "todo_complete"
-        and event.get("run_id") == turn_key
+        event.get("event_kind") == "todo_complete" and event.get("run_id") == turn_key
         for event in recovered_events
     )
 
@@ -2064,11 +2045,7 @@ json.load(sys.stdin)
 raise SystemExit(0 if pathlib.Path("claimed-artifact.txt").is_file() else 9)
 """
     state_path = (
-        project
-        / ".codex"
-        / "goals"
-        / "loopx-turn-fixture"
-        / "ACTIVE_GOAL_STATE.md"
+        project / ".codex" / "goals" / "loopx-turn-fixture" / "ACTIVE_GOAL_STATE.md"
     )
     before_state = state_path.read_text(encoding="utf-8")
     output = io.StringIO()
@@ -2134,11 +2111,7 @@ def test_turn_run_once_cli_uses_built_in_codex_host_and_typed_writeback(
 
     project, runtime, registry = _write_live_fixture(tmp_path)
     state_path = (
-        project
-        / ".codex"
-        / "goals"
-        / "loopx-turn-fixture"
-        / "ACTIVE_GOAL_STATE.md"
+        project / ".codex" / "goals" / "loopx-turn-fixture" / "ACTIVE_GOAL_STATE.md"
     )
     state_path.write_text(
         state_path.read_text(encoding="utf-8").replace(
@@ -2185,19 +2158,27 @@ def test_turn_run_once_cli_uses_built_in_codex_host_and_typed_writeback(
         }
         return envelope
 
-    def recording_refresh_state_run(*args: object, **kwargs: object) -> dict[str, object]:
+    def recording_refresh_state_run(
+        *args: object, **kwargs: object
+    ) -> dict[str, object]:
         refresh_workspace_paths.append(kwargs.get("delivery_workspace_path"))
         return real_refresh_state_run(*args, **kwargs)
 
-    def recording_spend_quota_slot(*args: object, **kwargs: object) -> dict[str, object]:
+    def recording_spend_quota_slot(
+        *args: object, **kwargs: object
+    ) -> dict[str, object]:
         spend_workspace_paths.append(kwargs.get("workspace_path"))
         return real_spend_quota_slot(*args, **kwargs)
 
-    def recording_update_goal_todo(*args: object, **kwargs: object) -> dict[str, object]:
+    def recording_update_goal_todo(
+        *args: object, **kwargs: object
+    ) -> dict[str, object]:
         updated_todo_ids.append(str(kwargs.get("todo_id") or ""))
         return real_update_goal_todo(*args, **kwargs)
 
-    def fake_codex_host(request: dict[str, object], **_kwargs: object) -> dict[str, object]:
+    def fake_codex_host(
+        request: dict[str, object], **_kwargs: object
+    ) -> dict[str, object]:
         return {
             "schema_version": "loopx_turn_result_v0",
             "turn_key": request["turn_key"],
@@ -2275,11 +2256,7 @@ def test_turn_run_once_cli_uses_built_in_codex_host_and_typed_writeback(
         [] if result_kind == "validated_progress" else ["todo_fixture0001"]
     )
     state = (
-        project
-        / ".codex"
-        / "goals"
-        / "loopx-turn-fixture"
-        / "ACTIVE_GOAL_STATE.md"
+        project / ".codex" / "goals" / "loopx-turn-fixture" / "ACTIVE_GOAL_STATE.md"
     ).read_text(encoding="utf-8")
     assert "Run one revised public fixture check" in state
     if result_kind != "validated_progress":

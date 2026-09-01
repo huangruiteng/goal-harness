@@ -25,23 +25,19 @@ from typing import Any
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT))
 
-from loopx.control_plane.coordination.executor import (
-    CoordinationAuthorityExecutor,
-    sample_work_envelope,
-)
-from loopx.control_plane.coordination.file_provider import (
+from loopx.control_plane.coordination.file_provider import (  # noqa: E402
     FileCoordinationProvider,
 )
-from loopx.control_plane.coordination.head import (
+from loopx.control_plane.coordination.head import (  # noqa: E402
     bootstrap_head,
     validated_head,
 )
-from loopx.control_plane.turn_driver import (
+from loopx.control_plane.turn_driver import (  # noqa: E402
     build_loopx_turn_plan,
     build_turn_authority_command_guard,
     run_loopx_turn_once,
 )
-from loopx.file_lock import exclusive_file_lock
+from loopx.file_lock import exclusive_file_lock  # noqa: E402
 
 GOAL_ID = "goal-authority-turn-canary"
 TODO_ID = "todo_authority_canary"
