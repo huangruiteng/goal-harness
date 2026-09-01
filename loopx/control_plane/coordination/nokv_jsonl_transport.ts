@@ -23,6 +23,7 @@ import {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+const TRANSPORT_CONSTRUCTION_TOKEN = Symbol("NoKVJsonLinesTransport.open");
 
 export type NoKVJsonLinesProcessFactory = (
   command: string,
@@ -100,7 +101,15 @@ export class NoKVJsonLinesTransport implements NoKVBlobTransport {
   private terminalError: Error | null = null;
   private closing = false;
 
-  private constructor(options: NoKVJsonLinesTransportOptions) {
+  constructor(
+    options: NoKVJsonLinesTransportOptions,
+    constructionToken: typeof TRANSPORT_CONSTRUCTION_TOKEN,
+  ) {
+    if (constructionToken !== TRANSPORT_CONSTRUCTION_TOKEN) {
+      throw new NoKVTransportProtocolError(
+        "NoKV JSON-lines transport must be created with open()",
+      );
+    }
     if (!Array.isArray(options.argv) || options.argv.length === 0) {
       throw new NoKVTransportProtocolError("NoKV helper argv must not be empty");
     }
@@ -145,7 +154,10 @@ export class NoKVJsonLinesTransport implements NoKVBlobTransport {
   }
 
   static async open(options: NoKVJsonLinesTransportOptions): Promise<NoKVJsonLinesTransport> {
-    const transport = new NoKVJsonLinesTransport(options);
+    const transport = new NoKVJsonLinesTransport(
+      options,
+      TRANSPORT_CONSTRUCTION_TOKEN,
+    );
     let response: JsonObject;
     try {
       response = await transport.exchange("open", { config: options.config });
