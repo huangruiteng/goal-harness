@@ -865,6 +865,29 @@ Stage 3/4 qualification 必须保持以下 ownership 与 proof 边界：
    LoopX service 成为唯一 writer。本地 `.loopx` 退为 cache、offline projection 与
    诊断材料。绝不长期维持 dual-write 或 dual-master。
 
+#### Stage 2C 资格验证切片：本地提交后 shadow
+
+Stage 2C 的前半段是一个显式开启、默认关闭的产品路径。先预览，再开启：
+
+```bash
+loopx configure-goal --goal-id GOAL --local-authority-shadow-file
+loopx configure-goal --goal-id GOAL --local-authority-shadow-file --execute
+```
+
+Todo、handoff-mode、follow-up 与 task-lease facade 会在本地主写成功后，通过
+`FileAuthorityStore` 观察完整当前投影。候选数据位于 legacy 单 Goal runtime tree
+之外的 `authority-shadow/file/`，因此 state migration 不会复制 store identity 或
+revision；真正执行迁移时，会从迁移后的本地主状态为目标端建立一条新 lineage。
+候选失败只形成 evidence，不会推翻已经完成的本地写入。
+
+用
+`loopx configure-goal --goal-id GOAL --clear-local-authority-shadow --execute`
+即可关闭 observer。这里回退的只是观察路径：Markdown 与 task-lease 文件始终是
+canonical。本切片不会读取候选来决策，不会 fence legacy writer，不会资格化远端
+provider，也没有完成 Stage 2C 后半段的本地 canonical promotion。若进程恰好在本地
+提交后、observer 调用前崩溃，该次 observation 可能丢失；后续成功写入或 migration
+seed 会刷新完整当前投影，但这里不宣称已有 durable shadow outbox。
+
 ### 实施前置条件：先让本地文件模式经过同一协调合同
 
 在接入 live NoKV 或其他远端 provider 之前，runtime 应先把当前 todo/lease 写路径中的

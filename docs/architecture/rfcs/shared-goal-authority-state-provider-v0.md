@@ -1078,6 +1078,33 @@ The sequence is:
    cache, offline projection, and diagnostic material. Never keep a long-lived
    dual-write or dual-master mode.
 
+#### Stage 2C qualification slice: local post-commit shadow
+
+The first half of Stage 2C is an explicit, default-off product path. Preview
+and enable it with:
+
+```bash
+loopx configure-goal --goal-id GOAL --local-authority-shadow-file
+loopx configure-goal --goal-id GOAL --local-authority-shadow-file --execute
+```
+
+Todo, handoff-mode, follow-up, and task-lease facades observe their committed
+local result through `FileAuthorityStore`. Candidate bytes live under
+`authority-shadow/file/` outside the legacy per-Goal runtime tree, so state
+migration never copies a store identity or revision; an executed migration
+seeds a new target lineage from the migrated local state. Candidate failure is
+reported as evidence but never reverses the completed local write.
+
+Disable the observer in one command with
+`loopx configure-goal --goal-id GOAL --clear-local-authority-shadow --execute`.
+This is rollback of observation only: the local Markdown and task-lease files
+remain canonical throughout. The slice does not read the candidate for a
+decision, fence a legacy writer, qualify a remote provider, or complete the
+second Stage 2C promotion. A process crash after the local commit but before
+the observer call may miss that individual observation; a later committed
+write or migration seed refreshes the full current projection, but no durable
+shadow outbox is claimed here.
+
 ### Implementation prerequisite: put local file mode behind the same coordination contract
 
 Before wiring a live NoKV or another remote provider, the runtime should first
