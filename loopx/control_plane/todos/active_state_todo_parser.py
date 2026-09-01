@@ -11,7 +11,6 @@ from ..goals.active_state_metadata import (
 )
 from .contract import (
     TODO_TASK_PATTERN,
-    TODO_TASK_CLASS_ADVANCEMENT,
     normalize_todo_id,
     parse_todo_metadata_line,
     todo_done_for_status,
@@ -21,8 +20,8 @@ from .decision_scope import build_standing_decision_authority
 from .todo_summary import (
     MAX_STATUS_TODOS_PER_ROLE,
     compact_todo_group,
+    count_advancement_todos,
     normalize_todo_text,
-    todo_item_task_class,
 )
 
 
@@ -130,11 +129,8 @@ def parse_active_state_todos(
         item_limit=item_limit,
         include_task_orchestration_authority=include_task_orchestration_authority,
     )
-    archived_advancement_done_count = sum(
-        1
-        for item in archive_items
-        if item.get("done") is True
-        and todo_item_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
+    archived_advancement_done_count = count_advancement_todos(
+        [item for item in archive_items if item.get("done") is True]
     )
     if agent and archived_advancement_done_count:
         agent["archived_advancement_done_count"] = archived_advancement_done_count
