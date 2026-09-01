@@ -39,13 +39,16 @@ qualification.
 : Resolves the original App model selector before provider alias mapping. A
   `fast/` selector is stripped to its underlying route and forces the wire
   request tier to `priority`; an ordinary selector preserves the caller's
-  service tier. The operation accepts no prompt, auth or request body.
+  service tier. If that preserved tier is `priority`, candidate admission still
+  switches to Fast-capable-only, so the native Fast entry cannot reach Ark.
+  The operation accepts no prompt, auth or request body.
 
 `qualify_snapshot`
 : Checks the content-free App/CPA readback: visible and hidden routes, input
   modalities, explicit Fast sibling rows, per-row default tiers, active request
-  normalization, loopback binding, modality-aware affinity, typed route
-  traversal, durable settings revision and commit barrier.
+  normalization including effective-priority admission, loopback binding,
+  modality-aware affinity, typed route traversal, durable settings revision and
+  commit barrier.
 
 `project_runtime_status`
 : Joins a stable, route-independent host ChatGPT identity state with a

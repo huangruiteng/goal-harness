@@ -508,13 +508,31 @@ def normalize_selector_request(normalization: Mapping[str, Any]) -> dict[str, An
     elif requested_tier is not None:
         tier_action["value"] = requested_tier
 
+    effective_fast = (
+        selector["default_service_tier"] == "fast"
+        or requested_tier == catalog["fast_request_service_tier"]
+    )
+    eligible_candidates = selector["candidates"]
+    fallback_policy = selector["fallback_policy"]
+    if effective_fast:
+        profiles = {item["id"]: item for item in catalog["profiles"]}
+        eligible_candidates = _eligible_profiles(
+            selector["candidates"],
+            profiles,
+            required_modalities=set(),
+            require_fast=True,
+        )
+        if not eligible_candidates:
+            raise ValueError(f"selector {selector_slug} has no Fast-capable candidates")
+        fallback_policy = "fast_capable_only"
+
     return {
         "original_model_selector": selector_slug,
         "normalized_model_selector": selector["route_slug"],
         "default_service_tier": selector["default_service_tier"],
         "service_tier": tier_action,
-        "fallback_policy": selector["fallback_policy"],
-        "eligible_candidates": selector["candidates"],
+        "fallback_policy": fallback_policy,
+        "eligible_candidates": eligible_candidates,
     }
 
 
@@ -681,15 +699,15 @@ def project_runtime_status(status: Mapping[str, Any]) -> dict[str, Any]:
     )
     if modality not in route["input_modalities"]:
         raise ValueError(f"selector {selector_slug} does not admit modality {modality}")
-    fast = selector["default_service_tier"] == "fast"
+    selector_defaults_fast = selector["default_service_tier"] == "fast"
+    fast = selector_defaults_fast
     if "fast" in observation:
         declared_fast = _boolean(
             observation.get("fast"), "status.execution_observation.fast"
         )
-        if declared_fast != fast:
-            raise ValueError(
-                "execution Fast state must be inferred from the selected route slug"
-            )
+        if selector_defaults_fast and not declared_fast:
+            raise ValueError("a Fast selector cannot report a non-Fast execution")
+        fast = declared_fast
     observed_at = _timestamp(
         observation.get("observed_at"), "status.execution_observation.observed_at"
     )
@@ -899,8 +917,9 @@ def qualify_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         and normalizer.get("active") is True
         and normalizer.get("selector_prefix") == "fast/"
         and normalizer.get("fast_request_service_tier") == "priority"
-        and normalizer.get("ordinary_selector_action") == "preserve",
-        "normalizer captures the original selector and changes only Fast rows",
+        and normalizer.get("ordinary_selector_action") == "preserve"
+        and normalizer.get("effective_priority_admission") == "fast_capable_only",
+        "normalizer preserves ordinary tiers and constrains effective Fast requests",
     )
     check(
         "loopback_endpoint",
@@ -1060,6 +1079,7 @@ def build_upgrade_plan(upgrade: Mapping[str, Any]) -> dict[str, Any]:
             "selector_prefix_capture",
             "priority_injection",
             "ordinary_selector_preserved",
+            "effective_priority_admission",
             "fast_route_no_unsupported_fallback",
         ],
         "ssh_bridge": ["loopback_binds", "reconnect", "existing_task_resume"],

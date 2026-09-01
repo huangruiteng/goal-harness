@@ -199,7 +199,9 @@ provider 的原生 Fast 按钮还受宿主 ChatGPT 身份投影约束，不能�
 因此从显式声明 `fast_selector` 的普通 route 生成 `fast/<route>` sibling 行：普通行使用
 `default_service_tier = "default"`，Fast 行使用 `default_service_tier = "fast"`。CPA adapter/plugin
 必须在 alias 映射前读取原始 selector；命中 `fast/` 时去掉前缀并强制请求
-`service_tier = "priority"`，普通 selector 不改 tier。
+`service_tier = "priority"`。普通 selector 不改调用方传入的 tier；若原生 Fast
+入口已经传入 `priority`，normalizer 仍会按有效 Fast 状态收窄到 A/B
+Fast-capable candidates，不能落到 Ark。
 
 Fast sibling 的候选不是复制普通 route，而是按 `supports_fast` 过滤。A/B 支持 Fast，Ark 不支持，
 所以 Fast 行只能在 A/B 环内切换；没有 Fast-capable provider 时必须在首个输出前 fail closed。
@@ -481,7 +483,9 @@ credential 遍历、provider 选择和 commit barrier 仍由 CPA 独占。两层
 2. `input_modalities`：Standard/Fast Sol 与 Luna 为 `text, image`，Ark 为 `text`；
 3. `supported_reasoning_levels`：Sol 与 Luna 都只声明已验证的 `low / medium / high / xhigh / max`；
 4. `selector_default_service_tiers`：普通行、Luna、Ark 为 `default`，三条 `fast/` 行为 `fast`；
-5. `request_normalizer`：`fast/` 在 alias mapping 前强制 `priority`，普通行保持原请求；
+5. `request_normalizer`：`fast/` 在 alias mapping 前强制 `priority`；普通行保持原请求，
+   但原请求为 `priority` 时同样启用 Fast-capable-only admission；readback 必须报告
+   `effective_priority_admission = fast_capable_only`；
 6. `route_traversal`：普通 Sol 允许一次 A/B 环后接 Ark，Fast Sol 只允许一次 A/B 环。
 
 App Server 的 `model/list` readback 是 catalog 验收面。只检查 JSON 文件内容不够，因为旧

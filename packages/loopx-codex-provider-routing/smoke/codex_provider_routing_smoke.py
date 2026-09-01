@@ -76,6 +76,7 @@ def _valid_snapshot() -> dict[str, Any]:
             "selector_prefix": "fast/",
             "fast_request_service_tier": "priority",
             "ordinary_selector_action": "preserve",
+            "effective_priority_admission": "fast_capable_only",
         },
         "endpoint_host": "127.0.0.1",
         "affinity_policy": "hint_revalidated_per_attempt",
@@ -249,6 +250,22 @@ def main() -> int:
     )
     assert normalized_standard["normalized_model_selector"] == ("codex-b/gpt-5.6-sol")
     assert normalized_standard["service_tier"] == {"action": "preserve"}
+    normalized_standard_priority = normalize_selector_request(
+        {
+            "catalog_source": _source(),
+            "model_selector": "auto/gpt-5.6-sol",
+            "service_tier": "priority",
+        }
+    )
+    assert normalized_standard_priority["service_tier"] == {
+        "action": "preserve",
+        "value": "priority",
+    }
+    assert normalized_standard_priority["fallback_policy"] == "fast_capable_only"
+    assert normalized_standard_priority["eligible_candidates"] == [
+        "codex-a",
+        "codex-b",
+    ]
 
     runtime = project_runtime_status(_runtime_status())
     assert runtime["credential_free"] is True
@@ -294,11 +311,44 @@ def main() -> int:
         "Fast selector was allowed to fall back to a non-Fast provider",
     )
 
-    mismatched_fast_flag = _runtime_status()
-    mismatched_fast_flag["execution_observation"]["fast"] = True
+    ordinary_priority = _runtime_status()
+    ordinary_priority["execution_observation"].update(
+        {
+            "fast": True,
+            "attempted_profiles": ["codex-a", "codex-b"],
+            "selected_profile": "codex-b",
+        }
+    )
+    runtime = project_runtime_status(ordinary_priority)
+    assert runtime["route_intent"]["fast"] is True
+    assert runtime["route_intent"]["legal_attempt_orders"] == [
+        ["codex-a", "codex-b"],
+        ["codex-b", "codex-a"],
+    ]
+
+    ordinary_priority_to_ark = _runtime_status()
+    ordinary_priority_to_ark["execution_observation"].update(
+        {
+            "fast": True,
+            "attempted_profiles": ["codex-a", "codex-b", "ark-text"],
+            "selected_profile": "ark-text",
+        }
+    )
     expect_error(
-        lambda: project_runtime_status(mismatched_fast_flag),
-        "runtime Fast state was not inferred from the route slug",
+        lambda: project_runtime_status(ordinary_priority_to_ark),
+        "ordinary selector with priority was allowed to fall back to Ark",
+    )
+
+    fast_selector_reported_standard = _runtime_status()
+    fast_selector_reported_standard["execution_observation"].update(
+        {
+            "route_slug": "fast/auto/gpt-5.6-sol",
+            "fast": False,
+        }
+    )
+    expect_error(
+        lambda: project_runtime_status(fast_selector_reported_standard),
+        "Fast selector was allowed to report a non-Fast execution",
     )
 
     image_affinity = _runtime_status()
@@ -441,6 +491,15 @@ def main() -> int:
         item["id"] for item in failed["checks"] if not item["passed"]
     }
 
+    unsafe_priority_admission = _valid_snapshot()
+    unsafe_priority_admission["request_normalizer"]["effective_priority_admission"] = (
+        "route_default"
+    )
+    failed = qualify_snapshot(unsafe_priority_admission)
+    assert "request_normalizer" in {
+        item["id"] for item in failed["checks"] if not item["passed"]
+    }
+
     stale = _valid_snapshot()
     stale["affinity_policy"] = "sticky_without_revalidation"
     stale["turn_revision_matches"] = False
@@ -492,6 +551,7 @@ def main() -> int:
     assert "h2_reuse" in plan["required_checks"]
     assert "no_eligible_fail_closed" in plan["required_checks"]
     assert "ordinary_selector_preserved" in plan["required_checks"]
+    assert "effective_priority_admission" in plan["required_checks"]
     assert "turn_revision_match" in plan["required_checks"]
 
     response = _run_request(

@@ -59,9 +59,11 @@ declare one `fast_selector`; the compiler emits `fast/<route>`, filters its
 candidates to Fast-capable profiles and marks its default tier as `fast`.
 `normalize_selector_request` consumes only the original selector and optional
 service tier: Fast rows resolve to the underlying route and force the wire tier
-to `priority`, while ordinary rows preserve the request. It never accepts a
-prompt or request body. A Fast selector cannot fall through to a provider that
-does not support Fast.
+to `priority`, while ordinary rows preserve the request. A preserved
+`priority` tier is nevertheless treated as effective Fast state for candidate
+admission, so both the explicit sibling row and the native Fast entry are
+limited to Fast-capable providers. It never accepts a prompt or request body.
+A Fast request cannot fall through to a provider that does not support Fast.
 
 Codex App settings use the same evidence rule. A selector label is not proof
 that a running turn adopted the new model. Qualification requires a durable

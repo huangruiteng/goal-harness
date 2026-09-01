@@ -123,6 +123,7 @@
     },
     "request_normalizer": {
       "active": true,
+      "effective_priority_admission": "fast_capable_only",
       "fast_request_service_tier": "priority",
       "ordinary_selector_action": "preserve",
       "selector_prefix": "fast/"
