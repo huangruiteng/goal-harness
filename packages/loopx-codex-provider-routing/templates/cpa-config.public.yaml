@@ -20,3 +20,8 @@ routing:
 codex:
   stream-bootstrap-buffering: true
   optimize-multi-agent-v2: false
+
+# Adapter/plugin contract (not a native CPA YAML key): inspect the original
+# model selector before alias mapping. For `fast/<route>`, strip the prefix,
+# set the request service tier to `priority`, and admit only Fast-capable route
+# members. Preserve both model and service tier for ordinary selectors.
