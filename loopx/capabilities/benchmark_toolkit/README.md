@@ -750,7 +750,13 @@ future, or unresolved feedback/headroom produces a hold; malformed input fails c
 without a write. Feedback also carries the exact `updated_at` revision of the
 concurrency envelope it observed. Any configure, target change, admission, or release
 invalidates that receipt, so one healthy window cannot be replayed across target
-levels. Preview
+levels. A runner may preserve its healthy-window streak across ordinary campaign
+churn only when the transition is a qualified terminal run followed by a successful
+refill and the whole observation window has no launch failure, provider-capacity
+rejection, runner-invalid transition, or typed resource pressure. It must then issue
+new feedback bound to the post-refill envelope revision; the pre-transition receipt
+remains invalid. Reset the streak for any failed refill, unresolved terminal state,
+or pressure signal. Preview
 is the default; `--execute` atomically writes the selected target. The runner remains
 responsible for measuring resources, constructing `benchmark_concurrency_feedback_v0`,
 and launching admitted work; raw metrics and receipts are never persisted.

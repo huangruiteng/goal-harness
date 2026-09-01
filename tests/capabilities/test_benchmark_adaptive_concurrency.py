@@ -13,6 +13,7 @@ from loopx.capabilities.benchmark_toolkit import (
     configure_benchmark_concurrency_envelope,
     default_benchmark_concurrency_envelope_path,
     read_benchmark_concurrency_envelope,
+    release_benchmark_case,
     tune_benchmark_concurrency_target,
 )
 
@@ -190,6 +191,62 @@ def test_health_receipt_cannot_be_replayed_across_target_levels(
         "concurrency_feedback_envelope_revision_mismatch"
     ]
     assert replayed["write_performed"] is False
+    assert stored is not None
+    assert stored["config"]["target_active_cases"] == 4
+
+
+def test_fresh_feedback_can_preserve_healthy_streak_across_benign_churn(
+    tmp_path: Path,
+) -> None:
+    path = _configured_envelope(tmp_path)
+    now = datetime.now(UTC)
+    policy = build_benchmark_adaptive_concurrency_policy()
+    pre_churn_feedback = _feedback_for_path(path, now)
+
+    released = release_benchmark_case(
+        path,
+        run_id="run-0",
+        execute=True,
+        released_at=(now + timedelta(seconds=1)).isoformat(),
+    )
+    refilled = admit_benchmark_case(
+        path,
+        run_id="run-benign-refill",
+        case_id="case-benign-refill",
+        arm_role="treatment",
+        execute=True,
+        admitted_at=(now + timedelta(seconds=2)).isoformat(),
+    )
+    stale_result = tune_benchmark_concurrency_target(
+        path,
+        policy=policy,
+        feedback=pre_churn_feedback,
+        resource_headroom_receipt=_headroom(now + timedelta(seconds=3)),
+        decided_at=(now + timedelta(seconds=4)).isoformat(),
+    )
+    fresh_result = tune_benchmark_concurrency_target(
+        path,
+        policy=policy,
+        feedback=_feedback_for_path(
+            path,
+            now + timedelta(seconds=3),
+            streak=2,
+            launch_attempts=1,
+        ),
+        resource_headroom_receipt=_headroom(now + timedelta(seconds=3)),
+        execute=True,
+        decided_at=(now + timedelta(seconds=4)).isoformat(),
+    )
+
+    stored = read_benchmark_concurrency_envelope(path)
+    assert released["released"] is True
+    assert refilled["admitted"] is True
+    assert stale_result["action"] == "hold"
+    assert stale_result["reason_codes"] == [
+        "concurrency_feedback_envelope_revision_mismatch"
+    ]
+    assert fresh_result["action"] == "increase"
+    assert fresh_result["write_performed"] is True
     assert stored is not None
     assert stored["config"]["target_active_cases"] == 4
 
