@@ -175,6 +175,12 @@ changes.
 
 ## Benchmark And Reliability Engineering
 
+- [Benchmark Study Upload and Dashboard Projection v0](benchmark-study-upload-dashboard-v0.md)
+  - **RFC status:** Draft integration proposal.
+  - **Delivery on `main`:** Proposal only.
+  - **Current boundary:** Experiment-board rows and benchmark-native scores
+    remain authoritative; the study manifest, upload/readback envelope, and
+    campaign-to-run dashboard projection are proposed but not implemented.
 - [Long-Horizon Harness Benchmark and Research Program v0](long-horizon-harness-benchmark-research-program-v0.md)
   ([中文版](long-horizon-harness-benchmark-research-program-v0.zh-CN.md))
   - **RFC status:** Draft, research program.
