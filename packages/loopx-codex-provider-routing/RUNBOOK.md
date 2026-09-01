@@ -64,6 +64,7 @@ SSH 运行面的演进；CPA PR 承载进入在线 data plane 的通用修复。
 | LoopX | [#3711](https://github.com/huangruiteng/loopx/pull/3711) | merged | 将 runbook、脚本迁移清单、无密配置和资格 contract 升级为独立 extension |
 | LoopX | [#3737](https://github.com/huangruiteng/loopx/pull/3737) | merged | 增加 Luna，并把 A/B 选择收敛为同一账号环的首选入口 |
 | LoopX | [#3804](https://github.com/huangruiteng/loopx/pull/3804) | merged | 将宿主身份、路由选择、额度与真实 attempt chain 投影为无密运行状态 |
+| LoopX | [#3805](https://github.com/huangruiteng/loopx/pull/3805) | open | 生成显式 Fast sibling rows，固化 `fast/` request normalization、默认 tier 与 A/B-only fallback |
 | CLIProxyAPI | [#5211](https://github.com/router-for-me/CLIProxyAPI/pull/5211) | merged | 被动观测 per-auth quota header 与最近请求计数；management 原始身份字段仍须由 operator adapter 脱敏 |
 | CLIProxyAPI | [#5220](https://github.com/router-for-me/CLIProxyAPI/pull/5220) | open / conflicts | provider-bound Responses history、`additional_tools` 与 Ark SSE normalizer；CI 通过但需 rebase 后再 review |
 | CLIProxyAPI | [#5261](https://github.com/router-for-me/CLIProxyAPI/pull/5261) | open / review required | ChatGPT uTLS HTTP/2 连接池、TLS session resumption 与异常重建 |
