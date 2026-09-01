@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from loopx.control_plane.agents.workspace_guard import capture_delivery_workspace
 from loopx.control_plane.coordination.file_provider import FileCoordinationProvider
 from loopx.control_plane.coordination.head import bootstrap_head
 from loopx.extensions.runtime import default_extension_state_file, install_extension
@@ -21,6 +22,58 @@ GOAL_ID = "goal-authority-product-e2e"
 TODO_ID = "todo_authority_product_e2e"
 FOLLOWUP_TODO_ID = "todo_authority_product_followup"
 AGENT_IDS = ("agent-a", "agent-b")
+TASK_REPOSITORY = "git:example.invalid/loopx/authority-product-e2e"
+TASK_REPOSITORY_REMOTE = "https://example.invalid/loopx/authority-product-e2e.git"
+
+
+def _git(project: Path, *args: str) -> str:
+    env = dict(os.environ)
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    completed = subprocess.run(
+        ["git", "-C", str(project), *args],
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(completed.stderr or completed.stdout)
+    return completed.stdout.strip()
+
+
+def _create_independent_host_worktree(root: Path) -> Path:
+    source = root / "host-source"
+    source.mkdir()
+    _git(source, "init")
+    _git(source, "remote", "add", "origin", TASK_REPOSITORY_REMOTE)
+    (source / "README.md").write_text("authority product fixture\n", encoding="utf-8")
+    _git(source, "add", "README.md")
+    _git(
+        source,
+        "-c",
+        f"core.hooksPath={os.devnull}",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "user.name=LoopX test",
+        "-c",
+        "user.email=loopx-test@example.invalid",
+        "commit",
+        "-m",
+        "test: initialize authority product fixture",
+    )
+    worktree = root / "shared-host-project"
+    _git(source, "worktree", "add", "--detach", str(worktree), "HEAD")
+    workspace = capture_delivery_workspace(
+        worktree,
+        peer_independent_worktree_required=True,
+    )
+    assert workspace is not None
+    assert workspace["task_repository"] == TASK_REPOSITORY
+    assert workspace["workspace_kind"] == "independent_git_worktree"
+    return worktree
 
 
 def _write_product_fixture(
@@ -30,9 +83,8 @@ def _write_product_fixture(
 ) -> tuple[Path, Path, Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
-    host_project = root / "shared-host-project"
     runtime.mkdir(parents=True)
-    host_project.mkdir()
+    host_project = _create_independent_host_worktree(root)
     state = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
     state.parent.mkdir(parents=True)
     todo_lines = (
@@ -40,7 +92,7 @@ def _write_product_fixture(
             "- [ ] [P0] Advance the authority-qualified product fixture.",
             "  <!-- loopx:todo "
             f"todo_id={TODO_ID} status=open task_class=advancement_task "
-            "action_kind=fixture priority=P0 "
+            f"action_kind=fixture task_repository={TASK_REPOSITORY} priority=P0 "
             f"successor_todo_ids={FOLLOWUP_TODO_ID} -->",
             "",
             "- [ ] [P2] Keep the follow-up fixture available.",
@@ -130,7 +182,7 @@ def _bootstrap_authority(store: Path) -> None:
                     "gates_open": True,
                     "gate_revision": 1,
                 },
-                "repository": "git:example/authority-product-e2e",
+                "repository": TASK_REPOSITORY,
                 "code_revision": "0123456789abcdef",
                 "last_lease_epoch": 0,
             }
@@ -442,6 +494,13 @@ def test_two_product_cli_agents_share_one_authority_and_settle_once(
     selected_todo = envelope["action"]["selected_todo"]
     assert selected_todo["todo_id"] == TODO_ID
     assert selected_todo["selected_by"] == "turn_controller_advisory_primary"
+    assert selected_todo["task_repository"] == TASK_REPOSITORY
+    assert envelope["writeback"]["delivery_workspace_causality"] == {
+        "schema_version": "delivery_workspace_causality_v0",
+        "refresh": "delivery_workspace; otherwise --delivery-workspace-path",
+        "spend": "recorded_delivery_workspace",
+        "mismatch": "fail_closed",
+    }
     assert (
         envelope["action"]["action_portfolio"]["selection_policy"][
             "requires_explicit_turn_binding"
@@ -554,6 +613,11 @@ def test_two_product_cli_agents_share_one_authority_and_settle_once(
         "authority_product_completion",
         "quota_slot_spent",
     ]
+    assert run_rows[0]["delivery_workspace"]["task_repository"] == TASK_REPOSITORY
+    assert (
+        run_rows[0]["delivery_workspace"]["workspace_kind"]
+        == "independent_git_worktree"
+    )
     state = (project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md").read_text(
         encoding="utf-8"
     )
