@@ -1,6 +1,6 @@
 # 验证说明：NoKV canonical coordination provider（v0）
 
-- 配套 RFC：[多端共享 Goal 的在线权威与可插拔状态 Provider (v0)](./shared-goal-authority-state-provider-v0.zh-CN.md)
+- 配套 RFC：[LoopX 共享控制面权威与可插拔状态 Provider (v0)](./shared-goal-authority-state-provider-v0.zh-CN.md)
 - 参考实现与探针：`examples/nokv-shadow-provider/`
 - 证据范围：canonical coordination aggregate、target-scoped conflict、内部 CAS
   rebase 与历史 operation receipt 重放

@@ -1,7 +1,7 @@
 # NoKV canonical-coordination provider reference
 
 This directory contains the small, reviewable NoKV reference for
-[RFC: shared-goal authority and pluggable state provider v0](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0.md).
+[RFC: LoopX shared control-plane authority and pluggable state providers v0](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0.md).
 It is a contract example, not a shipped LoopX runtime integration or a
 production deployment claim.
 

@@ -1,16 +1,19 @@
-# RFC: Shared-Goal Online Authority and Pluggable Coordination Provider (v0)
+# RFC: LoopX Shared Control-Plane Authority and Pluggable State Providers (v0)
 
 - Status: Draft, under maintainer review
-- Proposed by: NoKV Lab
-- Date: 2026-08-05; revised 2026-08-18
-- Scope: a separate deployment contract for LoopX shared-goal coordination,
-  complementing
+- Initially proposed by: NoKV Lab
+- Widened by: LoopX maintainers
+- Date: 2026-08-05; revised 2026-09-01
+- Scope: one provider-neutral LoopX authority contract with built-in file,
+  optional NoKV, and optional PostgreSQL provider profiles, complementing
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
-- Source baseline: LoopX `c6a1da1eaa22962faaeb6d4050d867462e7665ff`
+- Source baseline: LoopX `a0c20f1779d273e7aaa4bd3ea166d145d466e6d5`
 - Provider API baseline: NoKV `3d75d96965` (0.11.0 line). The Python
   `publish_bytes` generation-CAS mapping was exercised once by hand against a
   live NoKV stack at that pin (see the example README); the run is evidence for
   the mapping only, not part of any merge gate
+- PostgreSQL baseline: contract and delivery plan only. This RFC does not claim
+  that a PostgreSQL provider or shared authority service already ships
 - Language note: the
   [Chinese version](./shared-goal-authority-state-provider-v0.zh-CN.md) and this
   English version are semantic mirrors. A difference between them is a defect.
@@ -56,26 +59,53 @@ the request passes, the claim, lease, and receipt are written together. If it
 fails, the requester gets an explicit reason.
 
 This time the bookkeeper gets one small ledger. We are not moving every LoopX
-file into a remote store:
+file into a remote store, and we are not creating three competing semantic
+authorities:
 
 1. one goal that explicitly opts into shared mode has one **canonical
    coordination aggregate**;
 2. each successful operation's state transition and original receipt land in
    the **same compare-and-set (CAS)**;
-3. the authority makes decisions, while a provider only stores deterministic
-   bytes reliably;
+3. the LoopX authority makes decisions, while file, NoKV, or PostgreSQL
+   providers only persist reviewed transactions reliably;
 4. run history, status, quota, scheduler state, host sessions, and evidence
    bodies stay with their existing owners instead of entering this ledger.
 
-NoKV is an optional provider behind the bookkeeper. Agents do not connect to
-NoKV directly for coordination writes, and NoKV does not become the LoopX
-control-plane authority.
+NoKV and PostgreSQL are optional providers behind the bookkeeper. Agents do not
+connect directly to either provider for controlled writes, and neither provider
+becomes the LoopX control-plane authority. The file provider is the first
+deterministic/parity backend; the current local file-based control plane remains
+the default authority path until a separately reviewed authority-source
+promotion.
 
-The first runnable example has only one command, `claim_work`. For an existing
-eligible todo, it records the soft claim, lease/fence, and receipt together. It
-answers the two questions most likely to cause an incident—who wins when two
-endpoints claim at once, and how a lost response recovers its original
-receipt—without pretending that the complete lease lifecycle already ships.
+```text
+Agent client
+    |
+    v
+LoopX authority API / embedded authority
+    |
+    v
+typed LoopX transactions
+    |
+    v
+provider-neutral store contract
+    |------------|-------------|
+    v            v             v
+   file         NoKV       PostgreSQL
+```
+
+The invariant is one semantic writer regardless of deployment. A shared
+service may host the LoopX authority together with authentication, tenancy,
+audit, and a PostgreSQL or NoKV provider. Those are deployment concerns: an
+Agent still calls LoopX APIs and cannot bypass the authority by writing tables,
+documents, or files directly.
+
+The first runnable slice began with one command, `claim_work`. For an existing
+eligible todo, it records the soft claim, lease/fence, and receipt together.
+Stage 3 extends that reference contract with renew, release, reclaim, and
+completion while keeping the modules coverage-only. The initial slice answers
+the two questions most likely to cause an incident—who wins when two endpoints
+claim at once, and how a lost response recovers its original receipt.
 
 The contention unit is `(goal_id, todo_id)` plus the preconditions actually
 referenced by that todo, not the whole goal. Two endpoints claiming the same
@@ -107,10 +137,11 @@ co-deployed while preserving different correctness contracts:
 | Semantic authority | Normalized commands, target-scoped preconditions, claims, lease epochs, fencing, revisions, and original receipts | Raw artifact bodies, provider placement, or background scheduling state |
 | Reconciliation layer | Observation, expired-lease recovery, wake-request emission, and continuous Supervisor decisions through the same command contract | Direct head mutation, provider bypass, or a second source of coordination truth |
 
-NoKV's workspace service is the candidate storage-plane implementation mapped
-by this RFC; it still requires the staged qualification below. The LoopX
-increment is the semantic authority that turns an opaque generation CAS into a
-trusted `claim_work` result and, later, into recoverable execution ownership.
+The built-in file backend is the first parity implementation; NoKV is the
+initial shared-store candidate; PostgreSQL is the planned service-provider
+profile. Each must pass the staged qualification below. The LoopX increment is
+the semantic authority that turns an opaque provider transaction into a trusted
+`claim_work` result and, later, into recoverable execution ownership.
 The reconciliation layer is a client of that authority, not another writer: a
 Supervisor observes projections and issues typed commands such as reclaim or
 requests a delivery-plane wake, while its scan cursor and scheduling state
@@ -133,8 +164,8 @@ retention or collection; it must not leave the head pointing at an object that
 was never durably published. Sharing a physical provider therefore does not
 merge the two ownership contracts or require a cross-domain transaction.
 
-Physical co-location is allowed. One deployment bundle may start a NoKV
-workspace service, a LoopX authority endpoint, and a Supervisor worker. Here,
+Physical co-location is allowed. One deployment bundle may start a NoKV or
+PostgreSQL provider, a LoopX authority endpoint, and a Supervisor worker. Here,
 "separate" means separately owned contracts and credentials; it does not
 require a separate repository, process, binary, or license in v0. An embedded
 authority is sufficient for trusted local qualification. A shared deployment
@@ -180,6 +211,8 @@ selects separate license terms; the current policy remains
 - bind each operation identity to one normalized request digest and reject the
   same id when it is reused with different semantics;
 - recover the original receipt after later operations advance the ledger;
+- define one semantic authority boundary and the file, NoKV, and PostgreSQL
+  provider profiles behind it;
 - keep LoopX's default local mode unchanged;
 - say how every existing durable state category joins—or stays outside—this
   boundary.
@@ -190,8 +223,8 @@ selects separate license terms; the current policy remains
 - support offline multi-writer merge or offline controlled writes;
 - mix message delivery, wake-up, presence, or an Agent IM protocol into the
   storage contract;
-- define multi-tenant public deployment, authentication, HA, or provider
-  failover;
+- ship production multi-tenant deployment, authentication, HA, or provider
+  failover in the Stage 0 reference slice;
 - move quota, scheduler state, run history, raw evidence, host sessions, or
   extension-owned ledgers into the coordination head;
 - automatically promote the current event projection or any provider;
@@ -581,6 +614,54 @@ that never happened; publishing state first can lose the only proof after a
 crash. Splitting it later requires a provider-neutral multi-record transaction
 or commit-marker protocol and a new reviewed contract.
 
+#### 6.2.1 Three provider profiles, one authority
+
+| Provider profile | Role in this RFC | Promotion requirement |
+| --- | --- | --- |
+| file | Built-in deterministic and parity backend. Current Markdown, registry JSON, event JSONL, run files, and task-lease files remain canonical until their owning contracts are explicitly promoted. | Prove parity and crash recovery behind the same typed transaction boundary before any file aggregate becomes canonical. |
+| NoKV | Optional shared-store provider for online coordination. It contributes generation CAS and store-lineage primitives, not LoopX semantics. | Close recovery/availability blockers, qualify capacity and HA, then pass shadow parity and the bounded canary. |
+| PostgreSQL | Optional provider behind an authenticated LoopX authority service for multi-Agent or private deployments. PostgreSQL tables and roles are service implementation details. | Implement the same conformance contract, transaction isolation, fencing, idempotency, cursor, audit, and fail-closed network behavior; no direct Agent database access. |
+
+Physical database or cluster co-location does not merge ownership. A deployment
+should isolate LoopX control-plane records from application-domain records with
+separate schemas and roles, and relate them only through opaque identities or
+digests. Provider-specific payloads do not enter the provider-neutral LoopX
+schema.
+
+#### 6.2.2 Target store contract after the reference CAS slice
+
+The current Stage 2/3 reference implementation deliberately uses the smaller
+`load` / `compare_and_put` document seam above. It proves the lifecycle and
+receipt invariants needed before widening the persistence boundary; it does not
+claim to implement the future service-grade transaction API.
+
+The next LoopX-owned TypeScript boundary should express at least these logical
+operations (exact names and wire shapes remain implementation decisions):
+
+```text
+load_authority(goal_id)
+  -> head + provider_revision + cursor
+
+commit_authority(
+  expected_provider_revision,
+  operation_id,
+  events,
+  next_projection,
+  receipts
+)
+  -> applied | conflict | ambiguous | failed
+
+read_receipt(operation_id)
+scan_committed(after_cursor, limit)
+```
+
+This contract owns atomic event/projection/receipt persistence, opaque provider
+revisions, cursors, and durable readback. LoopX still owns operation identity,
+request normalization, legal transitions, claim/lease fencing, Turn admission,
+quota semantics, settlement idempotency, and receipt meaning. In particular,
+an adapter must not reinterpret a provider transaction result as a domain
+decision.
+
 ### 6.3 The three version numbers are not the same thing
 
 | Domain | Owner | Meaning | Consumer |
@@ -593,9 +674,9 @@ A backend may often advance its generation once per accepted command, but
 numerical equality is never a contract. Migration, repair, or provider metadata
 may change provider generation without granting a new LoopX authority revision.
 
-For NoKV, its document generation implements `provider_generation` only. The
-LoopX authority remains responsible for the other two domains and for the
-receipt stored inside the document.
+A provider's document generation or database revision implements
+`provider_generation` only. The LoopX authority remains responsible for the
+other two domains and for the receipt stored inside the transaction.
 
 ### 6.4 Expiry adjudication and the binding fence
 
@@ -623,7 +704,9 @@ identity. The provider contract gains one read-only verb,
 `store_identity() -> str`, returning a stable identity for the store
 lineage: the NoKV adapter binds `workbench` plus the never-reused
 `workspace_incarnation_id` the service mints per workbench incarnation; the
-file provider mints an exclusive-create identity file per directory.
+file provider serializes creation under its cross-process lock and publishes a
+strictly formatted identity through complete temp write, fsync, atomic rename,
+and parent-directory fsync.
 `bootstrap` embeds the identity in the head (`store_binding`), and the
 authority refuses every command - typed `store_lineage_mismatch` - whenever
 the loaded head's binding differs from the provider's identity, re-checking
@@ -720,6 +803,16 @@ remains in force and the Stage 3 verbs ship on it unchanged.
 - The current event-store bridge still reports Markdown as source of truth and
   does not allow automatic promotion.
 
+Two deployment shapes share the same semantics:
+
+| Deployment | Authority boundary | Provider |
+| --- | --- | --- |
+| embedded/local | LoopX authority runs in the trusted local process; existing local writers remain canonical until promotion | file |
+| shared service | Agents call an authenticated LoopX authority API; the service owns provider credentials, tenancy, and audit | NoKV or PostgreSQL |
+
+An Agent is an API client in both shapes. Direct provider access never becomes
+an alternative shared mode.
+
 ### Shared-authority mode
 
 Shared mode is an explicit per-goal choice. A reviewed implementation must:
@@ -812,6 +905,44 @@ permission to weaken these normative checks. Performance measurements and a
 particular deployment topology are deliberately non-normative.
 
 ## 11. Staged Delivery
+
+The delivery program has one shared foundation and two provider-specific
+tracks. Workstream labels are responsibility boundaries, not authority grants:
+
+| Workstream | Primary responsibility |
+| --- | --- |
+| LoopX core owner | TypeScript-owned semantic transaction boundary; file-provider parity and promotion; migration, local-writer fencing, projection flip, rollback, and the single authority-source decision |
+| NoKV provider owner | NoKV adapter; live recovery, capacity, and HA qualification; feedback into the shared store contract without moving semantics into NoKV |
+| PostgreSQL provider owner | Generic PostgreSQL provider/service; transaction isolation, authentication, tenancy, audit, and operational deployment contract |
+| Joint qualification | Provider conformance matrix, one-way shadow parity, one-Goal/two-Agent TEST ONLY canary, and promotion evidence |
+
+The sequence is:
+
+1. **Stage 0 - merge the recoverable reference foundation.** Integrate #3669
+   with the native TypeScript task-lease acquire boundary, preserve TypeScript as
+   the acquire transaction owner, close file store-identity publication, and
+   keep the remaining Python lifecycle verbs explicitly coverage-only.
+2. **Stage 1 - define the provider-neutral transaction boundary.** Express the
+   service-grade contract in LoopX-owned TypeScript and make the file provider
+   its first conformance backend. Do not recreate a second Python semantic
+   authority.
+3. **Stage 2A/2B - implement providers in parallel.** The NoKV owner qualifies
+   the NoKV adapter and storage envelope; the PostgreSQL owner implements the
+   generic service/provider. Both reuse the same LoopX transition and receipt
+   semantics.
+4. **Stage 3 - one-way shadow parity.** Local control-plane files remain the
+   only authority while committed observations are projected to the candidate
+   provider. Compare Todo/claim, lease fence, Turn admission, quota,
+   settlement, receipt, projection head, and cursor. Do not perform bidirectional
+   synchronization or provider-to-file writes.
+5. **Stage 4 - TEST ONLY canary.** One Goal and two Agents must show no duplicate
+   claim or effect, correct expiry/fencing, restart resume, inbox steering,
+   idempotent exactly-once settlement, and fail-closed writes during network
+   failure.
+6. **Stage 5 - flip one authority source.** Only after a reviewed promotion,
+   make the shared LoopX service the sole writer. Local `.loopx` state becomes
+   cache, offline projection, and diagnostic material. Never keep a long-lived
+   dual-write or dual-master mode.
 
 ### Implementation prerequisite: put local file mode behind the same coordination contract
 
@@ -1039,12 +1170,13 @@ lease id, epoch, expiry, and contiguous authority revision sequence. A partial
 or edited v0 head therefore fails as corruption instead of gaining a new store
 binding, reusing an epoch, or authorizing an unproved holder.
 
-Delivery boundary, stated explicitly: this slice is the RFC's reference
-implementation with deterministic and live-example evidence. No LoopX
-production entry point constructs the executor yet - the modules are
-coverage-only in the visible governance ledger. PR #3669 asks the owner to
-accept that boundary explicitly; absent that decision, production wiring is
-still a merge gate. A real caller requires the reviewed shared-mode migration,
+Delivery boundary, stated explicitly and accepted by the owner on 2026-09-01:
+this slice is the RFC's reference implementation with deterministic and
+live-example evidence. No LoopX production entry point constructs the executor
+yet - the modules are coverage-only in the visible governance ledger. This
+acceptance allows the cohesive reference-contract slice to merge after its
+correctness, rebase, and review gates pass; it does not promote it to a shipped
+capability. A real caller requires the reviewed shared-mode migration,
 local-writer fence, authorization publisher, provider binding, projection
 flip, rollback, and retention decisions below - not a diagnostic CLI that
 creates a second writer. This status section claims proven contracts, not a
@@ -1064,6 +1196,11 @@ shipped production capability.
 
 ### Later runtime promotion and reviewed slices
 
+- the LoopX-owned TypeScript transaction/store boundary and file-provider
+  conformance described in Section 6.2;
+- NoKV and PostgreSQL providers qualified independently behind that boundary;
+- one-way shadow parity, the one-Goal/two-Agent TEST ONLY canary, and a
+  single-source authority flip with no long-lived dual-write or dual-master;
 - an explicit shared-mode migration and rollback/export operation, local
   writer fencing, provider binding, a production authorization-projection
   publisher, and provider-first status/completion projections;

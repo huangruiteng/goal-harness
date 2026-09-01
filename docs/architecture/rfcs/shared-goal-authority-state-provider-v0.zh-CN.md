@@ -1,14 +1,18 @@
-# RFC：共享 Goal 的在线权威与可插拔协调 Provider（v0）
+# RFC：LoopX 共享控制面权威与可插拔状态 Provider（v0）
 
 - 状态：Draft，正在接受 maintainer review
-- 提案方：NoKV Lab
-- 日期：2026-08-05；修订于 2026-08-18
-- 范围：LoopX 共享 Goal 协调的独立部署合同，用来补充
+- 最初提案方：NoKV Lab
+- 扩展修订方：LoopX maintainer
+- 日期：2026-08-05；修订于 2026-09-01
+- 范围：一个 provider-neutral 的 LoopX 权威合同，支持内置 file、可选 NoKV
+  与可选 PostgreSQL provider profile，用来补充
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
-- 源码基线：LoopX `c6a1da1eaa22962faaeb6d4050d867462e7665ff`
+- 源码基线：LoopX `a0c20f1779d273e7aaa4bd3ea166d145d466e6d5`
 - Provider API 基线：NoKV `3d75d96965`（0.11.0 线）。Python `publish_bytes`
   generation-CAS 映射已在该基线的真实 NoKV stack 上手工跑过一次（见示例 README）；
   该次运行只是映射本身的证据，不属于任何合并门槛
+- PostgreSQL 基线：目前只有合同与交付计划；本 RFC 不声称 PostgreSQL
+  provider 或 shared authority service 已经交付
 - 语言说明：[英文版](./shared-goal-authority-state-provider-v0.md)与本中文版互为
   语义镜像；两者不一致属于缺陷
 
@@ -45,20 +49,45 @@ RFC 不应该一口吞掉消息、调度、配额、run history 和所有 LoopX 
 申请。记账员检查目标 todo、身份、命名依赖和 gate；通过就把认领、lease 和回执
 一起记下，不通过就明确告诉申请人原因。
 
-这次只给记账员一本很小的账，而不是把 LoopX 的所有文件都搬进远端：
+这次只给记账员一本很小的账，而不是把 LoopX 的所有文件都搬进远端，也不是建立
+三个互相竞争的语义权威：
 
 1. 一个显式启用共享模式的 Goal，只有一份 **canonical coordination aggregate**；
 2. 每条成功 operation 的状态变化和原始 receipt 必须在**同一次 CAS**里落账；
-3. authority 负责判断，provider 只负责把确定性字节可靠保存下来；
+3. LoopX authority 负责判断，file、NoKV 或 PostgreSQL provider 只负责可靠持久化
+   经过评审的 transaction；
 4. run history、status、quota、scheduler、host session 和 evidence body 继续由各自的
    owner 管理，不塞进这本协调账。
 
-NoKV 是记账员身后的可选 provider。Agent 不会为 coordination write 直接连接
-NoKV，NoKV 也不会因此变成 LoopX 的控制面权威。
+NoKV 与 PostgreSQL 是记账员身后的可选 provider。Agent 不会为受控写入直接连接
+任一 provider，两者也都不会因此变成 LoopX 的控制面权威。file provider 是第一
+个 deterministic/parity backend；在另一次经过评审的权威源切换之前，当前本地
+file-based control plane 仍是默认 authority path。
 
-第一个能跑的例子只有 `claim_work`：对一个已经存在且可执行的 todo，同时写入 soft
-claim、lease/fence 和 receipt。它先回答两件最容易出事故的事——多人同时抢单时谁
-赢，以及响应丢失后怎样找回原回执——而不把完整 lease lifecycle 说成已经交付。
+```text
+Agent client
+    |
+    v
+LoopX authority API / embedded authority
+    |
+    v
+typed LoopX transactions
+    |
+    v
+provider-neutral store contract
+    |------------|-------------|
+    v            v             v
+   file         NoKV       PostgreSQL
+```
+
+无论如何部署，都只能有一个语义写入者。shared service 可以共同托管 LoopX
+authority、认证、租户、审计，以及 PostgreSQL 或 NoKV provider；这些是部署问题。
+Agent 仍只调用 LoopX API，不能通过直接写表、document 或 file 绕过 authority。
+
+第一个能跑的切片从 `claim_work` 开始：对一个已经存在且可执行的 todo，同时写入
+soft claim、lease/fence 和 receipt。Stage 3 在保持模块 coverage-only 的前提下，
+把参考合同扩展到 renew、release、reclaim 与 completion。初始切片先回答两件最容易
+出事故的事——多人同时抢单时谁赢，以及响应丢失后怎样找回原回执。
 
 这里的争用单元是 `(goal_id, todo_id)` 及该 todo 实际引用的 precondition，不是整个
 Goal。两个端抢同一个 todo 时只能一胜；两个端认领同一 Goal 下彼此独立、目标范围
@@ -84,8 +113,9 @@ expiry，A 仍然无法证明自己获准执行过这项工作。
 | 语义权威 | normalized command、目标范围 precondition、claim、lease epoch、fencing、revision 与原始 receipt | raw artifact body、provider placement 或后台调度状态 |
 | 持续协调层 | 通过同一 command contract 完成观察、过期 lease 恢复、wake request 与持续 Supervisor 决策 | 直接改写 head、绕过 provider 边界，或形成第二个 coordination 真相源 |
 
-NoKV workspace service 是本 RFC 映射的候选存储面实现，仍须经过下文的分阶段验证。
-LoopX 的增量是语义权威：它把 opaque generation CAS 变成可信的 `claim_work`
+内置 file backend 是第一个 parity 实现；NoKV 是最初的 shared-store 候选；
+PostgreSQL 是规划中的 service-provider profile。三者都必须通过下文的分阶段验证。
+LoopX 的增量是语义权威：它把 opaque provider transaction 变成可信的 `claim_work`
 结果，并在后续扩展成可恢复的执行权。持续协调层只是 authority 的 client，不是另
 一个 writer：Supervisor 观察 projection，通过 typed command 发起 reclaim，或请求
 delivery plane 执行 wake；它自己的 scan cursor 与调度状态继续留在 coordination
@@ -104,8 +134,8 @@ transition 中提交它的 pointer。若第二步之前失败，只会留下由�
 collection 处理的无引用 artifact；绝不能让 head 指向从未耐久发布的对象。因此，
 共享同一个物理 provider 不会合并两套 ownership contract，也不要求跨领域事务。
 
-物理上允许共同部署。一套 deployment bundle 可以同时启动 NoKV workspace service、
-LoopX authority endpoint 和 Supervisor worker。这里的“分开”是指 contract 与
+物理上允许共同部署。一套 deployment bundle 可以同时启动 NoKV 或 PostgreSQL
+provider、LoopX authority endpoint 和 Supervisor worker。这里的“分开”是指 contract 与
 credential 分别归属；v0 不要求它们必须拆成不同仓库、进程、binary 或 license。
 可信本地验证可以使用 embedded authority。共享部署则需要在线 authority boundary，
 确保不可信或过期 client 即使合法持有受限 artifact credential，也无法发布伪造的
@@ -144,6 +174,7 @@ provider-neutral core 切分。本 RFC 既不要求拆仓，也不选择独立 l
 - 把每个 operation identity 绑定到一份 normalized request digest，换一套语义复用
   同一个 id 时明确拒绝；
 - 即使后续 operation 已推进账本，也能找回原始 receipt；
+- 定义一个语义权威边界，以及位于其后的 file、NoKV、PostgreSQL provider profile；
 - 保持 LoopX 默认本地模式不变；
 - 把现有每一类持久状态该怎么接入说清楚。
 
@@ -152,7 +183,7 @@ provider-neutral core 切分。本 RFC 既不要求拆仓，也不选择独立 l
 - 不给所有 LoopX 状态造一个通用分布式文件系统或数据库；
 - 不做离线多写者 merge，也不允许离线创建受控写；
 - 不把 message delivery、wake-up、presence 或 Agent IM 协议混进存储合同；
-- 不定义多租户公网部署、认证协议、HA 或 provider failover；
+- 不在 Stage 0 参考切片中交付生产级多租户部署、认证、HA 或 provider failover；
 - 不把 quota、scheduler、run history、raw evidence、host session 或 extension ledger
   搬进 coordination head；
 - 不自动 promotion 当前 event projection 或任一 provider；
@@ -493,6 +524,50 @@ key；动词中省略 `goal_id` 并不表示该 key 是 global。
 凭证。将来若要拆分，必须有 provider-neutral 的 multi-record transaction 或
 commit-marker protocol，并通过新的合同 review。
 
+#### 6.2.1 三种 provider profile，一个权威
+
+| Provider profile | 在本 RFC 中的角色 | 晋升要求 |
+| --- | --- | --- |
+| file | 内置 deterministic 与 parity backend。当前 Markdown、registry JSON、event JSONL、run file 与 task-lease file 在各自合同显式晋升前仍是 canonical。 | 任一 file aggregate 成为 canonical 前，必须在同一 typed transaction boundary 后证明 parity 与崩溃恢复。 |
+| NoKV | 在线协调的可选共享存储 provider。它提供 generation CAS 与 store-lineage 原语，不提供 LoopX 语义。 | 关闭 recovery/availability 阻塞，验证容量与 HA，再通过 shadow parity 与有界 canary。 |
+| PostgreSQL | 面向 multi-Agent 或私有部署、位于已认证 LoopX authority service 背后的可选 provider。PostgreSQL 表与 role 是 service 实现细节。 | 实现同一 conformance contract、transaction isolation、fencing、幂等、cursor、审计与网络故障 fail-closed；Agent 不得直连数据库。 |
+
+物理数据库或 cluster 共同部署不会合并 ownership。部署应以独立 schema 与 role 隔离
+LoopX 控制面记录与应用领域记录，只通过 opaque identity 或 digest 建立关联。
+provider-specific payload 不进入 provider-neutral 的 LoopX schema。
+
+#### 6.2.2 参考 CAS 切片之后的目标 store contract
+
+当前 Stage 2/3 参考实现刻意使用上面的较小 `load` / `compare_and_put` document
+seam。它先证明扩大持久化边界所需的 lifecycle 与 receipt 不变量；它不声称已实现
+未来 service-grade transaction API。
+
+下一步由 LoopX 持有的 TypeScript boundary 至少应表达以下逻辑操作（精确命名与
+wire shape 仍由实现阶段决定）：
+
+```text
+load_authority(goal_id)
+  -> head + provider_revision + cursor
+
+commit_authority(
+  expected_provider_revision,
+  operation_id,
+  events,
+  next_projection,
+  receipts
+)
+  -> applied | conflict | ambiguous | failed
+
+read_receipt(operation_id)
+scan_committed(after_cursor, limit)
+```
+
+这份合同负责原子 event/projection/receipt 持久化、opaque provider revision、cursor
+与耐久 readback。LoopX 仍负责 operation identity、request normalization、合法
+transition、claim/lease fencing、Turn admission、quota 语义、settlement 幂等，以及
+receipt 的含义。特别是，adapter 不得把 provider transaction result 重新解释为领域
+判断。
+
 ### 6.3 三个版本号不是一回事
 
 | 版本域 | Owner | 含义 | Consumer |
@@ -505,8 +580,9 @@ Backend 常会对每条 accepted command 推进一次 generation，但数值相�
 Migration、repair 或 provider metadata 可以改变 provider generation，而不授予新的
 LoopX authority revision。
 
-对 NoKV 而言，它的 document generation 只实现 `provider_generation`。LoopX
-authority 继续负责另外两个版本域与 document 内的 receipt。
+Provider 的 document generation 或 database revision 只实现
+`provider_generation`。LoopX authority 继续负责另外两个版本域与 transaction 内
+的 receipt。
 
 ### 6.4 过期裁决与绑定围栏
 
@@ -524,7 +600,8 @@ store-lineage 绑定围栏关闭 Stage 2 状态中量化过的 restore 隐患：
 `provider_generation` 无法承载生命周期身份。provider 合同新增一个只读动词
 `store_identity() -> str`，返回该存储血统的稳定身份：NoKV adapter 绑定
 `workbench` 加服务端为每个 workbench 化身铸造、永不复用的
-`workspace_incarnation_id`；file provider 为每个目录以独占创建铸一个身份文件。
+`workspace_incarnation_id`；file provider 在跨进程锁内串行化创建，以完整临时写入、
+fsync、原子 rename、父目录 fsync 发布严格格式的身份文件。
 `bootstrap` 把身份嵌进 head（`store_binding`），authority 在 loaded head 的绑定
 与 provider 身份不符时拒绝一切命令——typed `store_lineage_mismatch`——并在每次
 reload 后复查。restore 因此保存冻结字节与血统而不授予在场权威，正如 Stage 1
@@ -596,6 +673,16 @@ receipt-per-object 替代方案被全面支配：每笔迁移多付一次对象�
   status、quota 与 host behavior 保持不变。
 - 安装 provider 不会启用 shared authority。
 - 当前 event-store bridge 仍报告 Markdown 为真相源，不允许自动 promotion。
+
+两种部署形态共享完全相同的语义：
+
+| Deployment | Authority boundary | Provider |
+| --- | --- | --- |
+| embedded/local | LoopX authority 运行在可信本地进程；晋升前，现有本地 writer 仍是 canonical | file |
+| shared service | Agent 调用已认证的 LoopX authority API；service 持有 provider credential、租户与审计 | NoKV 或 PostgreSQL |
+
+在两种形态中，Agent 都只是 API client。直接访问 provider 永远不会成为另一种
+shared mode。
 
 ### Shared-authority mode
 
@@ -674,6 +761,39 @@ gate/dependency ref、claim/lease field 与按 privacy class 标注的 opaque po
 性能测量与具体部署 topology 被刻意设为 non-normative。
 
 ## 11. 分阶段交付
+
+交付计划由一条共享基础线和两条 provider-specific 线组成。下列 workstream 是职责
+边界，不是额外的 authority grant：
+
+| Workstream | 主要职责 |
+| --- | --- |
+| LoopX core owner | TypeScript 持有的语义 transaction boundary；file-provider parity 与晋升；migration、本地 writer fencing、projection flip、rollback，以及单一权威源决策 |
+| NoKV provider owner | NoKV adapter；live recovery、容量与 HA 资格验证；在不把语义下沉到 NoKV 的前提下反馈并共同完善 shared store contract |
+| PostgreSQL provider owner | 通用 PostgreSQL provider/service；transaction isolation、认证、租户、审计与运维部署合同 |
+| 联合验证 | Provider conformance matrix、单向 shadow parity、一个 Goal/两个 Agent 的 TEST ONLY canary，以及晋升证据 |
+
+实施顺序如下：
+
+1. **Stage 0——合入可恢复执行参考基础。** 将 #3669 与原生 TypeScript task-lease
+   acquire boundary 集成，保持 TypeScript 是 acquire transaction owner，关闭
+   file store-identity 发布问题，并把其余 Python lifecycle verb 明确保持为
+   coverage-only。
+2. **Stage 1——定义 provider-neutral transaction boundary。** 在 LoopX 持有的
+   TypeScript 中表达 service-grade contract，并让 file provider 成为第一个
+   conformance backend；不重建第二个 Python 语义权威。
+3. **Stage 2A/2B——并行实现 provider。** NoKV owner 验证 NoKV adapter 与存储
+   包络；PostgreSQL owner 实现通用 service/provider。两者复用同一套 LoopX
+   transition 与 receipt 语义。
+4. **Stage 3——单向 shadow parity。** 本地控制面文件仍是唯一 authority；将已
+   提交观察投影到候选 provider，对比 Todo/claim、lease fence、Turn admission、
+   quota、settlement、receipt、projection head 与 cursor。不做双向同步，也不允许
+   provider 回写 file。
+5. **Stage 4——TEST ONLY canary。** 用一个 Goal、两个 Agent 验证：不重复 claim
+   或 effect、过期与 fencing 正确、重启后继续、inbox steering 改变后续决策、
+   settlement 幂等且 exactly-once、网络失败时写操作 fail-closed。
+6. **Stage 5——切换唯一 authority source。** 只有经过评审的晋升，才能让 shared
+   LoopX service 成为唯一 writer。本地 `.loopx` 退为 cache、offline projection 与
+   诊断材料。绝不长期维持 dual-write 或 dual-master。
 
 ### 实施前置条件：先让本地文件模式经过同一协调合同
 
@@ -849,10 +969,11 @@ head schema 版本化
 序列逐项一致。部分损坏或被编辑的 v0 head 因此会按 corruption fail closed，而不会
 获得新 store binding、重用 epoch，或授权一个无 receipt 证明的 holder。
 
-交付边界，明确声明：本切片是 RFC 的参考实现，附确定性与 live 示例证据。尚无
-LoopX 生产入口构造该 executor——这些模块在 visible governance 台账中属
-coverage-only。PR #3669 请求 owner 显式接受这一边界；在该决定产生前，产品 wiring
-仍是合并门禁。真实 caller 依赖下文经评审的 shared-mode migration、本地 writer
+交付边界，明确声明且已于 2026-09-01 获 owner 接受：本切片是 RFC 的参考实现，
+附确定性与 live 示例证据。尚无 LoopX 生产入口构造该 executor——这些模块在
+visible governance 台账中属 coverage-only。该接受允许内聚的 reference-contract
+切片在正确性、rebase 与 review 门禁通过后合入；并不把它晋升为已 ship capability。
+真实 caller 依赖下文经评审的 shared-mode migration、本地 writer
 围栏、authorization publisher、provider binding、projection 翻转、rollback 与
 retention 决策，不能用一个会制造第二 writer 的诊断 CLI 代替。本状态节声明的是已
 证明的合同，不是已 ship 的生产能力。
@@ -870,6 +991,11 @@ retention 决策，不能用一个会制造第二 writer 的诊断 CLI 代替。
 
 ### 后续 runtime promotion 与需 review 的切片
 
+- §6.2 所述由 LoopX 持有的 TypeScript transaction/store boundary 与 file-provider
+  conformance；
+- 在同一 boundary 后分别验证 NoKV 与 PostgreSQL provider；
+- 单向 shadow parity、一个 Goal/两个 Agent 的 TEST ONLY canary，以及不保留长期
+  dual-write/dual-master 的单一权威源切换；
 - 显式 shared-mode migration 与 rollback/export、本地 writer 围栏、provider
   binding、production authorization-projection publisher，以及 provider-first 的
   status/completion projection；
