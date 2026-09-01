@@ -3,15 +3,15 @@
 - Status: Draft, under maintainer review
 - Initially proposed by: NoKV Lab
 - Widened by: LoopX maintainers
-- Date: 2026-08-05; revised 2026-09-01
+- Date: 2026-08-05; revised 2026-09-02
 - Scope: one provider-neutral LoopX authority contract with built-in file,
   optional NoKV, and optional PostgreSQL provider profiles, complementing
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
 - Source baseline: LoopX `a0c20f1779d273e7aaa4bd3ea166d145d466e6d5`
-- Provider API baseline: NoKV `3d75d96965` (0.11.0 line). The Python
-  `publish_bytes` generation-CAS mapping was exercised once by hand against a
-  live NoKV stack at that pin (see the example README); the run is evidence for
-  the mapping only, not part of any merge gate
+- Provider API baseline: NoKV `0f1995ebee96048e5d4f9d4745d84c3518c64351`
+  (release 0.11.0, Python API 1, Holt pinned to 0.8.6). The Stage 2A executable
+  qualification admits only that SDK contract and this checkout's helper. It
+  remains candidate evidence, not a merge gate or authority promotion
 - PostgreSQL baseline: the TypeScript Stage 2B candidate implements the store
   contract and has passed a real PostgreSQL 16 transaction matrix. No shared
   authority service, runtime caller, authentication boundary, or authority
@@ -1427,6 +1427,20 @@ or HA. Passing
 claim that the complete P0 acceptance gate above passes. Historical latency or
 fault results are informative only; they are not a durability, recovery, HA,
 or production qualification claim.
+
+The additional TEST ONLY Stage 2A probe in
+`examples/nokv-authority-store/` opens three independent SDK helper processes
+and checks fresh create, exact generation update, a one-winner/two-contender
+CAS, winner/loser receipt behavior, and fresh-process history readback. Its
+executable fixes argv to one absolute Python executable plus this checkout's
+production helper; the helper fails closed unless the SDK reports NoKV 0.11.0
+and Python API 1, and validates every read/publish response against its requested
+workbench, path, workspace incarnation, operation, revision, and generation.
+Only a successful live JSON report is evidence for that single-node run;
+deterministic tests are sequence tests only. This LoopX-only candidate changes
+neither NoKV main nor its workbench/artifact data model or frozen-oracle-log use,
+and it still does not prove HA, restart recovery, capacity, production routing,
+or authority-source promotion.
 
 ## Appendix B: Handoff-Mode Decision Record (2026-08-10)
 
