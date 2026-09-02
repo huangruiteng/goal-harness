@@ -273,6 +273,20 @@ def test_catalog_exposes_four_arm_factorial_start_contract() -> None:
     )
 
 
+def test_catalog_exposes_study_simulation_workflow() -> None:
+    capability = build_capability_detail_packet("benchmark-toolkit")["capability"]
+
+    commands = [item["command"] for item in capability["commands"]]
+    assert any("study-validate" in command for command in commands)
+    assert any("upload-envelope" in command for command in commands)
+    assert any("upload-local" in command for command in commands)
+    assert any("upload-readback" in command for command in commands)
+    assert any("study-dashboard" in command for command in commands)
+    workflow = capability["agent_usage"]["study_projection_workflow"]
+    assert workflow["sequence"][0] == "validate_provider_neutral_study_manifest"
+    assert "separately activated provider" in workflow["external_provider_boundary"]
+
+
 def _attestation() -> dict[str, object]:
     return {
         "schema_version": BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION,

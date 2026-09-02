@@ -1158,6 +1158,90 @@ Absence becomes `startup_only` only when the authorized post-run observation is
 complete. This receipt is analysis-only: it never changes score countability,
 integrity qualification, treatment fidelity, or matched-pair eligibility.
 
+## Study manifest, local upload simulation, and dashboard packet
+
+Use `benchmark_study_manifest_v0` when a benchmark adapter needs to declare its
+case set, arms, factors, native metric meanings, and pinned source revisions once.
+The manifest describes the study; it does not score, launch, retry, or mutate a run.
+A simple baseline/treatment study normally declares one two-level factor. A
+factorized study declares each factor independently and assigns every arm to one
+level of every factor.
+
+Validate the public-safe manifest before producing upload records:
+
+```bash
+loopx benchmark study-validate \
+  --manifest-json <study-manifest.json> \
+  --format json
+```
+
+An adapter can then wrap one allowlisted record at a time: the manifest, an existing
+`benchmark_experiment_board_row_v0`, a redacted
+`benchmark_case_insight_projection_v0`, or an existing
+`benchmark_runtime_observation_v0`.
+
+```bash
+loopx benchmark upload-envelope \
+  --payload-json <public-safe-record.json> \
+  --record-kind experiment_board_row \
+  --producer-id <adapter-id> \
+  --producer-version <adapter-version> \
+  --benchmark-id <benchmark-id> \
+  --study-id <study-id> \
+  --idempotency-key <stable-key> \
+  --observed-at <iso-8601-timestamp> \
+  --source-revision <adapter-revision> \
+  --format json > <upload-envelope.json>
+```
+
+Before implementing a remote provider, exercise the transport lifecycle against
+the built-in local simulation. Preview is the default and performs no write;
+`--execute` appends to the explicitly named JSONL store under a file lock. Neither
+mode performs network access or grants upload/submission authority.
+
+```bash
+loopx benchmark upload-local \
+  --envelope-json <upload-envelope.json> \
+  --store <simulation.jsonl> \
+  --format json
+
+loopx benchmark upload-local \
+  --envelope-json <upload-envelope.json> \
+  --store <simulation.jsonl> \
+  --execute --format json
+
+loopx benchmark upload-readback \
+  --store <simulation.jsonl> \
+  --record-id <record-id> \
+  --format json
+```
+
+Retries using the same producer, benchmark, study, and idempotency key are accepted
+only when the payload digest is unchanged. A corrected record uses a new idempotency
+key and explicitly names `--supersedes-record-id`; experiment-board corrections must
+also obey existing legal run-state transitions.
+
+Finally, derive a read-only `benchmark_study_dashboard_v0` packet. It exposes
+campaign, arm, case, and run projections with explicit denominators and provisional
+coverage, while delegating scores and matched comparisons to the experiment board.
+For a qualified Goal/LoopX four-arm study, pass the compact four-arm contract to
+reuse the existing factorial reducer.
+
+```bash
+loopx benchmark study-dashboard \
+  --manifest-json <study-manifest.json> \
+  --store <simulation.jsonl> \
+  [--four-arm-contract-json <compact-four-arm-contract.json>] \
+  --format json
+```
+
+Adapters preserve their benchmark's native metric names, units, directions, and
+totals. Core fields are not software-engineering specific, so the same flow applies
+to two-arm, four-arm, and other declared benchmark studies. Raw tasks, trajectories,
+logs, hidden evaluator material, verifier tails, credentials, and local paths have
+no upload schema slot; producers must reduce post-run analysis to the redacted
+insight contract.
+
 ## Related commands
 
 ```bash

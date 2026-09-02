@@ -293,6 +293,84 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             ),
         },
         {
+            "command": (
+                "loopx benchmark study-validate "
+                "--manifest-json <study-manifest.json> --format json"
+            ),
+            "purpose": (
+                "Validate provider-neutral case, arm, factor, native-metric, and "
+                "source-revision intent before producing upload records."
+            ),
+            "write_boundary": (
+                "read-only local manifest validation; grants no runner, scorer, "
+                "network, upload, or publication authority"
+            ),
+        },
+        {
+            "command": (
+                "loopx benchmark upload-envelope "
+                "--payload-json <public-safe-record.json> "
+                "--record-kind <allowlisted-kind> --producer-id <adapter-id> "
+                "--producer-version <version> --benchmark-id <benchmark-id> "
+                "--study-id <study-id> --idempotency-key <stable-key> "
+                "--observed-at <timestamp> --source-revision <revision> "
+                "--format json"
+            ),
+            "purpose": (
+                "Normalize one allowlisted record and bind it to stable producer, "
+                "study, idempotency, source, and payload-digest identity."
+            ),
+            "write_boundary": (
+                "read-only envelope construction; accepts no credentials and "
+                "performs no local or external write"
+            ),
+        },
+        {
+            "command": (
+                "loopx benchmark upload-local "
+                "--envelope-json <public-safe-envelope.json> "
+                "--store <simulation.jsonl> [--execute] --format json"
+            ),
+            "purpose": (
+                "Preview or locally simulate digest-bound upload and readback "
+                "before implementing an independently authorized provider."
+            ),
+            "write_boundary": (
+                "preview by default; execute writes only the caller-selected local "
+                "JSONL simulation store and performs no network or external write"
+            ),
+        },
+        {
+            "command": (
+                "loopx benchmark study-dashboard "
+                "--manifest-json <study-manifest.json> "
+                "--store <simulation.jsonl> "
+                "[--four-arm-contract-json <compact-contract.json>] --format json"
+            ),
+            "purpose": (
+                "Derive campaign, arm, case, run, matched-pair, and optional "
+                "factorial projections with explicit denominators."
+            ),
+            "write_boundary": (
+                "read-only local reducer; experiment-board and factorial contracts "
+                "remain the scoring and comparison authorities"
+            ),
+        },
+        {
+            "command": (
+                "loopx benchmark upload-readback --store <simulation.jsonl> "
+                "--record-id <record-id> --format json"
+            ),
+            "purpose": (
+                "Verify the exact record id, payload digest, provider revision, "
+                "and supersession state in the local simulation."
+            ),
+            "write_boundary": (
+                "read-only local receipt; returns no store path and performs no "
+                "network or external write"
+            ),
+        },
+        {
             "command": "loopx capability show benchmark-toolkit --format json",
             "purpose": (
                 "Read the post-run analyst hint and benchmark_case_insight_v0 "
@@ -386,6 +464,21 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "Keep diagnostic-only explore rows separate and make paired claims "
             "only from matched_pair_countable comparisons."
         ),
+        "study_projection_workflow": {
+            "sequence": [
+                "validate_provider_neutral_study_manifest",
+                "wrap_one_allowlisted_public_safe_record_per_envelope",
+                "preview_local_upload_without_writing",
+                "execute_local_simulation_when_explicitly_requested",
+                "verify_record_id_digest_and_provider_revision_by_readback",
+                "derive_read_only_dashboard_packet",
+            ],
+            "external_provider_boundary": (
+                "The local simulation proves contract and readback behavior only. "
+                "Authentication, remote transport, retention, and publication need "
+                "a separately activated provider and explicit authority."
+            ),
+        },
     },
     "four_arm_study": {
         "benchmark_start_hint": (
@@ -715,6 +808,31 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
     },
     "implemented_protocols": [
+        {
+            "schema_version": "benchmark_study_manifest_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.study_projection",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
+            "schema_version": "benchmark_upload_envelope_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.study_projection",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
+            "schema_version": "benchmark_upload_readback_receipt_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.study_projection",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
+            "schema_version": "benchmark_case_insight_projection_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.study_projection",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
+            "schema_version": "benchmark_study_dashboard_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.study_projection",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
         {
             "schema_version": "benchmark_treatment_continuation_receipt_v0",
             "module": "loopx.capabilities.benchmark_toolkit.treatment_continuation",

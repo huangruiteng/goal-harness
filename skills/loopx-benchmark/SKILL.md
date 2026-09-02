@@ -22,6 +22,25 @@ any external provider binding, host permissions, and user gates.
   experiment-board-upsert, source-revision-fence, integrity-qualification,
   classify-artifacts).
 
+## Share a study through the public-safe contract
+
+When another benchmark developer needs portable study data, use the capability's
+typed study flow rather than sharing a runner-specific ledger or raw evidence:
+
+1. Validate `benchmark_study_manifest_v0` with `benchmark study-validate`.
+2. Wrap one allowlisted manifest, experiment-board row, redacted insight, or runtime
+   observation with `benchmark upload-envelope`.
+3. Run `benchmark upload-local` without `--execute` first, then explicitly execute
+   against a caller-selected local JSONL store.
+4. Verify the record/digest/revision binding with `benchmark upload-readback`.
+5. Derive the campaign/arm/case/run packet with `benchmark study-dashboard`; pass a
+   compact four-arm contract only when the study preregistered that design.
+
+The local provider is a no-network simulation. It does not grant remote upload,
+publication, credentials, retention, or benchmark submission authority. Adapters
+keep their native metric names and reduce private post-run evidence before envelope
+construction.
+
 ## Select the operating lane
 
 - **Inspect or explain:** use `capability show` and `benchmark --help`; remain
