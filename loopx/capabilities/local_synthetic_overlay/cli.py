@@ -37,10 +37,9 @@ def _binding_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument("--synthetic-database-image", required=True)
+    parser.add_argument("--compose-project", required=True)
     parser.add_argument("--scope", default=LOCAL_SYNTHETIC_SCOPE)
-    parser.add_argument(
-        "--product-write-scope", default=PRODUCT_WRITE_SCOPE_ZERO
-    )
+    parser.add_argument("--product-write-scope", default=PRODUCT_WRITE_SCOPE_ZERO)
     parser.add_argument("--lifetime", default="task_bound")
 
 
@@ -100,7 +99,6 @@ def register_local_synthetic_overlay_commands(
     )
     add_subcommand_format(cleanup)
     cleanup.add_argument("--receipt-id", required=True)
-    cleanup.add_argument("--compose-project", required=True)
     _binding_arguments(cleanup)
 
 
@@ -119,6 +117,7 @@ def render_local_synthetic_overlay_markdown(payload: dict[str, object]) -> str:
         "todo_id",
         "candidate_head",
         "candidate_tree",
+        "compose_project",
         "scope",
         "product_write_scope",
         "error",
@@ -156,6 +155,7 @@ def handle_local_synthetic_overlay_command(
                 candidate_tree=args.candidate_tree,
                 capabilities=args.capability,
                 synthetic_database_image=args.synthetic_database_image,
+                compose_project=args.compose_project,
                 scope=args.scope,
                 product_write_scope=args.product_write_scope,
                 lifetime=args.lifetime,
@@ -181,6 +181,7 @@ def handle_local_synthetic_overlay_command(
                 candidate_tree=args.candidate_tree,
                 capabilities=args.capability,
                 synthetic_database_image=args.synthetic_database_image,
+                compose_project=args.compose_project,
                 scope=args.scope,
                 product_write_scope=args.product_write_scope,
                 lifetime=args.lifetime,
@@ -198,6 +199,7 @@ def handle_local_synthetic_overlay_command(
                 candidate_tree=args.candidate_tree,
                 capabilities=args.capability,
                 synthetic_database_image=args.synthetic_database_image,
+                compose_project=args.compose_project,
                 scope=args.scope,
                 product_write_scope=args.product_write_scope,
                 lifetime=args.lifetime,

@@ -23,11 +23,11 @@ from ...state_refresh import resolve_goal_state
 LOCAL_SYNTHETIC_SCOPE = "local_synthetic_validation_only"
 PRODUCT_WRITE_SCOPE_ZERO = "ZERO"
 ALLOWED_CAPABILITIES = ("local_container", "synthetic_database")
-RECEIPT_SCHEMA_VERSION = "loopx_local_synthetic_overlay_receipt_v0"
+RECEIPT_SCHEMA_VERSION = "loopx_local_synthetic_overlay_receipt_v1"
 STORE_SCHEMA_VERSION = "loopx_local_synthetic_overlay_store_record_v0"
 DOCTOR_SCHEMA_VERSION = "loopx_local_synthetic_overlay_provider_doctor_v0"
-VALIDATION_SCHEMA_VERSION = "loopx_local_synthetic_overlay_validation_v0"
-CLEANUP_SCHEMA_VERSION = "loopx_local_synthetic_overlay_cleanup_v0"
+VALIDATION_SCHEMA_VERSION = "loopx_local_synthetic_overlay_validation_v1"
+CLEANUP_SCHEMA_VERSION = "loopx_local_synthetic_overlay_cleanup_v1"
 ISSUER_ID = "loopx-native-local-synthetic-overlay"
 PROVIDER_REVISION = "local-docker-disposable-v0"
 MIN_TTL_SECONDS = 60
@@ -139,6 +139,13 @@ def _image_reference(value: object) -> str:
     return image
 
 
+def _compose_project(value: object) -> str:
+    project = str(value or "").strip()
+    if not _COMPOSE_PROJECT.fullmatch(project):
+        raise ValueError("compose_project must be a bounded lowercase local token")
+    return project
+
+
 def doctor_local_synthetic_providers(
     *,
     synthetic_database_image: str,
@@ -177,8 +184,7 @@ def doctor_local_synthetic_providers(
                 image_status = "local_image_unavailable"
             else:
                 image_ready = (
-                    inspected.returncode == 0
-                    and "sha256:" in inspected.stdout
+                    inspected.returncode == 0 and "sha256:" in inspected.stdout
                 )
                 image_status = "ready" if image_ready else "local_image_unavailable"
 
@@ -228,20 +234,57 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def _git_worktree_identity(repository: str | Path, *, label: str) -> tuple[Path, Path]:
+    repo = Path(repository).expanduser().resolve()
+    if not repo.is_dir():
+        raise ValueError(f"{label} must be an existing local directory")
+    root = Path(_git(repo, "rev-parse", "--show-toplevel")).resolve()
+    if root != repo:
+        raise ValueError(f"{label} must be the exact Git worktree root")
+    common_directory = Path(
+        _git(
+            repo,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        )
+    ).resolve()
+    if not common_directory.is_dir():
+        raise ValueError(f"{label} Git repository identity is unavailable")
+    return root, common_directory
+
+
+def _same_git_repository(candidate: Path, registered: Path) -> bool:
+    try:
+        return candidate.samefile(registered)
+    except OSError:
+        return False
+
+
 def _candidate_snapshot(
     repository: str | Path,
     *,
+    registered_repository: str | Path,
     candidate_head: str,
     candidate_tree: str,
 ) -> dict[str, str]:
-    repo = Path(repository).expanduser().resolve()
-    if not repo.is_dir():
-        raise ValueError("repository must be an existing local directory")
+    repo, candidate_common_directory = _git_worktree_identity(
+        repository,
+        label="repository",
+    )
+    _, registered_common_directory = _git_worktree_identity(
+        registered_repository,
+        label="Goal registry repository",
+    )
+    if not _same_git_repository(
+        candidate_common_directory,
+        registered_common_directory,
+    ):
+        raise ValueError(
+            "candidate repository does not match the Goal registry Git repository"
+        )
     expected_head = _commit(candidate_head, "candidate_head")
     expected_tree = _commit(candidate_tree, "candidate_tree")
-    root = Path(_git(repo, "rev-parse", "--show-toplevel")).resolve()
-    if root != repo:
-        raise ValueError("repository must be the exact Git worktree root")
     observed_head = _git(repo, "rev-parse", "HEAD").lower()
     observed_tree = _git(repo, "rev-parse", "HEAD^{tree}").lower()
     if observed_head != expected_head:
@@ -264,7 +307,7 @@ def _active_goal_todo(
     runtime_root_arg: str | None,
     goal_id: str,
     todo_id: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     registry = load_registry(registry_path)
     goal = find_registry_goal(registry, goal_id)
     if goal is None:
@@ -282,12 +325,21 @@ def _active_goal_todo(
         todo_id=todo_id,
     )
     if match is None:
-        raise ValueError(f"Todo `{todo_id}` is not active and unique for Goal `{goal_id}`")
+        raise ValueError(
+            f"Todo `{todo_id}` is not active and unique for Goal `{goal_id}`"
+        )
     todo = match[-1]
     status = str(todo.get("status") or "open").strip().lower()
     if status not in {"open", "blocked"}:
         raise ValueError("overlay receipt requires an active open or blocked Todo")
-    return dict(todo)
+    return dict(goal), dict(todo)
+
+
+def _registered_goal_repository(goal: Mapping[str, Any]) -> Path:
+    repository = str(goal.get("repo") or "").strip()
+    if not repository:
+        raise ValueError("Goal registry entry does not name a repository")
+    return Path(repository).expanduser()
 
 
 def _receipt_directory(runtime_root: Path) -> Path:
@@ -323,6 +375,7 @@ def issue_local_synthetic_overlay_receipt(
     candidate_tree: str,
     capabilities: Sequence[str],
     synthetic_database_image: str,
+    compose_project: str,
     scope: str = LOCAL_SYNTHETIC_SCOPE,
     product_write_scope: str = PRODUCT_WRITE_SCOPE_ZERO,
     lifetime: str = "task_bound",
@@ -364,7 +417,8 @@ def issue_local_synthetic_overlay_receipt(
             f"ttl_seconds must be between {MIN_TTL_SECONDS} and {MAX_TTL_SECONDS}"
         )
     image = _image_reference(synthetic_database_image)
-    _active_goal_todo(
+    project = _compose_project(compose_project)
+    goal, _ = _active_goal_todo(
         registry_path=registry,
         runtime_root_arg=runtime_root_arg,
         goal_id=normalized_goal,
@@ -372,6 +426,7 @@ def issue_local_synthetic_overlay_receipt(
     )
     candidate = _candidate_snapshot(
         repository,
+        registered_repository=_registered_goal_repository(goal),
         candidate_head=candidate_head,
         candidate_tree=candidate_tree,
     )
@@ -384,19 +439,22 @@ def issue_local_synthetic_overlay_receipt(
 
     issued_at = (now or _now_utc()).astimezone(timezone.utc).replace(microsecond=0)
     expires_at = issued_at + timedelta(seconds=normalized_ttl)
-    receipt_id = "overlay_" + hashlib.sha256(
-        (
-            token_factory()
-            + "\0"
-            + normalized_goal
-            + "\0"
-            + normalized_todo
-            + "\0"
-            + candidate["head"]
-            + "\0"
-            + candidate["tree"]
-        ).encode("utf-8")
-    ).hexdigest()[:24]
+    receipt_id = (
+        "overlay_"
+        + hashlib.sha256(
+            (
+                token_factory()
+                + "\0"
+                + normalized_goal
+                + "\0"
+                + normalized_todo
+                + "\0"
+                + candidate["head"]
+                + "\0"
+                + candidate["tree"]
+            ).encode("utf-8")
+        ).hexdigest()[:24]
+    )
     receipt: dict[str, Any] = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "receipt_id": receipt_id,
@@ -406,6 +464,7 @@ def issue_local_synthetic_overlay_receipt(
         "goal_id": normalized_goal,
         "todo_id": normalized_todo,
         "candidate": candidate,
+        "compose_project": project,
         "scope": scope,
         "capabilities": normalized_capabilities,
         "product_write_scope": product_write_scope,
@@ -458,7 +517,9 @@ def issue_local_synthetic_overlay_receipt(
     return packet
 
 
-def _load_store_record(runtime_root: Path, receipt_id: str) -> tuple[Path, dict[str, Any]]:
+def _load_store_record(
+    runtime_root: Path, receipt_id: str
+) -> tuple[Path, dict[str, Any]]:
     path = _receipt_path(runtime_root, receipt_id)
     if not path.is_file():
         raise ValueError("system-managed overlay receipt does not exist")
@@ -466,7 +527,10 @@ def _load_store_record(runtime_root: Path, receipt_id: str) -> tuple[Path, dict[
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("system-managed overlay receipt is unreadable") from exc
-    if not isinstance(payload, dict) or payload.get("schema_version") != STORE_SCHEMA_VERSION:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != STORE_SCHEMA_VERSION
+    ):
         raise ValueError("system-managed overlay receipt store record is invalid")
     return path, payload
 
@@ -483,6 +547,7 @@ def validate_local_synthetic_overlay_receipt(
     candidate_tree: str,
     capabilities: Sequence[str],
     synthetic_database_image: str,
+    compose_project: str,
     scope: str = LOCAL_SYNTHETIC_SCOPE,
     product_write_scope: str = PRODUCT_WRITE_SCOPE_ZERO,
     lifetime: str = "task_bound",
@@ -506,6 +571,7 @@ def validate_local_synthetic_overlay_receipt(
         production=False,
     )
     image = _image_reference(synthetic_database_image)
+    project = _compose_project(compose_project)
     runtime_root = _resolved_runtime_root(
         registry_path=registry, runtime_root_arg=runtime_root_arg
     )
@@ -514,16 +580,17 @@ def validate_local_synthetic_overlay_receipt(
     digest = str(record.get("receipt_digest") or "")
     if not isinstance(receipt, Mapping) or digest != _canonical_digest(receipt):
         raise ValueError("system-managed overlay receipt digest is invalid")
-    expected_candidate = _candidate_snapshot(
-        repository,
-        candidate_head=candidate_head,
-        candidate_tree=candidate_tree,
-    )
-    _active_goal_todo(
+    goal, _ = _active_goal_todo(
         registry_path=registry,
         runtime_root_arg=runtime_root_arg,
         goal_id=normalized_goal,
         todo_id=normalized_todo,
+    )
+    expected_candidate = _candidate_snapshot(
+        repository,
+        registered_repository=_registered_goal_repository(goal),
+        candidate_head=candidate_head,
+        candidate_tree=candidate_tree,
     )
     expires = parse_timestamp(receipt.get("expires_at"))
     current = (now or _now_utc()).astimezone(timezone.utc)
@@ -537,6 +604,7 @@ def validate_local_synthetic_overlay_receipt(
         "goal_id": normalized_goal,
         "todo_id": normalized_todo,
         "candidate": expected_candidate,
+        "compose_project": project,
         "scope": scope,
         "capabilities": normalized_capabilities,
         "product_write_scope": product_write_scope,
@@ -579,6 +647,7 @@ def validate_local_synthetic_overlay_receipt(
         "todo_id": normalized_todo,
         "candidate_head": expected_candidate["head"],
         "candidate_tree": expected_candidate["tree"],
+        "compose_project": project,
         "capabilities": normalized_capabilities,
         "scope": scope,
         "product_write_scope": product_write_scope,
@@ -598,9 +667,11 @@ def verify_compose_cleanup(
 
     if validation.get("valid") is not True:
         raise ValueError("cleanup readback requires a valid task-bound overlay receipt")
-    project = str(compose_project or "").strip()
-    if not _COMPOSE_PROJECT.fullmatch(project):
-        raise ValueError("compose_project must be a bounded lowercase local token")
+    project = _compose_project(compose_project)
+    bound_project = _compose_project(validation.get("compose_project"))
+    if project != bound_project:
+        raise ValueError("compose_project does not match the validated overlay receipt")
+    project = bound_project
     docker = which("docker")
     if not docker:
         raise ValueError("Docker client is unavailable for cleanup readback")
