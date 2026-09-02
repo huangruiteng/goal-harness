@@ -646,9 +646,13 @@ def _validate_supersession(
         raise ValueError("upload must supersede the current active record")
     if prior is not None:
         old = prior["envelope"]
-        for field in ("benchmark_id", "study_id", "record_kind"):
+        for field in ("producer_id", "benchmark_id", "study_id", "record_kind"):
             if old[field] != envelope[field]:
                 raise ValueError("supersession identity does not match prior record")
+        if envelope["record_kind"] == "study_manifest":
+            raise ValueError(
+                "study manifest comparison intent is immutable; use a new study_id"
+            )
         if envelope["record_kind"] == "experiment_board_row":
             if not _same_board_row(old["payload"], envelope["payload"]):
                 raise ValueError("board-row supersession must preserve run identity")
