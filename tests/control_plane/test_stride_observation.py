@@ -4,6 +4,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from loopx.control_plane.runtime.stride_observation import (
     STRIDE_EVALUATION_SCHEMA_VERSION,
     STRIDE_OBSERVATION_SCHEMA_VERSION,
@@ -356,6 +358,94 @@ def test_boundary_authority_changes_require_explicit_markers(
         agent_id=AGENT_ID,
     )
     assert unmarked["authority"]["bounded_slices_since_change"] == 3
+
+
+@pytest.mark.parametrize(
+    "classification",
+    [
+        "revision_review",
+        "supervision_check",
+        "waiting_at_approval_gate",
+        "provisional_benchmark_reward",
+    ],
+)
+def test_boundary_authority_markers_do_not_use_substring_or_waiting_state(
+    tmp_path: Path,
+    classification: str,
+) -> None:
+    _write_run_index(
+        tmp_path,
+        [
+            _run(
+                classification="bounded_progress_report",
+                outcome="outcome_progress",
+                minutes_ago=120,
+            ),
+            _run(
+                classification=classification,
+                outcome="surface_only",
+                minutes_ago=60,
+            ),
+            _run(
+                classification="exact_head_review_delivered",
+                outcome="outcome_progress",
+                minutes_ago=10,
+            ),
+        ],
+    )
+
+    observation = build_stride_observation(
+        tmp_path,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+
+    assert observation["authority"]["bounded_slices_since_change"] == 3
+
+
+@pytest.mark.parametrize(
+    "classification",
+    [
+        "replan",
+        "vision",
+        "gate",
+        "bounded_replan_progress",
+        "vision_refresh_accepted",
+        "operator_gate_approved",
+    ],
+)
+def test_boundary_authority_markers_preserve_explicit_positive_values(
+    tmp_path: Path,
+    classification: str,
+) -> None:
+    _write_run_index(
+        tmp_path,
+        [
+            _run(
+                classification="bounded_progress_report",
+                outcome="outcome_progress",
+                minutes_ago=120,
+            ),
+            _run(
+                classification=classification,
+                outcome="surface_only",
+                minutes_ago=60,
+            ),
+            _run(
+                classification="exact_head_review_delivered",
+                outcome="outcome_progress",
+                minutes_ago=10,
+            ),
+        ],
+    )
+
+    observation = build_stride_observation(
+        tmp_path,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+
+    assert observation["authority"]["bounded_slices_since_change"] == 1
 
 
 def test_boundary_projection_replays_byte_identical(tmp_path: Path) -> None:
