@@ -13,6 +13,10 @@ from ...extensions.runtime import (
 )
 from ...rollout_event_log import iter_rollout_events
 from .core import build_periodic_report_run
+from .machine_defaults import (
+    build_goal_periodic_report_delivery_plan,
+    plan_periodic_report_machine_default_backfill,
+)
 from .extension_envelope import build_openviking_archive_execution_envelope
 from .presets import (
     PERIODIC_REPORT_PROFILE_PRESET_ALIASES,
@@ -100,6 +104,26 @@ def register_periodic_report_commands(
     consume_pending.add_argument("--goal-id", required=True)
     consume_pending.add_argument("--agent-id", required=True)
     consume_pending.add_argument("--execute", action="store_true")
+    plan_machine_defaults = commands.add_parser(
+        "plan-machine-defaults",
+        help="Preview per-Goal weekly-report inheritance without writing registries.",
+    )
+    add_subcommand_format(plan_machine_defaults)
+    plan_machine_defaults.add_argument(
+        "--config-json",
+        required=True,
+        help="Path to loopx_machine_configuration_v0 JSON; use '-' for stdin.",
+    )
+    plan_goal_delivery = commands.add_parser(
+        "plan-goal-delivery",
+        help="Preview Goal-owned delivery identity and preferred Agent execution.",
+    )
+    add_subcommand_format(plan_goal_delivery)
+    plan_goal_delivery.add_argument(
+        "--request-json",
+        required=True,
+        help="Path to periodic_report_goal_delivery_plan_request_v0 JSON.",
+    )
     evaluate_runtime.add_argument(
         "--rollout-events-jsonl",
         required=True,
@@ -276,6 +300,20 @@ def render_periodic_report_markdown(payload: dict[str, object]) -> str:
                 "",
             ]
         )
+    if payload.get("schema_version") in {
+        "periodic_report_machine_default_backfill_plan_v0",
+        "periodic_report_goal_delivery_plan_v0",
+    }:
+        return "\n".join(
+            [
+                "# Periodic Report Goal Plan",
+                "",
+                f"- schema: `{payload.get('schema_version')}`",
+                f"- status: `{payload.get('status', 'preview')}`",
+                f"- writes_required: `{payload.get('writes_required', 0)}`",
+                "",
+            ]
+        )
     run_state = payload.get("run_state")
     retry = payload.get("retry")
     state = run_state if isinstance(run_state, dict) else {}
@@ -350,6 +388,16 @@ def handle_periodic_report_command(
                 goal_id=args.goal_id,
                 agent_id=args.agent_id,
                 execute=bool(args.execute),
+            )
+        elif args.periodic_report_command == "plan-machine-defaults":
+            payload = plan_periodic_report_machine_default_backfill(
+                read_json(registry_path),
+                _load_json_object(args.config_json),
+            )
+            payload["ok"] = True
+        elif args.periodic_report_command == "plan-goal-delivery":
+            payload = build_goal_periodic_report_delivery_plan(
+                _load_json_object(args.request_json)
             )
         else:
             request = _load_json_object(args.request_json)
