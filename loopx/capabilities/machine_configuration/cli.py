@@ -10,7 +10,10 @@ from typing import Any
 from ...paths import resolve_runtime_root
 from ...registry import read_json
 from .builtins import build_builtin_machine_configuration_registry
-from .contract import remove_machine_configuration_namespace
+from .contract import (
+    merge_machine_configuration_namespace,
+    remove_machine_configuration_namespace,
+)
 from .store import (
     configure_machine_configuration,
     inspect_machine_configuration,
@@ -48,6 +51,19 @@ def _render(payload: dict[str, object]) -> str:
         lines.append(
             f"- changed_namespaces: `{', '.join(map(str, namespaces)) or 'none'}`"
         )
+    catalog_namespaces = payload.get("namespaces")
+    if isinstance(catalog_namespaces, list):
+        lines.extend(["", "## Registered Namespaces", ""])
+        for item in catalog_namespaces:
+            if not isinstance(item, dict):
+                continue
+            namespace = str(item.get("namespace") or "unknown")
+            title = str(item.get("title") or namespace)
+            versions = item.get("schema_versions")
+            version_text = (
+                ", ".join(map(str, versions)) if isinstance(versions, list) else "unknown"
+            )
+            lines.append(f"- `{namespace}` — {title} (`{version_text}`)")
     return "\n".join(lines) + "\n"
 
 
@@ -57,15 +73,36 @@ def register_machine_configuration_commands(
 ) -> None:
     parser = subparsers.add_parser(
         "machine-config",
-        help="Inspect, preview, apply, or roll back typed machine configuration.",
+        help=(
+            "Discover, inspect, preview, apply, or roll back typed machine "
+            "configuration."
+        ),
     )
     commands = parser.add_subparsers(dest="machine_config_command", required=True)
+    describe = commands.add_parser(
+        "describe", help="List registered machine-configuration namespaces."
+    )
+    add_subcommand_format(describe)
     preview = commands.add_parser("preview")
     add_subcommand_format(preview)
     preview.add_argument("--config-json", required=True)
+    preview.add_argument(
+        "--namespace",
+        help=(
+            "Treat --config-json as one namespace value and preserve every sibling "
+            "namespace. Without this flag the file must contain the whole envelope."
+        ),
+    )
     apply = commands.add_parser("apply")
     add_subcommand_format(apply)
     apply.add_argument("--config-json", required=True)
+    apply.add_argument(
+        "--namespace",
+        help=(
+            "Treat --config-json as one namespace value and preserve every sibling "
+            "namespace. Without this flag the file must contain the whole envelope."
+        ),
+    )
     apply.add_argument("--expected-plan-revision", required=True)
     apply.add_argument("--execute", action="store_true", required=True)
     inspect = commands.add_parser("inspect")
@@ -103,16 +140,37 @@ def handle_machine_configuration_command(
         registry_path=registry_path,
     )
     try:
-        if args.machine_config_command == "preview":
+        if args.machine_config_command == "describe":
+            payload = {
+                "ok": True,
+                **registry.public_catalog(),
+            }
+        elif args.machine_config_command == "preview":
+            configuration = _load_json_object(args.config_json)
+            if args.namespace:
+                configuration = merge_machine_configuration_namespace(
+                    read_machine_configuration(runtime_root, registry=registry),
+                    namespace=args.namespace,
+                    namespace_configuration=configuration,
+                    registry=registry,
+                )
             payload = configure_machine_configuration(
                 runtime_root=runtime_root,
-                configuration=_load_json_object(args.config_json),
+                configuration=configuration,
                 registry=registry,
             )
         elif args.machine_config_command == "apply":
+            configuration = _load_json_object(args.config_json)
+            if args.namespace:
+                configuration = merge_machine_configuration_namespace(
+                    read_machine_configuration(runtime_root, registry=registry),
+                    namespace=args.namespace,
+                    namespace_configuration=configuration,
+                    registry=registry,
+                )
             payload = configure_machine_configuration(
                 runtime_root=runtime_root,
-                configuration=_load_json_object(args.config_json),
+                configuration=configuration,
                 registry=registry,
                 execute=args.execute,
                 expected_plan_revision=args.expected_plan_revision,

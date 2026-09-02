@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from .capabilities.machine_configuration.builtins import (
     build_builtin_machine_configuration_registry,
 )
-from .capabilities.machine_configuration.contract import MachineConfigurationRegistry
+from .capabilities.machine_configuration.contract import (
+    MachineConfigurationRegistry,
+    merge_machine_configuration_namespace,
+)
 from .capabilities.machine_configuration.store import (
     configure_machine_configuration,
     inspect_machine_configuration,
@@ -25,7 +28,7 @@ class _MachineConfigurationServer(Protocol):
 
 
 def _public_payload(
-    payload: dict[str, Any], *, namespace_ids: tuple[str, ...]
+    payload: dict[str, Any], *, registry: MachineConfigurationRegistry
 ) -> dict[str, Any]:
     """Keep the browser contract path-free and limited to public projections."""
 
@@ -54,16 +57,19 @@ def _public_payload(
         "machine_configuration",
     }
     projected = {key: value for key, value in payload.items() if key in allowed}
-    projected["available_namespaces"] = list(namespace_ids)
+    projected["available_namespaces"] = list(registry.namespace_ids)
+    projected["namespace_catalog"] = registry.public_catalog()
     return projected
 
 
 class MachineConfigurationRequestMixin:
     server: _MachineConfigurationServer
 
-    def _read_json(self) -> dict[str, Any]: ...
+    def _read_json(self) -> dict[str, Any]:
+        raise NotImplementedError
 
-    def _send_json(self, payload: dict[str, Any], *, status: int = 200) -> None: ...
+    def _send_json(self, payload: dict[str, Any], *, status: int = 200) -> None:
+        raise NotImplementedError
 
     def _send_error(
         self,
@@ -72,10 +78,13 @@ class MachineConfigurationRequestMixin:
         status: int,
         error_code: str,
         **kwargs: Any,
-    ) -> None: ...
+    ) -> None:
+        raise NotImplementedError
 
-    def _machine_configuration_registry(self):
-        return build_builtin_machine_configuration_registry()
+    def _machine_configuration_registry(self) -> MachineConfigurationRegistry:
+        return cast(
+            MachineConfigurationRegistry, build_builtin_machine_configuration_registry()
+        )
 
     def _machine_configuration_namespace_update(
         self,
@@ -91,17 +100,13 @@ class MachineConfigurationRequestMixin:
         current = read_machine_configuration(
             self.server.runtime_root,
             registry=registry,
-        ) or {
-            "schema_version": "loopx_machine_configuration_v0",
-            "namespaces": {},
-        }
-        return {
-            "schema_version": "loopx_machine_configuration_v0",
-            "namespaces": {
-                **current["namespaces"],
-                namespace: namespace_configuration,
-            },
-        }
+        )
+        return merge_machine_configuration_namespace(
+            current,
+            namespace=namespace,
+            namespace_configuration=namespace_configuration,
+            registry=registry,
+        )
 
     def _machine_configuration_inspect(self) -> None:
         registry = self._machine_configuration_registry()
@@ -124,7 +129,7 @@ class MachineConfigurationRequestMixin:
                 error_code="machine_configuration_inspection_failed",
             )
             return
-        self._send_json(_public_payload(result, namespace_ids=registry.namespace_ids))
+        self._send_json(_public_payload(result, registry=registry))
 
     def _machine_configuration_update(self, *, execute: bool) -> None:
         registry = self._machine_configuration_registry()
@@ -169,7 +174,7 @@ class MachineConfigurationRequestMixin:
             )
             return
         self._send_json(
-            _public_payload(result, namespace_ids=registry.namespace_ids),
+            _public_payload(result, registry=registry),
             status=200 if execute else 201,
         )
 
@@ -215,7 +220,7 @@ class MachineConfigurationRequestMixin:
             )
             return
         self._send_json(
-            _public_payload(result, namespace_ids=registry.namespace_ids),
+            _public_payload(result, registry=registry),
             status=200 if execute else 201,
         )
 

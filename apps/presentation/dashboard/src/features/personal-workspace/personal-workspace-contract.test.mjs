@@ -317,8 +317,12 @@ assert.match(machineSettings, /previewMachineConfiguration\(/, "Machine settings
 assert.match(machineSettings, /applyMachineConfiguration\([\s\S]*preview\.plan_revision/, "Machine settings apply the exact reviewed revision");
 assert.match(machineSettings, /previewMachineConfigurationRollback\(/, "Machine settings preview rollback before execution");
 assert.match(machineSettings, /futureGoalsOnlyDescription/, "Machine policy is visibly distinct from Goal migration");
+assert.match(machineSettings, /namespace_catalog/, "Machine settings discover capability namespaces from the registry catalog");
+assert.match(machineSettings, /personal-machine-json-editor/, "Every registered namespace has a generic JSON editor fallback");
+assert.match(machineSettings, /selectedNamespace,\s*desiredNamespaceConfiguration/, "Preview targets the selected namespace instead of a periodic-report constant");
 assert.doesNotMatch(machineSettings, /password|secret|credential/i, "Machine settings do not collect credentials");
 assert.match(chatData, /machineConfigurationSchema/, "Machine configuration uses a typed frontend contract");
+assert.match(chatData, /machineConfigurationCatalogSchema/, "The frontend validates the generic namespace catalog");
 assert.match(chatData, /namespace_configuration:\s*namespaceConfiguration/, "The browser patches one owned namespace without round-tripping private namespaces");
 assert.match(chatData, /\/api\/chat\/machine-configuration\/preview/, "Machine configuration uses a generic preview API");
 assert.match(styles, /personal-settings-sidebar[^{]*\{[^}]*overflow-y:\s*auto/, "The settings rail remains scrollable on short screens");

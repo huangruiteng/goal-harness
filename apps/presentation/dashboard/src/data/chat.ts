@@ -919,9 +919,27 @@ export const machineConfigurationSchema = z.object({
   namespaces: z.record(z.string(), z.record(z.string(), z.unknown())),
 });
 
+export const machineConfigurationNamespaceDescriptorSchema = z.object({
+  namespace: z.string(),
+  title: z.string(),
+  description: z.string(),
+  schema_versions: z.array(z.string()).min(1),
+  configuration_template: z.record(z.string(), z.unknown()),
+  template_status: z.enum(["ready", "schema_only"]),
+});
+
+export const machineConfigurationCatalogSchema = z.object({
+  schema_version: z.literal("machine_configuration_catalog_v0"),
+  namespaces: z.array(machineConfigurationNamespaceDescriptorSchema),
+});
+
 const machineConfigurationBaseSchema = z.object({
   ok: z.literal(true),
   available_namespaces: z.array(z.string()),
+  namespace_catalog: machineConfigurationCatalogSchema.optional().default({
+    schema_version: "machine_configuration_catalog_v0",
+    namespaces: [],
+  }),
   changed_namespaces: z.array(z.string()).optional().default([]),
   machine_configuration: machineConfigurationSchema.nullable().optional(),
 });
@@ -975,6 +993,7 @@ export const machineConfigurationRollbackReceiptSchema = machineConfigurationBas
 });
 
 export type MachineConfiguration = z.infer<typeof machineConfigurationSchema>;
+export type MachineConfigurationNamespaceDescriptor = z.infer<typeof machineConfigurationNamespaceDescriptorSchema>;
 export type MachineConfigurationInspection = z.infer<typeof machineConfigurationInspectionSchema>;
 export type MachineConfigurationPreview = z.infer<typeof machineConfigurationPreviewSchema>;
 export type MachineConfigurationTransaction = z.infer<typeof machineConfigurationTransactionSchema>;

@@ -98,6 +98,27 @@ def test_inspection_lists_registered_namespaces_without_local_refs(
     response = handler.responses[0]
     assert response["status"] == "absent"
     assert response["available_namespaces"] == ["periodic_report"]
+    assert response["namespace_catalog"] == {
+        "schema_version": "machine_configuration_catalog_v0",
+        "namespaces": [
+            {
+                "namespace": "periodic_report",
+                "title": "Periodic reports",
+                "description": (
+                    "Defaults materialized into newly connected Goals. Existing "
+                    "Goals are not migrated by changing this machine policy."
+                ),
+                "schema_versions": ["periodic_report_machine_defaults_v0"],
+                "configuration_template": {
+                    "schema_version": "periodic_report_machine_defaults_v0",
+                    "enabled": False,
+                    "inheritance": "materialize_on_goal_connect",
+                    "timezone": "UTC",
+                },
+                "template_status": "ready",
+            }
+        ],
+    }
     assert response["machine_configuration"] is None
     encoded = json.dumps(response)
     assert str(tmp_path) not in encoded

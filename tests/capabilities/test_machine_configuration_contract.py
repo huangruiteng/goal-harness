@@ -8,6 +8,7 @@ import pytest
 from loopx.capabilities.machine_configuration.contract import (
     MachineConfigurationNamespace,
     MachineConfigurationRegistry,
+    merge_machine_configuration_namespace,
     normalize_machine_configuration,
     project_machine_configuration,
     remove_machine_configuration_namespace,
@@ -23,6 +24,12 @@ def _normalize_example(value: Mapping[str, Any]) -> dict[str, Any]:
     return dict(value)
 
 
+def _normalize_required_input(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not value.get("path"):
+        raise ValueError("path is required")
+    return dict(value)
+
+
 def _registry() -> MachineConfigurationRegistry:
     return MachineConfigurationRegistry().register(
         MachineConfigurationNamespace(
@@ -31,6 +38,13 @@ def _registry() -> MachineConfigurationRegistry:
             normalize=_normalize_example,
             project_public=lambda value: {
                 key: item for key, item in value.items() if key != "secret"
+            },
+            title="Example defaults",
+            description="Example machine-level defaults.",
+            default_configuration={
+                "schema_version": "example_v0",
+                "enabled": False,
+                "secret": "hidden",
             },
         )
     )
@@ -95,3 +109,77 @@ def test_removing_an_unknown_namespace_fails_closed() -> None:
         remove_machine_configuration_namespace(
             _config(), namespace="unknown", registry=_registry()
         )
+
+
+def test_registry_catalog_is_public_and_supplies_an_editable_default() -> None:
+    assert _registry().public_catalog() == {
+        "schema_version": "machine_configuration_catalog_v0",
+        "namespaces": [
+            {
+                "namespace": "example",
+                "title": "Example defaults",
+                "description": "Example machine-level defaults.",
+                "schema_versions": ["example_v0"],
+                "configuration_template": {
+                    "schema_version": "example_v0",
+                    "enabled": False,
+                },
+                "template_status": "ready",
+            }
+        ],
+    }
+
+
+def test_registry_catalog_keeps_namespaces_without_defaults_discoverable() -> None:
+    registry = MachineConfigurationRegistry().register(
+        MachineConfigurationNamespace(
+            namespace="required_input",
+            schema_versions=frozenset({"required_input_v0"}),
+            normalize=_normalize_required_input,
+            project_public=lambda value: dict(value),
+        )
+    )
+
+    descriptor = registry.public_catalog()["namespaces"][0]
+    assert descriptor["configuration_template"] == {
+        "schema_version": "required_input_v0"
+    }
+    assert descriptor["template_status"] == "schema_only"
+
+
+def test_registry_rejects_an_invalid_provider_template_before_effects() -> None:
+    with pytest.raises(TypeError, match="example.enabled must be a boolean"):
+        MachineConfigurationRegistry().register(
+            MachineConfigurationNamespace(
+                namespace="example",
+                schema_versions=frozenset({"example_v0"}),
+                normalize=_normalize_example,
+                project_public=lambda value: dict(value),
+                default_configuration={"schema_version": "example_v0"},
+            )
+        )
+
+
+def test_namespace_merge_preserves_siblings_and_validates_the_patch() -> None:
+    registry = _registry().register(
+        MachineConfigurationNamespace(
+            namespace="second",
+            schema_versions=frozenset({"second_v0"}),
+            normalize=lambda value: dict(value),
+            project_public=lambda value: dict(value),
+        )
+    )
+    current = _config()
+
+    merged = merge_machine_configuration_namespace(
+        current,
+        namespace="second",
+        namespace_configuration={"schema_version": "second_v0", "limit": 4},
+        registry=registry,
+    )
+
+    assert merged["namespaces"]["example"] == current["namespaces"]["example"]
+    assert merged["namespaces"]["second"] == {
+        "schema_version": "second_v0",
+        "limit": 4,
+    }

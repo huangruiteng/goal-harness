@@ -151,6 +151,17 @@ def periodic_report_machine_configuration_namespace() -> MachineConfigurationNam
         schema_versions=frozenset({PERIODIC_REPORT_MACHINE_DEFAULTS_SCHEMA}),
         normalize=normalize_periodic_report_machine_defaults,
         project_public=lambda value: dict(value),
+        title="Periodic reports",
+        description=(
+            "Defaults materialized into newly connected Goals. Existing Goals are "
+            "not migrated by changing this machine policy."
+        ),
+        default_configuration={
+            "schema_version": PERIODIC_REPORT_MACHINE_DEFAULTS_SCHEMA,
+            "enabled": False,
+            "inheritance": _INHERITANCE_MODE,
+            "timezone": "UTC",
+        },
     )
 
 

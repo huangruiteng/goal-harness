@@ -380,6 +380,13 @@ def test_canonical_machine_config_cli_uses_the_same_store_and_projection(
         "machine-config",
     ]
 
+    assert main([*common, "describe"]) == 0
+    catalog = json.loads(capsys.readouterr().out)
+    assert catalog["schema_version"] == "machine_configuration_catalog_v0"
+    assert [item["namespace"] for item in catalog["namespaces"]] == [
+        "periodic_report"
+    ]
+
     assert main([*common, "preview", "--config-json", str(defaults_path)]) == 0
     preview = json.loads(capsys.readouterr().out)
     assert preview["changed_namespaces"] == ["periodic_report"]
@@ -482,6 +489,62 @@ def test_machine_config_cli_removes_a_namespace_with_preview_fencing(
     result = json.loads(capsys.readouterr().out)
     assert result["status"] == "applied"
     assert result["machine_configuration"] is None
+
+
+def test_canonical_machine_config_cli_accepts_one_namespace_patch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text('{"goals": []}', encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    namespace_path = tmp_path / "periodic-report.json"
+    namespace_path.write_text(
+        json.dumps(_defaults()["namespaces"]["periodic_report"]), encoding="utf-8"
+    )
+    common = [
+        "--registry",
+        str(registry_path),
+        "--runtime-root",
+        str(runtime_root),
+        "--format",
+        "json",
+        "machine-config",
+    ]
+
+    assert (
+        main(
+            [
+                *common,
+                "preview",
+                "--namespace",
+                "periodic_report",
+                "--config-json",
+                str(namespace_path),
+            ]
+        )
+        == 0
+    )
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["machine_configuration"] == _defaults()
+
+    assert (
+        main(
+            [
+                *common,
+                "apply",
+                "--namespace",
+                "periodic_report",
+                "--config-json",
+                str(namespace_path),
+                "--expected-plan-revision",
+                preview["plan_revision"],
+                "--execute",
+            ]
+        )
+        == 0
+    )
+    applied = json.loads(capsys.readouterr().out)
+    assert applied["status"] == "applied"
 
 
 def test_inspection_is_path_free_and_reports_absence(tmp_path: Path) -> None:

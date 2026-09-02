@@ -4,11 +4,13 @@ import hashlib
 import json
 import re
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
 
 MACHINE_CONFIGURATION_SCHEMA = "loopx_machine_configuration_v0"
+MACHINE_CONFIGURATION_CATALOG_SCHEMA = "machine_configuration_catalog_v0"
 _NAMESPACE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 Normalizer = Callable[[Mapping[str, Any]], dict[str, Any]]
 Projector = Callable[[Mapping[str, Any]], dict[str, Any]]
@@ -22,6 +24,9 @@ class MachineConfigurationNamespace:
     schema_versions: frozenset[str]
     normalize: Normalizer
     project_public: Projector
+    title: str | None = None
+    description: str | None = None
+    default_configuration: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not _NAMESPACE_RE.fullmatch(self.namespace):
@@ -30,6 +35,35 @@ class MachineConfigurationNamespace:
             not str(version).strip() for version in self.schema_versions
         ):
             raise ValueError("machine-configuration schema versions are required")
+        if self.title is not None and not self.title.strip():
+            raise ValueError("machine-configuration namespace title must not be empty")
+        if self.description is not None and not self.description.strip():
+            raise ValueError(
+                "machine-configuration namespace description must not be empty"
+            )
+
+    def public_descriptor(self) -> dict[str, Any]:
+        if self.default_configuration is None:
+            public_template = {"schema_version": sorted(self.schema_versions)[0]}
+            template_status = "schema_only"
+        else:
+            default = deepcopy(dict(self.default_configuration))
+            normalized_default = self.normalize(default)
+            public_template = self.project_public(normalized_default)
+            if public_template.get("schema_version") not in self.schema_versions:
+                raise ValueError(
+                    "machine-configuration namespace default changed schema_version: "
+                    + self.namespace
+                )
+            template_status = "ready"
+        return {
+            "namespace": self.namespace,
+            "title": self.title or self.namespace.replace("_", " ").title(),
+            "description": self.description or "",
+            "schema_versions": sorted(self.schema_versions),
+            "configuration_template": public_template,
+            "template_status": template_status,
+        }
 
 
 class MachineConfigurationRegistry:
@@ -46,6 +80,9 @@ class MachineConfigurationRegistry:
                 "machine-configuration namespace is already registered: "
                 + contract.namespace
             )
+        # Validate public catalog metadata before this registry can own effects.
+        # A bad provider template must fail before preview/apply/rollback runs.
+        contract.public_descriptor()
         self._namespaces[contract.namespace] = contract
         return self
 
@@ -60,6 +97,45 @@ class MachineConfigurationRegistry:
     @property
     def namespace_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._namespaces))
+
+    def public_catalog(self) -> dict[str, Any]:
+        return {
+            "schema_version": MACHINE_CONFIGURATION_CATALOG_SCHEMA,
+            "namespaces": [
+                self._namespaces[namespace].public_descriptor()
+                for namespace in self.namespace_ids
+            ],
+        }
+
+
+def merge_machine_configuration_namespace(
+    current: Mapping[str, Any] | None,
+    *,
+    namespace: str,
+    namespace_configuration: Mapping[str, Any],
+    registry: MachineConfigurationRegistry,
+) -> dict[str, Any]:
+    """Build one whole-document update while preserving sibling namespaces."""
+
+    registry.resolve(namespace)
+    normalized_current = (
+        normalize_machine_configuration(current, registry=registry)
+        if current is not None
+        else {"schema_version": MACHINE_CONFIGURATION_SCHEMA, "namespaces": {}}
+    )
+    current_namespaces = _mapping(
+        normalized_current.get("namespaces"), "machine_configuration.namespaces"
+    )
+    return normalize_machine_configuration(
+        {
+            "schema_version": MACHINE_CONFIGURATION_SCHEMA,
+            "namespaces": {
+                **current_namespaces,
+                namespace: dict(namespace_configuration),
+            },
+        },
+        registry=registry,
+    )
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
@@ -160,10 +236,12 @@ def remove_machine_configuration_namespace(
 
 
 __all__ = [
+    "MACHINE_CONFIGURATION_CATALOG_SCHEMA",
     "MACHINE_CONFIGURATION_SCHEMA",
     "MachineConfigurationNamespace",
     "MachineConfigurationRegistry",
     "machine_configuration_revision",
+    "merge_machine_configuration_namespace",
     "normalize_machine_configuration",
     "project_machine_configuration",
     "remove_machine_configuration_namespace",
