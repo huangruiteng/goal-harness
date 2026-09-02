@@ -1197,9 +1197,59 @@ and authority-source promotion remain explicit holds. The next PostgreSQL
 slice must qualify the authenticated service/deployment and failure boundary;
 it must not treat database RLS as that missing API authorization layer.
 
-The file-backed provider shadow is Stage 2; its first slice is merged on
-`main` through #3529, and the evidence behind it is recorded in the Stage 2
-status subsection below.
+The file-backed provider contract and executor are Stage 2; their first slice
+is merged on `main` through #3529, and the evidence behind it is recorded in
+the Stage 2 status subsection below. That slice proves the aggregate and
+provider boundary, but it is not the Stage 2C production runtime shadow: it
+does not hook the legacy Todo or task-lease writers.
+
+#### Stage 2C post-commit runtime-shadow status (2026-09-03)
+
+The first production-path shadow slice is implemented behind this exact,
+default-off goal configuration:
+
+```json
+{
+  "coordination": {
+    "runtime_shadow": {
+      "enabled": true,
+      "schema_version": "loopx_coordination_runtime_shadow_config_v0",
+      "provider": "file_v0"
+    }
+  }
+}
+```
+
+Activation requires all three values. An absent, disabled, malformed, or
+unsupported configuration preserves the legacy result and returns typed
+disabled evidence. When enabled, the runtime obeys the following boundary:
+
+- the legacy Markdown Todo writer or task-lease writer commits first and
+  remains canonical; only a successful primary mutation dispatches the
+  shadow;
+- the Python adapter reduces the committed Todo and lease read models to the
+  coordination-owned fields, sorts them by stable Todo identity, and sends one
+  post-commit projection through the existing TypeScript effect runtime;
+- the TypeScript owner writes that projection and its operation receipt in one
+  `AuthorityStore` transaction. It checks an existing receipt before writing,
+  rejects reuse of an operation id with different normalized content, retries
+  provider-revision contention only within a fixed bound, and reconciles an
+  ambiguous commit only by reading the exact durable receipt;
+- an applied result reads the receipt back and verifies the current provider
+  head when it has not already been superseded. Every result states
+  `decision_read_from_shadow=false`; a disabled, failed, conflicting, or
+  ambiguous shadow result cannot reject, roll back, or rewrite the committed
+  primary result.
+
+Cross-runtime tests exercise the real Python -> TypeScript ->
+`FileAuthorityStore` path from both Todo and task-lease hooks, including
+default-off behavior, stable replay, content-drift rejection, ambiguous-commit
+recovery, projection read-back, and shadow-failure isolation. This closes the
+first runtime-shadow slice only. Migration/import, a rollback command, baseline
+and sustained parity reports, the provider-first read flip, and fencing every
+legacy coordination writer remain mandatory evidence for the separately
+reviewed local canonical promotion. Remote NoKV/PostgreSQL shadowing therefore
+remains Stage 3 and cannot use this default-off hook as authority.
 
 Durable completion continuation read-back
 (`durable_completion.py`: `read_persisted_todo_record` /
@@ -1571,8 +1621,12 @@ as a follow-up. `legacy` remains the default and keeps the divergence hole by
 design. Two side doors found after the gate landed are closed alongside this
 revision: `supersede` crosses the same lease fence as `complete`, and a forced
 state rebuild (`bootstrap --force`) carries the declared mode instead of
-resetting it to `legacy`. The next stage, a file-backed provider shadow behind
-the coordination contract of Section 11, has not started.
+resetting it to `legacy`. The Stage 2 provider contract and file backend have
+since landed, and the first Stage 2C post-commit runtime shadow now exists
+behind an explicit default-off configuration. Local canonical promotion has
+not started: the runtime still never reads the shadow for decisions, and the
+migration, rollback, parity, read-flip, and legacy-writer fencing gates above
+remain open.
 
 ### Relation to Staged Delivery
 

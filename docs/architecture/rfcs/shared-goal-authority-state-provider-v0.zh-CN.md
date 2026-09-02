@@ -964,8 +964,50 @@ ONLY canary 与 authority-source promotion 仍是显式 hold。下一个 Postgre
 资格化 authenticated service/deployment 与 failure boundary，不能把 database RLS 当成
 仍缺失的 API authorization layer。
 
-File-backed provider shadow 属于 Stage 2；其第一个切片已通过 #3529 合入
-`main`，证据记录在下方的 Stage 2 状态小节。
+File-backed provider 合同与 executor 属于 Stage 2；其第一个切片已通过 #3529
+合入 `main`，证据记录在下方的 Stage 2 状态小节。该切片证明 aggregate 与 provider
+边界，但还不是 Stage 2C 的生产 runtime shadow：它没有接入 legacy Todo 或
+task-lease writer。
+
+#### Stage 2C 提交后 runtime shadow 状态（2026-09-03）
+
+第一个接入真实写路径的 shadow 切片由以下精确配置显式启用，默认关闭：
+
+```json
+{
+  "coordination": {
+    "runtime_shadow": {
+      "enabled": true,
+      "schema_version": "loopx_coordination_runtime_shadow_config_v0",
+      "provider": "file_v0"
+    }
+  }
+}
+```
+
+三个值缺一不可；配置缺失、关闭、格式错误或 provider 不受支持时，legacy 结果保持
+不变，并返回 typed disabled evidence。启用后，runtime 遵守以下边界：
+
+- legacy Markdown Todo writer 或 task-lease writer 先成功提交且继续作为 canonical；
+  只有 primary mutation 成功后才派发 shadow；
+- Python adapter 把已提交的 Todo 与 lease read model 收敛为 coordination 自有字段，
+  按稳定 Todo identity 排序，再通过既有 TypeScript effect runtime 发送一份提交后
+  projection；
+- TypeScript owner 在同一笔 `AuthorityStore` transaction 中写 projection 与 operation
+  receipt。写前先查询既有 receipt；同一 operation id 搭配不同 normalized content
+  会被拒绝；provider-revision contention 只做固定次数重试；ambiguous commit 只能
+  通过读取精确 durable receipt 恢复；
+- `applied` 会读回 receipt，并在 provider head 尚未被后续提交覆盖时验证当前
+  projection。所有结果都声明 `decision_read_from_shadow=false`；shadow 被关闭、失败、
+  冲突或 ambiguous，都不能拒绝、回滚或改写已经提交的 primary result。
+
+跨 runtime 测试从 Todo 与 task-lease 两条 hook 验证真实的 Python -> TypeScript ->
+`FileAuthorityStore` 路径，覆盖 default-off、稳定 replay、内容漂移拒绝、ambiguous
+commit 恢复、projection read-back 与 shadow failure isolation。这里仅关闭第一个
+runtime-shadow 切片；migration/import、一键 rollback、baseline 与持续 parity 报告、
+provider-first read flip，以及 fence 全部 legacy coordination writer，仍是独立评审的
+本地 canonical promotion 的强制证据。因此 NoKV/PostgreSQL 远端 shadow 仍属于 Stage
+3，不能把这个默认关闭的 hook 当作 authority。
 
 完成续接（continuation）的持久化读回
 （`durable_completion.py`：`read_persisted_todo_record` /
@@ -1250,8 +1292,11 @@ hard_lease` 语义、只允许静止态切换的 `loopx handoff-mode show|set`�
 `handoff_gate_overridden` 标记的委托授权门；上面的 user gate 自动铸钥匙作为后续
 补充落地。`legacy` 仍是默认值，分叉洞按设计保留。门禁落地后发现的两扇侧门随本次
 修订一并关上：`supersede` 与 `complete` 过同一道租约栅栏；强制重建状态
-（`bootstrap --force`）保留已声明的模式而不是把它重置回 `legacy`。下一阶段，即
-第 11 节协调合同后面的 file-backed provider shadow，尚未开始。
+（`bootstrap --force`）保留已声明的模式而不是把它重置回 `legacy`。此后 Stage 2
+provider 合同与 file backend 已落地，第一个 Stage 2C 提交后 runtime shadow 也已在
+显式、默认关闭的配置后实现。本地 canonical promotion 尚未开始：runtime 仍不从
+shadow 读取决策，上述 migration、rollback、parity、read flip 与 legacy-writer fencing
+门禁仍然开放。
 
 ### 与分阶段交付的关系
 
