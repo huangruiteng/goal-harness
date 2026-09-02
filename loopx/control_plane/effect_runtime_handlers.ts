@@ -101,6 +101,7 @@ import {
   projectTodoPlanningInventory,
   projectTodoPlanningInventoryDetail,
 } from "./work_items/planning_inventory.ts";
+import { resolveRefreshRecommendation } from "./work_items/refresh_recommendation.ts";
 import {
   validateInteractionProjectionHookInvocation,
   validateInteractionProjectionHookRegistration,
@@ -340,6 +341,7 @@ export function createEffectRuntimeHandlers(
     ["work_item.planning_horizon.project", projectQuotaPlanningHorizon],
     ["work_item.planning_inventory.project", projectTodoPlanningInventory],
     ["work_item.planning_inventory.detail", projectTodoPlanningInventoryDetail],
+    ["work_item.refresh_recommendation.resolve", resolveRefreshRecommendation],
     ["goal.vision_checkpoint.evaluate", buildVisionCheckpoint],
     ["agent.delivery_workspace.evaluate", evaluateDeliveryWorkspace],
     [
