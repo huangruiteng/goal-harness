@@ -1,72 +1,46 @@
-# codex × LoopX 在 SWE-Marathon 上的总结报告（探索性）
+# SWE-Marathon：codex × LoopX 评测
 
-> **性质**：单次（每格 1 trial）、紧预算下的**探索性观察**，不是可下因果结论的对照实验。
-> 数值为描述性统计；机制解释均为**假设**，需重复的匹配实验才能证实。
+裸 `codex`、codex 原生 `goal`、以及三种 LoopX 接入模式在 SWE-Marathon（Harbor）15 个任务上的对照。
+模型 `gpt-5.6`；agent 预算压至任务时限的 ~30%（`agent_timeout_multiplier=0.3`）；共 75 trial（15×5，每格 1）。
+
+> **性质**：单次、每格 1 trial、多机制同变的**探索性观察**。数值为描述性统计，机制陈述为假设，需重复的匹配实验方能证实。
 >
-> **数据边界**：本报告只发布 **public-safe 聚合**（见同目录 `data.json`）。逐 trial 的
-> 原始轨迹（reason / exec / 工具输出 / 消息 / goal 原文）按 LoopX benchmark 契约**保留在
-> 私有存储，不公开**。
+> **数据边界**：仅发布 public-safe 聚合（`data.json`）。逐 trial 原始轨迹按 LoopX benchmark 契约保留私有。
 
-在 SWE-Marathon（Harbor 环境）15 个五模式齐全的任务上，对比裸 `codex`、codex 原生
-`goal`、以及在其上叠加 LoopX 的三种模式。模型 `gpt-5.6`，agent 预算压到任务声明时限的
-**~30%**（`agent_timeout_multiplier=0.3`）。共 **75 个 trial**（15 任务 × 5 模式，每格 1 trial）。
+## 1. 模式
 
-## 1. 实验设置：两条 baseline + 三个 LoopX 模式
-
-| 模式 | 归属 | 含义 |
+| 模式 | 归属 | 说明 |
 |---|---|---|
-| **plain** | baseline① | 裸 codex，objective 固定 `"Finish the task."`，无 goal、无 LoopX |
-| **goal** | baseline② | **codex 原生 goal**（codex 自带的 goal 功能），注入干净 goal，**非 LoopX** |
-| **ssh-goal** | LoopX① | codex 原生 goal + LoopX 渲染的 goal body / skills，经 ssh（codex_app）驱动 |
-| **codex-cli** | LoopX② | codex_cli 渲染 goal body（人值守 TUI 模式，无人跑靠传输替代） |
-| **heartbeat** | LoopX③ | 心跳驱动的续跑 / 解锁 + LoopX goal body / skills（automation 驱动） |
+| `plain` | baseline① | 裸 codex，objective 固定 `"Finish the task."` |
+| `goal` | baseline② | codex 原生 goal（非 LoopX），注入干净 goal |
+| `ssh-goal` | LoopX | codex 原生 goal + LoopX goal body/skills，codex_app over ssh |
+| `codex-cli` | LoopX | codex_cli 渲染 goal body（人值守 TUI 模式，无人跑靠传输替代） |
+| `heartbeat` | LoopX | 外部调度器驱动的续跑/解锁（automation） |
 
-`goal` 是 **codex 自己的** goal 机制，不是 LoopX。两条对照锚点：plain→goal 看 codex 原生
-goal 的价值，goal→{ssh-goal, codex-cli, heartbeat} 看 LoopX 在其上的增量。
+两条对照锚点：`plain→goal` 衡量 codex 原生 goal 的价值；`goal→{ssh-goal, codex-cli, heartbeat}` 衡量 LoopX 的增量。
 
-> 验证依据：`goal` 的 goal body 是干净任务描述（不含 `advance loopx / lease / peer /
-> lhtb-goal / registry`），而三个 LoopX 模式 15/15 都带这套样板。
+## 2. 评分口径
 
-### 评分口径
+- `reward` 为二值，紧预算下几乎全 0；主指标用任务连续分 `partial_score`。
+- 构建失败（partial 被门禁归零）作为观测结果计入，所有模式共用同一 15 任务 matched 分母（无单臂剔除），另列标注。
 
-- Harbor 的 `reward` 是**二值**的；紧预算下几乎全 0，区分度低。
-- 主指标用任务自带的连续分 `partial_score`。
-- **构建失败**（Rust 类任务，`partial_score` 被门禁归零）**作为观测结果计入**，不做单臂
-  剔除；另用"构建失败"列单独标注。**所有模式共用同一 15 任务分母**（matched），避免不匹配
-  分母冒充能力差异。
+## 3. 结果（15 个 matched 任务）
 
-## 2. 总表（15 个五模式齐任务，matched 分母）
+| 模式 | reward | partial | 花费 | 自收工 | 续跑 | 解锁 | 构建失败 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| plain | 0.267 | 0.710 | $368 | 0/15 | 0 | 0 | 0/15 |
+| goal | 0.267 | 0.767 | $533 | 12/15 | 7 | 0 | 0/15 |
+| ssh-goal | 0.267 | 0.773 | $696 | 14/15 | 40 | 0 | 0/15 |
+| codex-cli | 0.200 | 0.655 | $419 | 12/15 | 37 | 19 | 1/15 |
+| heartbeat | 0.333 | 0.778 | $830 | 13/15 | 42 | 8 | 0/15 |
 
-| 模式 | 归属 | reward | partial_score | 花费 | 自己收工 | 续跑 | 解锁 | 构建失败 |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| plain | base① | 0.267 | 0.710 | $368 | 0/15 | 0 | 0 | 0/15 |
-| goal | base② | 0.267 | 0.767 | $533 | 12/15 | 7 | 0 | 0/15 |
-| ssh-goal | LoopX | 0.267 | 0.773 | $696 | 14/15 | 40 | 0 | 0/15 |
-| codex-cli | LoopX | 0.200 | 0.655 | $419 | 12/15 | 37 | 19 | **1/15** |
-| heartbeat | LoopX | 0.333 | 0.778 | $830 | 13/15 | 42 | 8 | 0/15 |
+## 4. 观察（描述性；机制为假设）
 
-> codex-cli 的 `1/15` 构建失败（kubernetes-rust-rewrite）已计入其 reward/partial，未剔除。
+1. `plain→goal`：partial 0.710→0.767、自收工 0/15→12/15。紧预算下"主动收尾"这一行为差异，本次数据中主要与 codex 原生 goal 同现。
+2. LoopX 三模式相对 `goal` 的连续分增量较小（ssh-goal +0.006、heartbeat +0.011、codex-cli −0.112），成本更高；binary reward 仅 heartbeat 上移。
+3. codex-cli 最弱且唯一构建失败。其解锁 19 次为各模式最多，与"在错配的 LoopX 多智能体样板（claim/lease/peer）上空转"一致（假设）。
 
-## 3. 观察（描述性；机制为假设）
-
-单 trial/格、无不确定度、多机制同变（prompt + driver + continuation + unlock）且存在已知
-prompt confound，因此以下均为**描述性观察与待验证假设**，非因果结论。
-
-1. **plain→goal 的提升与 codex 原生 goal 同现**：partial 0.710→0.767、自收工 0/15→12/15。
-   在本次数据里，紧预算下"主动收尾"这个行为差异，codex 原生 goal 已呈现绝大部分。（假设：
-   多数收益来自原生 goal，需重复匹配实验验证。）
-
-2. **LoopX 三模式相对 goal 的增量较小、且更贵**：以 goal（0.767 / 自收工 12/15 / $533）为锚，
-   ssh-goal partial +0.006、heartbeat +0.011（最高 0.778）、codex-cli −0.112（0.655）；花费
-   ssh-goal $696、heartbeat $830、codex-cli $419。binary reward 仅 heartbeat 上移（0.333）。
-
-3. **codex-cli 最弱、且是唯一构建失败**（0.200 / 0.655）。**一个可能的解释**：其 goal body 由
-   `codex_cli` profile 渲染，带 LoopX 多智能体 git 协作样板（claim/lease/peer/PR），对单机
-   SWE-Marathon 任务错配；它的解锁 19 次为各模式最多，与"在错配样板上空转"一致。这是**假设**，
-   非定论（见配套机制分析：codex-cli 与 ssh-goal 的 goal body 逐字节几乎相同，唯一差 guard 的
-   `--runtime-profile` 与是否带 `--begin-turn`）。
-
-## 4. 逐任务矩阵（15 × 5，matched）
+## 5. 逐任务矩阵（reward | partial；✗=构建失败）
 
 | 任务 | plain | goal | ssh-goal | codex-cli | heartbeat |
 |---|---|---|---|---|---|
@@ -86,43 +60,42 @@ prompt confound，因此以下均为**描述性观察与待验证假设**，非�
 | mastodon-clone | 0/0.50 | 0/0.41 | 0/0.46 | 0/0.00 | 0/0.44 |
 | rust-java-lsp | 0/0.00 | 0/0.00 | 0/0.00 | 0/0.00 | 0/0.00 |
 
-*每格 = `reward | partial_score`；✗ = 构建失败，partial 被门禁归零（仍计入均值）。*
+## 6. LoopX 使用真实性
 
-## 5. LoopX 使用真实性（harness 层 vs agent 层）
+- harness 层（goal body 注入 + 续跑再唤醒）：三个 LoopX 模式 15/15。
+- agent 自调 `loopx` CLI：稀疏（ssh-goal 2/15、codex-cli 1/15、heartbeat 4/15）；轨迹中多数 "loopx" 为读 `SKILL.md`。
 
-- **harness 层（goal body 注入 + 续跑再唤醒）**：三个 LoopX 模式 15/15 都注入了带 LoopX
-  样板的 goal body、每个 trial 都被续跑循环再唤醒——这层真实、统一存在。
-- **agent 自己敲 `loopx` CLI**：稀疏——ssh-goal 2/15、codex-cli 1/15、heartbeat 4/15；轨迹里
-  多数"loopx"字样是读 `SKILL.md`，非执行。
+## 7. 机制观察（假设）
 
-> 以上计数为聚合口径。更强的证据（typed countability / treatment-fidelity receipt）尚未提供，
-> 结论按此保留为观察而非认证。
+- codex-cli 与 ssh-goal 的 goal body 逐字节几乎相同，唯一差异是 guard 行的 `--runtime-profile` 与是否带 `--begin-turn`；无人自动化下 codex-cli 缺 `--begin-turn`，多轮续跑退化为空转（如 kubernetes：11 轮仅 13 次工具调用，终态 blocked），而 ssh-goal 每轮均有效工作。
+- heartbeat 长程最稳的两点：其派发器 prompt 用"配额节拍 + 卡两次即 replan + 干净 writeback"替代了 goal prompt 携带的大量 LoopX 生命周期记账变量（claims/leases/successor/refresh-state/classification）；且续跑由外部 driver 拥有，每次唤醒以当前 worktree 重新锚定。跨轮注入除 `Tokens used` 计数器外无漂移。
 
-## 6. 复现与血缘
+## 8. 代码结构
 
-**公开可复现的部分**：从本目录 pinned 的 public-safe 聚合 `data.json` 重算所有表格：
+```
+agents/    Harbor 适配器（LoopX treatment + codex 原生 goal baseline）
+scoring/   评分/聚合/可视化（口径见 _common.py）
+skills/    两个五模式 benchmark skill
+runtime/   模式框架 + turn 驱动，含 automation 唤醒循环 loopx_turn_runner.py（见 runtime/RUNTIME.md）
+data.json  pinned public-safe 聚合产物
+```
+
+依赖 `loopx.capabilities.benchmark_toolkit` 与 harbor；内部网络拓扑与凭证未内嵌。
+
+## 9. 复现与血缘
 
 ```bash
-# data.json 为 public-safe 聚合产物（无 raw 轨迹）；表格可直接由它重算
+# 从 pinned 聚合直接重算表格（public-safe，无需 raw）
 python3 - <<'PY'
 import json; d=json.load(open("data.json"))
 for a in d["arms"]:
-    s=d["arm_summary"][a]; print(a, "partial=%.3f reward=%.3f cost=$%.0f self=%d/%d"
-        % (s["partial"], s["reward"], s["cost"], s["self_complete"], s["n"]))
+    s=d["arm_summary"][a]; print(a,"partial=%.3f reward=%.3f cost=$%.0f self=%d/%d"%(
+        s["partial"],s["reward"],s["cost"],s["self_complete"],s["n"]))
 PY
+
+# 从原始结果树重算 data.json（需私有数据 + harness）
+python3 scoring/_aggregate.py <private_results_dir> data.json
+python3 scoring/_compare.py   <private_results_dir>
 ```
 
-**从原始结果树重算 `data.json`**（需私有数据 + 评测 harness，见 companion PR **#3842**）：
-
-```bash
-# 脚本随 #3842 落在 benchmark/swe-marathon/scoring/
-python3 benchmark/swe-marathon/scoring/_aggregate.py <private_results_dir> data.json
-python3 benchmark/swe-marathon/scoring/_compare.py   <private_results_dir>
-```
-
-**血缘 / 已知项**：模型 `gpt-5.6`；bench=swe-marathon；`agent_timeout_multiplier=0.3`；
-75 trial（15×5，每格 1）；聚合口径见 `scoring/_common.py`。原始 75-trial 结果树按 LoopX
-契约**私有**，不随本 PR 公开。本 PR 依赖 / 应与 **#3842**（harness + scoring）合并评审。
-
----
-*探索性观察，生成于 2026-09-02。public-safe 聚合见 `data.json`；原始轨迹私有。*
+血缘：模型 `gpt-5.6`；`agent_timeout_multiplier=0.3`；75 trial（15×5，每格 1）。原始 75-trial 结果树按 LoopX 契约私有，不随本 PR 公开。
