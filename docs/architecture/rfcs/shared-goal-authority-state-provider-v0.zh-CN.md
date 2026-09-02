@@ -1124,6 +1124,21 @@ retention 决策，不能用一个会制造第二 writer 的诊断 CLI 代替。
    Provider 选择不改变 authority contract。
 5. Production 使用前，什么 retention 与 capacity policy 可以替代或落实
    `retain_all_v0`，且不丢失历史凭证？
+6. Stage 4 canary 在准入前是否要求 Host lease liveness，还是把它留作 Stage 5
+   promotion hold？第 11 节要求 canary 观察"外部 effect 不重复"，但运行时间超过
+   lease TTL 的 Host 会在另一个 Agent reclaim 该 Todo 之后继续产生 effect，事后
+   拒绝 settlement 也无法撤销它们。#3820 的评审把这一点当作 Stage 4 前置条件；
+   RFC 必须写明要求哪种机制以及落在哪一层：Host 运行期间续约并在 fence 丢失时取
+   消 Host、可恢复协议内的 effect-owning fenced commit，或把 Host 时长硬性限制在
+   TTL 之下。*拟议答案：任何运行真实 Host 的 canary 都必须在 Host 执行期间续约并
+   在 fence 丢失时取消，其验收必须包含长 Host 过期/reclaim 负例；有界的 fake Host
+   不能作为这一行的证据。*
+7. canary 的 authority provider 如何绑定到 Goal？用 CLI 参数指定任意 guard 命令只
+   是测试 harness 的便利，不是产品级 authority selector。*拟议答案：绑定是一条
+   goal 级 registry 记录，由问题 2 中发布 authorization projection 的同一 owner 发
+   布，记录 provider 种类、store identity 或 lineage，以及显式的 TEST ONLY canary
+   标记；没有该标记的 Goal 不得被 shared-authority guard 准入，runtime 从该记录而
+   非 argv 解析 provider。*
 
 ---
 

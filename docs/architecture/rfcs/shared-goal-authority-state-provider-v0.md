@@ -1404,6 +1404,27 @@ shipped production capability.
    canary? Provider selection does not change the authority contract.
 5. Before production use, what retention and capacity policy replaces or
    operationalizes `retain_all_v0` without losing historical proof?
+6. Does the Stage 4 canary require Host lease liveness before admission, or
+   is that a Stage 5 promotion hold? Section 11 asks the canary to observe
+   that no external effect is duplicated, but a Host whose runtime exceeds the
+   lease TTL can keep producing effects after another Agent reclaims the Todo,
+   and a settlement rejected afterwards cannot undo them. The review of #3820
+   treated this as a Stage 4 precondition; the RFC must say which mechanism
+   is required and where: renewing the lease while the Host runs plus
+   cancelling the Host when the fence is lost, an effect-owning fenced commit
+   inside the recoverable protocol, or a hard Host duration bound below the
+   TTL. *Proposed answer: any canary that runs a real Host must renew during
+   Host execution and cancel on fence loss, and its acceptance must include
+   the long-Host expiry/reclaim negative test; a bounded fake Host is not
+   evidence for this row.*
+7. How is the canary's authority provider bound to a Goal? A CLI argument
+   that names an arbitrary guard command is a test-harness convenience, not a
+   product authority selector. *Proposed answer: the binding is a
+   goal-level registry record published by the same owner as the
+   authorization projection in question 2, naming the provider kind, the
+   store identity or lineage, and an explicit TEST ONLY canary marker; a Goal
+   without that marker cannot be admitted by a shared-authority guard, and
+   the runtime resolves the provider from the record rather than from argv.*
 
 ---
 
