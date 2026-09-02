@@ -14,8 +14,11 @@ product authority.
 Every issued receipt binds all of the following:
 
 - one live Goal and one active Todo;
-- one exact local Git worktree, 40-character HEAD, and commit tree;
+- one exact local Git worktree, 40-character HEAD, and commit tree, belonging
+  to the same Git repository as the Goal registry entry (linked worktrees are
+  supported);
 - a tracked-clean candidate;
+- one task-specific Compose project used for cleanup readback;
 - exactly `local_container` and `synthetic_database`;
 - `scope=local_synthetic_validation_only`;
 - `product_write_scope=ZERO`;
@@ -52,17 +55,19 @@ loopx local-synthetic-overlay issue \
   --candidate-head <40-char-head> --candidate-tree <40-char-tree> \
   --capability local_container --capability synthetic_database \
   --synthetic-database-image '<image>@sha256:<digest>' \
+  --compose-project <task-project> \
   --product-write-scope ZERO --lifetime task_bound \
   --execute --format json
 ```
 
-Before every governed action, call `validate` with the same exact bindings and
-the returned `receipt_id`. Receipt files are mode `0600`; their containing
-directory is mode `0700`.
+Before every governed action, call `validate` with the same exact bindings,
+including `compose_project`, and the returned `receipt_id`. Receipt files are
+mode `0600`; their containing directory is mode `0700`.
 
 ## Cleanup readback
 
 The caller owns its known validation flow and cleanup command. LoopX does not
 accept an arbitrary container command. After cleanup, `cleanup-check` uses the
-task's Compose project label to prove no container, volume, or network remains.
-An unavailable Docker daemon or any residual resource fails closed.
+Compose project bound into the digest-protected receipt to prove no container,
+volume, or network remains. A different caller-supplied project, an unavailable
+Docker daemon, or any residual resource fails closed.

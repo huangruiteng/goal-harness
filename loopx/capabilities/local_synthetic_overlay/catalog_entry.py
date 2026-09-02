@@ -32,23 +32,23 @@ LOCAL_SYNTHETIC_OVERLAY_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "command": "loopx local-synthetic-overlay issue [exact task and candidate bindings] --execute --format json",
-            "purpose": "Persist one short-lived system-managed receipt for the exact Goal, Todo, candidate, and closed capability set.",
+            "purpose": "Persist one short-lived system-managed receipt for the exact Goal, Todo, candidate, Compose project, and closed capability set.",
             "write_boundary": "LoopX runtime receipt directory only; product-write scope remains ZERO",
         },
         {
             "command": "loopx local-synthetic-overlay validate [receipt and exact bindings] --format json",
-            "purpose": "Revalidate digest, task lifetime, active Goal/Todo, tracked-clean HEAD/tree, and the restrictive envelope.",
+            "purpose": "Revalidate digest, task lifetime, active Goal/Todo, registered Git repository identity, exact tracked-clean worktree HEAD/tree, Compose project, and the restrictive envelope.",
             "write_boundary": "read-only LoopX state and Git inspection",
         },
         {
             "command": "loopx local-synthetic-overlay cleanup-check [receipt and exact bindings] --compose-project <task-project> --format json",
-            "purpose": "Prove the task-labelled Compose project has no remaining container, volume, or network.",
+            "purpose": "Prove the receipt-bound Compose project has no remaining container, volume, or network, rejecting any caller mismatch.",
             "write_boundary": "read-only Docker metadata inspection",
         },
     ],
     "implemented_protocols": [
         {
-            "schema_version": "loopx_local_synthetic_overlay_receipt_v0",
+            "schema_version": "loopx_local_synthetic_overlay_receipt_v1",
             "module": "loopx.capabilities.local_synthetic_overlay.core",
             "doc": "loopx/capabilities/local_synthetic_overlay/README.md",
         },
@@ -58,7 +58,7 @@ LOCAL_SYNTHETIC_OVERLAY_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "loopx/capabilities/local_synthetic_overlay/README.md",
         },
         {
-            "schema_version": "loopx_local_synthetic_overlay_cleanup_v0",
+            "schema_version": "loopx_local_synthetic_overlay_cleanup_v1",
             "module": "loopx.capabilities.local_synthetic_overlay.core",
             "doc": "loopx/capabilities/local_synthetic_overlay/README.md",
         },
@@ -70,7 +70,7 @@ LOCAL_SYNTHETIC_OVERLAY_CATALOG_ENTRY: dict[str, Any] = {
     "boundaries": [
         "The only allowed capabilities are the exact pair local_container and synthetic_database.",
         "Product-write scope is exactly ZERO; a non-empty file allowlist is neither accepted nor required.",
-        "Every receipt is bound to one live Goal/Todo, exact tracked-clean candidate HEAD/tree, local repository, provider revision, and short expiry.",
+        "Every receipt is bound to one live Goal/Todo, the Goal registry Git repository identity, one exact tracked-clean candidate worktree HEAD/tree, one Compose project, provider revision, and short expiry.",
         "Real customer or child data, real audio, real providers, hosted databases, production, cross-task reuse, network image pulls, arbitrary container commands, and deployment are rejected.",
         "Legacy Dispatcher schemas, queues, leases, grants, and databases are not read by this capability.",
         "The provider doctor reports unavailable runtimes as unavailable and never manufactures readiness.",
