@@ -228,7 +228,7 @@ Docker compose command failed ... all predefined address pools have been fully s
 
 ### 五、docker 网段池 —— 一次废掉 12 条
 
-默认地址池只支持约 32 个 bridge 网络（172.17.0.0/12 切 /16 得 16 + 192.168.0.0/16 切 /20 得 16）。**机器是共用的**，别人常年占约 15 个，每个 trial 一个 compose 网络。撑爆后新 trial 直接死在环境启动。
+默认地址池只支持约 32 个 bridge 网络（一个 RFC 1918 私网池切成 16 个子网，另一个私网池再切成 16 个子网）。**机器是共用的**，别人常年占约 15 个，每个 trial 一个 compose 网络。撑爆后新 trial 直接死在环境启动。
 
 泄漏源常常是自己：**`docker rm -f` 只删容器，不删 compose 网络**。清理容器时必须连网络一起清。
 

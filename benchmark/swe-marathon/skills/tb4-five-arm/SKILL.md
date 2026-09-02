@@ -87,7 +87,7 @@ TB4 的 66 个 `task.toml` **一个都没有声明 `network_mode` / `allow_inter
 **另注：`--allow-agent-host` 在 public 下是空操作。** 实测 harbor 会打印
 
 ```
-UserWarning: Run-specific allowlist host(s) ['<model-gateway>', '172.17.0.1'] are
+UserWarning: Run-specific allowlist host(s) ['<model-gateway>', '<container-gateway>'] are
 ignored because the effective network policy is public.
 ```
 
