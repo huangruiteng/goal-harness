@@ -1151,9 +1151,13 @@ HA 或 production qualification 声明。
 一次 CAS 已落盘但响应被刻意丢弃后的回读 reconciliation、两个竞争者恰一胜出的
 CAS、胜负双方的 receipt 行为，以及新进程对 receipt 与完整 history 的回读。该可
 执行入口把 argv 固定为一个绝对 Python executable 加本 checkout 中经过评审的
-helper；helper 只接受 NoKV 0.11.0 / Python API 1，并逐项核对 read/publish 回包与
-请求的 workbench、path、workspace incarnation、operation、revision、generation
-是否绑定。只有成功的 live JSON report 才是该次单节点 Stage 2A store-conformance
+helper；helper 只接受 NoKV 0.11.0 / Python API 1。它把 read metadata 与当前
+workbench incarnation 对照，并针对请求的 workbench、path、operation、revision、
+generation 校验 publish 回包。即使 publish 回包报告成功，AuthorityStore 也必须
+重新读取并证明当前 workbench incarnation 下持久化了完全相同的 transaction，才会
+接受成功。这在 LoopX 边界消除了错误成功，但 NoKV 当前 Python API 尚不能把
+expected workspace incarnation 原子绑定到 `publish_bytes`；阻止 concurrent
+remove/recreate 后的写入仍是明确的 provider-contract hold。只有成功的 live JSON report 才是该次单节点 Stage 2A store-conformance
 运行的证据；确定性测试只证明场景序列。这个纯 LoopX 候选既不修改 NoKV 源码，也
 不改变其 workbench/artifact 数据模型；它不证明 runtime shadow parity、multi-Agent
 canary、authority-source promotion、HA、重启恢复、容量或生产路由。

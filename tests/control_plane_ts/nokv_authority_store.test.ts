@@ -26,6 +26,7 @@ interface FakeNoKVBackend {
   identity: string;
   blob: { bytes: Uint8Array; generation: number } | null;
   identityUnavailable: boolean;
+  rotateIdentityBeforePublish: string | null;
   readUnavailable: number;
   publishFault: PublishFault;
   casRequests: NoKVBlobCasRequest[];
@@ -37,6 +38,7 @@ function fakeBackend(): FakeNoKVBackend {
     identity: `nokv:authority-workbench:${"a".repeat(32)}`,
     blob: null,
     identityUnavailable: false,
+    rotateIdentityBeforePublish: null,
     readUnavailable: 0,
     publishFault: null,
     casRequests: [],
@@ -82,6 +84,10 @@ class FakeNoKVTransport implements NoKVBlobTransport {
 
   async casPublishBlob(request: NoKVBlobCasRequest): Promise<NoKVBlobCasResult> {
     this.backend.casRequests.push({ ...request, bytes: request.bytes.slice() });
+    if (this.backend.rotateIdentityBeforePublish !== null) {
+      this.backend.identity = this.backend.rotateIdentityBeforePublish;
+      this.backend.rotateIdentityBeforePublish = null;
+    }
     if (
       this.backend.terminalPhysicalIds.has(request.operation_id) ||
       this.backend.terminalPhysicalIds.has(request.artifact_revision_id)
@@ -267,6 +273,21 @@ test("NoKV provider fences restored bytes with a different workspace incarnation
   );
   assert.equal(rejected.status, "failed");
   assert.equal(backend.casRequests.length, callsBeforeRestore);
+});
+
+test("NoKV provider does not report applied across a workbench-incarnation race", async () => {
+  const backend = fakeBackend();
+  const provider = store(backend);
+  backend.rotateIdentityBeforePublish = `nokv:authority-workbench:${"b".repeat(32)}`;
+
+  const result = await provider.commitAuthority(commit(null, "operation-a", 1, 1));
+
+  assert.equal(result.status, "failed");
+  if (result.status === "failed") {
+    assert.equal(result.reason_code, "provider_protocol_violation");
+    assert.match(result.reason, /lineage mismatch/);
+  }
+  assert.equal((await provider.loadAuthority()).status, "failed");
 });
 
 test("NoKV provider fails closed when persisted generation and bytes diverge", async () => {

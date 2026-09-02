@@ -410,12 +410,13 @@ export class NoKVAuthorityStore implements AuthorityStore {
     };
   }
 
-  private async settleUnknownCommit(
+  private async settleCommitFromReadback(
     expectedProviderRevision: string | null,
     intended: AuthorityStoreCommittedTransaction,
     fallback: Extract<NoKVBlobCasResult, { status: "ambiguous" }>,
   ): Promise<AuthorityStoreCommitResult> {
     const observed = await this.readEnvelope();
+    if (observed.status === "failed") return observed;
     if (observed.status !== "loaded") return fallback;
     const sameOperation = observed.document.committed.find(
       (entry) => entry.operation_id === intended.operation_id,
@@ -564,7 +565,20 @@ export class NoKVAuthorityStore implements AuthorityStore {
       };
     }
     if (result.status === "applied" && result.generation === generation) {
-      return { status: "applied", provider_revision: revision, cursor };
+      // Generation is not a workbench-incarnation fence: NoKV may restart it
+      // after remove/recreate. Never expose success until a fresh read proves
+      // this exact transaction in the current incarnation. Preventing the
+      // stale-incarnation write itself still requires an atomic provider
+      // primitive that accepts the expected incarnation.
+      return await this.settleCommitFromReadback(
+        normalized.expected_provider_revision,
+        transaction,
+        {
+          status: "ambiguous",
+          reason_code: "nokv_applied_readback_unproved",
+          reason: "NoKV applied response requires current-incarnation readback",
+        },
+      );
     }
     if (result.status === "failed") return result;
     const fallback: Extract<NoKVBlobCasResult, { status: "ambiguous" }> =
@@ -579,7 +593,7 @@ export class NoKVAuthorityStore implements AuthorityStore {
             ? "NoKV CAS conflict requires authority-envelope readback"
             : "NoKV publish generation did not match the attempted envelope",
         };
-    return await this.settleUnknownCommit(
+    return await this.settleCommitFromReadback(
       normalized.expected_provider_revision,
       transaction,
       fallback,

@@ -60,6 +60,7 @@ export const AUTHORITY_STORE_PROVIDER_PROFILES = {
     trust_boundary: "loopx_authority_owned_nokv_credentials",
     qualification_holds: [
       "service_grade_contract_adapter",
+      "atomic_workspace_incarnation_publication_fence",
       "restart_and_restore_recovery",
       "capacity_and_receipt_retention",
       "availability_and_ha",

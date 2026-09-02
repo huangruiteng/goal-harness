@@ -1435,8 +1435,14 @@ applied CAS response is deliberately lost, a one-winner/two-contender CAS,
 winner/loser receipt behavior, and fresh-process receipt/history readback. Its
 executable fixes argv to one absolute Python executable plus this checkout's
 reviewed helper; the helper fails closed unless the SDK reports NoKV 0.11.0 and
-Python API 1, and validates every read/publish response against its requested
-workbench, path, workspace incarnation, operation, revision, and generation.
+Python API 1. It validates read metadata against the current workbench
+incarnation and validates publish responses against the requested workbench,
+path, operation, revision, and generation. The AuthorityStore accepts even a
+successful publish response only after a fresh read proves the exact persisted
+transaction under the current workbench incarnation. This closes false success
+at the LoopX boundary, but NoKV's current Python API does not atomically bind an
+expected workspace incarnation into `publish_bytes`; preventing a write after a
+concurrent remove/recreate remains an explicit provider-contract hold.
 Only a successful live JSON report is evidence for that single-node Stage 2A
 store-conformance run; deterministic tests are sequence tests only. This
 LoopX-only candidate changes neither NoKV source nor its workbench/artifact data

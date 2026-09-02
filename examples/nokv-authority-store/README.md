@@ -29,6 +29,8 @@ independent helper processes and verifies:
 - after the generation-2 CAS lands, an injected response loss is reconciled
   from the durable authority envelope and operation receipt rather than from
   the lower-layer response;
+- every successful CAS response is accepted only after a fresh read proves the
+  exact transaction in the current workbench incarnation;
 - two writes released together against generation 2 produce exactly one
   generation-3 winner and one typed conflict;
 - the losing operation does not acquire a durable receipt; and
@@ -40,10 +42,13 @@ If the SDK, helper, workbench, backend, CAS, or independent readback cannot be
 proved, the process exits nonzero. The normal test suite uses deterministic
 fakes only to test this sequence and does **not** count as live evidence.
 
-The probe does not prove runtime shadow parity, a multi-Agent canary, authority
-promotion, HA, failover, restart recovery, capacity, or performance. It also
-does not create a workbench. A green run is Stage 2A single-node storage
-conformance evidence only.
+The probe does not prove an atomic expected-incarnation publication fence,
+runtime shadow parity, a multi-Agent canary, authority promotion, HA, failover,
+restart recovery, capacity, or performance. NoKV generation can restart after
+workbench recreation, so the current adapter fails closed through authoritative
+post-write readback; preventing the stale-incarnation write itself requires a
+future provider primitive. The probe also does not create a workbench. A green
+run is Stage 2A single-node storage conformance evidence only.
 
 ## Inputs
 
