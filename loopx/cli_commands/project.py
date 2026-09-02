@@ -4,6 +4,13 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
+from ..capabilities.periodic_report.machine_defaults import (
+    materialize_goal_periodic_report_subscription,
+)
+from ..capabilities.machine_configuration.builtins import (
+    build_builtin_machine_configuration_registry,
+)
+from ..capabilities.machine_configuration.store import read_machine_configuration
 from ..control_plane.projects.registry import (
     PROJECT_KINDS,
     bind_session,
@@ -11,8 +18,36 @@ from ..control_plane.projects.registry import (
     resolve_project,
     unbind_session,
 )
+from ..history import load_registry
+from ..paths import DEFAULT_RUNTIME_ROOT
 
-PrintPayload = Callable[[dict[str, object], str, Callable[[dict[str, object]], str]], None]
+PrintPayload = Callable[
+    [dict[str, object], str, Callable[[dict[str, object]], str]], None
+]
+
+
+def _new_goal_control_plane(
+    *, registry_path: Path, runtime_root_arg: str | None, goal_id: str
+) -> dict[str, object] | None:
+    if runtime_root_arg:
+        runtime_root = Path(runtime_root_arg).expanduser()
+    elif registry_path.is_file():
+        registry = load_registry(registry_path)
+        runtime_root = Path(
+            str(registry.get("common_runtime_root") or DEFAULT_RUNTIME_ROOT)
+        ).expanduser()
+    else:
+        runtime_root = DEFAULT_RUNTIME_ROOT
+    defaults = read_machine_configuration(
+        runtime_root, registry=build_builtin_machine_configuration_registry()
+    )
+    if defaults is None:
+        return None
+    materialized = materialize_goal_periodic_report_subscription(
+        {"id": goal_id}, defaults
+    )
+    control_plane = materialized.get("control_plane")
+    return dict(control_plane) if isinstance(control_plane, dict) else None
 
 
 def register_project_commands(
@@ -35,7 +70,9 @@ def register_project_commands(
     register_parser.add_argument("--goal-id", required=True)
     register_parser.add_argument("--objective", required=True)
     register_parser.add_argument("--non-goal", action="append", default=[])
-    register_parser.add_argument("--acceptance", action="append", default=[], required=True)
+    register_parser.add_argument(
+        "--acceptance", action="append", default=[], required=True
+    )
     register_parser.add_argument("--unknown", action="append", default=[])
     register_parser.add_argument("--next-effect", required=True)
     register_parser.add_argument("--stop-condition", required=True)
@@ -102,9 +139,16 @@ def handle_project_command(
         return None
     try:
         if args.project_command == "register":
+            goal_control_plane = _new_goal_control_plane(
+                registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
+                goal_id=args.goal_id,
+            )
             payload = register_project_goal(
                 registry_path=registry_path,
-                runtime_root=Path(runtime_root_arg).expanduser() if runtime_root_arg else None,
+                runtime_root=Path(runtime_root_arg).expanduser()
+                if runtime_root_arg
+                else None,
                 project_id=args.project_id,
                 project_kind=args.project_kind,
                 knowledge_root=Path(args.knowledge_root),
@@ -117,6 +161,7 @@ def handle_project_command(
                 stop_condition=args.stop_condition,
                 repository_bindings=args.repository,
                 external_locator_bindings=args.external_locator,
+                goal_control_plane=goal_control_plane,
             )
         elif args.project_command == "bind-session":
             payload = bind_session(

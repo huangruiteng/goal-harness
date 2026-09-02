@@ -27,6 +27,7 @@ from .core import build_periodic_report_run
 from .machine_defaults import (
     build_goal_periodic_report_delivery_identity,
     build_goal_periodic_report_delivery_plan,
+    materialize_goal_periodic_report_subscription,
     normalize_loopx_machine_defaults,
     normalize_periodic_report_machine_defaults,
     periodic_report_machine_configuration_namespace,
@@ -83,6 +84,7 @@ __all__ = [
     "normalize_loopx_machine_defaults",
     "normalize_periodic_report_machine_defaults",
     "periodic_report_machine_configuration_namespace",
+    "materialize_goal_periodic_report_subscription",
     "plan_periodic_report_machine_default_backfill",
     "normalize_periodic_report_audience_policy",
     "normalize_periodic_report_sink_bindings",

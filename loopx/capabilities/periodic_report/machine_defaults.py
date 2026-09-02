@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Callable, Mapping
@@ -261,6 +262,37 @@ def _materialized_periodic_config(
     return periodic
 
 
+def materialize_goal_periodic_report_subscription(
+    goal: Mapping[str, Any],
+    machine_defaults: Mapping[str, Any],
+    *,
+    update_inherited: bool = False,
+) -> dict[str, Any]:
+    """Copy a machine default into one Goal without replacing an override.
+
+    Goal connection uses the default ``update_inherited=False`` mode, so only a
+    newly unconfigured Goal is changed.  The explicit migration transaction
+    opts into ``update_inherited=True`` to advance an older inherited revision.
+    """
+
+    normalized_goal = copy.deepcopy(_mapping(goal, "goal"))
+    _text(normalized_goal.get("id"), "goal.id")
+    existing = _goal_periodic_report(normalized_goal)
+    if existing is not None and (
+        existing.get("source") != "machine_default" or not update_inherited
+    ):
+        return normalized_goal
+    control_plane_raw = normalized_goal.get("control_plane")
+    control_plane = (
+        copy.deepcopy(dict(control_plane_raw))
+        if isinstance(control_plane_raw, Mapping)
+        else {}
+    )
+    control_plane["periodic_report"] = _materialized_periodic_config(machine_defaults)
+    normalized_goal["control_plane"] = control_plane
+    return normalized_goal
+
+
 def _state_path(goal: Mapping[str, Any]) -> Path | None:
     state_file = str(goal.get("state_file") or "").strip()
     repo = str(goal.get("repo") or "").strip()
@@ -459,6 +491,7 @@ __all__ = [
     "build_goal_periodic_report_delivery_identity",
     "build_goal_periodic_report_delivery_plan",
     "loopx_machine_defaults_revision",
+    "materialize_goal_periodic_report_subscription",
     "normalize_loopx_machine_defaults",
     "normalize_periodic_report_machine_defaults",
     "periodic_report_machine_configuration_namespace",

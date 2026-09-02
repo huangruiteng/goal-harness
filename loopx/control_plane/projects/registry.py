@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -201,6 +203,7 @@ def register_project_goal(
     stop_condition: str,
     repository_bindings: list[str],
     external_locator_bindings: list[str],
+    goal_control_plane: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     project_id = _identifier(project_id, field="project_id")
     goal_id = _identifier(goal_id, field="goal_id")
@@ -301,6 +304,13 @@ def register_project_goal(
             ),
             None,
         )
+        if existing_goal is None:
+            if goal_control_plane is not None:
+                goal_record["control_plane"] = copy.deepcopy(dict(goal_control_plane))
+        else:
+            existing_control_plane = existing_goal.get("control_plane")
+            if isinstance(existing_control_plane, dict):
+                goal_record["control_plane"] = copy.deepcopy(existing_control_plane)
         if existing_project is not None and existing_project != project_record:
             raise ValueError(f"project_id conflicts with existing registration: {project_id}")
         if existing_goal is not None and existing_goal != goal_record:
