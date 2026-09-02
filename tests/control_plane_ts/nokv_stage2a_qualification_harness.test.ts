@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -12,12 +16,68 @@ import {
   QualificationFailure,
   type QualificationTransport,
 } from "../../examples/nokv-authority-store/live-qualification.ts";
-import type {
-  NoKVBlobCasRequest,
-  NoKVBlobCasResult,
-  NoKVBlobReadResult,
-  NoKVStoreIdentityResult,
+import {
+  NoKVTransportProtocolError,
+  NoKVTransportUnavailableError,
+  type NoKVBlobCasRequest,
+  type NoKVBlobCasResult,
+  type NoKVBlobReadResult,
+  type NoKVStoreIdentityResult,
 } from "../../loopx/control_plane/coordination/nokv_authority_store.ts";
+import {
+  NoKVJsonLinesTransport,
+} from "../../loopx/control_plane/coordination/nokv_jsonl_transport.ts";
+
+const REPOSITORY_HELPER = fileURLToPath(
+  new URL("../../loopx/control_plane/coordination/nokv_jsonl_helper.py", import.meta.url),
+);
+const PYTHON = process.env.LOOPX_TEST_PYTHON ?? "python3";
+
+/** Minimal module that satisfies helper admission and records that it was imported. */
+const STAND_IN_SDK_SOURCE = `import os
+
+__version__ = "0.11.0"
+API_VERSION = 1
+
+_marker = os.environ.get("LOOPX_TEST_STAND_IN_MARKER")
+if _marker:
+    with open(_marker, "w", encoding="utf-8") as handle:
+        handle.write("stand-in nokv imported")
+
+
+class RoutingConfig:
+    @staticmethod
+    def etcd(*values):
+        return ("etcd", values)
+
+    @staticmethod
+    def static(*values):
+        return ("static", values)
+
+
+class ObjectStoreConfig:
+    @staticmethod
+    def memory():
+        return ("memory",)
+
+    @staticmethod
+    def s3(**values):
+        return ("s3", values)
+
+
+class Client:
+    def __init__(self, **values):
+        self.values = values
+`;
+
+function absolutePythonExecutable(): string | null {
+  const probe = spawnSync(PYTHON, ["-c", "import sys; print(sys.executable)"], {
+    encoding: "utf8",
+  });
+  if (probe.status !== 0) return null;
+  const executable = probe.stdout.trim();
+  return isAbsolute(executable) ? executable : null;
+}
 
 interface Backend {
   blob: { bytes: Uint8Array; generation: number } | null;
@@ -99,13 +159,10 @@ test("Stage 2A qualification harness requires explicit write opt-in", () => {
   );
 });
 
-test("Stage 2A qualification harness fixes the executable and repository helper", () => {
+test("Stage 2A qualification harness fixes the executable, isolation flag, and repository helper", () => {
   const executable = "/opt/loopx-qualification/bin/python";
-  const expectedHelper = fileURLToPath(
-    new URL("../../loopx/control_plane/coordination/nokv_jsonl_helper.py", import.meta.url),
-  );
 
-  assert.deepEqual(qualificationHelperArgv(executable), [executable, expectedHelper]);
+  assert.deepEqual(qualificationHelperArgv(executable), [executable, "-I", REPOSITORY_HELPER]);
   const parsed = parseQualificationArguments([
     "--execute-live",
     "--config-json", "/tmp/client.json",
@@ -235,4 +292,68 @@ test("qualification requires durable readback after the injected response loss",
       return true;
     },
   );
+});
+
+test("qualification helper runs Python isolated so PYTHONPATH cannot substitute the nokv module", async (t) => {
+  const executable = absolutePythonExecutable();
+  if (executable === null) {
+    t.skip("no Python interpreter is available for the helper");
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), "loopx-nokv-stand-in-"));
+  try {
+    const marker = join(root, "stand-in-imported");
+    mkdirSync(join(root, "nokv"));
+    writeFileSync(join(root, "nokv", "__init__.py"), STAND_IN_SDK_SOURCE);
+    const config = {
+      root_id: "0".repeat(32),
+      routing: {
+        kind: "etcd",
+        endpoints: ["http://127.0.0.1:1"],
+        key_prefix: "/loopx-stand-in",
+        lease_ttl_seconds: 1,
+      },
+      object_store: { kind: "memory" },
+    };
+    const env = {
+      ...process.env,
+      PYTHONPATH: root,
+      LOOPX_TEST_STAND_IN_MARKER: marker,
+    };
+
+    // Without isolation the PYTHONPATH stand-in is imported and admitted. This
+    // is the vector the qualification argv closes, so prove it exists first.
+    const unguarded = await NoKVJsonLinesTransport.open({
+      argv: [executable, REPOSITORY_HELPER],
+      config,
+      env,
+      request_timeout_ms: 30_000,
+    });
+    await unguarded.close();
+    assert.ok(existsSync(marker), "stand-in module must be importable without -I");
+    rmSync(marker);
+
+    // The qualification argv must never consult the stand-in: the marker stays
+    // absent and the open handshake fails closed, either because the isolated
+    // interpreter has no nokv module or because the real SDK cannot reach the
+    // closed endpoint.
+    await assert.rejects(
+      NoKVJsonLinesTransport.open({
+        argv: qualificationHelperArgv(executable),
+        config,
+        env,
+        request_timeout_ms: 30_000,
+      }),
+      (error: unknown) =>
+        error instanceof NoKVTransportUnavailableError ||
+        error instanceof NoKVTransportProtocolError,
+    );
+    assert.equal(
+      existsSync(marker),
+      false,
+      "isolated interpreter must not import the PYTHONPATH stand-in",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -101,13 +101,24 @@ function requiredString(value: unknown, name: string): string {
   return value;
 }
 
-/** Build the only helper argv accepted by the destructive live probe. */
-export function qualificationHelperArgv(pythonExecutable: string): readonly [string, string] {
+/** Interpreter flag: ignore PYTHONPATH, PYTHONHOME, and user site-packages. */
+export const HELPER_INTERPRETER_ISOLATION_FLAG = "-I";
+
+/**
+ * Build the only helper argv accepted by the destructive live probe.
+ *
+ * The interpreter runs in isolated mode, so the `nokv` module can come only
+ * from the chosen executable's own environment. An environment variable cannot
+ * substitute a stand-in SDK for live evidence.
+ */
+export function qualificationHelperArgv(
+  pythonExecutable: string,
+): readonly [string, string, string] {
   const executable = requiredString(pythonExecutable, "Python executable");
   if (!isAbsolute(executable)) {
     return fail("invalid_arguments", "Python executable must be an absolute path");
   }
-  return [executable, REPOSITORY_HELPER];
+  return [executable, HELPER_INTERPRETER_ISOLATION_FLAG, REPOSITORY_HELPER];
 }
 
 function positiveSafeInteger(value: unknown, name: string): number {

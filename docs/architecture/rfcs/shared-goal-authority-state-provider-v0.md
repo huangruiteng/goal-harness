@@ -1433,9 +1433,11 @@ The additional TEST ONLY Stage 2A probe in
 and checks fresh create, exact generation update, reconciliation after an
 applied CAS response is deliberately lost, a one-winner/two-contender CAS,
 winner/loser receipt behavior, and fresh-process receipt/history readback. Its
-executable fixes argv to one absolute Python executable plus this checkout's
-reviewed helper; the helper fails closed unless the SDK reports NoKV 0.11.0 and
-Python API 1. It validates read metadata against the current workbench
+executable fixes argv to one absolute Python executable, the interpreter
+isolation flag `-I`, and this checkout's reviewed helper, so `PYTHONPATH`
+cannot substitute the `nokv` module; the helper fails closed unless the SDK
+reports NoKV 0.11.0 and Python API 1, and the report repeats those two
+admission constants rather than server-observed values. It validates read metadata against the current workbench
 incarnation and validates publish responses against the requested workbench,
 path, operation, revision, and generation. The AuthorityStore accepts even a
 successful publish response only after a fresh read proves the exact persisted

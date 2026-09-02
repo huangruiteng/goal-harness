@@ -1150,8 +1150,10 @@ HA 或 production qualification 声明。
 打开三个相互独立的 SDK helper 进程，验证 fresh create、精确 generation update、
 一次 CAS 已落盘但响应被刻意丢弃后的回读 reconciliation、两个竞争者恰一胜出的
 CAS、胜负双方的 receipt 行为，以及新进程对 receipt 与完整 history 的回读。该可
-执行入口把 argv 固定为一个绝对 Python executable 加本 checkout 中经过评审的
-helper；helper 只接受 NoKV 0.11.0 / Python API 1。它把 read metadata 与当前
+执行入口把 argv 固定为一个绝对 Python executable、解释器隔离标志 `-I`，加本
+checkout 中经过评审的 helper，因此 `PYTHONPATH` 无法替换 `nokv` 模块；helper 只
+接受 NoKV 0.11.0 / Python API 1，report 中重复的是这两个准入常量，而非从服务端读
+回的值。它把 read metadata 与当前
 workbench incarnation 对照，并针对请求的 workbench、path、operation、revision、
 generation 校验 publish 回包。即使 publish 回包报告成功，AuthorityStore 也必须
 重新读取并证明当前 workbench incarnation 下持久化了完全相同的 transaction，才会

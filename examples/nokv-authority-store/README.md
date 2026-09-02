@@ -89,9 +89,11 @@ silently fall through to NoKV's ambient provider chain. Intentionally omitted
 optional S3 credential fields retain the NoKV SDK's normal behavior.
 
 Pass only the absolute path to the Python executable that resolves the qualified
-NoKV SDK. The probe itself fixes the second and only other argv entry to the
-reviewed helper in this checkout; callers cannot supply a wrapper argument or
-alternate helper path:
+NoKV SDK. The probe itself fixes the remaining argv to the interpreter isolation
+flag `-I` followed by the reviewed helper in this checkout; callers cannot
+supply a wrapper argument or an alternate helper path, and `PYTHONPATH`,
+`PYTHONHOME`, or user site-packages cannot redirect the `nokv` import away from
+that executable's own environment:
 
 ```text
 /path/to/nokv-python-environment/bin/python
@@ -124,6 +126,9 @@ unfenced, pre-existing, or unreadable state exits nonzero with a compact JSON
 reason; provider stderr, endpoints, credentials, and raw SDK errors are not
 copied into that result. A successful JSON report includes
 `"qualification_scope":"stage_2a_single_node_store_conformance"`,
-`"nokv_sdk_version":"0.11.0"`, and `"nokv_api_version":1`; those fields are an
-exact Stage 2A/helper-admission claim, not runtime-shadow, canary, HA, or
+`"nokv_sdk_version":"0.11.0"`, and `"nokv_api_version":1`. The two version
+fields are the helper's admission constants: the helper refuses to open a client
+for any other SDK version or API version, so a successful report implies them,
+but they are not values read back from the NoKV server. The report is Stage
+2A/helper-admission evidence only, not runtime-shadow, canary, HA, or
 production-readiness evidence.
