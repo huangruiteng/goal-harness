@@ -58,6 +58,15 @@ changes.
     [#3669](https://github.com/huangruiteng/loopx/pull/3669),
     [#3798](https://github.com/huangruiteng/loopx/pull/3798)). No remote
     provider is the promoted authority; PostgreSQL remains planned.
+- [Shared Goal Alignment and Governed Amendment Protocol v0](shared-goal-alignment-and-governed-amendment-v0.md)
+  ([中文版](shared-goal-alignment-and-governed-amendment-v0.zh-CN.md))
+  - **RFC status:** Draft, under maintainer review.
+  - **Delivery on `main`:** Proposal only.
+  - **Current boundary:** Existing peer lanes, unclaimed work, claims/leases,
+    Agent-scoped Goal Vision/Replan, and provider-neutral authority are inputs.
+    A read-only shared-alignment projection, automated amendment policy,
+    verifier boundary, and canonical Goal-amendment transaction have not
+    shipped.
 - [Goal Artifact Lifecycle Projection v0](goal-artifact-lifecycle-projection-v0.md)
   ([中文版](goal-artifact-lifecycle-projection-v0.zh-CN.md))
   - **RFC status:** Draft, under maintainer review.
