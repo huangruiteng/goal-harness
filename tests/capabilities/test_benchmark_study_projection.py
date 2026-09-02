@@ -399,6 +399,44 @@ def test_case_insight_supersession_preserves_run_identity(tmp_path: Path) -> Non
         simulate_benchmark_upload(store, replacement, execute=True)
 
 
+def test_supersession_preserves_producer_and_immutable_study_identity(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "simulated-upload.jsonl"
+    first = _envelope(_manifest(), record_kind="study_manifest", key="manifest-v1")
+    simulate_benchmark_upload(store, first, execute=True)
+
+    changed = _manifest()
+    changed["labels"] = {"title": "Changed public title"}
+    replacement = _envelope(
+        changed,
+        record_kind="study_manifest",
+        key="manifest-v2",
+        supersedes=first["record_id"],
+    )
+    with pytest.raises(ValueError, match="immutable"):
+        simulate_benchmark_upload(store, replacement, execute=True)
+
+    insight = _envelope(
+        _insight(), record_kind="case_insight_projection", key="insight-v1"
+    )
+    simulate_benchmark_upload(store, insight, execute=True)
+    other_producer = build_benchmark_upload_envelope(
+        _insight(),
+        record_kind="case_insight_projection",
+        producer_id="another-adapter",
+        producer_version="1.0.0",
+        benchmark_id="fixture-swe@1",
+        study_id="paired-v1",
+        idempotency_key="insight-v2",
+        observed_at="2026-09-02T12:00:00+00:00",
+        source_revision="0123456789abcdef",
+        supersedes_record_id=insight["record_id"],
+    )
+    with pytest.raises(ValueError, match="identity"):
+        simulate_benchmark_upload(store, other_producer, execute=True)
+
+
 def test_redacted_insight_rejects_raw_fields_and_path_references() -> None:
     insight = _insight()
     insight["raw_trajectory"] = "private solver text"
