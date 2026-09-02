@@ -37,6 +37,10 @@ from .post_writeback_hook import (
     evaluate_periodic_report_trigger_evaluation_intent,
 )
 from .project_progress_snapshot import build_project_progress_snapshot
+from .incremental import (
+    build_periodic_report_publication_candidate,
+    write_periodic_report_publication_candidate,
+)
 
 
 PENDING_INTENT_SCHEMA = "pending_capability_intent_projection_v0"
@@ -483,6 +487,30 @@ def _progress_facts_from_snapshot(
             "status": status,
             "source_ref": source_ref,
         }
+        change_kind = str(raw_item.get("change_kind") or "").strip()
+        if change_kind:
+            if change_kind not in {"added", "changed"}:
+                raise ValueError(
+                    "periodic-report progress snapshot change_kind is invalid"
+                )
+            fact["change_kind"] = change_kind
+        if change_kind == "changed":
+            previous_status = str(raw_item.get("previous_status") or "").strip()
+            previous_kind = str(raw_item.get("previous_content_kind") or "").strip()
+            previous_fingerprint = str(
+                raw_item.get("previous_fact_fingerprint") or ""
+            ).strip()
+            if not previous_status or not previous_kind or not previous_fingerprint:
+                raise ValueError(
+                    "periodic-report changed fact requires its previous state"
+                )
+            fact.update(
+                {
+                    "previous_status": previous_status,
+                    "previous_content_kind": previous_kind,
+                    "previous_fact_fingerprint": previous_fingerprint,
+                }
+            )
         if completed is not None:
             fact["completed_at"] = completed
         facts.append(fact)
@@ -513,6 +541,7 @@ def _build_editorial_request(
     agent_id: str,
     completed_at: str,
     facts: list[dict[str, Any]],
+    incremental_baseline: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     work_window = _actual_work_window(
         runtime_root=runtime_root,
@@ -520,6 +549,11 @@ def _build_editorial_request(
         agent_id=agent_id,
         facts=facts,
         completed_at=completed_at,
+        publication_boundary=(
+            str(incremental_baseline.get("covered_until") or "")
+            if isinstance(incremental_baseline, Mapping)
+            else None
+        ),
     )
     request: dict[str, Any] = {
         "schema_version": EDITORIAL_REQUEST_SCHEMA,
@@ -538,6 +572,8 @@ def _build_editorial_request(
                 "Separate current-version coverage from historical evidence.",
                 "Keep report-building work out of the analysis mainline.",
                 "Write audience-facing Chinese while preserving necessary technical terms.",
+                "Report only the supplied incremental facts; never restate facts absent from this request.",
+                "Render change_kind=changed as a concise transition from the supplied previous state to the current state.",
             ],
         },
         "completed_at": completed_at,
@@ -549,6 +585,8 @@ def _build_editorial_request(
             "external_writes_performed": False,
         },
     }
+    if isinstance(incremental_baseline, Mapping):
+        request["incremental_baseline"] = dict(incremental_baseline)
     request["request_digest"] = _canonical_digest(request)
     return request
 
@@ -560,9 +598,22 @@ def _actual_work_window(
     agent_id: str,
     facts: list[dict[str, Any]],
     completed_at: str,
+    publication_boundary: str | None = None,
 ) -> dict[str, str]:
     end = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
     observed: list[datetime] = []
+    boundary: datetime | None = None
+    if publication_boundary:
+        try:
+            boundary = datetime.fromisoformat(
+                publication_boundary.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ValueError("periodic-report publication boundary is invalid") from exc
+        if boundary.tzinfo is None or boundary >= end:
+            raise ValueError("periodic-report publication boundary is invalid")
+        boundary = boundary.astimezone(end.tzinfo)
+        observed.append(boundary)
     run_index = runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
     if run_index.is_file():
         try:
@@ -584,7 +635,7 @@ def _actual_work_window(
             if value.tzinfo is None or end.tzinfo is None:
                 continue
             value = value.astimezone(end.tzinfo)
-            if value <= end:
+            if value <= end and (boundary is None or value >= boundary):
                 observed.append(value)
     for fact in facts:
         raw = str(fact.get("completed_at") or fact.get("updated_at") or "").strip()
@@ -597,7 +648,7 @@ def _actual_work_window(
         if value.tzinfo is None or end.tzinfo is None:
             continue
         value = value.astimezone(end.tzinfo)
-        if value <= end:
+        if value <= end and (boundary is None or value >= boundary):
             observed.append(value)
     start = min(observed, default=end)
     # The document protocol requires a non-empty half-open window. A stage with
@@ -631,12 +682,15 @@ def _actual_work_window(
             f"{display_end:%Y-%m-%d %H:%M}"
             f"（{timezone_label}）"
         )
-    return {
+    window = {
         "start_at": document_start.isoformat(),
         "end_at": end.isoformat(),
         "period_label": period_label,
         "source": "agent_run_history_or_report_facts",
     }
+    if boundary is not None:
+        window["publication_boundary_applied"] = "true"
+    return window
 
 
 def _load_frozen_editorial_request(
@@ -902,6 +956,12 @@ def consume_pending_periodic_report_intent(
         agent_id=agent_id,
         completed_at=completed_at,
         facts=facts,
+        incremental_baseline=(
+            project_progress.get("incremental_baseline")
+            if isinstance(project_progress, Mapping)
+            and isinstance(project_progress.get("incremental_baseline"), Mapping)
+            else None
+        ),
     )
     if not response_path.is_file():
         result = {
@@ -988,9 +1048,28 @@ def consume_pending_periodic_report_intent(
     markdown_path = artifact_dir / "report.md"
     html_path = artifact_dir / "report.html"
     generation_bundle_path = artifact_dir / "generation-bundle.json"
+    publication_candidate_path = artifact_dir / "publication-candidate.json"
     markdown_path.write_text(str(markdown["content"]), encoding="utf-8")
     html_path.write_text(str(html["content"]), encoding="utf-8")
     atomic_write_json(generation_bundle_path, bundle)
+    incremental_baseline = (
+        project_progress.get("incremental_baseline")
+        if isinstance(project_progress, Mapping)
+        and isinstance(project_progress.get("incremental_baseline"), Mapping)
+        else None
+    )
+    publication_candidate = build_periodic_report_publication_candidate(
+        goal_id=goal_id,
+        agent_id=agent_id,
+        generation_id=str(generation["generation_id"]),
+        trigger_receipt=trigger,
+        facts=facts,
+        baseline=incremental_baseline,
+    )
+    write_periodic_report_publication_candidate(
+        path=publication_candidate_path,
+        candidate=publication_candidate,
+    )
     approval_scope = str(result["approval_scope"])
     delivery = add_goal_todo(
         registry_path=registry_path,
@@ -1051,7 +1130,9 @@ def consume_pending_periodic_report_intent(
             "markdown_path": str(markdown_path),
             "markdown_digest": markdown["content_digest"],
             "generation_bundle_path": str(generation_bundle_path),
+            "publication_candidate_path": str(publication_candidate_path),
         },
+        "incremental_baseline": publication_candidate.get("incremental_baseline"),
     }
     atomic_write_json(receipt_path, durable)
     return durable

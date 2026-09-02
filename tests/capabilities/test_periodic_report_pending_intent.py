@@ -11,6 +11,11 @@ from loopx.capabilities.periodic_report.pending_intent import (
     pending_periodic_report_intents,
     periodic_report_pending_intent_interaction_hook,
 )
+from loopx.capabilities.periodic_report.incremental import (
+    build_periodic_report_publication_candidate,
+    commit_periodic_report_publication_cursor,
+    periodic_report_incremental_baseline,
+)
 from loopx.capabilities.periodic_report.project_progress_snapshot import (
     build_project_progress_snapshot,
 )
@@ -27,10 +32,15 @@ GOAL_ID = "report-goal"
 AGENT_ID = "report-agent"
 
 
-def test_delivery_binding_ref_is_valid_when_generation_digest_starts_with_digit() -> None:
-    assert _periodic_report_delivery_binding_ref(
-        "report_generation_53429b77872cbe1130a3e2f3"
-    ) == "periodic-report:g53429b77872cbe11"
+def test_delivery_binding_ref_is_valid_when_generation_digest_starts_with_digit() -> (
+    None
+):
+    assert (
+        _periodic_report_delivery_binding_ref(
+            "report_generation_53429b77872cbe1130a3e2f3"
+        )
+        == "periodic-report:g53429b77872cbe11"
+    )
 
 
 def _intent() -> dict[str, object]:
@@ -380,6 +390,7 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
     assert Path(first["artifacts"]["html_path"]).is_file()
     assert Path(first["artifacts"]["markdown_path"]).is_file()
     assert Path(first["artifacts"]["generation_bundle_path"]).is_file()
+    assert Path(first["artifacts"]["publication_candidate_path"]).is_file()
     html = Path(first["artifacts"]["html_path"]).read_text(encoding="utf-8")
     assert "本期结论：阶段分析已经形成完整判断" in html
     assert "当前风险：问题已按影响与证据分层" in html
@@ -500,6 +511,118 @@ def test_consumption_uses_the_stage_progress_snapshot(tmp_path: Path) -> None:
     assert not any(
         "Follow-up work added after stage completion" in fact["title"] for fact in facts
     )
+
+
+def test_publication_candidate_keeps_the_trigger_snapshot_baseline(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    first_candidate = build_periodic_report_publication_candidate(
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        generation_id="report_generation_first",
+        trigger_receipt={"coalesced_trigger_ids": ["trigger_first"]},
+        facts=[
+            {
+                "source_ref": "todo:first",
+                "title": "First outcome",
+                "summary": "The first outcome was published.",
+                "content_kind": "outcome",
+                "status": "done",
+            }
+        ],
+        baseline=None,
+    )
+    cursor_one = commit_periodic_report_publication_cursor(
+        runtime_root=runtime,
+        candidate=first_candidate,
+        publication_id="goal-channel:first",
+        delivered_at="2026-08-30T08:00:00Z",
+        covered_until="2026-08-30T08:00:00Z",
+    )
+    baseline_one = periodic_report_incremental_baseline(cursor_one)
+    sidecar = next(
+        (runtime / "goals" / GOAL_ID / "post_writeback_hooks").glob("*.json")
+    )
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    payload["intent"]["payload"]["project_progress"] = {
+        "schema_version": "periodic_report_project_progress_projection_v0",
+        "goal_id": GOAL_ID,
+        "observed_at": "2026-08-30T09:00:00Z",
+        "language": "zh-CN",
+        "items": [
+            {
+                "item_id": "second",
+                "title": "Second outcome",
+                "summary": "The second outcome belongs to this stage.",
+                "content_kind": "outcome",
+                "status": "done",
+                "source_ref": "todo:second",
+                "completed_at": "2026-08-30T09:00:00Z",
+                "change_kind": "added",
+            }
+        ],
+        "incremental_baseline": baseline_one,
+    }
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    competing_candidate = build_periodic_report_publication_candidate(
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        generation_id="report_generation_competing",
+        trigger_receipt={"coalesced_trigger_ids": ["trigger_competing"]},
+        facts=[
+            {
+                "source_ref": "todo:competing",
+                "title": "Competing outcome",
+                "summary": "Another report reached publication first.",
+                "content_kind": "outcome",
+                "status": "done",
+            }
+        ],
+        baseline=baseline_one,
+    )
+    cursor_two = commit_periodic_report_publication_cursor(
+        runtime_root=runtime,
+        candidate=competing_candidate,
+        publication_id="goal-channel:competing",
+        delivered_at="2026-08-30T09:01:00Z",
+        covered_until="2026-08-30T09:00:30Z",
+    )
+    _write_editorial_response(required)
+
+    result = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    frozen_candidate = json.loads(
+        Path(result["artifacts"]["publication_candidate_path"]).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert frozen_candidate["incremental_baseline"] == baseline_one
+    assert (
+        frozen_candidate["incremental_baseline"]["cursor_id"] != cursor_two["cursor_id"]
+    )
+    with pytest.raises(ValueError, match="baseline does not match"):
+        commit_periodic_report_publication_cursor(
+            runtime_root=runtime,
+            candidate=frozen_candidate,
+            publication_id="goal-channel:second",
+            delivered_at="2026-08-30T09:02:00Z",
+            covered_until="2026-08-30T09:00:00Z",
+        )
 
 
 def test_consumption_rejects_snapshot_outcome_after_stage_completion(

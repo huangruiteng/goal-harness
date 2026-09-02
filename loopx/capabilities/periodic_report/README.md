@@ -87,6 +87,17 @@ closure, blocker, and manual triggers may bypass that interval. Concurrent
 material facts are coalesced into one report and previously covered trigger
 ids are deduplicated.
 
+Incremental reports advance from an exact, readback-verified publication
+cursor rather than from generated prose. The cursor keeps cumulative trigger
+ids and semantic fingerprints keyed by each fact's stable `source_ref`. A
+later stage includes only new facts and facts whose fingerprint changed;
+changed facts carry their prior status and kind so the editorial step can
+render a transition instead of repeating the old item. If no supplied fact is
+new or changed, the post-writeback producer emits no report intent. Local
+generation, approval, and failed or partial delivery never advance this
+cursor. A successful Goal Channel delivery records the predecessor
+publication identity for the next report.
+
 An enabled custom profile may also declare `trigger_policy.aggregation` with a
 bounded `window_seconds` and `stage_completion_required=true`. Stage completion
 reuses the existing goal-vision, outcome-checkpoint, and frontier-replan facts:

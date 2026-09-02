@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -13,6 +14,10 @@ from ...capabilities.periodic_report.bindings import (
     build_periodic_report_generation_bundle,
 )
 from ...capabilities.periodic_report.core import _reject_raw_keys
+from ...capabilities.periodic_report.incremental import (
+    commit_periodic_report_publication_cursor,
+    find_periodic_report_publication_candidate,
+)
 from . import LARK_EXTENSION_ID, LARK_GOAL_CHANNEL_PERMISSION
 from .goal_channel_contracts import (
     binding_for_goal,
@@ -573,6 +578,25 @@ def deliver_periodic_report_to_goal_channel(
         ),
         "message_results": message_results,
     }
+    publication_cursor = None
+    if satisfied:
+        generation_id = str(generation["generation_receipt"]["generation_id"])
+        candidate = find_periodic_report_publication_candidate(
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            generation_id=generation_id,
+        )
+        if candidate is not None:
+            publication_cursor = commit_periodic_report_publication_cursor(
+                runtime_root=runtime_root,
+                candidate=candidate,
+                publication_id=(
+                    "goal-channel-"
+                    + hashlib.sha256(idempotency_key.encode()).hexdigest()[:24]
+                ),
+                delivered_at=datetime.now(timezone.utc).isoformat(),
+                covered_until=str(generation["document"]["period_window"]["end_at"]),
+            )
     return {
         "ok": bool(satisfied or not execute),
         "schema_version": GOAL_CHANNEL_DELIVERY_RESULT_SCHEMA,
@@ -580,6 +604,12 @@ def deliver_periodic_report_to_goal_channel(
         "intent_satisfied": satisfied,
         "generation_id": generation["generation_receipt"]["generation_id"],
         "sink_result": sink_result,
+        "publication_cursor": publication_cursor,
+        "incremental_baseline": (
+            candidate.get("incremental_baseline")
+            if satisfied and candidate is not None
+            else None
+        ),
         "boundary": {
             "goal_channel_binding_required": True,
             "project_bot_identity_required": True,
