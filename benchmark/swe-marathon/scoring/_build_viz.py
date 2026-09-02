@@ -8,7 +8,8 @@
     _build_viz.py viz/data.json viz/SUMMARY.md viz/index.html
 """
 from __future__ import annotations
-import json, sys
+import json
+import sys
 
 from _common import safe_path
 

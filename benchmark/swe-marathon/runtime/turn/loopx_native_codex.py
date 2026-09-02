@@ -70,10 +70,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-from goal_codex import GoalCodex, _CODEX_EXEC_MARKER, _REMOTE_DIR
+from goal_codex import GoalCodex, _CODEX_EXEC_MARKER, _REMOTE_DIR, _installed_loopx_root
 
 _PROFILE_ROOT = os.environ.get("MR_LOOPX_PROFILE_ROOT", "/tmp/loopx-profile")
-_LOOPX_ROOT = os.path.expanduser(os.environ.get("MR_LOOPX_ROOT", "~/szh/loopx"))
+# LoopX 源根：优先 env，其次从已安装 loopx 包推导；不硬编码机器/用户专属路径。
+_LOOPX_ROOT = os.environ.get("MR_LOOPX_ROOT") or _installed_loopx_root()
 _GOAL_ID = "deepswe-task"
 _AGENT_ID = "deepswe-codex"
 _PROJECT = "/app"

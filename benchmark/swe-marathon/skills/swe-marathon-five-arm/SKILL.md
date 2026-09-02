@@ -67,7 +67,7 @@ MARATHON_CONCURRENCY=12 GOAL_TIMEOUT_SEC=21600 MARATHON_AGENT_TIMEOUT_MULT=1.0 \
 
 ### 2. `stage_local.sh` —— 把重资产搬到本地 NVMe
 
-`wen/` 在 NFS 上（`192.168.7.8:/volume1`，nfs v3）。docker 数据根在本地 NVMe，所以**镜像层不慢**，慢的是每个 trial 往容器里搬的东西：
+`wen/` 在 NFS 上（`<nfs-host>:/<vol>`，nfs v3）。docker 数据根在本地 NVMe，所以**镜像层不慢**，慢的是每个 trial 往容器里搬的东西：
 
 ```
 codex 二进制    331M   NFS 读

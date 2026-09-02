@@ -42,6 +42,22 @@ def _default_codex() -> str:
     return str(staged) if staged.exists() else "codex"
 
 
+def _default_loopx_src() -> str:
+    """默认 LoopX 源根：优先 env MR_LOOPX_ROOT，其次从已安装 loopx 包推导，
+    再次回退到仓库根下的 loopx/。不硬编码机器/用户专属布局。"""
+    root = os.environ.get("MR_LOOPX_ROOT")
+    if root:
+        return root
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("loopx")
+        if spec and spec.origin:
+            return str(Path(spec.origin).resolve().parent.parent)
+    except Exception:
+        pass
+    return str(Path(__file__).resolve().parent.parent / "loopx")
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -165,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     # 3) body 里点名的那个 release CLI 真的存在
     installed = None
     if not args.no_profile:
-        src = args.loopx_src or str(Path(__file__).resolve().parent.parent / "loopx")
+        src = args.loopx_src or _default_loopx_src()
         root = args.profile_root or str(
             Path(args.receipt).resolve().parent / f"profile-{mode.name}"
             if args.receipt else Path(f"/tmp/wen-profile-{mode.name}-{os.getpid()}")

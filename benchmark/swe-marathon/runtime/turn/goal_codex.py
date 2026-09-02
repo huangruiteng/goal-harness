@@ -60,9 +60,31 @@ _CODEX_EXEC_MARKER = "codex exec "
 
 _REMOTE_DIR = "/tmp/loopx-goal"
 _LOOPX_MOUNT = "/opt/loopx"
-_DEFAULT_LOOPX_ROOT = os.path.expanduser("~/szh/loopx")
-_DEFAULT_MODULE = os.path.expanduser(
-    "~/szh/loopx/loopx/capabilities/benchmark_toolkit/native_codex_goal.py"
+
+
+def _installed_loopx_root() -> str:
+    """已安装 loopx 包的根目录（含 `loopx/` 的上级）。找不到返回空串。
+
+    不硬编码任何机器/用户专属路径：优先环境变量 MR_LOOPX_ROOT，其次从已安装包推导。
+    """
+    root = os.environ.get("MR_LOOPX_ROOT")
+    if root:
+        return root
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("loopx")
+        if spec and spec.origin:
+            return str(Path(spec.origin).resolve().parent.parent)
+    except Exception:
+        pass
+    return ""
+
+
+_DEFAULT_LOOPX_ROOT = _installed_loopx_root()
+_DEFAULT_MODULE = os.environ.get("MR_NATIVE_GOAL_MODULE") or (
+    str(Path(_DEFAULT_LOOPX_ROOT)
+        / "loopx/capabilities/benchmark_toolkit/native_codex_goal.py")
+    if _DEFAULT_LOOPX_ROOT else ""
 )
 
 # The Goal objective is fixed rather than derived from the task text.  A Goal is

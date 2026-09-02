@@ -30,7 +30,7 @@ from harbor.agents.installed.codex import Codex
 from harbor.environments.base import BaseEnvironment
 
 # wen/ 版默认指向本工作区暂存的二进制（当前 0.151.0）。原值
-# /data/descfly/szh/codex-offline 是 szh 那台机器的路径，本机不存在。
+# 原默认曾指向某台特定机器的绝对路径，此处改为工作区相对路径。
 _DEFAULT_OFFLINE_DIR = str(Path(__file__).resolve().parent.parent / "codex")
 
 # 先落到 /tmp 再 install 到 /usr/local/bin：upload_file 以 root 落盘且不保留

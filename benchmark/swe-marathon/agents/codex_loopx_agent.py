@@ -100,8 +100,14 @@ _UNGATED = bool(os.environ.get("LOOPX_UNGATED"))
 # ── 三个模式 ────────────────────────────────────────────────────────────────
 # WEN_MODE 选 LoopX README 里 Codex 的哪一行 host（README.md:289-291）。
 # 定义在 wen/modes/profiles.py，这里只取参数，不复制一份枚举。
-import sys as _sys
-_sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import sys as _sys  # noqa: E402
+# modes/ 可能在同级（wen 布局）或 runtime/ 子目录（发布布局）下；探测哪个含
+# modes/profiles.py 再加进 path，`from modes.profiles` 在两种布局都能解析。
+_here = Path(__file__).resolve().parent
+for _cand in (_here.parent, _here.parent / "runtime", _here.parent.parent):
+    if (_cand / "modes" / "profiles.py").exists():
+        _sys.path.insert(0, str(_cand))
+        break
 from modes.profiles import profile_args as _profile_args, resolve as _resolve_mode  # noqa: E402
 
 _MODE = _resolve_mode(
@@ -273,7 +279,7 @@ class CodexLoopxAgent(CodexGoalAgent):
 
     # ── 安装 LoopX profile ────────────────────────────────────────────────
     def _install_loopx(self, cid: str) -> None:
-        # wen/ 版默认落在本机布局上（原默认是 szh 那台机器的路径）。
+        # wen/ 版默认落在本机布局上（原默认曾是某台特定机器的绝对路径）。
         # env.sh 会显式导出这两个变量，这里的 fallback 只是脱离 env.sh 时的兜底。
         _wen = Path(__file__).resolve().parent.parent
         src = os.environ.get("LOOPX_SRC_DIR", str(_wen.parent / "loopx"))
