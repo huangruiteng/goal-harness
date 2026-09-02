@@ -633,6 +633,16 @@ def _validate_supersession(
     by_id = {row["envelope"]["record_id"]: row for row in records}
     supersedes = envelope.get("supersedes_record_id")
     prior = by_id.get(supersedes) if supersedes else None
+    if envelope["record_kind"] == "study_manifest" and any(
+        row["envelope"]["record_kind"] == "study_manifest"
+        and row["envelope"]["benchmark_id"] == envelope["benchmark_id"]
+        and row["envelope"]["study_id"] == envelope["study_id"]
+        and row["envelope"]["record_id"] != envelope["record_id"]
+        for row in records
+    ):
+        raise ValueError(
+            "study manifest comparison intent is immutable; use a new study_id"
+        )
     if supersedes and prior is None:
         raise ValueError("superseded upload record does not exist")
     if supersedes == envelope["record_id"]:
@@ -649,10 +659,6 @@ def _validate_supersession(
         for field in ("producer_id", "benchmark_id", "study_id", "record_kind"):
             if old[field] != envelope[field]:
                 raise ValueError("supersession identity does not match prior record")
-        if envelope["record_kind"] == "study_manifest":
-            raise ValueError(
-                "study manifest comparison intent is immutable; use a new study_id"
-            )
         if envelope["record_kind"] == "experiment_board_row":
             if not _same_board_row(old["payload"], envelope["payload"]):
                 raise ValueError("board-row supersession must preserve run identity")
