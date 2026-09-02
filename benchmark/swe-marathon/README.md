@@ -68,9 +68,9 @@
 
 ## 7. 机制观察（假设）
 
-- **codex-cli ≈ ssh-goal，差异收敛到 harness**：两者 goal body 逐字节几乎相同，唯一差异是 guard 行的 `--runtime-profile` 与是否带 `--begin-turn`。无人自动化下 codex-cli 缺 `--begin-turn`，多轮续跑退化为空转（如 kubernetes：11 轮仅 13 次工具调用、终态 blocked），而 ssh-goal 每轮均有效工作。这支持"能力相当、差在 harness"的判断。
-- **漂移（H1）排除**：跨轮注入除 `Tokens used` 计数器外无变化，automation 与 goal 的注入内容均不漂移。
-- **goal 内部续跑 prompt 干扰（H2，主因）**：`goal` 携带大量 LoopX 生命周期记账引导（claims/leases/successor/refresh-state/classification），且卡壳处理是"第三次相同 blocked 轮即 cancel"；`heartbeat` 派发器用"配额节拍 + 卡两次即 **replan** + 干净 writeback"替代了这些，续跑由外部 driver 拥有、每轮以当前 worktree 重新锚定。长程反复卡壳时，replan 比 cancel 更能续命。此类 goal 内部续跑 prompt 的干扰在交互体验中不易察觉，主要由评测暴露。
+- **codex-cli ≈ ssh-goal，差异可能主要来自 harness 与 continuation 方式**：两者 goal body 逐字节几乎相同，唯一差异是 guard 行的 `--runtime-profile` 与是否带 `--begin-turn`。无人自动化下 codex-cli 缺 `--begin-turn`，多轮续跑退化为空转（如 kubernetes：11 轮仅 13 次工具调用、终态 blocked），而 ssh-goal 每轮均有效工作。这与"能力相当、差异主要在 harness 与 continuation 方式"的假设一致，仍需更多重复匹配实验验证。
+- **本轮未观察到明显的 H1（prompt 漂移）**：跨轮注入除 `Tokens used` 计数器外无变化，automation 与 goal 的注入内容本轮均未见漂移。
+- **goal 内部续跑 prompt 干扰（H2，当前较有解释力的假设）**：`goal` 携带大量 LoopX 生命周期记账引导（claims/leases/successor/refresh-state/classification），且卡壳处理是"第三次相同 blocked 轮即 cancel"；`heartbeat` 派发器用"配额节拍 + 卡两次即 **replan** + 干净 writeback"替代了这些，续跑由外部 driver 拥有、每轮以当前 worktree 重新锚定。长程反复卡壳时，replan 比 cancel 更能续命。此类 goal 内部续跑 prompt 的干扰在交互体验中不易察觉，主要由评测暴露。
 
 > **方向（趋势，非定论）**：本次数据中，无人值守长程下由外部 driver 拥有续跑的 automation（heartbeat）最鲁棒，与"将 automation 作为无人自动化默认姿势"的方向一致；作为最佳实践仍需重复的匹配实验确认。
 
@@ -102,4 +102,16 @@ python3 scoring/_aggregate.py <private_results_dir> data.json
 python3 scoring/_compare.py   <private_results_dir>
 ```
 
-血缘：模型 `gpt-5.6`；`agent_timeout_multiplier=0.3`；75 trial（15×5，每格 1）。原始 75-trial 结果树按 LoopX 契约私有，不随本 PR 公开。
+**血缘 / 版本**：
+
+| 组件 | 版本 |
+|---|---|
+| model | `gpt-5.6` |
+| Codex | `0.151.0` |
+| LoopX | `0.5.3`（repo `bd52b28a`） |
+| harness (harbor) | `0.20.0` |
+| benchmark / verifier | SWE-Marathon（Harbor 任务集，`partial_score` 由任务 verifier 写入 `/logs/verifier/metrics.json`） |
+| 预算 | `agent_timeout_multiplier=0.3`（~30%） |
+| 规模 | 75 trial（15 任务 × 5 模式，每格 1） |
+
+原始 75-trial 结果树按 LoopX 契约**私有**，不随本 PR 公开。本 PR 为 exploratory research contribution；portable harness、统一 benchmark evidence、missing-score policy、重复 adapter 与 benchmark-toolkit 的收敛按维护者约定作为后续 follow-up。
