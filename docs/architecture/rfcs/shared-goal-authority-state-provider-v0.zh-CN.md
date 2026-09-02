@@ -1250,6 +1250,56 @@ visible governance 台账中属 coverage-only。该接受允许内聚的 referen
 retention 决策，不能用一个会制造第二 writer 的诊断 CLI 代替。本状态节声明的是已
 证明的合同，不是已 ship 的生产能力。
 
+#### Stage ladder 端到端证据（2026-09-03）
+
+本分支上存在一条增量式端到端 "stage ladder"：它通过真实的
+`python -m loopx.cli` 逐行演练本 RFC 每个已完成阶段的声明，并按行给出可机器
+判定的结论：`loopx/control_plane/testing/authority_e2e_ladder.py`（行注册表、
+runner、`loopx_shared_goal_authority_e2e_report_v0` JSON 报告、退出策略与隐私
+扫描）、`loopx/control_plane/testing/authority_e2e_fixtures.py`（goal 工作区、
+CLI runner、observation-lock 窗口、候选回读）、只读 TypeScript 探针
+`tests/control_plane_ts/authority_store_readback_probe.ts`、pytest 投影
+`tests/control_plane/test_shared_goal_authority_e2e.py`，以及入口
+`examples/shared-goal-authority-e2e/ladder.py`。
+
+按阶段，本增量实现：
+
+- Stage 0：`s0.file_matrix_twelve_rows` 运行保留的 live matrix 脚本，要求 file
+  provider 上恰好十二个共享场景行全为 true；`s0.nokv_live_matrix` 要求 live
+  NoKV 栈上同样的行加 `restored_lineage_fails_closed` 全为 true，且 file/NoKV
+  逐行结果一致。
+- Stage 1：`s1.cli_document_decodes_through_ts_store` 通过产品 CLI 写入三次
+  observation（`todo add`、`task-lease acquire`、`todo update`），再经
+  `FileAuthorityStore` 的 `loadAuthority`、分页 `scanCommitted` 与
+  `readReceipt` 回读：cursor 为 `3`、三个 operation id 按序一致、首条 receipt
+  可找到。
+- Stage 2B：`s2b.postgresql_conformance_live` 在 node TAP reporter 下运行
+  PostgreSQL 集成测试文件，要求至少九个 pass、零 fail、零 skip。
+- Stage 2C 观察基础：六个 `s2c1.*` 行移植本地 shadow CLI E2E 与迁移断言。
+  configure 往返先预览、再开启、回读、最后关闭 observer；每个 writer family
+  （handoff-mode、todo add/update/complete/supersede/capture-followups/
+  archive-completed、task-lease acquire/renew/transfer）都以
+  `primary_writeback_preserved`、`provider_to_local_writes=false`、
+  `candidate_read_for_decision=false` 完成 capture，而幂等 re-acquire 不产生
+  observation；default-off goal 保持隔离；候选失败不推翻主写；POSIX SIGKILL
+  落在崩溃间隙时只丢失该次 observation；`migrate-state` 在不携带 legacy 字节的
+  前提下建立新 lineage。
+
+Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1` 加
+`NOKV_*` 栈变量）。没有栈时它们报告 `unverified`，除非传入
+`--allow-unverified`，否则 ladder 以非零退出；unverified 行永不计为 green。
+报告绑定 LoopX commit、工作树是否 dirty、探针 digest 与经哈希的连接事实；其隐私
+扫描会把任何临时根目录、home 目录、连接 URL 或配置路径的泄露改写为
+`fail/privacy_violation`。
+
+交付边界：test-only。没有任何生产入口构造任何 store；ladder 不新增产品路径，
+只经保留的 TypeScript store 读取候选。Stage 2A live 资格验证
+（`s2a.nokv_live_qualification`，待 PR #3819 合并）与 Stage 2C parity 后半段
+（`s2c2.*`：outbox 条目、幂等 drain、drain 前与 drain 中的 SIGKILL、带 pending
+条目的 rollback、双 runtime root、parity 相等与分歧、迁移 seed-and-drain、增长
+度量）以 pending 行声明，而非宣称已完成。本小节记录的是上述阶段的可执行证据；
+它不晋升任何 provider，也不完成 Stage 2C promotion。
+
 ### P0：合同与 deterministic proof
 
 - 本 ownership matrix 与显式 shared-mode boundary；

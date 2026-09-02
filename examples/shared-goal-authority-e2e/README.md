@@ -1,0 +1,92 @@
+# Shared-goal-authority E2E stage ladder
+
+One incremental end-to-end ladder for
+[RFC: LoopX shared control-plane authority and pluggable state providers v0](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0.md).
+Every completed RFC stage claim is one row; every row drives the product
+through the real `python -m loopx.cli` (`real_cli`) or runs a retained
+store-level probe (`store_direct`). The ladder adds no product path, reads the
+candidate only through the production TypeScript `FileAuthorityStore`, and
+never reports green while a selected row is unverified.
+
+```bash
+python examples/shared-goal-authority-e2e/ladder.py            # exit 1 here: live rows unverified
+python examples/shared-goal-authority-e2e/ladder.py --allow-unverified
+python examples/shared-goal-authority-e2e/ladder.py --stage 2c1 --report-json ladder-report.json
+python examples/shared-goal-authority-e2e/ladder.py --list
+```
+
+The pytest projection is `tests/control_plane/test_shared_goal_authority_e2e.py`;
+there, an unverified row skips as `unverified: <reason>` and a POSIX-only row
+skips on Windows.
+
+## Rows
+
+| Row | Stage | Path | Gate | Asserts |
+| --- | --- | --- | --- | --- |
+| `s0.file_matrix_twelve_rows` | 0 | store_direct | deterministic | `examples/nokv-shadow-provider/live_e2e.py` reports exactly the twelve known file-provider scenario rows, all true |
+| `s0.nokv_live_matrix` | 0 | store_direct | env:nokv_legacy | the same twelve rows plus `restored_lineage_fails_closed` are true on a live NoKV stack and file/NoKV outcomes are identical |
+| `s1.cli_document_decodes_through_ts_store` | 1 | real_cli | deterministic | three CLI writes (`todo add`, `task-lease acquire`, `todo update`) read back through `FileAuthorityStore`: `loadAuthority` loaded at cursor `3`, paged `scanCommitted` yields the three `observation_id`s in order, `readReceipt` finds the first |
+| `s2b.postgresql_conformance_live` | 2b | store_direct | env:postgresql | `postgresql_authority_store.integration.test.ts` under node's TAP reporter: `# pass >= 9`, `# fail 0`, `# skipped 0` |
+| `s2c1.configure_enable_disable_roundtrip` | 2c1 | real_cli | deterministic | `configure-goal` preview does not write, enable writes, captured observations for a todo and a lease, read-back summary `enabled/file_one_way`, disable writes and later writes neither observe nor touch candidate bytes |
+| `s2c1.every_writer_family_captures` | 2c1 | real_cli | deterministic | handoff-mode set, todo add/update/complete/supersede/capture-followups/archive-completed, task-lease acquire/renew/transfer each carry `outcome in {captured, replayed, ambiguous_reconciled}`, `primary_writeback_preserved=true`, `provider_to_local_writes=false`, `candidate_read_for_decision=false`; an idempotent re-acquire carries no `authority_shadow`; candidate `cursor == captured count`, operation ids equal observation ids, no time-active lease in the head, head todos equal `todo list` |
+| `s2c1.default_off_isolation` | 2c1 | real_cli | deterministic | a default-off goal returns the same response fields as an observed goal, carries no `authority_shadow`, and creates no `authority-shadow/` directory |
+| `s2c1.candidate_failure_preserves_primary` | 2c1 | real_cli | deterministic | a blocked candidate directory yields `outcome=failed`, `reason_code=shadow_observation_failed`, and the committed todo is in the primary state |
+| `s2c1.crash_gap_loses_observation` | 2c1 | real_cli | deterministic (POSIX) | a writer SIGKILLed while the observation lock is held commits its todo but leaves no candidate document; the next write captures the full two-todo snapshot without claiming an outbox or correlation |
+| `s2c1.migration_seeds_new_lineage` | 2c1 | real_cli | deterministic | `migrate-state` dry run plans the seed without writing; execute seeds one fresh `file:` lineage at cursor `1` that carries no legacy identity, revision, source path, or private byte |
+
+Pending rows are declared in the report as `pending`, never counted as pass:
+`s2a.nokv_live_qualification` (until PR #3819 merges) and the Stage 2C parity
+rows `s2c2.outbox_prepared_then_committed_entries`, `s2c2.drain_idempotent`,
+`s2c2.sigkill_between_primary_write_and_drain`, `s2c2.sigkill_mid_drain`,
+`s2c2.rollback_with_pending_entries`, `s2c2.dual_runtime_root_consistency`,
+`s2c2.parity_equal`, `s2c2.parity_divergent_detects_foreign_edit`,
+`s2c2.migration_seeds_and_drains`, `s2c2.growth_measurement_gate` (until the
+Stage 2C parity PRs land).
+
+## Gates and environment variables
+
+| Gate | Requirement | Unverified reason when absent |
+| --- | --- | --- |
+| `deterministic` | none (needs `node` on `PATH` for the CLI's TypeScript runtime and the read-back probe) | `node_missing` when the probe cannot run |
+| `env:postgresql` | `LOOPX_TEST_POSTGRES_URL` plus `node_modules/pg` (`npm ci`) | `postgres_url_missing`, `pg_dependency_missing`, `node_missing` |
+| `env:nokv_legacy` | `NOKV_COORDINATION_LIVE=1` and `NOKV_ETCD`, `NOKV_ETCD_PREFIX`, `NOKV_ROOT_ID`, `NOKV_BUCKET`, `NOKV_OBJECT_ENDPOINT`, `NOKV_OBJECT_ROOT`, `NOKV_OBJECT_KEY`, `NOKV_OBJECT_SECRET`; the `nokv` SDK importable | `nokv_live_env_missing`, `nokv_live_flag_not_enabled`, `nokv_sdk_missing` |
+| `env:nokv` | reserved for the Stage 2A store rows (same variables); no row uses it yet | same as above |
+
+POSIX-only rows report `unverified/posix_only` on Windows.
+
+## Report and exit policy
+
+The report schema is `loopx_shared_goal_authority_e2e_report_v0`:
+`rows[]` (`status in {pass, fail, unverified}`, `reason_code`, public-safe
+`evidence`, `duration_ms`), `pending[]`, `summary{pass, fail, unverified,
+pending}`, `bindings{loopx_commit, loopx_tree_dirty, probe_sha256[],
+nokv_client_config_sha256, nokv_sdk_version, postgres_url_sha256_prefix,
+pg_package_version}` (`null` when unknown), and `exit_policy`.
+
+Exit code is `0` iff `fail == 0` and (`unverified == 0` or
+`--allow-unverified`). A privacy scan runs over the finished report: any
+occurrence of a temporary root, the home directory, the repository path, the
+PostgreSQL URL, or a NoKV configuration value rewrites that row to
+`fail/privacy_violation`. Evidence therefore carries counters, cursors,
+outcome tokens, and sha256 prefixes only.
+
+## Test seams later PRs must provide
+
+The pending `s2c2.*` rows will be implemented against these seams; a Stage 2C
+parity PR that does not expose them cannot be ladder-verified:
+
+- a drain lock file at `<runtime>/authority-shadow/outbox/<goal>/drain` so the
+  ladder can hold the drain window with `loopx.file_lock.exclusive_file_lock`
+  exactly as it holds `<runtime>/authority-shadow/file/<goal>/observation`
+  today, then SIGKILL a writer before or during drain;
+- one file per outbox entry under `<runtime>/authority-shadow/outbox/<goal>/`
+  with a prepared-then-committed marker, so pending entries are countable and
+  a rollback with pending entries is observable from disk;
+- `drain` and `verify` product commands that emit JSON with `drained_count`,
+  `cursor_before`, `cursor_after`, `parity_verdict`, and the source and
+  candidate digests, so parity-equal and foreign-edit rows can assert on
+  typed fields rather than prose;
+- the same commands must resolve the runtime root the way `todo` and
+  `task-lease` do, so `s2c2.dual_runtime_root_consistency` can pass a
+  `--runtime-root` override that differs from `common_runtime_root` and
+  assert one lineage.

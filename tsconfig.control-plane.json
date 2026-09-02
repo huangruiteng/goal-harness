@@ -70,6 +70,7 @@
     "tests/control_plane_ts/nokv_authority_store.test.ts",
     "tests/control_plane_ts/nokv_jsonl_transport.test.ts",
     "tests/control_plane_ts/nokv_stage2a_qualification_harness.test.ts",
+    "tests/control_plane_ts/authority_store_readback_probe.ts",
     "tests/control_plane_ts/postgresql_authority_store.integration.test.ts",
     "tests/control_plane_ts/delivery_continuity.test.ts",
     "tests/control_plane_ts/delivery_workspace.test.ts",

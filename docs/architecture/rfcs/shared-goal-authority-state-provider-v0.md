@@ -1563,6 +1563,65 @@ flip, rollback, and retention decisions below - not a diagnostic CLI that
 creates a second writer. This status section claims proven contracts, not a
 shipped production capability.
 
+#### Stage-ladder end-to-end evidence (2026-09-03)
+
+What exists on this branch is one incremental end-to-end "stage ladder" that
+exercises every completed stage claim of this RFC through the real
+`python -m loopx.cli` and reports a machine-checkable verdict per row:
+`loopx/control_plane/testing/authority_e2e_ladder.py` (row registry, runners,
+the `loopx_shared_goal_authority_e2e_report_v0` JSON report, exit policy, and
+privacy scan), `loopx/control_plane/testing/authority_e2e_fixtures.py` (goal
+workspaces, CLI runners, the observation-lock window, candidate read-back), the
+read-only TypeScript probe
+`tests/control_plane_ts/authority_store_readback_probe.ts`, the pytest
+projection `tests/control_plane/test_shared_goal_authority_e2e.py`, and the
+entry point `examples/shared-goal-authority-e2e/ladder.py`.
+
+Per stage, this increment implements:
+
+- Stage 0: `s0.file_matrix_twelve_rows` runs the retained live matrix script
+  and requires exactly the twelve shared scenario rows to be true on the file
+  provider; `s0.nokv_live_matrix` requires the same rows plus
+  `restored_lineage_fails_closed` and identical file/NoKV outcomes on a live
+  NoKV stack.
+- Stage 1: `s1.cli_document_decodes_through_ts_store` writes three
+  observations through the product CLI (`todo add`, `task-lease acquire`,
+  `todo update`) and reads them back through `FileAuthorityStore` with
+  `loadAuthority`, paged `scanCommitted`, and `readReceipt`: cursor `3`, the
+  three operation ids in order, and the first receipt found.
+- Stage 2B: `s2b.postgresql_conformance_live` runs the PostgreSQL integration
+  test file under node's TAP reporter and requires at least nine passes, zero
+  failures, and zero skips.
+- Stage 2C observation foundation: six `s2c1.*` rows port the local-shadow CLI
+  E2E and migration assertions. The configure round trip previews, enables,
+  reads back, and disables the observer; every writer family (handoff-mode,
+  todo add/update/complete/supersede/capture-followups/archive-completed,
+  task-lease acquire/renew/transfer) captures with
+  `primary_writeback_preserved`, `provider_to_local_writes=false`, and
+  `candidate_read_for_decision=false`, while an idempotent re-acquire does not
+  observe; default-off goals stay isolated; candidate failure preserves the
+  primary commit; a POSIX SIGKILL in the crash gap loses only that
+  observation; and `migrate-state` seeds a fresh lineage without legacy bytes.
+
+Live rows are environment-gated (`LOOPX_TEST_POSTGRES_URL`;
+`NOKV_COORDINATION_LIVE=1` plus the `NOKV_*` stack variables). Without a
+stack they report `unverified`, and the ladder exits non-zero unless
+`--allow-unverified` is passed; an unverified row is never counted as green.
+The report binds the LoopX commit, tree dirtiness, probe digests, and hashed
+connection facts, and its privacy scan turns any leak of a temporary root,
+home directory, connection URL, or configuration path into
+`fail/privacy_violation`.
+
+Delivery boundary: test-only. No production entry point constructs any store;
+the ladder adds no product path and reads the candidate only through the
+retained TypeScript store. Stage 2A live qualification
+(`s2a.nokv_live_qualification`, pending PR #3819) and the Stage 2C parity half
+(`s2c2.*`: outbox entries, idempotent drain, SIGKILL before and during drain,
+rollback with pending entries, dual runtime roots, parity equal and divergent,
+migration seed-and-drain, growth measurement) are declared as pending rows,
+not claimed. This subsection records executable evidence for the stages above;
+it does not promote any provider or complete the Stage 2C promotion.
+
 ### P0: contract and deterministic proof
 
 - this ownership matrix and explicit shared-mode boundary;
