@@ -300,7 +300,8 @@
 .personal-connection-status { padding: 2px 8px; border-radius: 99px; background: var(--pw-green-bg); color: var(--pw-green); font-size: 10px; font-weight: 650; }
 
 .personal-settings-page { --pw-bg: #fbfaf7; --pw-card: #ffffff; --pw-line: #eceae3; --pw-line-strong: #e0ddd4; --pw-muted: #82889a; --pw-faint: #aab0bf; --pw-text: #23262e; --pw-blue: #2f66e9; --pw-blue-ink: #2456c8; --pw-blue-soft: #ebf1fe; --pw-red: #c2402f; --pw-red-bg: #fcecea; --pw-green: #2e7d5b; --pw-green-bg: #e6f3ec; display: grid; grid-template-columns: 268px minmax(0, 1fr); min-height: 100vh; background: var(--pw-bg); color: var(--pw-text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
-.personal-settings-sidebar { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 18px 14px; border-right: 1px solid var(--pw-line); background: #f5f3ee; }
+.personal-settings-sidebar { position: sticky; top: 0; display: flex; flex-direction: column; gap: 14px; min-width: 0; height: 100dvh; overflow-y: auto; scrollbar-gutter: stable; padding: 18px 14px; border-right: 1px solid var(--pw-line); background: #f5f3ee; }
+.personal-settings-page :focus-visible { outline: 2px solid #5f87ed; outline-offset: 2px; }
 .personal-settings-back { display: inline-flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 0 10px; border: 0; border-radius: 10px; background: transparent; color: var(--pw-muted); cursor: pointer; font-size: 13px; font-weight: 650; text-align: left; }
 .personal-settings-back:hover { background: rgb(255 255 255 / 65%); color: var(--pw-text); }
 .personal-settings-title { display: grid; gap: 3px; padding: 8px 10px 10px; border-bottom: 1px solid var(--pw-line); }
@@ -358,6 +359,67 @@
 .personal-language-options strong { font-size: 13px; }
 .personal-language-options small { color: var(--pw-muted); font-size: 11px; font-weight: 400; line-height: 1.45; }
 .personal-settings-card > footer { padding: 13px 20px; border-top: 1px solid var(--pw-line); background: #faf9f6; color: var(--pw-faint); font-size: 11px; }
+.personal-machine-loading { display: grid; min-height: 220px; place-items: center; color: var(--pw-muted); font-size: 13px; }
+.personal-machine-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 22px; max-width: 1080px; }
+.personal-machine-namespaces { min-width: 0; }
+.personal-machine-namespaces > div { display: grid; gap: 3px; margin-bottom: 10px; padding: 0 4px; }
+.personal-machine-namespaces > div small, .personal-machine-editor > header small { color: var(--pw-blue); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.personal-machine-namespaces > div strong { font-size: 13px; }
+.personal-machine-namespaces nav { display: grid; gap: 5px; }
+.personal-machine-namespaces button { display: grid; gap: 3px; width: 100%; min-height: 52px; padding: 9px 11px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--pw-muted); cursor: pointer; text-align: left; }
+.personal-machine-namespaces button:hover { border-color: var(--pw-line); background: rgb(255 255 255 / 60%); }
+.personal-machine-namespaces button[aria-current="page"] { border-color: var(--pw-line-strong); background: #fff; color: var(--pw-text); box-shadow: 0 2px 8px rgb(30 28 20 / 5%); }
+.personal-machine-namespaces button span { overflow-wrap: anywhere; font-size: 12px; font-weight: 650; }
+.personal-machine-namespaces button small { color: var(--pw-muted); font-size: 10px; }
+.personal-machine-content { min-width: 0; }
+.personal-machine-summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 14px; padding: 14px 16px; border: 1px solid var(--pw-line); border-radius: 14px; background: #fff; }
+.personal-machine-summary > div { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.personal-machine-summary > div > span:last-child { display: grid; gap: 3px; }
+.personal-machine-summary > div small { color: var(--pw-muted); font-size: 10px; font-weight: 650; text-transform: uppercase; }
+.personal-machine-summary > div strong { font-size: 13px; }
+.personal-machine-summary dl { display: flex; gap: 22px; margin: 0; }
+.personal-machine-summary dl div { display: grid; gap: 3px; }
+.personal-machine-summary dt { color: var(--pw-muted); font-size: 10px; }
+.personal-machine-summary dd { margin: 0; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; font-weight: 650; }
+.personal-machine-editor { overflow: hidden; border: 1px solid var(--pw-line); border-radius: 16px; background: #fff; box-shadow: 0 8px 30px rgb(30 28 20 / 4%); }
+.personal-machine-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px; border-bottom: 1px solid var(--pw-line); }
+.personal-machine-editor > header h2 { margin: 4px 0 3px; font-size: 18px; letter-spacing: -.02em; }
+.personal-machine-editor > header p { max-width: 610px; margin: 0; color: var(--pw-muted); font-size: 12px; line-height: 1.55; }
+.personal-machine-switch { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; min-height: 44px; color: var(--pw-muted); cursor: pointer; font-size: 12px; font-weight: 650; white-space: nowrap; }
+.personal-machine-switch input { width: 42px; height: 24px; margin: 0; accent-color: var(--pw-blue); cursor: pointer; }
+.personal-machine-scope-note { display: flex; align-items: flex-start; gap: 10px; margin: 18px 20px 0; padding: 13px 14px; border: 1px solid #cfdaf3; border-radius: 12px; background: #f6f8fd; color: var(--pw-blue-ink); }
+.personal-machine-scope-note svg { flex: 0 0 auto; margin-top: 1px; }
+.personal-machine-scope-note strong { font-size: 12px; }
+.personal-machine-scope-note p { margin: 3px 0 0; color: #52627f; font-size: 11px; line-height: 1.55; }
+.personal-machine-editor fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; padding: 20px; border: 0; }
+.personal-machine-editor fieldset label { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.personal-machine-editor fieldset label:last-child { grid-column: 1 / -1; }
+.personal-machine-editor fieldset label > span { font-size: 12px; font-weight: 650; }
+.personal-machine-editor fieldset label > small { color: var(--pw-muted); font-size: 10.5px; line-height: 1.45; }
+.personal-machine-editor input[type="text"], .personal-machine-editor fieldset input { width: 100%; min-width: 0; min-height: 42px; padding: 0 11px; border: 1px solid var(--pw-line-strong); border-radius: 9px; background: #fff; color: var(--pw-text); font: inherit; font-size: 13px; }
+.personal-machine-editor fieldset:disabled { opacity: .58; }
+.personal-machine-editor fieldset:disabled input { cursor: not-allowed; }
+.personal-machine-validation, .personal-machine-error, .personal-machine-notice { margin: 0 20px 16px; padding: 10px 12px; border-radius: 9px; font-size: 11px; line-height: 1.5; }
+.personal-machine-validation, .personal-machine-error { border: 1px solid #edc1ba; background: var(--pw-red-bg); color: var(--pw-red); }
+.personal-machine-notice { display: flex; align-items: center; gap: 8px; border: 1px solid #bcdacb; background: var(--pw-green-bg); color: var(--pw-green); }
+.personal-machine-preview { margin: 0 20px 18px; padding: 14px; border: 1px solid #aebfec; border-radius: 12px; background: #f8faff; }
+.personal-machine-preview header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.personal-machine-preview header strong { font-size: 12px; }
+.personal-machine-preview header span { padding: 3px 8px; border-radius: 99px; background: var(--pw-blue-soft); color: var(--pw-blue-ink); font-size: 10px; font-weight: 650; }
+.personal-machine-preview dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.personal-machine-preview dl div { min-width: 0; padding: 8px; border: 1px solid #dfe5f3; border-radius: 8px; background: #fff; }
+.personal-machine-preview dt { color: var(--pw-muted); font-size: 9.5px; }
+.personal-machine-preview dd { overflow-wrap: anywhere; margin: 4px 0 0; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10.5px; font-weight: 650; }
+.personal-machine-preview p { margin: 0; color: #52627f; font-size: 10.5px; line-height: 1.5; }
+.personal-machine-rollback { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 20px 18px; padding: 13px 14px; border: 1px solid var(--pw-line); border-radius: 12px; background: #faf9f6; }
+.personal-machine-rollback strong { font-size: 12px; }
+.personal-machine-rollback p { margin: 3px 0 0; color: var(--pw-muted); font-size: 10.5px; line-height: 1.45; }
+.personal-machine-rollback .personal-secondary-action { flex: 0 0 auto; width: auto; min-height: 40px; margin: 0; padding: 0 13px; }
+.personal-machine-editor > footer { display: flex; justify-content: flex-end; gap: 10px; padding: 15px 20px; border-top: 1px solid var(--pw-line); background: #faf9f6; }
+.personal-machine-editor > footer .personal-primary-action, .personal-machine-editor > footer .personal-secondary-action { width: auto; min-height: 42px; margin: 0; padding: 0 15px; }
+.personal-machine-unavailable { display: grid; justify-items: start; gap: 8px; min-height: 180px; padding: 26px; border: 1px dashed var(--pw-line-strong); border-radius: 14px; background: #fff; color: var(--pw-muted); }
+.personal-machine-unavailable strong { color: var(--pw-text); font-size: 13px; }
+.personal-machine-unavailable p { max-width: 540px; margin: 0; font-size: 11px; line-height: 1.6; }
 .personal-lark-loading, .personal-lark-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 130px; color: var(--pw-muted); font-size: 13px; }
 .personal-lark-apps { max-width: 1180px; margin: 0 auto; }
 .personal-lark-app-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: var(--pw-muted); font-size: 11px; }
@@ -798,6 +860,16 @@
   .personal-home-lanes { grid-template-columns: repeat(2, minmax(190px, 1fr)); }
 }
 
+@media (max-width: 1100px) {
+  .personal-machine-layout { grid-template-columns: 1fr; gap: 14px; }
+  .personal-machine-namespaces nav { display: flex; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; }
+  .personal-machine-namespaces button { flex: 0 0 180px; scroll-snap-align: start; }
+  .personal-machine-summary { align-items: flex-start; flex-wrap: wrap; }
+  .personal-machine-editor fieldset { grid-template-columns: 1fr; }
+  .personal-machine-editor fieldset label:last-child { grid-column: auto; }
+  .personal-machine-preview dl { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 1050px) {
   .personal-workspace-shell, .personal-workspace-shell.has-drawer { grid-template-columns: minmax(0, 1fr); }
   .personal-workspace-sidebar { display: none; position: fixed; inset: 0 auto 0 0; z-index: 40; width: min(310px, 86vw); box-shadow: 18px 0 50px rgb(30 28 20 / 16%); }
@@ -857,7 +929,7 @@
   .personal-session-record dl { grid-template-columns: 1fr; }
   .personal-session-record > .personal-secondary-action { grid-column: 1; grid-row: auto; }
   .personal-settings-page { grid-template-columns: 1fr; }
-  .personal-settings-sidebar { gap: 10px; padding: 12px 14px; border-right: 0; border-bottom: 1px solid var(--pw-line); }
+  .personal-settings-sidebar { position: static; gap: 10px; height: auto; overflow: visible; padding: 12px 14px; border-right: 0; border-bottom: 1px solid var(--pw-line); }
   .personal-settings-title { display: none; }
   .personal-settings-tabs { display: flex; overflow-x: auto; }
   .personal-settings-tabs button { flex: 0 0 180px; }
@@ -865,6 +937,16 @@
   .personal-settings-header { align-items: center; gap: 14px; }
   .personal-settings-header h1 { font-size: 24px; }
   .personal-settings-choice-group { grid-template-columns: 1fr; }
+  .personal-machine-layout { grid-template-columns: 1fr; gap: 14px; }
+  .personal-machine-namespaces nav { display: flex; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; }
+  .personal-machine-namespaces button { flex: 0 0 180px; scroll-snap-align: start; }
+  .personal-machine-summary { align-items: flex-start; }
+  .personal-machine-summary dl { flex-direction: column; gap: 8px; }
+  .personal-machine-editor fieldset { grid-template-columns: 1fr; }
+  .personal-machine-editor fieldset label:last-child { grid-column: auto; }
+  .personal-machine-preview dl { grid-template-columns: 1fr; }
+  .personal-machine-rollback { align-items: stretch; flex-direction: column; }
+  .personal-machine-rollback .personal-secondary-action { width: 100%; }
   .personal-lark-settings.is-embedded .personal-lark-tabs { overflow-x: auto; }
   .personal-lark-settings.is-embedded .personal-lark-tabs button { flex: 0 0 auto; }
 }
@@ -921,10 +1003,16 @@
 .personal-settings-page[data-pw-theme="brutal"] .personal-settings-tabs button:hover { background: rgb(255 255 255 / 55%); }
 .personal-settings-page[data-pw-theme="brutal"] .personal-settings-tabs button[aria-current="page"] { border: 2px solid #141414; border-radius: 4px; background: #ff8fd0; color: #141414; box-shadow: 3px 3px 0 #141414; }
 .personal-settings-page[data-pw-theme="brutal"] .personal-detail-card,
+.personal-settings-page[data-pw-theme="brutal"] .personal-machine-editor,
+.personal-settings-page[data-pw-theme="brutal"] .personal-machine-summary,
 .personal-settings-page[data-pw-theme="brutal"] .personal-lark-app-card,
 .personal-settings-page[data-pw-theme="brutal"] .personal-lark-table,
 .personal-settings-page[data-pw-theme="brutal"] .personal-lark-topic-panel { border: 2px solid #141414; border-radius: 4px; background: #fff; box-shadow: 3px 3px 0 #141414; }
 .personal-settings-page[data-pw-theme="brutal"] .personal-settings-choice-group button { border: 2px solid #141414; border-radius: 4px; background: #fff; box-shadow: 2px 2px 0 #141414; }
+.personal-settings-page[data-pw-theme="brutal"] .personal-machine-namespaces button[aria-current="page"],
+.personal-settings-page[data-pw-theme="brutal"] .personal-machine-preview,
+.personal-settings-page[data-pw-theme="brutal"] .personal-machine-scope-note,
+.personal-settings-page[data-pw-theme="brutal"] .personal-machine-rollback { border: 2px solid #141414; border-radius: 4px; background: #fff; color: #141414; box-shadow: 2px 2px 0 #141414; }
 .personal-settings-page[data-pw-theme="brutal"] .personal-settings-choice-group button:hover { border-color: #141414; background: #fff8d6; box-shadow: 4px 4px 0 #141414; transform: translate(-1px, -1px); }
 .personal-settings-page[data-pw-theme="brutal"] .personal-settings-choice-group button[aria-checked="true"] { border-color: #141414; background: #ffe23f; box-shadow: 3px 3px 0 #141414; }
 .personal-settings-page[data-pw-theme="brutal"] .personal-primary-action,
