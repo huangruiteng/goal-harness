@@ -16,15 +16,15 @@ from .benchmark_concurrency import (
     handle_benchmark_concurrency_command,
     register_benchmark_concurrency_commands,
 )
-from .benchmark_external_agent import (
-    BENCHMARK_EXTERNAL_AGENT_COMMANDS,
-    handle_benchmark_external_agent_command,
-    register_benchmark_external_agent_commands,
-)
 from .benchmark_experiment_board import (
     BENCHMARK_EXPERIMENT_BOARD_COMMANDS,
     handle_benchmark_experiment_board_command,
     register_benchmark_experiment_board_commands,
+)
+from .benchmark_external_agent import (
+    BENCHMARK_EXTERNAL_AGENT_COMMANDS,
+    handle_benchmark_external_agent_command,
+    register_benchmark_external_agent_commands,
 )
 from .benchmark_study import (
     handle_benchmark_study_command,
