@@ -23,6 +23,7 @@ from loopx.cli import build_parser
 IMAGE = "postgres:17-test@sha256:" + "a" * 64
 GOAL_ID = "goal-local-synthetic"
 TODO_ID = "todo_local_synthetic"
+COMPOSE_PROJECT = "loopx_synthetic_task"
 NOW = datetime(2026, 9, 2, 8, 0, tzinfo=timezone.utc)
 
 
@@ -50,17 +51,48 @@ def _doctor_ready(**_kwargs: object) -> dict[str, object]:
     }
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, str, str]:
-    repository = tmp_path / "candidate"
+def _create_repository(repository: Path) -> tuple[str, str]:
     repository.mkdir()
     assert _command(["git", "init", "-q", str(repository)]).returncode == 0
-    assert _command(["git", "-C", str(repository), "config", "user.name", "LoopX Test"]).returncode == 0
-    assert _command(["git", "-C", str(repository), "config", "user.email", "loopx-test@example.invalid"]).returncode == 0
+    assert (
+        _command(
+            ["git", "-C", str(repository), "config", "user.name", "LoopX Test"]
+        ).returncode
+        == 0
+    )
+    assert (
+        _command(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "config",
+                "user.email",
+                "loopx-test@example.invalid",
+            ]
+        ).returncode
+        == 0
+    )
     (repository / "candidate.txt").write_text("synthetic candidate\n", encoding="utf-8")
-    assert _command(["git", "-C", str(repository), "add", "candidate.txt"]).returncode == 0
-    assert _command(["git", "-C", str(repository), "commit", "-q", "-m", "fixture"]).returncode == 0
+    assert (
+        _command(["git", "-C", str(repository), "add", "candidate.txt"]).returncode == 0
+    )
+    assert (
+        _command(
+            ["git", "-C", str(repository), "commit", "-q", "-m", "fixture"]
+        ).returncode
+        == 0
+    )
     head = _command(["git", "-C", str(repository), "rev-parse", "HEAD"]).stdout.strip()
-    tree = _command(["git", "-C", str(repository), "rev-parse", "HEAD^{tree}"]).stdout.strip()
+    tree = _command(
+        ["git", "-C", str(repository), "rev-parse", "HEAD^{tree}"]
+    ).stdout.strip()
+    return head, tree
+
+
+def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, str, str]:
+    repository = tmp_path / "candidate"
+    head, tree = _create_repository(repository)
 
     project = tmp_path / "project"
     state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -93,8 +125,8 @@ updated_at: 2026-09-02T08:00:00Z
                     {
                         "id": GOAL_ID,
                         "status": "active",
-                        "repo": str(project),
-                        "state_file": f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md",
+                        "repo": str(repository),
+                        "state_file": str(state_file),
                     }
                 ],
             }
@@ -104,19 +136,31 @@ updated_at: 2026-09-02T08:00:00Z
     return registry_path, runtime_root, repository, head, tree
 
 
-def _issue(tmp_path: Path) -> tuple[dict[str, object], tuple[Path, Path, Path, str, str]]:
-    fixture = _fixture(tmp_path)
-    registry_path, _runtime_root, repository, head, tree = fixture
-    packet = issue_local_synthetic_overlay_receipt(
+def _issue_fixture(
+    fixture: tuple[Path, Path, Path, str, str],
+    *,
+    repository: Path | None = None,
+    head: str | None = None,
+    tree: str | None = None,
+) -> dict[str, object]:
+    (
+        registry_path,
+        _runtime_root,
+        registered_repository,
+        registered_head,
+        registered_tree,
+    ) = fixture
+    return issue_local_synthetic_overlay_receipt(
         registry_path=registry_path,
         runtime_root_arg=None,
         goal_id=GOAL_ID,
         todo_id=TODO_ID,
-        repository=repository,
-        candidate_head=head,
-        candidate_tree=tree,
+        repository=repository or registered_repository,
+        candidate_head=head or registered_head,
+        candidate_tree=tree or registered_tree,
         capabilities=ALLOWED_CAPABILITIES,
         synthetic_database_image=IMAGE,
+        compose_project=COMPOSE_PROJECT,
         product_write_scope="ZERO",
         ttl_seconds=600,
         execute=True,
@@ -124,7 +168,38 @@ def _issue(tmp_path: Path) -> tuple[dict[str, object], tuple[Path, Path, Path, s
         token_factory=lambda: "deterministic-system-token",
         doctor=_doctor_ready,
     )
-    return packet, fixture
+
+
+def _linked_worktree(
+    tmp_path: Path,
+    fixture: tuple[Path, Path, Path, str, str],
+) -> Path:
+    _registry_path, _runtime_root, repository, head, _tree = fixture
+    worktree = tmp_path / "candidate-worktree"
+    assert (
+        _command(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                str(worktree),
+                head,
+            ]
+        ).returncode
+        == 0
+    )
+    return worktree
+
+
+def _issue(
+    tmp_path: Path,
+) -> tuple[dict[str, object], tuple[Path, Path, Path, str, str]]:
+    fixture = _fixture(tmp_path)
+    return _issue_fixture(fixture), fixture
 
 
 def _validate(
@@ -144,6 +219,7 @@ def _validate(
         "candidate_tree": tree,
         "capabilities": ALLOWED_CAPABILITIES,
         "synthetic_database_image": IMAGE,
+        "compose_project": COMPOSE_PROJECT,
         "product_write_scope": "ZERO",
         "now": NOW + timedelta(seconds=1),
     }
@@ -161,6 +237,7 @@ def test_zero_write_receipt_is_system_managed_and_exactly_bound(tmp_path: Path) 
     assert receipt["reusable_across_tasks"] is False
     assert set(receipt["restrictions"].values()) == {False}
     assert receipt["authority_path"] == "loopx_native"
+    assert receipt["compose_project"] == COMPOSE_PROJECT
     assert packet["legacy_dispatcher_used"] is False
     assert validation["valid"] is True
     assert validation["receipt_digest"] == packet["receipt_digest"]
@@ -206,6 +283,65 @@ def test_expiry_and_receipt_tamper_fail_closed(tmp_path: Path) -> None:
         _validate(packet, fixture)
 
 
+def test_unrelated_repository_is_rejected_at_issue_and_validation(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated_head, unrelated_tree = _create_repository(unrelated)
+    with pytest.raises(ValueError, match="Goal registry Git repository"):
+        _issue_fixture(
+            fixture,
+            repository=unrelated,
+            head=unrelated_head,
+            tree=unrelated_tree,
+        )
+
+    packet = _issue_fixture(fixture)
+    with pytest.raises(ValueError, match="Goal registry Git repository"):
+        _validate(
+            packet,
+            fixture,
+            repository=unrelated,
+            candidate_head=unrelated_head,
+            candidate_tree=unrelated_tree,
+        )
+
+
+def test_registered_repository_linked_worktree_is_valid(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    worktree = _linked_worktree(tmp_path, fixture)
+    packet = _issue_fixture(fixture, repository=worktree)
+    validation = _validate(packet, fixture, repository=worktree)
+    receipt = packet["receipt"]
+    assert isinstance(receipt, dict)
+    assert receipt["candidate"]["repository"] == str(worktree.resolve())
+    assert validation["valid"] is True
+
+
+def test_receipt_stays_bound_to_exact_candidate_worktree(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    _registry_path, _runtime_root, repository, _head, _tree = fixture
+    worktree = _linked_worktree(tmp_path, fixture)
+    packet = _issue_fixture(fixture, repository=worktree)
+    with pytest.raises(ValueError, match="candidate"):
+        _validate(packet, fixture, repository=repository)
+
+
+def test_compose_project_mismatch_and_tamper_are_rejected(tmp_path: Path) -> None:
+    packet, fixture = _issue(tmp_path)
+    with pytest.raises(ValueError, match="compose_project"):
+        _validate(packet, fixture, compose_project="unrelated_empty_project")
+
+    receipt_path = Path(str(packet["receipt_path"]))
+    stored = json.loads(receipt_path.read_text(encoding="utf-8"))
+    stored["receipt"]["compose_project"] = "unrelated_empty_project"
+    receipt_path.write_text(json.dumps(stored), encoding="utf-8")
+    os.chmod(receipt_path, 0o600)
+    with pytest.raises(ValueError, match="digest"):
+        _validate(packet, fixture)
+
+
 @pytest.mark.parametrize(
     "unsafe",
     [
@@ -232,6 +368,7 @@ def test_real_production_reuse_and_nonzero_write_scope_are_rejected(
         "candidate_tree": tree,
         "capabilities": ALLOWED_CAPABILITIES,
         "synthetic_database_image": IMAGE,
+        "compose_project": COMPOSE_PROJECT,
         "execute": True,
         "now": NOW,
         "doctor": _doctor_ready,
@@ -244,7 +381,9 @@ def test_real_production_reuse_and_nonzero_write_scope_are_rejected(
 def test_doctor_is_truthful_and_never_pulls_or_creates() -> None:
     calls: list[list[str]] = []
 
-    def ready_runner(argv: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
+    def ready_runner(
+        argv: list[str], _timeout: float
+    ) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         stdout = '"27.0"\n' if argv[1] == "version" else '"sha256:image"\n'
         return subprocess.CompletedProcess(argv, 0, stdout, "")
@@ -260,7 +399,9 @@ def test_doctor_is_truthful_and_never_pulls_or_creates() -> None:
     assert ready["resource_created"] is False
     assert all("pull" not in argv and "run" not in argv for argv in calls)
 
-    def missing_image(argv: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
+    def missing_image(
+        argv: list[str], _timeout: float
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             argv,
             0 if argv[1] == "version" else 1,
@@ -279,14 +420,20 @@ def test_doctor_is_truthful_and_never_pulls_or_creates() -> None:
 
 
 def test_cleanup_readback_reports_clean_and_residue() -> None:
-    validation = {"valid": True, "receipt_id": "overlay_" + "a" * 24}
+    validation = {
+        "valid": True,
+        "receipt_id": "overlay_" + "a" * 24,
+        "compose_project": COMPOSE_PROJECT,
+    }
 
-    def clean_runner(argv: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
+    def clean_runner(
+        argv: list[str], _timeout: float
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     clean = verify_compose_cleanup(
         validation=validation,
-        compose_project="loopx_synthetic_task",
+        compose_project=COMPOSE_PROJECT,
         runner=clean_runner,
         which=lambda _name: "/fixture/docker",
     )
@@ -297,18 +444,54 @@ def test_cleanup_readback_reports_clean_and_residue() -> None:
         "networks": 0,
     }
 
-    def residue_runner(argv: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
+    def residue_runner(
+        argv: list[str], _timeout: float
+    ) -> subprocess.CompletedProcess[str]:
         stdout = "container-id\n" if argv[1] == "ps" else ""
         return subprocess.CompletedProcess(argv, 0, stdout, "")
 
     residue = verify_compose_cleanup(
         validation=validation,
-        compose_project="loopx_synthetic_task",
+        compose_project=COMPOSE_PROJECT,
         runner=residue_runner,
         which=lambda _name: "/fixture/docker",
     )
     assert residue["ok"] is False
     assert residue["status"] == "residue_detected"
+
+
+def test_cleanup_uses_only_receipt_bound_compose_project(tmp_path: Path) -> None:
+    packet, fixture = _issue(tmp_path)
+    validation = _validate(packet, fixture)
+    calls: list[list[str]] = []
+
+    def clean_runner(
+        argv: list[str], _timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    clean = verify_compose_cleanup(
+        validation=validation,
+        compose_project=COMPOSE_PROJECT,
+        runner=clean_runner,
+        which=lambda _name: "/fixture/docker",
+    )
+    assert clean["clean"] is True
+    assert len(calls) == 3
+    assert all(
+        f"label=com.docker.compose.project={COMPOSE_PROJECT}" in argv for argv in calls
+    )
+
+    calls.clear()
+    with pytest.raises(ValueError, match="does not match"):
+        verify_compose_cleanup(
+            validation=validation,
+            compose_project="unrelated_empty_project",
+            runner=clean_runner,
+            which=lambda _name: "/fixture/docker",
+        )
+    assert calls == []
 
 
 def test_cli_and_capability_catalog_expose_native_path() -> None:
@@ -327,6 +510,4 @@ def test_cli_and_capability_catalog_expose_native_path() -> None:
     detail = build_capability_detail_packet("local-synthetic-overlay")
     capability = detail["capability"]
     assert capability["provider_id"] == "loopx-core"
-    assert any(
-        "Legacy Dispatcher" in boundary for boundary in capability["boundaries"]
-    )
+    assert any("Legacy Dispatcher" in boundary for boundary in capability["boundaries"])
