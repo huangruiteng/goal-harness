@@ -161,6 +161,8 @@ const statusFixture = {
   },
   local_dashboard_api: {
     source: "serve-status",
+    periodic_report_index_url: "/periodic-report-frontstage",
+    periodic_report_detail_url: "/periodic-report-projection",
     reward_dry_run_url: "/reward/dry-run",
     reward_append_url: null,
     reward_write_enabled: false,
@@ -215,6 +217,103 @@ const statusFixture = {
     ],
   },
 };
+
+const periodicReportProjection = {
+  schema_version: "periodic_report_frontstage_projection_v0",
+  goal_id: "live-goal-a",
+  agent_id: "codex-side-bypass",
+  generation_id: "report_generation_public_fixture",
+  generated_at: "2026-06-20T09:00:00Z",
+  title: "Synthetic milestone report",
+  summary: "A delivery-verified milestone projection with compact public-safe facts.",
+  content_sha256: `sha256:${"1".repeat(64)}`,
+  period_window: {
+    start_at: "2026-06-13T09:00:00Z",
+    end_at: "2026-06-20T09:00:00Z",
+  },
+  interaction: {
+    attention_kind: "progress",
+    interaction: "inform",
+    delivery: "surface",
+    form: "milestone_report",
+    writable: false,
+  },
+  delta: {
+    added_count: 1,
+    changed_count: 1,
+    item_count: 2,
+    items: [
+      {
+        fact_id: "fact_public_one",
+        source_ref: "todo:public-one",
+        title: "Typed publication projection",
+        summary: "The report display is bound to a verified publication cursor.",
+        status: "done",
+        content_kind: "outcome",
+        change_kind: "added",
+      },
+      {
+        fact_id: "fact_public_two",
+        source_ref: "todo:public-two",
+        title: "Mobile visual validation",
+        summary: "Validate the compact report layout at narrow width.",
+        status: "open",
+        content_kind: "next_action",
+        change_kind: "changed",
+        previous_status: "blocked",
+      },
+    ],
+  },
+  publication: {
+    publication_id: "publication_public_fixture",
+    delivered_at: "2026-06-20T09:05:00Z",
+    predecessor_publication_id: "publication_public_predecessor",
+    cursor_id: "report_cursor_public_fixture",
+  },
+  truth_contract: {
+    published_cursor_is_source_of_truth: true,
+    generation_receipt_is_delivery_receipt: false,
+    projection_is_writable: false,
+    browser_write_api: false,
+  },
+};
+
+async function installPeriodicReportRoutes(page) {
+  await page.route("**/periodic-report-frontstage?*", async (route) => {
+    const goalId = new URL(route.request().url()).searchParams.get("goal_id");
+    const items = goalId === periodicReportProjection.goal_id ? [{
+      goal_id: periodicReportProjection.goal_id,
+      agent_id: periodicReportProjection.agent_id,
+      generation_id: periodicReportProjection.generation_id,
+      publication_id: periodicReportProjection.publication.publication_id,
+      delivered_at: periodicReportProjection.publication.delivered_at,
+      predecessor_publication_id: periodicReportProjection.publication.predecessor_publication_id,
+      detail_ref: {
+        goal_id: periodicReportProjection.goal_id,
+        agent_id: periodicReportProjection.agent_id,
+        generation_id: periodicReportProjection.generation_id,
+        content_sha256: periodicReportProjection.content_sha256,
+      },
+    }] : [];
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        periodic_reports: {
+          schema_version: "periodic_report_frontstage_index_v0",
+          count: items.length,
+          items,
+        },
+      }),
+    });
+  });
+  await page.route("**/periodic-report-projection?*", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, projection: periodicReportProjection }),
+    });
+  });
+}
 
 function loadPlaywright() {
   const candidates = [
@@ -460,6 +559,7 @@ async function main() {
     browser = await launchBrowser(chromium);
 
     const desktopPage = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+    await installPeriodicReportRoutes(desktopPage);
     desktopPage.on("pageerror", (error) => pageErrors.push(error.message));
     try {
       await captureFrontstage(desktopPage, `${baseUrl}/frontstage`, "desktop-frontstage", [
@@ -870,6 +970,11 @@ async function main() {
           "Active Claims",
           "Open Gates",
           "Artifacts",
+          "Milestone Reports",
+          "Synthetic milestone report",
+          "Typed publication projection",
+          "Mobile visual validation",
+          "generation and delivery receipts remain distinct",
           "Truth Contract",
           "CLAIMED LANES",
           "EVIDENCE LOOP",
@@ -966,6 +1071,7 @@ async function main() {
       isMobile: true,
       viewport: { width: 390, height: 900 },
     });
+    await installPeriodicReportRoutes(mobilePage);
     mobilePage.on("pageerror", (error) => pageErrors.push(`mobile: ${error.message}`));
     try {
       await captureFrontstage(mobilePage, `${baseUrl}/frontstage`, "mobile-frontstage", [
@@ -980,6 +1086,18 @@ async function main() {
         mobilePage,
         `${baseUrl}/frontstage?mode=developer&statusUrl=/${fixtureName}`,
         "mobile-frontstage-developer",
+      );
+      await captureFrontstage(
+        mobilePage,
+        `${baseUrl}/frontstage?mode=ops&statusUrl=/${fixtureName}&goalId=live-goal-a`,
+        "mobile-frontstage-live",
+        [
+          "Live Goal Channel",
+          "Milestone Reports",
+          "Synthetic milestone report",
+          "Typed publication projection",
+          "Mobile visual validation",
+        ],
       );
     } finally {
       await mobilePage.close();

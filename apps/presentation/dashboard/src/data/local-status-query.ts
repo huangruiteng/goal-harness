@@ -1,4 +1,10 @@
-import { StatusPayload, parseStatusPayload } from "./status";
+import {
+  PeriodicReportDetailRef,
+  StatusPayload,
+  parseStatusPayload,
+  periodicReportIndexResponseSchema,
+  periodicReportProjectionResponseSchema,
+} from "./status";
 
 export const expectedStatusContractSchemaVersion = 2;
 export const fallbackStatusContractReloadHint = "scripts/macos-dashboard-launchagent.sh restart";
@@ -100,6 +106,39 @@ function localApiUrl(source: ResolvedFrontstageStatusUrl, path: string | null | 
   } catch {
     return null;
   }
+}
+
+export function periodicReportApiUrls(
+  payload: StatusPayload,
+  source: ResolvedFrontstageStatusUrl,
+) {
+  return {
+    detailUrl: localApiUrl(source, payload.local_dashboard_api?.periodic_report_detail_url),
+    indexUrl: localApiUrl(source, payload.local_dashboard_api?.periodic_report_index_url),
+  };
+}
+
+export async function fetchPeriodicReportIndex(indexUrl: string, goalId: string) {
+  const url = new URL(indexUrl);
+  url.searchParams.set("goal_id", goalId);
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} while loading published reports`);
+  }
+  return periodicReportIndexResponseSchema.parse(await response.json()).periodic_reports;
+}
+
+export async function fetchPeriodicReportProjection(
+  detailUrl: string,
+  ref: PeriodicReportDetailRef,
+) {
+  const url = new URL(detailUrl);
+  Object.entries(ref).forEach(([key, value]) => url.searchParams.set(key, value));
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} while loading published report detail`);
+  }
+  return periodicReportProjectionResponseSchema.parse(await response.json()).projection;
 }
 
 export function localDashboardApiCapabilities(

@@ -78,6 +78,9 @@ includes(dataSource, 'pause_policy: "control-plane policy only"', "pause policy 
 includes(dataSource, "raw_or_private_material_omitted", "source warning fixture");
 includes(statusSource, "goal_channel_projection: goalChannelProjectionSchema", "status projection parser");
 includes(statusSource, "local_dashboard_api", "local dashboard API status parser");
+includes(statusSource, "periodicReportProjectionSchema", "periodic report projection schema");
+includes(statusSource, 'form: z.literal("milestone_report")', "milestone report form contract");
+includes(statusSource, "browser_write_api: z.literal(false)", "periodic report browser write guard");
 
 includes(localStatusQuerySource, "resolveFrontstageOpsStatusUrl", "frontstage status URL resolver");
 includes(localStatusQuerySource, "fetchFrontstageStatusPayload", "frontstage status query fetcher");
@@ -87,6 +90,8 @@ includes(localStatusQuerySource, "localDashboardApiCapabilities", "local dashboa
 includes(localStatusQuerySource, "expectedStatusContractSchemaVersion", "schema freshness gate");
 includes(localStatusQuerySource, "fallbackStatusContractReloadHint", "stale daemon repair hint");
 includes(localStatusQuerySource, "isLoopbackHostname", "loopback source guard");
+includes(localStatusQuerySource, "fetchPeriodicReportProjection", "periodic report cold-path fetch");
+includes(localStatusQuerySource, "periodicReportApiUrls", "periodic report loopback URLs");
 includes(localStatusQuerySource, "Ops statusUrl must be relative or loopback", "ops status URL guard copy");
 
 includes(frontstageSource, 'data-testid="goal-channel-frontstage-route"', "route test id");
@@ -181,6 +186,10 @@ includes(frontstageSource, "claimed lanes", "claimed lane signal");
 includes(frontstageSource, "evidence loop", "evidence loop signal");
 includes(frontstageSource, "No open gates in this projection.", "open gates empty state");
 includes(frontstageSource, "No compact artifacts projected.", "artifacts empty state");
+includes(frontstageSource, "Milestone Reports", "periodic report frontstage panel");
+includes(frontstageSource, 'data-testid="frontstage-milestone-reports"', "periodic report panel test id");
+includes(frontstageSource, "generation and delivery receipts remain distinct", "periodic report receipt boundary");
+excludes(frontstageSource, "approve-periodic-report", "periodic report write affordance");
 includes(frontstageSource, "artifactDisplayValue", "artifact value truncation helper");
 includes(frontstageSource, 'data-testid="frontstage-efficiency-evidence"', "efficiency evidence panel");
 includes(frontstageSource, "Efficiency Evidence", "efficiency evidence copy");
