@@ -430,6 +430,13 @@ function proposalFields(parameters: Record<string, unknown>, t: WorkspaceTransla
 
 type GoalLifecycleOperation = "stop" | "resume" | "delete";
 
+type GoalLifecycleProjection = {
+  goalId: string;
+  next: "active" | "stopped";
+  optimisticApplied: boolean;
+  previous: "active" | "stopped";
+};
+
 function lifecycleOperationFor(proposal: TypedActionProposal): GoalLifecycleOperation | undefined {
   if (proposal.action_kind !== "goal.lifecycle") return undefined;
   const operation = proposal.normalized_parameters.operation;
@@ -1009,12 +1016,22 @@ export function PersonalWorkspacePage({
       resume: t("proposal.summary.lifecycleResume", { title: goal.title }),
       stop: t("proposal.summary.lifecycleStop", { title: goal.title }),
     };
+    let stopProjection: GoalLifecycleProjection | null = null;
+    let projectionOwnedByApply = false;
     try {
       if (operation === "stop") {
         if (lifecyclePendingGoalIdsRef.current.has(goal.goalId)) return;
         lifecyclePendingGoalIdsRef.current.add(goal.goalId);
         setLifecycleBusyGoalIds(new Set(lifecyclePendingGoalIdsRef.current));
         setSelection(null);
+        stopProjection = {
+          goalId: goal.goalId,
+          next: "stopped",
+          optimisticApplied: true,
+          previous: goal.activationState,
+        };
+        setActionFeedback(t("feedback.applying", { title: summaryByOperation.stop }));
+        callbacks.onGoalActivationStateChange?.(goal.goalId, "stopped");
       }
       const proposal = await createPreview({
         actionKind: "goal.lifecycle",
@@ -1029,12 +1046,25 @@ export function PersonalWorkspacePage({
       }, { select: operation !== "stop" });
       if (operation === "stop") {
         if (proposal.status === "ready") {
-          await applyProposal(proposal, { presentation: "feedback" });
+          projectionOwnedByApply = true;
+          await applyProposal(proposal, {
+            lifecycleProjection: stopProjection ?? undefined,
+            presentation: "feedback",
+          });
         } else {
+          if (stopProjection) {
+            callbacks.onGoalActivationStateChange?.(stopProjection.goalId, stopProjection.previous);
+          }
+          setActionFeedback(proposal.gate
+            ? t("feedback.gateRequired", { summary: proposal.gate.summary })
+            : t("feedback.notCompleted", { status: proposal.status }));
           setSelection({ item: proposal, kind: "proposal" });
         }
       }
     } catch (error) {
+      if (stopProjection && !projectionOwnedByApply) {
+        callbacks.onGoalActivationStateChange?.(stopProjection.goalId, stopProjection.previous);
+      }
       setActionFeedback(t("feedback.executionFailed", {
         error: error instanceof Error ? error.message : String(error),
       }));
@@ -1100,24 +1130,29 @@ export function PersonalWorkspacePage({
 
   async function applyProposal(
     proposal: WorkspaceActionPreview,
-    options: { presentation?: "drawer" | "feedback" } = {},
+    options: {
+      lifecycleProjection?: GoalLifecycleProjection;
+      presentation?: "drawer" | "feedback";
+    } = {},
   ) {
     const showDrawer = options.presentation !== "feedback";
-    const lifecycleChange = proposal.actionKind === "goal.lifecycle"
+    const inferredLifecycleChange = proposal.actionKind === "goal.lifecycle"
       && proposal.goalId
       && (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "resume")
       ? {
           goalId: proposal.goalId,
           next: proposal.lifecycleOperation === "stop" ? "stopped" as const : "active" as const,
+          optimisticApplied: false,
           previous: model.goals.find((goal) => goal.goalId === proposal.goalId)?.activationState
             ?? (proposal.lifecycleOperation === "stop" ? "active" as const : "stopped" as const),
         }
       : null;
+    const lifecycleChange = options.lifecycleProjection ?? inferredLifecycleChange;
     setActionFeedback(t("feedback.applying", { title: proposal.title }));
     const applying = { ...proposal, status: "applying" as const };
     setProposals((current) => ({ ...current, [proposal.previewId]: applying }));
     if (showDrawer) setSelection({ item: applying, kind: "proposal" });
-    if (lifecycleChange) {
+    if (lifecycleChange && !lifecycleChange.optimisticApplied) {
       callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.next);
     }
     try {

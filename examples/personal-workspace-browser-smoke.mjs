@@ -56,6 +56,7 @@ async function installApi(page) {
     durableResources: new Set(),
     durableWriteCount: 0,
     failNextLifecycleApply: false,
+    failNextLifecyclePreview: false,
     failNextStatusRequest: false,
     goalActivationStates: new Map([
       ["product-release", "active"],
@@ -68,6 +69,7 @@ async function installApi(page) {
     actionTransitions: [],
     allowNextHeartbeatApply: false,
     nextLifecycleApplyDelayMs: 0,
+    nextLifecyclePreviewDelayMs: 0,
     nextStatusDelayMs: 0,
     statusRequestCount: 0,
     turnRequests: [],
@@ -448,6 +450,18 @@ async function installApi(page) {
     const url = new URL(request.url());
     if (url.pathname === "/api/actions/preview") {
       const body = request.postDataJSON();
+      const lifecycleDelayMs = body.action_kind === "goal.lifecycle" ? state.nextLifecyclePreviewDelayMs : 0;
+      state.nextLifecyclePreviewDelayMs = 0;
+      if (lifecycleDelayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, lifecycleDelayMs));
+      if (body.action_kind === "goal.lifecycle" && state.failNextLifecyclePreview) {
+        state.failNextLifecyclePreview = false;
+        await route.fulfill({
+          contentType: "application/json",
+          json: { error: "Lifecycle preview temporarily unavailable", error_code: "preview_unavailable", ok: false },
+          status: 503,
+        });
+        return;
+      }
       const proposal_id = `proposal-${body.idempotency_key}`;
       actionKinds.set(proposal_id, body.action_kind);
       state.actionPreviews.push({ ...body, proposalId: proposal_id });
@@ -629,6 +643,7 @@ async function main() {
     if (!(await stoppedDirectory.isVisible()) || await stoppedDirectory.getAttribute("open") !== null) throw new Error("Stopped Goals are not available in a collapsed directory section");
     const writesBeforeLifecyclePreview = api.durableWriteCount;
     const statusRequestsBeforeStop = api.statusRequestCount;
+    api.nextLifecyclePreviewDelayMs = 900;
     api.nextLifecycleApplyDelayMs = 900;
     api.nextStatusDelayMs = 900;
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
@@ -637,6 +652,9 @@ async function main() {
       null,
       { timeout: 600 },
     );
+    const pendingStop = page.locator('.personal-stopped-goals .personal-goal-lifecycle[aria-label="恢复 Product Release"]');
+    if (await pendingStop.getAttribute("aria-busy") !== "true") throw new Error("Pending Goal stop does not expose accessible progress");
+    await page.waitForTimeout(1_000);
     const stopPreview = api.actionPreviews.findLast((preview) => preview.action_kind === "goal.lifecycle" && preview.normalized_parameters.operation === "stop");
     if (!stopPreview || stopPreview.normalized_parameters.goal_id !== "product-release") throw new Error("Goal stop did not create the expected typed preview");
     if (api.durableWriteCount !== writesBeforeLifecyclePreview) throw new Error("Goal stop wrote durable state before its typed apply completed");
@@ -666,6 +684,13 @@ async function main() {
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).waitFor({ state: "attached" });
     await page.waitForTimeout(1_800);
     if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("A stale background response overwrote a newer optimistic Goal transition");
+
+    api.failNextLifecyclePreview = true;
+    api.nextLifecyclePreviewDelayMs = 900;
+    await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
+    await page.getByRole("button", { name: "恢复 Product Release", exact: true }).waitFor({ state: "attached", timeout: 600 });
+    await page.getByRole("button", { name: "停止 Product Release", exact: true }).waitFor({ state: "attached", timeout: 2_000 });
+    if (api.goalActivationStates.get("product-release") !== "active") throw new Error("Rejected Goal stop preview mutated the durable fixture state");
 
     api.failNextLifecycleApply = true;
     api.nextLifecycleApplyDelayMs = 900;

@@ -99,6 +99,8 @@
 .personal-goal-lifecycle { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--pw-faint); cursor: pointer; }
 .personal-goal-lifecycle:hover { background: #fff; color: var(--pw-text); box-shadow: 0 1px 3px rgb(30 28 20 / 12%); }
 .personal-goal-lifecycle:disabled { opacity: .45; cursor: wait; }
+.personal-goal-lifecycle.is-pending svg { animation: personal-goal-lifecycle-spin .8s linear infinite; }
+@keyframes personal-goal-lifecycle-spin { to { transform: rotate(360deg); } }
 .personal-goal-delete:hover { color: var(--pw-danger); }
 .personal-goal-link-copy { display: grid; min-width: 0; gap: 2px; }
 .personal-goal-link-copy strong, .personal-goal-link-copy small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -854,6 +856,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .personal-timeline-row, .personal-diagnostics-trigger svg, .personal-workspace-sidebar, .personal-stopped-goals > summary svg { transition: none; }
+  .personal-goal-lifecycle.is-pending svg { animation: none; }
   .personal-spin { animation: none; }
 }
 
