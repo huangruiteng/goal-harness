@@ -331,8 +331,17 @@ def enforce_open_replan_writeback(
     agent_vision: dict[str, Any] | None = None,
     completion_todo_id: str | None = None,
     completion_turn_key: str | None = None,
+    guard_scoped: bool = False,
+    guard_semantic_replan_obligation_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """Fail closed unless concrete typed evidence satisfies the open replan."""
+    """Fail closed unless concrete typed evidence satisfies the selected replan.
+
+    An exact Turn guard is the authority for work admitted in that Turn. When
+    ``guard_scoped`` is true, a replan obligation applies only if that guard
+    selected its exact generation. A different or newly derived obligation is
+    preserved for the next Turn instead of retroactively rejecting authorized
+    delivery.
+    """
 
     obligation, semantic_delta = qualify_replan_writeback(
         newest_first_runs=newest_first_runs,
@@ -346,6 +355,10 @@ def enforce_open_replan_writeback(
         completion_turn_key=completion_turn_key,
     )
     if not obligation:
+        return None
+    if guard_scoped and str(obligation.get("obligation_id") or "").strip() != str(
+        guard_semantic_replan_obligation_id or ""
+    ).strip():
         return None
     if isinstance(semantic_delta, dict) and semantic_delta.get("accepted") is True:
         return semantic_delta
@@ -378,6 +391,8 @@ def qualify_refresh_replan_writeback(
     agent_id: str,
     dry_run: bool,
     settlement_todo_id: str | None,
+    settlement_guard_scoped: bool,
+    settlement_guard_semantic_replan_obligation_id: str | None,
     newest_first_runs: list[dict[str, Any]],
     state_text: str,
     goal_id: str,
@@ -446,6 +461,10 @@ def qualify_refresh_replan_writeback(
         agent_vision=agent_vision,
         completion_todo_id=completion_todo_id,
         completion_turn_key=completion_turn_key,
+        guard_scoped=settlement_guard_scoped,
+        guard_semantic_replan_obligation_id=(
+            settlement_guard_semantic_replan_obligation_id
+        ),
     )
     if semantic_delta:
         effective_recorded = True

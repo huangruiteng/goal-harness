@@ -34,6 +34,7 @@ export const QUOTA_SETTLEMENT_READBACK_REQUEST_SCHEMA =
   "loopx_quota_settlement_readback_request_v0";
 export const QUOTA_SETTLEMENT_READBACK_RESULT_SCHEMA =
   "loopx_quota_settlement_readback_result_v0";
+export const SEMANTIC_REPLAN_GUARD_SCHEMA = "semantic_replan_guard_v0";
 
 const ROLLOUT_EVENT_SCHEMA_VERSION = "loopx_rollout_event_v0";
 const TURN_INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -200,6 +201,38 @@ function runEffectMatches(
 
 function details(event: JsonObject | null): JsonObject {
   return jsonObject(event?.details) ?? {};
+}
+
+export function projectSemanticReplanGuard(
+  receiptDetails: JsonObject,
+): JsonObject {
+  if (!Object.hasOwn(receiptDetails, "semantic_replan_obligation_id")) {
+    return {
+      schema_version: SEMANTIC_REPLAN_GUARD_SCHEMA,
+      scope: "legacy_unscoped",
+      selected_obligation_id: null,
+    };
+  }
+  const rawObligationId = receiptDetails.semantic_replan_obligation_id;
+  if (rawObligationId === "" || rawObligationId === null) {
+    return {
+      schema_version: SEMANTIC_REPLAN_GUARD_SCHEMA,
+      scope: "turn_guard",
+      selected_obligation_id: null,
+    };
+  }
+  const selectedObligationId = normalizeReplanObligationId(rawObligationId);
+  if (selectedObligationId === null) {
+    throw new EffectRuntimeRequestError(
+      "heartbeat receipt semantic replan guard is malformed",
+      "malformed_settlement_state",
+    );
+  }
+  return {
+    schema_version: SEMANTIC_REPLAN_GUARD_SCHEMA,
+    scope: "turn_guard",
+    selected_obligation_id: selectedObligationId,
+  };
 }
 
 function receiptIdentity(
@@ -639,6 +672,7 @@ function failedReadback(
     terminal_closeout: bundle(terminalFailure),
     terminal_settlement: bundle(downstreamFailure),
     workspace_causality: null,
+    semantic_replan_guard: null,
     writeback_run: null,
     spend_run: null,
     heartbeat_receipt: null,
@@ -731,6 +765,7 @@ export async function readQuotaSettlement(value: unknown): Promise<JsonObject> {
     terminal_closeout: bundle(terminalCloseout),
     terminal_settlement: bundle(terminalSettlement),
     workspace_causality: workspaceCausality,
+    semantic_replan_guard: projectSemanticReplanGuard(receiptDetails),
     writeback_run: writebackRun,
     spend_run: spendRun,
     heartbeat_receipt: heartbeatReceipt,

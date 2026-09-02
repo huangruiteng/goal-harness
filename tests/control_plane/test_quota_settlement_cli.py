@@ -15,6 +15,9 @@ from loopx.control_plane.work_items.delivery_outcome import (
     PROGRESS_DELIVERY_OUTCOMES,
     DeliveryOutcome,
 )
+from loopx.control_plane.status.autonomous_replan_projection import (
+    AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD,
+)
 from loopx.heartbeat_prompt import build_heartbeat_prompt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -174,6 +177,28 @@ def _classification_count(runtime: Path, classification: str) -> int:
         for line in index_path.read_text(encoding="utf-8").splitlines()
         if json.loads(line).get("classification") == classification
     )
+
+
+def _append_surface_only_runs(runtime: Path, *, count: int) -> None:
+    index_path = runtime / "goals" / GOAL_ID / "runs" / "index.jsonl"
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with index_path.open("a", encoding="utf-8") as handle:
+        for index in range(count):
+            handle.write(
+                json.dumps(
+                    {
+                        "generated_at": (
+                            f"2026-08-13T00:{index:02d}:00+00:00"
+                        ),
+                        "goal_id": GOAL_ID,
+                        "classification": "surface_only_progress",
+                        "agent_id": AGENT_ID,
+                        "progress_scope": "agent_lane",
+                        "delivery_outcome": "surface_only",
+                    }
+                )
+                + "\n"
+            )
 
 
 def _heartbeat_receipt_count(runtime: Path, turn_instance_id: str) -> int:
@@ -1752,6 +1777,133 @@ def test_visible_goal_refresh_and_spend_preserve_selected_todo_causality(
     assert _spend_run_count(runtime) == 1
 
 
+def test_todo_guard_defers_replan_obligation_created_after_admission(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_read_only_todo(project)
+
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--runtime-profile",
+        "codex_app_ssh_goal",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--begin-turn",
+        "--scan-path",
+        str(project),
+    )
+
+    assert guard_rc == 0, guard
+    receipt = guard["heartbeat_receipt"]
+    assert "semantic_replan_obligation_id" not in receipt
+    identity = receipt["settlement_identity"]
+
+    _append_surface_only_runs(
+        runtime,
+        count=AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD,
+    )
+
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--classification",
+        "turn_admitted_progress",
+        "--delivery-batch-scale",
+        "single_surface",
+        "--delivery-outcome",
+        "outcome_progress",
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        TODO_ID,
+        "--turn-instance-id",
+        identity["turn_instance_id"],
+        "--no-global-sync",
+        "--suppress-external-sinks",
+    )
+
+    assert refresh_rc == 0, refresh
+    assert refresh["todo_id"] == TODO_ID
+    assert refresh["turn_instance_id"] == identity["turn_instance_id"]
+
+
+def test_legacy_todo_guard_keeps_current_replan_gate_strict(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_selected_todo_replan_fixture(project, registry_path)
+    _initialize_git_checkout(project)
+    turn_instance_id = "turn-legacy-replan-guard"
+
+    guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--scan-path",
+        str(project),
+    )
+    assert guard_rc == 0, guard
+    assert guard["decision"] == "autonomous_replan_required", guard
+
+    log_path = runtime / "goals" / GOAL_ID / "rollout-event-log.jsonl"
+    events = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    for event in events:
+        if event.get("event_kind") == "quota_should_run":
+            event["details"].pop("semantic_replan_obligation_id", None)
+    log_path.write_text(
+        "".join(json.dumps(event) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        turn_instance_id,
+        "--todo-id",
+        SELECTED_REPLAN_TODO_ID,
+        "--delivery-workspace-path",
+        str(project),
+        "--delivery-outcome",
+        "outcome_progress",
+        "--classification",
+        "validated_progress",
+        "--progress-result-class",
+        "advanced",
+        "--progress-evidence-id",
+        "evidence:legacy-guard",
+    )
+
+    assert refresh_rc == 1, refresh
+    assert "requires a typed semantic delta" in refresh["error"]
+
+
 def test_visible_goal_unbound_spend_recovers_delivery_after_capability_replan(
     tmp_path: Path,
 ) -> None:
@@ -2652,6 +2804,9 @@ def test_todo_bound_autonomous_replan_uses_one_binding_for_refresh_and_spend(
     assert guard["decision"] == "autonomous_replan_required", guard
     assert guard["selected_todo"]["todo_id"] == SELECTED_REPLAN_TODO_ID
     obligation_id = guard["replan_action_packet"]["obligation_id"]
+    assert guard["heartbeat_receipt"]["semantic_replan_obligation_id"] == (
+        obligation_id
+    )
     cli_channel = guard["interaction_contract"]["cli_channel"]
     contract = cli_channel["replan_settlement_contract"]
     assert contract["settlement_binding"] == {

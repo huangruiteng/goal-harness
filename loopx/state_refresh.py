@@ -103,8 +103,6 @@ BULLET_PREFIX_RE = re.compile(r"^(?:[-*]\s+|\d+[.)]\s+)")
 CHECKBOX_PREFIX_RE = re.compile(r"^\[(?P<mark>[ xX])\]\s+")
 ACTIVE_STATE_NEXT_ACTION_UPDATE_SCHEMA_VERSION = "active_state_next_action_update_v0"
 REPAIR_NOOP_SCHEMA_VERSION = "repair_noop_v0"
-
-
 def _delivery_workspace_supplement_required(
     *,
     prior_writeback: dict[str, Any],
@@ -865,6 +863,7 @@ def refresh_state_run(
     settlement_result = None
     delivery_workspace_causality = None
     settlement_workspace_requirement = None
+    settlement_readback = None
     if todo_id or normalized_replan_obligation_id or turn_instance_id:
         if not turn_scoped_settlement_qualified:
             raise ValueError(
@@ -1099,6 +1098,12 @@ def refresh_state_run(
         recommendation_resolution["recommended_action_source"]
     )
     requested_classification = classification
+    settlement_replan_guard = (
+        settlement_readback.semantic_replan_guard
+        if settlement_readback is not None
+        and settlement_readback.semantic_replan_guard is not None
+        else {}
+    )
     replan_qualification = qualify_refresh_replan_writeback(
         autonomous_replan_recorded=autonomous_replan_recorded,
         requested_delta_kinds=normalized_repair_delta_kinds,
@@ -1108,6 +1113,16 @@ def refresh_state_run(
         agent_id=normalized_agent_id,
         dry_run=dry_run,
         settlement_todo_id=(settlement_identity.todo_id if settlement_identity else None),
+        settlement_guard_scoped=(
+            settlement_replan_guard.get("scope") == "turn_guard"
+        ),
+        settlement_guard_semantic_replan_obligation_id=(
+            settlement_replan_guard.get("selected_obligation_id")
+            if isinstance(
+                settlement_replan_guard.get("selected_obligation_id"), str
+            )
+            else None
+        ),
         newest_first_runs=newest_first_runs,
         state_text=state_text,
         goal_id=safe_goal_id,
