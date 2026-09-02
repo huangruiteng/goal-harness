@@ -314,6 +314,8 @@ def test_release_launchers_use_lightweight_entrypoint() -> None:
 	posix_launcher = (REPO_ROOT / "scripts" / "loopx").read_text(encoding="utf-8")
 	windows_entry = (REPO_ROOT / "scripts" / "loopx_entry.py").read_text(encoding="utf-8")
 
+	assert "LOOPX_MANAGED_RELEASE_LAUNCHER_V1" in posix_launcher
+	assert "LOOPX_MANAGED_RELEASE_LAUNCHER_V1" in windows_entry
 	assert '"loopx.entrypoint"' in posix_launcher
 	assert '"loopx.entrypoint"' in windows_entry
 	assert 'else "loopx.cli"' in posix_launcher

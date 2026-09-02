@@ -94,6 +94,10 @@ import os
 import runpy
 import sys
 
+# Stable process identity for LoopX Desktop stale-service recovery. Keep this
+# independent from the selected Python entry module.
+LOOPX_MANAGED_RELEASE_LAUNCHER_V1 = True
+
 if sys.version_info < (3, 11):
     print(
         "loopx runtime error: Python 3.11+ is required; "

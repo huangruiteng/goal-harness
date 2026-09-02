@@ -234,8 +234,15 @@ enum LoopxProcessInvocation {
     ManagedReleaseLauncher,
 }
 
-const MANAGED_RELEASE_LAUNCHER_MARKER: &str =
-    r#"runpy.run_module("loopx.cli", run_name="__main__")"#;
+/// Stable process fingerprint emitted by release launchers. The Desktop must
+/// not couple stale-service recovery to the launcher's current Python module:
+/// changing `loopx.cli` to `loopx.entrypoint` must not strand an older daemon.
+const MANAGED_RELEASE_LAUNCHER_MARKER: &str = "LOOPX_MANAGED_RELEASE_LAUNCHER_V1";
+const LEGACY_CLI_LAUNCHER_MARKER: &str = r#"runpy.run_module("loopx.cli", run_name="__main__")"#;
+const ENTRYPOINT_LAUNCHER_MODULE_MARKER: &str = r#""loopx.entrypoint""#;
+const DYNAMIC_MODULE_LAUNCH_MARKER: &str = r#"runpy.run_module(module, run_name="__main__")"#;
+const RELEASE_ARGV_ZERO_MARKER: &str =
+    r#"sys.argv[0] = os.path.join(release_root, "scripts", "loopx")"#;
 
 fn terminate_stale_listener(
     kind: ServiceKind,
@@ -398,22 +405,36 @@ fn classify_loopx_process_invocation(
     if executable_is_direct {
         return Some(LoopxProcessInvocation::DirectExecutable);
     }
-    if interpreter_is_python && arguments.windows(2).any(|pair| pair == ["-m", "loopx.cli"]) {
+    if interpreter_is_python
+        && arguments
+            .windows(2)
+            .any(|pair| pair == ["-m", "loopx.cli"] || pair == ["-m", "loopx.entrypoint"])
+    {
         return Some(LoopxProcessInvocation::PythonModule);
     }
 
-    // Installed LoopX wrappers intentionally exec Python with a stable `-c`
-    // bootstrap. `ps` exposes that bootstrap instead of the wrapper path, so
-    // the exact module-launch statement and release-root contract are the
-    // durable positive fingerprint for this typed invocation variant.
     if interpreter_is_python
         && arguments.contains(&"-c")
-        && command_line.contains(MANAGED_RELEASE_LAUNCHER_MARKER)
-        && command_line.contains("LOOPX_RELEASE_ROOT")
+        && is_managed_release_launcher(command_line)
     {
         return Some(LoopxProcessInvocation::ManagedReleaseLauncher);
     }
     None
+}
+
+fn is_managed_release_launcher(command_line: &str) -> bool {
+    if !command_line.contains("LOOPX_RELEASE_ROOT") {
+        return false;
+    }
+
+    // New release launchers carry an entrypoint-independent marker. Preserve
+    // both historical templates so an App installed after this fix can still
+    // replace daemons started before the marker existed.
+    command_line.contains(MANAGED_RELEASE_LAUNCHER_MARKER)
+        || command_line.contains(LEGACY_CLI_LAUNCHER_MARKER)
+        || (command_line.contains(ENTRYPOINT_LAUNCHER_MODULE_MARKER)
+            && command_line.contains(DYNAMIC_MODULE_LAUNCH_MARKER)
+            && command_line.contains(RELEASE_ARGV_ZERO_MARKER))
 }
 
 fn paths_refer_to_same_file(candidate: &str, expected: &str) -> bool {
