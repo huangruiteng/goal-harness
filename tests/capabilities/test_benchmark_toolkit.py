@@ -146,9 +146,21 @@ def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:
         "matched_pair_count",
         "aggregate_primary_metric_by_arm",
         "binary_outcome_by_arm_when_available",
+        "feature_metric_by_arm_when_available",
+        "preservation_guardrail_by_arm_when_available",
         "improved_flat_regressed_pair_counts",
+        "baseline_effort_strata_when_available",
         "new_case_insights_and_next_probe",
     ]
+    effort_stratification = reporting["effort_stratification"]
+    assert effort_stratification["default_reference_arm"] == "baseline"
+    assert effort_stratification["default_reference_field"] == (
+        "effort.duration_ms"
+    )
+    assert effort_stratification["candidate_duration_affects_bucket"] is False
+    assert effort_stratification["interpretation"] == (
+        "descriptive_sensitivity_only"
+    )
     assert "Do not send a repetitive" in reporting["unchanged_policy"]
     active = analysis["active_progress_readback"]
     assert active["workspace_basis"] == [

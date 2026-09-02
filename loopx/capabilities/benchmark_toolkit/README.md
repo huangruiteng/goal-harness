@@ -1005,10 +1005,18 @@ wait `blocked`, and do not use the monitor itself as the runnable successor.
 
 A material user update should include the current countable arm and pair coverage,
 aggregate primary metric by arm, binary outcomes when the benchmark exposes them,
-improved/flat/regressed pair counts, and the new causal insight or next probe. Derive
-these score fields from the experiment board or benchmark-owned scoring projection,
-not from raw private evidence. Do not send a repetitive update when no score,
-coverage, direction, insight, or material runner state changed.
+feature and preservation guardrail totals when the benchmark exposes them,
+improved/flat/regressed pair counts, and the new causal insight or next probe.
+When effort stratification is useful, preregister benchmark-appropriate fixed
+boundaries and assign every matched case from the baseline arm's
+`effort.duration_ms`. Reuse that same case bucket for every candidate arm; candidate
+duration must not define difficulty because it is itself a treatment outcome. Per
+bucket, report pair count, primary/binary/feature/preservation metrics, and
+improved/flat/regressed counts. Treat these strata as descriptive sensitivity
+analysis unless the study preregistered a causal subgroup claim. Derive score fields
+from the experiment board or benchmark-owned scoring projection, not from raw
+private evidence. Do not send a repetitive update when no score, coverage,
+direction, insight, or material runner state changed.
 Only public-safe conclusions from the private post-run insight may enter that user
 update; raw evaluation evidence remains private.
 

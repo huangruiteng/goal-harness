@@ -515,9 +515,32 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "matched_pair_count",
                 "aggregate_primary_metric_by_arm",
                 "binary_outcome_by_arm_when_available",
+                "feature_metric_by_arm_when_available",
+                "preservation_guardrail_by_arm_when_available",
                 "improved_flat_regressed_pair_counts",
+                "baseline_effort_strata_when_available",
                 "new_case_insights_and_next_probe",
             ],
+            "effort_stratification": {
+                "default_reference_arm": "baseline",
+                "default_reference_field": "effort.duration_ms",
+                "candidate_duration_affects_bucket": False,
+                "interpretation": "descriptive_sensitivity_only",
+                "report_per_stratum": [
+                    "matched_pair_count",
+                    "binary_outcome_by_arm_when_available",
+                    "aggregate_primary_metric_by_arm",
+                    "feature_metric_by_arm_when_available",
+                    "preservation_guardrail_by_arm_when_available",
+                    "improved_flat_regressed_pair_counts",
+                ],
+                "boundary_policy": (
+                    "Preregister benchmark-appropriate fixed boundaries before "
+                    "reading candidate durations. Use the same baseline-side case "
+                    "bucket for every arm in a matched comparison; never define "
+                    "difficulty from treatment duration."
+                ),
+            },
             "unchanged_policy": (
                 "Do not send a repetitive user update when no score, coverage, "
                 "direction, insight, or material runner state changed."
