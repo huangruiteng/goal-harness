@@ -5,8 +5,25 @@
     {
       "properties": {
         "operation": {
+          "const": "qualify_heartbeat_transport"
+        },
+        "integration": false,
+        "normalization": false,
+        "snapshot": false,
+        "source": false,
+        "status": false,
+        "upgrade": false
+      },
+      "required": [
+        "heartbeat_transport"
+      ]
+    },
+    {
+      "properties": {
+        "operation": {
           "const": "reconcile_integration_candidate"
         },
+        "heartbeat_transport": false,
         "normalization": false,
         "snapshot": false,
         "source": false,
@@ -22,6 +39,7 @@
         "operation": {
           "const": "project_runtime_status"
         },
+        "heartbeat_transport": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
@@ -37,6 +55,7 @@
         "operation": {
           "const": "compile_catalog"
         },
+        "heartbeat_transport": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
@@ -52,6 +71,7 @@
         "operation": {
           "const": "normalize_selector_request"
         },
+        "heartbeat_transport": false,
         "integration": false,
         "snapshot": false,
         "source": false,
@@ -67,6 +87,7 @@
         "operation": {
           "const": "qualify_snapshot"
         },
+        "heartbeat_transport": false,
         "integration": false,
         "normalization": false,
         "source": false,
@@ -82,6 +103,7 @@
         "operation": {
           "const": "upgrade_plan"
         },
+        "heartbeat_transport": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
@@ -94,11 +116,15 @@
     }
   ],
   "properties": {
+    "heartbeat_transport": {
+      "type": "object"
+    },
     "operation": {
       "enum": [
         "compile_catalog",
         "normalize_selector_request",
         "project_runtime_status",
+        "qualify_heartbeat_transport",
         "qualify_snapshot",
         "reconcile_integration_candidate",
         "upgrade_plan"

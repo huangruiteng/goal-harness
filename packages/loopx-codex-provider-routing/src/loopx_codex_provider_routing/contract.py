@@ -10,6 +10,7 @@ RUNTIME_STATUS_SCHEMA_VERSION = "codex_provider_routing_runtime_status_v0"
 REQUEST_SCHEMA_VERSION = "loopx_codex_provider_routing_request_v0"
 RESPONSE_SCHEMA_VERSION = "loopx_codex_provider_routing_response_v0"
 INTEGRATION_CANDIDATE_SCHEMA_VERSION = "codex_provider_integration_candidate_v0"
+HEARTBEAT_TRANSPORT_SCHEMA_VERSION = "codex_app_heartbeat_transport_qualification_v0"
 
 FORBIDDEN_KEYS = {
     "account_id",
@@ -94,6 +95,73 @@ def _boolean(value: Any, field: str, *, default: bool | None = None) -> bool:
     if not isinstance(value, bool):
         raise TypeError(f"{field} must be a boolean")
     return value
+
+
+def qualify_heartbeat_transport(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Check the host boundary used to inject one scheduled heartbeat turn."""
+
+    reject_private_material(observation)
+    _reject_unexpected_keys(
+        observation,
+        {"turn_trigger", "payload_kind", "delivery_kind", "message_role", "tool_name"},
+        "heartbeat_transport",
+    )
+    turn_trigger = _non_empty_string(
+        observation.get("turn_trigger"), "heartbeat_transport.turn_trigger"
+    )
+    if turn_trigger != "automation_heartbeat":
+        raise ValueError(
+            "heartbeat_transport.turn_trigger must be automation_heartbeat"
+        )
+    payload_kind = _non_empty_string(
+        observation.get("payload_kind"), "heartbeat_transport.payload_kind"
+    )
+    if payload_kind != "heartbeat_xml":
+        raise ValueError("heartbeat_transport.payload_kind must be heartbeat_xml")
+    delivery_kind = _non_empty_string(
+        observation.get("delivery_kind"), "heartbeat_transport.delivery_kind"
+    )
+    if delivery_kind not in {"user_input", "tool_output"}:
+        raise ValueError(
+            "heartbeat_transport.delivery_kind must be user_input or tool_output"
+        )
+
+    message_role = observation.get("message_role")
+    tool_name = observation.get("tool_name")
+    if delivery_kind == "user_input":
+        if message_role != "user":
+            raise ValueError("heartbeat user_input must declare message_role=user")
+        if tool_name is not None:
+            raise ValueError("heartbeat user_input must not declare tool_name")
+        qualified = True
+        failure_code = None
+    else:
+        if message_role is not None:
+            raise ValueError("heartbeat tool_output must not declare message_role")
+        tool_name = _non_empty_string(tool_name, "heartbeat_transport.tool_name")
+        qualified = False
+        failure_code = (
+            "heartbeat_mislabeled_as_automation_tool_output"
+            if tool_name == "automation_update"
+            else "heartbeat_injected_as_tool_output"
+        )
+
+    return {
+        "schema_version": HEARTBEAT_TRANSPORT_SCHEMA_VERSION,
+        "qualified": qualified,
+        "failure_code": failure_code,
+        "required_delivery": {
+            "delivery_kind": "user_input",
+            "message_role": "user",
+        },
+        "observed_delivery": {
+            "delivery_kind": delivery_kind,
+            "message_role": message_role,
+            "tool_name": tool_name,
+        },
+        "responsible_layer": "codex_app_heartbeat_transport",
+        "prompt_or_model_remediation": False,
+    }
 
 
 def _reject_unexpected_keys(

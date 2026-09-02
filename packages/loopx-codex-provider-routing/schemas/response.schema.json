@@ -45,6 +45,7 @@
         "compile_catalog",
         "normalize_selector_request",
         "project_runtime_status",
+        "qualify_heartbeat_transport",
         "qualify_snapshot",
         "reconcile_integration_candidate",
         "upgrade_plan"

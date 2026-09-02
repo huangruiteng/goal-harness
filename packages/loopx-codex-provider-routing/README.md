@@ -50,6 +50,14 @@ qualification.
   modality-aware affinity, typed route traversal, durable settings revision and
   commit barrier.
 
+`qualify_heartbeat_transport`
+: Checks a content-free host observation for one scheduler-injected heartbeat.
+  A heartbeat envelope must enter the turn as user input with `role=user`.
+  Encoding it as a tool result, especially as an `automation_update` result,
+  fails with a stable code and assigns remediation to the Codex App heartbeat
+  transport rather than to the LoopX prompt or model provider. This operation
+  diagnoses the boundary; it does not patch, restart or modify Codex App.
+
 `project_runtime_status`
 : Joins a stable, route-independent host ChatGPT identity state with a
   content-free CPA execution observation and symbolic A/B quota/activity.
@@ -85,6 +93,10 @@ loopx extension run loopx-codex-provider-routing \
   --format json
 loopx extension run loopx-codex-provider-routing \
   --input-json packages/loopx-codex-provider-routing/examples/normalize-request.json \
+  --execute \
+  --format json
+loopx extension run loopx-codex-provider-routing \
+  --input-json packages/loopx-codex-provider-routing/examples/heartbeat-transport.json \
   --execute \
   --format json
 loopx extension run loopx-codex-provider-routing \

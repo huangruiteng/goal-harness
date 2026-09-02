@@ -1,0 +1,10 @@
+{
+  "schema_version": "loopx_codex_provider_routing_request_v0",
+  "operation": "qualify_heartbeat_transport",
+  "heartbeat_transport": {
+    "turn_trigger": "automation_heartbeat",
+    "payload_kind": "heartbeat_xml",
+    "delivery_kind": "user_input",
+    "message_role": "user"
+  }
+}

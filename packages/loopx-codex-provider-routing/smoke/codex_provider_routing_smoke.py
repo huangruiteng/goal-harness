@@ -21,6 +21,7 @@ build_upgrade_plan = contract.build_upgrade_plan
 compile_catalog = contract.compile_catalog
 normalize_selector_request = contract.normalize_selector_request
 project_runtime_status = contract.project_runtime_status
+qualify_heartbeat_transport = contract.qualify_heartbeat_transport
 qualify_snapshot = contract.qualify_snapshot
 reconcile_integration_candidate = contract.reconcile_integration_candidate
 
@@ -191,6 +192,44 @@ def expect_error(action: Callable[[], Any], message: str) -> None:
 
 
 def main() -> int:
+    heartbeat = qualify_heartbeat_transport(
+        {
+            "turn_trigger": "automation_heartbeat",
+            "payload_kind": "heartbeat_xml",
+            "delivery_kind": "user_input",
+            "message_role": "user",
+        }
+    )
+    assert heartbeat["qualified"] is True
+    assert heartbeat["prompt_or_model_remediation"] is False
+
+    mislabeled_heartbeat = qualify_heartbeat_transport(
+        {
+            "turn_trigger": "automation_heartbeat",
+            "payload_kind": "heartbeat_xml",
+            "delivery_kind": "tool_output",
+            "tool_name": "automation_update",
+        }
+    )
+    assert mislabeled_heartbeat["qualified"] is False
+    assert mislabeled_heartbeat["failure_code"] == (
+        "heartbeat_mislabeled_as_automation_tool_output"
+    )
+    assert mislabeled_heartbeat["responsible_layer"] == (
+        "codex_app_heartbeat_transport"
+    )
+    expect_error(
+        lambda: qualify_heartbeat_transport(
+            {
+                "turn_trigger": "automation_heartbeat",
+                "payload_kind": "heartbeat_xml",
+                "delivery_kind": "user_input",
+                "message_role": "assistant",
+            }
+        ),
+        "heartbeat user input accepted a non-user role",
+    )
+
     catalog = compile_catalog(_source())
     assert catalog["credential_free"] is True
     auto = next(
@@ -607,6 +646,7 @@ def main() -> int:
         "normalize-request.json",
         "runtime-status.json",
         "qualification-snapshot.json",
+        "heartbeat-transport.json",
         "integration-candidate.json",
         "upgrade-request.json",
     ):

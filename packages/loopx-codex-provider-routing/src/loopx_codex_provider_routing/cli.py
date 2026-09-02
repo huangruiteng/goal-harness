@@ -13,6 +13,7 @@ from .contract import (
     compile_catalog,
     normalize_selector_request,
     project_runtime_status,
+    qualify_heartbeat_transport,
     qualify_snapshot,
     reconcile_integration_candidate,
     reject_private_material,
@@ -45,6 +46,7 @@ def _doctor() -> int:
                 "compile_catalog",
                 "normalize_selector_request",
                 "project_runtime_status",
+                "qualify_heartbeat_transport",
                 "qualify_snapshot",
                 "reconcile_integration_candidate",
                 "upgrade_plan",
@@ -66,6 +68,7 @@ def _run_request(request: Any) -> dict[str, Any]:
         "compile_catalog": "source",
         "normalize_selector_request": "normalization",
         "project_runtime_status": "status",
+        "qualify_heartbeat_transport": "heartbeat_transport",
         "qualify_snapshot": "snapshot",
         "reconcile_integration_candidate": "integration",
         "upgrade_plan": "upgrade",
@@ -95,6 +98,13 @@ def _run_request(request: Any) -> dict[str, Any]:
         if not isinstance(status, Mapping):
             raise ValueError("project_runtime_status requires object `status`")
         result = project_runtime_status(status)
+    elif operation == "qualify_heartbeat_transport":
+        heartbeat_transport = request.get("heartbeat_transport")
+        if not isinstance(heartbeat_transport, Mapping):
+            raise ValueError(
+                "qualify_heartbeat_transport requires object `heartbeat_transport`"
+            )
+        result = qualify_heartbeat_transport(heartbeat_transport)
     elif operation == "qualify_snapshot":
         snapshot = request.get("snapshot")
         if not isinstance(snapshot, Mapping):

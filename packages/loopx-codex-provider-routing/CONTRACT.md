@@ -12,6 +12,8 @@ Runtime status: `codex_provider_routing_runtime_status_v0`
 
 Integration candidate: `codex_provider_integration_candidate_v0`
 
+Heartbeat transport qualification: `codex_app_heartbeat_transport_qualification_v0`
+
 The provider accepts exactly one public-safe operation per invocation and
 returns a deterministic JSON result. An input containing credential-shaped
 keys fails before any operation runs.
@@ -20,6 +22,14 @@ The provider has no Kernel transition authority and no external write
 permission. A qualification result is evidence, not permission to edit a
 Codex home, install CPA, change a model, start a turn, rotate a credential or
 merge an upstream PR.
+
+Heartbeat qualification accepts only symbolic, content-free shape facts. For
+an `automation_heartbeat` carrying a `heartbeat_xml` envelope, the conforming
+delivery is `user_input` with `message_role=user`. A `tool_output` observation
+is non-conforming because it changes the semantic role of the scheduler event;
+the provider reports a stable failure code and never recommends prompt or model
+tuning as remediation. App inspection, binary changes and process lifecycle
+remain outside this read-only extension.
 
 The integration-candidate operation composes with, but does not replace,
 LoopX core `integration-branch`. It accepts only public Git refs, full commit
