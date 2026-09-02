@@ -9,10 +9,12 @@ trajectories/<task>__<arm>.json（在 gh-pages / 本地 http 下可用）。
 from __future__ import annotations
 import json, sys, pathlib
 
-base = pathlib.Path(sys.argv[1]).parent if len(sys.argv) > 1 else pathlib.Path("viz")
-data_path = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "viz/data.json")
-md_path   = pathlib.Path(sys.argv[2] if len(sys.argv) > 2 else "viz/SUMMARY.md")
-out_path  = pathlib.Path(sys.argv[3] if len(sys.argv) > 3 else "viz/index.html")
+from _common import safe_path
+
+data_path = safe_path(sys.argv[1] if len(sys.argv) > 1 else "viz/data.json")
+md_path   = safe_path(sys.argv[2] if len(sys.argv) > 2 else "viz/SUMMARY.md")
+out_path  = safe_path(sys.argv[3] if len(sys.argv) > 3 else "viz/index.html")
+base = data_path.parent
 
 data = json.loads(data_path.read_text())
 md_raw = md_path.read_text()

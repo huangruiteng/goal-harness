@@ -14,13 +14,11 @@
 from __future__ import annotations
 import json, os, re, sys, pathlib
 
-ARMS = ("plain", "goal", "ssh-goal", "codex-cli", "heartbeat")
+from _common import ARMS, norm, safe_path
+
 OUT_HEAD, OUT_TAIL = 1000, 240      # 输出保留首尾
 CMD_CAP = 1200
 GOAL_CAP = 6000
-
-
-def norm(a): return re.sub(r"-\d{3,}$", "", a)
 
 
 def clip(s, head, tail=0):
@@ -61,7 +59,6 @@ def extract_cmd(inp: str) -> str:
 
 def parse_rollout(fp: pathlib.Path):
     steps = []
-    goal_seen = False
     for line in fp.read_text(errors="replace").splitlines():
         try:
             o = json.loads(line)
@@ -81,7 +78,6 @@ def parse_rollout(fp: pathlib.Path):
                 # LoopX 的关键自变量：注入的 goal 上下文（plain 模式没有这条）
                 if 'codex_internal_context source="goal"' in body or "active thread goal" in body:
                     steps.append({"kind": "goal", "role": role, "text": clip(body, GOAL_CAP)})
-                    goal_seen = True
                 else:
                     steps.append({"kind": "msg", "role": role, "text": clip(body, 2500)})
             elif st == "reasoning":
@@ -105,8 +101,8 @@ def parse_rollout(fp: pathlib.Path):
 
 
 def main():
-    root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "marathon-full")
-    outdir = pathlib.Path(sys.argv[2] if len(sys.argv) > 2 else "viz/trajectories")
+    root = safe_path(sys.argv[1] if len(sys.argv) > 1 else "marathon-full")
+    outdir = safe_path(sys.argv[2] if len(sys.argv) > 2 else "viz/trajectories")
     outdir.mkdir(parents=True, exist_ok=True)
     index = {}
     for task_dir in sorted(root.glob("*")):
