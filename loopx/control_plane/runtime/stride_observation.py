@@ -11,6 +11,7 @@ than being guessed from prose or command names.
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,10 +20,57 @@ STRIDE_OBSERVATION_SCHEMA_VERSION = "hierarchical_stride_observation_v0"
 STRIDE_EVALUATION_SCHEMA_VERSION = "hierarchical_stride_evaluation_v0"
 EVIDENCE_FRESH_WINDOW_HOURS = 6
 AUTHORITY_CHANGE_MARKERS = ("replan", "vision", "gate")
+_AUTHORITY_CLASSIFICATION_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_AUTHORITY_TOKEN_MARKERS = frozenset(AUTHORITY_CHANGE_MARKERS[:2])
+_AUTHORITY_GATE_DECISION_TOKENS = frozenset(
+    {
+        "accepted",
+        "added",
+        "approved",
+        "canceled",
+        "cancelled",
+        "changed",
+        "closed",
+        "deferred",
+        "denied",
+        "opened",
+        "passed",
+        "recorded",
+        "rejected",
+        "resolved",
+        "revoked",
+    }
+)
 
 
 def _compact_text(value: Any, *, limit: int = 180) -> str:
     return " ".join(str(value or "").strip().split())[:limit]
+
+
+def _has_authority_change_marker(value: Any) -> bool:
+    """Return whether a classification explicitly denotes an authority change.
+
+    Run classifications are caller-supplied free text, so substring matches
+    are not semantic evidence (for example, ``revision`` contains ``vision``).
+    Replan and vision are reserved whole-token markers. A gate token is
+    ambiguous in waiting/gated states, and therefore requires either a
+    standalone ``gate`` value or a known decision/transition token.
+    """
+
+    tokens = set(
+        _AUTHORITY_CLASSIFICATION_TOKEN_RE.findall(
+            _compact_text(value, limit=240).casefold()
+        )
+    )
+    if not tokens:
+        return False
+    if tokens.intersection(_AUTHORITY_TOKEN_MARKERS):
+        return True
+    if "gate" not in tokens:
+        return False
+    return tokens == {"gate"} or bool(
+        tokens.intersection(_AUTHORITY_GATE_DECISION_TOKENS)
+    )
 
 
 def read_run_index(runtime_root: Path, goal_id: str) -> list[dict[str, Any]]:
@@ -84,9 +132,7 @@ def build_stride_observation(
 
     authority_change_index: int | None = None
     for index, run in enumerate(agent_runs):
-        classification = _compact_text(run.get("classification"), limit=240)
-        lowered = classification.lower()
-        if any(marker in lowered for marker in AUTHORITY_CHANGE_MARKERS):
+        if _has_authority_change_marker(run.get("classification")):
             authority_change_index = index
     bounded_slices_since_change = (
         len(agent_runs) - authority_change_index - 1
