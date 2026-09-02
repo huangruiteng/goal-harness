@@ -8,7 +8,7 @@
   optional NoKV, and optional PostgreSQL provider profiles, complementing
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
 - Source baseline: LoopX `a0c20f1779d273e7aaa4bd3ea166d145d466e6d5`
-- Provider API baseline: NoKV `0f1995ebee96048e5d4f9d4745d84c3518c64351`
+- Provider API baseline: NoKV `7bb3ffd6512fd57d9c0f193aa6d9c5b935d77f30`
   (release 0.11.0, Python API 1, Holt pinned to 0.8.6). The Stage 2A executable
   qualification admits only that SDK contract and this checkout's helper. It
   remains candidate evidence, not a merge gate or authority promotion
@@ -1430,17 +1430,19 @@ or production qualification claim.
 
 The additional TEST ONLY Stage 2A probe in
 `examples/nokv-authority-store/` opens three independent SDK helper processes
-and checks fresh create, exact generation update, a one-winner/two-contender
-CAS, winner/loser receipt behavior, and fresh-process history readback. Its
+and checks fresh create, exact generation update, reconciliation after an
+applied CAS response is deliberately lost, a one-winner/two-contender CAS,
+winner/loser receipt behavior, and fresh-process receipt/history readback. Its
 executable fixes argv to one absolute Python executable plus this checkout's
-production helper; the helper fails closed unless the SDK reports NoKV 0.11.0
-and Python API 1, and validates every read/publish response against its requested
+reviewed helper; the helper fails closed unless the SDK reports NoKV 0.11.0 and
+Python API 1, and validates every read/publish response against its requested
 workbench, path, workspace incarnation, operation, revision, and generation.
-Only a successful live JSON report is evidence for that single-node run;
-deterministic tests are sequence tests only. This LoopX-only candidate changes
-neither NoKV main nor its workbench/artifact data model or frozen-oracle-log use,
-and it still does not prove HA, restart recovery, capacity, production routing,
-or authority-source promotion.
+Only a successful live JSON report is evidence for that single-node Stage 2A
+store-conformance run; deterministic tests are sequence tests only. This
+LoopX-only candidate changes neither NoKV source nor its workbench/artifact data
+model, and it does not prove runtime shadow parity, a multi-Agent canary,
+authority-source promotion, HA, restart recovery, capacity, or production
+routing.
 
 ## Appendix B: Handoff-Mode Decision Record (2026-08-10)
 

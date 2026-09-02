@@ -29,9 +29,10 @@ import {
 } from "../../loopx/control_plane/coordination/nokv_jsonl_transport.ts";
 
 const REPORT_SCHEMA = "loopx_nokv_authority_live_qualification_v0";
+export const QUALIFICATION_SCOPE = "stage_2a_single_node_store_conformance";
 export const QUALIFIED_NOKV_SDK_VERSION = "0.11.0";
 export const QUALIFIED_NOKV_API_VERSION = 1;
-const PRODUCTION_HELPER = fileURLToPath(
+const REPOSITORY_HELPER = fileURLToPath(
   new URL("../../loopx/control_plane/coordination/nokv_jsonl_helper.py", import.meta.url),
 );
 const COMPETITION_BARRIER_TIMEOUT_MS = 10_000;
@@ -60,6 +61,7 @@ export interface QualificationOptions {
 
 export interface QualificationReport {
   schema_version: typeof REPORT_SCHEMA;
+  qualification_scope: typeof QUALIFICATION_SCOPE;
   ok: true;
   checks: readonly { id: string; status: "passed" }[];
   final_generation: number;
@@ -100,12 +102,12 @@ function requiredString(value: unknown, name: string): string {
 }
 
 /** Build the only helper argv accepted by the destructive live probe. */
-export function productionHelperArgv(pythonExecutable: string): readonly [string, string] {
+export function qualificationHelperArgv(pythonExecutable: string): readonly [string, string] {
   const executable = requiredString(pythonExecutable, "Python executable");
   if (!isAbsolute(executable)) {
     return fail("invalid_arguments", "Python executable must be an absolute path");
   }
-  return [executable, PRODUCTION_HELPER];
+  return [executable, REPOSITORY_HELPER];
 }
 
 function positiveSafeInteger(value: unknown, name: string): number {
@@ -210,6 +212,41 @@ class BarrierTransport implements NoKVBlobTransport {
   }
 }
 
+/**
+ * Turn one proven lower-layer success into an unknown transport outcome.
+ *
+ * The wrapper is deliberately above the real NoKV transport: the durable CAS
+ * still runs, while the TypeScript AuthorityStore must settle the result from
+ * the persisted operation receipt instead of trusting the lost response.
+ */
+class LoseOneAppliedResponseTransport implements NoKVBlobTransport {
+  readonly inner: NoKVBlobTransport;
+  appliedResponseDropped = false;
+
+  constructor(inner: NoKVBlobTransport) {
+    this.inner = inner;
+  }
+
+  async storeIdentity(workbench: string): Promise<NoKVStoreIdentityResult> {
+    return await this.inner.storeIdentity(workbench);
+  }
+
+  async readBlob(workbench: string, path: string): Promise<NoKVBlobReadResult> {
+    return await this.inner.readBlob(workbench, path);
+  }
+
+  async casPublishBlob(request: NoKVBlobCasRequest): Promise<NoKVBlobCasResult> {
+    const result = await this.inner.casPublishBlob(request);
+    if (!this.appliedResponseDropped && result.status === "applied") {
+      this.appliedResponseDropped = true;
+      throw new NoKVTransportUnavailableError(
+        "qualification injected response loss after an applied NoKV CAS",
+      );
+    }
+    return result;
+  }
+}
+
 function applied(
   result: AuthorityStoreCommitResult,
   reasonCode: string,
@@ -272,7 +309,8 @@ export async function exerciseQualificationSequence(
       goal_id: goalId,
       workbench,
     });
-    const second = new NoKVAuthorityStore(secondTransport, {
+    const responseLossTransport = new LoseOneAppliedResponseTransport(secondTransport);
+    const second = new NoKVAuthorityStore(responseLossTransport, {
       tenant_id: tenantId,
       goal_id: goalId,
       workbench,
@@ -318,6 +356,12 @@ export async function exerciseQualificationSequence(
       ),
       "generation_cas_failed",
     );
+    expect(
+      responseLossTransport.appliedResponseDropped,
+      "response_loss_not_injected",
+      "qualification did not discard an applied NoKV CAS response",
+    );
+    passed("response_lost_success_reconciled");
     passed("generation_cas_applied");
     await rawGeneration(firstTransport, first, 2, "generation_two_readback_failed");
     passed("generation_two_readback");
@@ -404,10 +448,19 @@ export async function exerciseQualificationSequence(
     const loserOperation = winnerIndex === 0
       ? operationIds.contenderB
       : operationIds.contenderA;
-    const [winnerReceipt, loserReceipt] = await Promise.all([
+    const [ambiguousCommitReceipt, winnerReceipt, loserReceipt] = await Promise.all([
+      readback.readReceipt(operationIds.advance),
       readback.readReceipt(winnerOperation),
       readback.readReceipt(loserOperation),
     ]);
+    expect(
+      ambiguousCommitReceipt.status === "found" &&
+        ambiguousCommitReceipt.cursor === "2" &&
+        ambiguousCommitReceipt.receipts[0]?.operation_id === operationIds.advance,
+      "ambiguous_commit_receipt_missing",
+      "the response-lost operation receipt was not retained",
+    );
+    passed("ambiguous_commit_receipt_retained");
     expect(
       winnerReceipt.status === "found" && winnerReceipt.cursor === "3",
       "winner_receipt_missing",
@@ -431,18 +484,19 @@ export async function exerciseQualificationSequence(
   }
 }
 
-/** Run the live probe only through this checkout's production JSONL transport. */
+/** Run the live probe only through this checkout's reviewed JSONL transport. */
 export async function qualifyNoKVAuthorityStore(
   options: QualificationOptions,
 ): Promise<QualificationReport> {
   const sequence = await exerciseQualificationSequence(options, async () =>
     await NoKVJsonLinesTransport.open({
-      argv: productionHelperArgv(options.python_executable),
+      argv: qualificationHelperArgv(options.python_executable),
       config: options.client_config,
       request_timeout_ms: options.request_timeout_ms,
     }));
   return {
     schema_version: REPORT_SCHEMA,
+    qualification_scope: QUALIFICATION_SCOPE,
     ok: true,
     ...sequence,
     durable_test_data_left: true,
@@ -483,7 +537,7 @@ export function parseQualificationArguments(
   }
   return {
     configJsonPath: requiredString(values["config-json"], "--config-json"),
-    pythonExecutable: productionHelperArgv(
+    pythonExecutable: qualificationHelperArgv(
       requiredString(values["python-executable"], "--python-executable"),
     )[0],
     tenantId: requiredString(values["tenant-id"], "--tenant-id"),

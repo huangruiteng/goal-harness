@@ -8,7 +8,7 @@
   与可选 PostgreSQL provider profile，用来补充
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
 - 源码基线：LoopX `a0c20f1779d273e7aaa4bd3ea166d145d466e6d5`
-- Provider API 基线：NoKV `0f1995ebee96048e5d4f9d4745d84c3518c64351`
+- Provider API 基线：NoKV `7bb3ffd6512fd57d9c0f193aa6d9c5b935d77f30`
   （release 0.11.0、Python API 1、Holt 固定为 0.8.6）。Stage 2A 的可执行资格
   验证只接受这份 SDK 合同与本 checkout 的 helper；它仍是候选证据，不是合并门槛
   或 authority promotion
@@ -1148,14 +1148,15 @@ HA 或 production qualification 声明。
 
 `examples/nokv-authority-store/` 还包含一个 TEST ONLY 的 Stage 2A probe：它会
 打开三个相互独立的 SDK helper 进程，验证 fresh create、精确 generation update、
-两个竞争者恰一胜出的 CAS、胜负双方的 receipt 行为，以及新进程对完整 history 的
-回读。该可执行入口把 argv 固定为一个绝对 Python executable 加本 checkout 的生产
+一次 CAS 已落盘但响应被刻意丢弃后的回读 reconciliation、两个竞争者恰一胜出的
+CAS、胜负双方的 receipt 行为，以及新进程对 receipt 与完整 history 的回读。该可
+执行入口把 argv 固定为一个绝对 Python executable 加本 checkout 中经过评审的
 helper；helper 只接受 NoKV 0.11.0 / Python API 1，并逐项核对 read/publish 回包与
 请求的 workbench、path、workspace incarnation、operation、revision、generation
-是否绑定。只有成功的 live JSON report 才是该次单节点运行的证据；确定性测试只证明
-场景序列。这个纯 LoopX 候选既不修改 NoKV main，也不改变其 workbench/artifact
-数据模型或 frozen-oracle-log 用途；它仍不证明 HA、重启恢复、容量、生产路由或
-authority-source promotion。
+是否绑定。只有成功的 live JSON report 才是该次单节点 Stage 2A store-conformance
+运行的证据；确定性测试只证明场景序列。这个纯 LoopX 候选既不修改 NoKV 源码，也
+不改变其 workbench/artifact 数据模型；它不证明 runtime shadow parity、multi-Agent
+canary、authority-source promotion、HA、重启恢复、容量或生产路由。
 
 ## 附录 B：交接模式决策记录（2026-08-10）
 
