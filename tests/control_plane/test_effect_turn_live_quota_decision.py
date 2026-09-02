@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from loopx.control_plane.effect_program import (
@@ -22,6 +23,7 @@ GOAL_ID = "effect-interpreter-fixture"
 def _turn_start_dispatch(
     *,
     required: bool = True,
+    observation_count: int = 1,
     commands: tuple[str, ...] = ("loopx inbox drain --goal-id fixture",),
 ) -> dict[str, object]:
     hooks: list[TurnStartHookRegistration] = []
@@ -37,7 +39,7 @@ def _turn_start_dispatch(
                 "capability_id": "operator-inbox",
                 "phase": "turn_start",
                 "status": "observed" if required else "empty",
-                "observation_count": 1 if required else 0,
+                "observation_count": observation_count if required else 0,
                 "agent_read_required": required,
                 "external_reads_performed": True,
                 "external_writes_performed": False,
@@ -84,6 +86,50 @@ def _ordinary_status_payload() -> dict[str, object]:
         recommended_action=todo_text,
         next_action=todo_text,
     )
+
+
+def _material_review_urgency(
+    *, reply_due: bool = False, pending_count: int = 1, **_kwargs: object
+) -> dict[str, object]:
+    return {
+        "schema_version": "operator_inbox_urgency_v0",
+        "enabled": True,
+        "pending_count": pending_count,
+        "attention_required_count": int(reply_due),
+        "reply_due": reply_due,
+        "material_review_count": 1,
+        "material_attachment_count": 0,
+        "material_review_due": True,
+        "material_review_drain_limit": 20,
+        "local_private_content_returned": False,
+    }
+
+
+def _inbox_goal(tmp_path: Path) -> dict[str, object]:
+    return {
+        "id": GOAL_ID,
+        "registry_member": True,
+        "status": "active",
+        "adapter_kind": "harness_self_improvement",
+        "adapter_status": "connected-read-only",
+        "repo": str(tmp_path),
+        "quota": {"compute": 1.0, "window_hours": 24},
+        "control_plane": {
+            "lark_event_inbox": {
+                "enabled": True,
+                "config_path": ".loopx/config/lark/inbox.json",
+            }
+        },
+    }
+
+
+def _status_with_inbox(tmp_path: Path) -> dict[str, object]:
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps({"goals": [_inbox_goal(tmp_path)]}),
+        encoding="utf-8",
+    )
+    return _ordinary_status_payload() | {"registry": str(registry_path)}
 
 
 def test_live_quota_decision_maps_to_effect_turn(tmp_path: Path) -> None:
@@ -204,7 +250,8 @@ def test_turn_start_read_is_required_before_ordinary_work(tmp_path: Path) -> Non
             "ordering": "before_work",
         }
     ]
-    assert packet["interaction_contract"]["user_channel"]["notify"] == "DONT_NOTIFY"
+    assert packet["interaction_contract"]["user_channel"]["notify"] == "NOTIFY"
+    assert packet["interaction_contract"]["user_channel"]["action_required"] is False
     assert packet.get("selected_todo") == baseline.get("selected_todo")
     assert (
         packet["agent_todo_summary"]["first_executable_items"]
@@ -212,6 +259,197 @@ def test_turn_start_read_is_required_before_ordinary_work(tmp_path: Path) -> Non
     )
     assert packet["recommended_action"] == baseline["recommended_action"]
     assert packet["effective_action"] == baseline["effective_action"] == "normal_run"
+
+
+def test_fresh_turn_start_read_notifies_without_preempting_selected_work(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "loopx.control_plane.quota.goal_boundary.operator_inbox_binding",
+        lambda **_kwargs: {
+            "status": "verified",
+            "attention_required": False,
+        },
+    )
+    status = _status_with_inbox(tmp_path)
+    baseline = build_live_quota_should_run_decision(
+        status,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        available_capabilities=["shell"],
+        include_scheduler_detail=False,
+        codex_app_current_rrule=None,
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+    )
+    packet = build_live_quota_should_run_decision(
+        status,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        available_capabilities=["shell"],
+        include_scheduler_detail=False,
+        codex_app_current_rrule=None,
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        operator_inbox_urgency_projector=_material_review_urgency,
+        turn_start_hook_dispatch=_turn_start_dispatch(),
+    )
+
+    assert packet["effective_action"] == baseline["effective_action"] == "normal_run"
+    assert packet.get("selected_todo") == baseline.get("selected_todo")
+    assert packet["recommended_action"] == baseline["recommended_action"]
+    assert packet["interaction_contract"]["user_channel"]["notify"] == "NOTIFY"
+    assert packet["interaction_contract"]["user_channel"]["action_required"] is False
+    assert packet["interaction_contract"]["agent_channel"]["required_reads"]
+
+
+def test_unsettled_inbox_material_preempts_on_following_turn(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "loopx.control_plane.quota.goal_boundary.operator_inbox_binding",
+        lambda **_kwargs: {
+            "status": "verified",
+            "attention_required": False,
+        },
+    )
+    packet = build_live_quota_should_run_decision(
+        _status_with_inbox(tmp_path),
+        goal_id=GOAL_ID,
+        agent_id=None,
+        available_capabilities=["shell"],
+        include_scheduler_detail=False,
+        codex_app_current_rrule=None,
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        operator_inbox_urgency_projector=_material_review_urgency,
+        turn_start_hook_dispatch=_turn_start_dispatch(required=False),
+    )
+
+    assert packet["effective_action"] == "operator_inbox_material_review_due"
+    assert packet["work_lane_contract"]["priority_preemption"] is True
+    assert "required_reads" not in packet["interaction_contract"]["agent_channel"]
+
+
+def test_fresh_direct_reply_still_preempts_selected_work(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "loopx.control_plane.quota.goal_boundary.operator_inbox_binding",
+        lambda **_kwargs: {
+            "status": "verified",
+            "attention_required": False,
+        },
+    )
+    packet = build_live_quota_should_run_decision(
+        _status_with_inbox(tmp_path),
+        goal_id=GOAL_ID,
+        agent_id=None,
+        available_capabilities=["shell"],
+        include_scheduler_detail=False,
+        codex_app_current_rrule=None,
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        operator_inbox_urgency_projector=(
+            lambda **kwargs: _material_review_urgency(reply_due=True, **kwargs)
+        ),
+        turn_start_hook_dispatch=_turn_start_dispatch(),
+    )
+
+    assert packet["effective_action"] == "lark_inbox_reply_due"
+    assert packet["work_lane_contract"]["priority_preemption"] is True
+    assert packet["interaction_contract"]["agent_channel"]["required_reads"]
+
+
+def test_fresh_read_does_not_hide_older_unsettled_material(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "loopx.control_plane.quota.goal_boundary.operator_inbox_binding",
+        lambda **_kwargs: {
+            "status": "verified",
+            "attention_required": False,
+        },
+    )
+    packet = build_live_quota_should_run_decision(
+        _status_with_inbox(tmp_path),
+        goal_id=GOAL_ID,
+        agent_id=None,
+        available_capabilities=["shell"],
+        include_scheduler_detail=False,
+        codex_app_current_rrule=None,
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        operator_inbox_urgency_projector=(
+            lambda **kwargs: _material_review_urgency(
+                pending_count=2,
+                **kwargs,
+            )
+        ),
+        turn_start_hook_dispatch=_turn_start_dispatch(observation_count=1),
+    )
+
+    assert packet["effective_action"] == "operator_inbox_material_review_due"
+    assert packet["work_lane_contract"]["priority_preemption"] is True
+    assert packet["interaction_contract"]["agent_channel"]["required_reads"]
+
+
+def test_non_inbox_hook_observations_do_not_mask_unsettled_inbox_material(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "loopx.control_plane.quota.goal_boundary.operator_inbox_binding",
+        lambda **_kwargs: {
+            "status": "verified",
+            "attention_required": False,
+        },
+    )
+    dispatch = _turn_start_dispatch(observation_count=1)
+    dispatch["results"].append(
+        {
+            "hook_id": "repository.turn_start_sync",
+            "capability_id": "repository",
+            "agent_read_required": True,
+            "observation_count": 10,
+        }
+    )
+    dispatch["required_reads"].append(
+        {
+            "kind": "repository",
+            "command": "git status --short",
+            "reason": "read repository state",
+            "ordering": "before_work",
+            "source": "turn_start_capability_hook",
+            "hook_id": "repository.turn_start_sync",
+            "capability_id": "repository",
+        }
+    )
+
+    packet = build_live_quota_should_run_decision(
+        _status_with_inbox(tmp_path),
+        goal_id=GOAL_ID,
+        agent_id=None,
+        available_capabilities=["shell"],
+        include_scheduler_detail=False,
+        codex_app_current_rrule=None,
+        registry_path=tmp_path / "registry.json",
+        runtime_root=tmp_path / "runtime",
+        operator_inbox_urgency_projector=(
+            lambda **kwargs: _material_review_urgency(
+                pending_count=2,
+                **kwargs,
+            )
+        ),
+        turn_start_hook_dispatch=dispatch,
+    )
+
+    assert packet["effective_action"] == "operator_inbox_material_review_due"
+    assert packet["work_lane_contract"]["priority_preemption"] is True
 
 
 def test_turn_start_read_is_not_projected_for_empty_or_failed_dispatch(

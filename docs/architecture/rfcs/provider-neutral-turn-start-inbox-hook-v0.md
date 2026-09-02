@@ -28,10 +28,12 @@ result with new observations must set `agent_read_required=true`. Its
 registration declares one bounded, public-safe `required_read` descriptor.
 The generic hook kernel validates that descriptor, deduplicates it by command,
 and projects it into both Agent and CLI interaction channels with
-`ordering=before_work`. The selected ordinary Todo and `user_channel.notify`
-remain independent: urgency may still select an inbox lane, but a quiet ordinary
-lane can remain selected while the required read runs first. The Agent reads the
-messages and chooses one typed semantic disposition:
+`ordering=before_work`. A fresh ordinary material read emits a non-blocking user
+notification while preserving the already selected work lane. If the material
+remains durably pending on the next turn, the existing material-review lane
+preempts work for recovery. A direct question or verified reply still preempts
+on its first turn. The Agent reads the messages and chooses one typed semantic
+disposition:
 
 - `steer_current_turn`: update the selected work without changing the durable
   Goal frontier;

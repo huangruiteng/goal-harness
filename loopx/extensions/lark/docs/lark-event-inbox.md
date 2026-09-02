@@ -57,6 +57,9 @@ write scope, failure isolation, and `agent_read_required` contract. A hook that
 can require Agent reading must also register one bounded public-safe
 `required_read`; the generic kernel validates and deduplicates it, then the live
 decision mirrors it into both interaction channels with `ordering=before_work`.
+Fresh ordinary material notifies without replacing the selected work lane;
+durable material left unsettled preempts on the following turn, while direct
+questions and verified replies retain immediate reply-lane precedence.
 The Lark extension owns that drain descriptor, history pagination,
 provider-envelope validation, private cursors, and inbox readback. The CLI
 composition root runs the hook before status/quota projection. Raw content
@@ -267,7 +270,9 @@ the profile, chat id, message id, reply text, or provider payload.
 
 ## Host collector lifecycle
 
-Keep the collector config ignored and untracked. It references the generic
+In Git projects, keep the collector config ignored and untracked. A non-Git
+project may keep it only below `.loopx/config`; parent Git boundaries and paths
+outside that private root remain rejected. The config references the generic
 inbox config but owns host-only details such as the chat id and supervisor:
 
 ```json

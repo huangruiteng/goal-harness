@@ -133,6 +133,46 @@ def _two_route_config(tmp_path: Path) -> tuple[Path, Path, str, str]:
     return project, collector, first_chat, second_chat
 
 
+def test_non_git_project_accepts_private_collector_config(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    first_chat = "oc_public_fixture_alpha"
+    inbox = _write_inbox(project, name="requirements-alpha", chat_id=first_chat)
+    collector = _write_collector(
+        project,
+        routes=[
+            {
+                "route_key": "requirements-alpha",
+                "chat_id": first_chat,
+                "event_inbox_config": inbox,
+            }
+        ],
+    )
+
+    config = load_lark_event_collector_config(
+        project=project,
+        config_path=collector,
+    )
+
+    assert config["project"] == project.resolve()
+    assert config["config_path"] == collector.resolve()
+
+
+def test_non_git_project_rejects_collector_config_outside_private_root(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    collector = project / "collector.json"
+    collector.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="under .loopx/config"):
+        load_lark_event_collector_config(
+            project=project,
+            config_path=collector,
+        )
+
+
 def test_v1_plan_binds_one_profile_to_isolated_multi_chat_routes(
     tmp_path: Path,
 ) -> None:

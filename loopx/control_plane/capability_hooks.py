@@ -653,6 +653,8 @@ def dispatch_turn_start_hooks(
                         {
                             **dict(required_read),
                             "source": "turn_start_capability_hook",
+                            "hook_id": registration.hook_id,
+                            "capability_id": registration.capability_id,
                         }
                     )
                     seen_required_read_commands.add(command)

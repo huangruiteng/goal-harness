@@ -57,6 +57,8 @@ def test_turn_start_hook_returns_only_validated_agent_read_obligation() -> None:
             "reason": "read newly synchronized operator evidence",
             "ordering": "before_work",
             "source": "turn_start_capability_hook",
+            "hook_id": "operator_inbox.turn_start_sync",
+            "capability_id": "operator-inbox",
         }
     ]
 
