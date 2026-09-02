@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Any
 from urllib.parse import urlsplit
 
-from .environment_access import credential_probe_present
+from .environment_access import _heredoc_delimiters, credential_probe_present
 
 BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION = "benchmark_integrity_policy_v0"
 BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION = (
@@ -124,6 +124,9 @@ _HTTP_URL_PATTERN = re.compile(r"(?is)https?://[^\s\"'<>]+")
 _GIT_CLONE_COMMAND_PATTERN = re.compile(r"(?is)\bgit\s+clone\b")
 _GIT_REMOTE_PATTERN = re.compile(
     r"(?is)(?:\b(?:git|ssh)://[^\s\"'<>]+|(?<![A-Za-z0-9_.@/-])[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+:[^\s\"'<>]+)"
+)
+_PATCH_STDIN_COMMAND_PATTERN = re.compile(
+    r"(?:^|[\s/])apply_patch(?:\s|$)|(?:^|\s)--apply-patch(?:\s|$)"
 )
 _COMMAND_TEXT_FIELDS = ("cmd", "command")
 _COMMAND_ARGUMENT_FIELDS = ("args", "argv")
@@ -484,6 +487,33 @@ def _command_text_values(value: object) -> Iterable[str]:
             yield from _command_text_values(item)
 
 
+def _without_patch_stdin_bodies(command: str) -> str:
+    """Exclude heredoc source payloads consumed by patch commands.
+
+    The shell executes the declaration line, while ``apply_patch`` and the
+    benchmark bridge's ``--apply-patch`` mode consume the heredoc body as
+    source data.  URLs or command-looking text inside that patch are not
+    network requests.  Keep bodies for every other heredoc fail-closed because
+    they may be executable input to a shell or interpreter.
+    """
+
+    visible_lines: list[str] = []
+    pending: list[tuple[str, bool]] = []
+    for raw_line in command.splitlines(keepends=True):
+        if pending:
+            delimiter, strip_tabs = pending[0]
+            candidate = raw_line.rstrip("\r\n")
+            if strip_tabs:
+                candidate = candidate.lstrip("\t")
+            if candidate == delimiter:
+                pending.pop(0)
+            continue
+        visible_lines.append(raw_line)
+        if _PATCH_STDIN_COMMAND_PATTERN.search(raw_line):
+            pending.extend(_heredoc_delimiters(raw_line))
+    return "".join(visible_lines)
+
+
 def _scope_for_url(url: str) -> NetworkRequestScope:
     if _loopback_http_url(url):
         return NetworkRequestScope.LOOPBACK
@@ -494,7 +524,12 @@ def _network_request_scope(arguments: object) -> NetworkRequestScope:
     """Classify common shell HTTP requests while preserving argv association."""
 
     scope = NetworkRequestScope.NONE
-    command_texts = tuple(dict.fromkeys(_command_text_values(arguments)))
+    command_texts = tuple(
+        dict.fromkeys(
+            _without_patch_stdin_bodies(text)
+            for text in _command_text_values(arguments)
+        )
+    )
     for text in command_texts:
         if not _NETWORK_COMMAND_PATTERN.search(text):
             continue
@@ -509,7 +544,10 @@ def _network_request_scope(arguments: object) -> NetworkRequestScope:
     # Unknown command/target field names cannot prove safe association. If the
     # same argument object contains a supported network client and literal URLs,
     # classify those URLs fail-closed instead of silently losing split argv.
-    leaves = tuple(_argument_text_values(arguments))
+    leaves = tuple(
+        _without_patch_stdin_bodies(text)
+        for text in _argument_text_values(arguments)
+    )
     if not any(_NETWORK_COMMAND_PATTERN.search(text) for text in leaves):
         return scope
     for text in leaves:
