@@ -12,6 +12,12 @@ from ..control_plane.todos.contract import (
     replan_successor_semantic_binding,
 )
 from ..control_plane.capability_hooks import PostWritebackHookRegistration
+from ..control_plane.coordination.runtime_shadow import (
+    build_todo_runtime_shadow_projection,
+    dispatch_coordination_runtime_shadow,
+    load_task_lease_runtime_shadow_records,
+    resolve_coordination_runtime_shadow_config,
+)
 from ..control_plane.quota.settlement import (
     QuotaSettlementReadback,
     read_heartbeat_settlement,
@@ -20,7 +26,7 @@ from ..control_plane.quota.settlement import (
 from ..control_plane.todos.markdown import render_todo_markdown
 from ..history import load_index, load_registry
 from ..paths import resolve_runtime_root
-from ..registry import registry_goals
+from ..registry import find_registry_goal, registry_goals
 from ..control_plane.work_items.semantic_replan_writeback import (
     qualify_replan_writeback,
 )
@@ -58,6 +64,7 @@ from .todo_argument_validation import (
 )
 from .todo_event import (
     RolloutEventAppender,
+    TODO_EVENT_KINDS,
     append_todo_rollout_event,
     todo_error_payload,
 )
@@ -70,6 +77,87 @@ PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
     None,
 ]
+
+
+def _mirror_committed_todo_runtime_shadow(
+    payload: dict[str, object],
+    *,
+    args: argparse.Namespace,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+) -> dict[str, object] | None:
+    """Mirror an actual Todo write only after the legacy write has committed."""
+
+    if not payload.get("ok") or payload.get("dry_run"):
+        return None
+    changed = bool(payload.get("changed")) or any(
+        bool(payload.get(field))
+        for field in ("added", "metadata_updated", "status_changed")
+    )
+    if not changed:
+        return None
+
+    try:
+        registry = load_registry(registry_path)
+        goal = find_registry_goal(registry, args.goal_id)
+        shadow_enabled = resolve_coordination_runtime_shadow_config(goal).enabled
+    except Exception:
+        # The optional observer cannot turn a committed canonical mutation into
+        # a failed command while the feature remains absent or unreadable.
+        return None
+    if not shadow_enabled:
+        return None
+
+    rollout_event = payload.get("rollout_event")
+    event_id = (
+        str(rollout_event.get("event_id") or "").strip()
+        if isinstance(rollout_event, dict)
+        else ""
+    )
+    source_version = str(payload.get("updated_at") or "").strip()
+    if not event_id or not source_version:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_dispatch_v0",
+            "status": "failed",
+            "reason_code": "canonical_mutation_identity_missing",
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+
+    runtime_root = resolve_runtime_root(registry, runtime_root_arg)
+    try:
+        todo_projection = list_goal_todos(
+            registry_path=registry_path,
+            goal_id=args.goal_id,
+            **_todo_path_args(args),
+            runtime_root_arg=runtime_root_arg,
+        )
+        projection = build_todo_runtime_shadow_projection(
+            goal_id=args.goal_id,
+            todos=todo_projection.get("todos"),
+            leases=load_task_lease_runtime_shadow_records(
+                runtime_root=runtime_root,
+                goal_id=args.goal_id,
+            ),
+        )
+    except Exception as exc:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_dispatch_v0",
+            "status": "failed",
+            "reason_code": "shadow_projection_unavailable",
+            "reason": str(exc),
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    return dispatch_coordination_runtime_shadow(
+        goal=goal,
+        runtime_root=runtime_root,
+        goal_id=args.goal_id,
+        operation_id=f"todo-shadow:{event_id}",
+        event_kind=TODO_EVENT_KINDS.get(args.todo_command, "todo_update"),
+        source_version=source_version,
+        projection=projection,
+    )
 
 
 def _completion_settlement_requirement(
@@ -1016,6 +1104,14 @@ def handle_todo_command(
         runtime_root_arg=runtime_root_arg,
         append_cli_rollout_event=append_cli_rollout_event,
     )
+    runtime_shadow = _mirror_committed_todo_runtime_shadow(
+        payload,
+        args=args,
+        registry_path=registry_path,
+        runtime_root_arg=runtime_root_arg,
+    )
+    if runtime_shadow is not None:
+        payload["coordination_runtime_shadow"] = runtime_shadow
     if (
         args.todo_command == "complete"
         and getattr(args, "turn_instance_id", None)

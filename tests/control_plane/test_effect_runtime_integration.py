@@ -13,6 +13,10 @@ from types import SimpleNamespace
 import pytest
 
 from loopx.control_plane import effect_runtime
+from loopx.control_plane.coordination.runtime_shadow import (
+    RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+    dispatch_coordination_runtime_shadow,
+)
 
 
 _TURN_KEY = "sha256:" + "a" * 64
@@ -143,6 +147,54 @@ def test_managed_runtime_is_reused_and_restart_safe_for_typed_write(
         {},
         retry_safe=False,
     )
+
+
+def test_coordination_runtime_shadow_crosses_python_typescript_boundary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: tmp_path / "runtime")
+    goal = {
+        "id": "shadow-goal",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+    request = {
+        "goal": goal,
+        "runtime_root": tmp_path / "state",
+        "goal_id": "shadow-goal",
+        "operation_id": "todo-shadow:cross-runtime",
+        "event_kind": "todo_claim",
+        "source_version": "state:1",
+        "projection": {
+            "schema_version": "loopx_coordination_runtime_shadow_projection_v0",
+            "goal_id": "shadow-goal",
+            "todos": [
+                {
+                    "todo_id": "todo_cross_runtime",
+                    "status": "open",
+                    "claimed_by": "agent-a",
+                }
+            ],
+            "leases": [],
+        },
+    }
+
+    applied = dispatch_coordination_runtime_shadow(**request)
+    replayed = dispatch_coordination_runtime_shadow(**request)
+
+    assert applied["status"] == "applied"
+    assert applied["parity"]["receipt_matches"] is True
+    assert applied["parity"]["projection_readback"]["verified"] is True
+    assert replayed["status"] == "replayed"
+    assert replayed["cursor"] == applied["cursor"] == "1"
+
+    effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
 
 
 def test_runtime_decode_change_rotates_identity_and_starts_replacement(
