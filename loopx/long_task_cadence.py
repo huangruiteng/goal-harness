@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from .control_plane.work_items.delivery_batch_scale import DeliveryBatchScale, normalize_delivery_batch_scale
@@ -187,6 +188,49 @@ def build_long_task_cadence_policy(**kwargs: Any) -> dict[str, Any]:
     """Compatibility wrapper for older callers while this projection rolls out."""
 
     return build_long_task_cadence_hint(**kwargs)
+
+
+def reconcile_long_task_cadence_hint(
+    value: Any,
+    *,
+    interaction_contract: Mapping[str, Any] | None,
+    scheduler_hint: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Align the legacy work-cadence hint with final interaction authority.
+
+    Status builds this advisory before agent-scoped quota overrides are known.
+    Once the final interaction contract and scheduler both require active work,
+    an earlier goal-level ``wait`` hint must not survive in the same packet.
+    """
+
+    if not isinstance(value, Mapping):
+        return None
+    hint = dict(value)
+    agent_channel: Mapping[str, Any] = {}
+    if isinstance(interaction_contract, Mapping):
+        candidate = interaction_contract.get("agent_channel")
+        if isinstance(candidate, Mapping):
+            agent_channel = candidate
+    scheduler: Mapping[str, Any] = (
+        scheduler_hint if isinstance(scheduler_hint, Mapping) else {}
+    )
+    active_work_required = (
+        agent_channel.get("must_attempt") is True
+        and agent_channel.get("quiet_noop_allowed") is False
+        and scheduler.get("action") == "run_now"
+        and scheduler.get("cadence_class") == "active_work"
+    )
+    if not active_work_required or hint.get("recommendation") != "wait":
+        return hint
+    return {
+        "schema_version": LONG_TASK_CADENCE_HINT_SCHEMA_VERSION,
+        "signal": "active_work",
+        "recommendation": "keep",
+        "reason_codes": ["interaction_agent_attempt_required"],
+        "authority": "interaction_contract",
+        "superseded_signal": hint.get("signal"),
+        "superseded_reason_codes": list(hint.get("reason_codes") or []),
+    }
 
 
 def long_task_cadence_hint_summary(value: Any) -> str:
