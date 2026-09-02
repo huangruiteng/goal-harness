@@ -140,6 +140,7 @@ def handle_turn_command(
                     project_live_explore_composition_frontier
                 ),
                 requested_action_todo_id=requested_action_todo_id,
+                turn_start_hook_dispatch=turn_start_hook_dispatch,
             )
 
         decision = build_turn_decision()

@@ -426,6 +426,12 @@ function turnStartRegistration(overrides: Record<string, unknown> = {}) {
     failure_policy: "isolate",
     requested_read_scope: ["provider_history"],
     requested_write_scope: ["owner_private_inbox", "owner_private_cursor"],
+    required_read: {
+      kind: "operator_inbox",
+      command: "loopx inbox drain --goal-id fixture",
+      reason: "read newly synchronized operator evidence",
+      ordering: "before_work",
+    },
     ...overrides,
   };
 }
@@ -471,6 +477,28 @@ test("turn-start observations require Agent reading without returning private co
       result: turnStartResult({ private_content_returned: true }),
     }),
     /private provider content/,
+  );
+  assert.throws(
+    () => validateTurnStartHookInvocation({
+      registration: turnStartRegistration({ required_read: null }),
+      result: turnStartResult(),
+    }),
+    /required read route is missing/,
+  );
+  assert.throws(
+    () => validateTurnStartHookInvocation({
+      registration: turnStartRegistration({
+        required_read: {
+          kind: "operator_inbox",
+          command: "loopx inbox drain --goal-id fixture",
+          reason: "read newly synchronized operator evidence",
+          ordering: "before_work",
+          private_message_text: "must-not-enter-the-contract",
+        },
+      }),
+      result: turnStartResult(),
+    }),
+    /required_read fields are invalid/,
   );
 });
 

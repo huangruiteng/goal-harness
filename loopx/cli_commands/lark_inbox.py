@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -357,6 +358,7 @@ def build_lark_turn_start_inbox_hook(
     project: str | Path,
     config_path: str | Path,
     runtime_root_arg: str | Path | None,
+    required_read_command: str,
 ) -> TurnStartHookRegistration:
     """Compose the opt-in provider sync behind the shared turn-start phase."""
 
@@ -427,6 +429,12 @@ def build_lark_turn_start_inbox_hook(
             "provider_message_reaction",
         ),
         producer=produce,
+        required_read={
+            "kind": "operator_inbox",
+            "command": required_read_command,
+            "reason": "turn-start hook synchronized new operator inbox evidence",
+            "ordering": "before_work",
+        },
     )
 
 
@@ -444,12 +452,27 @@ def dispatch_goal_lark_turn_start_hooks(
         goal_id=goal_id,
     )
     config_path = _goal_inbox_config(goal, agent_id=agent_id)
+    control_plane = (
+        goal.get("control_plane") if isinstance(goal.get("control_plane"), dict) else {}
+    )
+    agent_inboxes = (
+        control_plane.get("lark_event_inboxes")
+        if isinstance(control_plane.get("lark_event_inboxes"), dict)
+        else {}
+    )
+    agent_scoped = bool(agent_id and isinstance(agent_inboxes.get(agent_id), dict))
+    drain_parts = ["loopx", "--registry", str(registry_path.expanduser())]
+    drain_parts.extend(["lark-inbox", "drain", "--goal-id", goal_id])
+    if agent_scoped and agent_id:
+        drain_parts.extend(["--agent-id", agent_id])
+    required_read_command = shlex.join(drain_parts)
     registrations = (
         (
             build_lark_turn_start_inbox_hook(
                 project=project,
                 config_path=config_path,
                 runtime_root_arg=runtime_root_arg,
+                required_read_command=required_read_command,
             ),
         )
         if config_path

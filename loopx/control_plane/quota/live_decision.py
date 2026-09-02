@@ -27,6 +27,82 @@ HostObservationResolver = Callable[..., Mapping[str, Any]]
 BoundedResearchFrontierProjector = Callable[..., Mapping[str, Any] | None]
 
 
+def _turn_start_required_reads(
+    dispatch: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Read only the generic, kernel-validated pre-work projection."""
+
+    if not isinstance(dispatch, Mapping):
+        return []
+    reads = dispatch.get("required_reads")
+    if not isinstance(reads, list):
+        return []
+    projected: list[dict[str, Any]] = []
+    seen_commands: set[str] = set()
+    for read in reads:
+        if not isinstance(read, Mapping):
+            continue
+        command = read.get("command")
+        if not isinstance(command, str) or not command.strip():
+            continue
+        normalized = command.strip()
+        if normalized in seen_commands:
+            continue
+        projected.append(
+            {
+                key: read[key]
+                for key in ("kind", "command", "reason", "source", "ordering")
+                if key in read
+            }
+        )
+        seen_commands.add(normalized)
+    return projected
+
+
+def _project_turn_start_required_reads(
+    payload: dict[str, Any],
+    dispatch: Mapping[str, Any] | None,
+    *,
+    available_capabilities: list[str] | None,
+    scheduler_execution_context: (
+        Mapping[str, Any] | SchedulerExecutionContextResolution | None
+    ),
+    turn_instance_id: str | None,
+    runtime_root: Path,
+) -> None:
+    """Order fresh operator evidence before work without changing work selection."""
+
+    projected = _turn_start_required_reads(dispatch)
+    if not projected:
+        return
+    existing = payload.get("required_reads")
+    required_reads = (
+        [dict(item) for item in existing if isinstance(item, Mapping)]
+        if isinstance(existing, list)
+        else []
+    )
+    seen_commands = {
+        str(item.get("command") or "").strip()
+        for item in required_reads
+        if str(item.get("command") or "").strip()
+    }
+    for required_read in projected:
+        command = str(required_read.get("command") or "").strip()
+        if command in seen_commands:
+            continue
+        required_reads.append(required_read)
+        seen_commands.add(command)
+    payload["required_reads"] = required_reads
+    payload["interaction_contract"] = build_interaction_contract(
+        payload,
+        available_capabilities=available_capabilities,
+        scheduler_execution_context=scheduler_execution_context,
+        turn_instance_id=turn_instance_id,
+        runtime_root=str(runtime_root),
+    )
+    payload["protocol_action_packet"] = build_protocol_action_packet(payload)
+
+
 def _apply_pending_capability_intent_precedence(
     payload: dict[str, Any],
     projection: Mapping[str, Any] | None,
@@ -249,6 +325,7 @@ def build_live_quota_should_run_decision(
     turn_instance_id: str | None = None,
     interaction_projection_hooks: Sequence[InteractionProjectionHookRegistration]
     | None = None,
+    turn_start_hook_dispatch: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one live CLI decision while keeping host observation injectable."""
 
@@ -320,6 +397,14 @@ def build_live_quota_should_run_decision(
     )
     if route_source.startswith("loopx_turn_"):
         payload["runtime_root"] = str(runtime_root)
+    _project_turn_start_required_reads(
+        payload,
+        turn_start_hook_dispatch,
+        available_capabilities=available_capabilities,
+        scheduler_execution_context=resolved_context,
+        turn_instance_id=turn_instance_id,
+        runtime_root=runtime_root,
+    )
     hook_dispatch = dispatch_interaction_projection_hooks(interaction_projection_hooks)
     projections = hook_dispatch["projections"]
     if isinstance(projections, Mapping):

@@ -369,6 +369,7 @@ def test_turn_start_sync_acknowledges_message_previously_captured_by_collector(
                 project=project,
                 config_path=config,
                 runtime_root_arg=None,
+                required_read_command="loopx lark-inbox drain --goal-id fixture",
             )
         ]
     )

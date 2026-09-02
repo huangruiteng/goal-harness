@@ -33,6 +33,12 @@ def _hook(producer: object) -> TurnStartHookRegistration:
         requested_read_scope=("provider_history",),
         requested_write_scope=("owner_private_inbox", "owner_private_cursor"),
         producer=producer,  # type: ignore[arg-type]
+        required_read={
+            "kind": "operator_inbox",
+            "command": "loopx inbox drain --goal-id fixture",
+            "reason": "read newly synchronized operator evidence",
+            "ordering": "before_work",
+        },
     )
 
 
@@ -44,6 +50,15 @@ def test_turn_start_hook_returns_only_validated_agent_read_obligation() -> None:
     assert dispatch["results"][0]["agent_read_required"] is True
     assert dispatch["results"][0]["observation_count"] == 1
     assert "content" not in dispatch["results"][0]
+    assert dispatch["required_reads"] == [
+        {
+            "kind": "operator_inbox",
+            "command": "loopx inbox drain --goal-id fixture",
+            "reason": "read newly synchronized operator evidence",
+            "ordering": "before_work",
+            "source": "turn_start_capability_hook",
+        }
+    ]
 
 
 def test_provider_shape_mismatch_is_not_misclassified_as_empty() -> None:
@@ -89,6 +104,12 @@ def test_turn_start_external_write_requires_reaction_scope() -> None:
             "provider_message_reaction",
         ),
         producer=lambda: _result(external_writes_performed=True),
+        required_read={
+            "kind": "operator_inbox",
+            "command": "loopx inbox drain --goal-id fixture",
+            "reason": "read newly synchronized operator evidence",
+            "ordering": "before_work",
+        },
     )
     dispatch = dispatch_turn_start_hooks([admitted])
 

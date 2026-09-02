@@ -53,13 +53,16 @@ turn-start hook
 
 Core owns the provider-neutral hook registration, output budget, allowed
 owner-private write scopes, the narrow `provider_message_reaction` external
-write scope, failure isolation, and `agent_read_required`
-contract. The Lark extension owns history pagination, provider-envelope
-validation, private cursors, and inbox readback. The CLI composition root runs
-the hook before status/quota projection. Raw content remains only in the local
-inbox and appears to the Agent only through the existing goal-bound
-`drain_command`; it never enters the public Goal registry, hook receipt, or
-quota packet.
+write scope, failure isolation, and `agent_read_required` contract. A hook that
+can require Agent reading must also register one bounded public-safe
+`required_read`; the generic kernel validates and deduplicates it, then the live
+decision mirrors it into both interaction channels with `ordering=before_work`.
+The Lark extension owns that drain descriptor, history pagination,
+provider-envelope validation, private cursors, and inbox readback. The CLI
+composition root runs the hook before status/quota projection. Raw content
+remains only in the local inbox and appears to the Agent only through the
+registered drain command; it never enters the public Goal registry, hook
+receipt, or quota packet.
 
 The distinction between `empty`, `provider_contract_error`, permission failure,
 and provider unavailability is mandatory. A success envelope whose message list

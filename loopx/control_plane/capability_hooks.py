@@ -23,10 +23,10 @@ INTERACTION_PROJECTION_HOOK_DISPATCH_SCHEMA_VERSION = (
     "loopx_interaction_projection_hook_dispatch_v0"
 )
 TURN_START_HOOK_REGISTRATION_SCHEMA_VERSION = (
-    "loopx_turn_start_capability_hook_registration_v0"
+    "loopx_turn_start_capability_hook_registration_v1"
 )
 TURN_START_HOOK_RESULT_SCHEMA_VERSION = "loopx_turn_start_capability_hook_result_v0"
-TURN_START_HOOK_DISPATCH_SCHEMA_VERSION = "loopx_turn_start_capability_hook_dispatch_v0"
+TURN_START_HOOK_DISPATCH_SCHEMA_VERSION = "loopx_turn_start_capability_hook_dispatch_v1"
 POST_WRITEBACK_HOOK_REGISTRATION_SCHEMA_VERSION = (
     "loopx_post_writeback_capability_hook_registration_v0"
 )
@@ -116,6 +116,7 @@ class TurnStartHookRegistration:
     requested_write_scope: tuple[str, ...]
     producer: TurnStartProducer
     max_result_bytes: int = 16 * 1024
+    required_read: Mapping[str, Any] | None = None
 
     def contract(self) -> dict[str, Any]:
         return {
@@ -130,6 +131,9 @@ class TurnStartHookRegistration:
             "failure_policy": "isolate",
             "requested_read_scope": list(self.requested_read_scope),
             "requested_write_scope": list(self.requested_write_scope),
+            "required_read": (
+                dict(self.required_read) if self.required_read is not None else None
+            ),
         }
 
 
@@ -596,8 +600,10 @@ def dispatch_turn_start_hooks(
     """Run bounded pre-turn observations without exposing provider payloads."""
 
     results: list[dict[str, Any]] = []
+    required_reads: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
     seen_hook_ids: set[str] = set()
+    seen_required_read_commands: set[str] = set()
     ordered = sorted(registrations or (), key=lambda item: item.hook_id)
     for registration in ordered:
         if registration.hook_id in seen_hook_ids:
@@ -605,7 +611,7 @@ def dispatch_turn_start_hooks(
             continue
         seen_hook_ids.add(registration.hook_id)
         try:
-            effect_runtime_result(
+            admitted_registration = effect_runtime_result(
                 "capability_hook.turn_start.validate_registration",
                 {"registration": registration.contract()},
             )
@@ -636,12 +642,27 @@ def dispatch_turn_start_hooks(
             )
             continue
         results.append(dict(normalized))
+        if normalized.get("agent_read_required") is True and isinstance(
+            admitted_registration, Mapping
+        ):
+            required_read = admitted_registration.get("required_read")
+            if isinstance(required_read, Mapping):
+                command = str(required_read.get("command") or "").strip()
+                if command and command not in seen_required_read_commands:
+                    required_reads.append(
+                        {
+                            **dict(required_read),
+                            "source": "turn_start_capability_hook",
+                        }
+                    )
+                    seen_required_read_commands.add(command)
     return {
         "schema_version": TURN_START_HOOK_DISPATCH_SCHEMA_VERSION,
         "phase": "turn_start",
         "registered_count": len(registrations or ()),
         "invoked_count": len(results),
         "results": results,
+        "required_reads": required_reads,
         "failures": failures,
     }
 

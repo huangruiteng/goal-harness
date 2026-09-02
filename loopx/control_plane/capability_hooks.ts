@@ -14,7 +14,7 @@ export const CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION =
 export const INTERACTION_PROJECTION_HOOK_RESULT_SCHEMA_VERSION =
   "loopx_interaction_projection_hook_result_v0";
 export const TURN_START_HOOK_REGISTRATION_SCHEMA_VERSION =
-  "loopx_turn_start_capability_hook_registration_v0";
+  "loopx_turn_start_capability_hook_registration_v1";
 export const TURN_START_HOOK_RESULT_SCHEMA_VERSION =
   "loopx_turn_start_capability_hook_result_v0";
 export const POST_WRITEBACK_HOOK_REGISTRATION_SCHEMA_VERSION =
@@ -60,6 +60,13 @@ const TURN_START_REGISTRATION_FIELDS = new Set([
   "failure_policy",
   "requested_read_scope",
   "requested_write_scope",
+  "required_read",
+]);
+const TURN_START_REQUIRED_READ_FIELDS = new Set([
+  "kind",
+  "command",
+  "reason",
+  "ordering",
 ]);
 const TURN_START_RESULT_FIELDS = new Set([
   "schema_version",
@@ -339,6 +346,7 @@ export function validateTurnStartHookRegistration(
   capability_id: string;
   max_result_bytes: number;
   requested_write_scope: string[];
+  required_read: JsonObject | null;
 } {
   const registration = requiredObject(value, "turn-start hook registration");
   requireExactFields(
@@ -387,12 +395,48 @@ export function validateTurnStartHookRegistration(
   if (maxInvocations !== 1 || maxResultBytes < 1024 || maxResultBytes > 65_536) {
     throw new Error("turn-start hook budget is outside the admitted envelope");
   }
+  let requiredRead: JsonObject | null = null;
+  if (registration.required_read !== null) {
+    const candidate = requiredObject(
+      registration.required_read,
+      "turn-start hook required_read",
+    );
+    requireExactFields(
+      candidate,
+      TURN_START_REQUIRED_READ_FIELDS,
+      "turn-start hook required_read",
+    );
+    const kind = requiredString(candidate.kind, "turn-start hook required_read kind");
+    const command = requiredString(
+      candidate.command,
+      "turn-start hook required_read command",
+    ).trim();
+    const reason = requiredString(
+      candidate.reason,
+      "turn-start hook required_read reason",
+    ).trim();
+    const containsControlCharacter = /[\u0000-\u001f\u007f]/;
+    if (
+      !TOKEN_RE.test(kind) ||
+      new TextEncoder().encode(command).byteLength > 360 ||
+      reason.length > 240 ||
+      containsControlCharacter.test(command) ||
+      containsControlCharacter.test(reason)
+    ) {
+      throw new Error("turn-start hook required_read is outside the admitted envelope");
+    }
+    if (candidate.ordering !== "before_work") {
+      throw new Error("turn-start hook required_read ordering is invalid");
+    }
+    requiredRead = { kind, command, reason, ordering: "before_work" };
+  }
   return {
     ...registration,
     hook_id: hookId,
     capability_id: capabilityId,
     max_result_bytes: maxResultBytes,
     requested_write_scope: writeScope,
+    required_read: requiredRead,
   };
 }
 
@@ -491,6 +535,9 @@ export function validateTurnStartHookInvocation(input: {
   }
   if (["unavailable", "failed"].includes(status) && result.agent_read_required) {
     throw new Error("unavailable turn-start hook cannot require unread evidence");
+  }
+  if (result.agent_read_required && registration.required_read === null) {
+    throw new Error("turn-start hook required read route is missing");
   }
   return { ...result };
 }
