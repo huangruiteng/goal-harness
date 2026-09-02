@@ -1219,7 +1219,9 @@ loopx benchmark upload-readback \
 Retries using the same producer, benchmark, study, and idempotency key are accepted
 only when the payload digest is unchanged. A corrected record uses a new idempotency
 key and explicitly names `--supersedes-record-id`; experiment-board corrections must
-also obey existing legal run-state transitions.
+also obey existing legal run-state transitions. A study manifest is immutable
+comparison intent: change its design under a new `study_id` instead of superseding it.
+Supersession also stays within the producer that authored the prior record.
 
 Finally, derive a read-only `benchmark_study_dashboard_v0` packet. It exposes
 campaign, arm, case, and run projections with explicit denominators and provisional
