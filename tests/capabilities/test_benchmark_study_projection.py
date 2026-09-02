@@ -416,6 +416,11 @@ def test_supersession_preserves_producer_and_immutable_study_identity(
     )
     with pytest.raises(ValueError, match="immutable"):
         simulate_benchmark_upload(store, replacement, execute=True)
+    duplicate_identity = _envelope(
+        _manifest(), record_kind="study_manifest", key="manifest-v3"
+    )
+    with pytest.raises(ValueError, match="immutable"):
+        simulate_benchmark_upload(store, duplicate_identity, execute=True)
 
     insight = _envelope(
         _insight(), record_kind="case_insight_projection", key="insight-v1"
