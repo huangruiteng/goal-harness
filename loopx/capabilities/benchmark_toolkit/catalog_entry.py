@@ -468,11 +468,27 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "sequence": [
                 "validate_provider_neutral_study_manifest",
                 "wrap_one_allowlisted_public_safe_record_per_envelope",
+                "upload_exact_terminal_run_before_its_redacted_case_insight",
                 "preview_local_upload_without_writing",
                 "execute_local_simulation_when_explicitly_requested",
                 "verify_record_id_digest_and_provider_revision_by_readback",
                 "derive_read_only_dashboard_packet",
             ],
+            "case_insight_upload": {
+                "schema_version": "benchmark_case_insight_projection_v0",
+                "precondition": (
+                    "one active exact-run board record is terminal, has complete "
+                    "post-run analysis status, and matches case/run/outcome identity"
+                ),
+                "authority_boundary": (
+                    "the projection contains no score, countability, integrity, or "
+                    "treatment-fidelity fields and cannot mutate run authority"
+                ),
+                "evidence_boundary": (
+                    "only bounded redacted analysis and public-safe evidence handles "
+                    "or digests; raw trajectory and evaluator material stay private"
+                ),
+            },
             "external_provider_boundary": (
                 "The local simulation proves contract and readback behavior only. "
                 "Authentication, remote transport, retention, and publication need "

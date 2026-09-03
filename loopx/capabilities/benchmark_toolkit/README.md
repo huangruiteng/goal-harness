@@ -1223,6 +1223,48 @@ also obey existing legal run-state transitions. A study manifest is immutable
 comparison intent: change its design under a new `study_id` instead of superseding it.
 Supersession also stays within the producer that authored the prior record.
 
+### Upload a terminal case insight
+
+`benchmark_case_insight_projection_v0` is the public-safe child record for one
+exact run. Upload the run's terminal `benchmark_experiment_board_row_v0` first;
+its `insight.status` must be `complete`, and the projection's `case_id`, `run_id`,
+and `outcome_status` must match that active terminal row. The run identity already
+resolves its arm, so the insight cannot invent a second arm binding. Because the
+projection has no metric, countability, integrity, or treatment-fidelity fields,
+accepting it cannot change the run's score authority.
+
+This is an intentionally strict upload-ordering rule: orphan, pre-terminal, and
+outcome-mismatched insight records that older local simulations accepted are now
+rejected. Re-upload the terminal run row before uploading its insight; no existing
+score or experiment-board authority is rewritten.
+
+```json
+{
+  "schema_version": "benchmark_case_insight_projection_v0",
+  "benchmark_id": "example-benchmark@1",
+  "study_id": "example-study-v1",
+  "case_id": "case-1",
+  "run_id": "treatment-case-1-r1",
+  "outcome_status": "completed",
+  "failure_class": "none",
+  "causal_summary": "The implementation satisfied the declared contract after an independent boundary check.",
+  "expectedness": "expected",
+  "implication": "Retain the independent boundary check in this arm.",
+  "next_probe": "Repeat on a different public case family.",
+  "confidence": "high",
+  "evidence_refs": ["public-receipt:abc123"],
+  "privacy_classification": "public_safe",
+  "producer_redaction_attested": true
+}
+```
+
+Wrap it with the same `benchmark upload-envelope` command above using
+`--record-kind case_insight_projection`, then preview, execute, and read it back
+through the same local provider flow. The private analyst may use task text,
+trajectory, final workspace, hidden evaluation, and verifier details only after
+the run is terminal; those sources are reduced into the bounded fields and
+public-safe evidence handles above and are never uploaded themselves.
+
 Finally, derive a read-only `benchmark_study_dashboard_v0` packet. It exposes
 campaign, arm, case, and run projections with explicit denominators and provisional
 coverage, while delegating scores and matched comparisons to the experiment board.

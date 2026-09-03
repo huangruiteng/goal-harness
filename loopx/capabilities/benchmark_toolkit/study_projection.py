@@ -18,6 +18,7 @@ from ...file_lock import exclusive_file_lock
 from .experiment_board import (
     BENCHMARK_EXPERIMENT_BOARD_ROW_SCHEMA_VERSION,
     benchmark_experiment_board_row_key,
+    benchmark_run_status_is_terminal,
     build_benchmark_experiment_board,
     normalize_benchmark_experiment_board_row,
     preview_benchmark_experiment_board_upsert,
@@ -413,6 +414,9 @@ def normalize_benchmark_case_insight_projection(
     confidence = _token(payload.get("confidence"), field="confidence")
     if expectedness not in _EXPECTEDNESS or confidence not in _CONFIDENCE_LEVELS:
         raise ValueError("case insight expectedness or confidence is unsupported")
+    outcome_status = _token(payload.get("outcome_status"), field="outcome_status")
+    if not benchmark_run_status_is_terminal(outcome_status):
+        raise ValueError("case insight outcome_status must be terminal")
     raw_refs = payload.get("evidence_refs", [])
     if not isinstance(raw_refs, list) or len(raw_refs) > 16:
         raise ValueError("evidence_refs must contain at most 16 handles")
@@ -423,7 +427,7 @@ def normalize_benchmark_case_insight_projection(
         "study_id": _token(payload.get("study_id"), field="study_id"),
         "case_id": _token(payload.get("case_id"), field="case_id"),
         "run_id": _token(payload.get("run_id"), field="run_id"),
-        "outcome_status": _token(payload.get("outcome_status"), field="outcome_status"),
+        "outcome_status": outcome_status,
         "failure_class": _token(payload.get("failure_class"), field="failure_class"),
         "causal_summary": _bounded_text(
             payload.get("causal_summary"), field="causal_summary"
@@ -627,6 +631,45 @@ def _same_board_row(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     ) == benchmark_experiment_board_row_key(right)
 
 
+def _validate_case_insight_attachment(
+    envelope: Mapping[str, Any], active_envelopes: Iterable[Mapping[str, Any]]
+) -> None:
+    if envelope["record_kind"] != "case_insight_projection":
+        return
+    insight = envelope["payload"]
+    board_rows = [
+        candidate["payload"]
+        for candidate in active_envelopes
+        if candidate["record_kind"] == "experiment_board_row"
+        and candidate["benchmark_id"] == envelope["benchmark_id"]
+        and candidate["study_id"] == envelope["study_id"]
+        and candidate["payload"]["run_id"] == insight["run_id"]
+    ]
+    if len(board_rows) != 1:
+        raise ValueError(
+            "case-insight upload requires one active exact-run board record"
+        )
+    run = board_rows[0]
+    if run["case_id"] != insight["case_id"]:
+        raise ValueError("case insight identity does not match its board row")
+    if not benchmark_run_status_is_terminal(run["status"]):
+        raise ValueError("case-insight upload requires a terminal run")
+    if run["status"] != insight["outcome_status"]:
+        raise ValueError("case insight outcome does not match its terminal run")
+    if run["insight"]["status"] != "complete":
+        raise ValueError(
+            "case-insight upload requires complete post-run analysis status"
+        )
+
+
+def _validate_case_insight_attachments(
+    records: Iterable[Mapping[str, Any]],
+) -> None:
+    active_envelopes = _active_envelopes(records)
+    for envelope in active_envelopes:
+        _validate_case_insight_attachment(envelope, active_envelopes)
+
+
 def _validate_supersession(
     envelope: Mapping[str, Any], records: list[dict[str, Any]]
 ) -> None:
@@ -684,6 +727,7 @@ def _validate_supersession(
             raise ValueError("changed board-row upload requires explicit supersession")
         if related and supersedes not in {item["record_id"] for item in related}:
             raise ValueError("board-row upload must supersede its current run record")
+    _validate_case_insight_attachments([*records, {"envelope": envelope}])
 
 
 def _receipt(
@@ -999,25 +1043,23 @@ def build_benchmark_study_dashboard(
         if row["comparison_protocol_id"] != study["comparison_protocol_id"]:
             raise ValueError("board row comparison protocol does not match manifest")
 
-    insights = {
-        envelope["payload"]["run_id"]: envelope["payload"]
-        for envelope in envelopes
-        if envelope["record_kind"] == "case_insight_projection"
-    }
-    insight_records = [
-        envelope["payload"]
+    insight_envelopes = [
+        envelope
         for envelope in envelopes
         if envelope["record_kind"] == "case_insight_projection"
     ]
+    insights = {
+        envelope["payload"]["run_id"]: envelope["payload"]
+        for envelope in insight_envelopes
+    }
+    insight_records = [envelope["payload"] for envelope in insight_envelopes]
     if len(insights) != len(insight_records):
         raise ValueError("study upload store has multiple active insights for one run")
-    board_rows_by_run = {row["run_id"]: row for row in board_rows}
-    for insight in insight_records:
+    for insight_envelope in insight_envelopes:
+        insight = insight_envelope["payload"]
         if insight["case_id"] not in declared_cases:
             raise ValueError("case insight is outside manifest coverage")
-        run = board_rows_by_run.get(insight["run_id"])
-        if run is not None and run["case_id"] != insight["case_id"]:
-            raise ValueError("case insight identity does not match its board row")
+        _validate_case_insight_attachment(insight_envelope, envelopes)
     runtime_observations = [
         envelope["payload"]
         for envelope in envelopes
