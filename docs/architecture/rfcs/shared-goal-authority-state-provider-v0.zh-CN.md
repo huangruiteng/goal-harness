@@ -1007,8 +1007,18 @@ commit 恢复、projection read-back 与 shadow failure isolation。这里仅关
 runtime-shadow 切片。后续 typed inspection seam 会把当前紧凑 legacy projection 与
 file head 对比，返回 `missing`、`matched` 或 `drifted` 以及两侧内容摘要。该 seam 默认
 关闭、只读，并始终返回 `decision_read_from_shadow=false`；它为 migration 提供可复用
-的 baseline/parity observation，但不会把 observation 升格为 authority。后续仍需完成
-migration/import 编排、一键 rollback、持续 parity policy、
+的 baseline/parity observation，但不会把 observation 升格为 authority。
+
+同一显式 opt-in 后面现在也有了下一个 migration primitive：
+`coordination.runtime_shadow.bootstrap` 只允许在 file shadow 尚未初始化时安装一份
+规范化 legacy projection。第一条已提交 event 持久绑定 source version、source
+projection digest 与 `legacy_canonical_shadow` mode declaration；由于尚未执行任何
+Agent operation，它刻意携带空 receipt payload。精确重放从第一条 transaction 恢复，
+包括提交成功但响应丢失的 ambiguous 情形；如果已有不同 lineage，则 fail closed。
+这是后续管理面 migration command 所需的 provider-owned bootstrap effect，但它仍不能
+promotion shadow，也不能参与协调决策。
+
+后续仍需完成管理面 CLI/import 编排、一键 rollback、持续 parity policy、
 provider-first read flip，以及 fence 全部 legacy coordination writer，仍是独立评审的
 本地 canonical promotion 的强制证据。因此 NoKV/PostgreSQL 远端 shadow 仍属于 Stage
 3，不能把这个默认关闭的 hook 当作 authority。

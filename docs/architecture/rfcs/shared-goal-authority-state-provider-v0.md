@@ -1250,8 +1250,21 @@ current compact legacy projection with the file head and reports `missing`,
 `matched`, or `drifted` plus both content digests. It is default-off,
 read-only, and always returns `decision_read_from_shadow=false`; this provides
 the reusable baseline/parity observation needed by migration without turning
-an observation into authority. Migration/import orchestration, a rollback
-command, sustained parity policy, the provider-first read flip, and fencing every
+an observation into authority.
+
+The next migration primitive is now also present behind the same explicit
+opt-in. `coordination.runtime_shadow.bootstrap` installs one normalized legacy
+projection only when the file shadow is uninitialized. Its first committed
+event durably binds the source version, source projection digest, and
+`legacy_canonical_shadow` mode declaration; it deliberately carries an empty
+receipt payload because no agent operation has run. Exact replay is recovered
+from that first transaction, including an ambiguous lost response, while a
+different existing lineage fails closed. This is the provider-owned bootstrap
+effect needed by a later administrative migration command; it still cannot
+promote the shadow or make a coordination decision.
+
+The administrative CLI/import orchestration, a rollback command, sustained
+parity policy, the provider-first read flip, and fencing every
 legacy coordination writer remain mandatory evidence for the separately
 reviewed local canonical promotion. Remote NoKV/PostgreSQL shadowing therefore
 remains Stage 3 and cannot use this default-off hook as authority.
