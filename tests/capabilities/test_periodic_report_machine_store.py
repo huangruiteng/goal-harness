@@ -32,7 +32,7 @@ def _defaults(*, route_ref: str = "loopx-concierge") -> dict:
             "periodic_report": {
                 "schema_version": "periodic_report_machine_defaults_v0",
                 "enabled": True,
-        "inheritance": "live_machine_default",
+                "inheritance": "live_machine_default",
                 "profile_preset": "weekly-progress",
                 "route_ref": route_ref,
                 "timezone": "Asia/Shanghai",
@@ -324,6 +324,24 @@ def test_machine_defaults_cli_previews_applies_reads_and_rolls_back(
     applied = json.loads(capsys.readouterr().out)
     assert applied["status"] == "applied"
 
+    assert (
+        main(
+            [
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime_root),
+                "periodic-report",
+                "rollback-machine-defaults",
+                "--transaction-id",
+                applied["transaction_id"],
+            ]
+        )
+        == 0
+    )
+    rollback_markdown = capsys.readouterr().out
+    assert "- plan_revision: `sha256:" in rollback_markdown
+
     assert main([*common, "inspect-machine-defaults"]) == 0
     inspection = json.loads(capsys.readouterr().out)
     assert inspection["status"] == "configured"
@@ -387,6 +405,24 @@ def test_canonical_machine_config_cli_uses_the_same_store_and_projection(
         "periodic_report"
     ]
 
+    assert (
+        main(
+            [
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime_root),
+                "machine-config",
+                "preview",
+                "--config-json",
+                str(defaults_path),
+            ]
+        )
+        == 0
+    )
+    markdown_preview = capsys.readouterr().out
+    assert "- plan_revision: `sha256:" in markdown_preview
+
     assert main([*common, "preview", "--config-json", str(defaults_path)]) == 0
     preview = json.loads(capsys.readouterr().out)
     assert preview["changed_namespaces"] == ["periodic_report"]
@@ -444,6 +480,7 @@ def test_periodic_report_compatibility_cli_renders_generic_machine_schemas(
     assert preview.startswith("# Machine Configuration")
     assert "- status: `preview`" in preview
     assert "- action: `create`" in preview
+    assert "- plan_revision: `sha256:" in preview
 
     assert main([*common, "inspect-machine-defaults"]) == 0
     inspection = capsys.readouterr().out
@@ -470,6 +507,24 @@ def test_machine_config_cli_removes_a_namespace_with_preview_fencing(
         "--namespace",
         "periodic_report",
     ]
+
+    assert (
+        main(
+            [
+                "--registry",
+                str(registry_path),
+                "--runtime-root",
+                str(runtime_root),
+                "machine-config",
+                "remove",
+                "--namespace",
+                "periodic_report",
+            ]
+        )
+        == 0
+    )
+    markdown_preview = capsys.readouterr().out
+    assert "- plan_revision: `sha256:" in markdown_preview
 
     assert main(common) == 0
     preview = json.loads(capsys.readouterr().out)
