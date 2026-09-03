@@ -598,8 +598,9 @@
 .personal-task-card.is-selected > button,
 .personal-task-kanban .personal-object-list > button.is-selected { border-color: #7c9df1; background: #f5f8ff; box-shadow: 0 0 0 2px rgb(47 102 233 / 12%), 0 4px 14px rgb(30 52 104 / 10%); }
 .personal-task-card.is-selected::before { position: absolute; z-index: 2; top: 8px; bottom: 8px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--pw-blue); content: ""; }
-.personal-task-card-actions button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--pw-line-strong); border-radius: 7px; background: #fff; color: var(--pw-muted); cursor: pointer; box-shadow: 0 1px 3px rgb(30 28 20 / 12%); }
+.personal-task-card-actions button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--pw-line-strong); border-radius: 7px; background: #fff; color: var(--pw-muted); cursor: pointer; box-shadow: 0 1px 3px rgb(30 28 20 / 12%); }
 .personal-task-card-actions button:hover { color: var(--pw-text); border-color: var(--pw-text); }
+.personal-task-card-actions button:disabled { cursor: wait; opacity: .72; }
 .personal-task-card-actions .personal-task-session-link { display: flex; width: auto; padding: 0 8px; gap: 5px; color: var(--pw-blue-ink); opacity: 1; }
 .personal-task-session-link span { white-space: nowrap; font-size: 10.5px; font-weight: 650; }
 .personal-task-session-status { color: var(--pw-blue-ink); font-weight: 650; }

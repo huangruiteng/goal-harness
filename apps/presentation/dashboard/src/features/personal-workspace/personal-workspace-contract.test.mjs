@@ -145,7 +145,10 @@ assert.match(page, /\.map\(\(\[key, value\]\) => \(\{[\s\S]*key,[\s\S]*label: fi
 assert.match(page, /field\.key === "cadence"[\s\S]*field\.key === "stop_condition"[\s\S]*field\.key === "timezone"/, "Applied Heartbeat readback consumes stable semantic keys");
 assert.doesNotMatch(page, /field\.label === "cadence"|field\.label === "stop condition"/, "Schedule semantics never depend on localized display labels");
 assert.match(page, /defaultTimeline\(model, managerProjectionId, t\)/, "Default schedule projection uses the active locale authority");
-assert.match(page, /onOpenGoal: async \(goalId\)[\s\S]*await callbacks\.onRefresh\?\.\(\);[\s\S]*selectGoal\(goalId\)/, "A created Goal refreshes before navigation");
+assert.match(page, /onOpenGoal: \(goalId\)[\s\S]*selectGoal\(goalId\);[\s\S]*Promise\.resolve\(\)\.then\(\(\) => reconcile\?\.\(\)\)/, "Applied-action Goal navigation is immediate and reconciles state in the background");
+assert.match(drawer, /onClose\(\); void callbacks\.onOpenGoal\?\.\(goalId\)/, "Applied-action Goal navigation closes its result drawer before asynchronous reconciliation");
+assert.match(tasks, /aria-busy=\{quickCompletingTodoIds\?\.has\(todo\.todoId\)/, "Quick Todo completion exposes accessible pending state while its typed preview is prepared");
+assert.match(tasks, /disabled=\{quickCompletingTodoIds\?\.has\(todo\.todoId\)\}/, "Quick Todo completion rejects duplicate clicks while preview creation is pending");
 assert.match(page, /callbacks\.onGoalActivationStateChange\?\.\(lifecycleChange\.goalId, lifecycleChange\.next\)/, "Goal lifecycle apply projects the requested state before the server responds");
 assert.match(page, /model\.goals\.find\(\(goal\) => goal\.goalId === proposal\.goalId\)\?\.activationState/, "Goal lifecycle rollback captures the rendered state instead of assuming the operation inverse");
 assert.match(page, /callbacks\.onGoalActivationStateChange\?\.\(lifecycleChange\.goalId, lifecycleChange\.previous\)/, "Rejected Goal lifecycle apply rolls back the optimistic projection");

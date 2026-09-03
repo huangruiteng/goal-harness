@@ -38,6 +38,7 @@ import type {
   WorkspaceRun,
   WorkspaceSystemHealth,
   WorkspaceTimelineItem,
+  WorkspaceTodo,
 } from "./personal-workspace-model";
 import { goalTitleFor, workspaceHomeLaneForGoal } from "./personal-workspace-model";
 import { routeWorkspaceInput } from "./personal-workspace-router";
@@ -714,6 +715,7 @@ export function PersonalWorkspacePage({
   const [imageAttachmentError, setImageAttachmentError] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [lifecycleBusyGoalIds, setLifecycleBusyGoalIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [quickCompletingTodoIds, setQuickCompletingTodoIds] = useState<ReadonlySet<string>>(() => new Set());
   const [refreshState, setRefreshState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [sessionProposalIds, setSessionProposalIds] = useState<string[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -731,6 +733,7 @@ export function PersonalWorkspacePage({
   const channelScrollRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const lifecyclePendingGoalIdsRef = useRef(new Set<string>());
+  const quickCompletingTodoIdsRef = useRef(new Set<string>());
   const [digest, setDigest] = useState<{ attention: number; done: number; failed: number } | null>(null);
   const selectedGoalId = controlledGoalId === undefined ? localGoalId : controlledGoalId;
   const selectedAgentId = controlledAgentId ?? localAgentId;
@@ -1170,6 +1173,30 @@ export function PersonalWorkspacePage({
     });
   }
 
+  async function requestQuickTodoCompletion(todo: WorkspaceTodo) {
+    if (quickCompletingTodoIdsRef.current.has(todo.todoId)) return;
+    quickCompletingTodoIdsRef.current.add(todo.todoId);
+    setQuickCompletingTodoIds(new Set(quickCompletingTodoIdsRef.current));
+    setActionFeedback(t("feedback.preparingPreview", { title: todo.text }));
+    try {
+      await createPreview({
+        actionKind: "todo.update",
+        context: { goal_id: todo.goalId, kind: "todo", todo_id: todo.todoId },
+        idempotencyKey: `workspace-todo-${todo.todoId}-complete-${Date.now().toString(36)}`,
+        normalizedParameters: { goal_id: todo.goalId, operation: "complete", todo_id: todo.todoId },
+        summary: t("tasks.markComplete", { name: todo.text }),
+      });
+      setActionFeedback(null);
+    } catch (error) {
+      setActionFeedback(t("feedback.previewFailed", {
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      quickCompletingTodoIdsRef.current.delete(todo.todoId);
+      setQuickCompletingTodoIds(new Set(quickCompletingTodoIdsRef.current));
+    }
+  }
+
   async function applyProposal(
     proposal: WorkspaceActionPreview,
     options: {
@@ -1295,9 +1322,12 @@ export function PersonalWorkspacePage({
       setActiveSessionRun(run);
       setSelection(null);
     },
-    onOpenGoal: async (goalId) => {
-      await callbacks.onRefresh?.();
+    onOpenGoal: (goalId) => {
       selectGoal(goalId);
+      const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
+      void Promise.resolve().then(() => reconcile?.()).catch(() => {
+        setActionFeedback(t("feedback.goalRefreshFailed"));
+      });
     },
     onOpenGoalView: (tab) => {
       setSelectedGoalTab(tab);
@@ -1731,14 +1761,9 @@ export function PersonalWorkspacePage({
                   window.requestAnimationFrame(() => composerRef.current?.focus());
                 }}
                 onOpenChat={() => setSelectedGoalTab("chat")}
-                onQuickComplete={readOnly ? undefined : (todo) => void createPreview({
-                  actionKind: "todo.update",
-                  context: { goal_id: todo.goalId, kind: "todo", todo_id: todo.todoId },
-                  idempotencyKey: `workspace-todo-${todo.todoId}-complete-${Date.now().toString(36)}`,
-                  normalizedParameters: { goal_id: todo.goalId, operation: "complete", todo_id: todo.todoId },
-                  summary: `标记完成：${todo.text}`,
-                })}
+                onQuickComplete={readOnly ? undefined : requestQuickTodoCompletion}
                 onSelect={setSelection}
+                quickCompletingTodoIds={quickCompletingTodoIds}
                 selectedTodoId={drawerSelection?.kind === "todo" ? drawerSelection.item.todoId : null}
                 userTodos={model.userTodos}
               />

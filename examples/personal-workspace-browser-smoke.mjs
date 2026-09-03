@@ -81,6 +81,7 @@ async function installApi(page) {
     durableWriteCount: 0,
     failNextLifecycleApply: false,
     failNextLifecyclePreview: false,
+    failNextActionPreview: false,
     failNextStatusRequest: false,
     goalActivationStates: new Map([
       ["product-release", "active"],
@@ -94,6 +95,7 @@ async function installApi(page) {
     allowNextHeartbeatApply: false,
     nextLifecycleApplyDelayMs: 0,
     nextLifecyclePreviewDelayMs: 0,
+    nextActionPreviewDelayMs: 0,
     nextStatusDelayMs: 0,
     statusRequestCount: 0,
     turnRequests: [],
@@ -535,9 +537,21 @@ async function installApi(page) {
     const url = new URL(request.url());
     if (url.pathname === "/api/actions/preview") {
       const body = request.postDataJSON();
+      const actionDelayMs = state.nextActionPreviewDelayMs;
+      state.nextActionPreviewDelayMs = 0;
       const lifecycleDelayMs = body.action_kind === "goal.lifecycle" ? state.nextLifecyclePreviewDelayMs : 0;
       state.nextLifecyclePreviewDelayMs = 0;
-      if (lifecycleDelayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, lifecycleDelayMs));
+      const previewDelayMs = Math.max(actionDelayMs, lifecycleDelayMs);
+      if (previewDelayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, previewDelayMs));
+      if (state.failNextActionPreview) {
+        state.failNextActionPreview = false;
+        await route.fulfill({
+          contentType: "application/json",
+          json: { error: "Action preview temporarily unavailable", error_code: "preview_unavailable", ok: false },
+          status: 503,
+        });
+        return;
+      }
       if (body.action_kind === "goal.lifecycle" && state.failNextLifecyclePreview) {
         state.failNextLifecyclePreview = false;
         await route.fulfill({
@@ -1402,6 +1416,28 @@ async function main() {
       if (!api.actionPreviews.some((preview) => preview.action_kind === actionKind && (operation === null || preview.normalized_parameters.operation === operation))) throw new Error(`Todo ${label} did not create the expected typed preview`);
       await page.getByRole("button", { name: "关闭", exact: true }).click();
     }
+    api.nextActionPreviewDelayMs = 900;
+    const quickComplete = taskCards.first().getByRole("button", { name: /^标记完成：/u });
+    const quickPreviewCount = api.actionPreviews.length;
+    await quickComplete.click();
+    await page.waitForFunction(
+      () => document.querySelector('button[aria-label^="标记完成："]')?.getAttribute("aria-busy") === "true",
+      null,
+      { timeout: 600 },
+    );
+    if (!(await quickComplete.isDisabled())) throw new Error("Quick Todo completion remained clickable while preview creation was pending");
+    await page.getByText(/^正在准备确认预览：/u).waitFor({ state: "visible", timeout: 600 });
+    await page.getByText("确认执行").waitFor({ state: "visible", timeout: 2_000 });
+    if (api.actionPreviews.length !== quickPreviewCount + 1) throw new Error("Quick Todo completion did not create exactly one typed preview");
+    const quickPreview = api.actionPreviews.at(-1);
+    if (quickPreview?.action_kind !== "todo.update" || quickPreview.normalized_parameters.operation !== "complete") throw new Error(`Quick Todo completion created the wrong typed preview: ${JSON.stringify(quickPreview)}`);
+    await page.getByRole("button", { name: "关闭", exact: true }).click();
+    api.failNextActionPreview = true;
+    api.nextActionPreviewDelayMs = 300;
+    await quickComplete.click();
+    await page.getByText(/^无法准备确认预览：/u).waitFor({ state: "visible", timeout: 1_000 });
+    if (await quickComplete.isDisabled()) throw new Error("Quick Todo completion stayed disabled after a preview failure");
+    if (api.actionPreviews.length !== quickPreviewCount + 1) throw new Error("A rejected quick completion preview was recorded as ready");
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Chat" }).click();
     await page.getByRole("dialog").filter({ hasText: "确认执行" }).waitFor({ state: "hidden" });
 
@@ -1437,7 +1473,10 @@ async function main() {
         await page.getByText("已应用，LoopX 状态将刷新。").waitFor({ state: "visible" });
         if (api.durableWriteCount !== writesBeforeApply + 1) throw new Error("Monitor confirmation did not produce exactly one durable write");
         if (!api.actionApplies.includes(monitorUpdate.proposalId)) throw new Error("Monitor confirmation did not apply the previewed proposal");
+        api.nextStatusDelayMs = 1_600;
         await page.getByRole("button", { name: "查看更新后的 Goal", exact: true }).click();
+        await page.getByRole("dialog").filter({ hasText: "执行结果" }).waitFor({ state: "hidden", timeout: 600 });
+        await goalNavigation.getByRole("button", { name: "Tasks", current: "page" }).waitFor({ state: "visible", timeout: 600 });
         await goalNavigation.getByRole("button", { name: "Chat" }).click();
       } else {
         await page.getByRole("button", { name: "关闭", exact: true }).click();
