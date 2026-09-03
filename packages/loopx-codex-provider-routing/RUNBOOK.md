@@ -274,6 +274,13 @@ provider 下 `requiresOpenaiAuth = false`，因此不能根据模型 route 同�
 才记为 fallback。原始 management 响应、auth filename、email、请求内容和 task/session ID
 不得进入 LoopX 仓库或 extension 输入。
 
+额度采集由 operator adapter 通过宿主支持的 account/rate-limit 只读接口完成，再把窗口映射为
+symbolic profile observation。不要为了查询额度抢占正在运行的 App IPC 单客户端连接，也不要把
+宿主 auth token 交给 LoopX extension。若必须启动隔离的 App Server probe，probe 应使用独立
+socket、只读方法和有界生命周期；extension 最终只接收 `used_percent`、窗口长度、reset 时间与
+recent activity。reset 本身仍是 operator-owned effect，成功后交给 `qualify_quota_recovery`
+验证 cooldown 失效与 reprobe 顺序。
+
 这里的“开启自动切换开关”不是修改 CPA 的一个全局布尔值，而是让 App selector 暴露并
 允许选择 `auto/...` 虚拟模型。A/B 也不再表示 hard pin，而是同一账号环的两个首选入口；
 只有显式 Ark 仍固定单一 provider。CPA 只按已验收的 provider pool 执行自动路由。
@@ -767,6 +774,28 @@ result 在目标 Codex rollout 中只能写成一个逻辑 `function_call_output
 状态机里。pre-commit attempt 可以换目标并重新生成 derived projection；post-commit
 attempt 只能向当前 task 报错，不能继续沿 failover 队列。这个原则同时约束 HTTP error、
 in-band SSE error、客户端取消和 handler 自己补出的 lifecycle event。
+
+## 运行时恢复与兼容门
+
+在把异构 provider 纳入自动 fallback 前，还要过三类独立恢复门。它们不能被“HTTP 200”
+或“进程已经启动”替代：
+
+| 故障面 | 必须观察 | fail-closed 行为 |
+| --- | --- | --- |
+| 桌面补丁升级 | 当前构建只有一个已应用锚点；所有改动文件的 ASAR integrity 匹配；header digest 与 bundle metadata 匹配；签名、启动、heartbeat readback 均成功 | 停留在旧 runtime 或回滚，不把未知构建投入使用 |
+| quota reset | reset receipt 晚于 cooldown 来源；旧 cooldown 已失效；目标账号先完成一次 bounded probe | probe 前不得因旧 cooldown 直接选择 fallback；新 probe 明确 quota-limited 后才允许新 cooldown |
+| Code Mode 工具 | selector normalization 声明 `required_tool_transport=custom_tool_call`；实际响应仍为 `custom_tool_call`；host dispatch 完成 | function-only provider 在遍历前被过滤；适配层若降级 item type，qualification 失败 |
+
+这三类证据分别由 `qualify_desktop_patch`、`qualify_quota_recovery`、
+`qualify_tool_transport` 接收。它们只处理 symbolic、content-free observation。
+本机 bundle 路径、账号身份、task ID、原始日志、OAuth 和 reset token 都不得进入
+LoopX state 或公开 PR。
+
+`tool_transports` 是 profile capability，不是根据模型名字猜测的路由规则。默认情况下，
+原生 Codex profile 声明 `function_call` 与 `custom_tool_call`；普通
+OpenAI-compatible profile 只声明 `function_call`。只有适配器已经实现并验证 custom item
+保真时，才可显式追加 `custom_tool_call`。这样 text-only Ark 可以继续作为普通文本回答的
+terminal tail，却不会接住会触发 Code Mode `exec` 的 turn。
 
 ## Compatibility matrix
 
