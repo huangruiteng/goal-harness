@@ -44,7 +44,8 @@
           ],
           "priority": 300,
           "provider": "codex",
-          "supports_fast": true
+          "supports_fast": true,
+          "tool_transports": ["function_call", "custom_tool_call"]
         },
         {
           "id": "codex-b",
@@ -54,7 +55,8 @@
           ],
           "priority": 200,
           "provider": "codex",
-          "supports_fast": true
+          "supports_fast": true,
+          "tool_transports": ["function_call", "custom_tool_call"]
         },
         {
           "id": "ark-text",
@@ -63,7 +65,8 @@
           ],
           "priority": 100,
           "provider": "openai_compatibility",
-          "supports_fast": false
+          "supports_fast": false,
+          "tool_transports": ["function_call"]
         }
       ],
       "rings": [
@@ -110,6 +113,7 @@
       "modality": "text",
       "observed_at": "2026-09-01T08:00:00Z",
       "outcome": "success",
+      "required_tool_transport": "custom_tool_call",
       "route_slug": "codex-b/gpt-5.6-sol",
       "selected_profile": "codex-a"
     },

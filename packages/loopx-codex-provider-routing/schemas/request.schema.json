@@ -7,12 +7,15 @@
         "operation": {
           "const": "qualify_heartbeat_transport"
         },
+        "desktop_patch": false,
         "host_control_recovery": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
         "source": false,
         "status": false,
+        "quota_recovery": false,
+        "tool_transport": false,
         "upgrade": false
       },
       "required": [
@@ -24,12 +27,15 @@
         "operation": {
           "const": "qualify_host_control_recovery"
         },
+        "desktop_patch": false,
         "heartbeat_transport": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
         "source": false,
         "status": false,
+        "quota_recovery": false,
+        "tool_transport": false,
         "upgrade": false
       },
       "required": [
@@ -41,12 +47,15 @@
         "operation": {
           "const": "reconcile_integration_candidate"
         },
+        "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
         "normalization": false,
         "snapshot": false,
         "source": false,
         "status": false,
+        "quota_recovery": false,
+        "tool_transport": false,
         "upgrade": false
       },
       "required": [
@@ -58,12 +67,15 @@
         "operation": {
           "const": "project_runtime_status"
         },
+        "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
         "source": false,
+        "quota_recovery": false,
+        "tool_transport": false,
         "upgrade": false
       },
       "required": [
@@ -75,12 +87,15 @@
         "operation": {
           "const": "compile_catalog"
         },
+        "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
         "status": false,
+        "quota_recovery": false,
+        "tool_transport": false,
         "upgrade": false
       },
       "required": [
@@ -92,12 +107,15 @@
         "operation": {
           "const": "normalize_selector_request"
         },
+        "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
         "integration": false,
         "snapshot": false,
         "source": false,
         "status": false,
+        "quota_recovery": false,
+        "tool_transport": false,
         "upgrade": false
       },
       "required": [
@@ -109,12 +127,15 @@
         "operation": {
           "const": "qualify_snapshot"
         },
+        "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
         "integration": false,
         "normalization": false,
         "source": false,
         "status": false,
+        "quota_recovery": false,
+        "tool_transport": false,
         "upgrade": false
       },
       "required": [
@@ -126,24 +147,96 @@
         "operation": {
           "const": "upgrade_plan"
         },
+        "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
         "source": false,
-        "status": false
+        "status": false,
+        "quota_recovery": false,
+        "tool_transport": false
       },
       "required": [
         "upgrade"
       ]
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "qualify_desktop_patch"
+        },
+        "heartbeat_transport": false,
+        "host_control_recovery": false,
+        "integration": false,
+        "normalization": false,
+        "quota_recovery": false,
+        "snapshot": false,
+        "source": false,
+        "status": false,
+        "tool_transport": false,
+        "upgrade": false
+      },
+      "required": [
+        "desktop_patch"
+      ]
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "qualify_quota_recovery"
+        },
+        "desktop_patch": false,
+        "heartbeat_transport": false,
+        "host_control_recovery": false,
+        "integration": false,
+        "normalization": false,
+        "snapshot": false,
+        "source": false,
+        "status": false,
+        "tool_transport": false,
+        "upgrade": false
+      },
+      "required": [
+        "quota_recovery"
+      ]
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "qualify_tool_transport"
+        },
+        "desktop_patch": false,
+        "heartbeat_transport": false,
+        "host_control_recovery": false,
+        "integration": false,
+        "normalization": false,
+        "quota_recovery": false,
+        "snapshot": false,
+        "source": false,
+        "status": false,
+        "upgrade": false
+      },
+      "required": [
+        "tool_transport"
+      ]
     }
   ],
   "properties": {
+    "desktop_patch": {
+      "type": "object"
+    },
     "heartbeat_transport": {
       "type": "object"
     },
     "host_control_recovery": {
+      "type": "object"
+    },
+    "quota_recovery": {
+      "type": "object"
+    },
+    "tool_transport": {
       "type": "object"
     },
     "operation": {
@@ -151,9 +244,12 @@
         "compile_catalog",
         "normalize_selector_request",
         "project_runtime_status",
+        "qualify_desktop_patch",
         "qualify_heartbeat_transport",
         "qualify_host_control_recovery",
+        "qualify_quota_recovery",
         "qualify_snapshot",
+        "qualify_tool_transport",
         "reconcile_integration_candidate",
         "upgrade_plan"
       ]

@@ -1,0 +1,9 @@
+{
+  "operation": "qualify_tool_transport",
+  "schema_version": "loopx_codex_provider_routing_request_v0",
+  "tool_transport": {
+    "dispatch_outcome": "completed",
+    "observed_transport": "custom_tool_call",
+    "requested_transport": "custom_tool_call"
+  }
+}

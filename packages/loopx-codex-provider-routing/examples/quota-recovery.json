@@ -1,0 +1,13 @@
+{
+  "operation": "qualify_quota_recovery",
+  "quota_recovery": {
+    "cooldown_expires_at": "2026-09-05T10:00:00Z",
+    "cooldown_invalidated": true,
+    "cooldown_source_observed_at": "2026-09-01T10:00:00Z",
+    "fallback_attempted": false,
+    "post_reset_probe": "success",
+    "reset_observed_at": "2026-09-01T11:00:00Z",
+    "reset_outcome": "applied"
+  },
+  "schema_version": "loopx_codex_provider_routing_request_v0"
+}
