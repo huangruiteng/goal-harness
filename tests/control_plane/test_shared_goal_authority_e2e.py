@@ -24,6 +24,22 @@ LIVE_ENVIRONMENT_VARIABLES = (
     *ladder.NOKV_STACK_VARIABLES,
 )
 GATED_ROW_IDS = ("s0.nokv_live_matrix", "s2b.postgresql_conformance_live")
+FULL_LADDER_VARIABLE = "LOOPX_LADDER_FULL"
+# Rows whose assertions the in-repo CLI E2E suite already pins through the same
+# product path. The pytest job runs close to its time budget, so the default CI
+# projection keeps the rows that only the ladder exercises and defers these to
+# the example runner (or LOOPX_LADDER_FULL=1).
+CLI_E2E_COVERED_ROW_IDS = (
+    "s2c1.configure_enable_disable_roundtrip",
+    "s2c1.default_off_isolation",
+    "s2c1.candidate_failure_preserves_primary",
+    "s2c1.crash_gap_loses_observation",
+    "s2c1.dual_runtime_root_consistency",
+)
+CLI_E2E_COVERAGE_REASON = (
+    "pinned by tests/control_plane/test_local_authority_shadow_cli_e2e.py; "
+    "run examples/shared-goal-authority-e2e/ladder.py or set LOOPX_LADDER_FULL=1"
+)
 REQUIRED_PENDING_ROW_IDS = (
     "s2a.nokv_live_qualification",
     "s2c2.outbox_prepared_then_committed_entries",
@@ -39,12 +55,15 @@ REQUIRED_PENDING_ROW_IDS = (
 
 
 def _row_parameters() -> Iterator[object]:
+    full_ladder = os.environ.get(FULL_LADDER_VARIABLE) == "1"
     for row in ladder.LADDER_ROWS:
-        marks = (
-            [pytest.mark.skipif(os.name == "nt", reason="requires POSIX cross-process flock and SIGKILL")]
-            if row.posix_only
-            else []
-        )
+        marks = []
+        if row.posix_only:
+            marks.append(
+                pytest.mark.skipif(os.name == "nt", reason="requires POSIX cross-process flock and SIGKILL")
+            )
+        if row.id in CLI_E2E_COVERED_ROW_IDS and not full_ladder:
+            marks.append(pytest.mark.skip(reason=CLI_E2E_COVERAGE_REASON))
         yield pytest.param(row, id=row.id, marks=marks)
 
 
@@ -71,6 +90,7 @@ def test_ladder_row_passes_or_is_declared_unverified(
 
 def test_registry_vocabulary_and_pending_rows_are_declared_not_claimed() -> None:
     row_ids = [row.id for row in ladder.LADDER_ROWS]
+    assert set(CLI_E2E_COVERED_ROW_IDS) < set(row_ids)
     pending_ids = [row.id for row in ladder.PENDING_ROWS]
     assert len(set(row_ids)) == len(row_ids)
     assert set(row_ids).isdisjoint(pending_ids)

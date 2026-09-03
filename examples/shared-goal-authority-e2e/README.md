@@ -17,7 +17,12 @@ python examples/shared-goal-authority-e2e/ladder.py --list
 
 The pytest projection is `tests/control_plane/test_shared_goal_authority_e2e.py`;
 there, an unverified row skips as `unverified: <reason>` and a POSIX-only row
-skips on Windows.
+skips on Windows. Five `s2c1.*` rows whose assertions
+`tests/control_plane/test_local_authority_shadow_cli_e2e.py` already pins
+through the same product path (configure round trip, default-off isolation,
+candidate failure, crash gap, dual runtime root) are skipped in the default CI
+projection to stay within the pytest job budget; `LOOPX_LADDER_FULL=1` runs
+them in pytest, and the example runner always runs every row.
 
 ## Rows
 
