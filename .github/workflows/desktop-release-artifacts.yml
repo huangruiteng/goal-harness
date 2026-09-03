@@ -102,56 +102,20 @@ jobs:
         working-directory: apps/desktop/loopx-control-plane
         run: npm run build -- --bundles ${{ matrix.bundles }} --no-sign
 
-      - name: Build signed macOS release bundles
+      - name: Build integrity-signed macOS release bundles
         if: github.event_name != 'pull_request' && runner.os == 'macOS'
         working-directory: apps/desktop/loopx-control-plane
         env:
           RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          for name in \
-            APPLE_CERTIFICATE \
-            APPLE_CERTIFICATE_PASSWORD \
-            KEYCHAIN_PASSWORD \
-            APPLE_ID \
-            APPLE_PASSWORD \
-            APPLE_TEAM_ID
-          do
-            if [[ -z "${!name:-}" ]]; then
-              echo "::error title=Missing Apple signing secret::${name} is required for a macOS desktop release"
-              exit 1
-            fi
-          done
           release_version="${RELEASE_TAG#v}"
           if [[ ! "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error title=Invalid desktop release version::${RELEASE_TAG} is not a supported release tag"
             exit 1
           fi
           npm run build -- --bundles ${{ matrix.bundles }} \
-            --config "{\"version\":\"${release_version}\"}"
-
-      - name: Notarize macOS disk image
-        if: github.event_name != 'pull_request' && runner.os == 'macOS'
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          dmg_path="$(find apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
-          test -n "${dmg_path}"
-          xcrun notarytool submit "${dmg_path}" \
-            --apple-id "${APPLE_ID}" \
-            --password "${APPLE_PASSWORD}" \
-            --team-id "${APPLE_TEAM_ID}" \
-            --wait
-          xcrun stapler staple "${dmg_path}"
+            --config "{\"version\":\"${release_version}\",\"bundle\":{\"macOS\":{\"signingIdentity\":\"-\"}}}"
 
       - name: Build Windows release bundles
         if: github.event_name != 'pull_request' && runner.os == 'Windows'
@@ -169,7 +133,7 @@ jobs:
           npm run build -- --bundles ${{ matrix.bundles }} --no-sign \
             --config "{\"version\":\"${release_version}\"}"
 
-      - name: Verify signed and notarized macOS bundles
+      - name: Verify macOS desktop bundles
         if: github.event_name != 'pull_request' && runner.os == 'macOS'
         shell: bash
         run: |
@@ -178,11 +142,8 @@ jobs:
           dmg_path="$(find apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
           test -n "${dmg_path}"
           codesign --verify --deep --strict --verbose=2 "${app_path}"
-          spctl --assess --type execute --verbose=4 "${app_path}"
-          xcrun stapler validate "${app_path}"
-          codesign --verify --deep --strict --verbose=2 "${dmg_path}"
-          spctl --assess --type open --context context:primary-signature --verbose=4 "${dmg_path}"
-          xcrun stapler validate "${dmg_path}"
+          codesign --display --verbose=4 "${app_path}" 2>&1 \
+            | grep -q '^Signature=adhoc$'
           hdiutil verify "${dmg_path}"
 
       - name: Collect macOS desktop bundles

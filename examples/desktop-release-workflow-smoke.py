@@ -15,16 +15,15 @@ def assert_contains(text: str, needle: str) -> None:
         raise AssertionError(f"missing desktop release contract: {needle}")
 
 
+def assert_absent(text: str, needle: str) -> None:
+    if needle in text:
+        raise AssertionError(f"desktop preview release must not require {needle}")
+
+
 def main() -> int:
     text = WORKFLOW.read_text(encoding="utf-8")
 
     for required in [
-        'APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}',
-        'APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}',
-        'KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}',
-        'APPLE_ID: ${{ secrets.APPLE_ID }}',
-        'APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}',
-        'APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}',
         "github.event_name == 'pull_request'",
         "github.event_name != 'pull_request'",
         "- name: Validate desktop release workflow\n        if: github.event_name == 'pull_request'",
@@ -32,12 +31,9 @@ def main() -> int:
         'npm run build -- --bundles ${{ matrix.bundles }}',
         'RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}',
         'release_version="${RELEASE_TAG#v}"',
-        r'--config "{\"version\":\"${release_version}\"}"',
+        r'\"signingIdentity\":\"-\"',
         'codesign --verify --deep --strict --verbose=2',
-        'spctl --assess --type execute --verbose=4',
-        'xcrun notarytool submit',
-        'spctl --assess --type open --context context:primary-signature --verbose=4',
-        'xcrun stapler validate',
+        "grep -q '^Signature=adhoc$'",
         'hdiutil verify',
         'bundle/macos/LoopX.app',
         'dist/desktop/LoopX.app.zip',
@@ -47,11 +43,21 @@ def main() -> int:
     ]:
         assert_contains(text, required)
 
-    signed_step = text.split("- name: Build signed macOS release bundles", 1)[1].split(
+    signed_step = text.split("- name: Build integrity-signed macOS release bundles", 1)[1].split(
         "- name:", 1
     )[0]
     if "--no-sign" in signed_step:
-        raise AssertionError("signed macOS release build must not use --no-sign")
+        raise AssertionError("integrity-signed macOS release build must not use --no-sign")
+
+    for forbidden in [
+        "APPLE_CERTIFICATE",
+        "APPLE_ID",
+        "KEYCHAIN_PASSWORD",
+        "notarytool",
+        "stapler",
+        "spctl",
+    ]:
+        assert_absent(text, forbidden)
 
     print("desktop-release-workflow-smoke: ok")
     return 0
