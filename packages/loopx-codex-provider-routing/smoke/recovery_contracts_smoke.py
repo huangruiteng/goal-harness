@@ -89,6 +89,24 @@ def main() -> int:
         "degraded_fallback_binding_used_for_native_request",
     }
 
+    ongoing_outage_native_fallback = qualify_outage_recovery(
+        {
+            "outage_ended": False,
+            "outage_ended_observed_at": None,
+            "cooldown_source_observed_at": "2026-09-03T14:50:00Z",
+            "cooldown_expires_at": "2026-09-03T18:50:00Z",
+            "cooldown_invalidated": False,
+            "post_recovery_probe": "not_attempted",
+            "degraded_fallback_binding_cleared": False,
+            "native_capability_requested": True,
+            "fallback_attempted": True,
+        }
+    )
+    assert ongoing_outage_native_fallback["qualified"] is False
+    assert ongoing_outage_native_fallback["failure_codes"] == [
+        "degraded_fallback_binding_used_for_native_request"
+    ]
+
     quota_recovery = qualify_quota_recovery(
         {
             "reset_outcome": "applied",

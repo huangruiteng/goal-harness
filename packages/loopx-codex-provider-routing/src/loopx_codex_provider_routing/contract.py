@@ -326,15 +326,6 @@ def qualify_outage_recovery(observation: Mapping[str, Any]) -> dict[str, Any]:
                 "passed": not fallback_attempted or probe == "still_outage",
                 "failure_code": "fallback_selected_after_recovery_probe",
             },
-            {
-                "id": "degraded_binding_not_used_for_native",
-                "passed": not native_requested
-                or (
-                    degraded_cleared
-                    and not (fallback_attempted and probe == "still_outage")
-                ),
-                "failure_code": "degraded_fallback_binding_used_for_native_request",
-            },
         ]
         expected_action = "invalidate_cooldown_and_revalidate_affinity"
     else:
@@ -346,6 +337,17 @@ def qualify_outage_recovery(observation: Mapping[str, Any]) -> dict[str, Any]:
             }
         ]
         expected_action = "retain_cooldown_until_recovery_observed"
+    checks.append(
+        {
+            "id": "degraded_binding_not_used_for_native",
+            "passed": not native_requested
+            or (
+                not fallback_attempted
+                and (not outage_ended or degraded_cleared)
+            ),
+            "failure_code": "degraded_fallback_binding_used_for_native_request",
+        }
+    )
     failure_codes = [check["failure_code"] for check in checks if not check["passed"]]
     return {
         "schema_version": OUTAGE_RECOVERY_SCHEMA_VERSION,
