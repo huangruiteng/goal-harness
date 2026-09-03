@@ -464,7 +464,7 @@ async function main() {
     try {
       await captureFrontstage(desktopPage, `${baseUrl}/frontstage`, "desktop-frontstage", [
         "Loop engineering for long-running AI agents",
-        "Public cases first. Live registry state stays behind explicit ops mode.",
+        "Public cases first. Live registry state stays behind the deprecated diagnostics route.",
         "Explore cases",
         "Quick Start",
         "Share feedback",
@@ -807,7 +807,11 @@ async function main() {
           "GH_FAKE_PRIVATE_TODO_GAMMA",
           "GH_FAKE_PRIVATE_EVENT_DELTA",
         ],
+        { includeFrontstageRequired: false },
       );
+      if (!new URL(desktopPage.url()).pathname.endsWith("/deprecated/frontstage/ops")) {
+        throw new Error(`Legacy mode=ops URL did not redirect into the deprecated route namespace: ${desktopPage.url()}`);
+      }
       const privateTrapOpsText = await desktopPage.locator("body").innerText();
       for (const marker of [
         "GH_FAKE_PRIVATE_PLAN_SUMMARY_ALPHA",
@@ -844,7 +848,7 @@ async function main() {
       );
       await captureFrontstage(
         desktopPage,
-        `${baseUrl}/frontstage?mode=ops&statusUrl=/${fixtureName}&goalId=live-goal-a`,
+        `${baseUrl}/deprecated/frontstage/ops?statusUrl=/${fixtureName}&goalId=live-goal-a`,
         "desktop-frontstage-live",
         [
           "ops live",
@@ -881,6 +885,7 @@ async function main() {
           "browser smoke statusUrl",
           "browser_smoke_public_fixture",
         ],
+        { includeFrontstageRequired: false },
       );
       const outcomePanel = desktopPage.locator('[data-testid="frontstage-state-outcome"]');
       const outcomePanelText = await outcomePanel.innerText();
@@ -970,7 +975,7 @@ async function main() {
     try {
       await captureFrontstage(mobilePage, `${baseUrl}/frontstage`, "mobile-frontstage", [
         "Loop engineering for long-running AI agents",
-        "Public cases first. Live registry state stays behind explicit ops mode.",
+        "Public cases first. Live registry state stays behind the deprecated diagnostics route.",
         "showcase mode",
         "Showcase mode ignores statusUrl",
         "Public Boundary",
