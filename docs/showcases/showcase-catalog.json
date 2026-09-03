@@ -1168,6 +1168,7 @@
       "case_page": "docs/showcases/cases/dsh-loopx-replan-demo.md",
       "demo_command": "python3 examples/dsh-loopx-demo-smoke.py",
       "recording_path": "docs/assets/showcases/dsh-loopx/dsh-loopx-quickstart-replan.mp4",
+      "page_assets": "shared",
       "domain": "agent-host-integration",
       "audience": [
         "DSH user",
@@ -1222,6 +1223,8 @@
         "zh": {
           "title": "DSH × LoopX：约束变化后的显式 Replan",
           "headline": "真实 DSH 会话在新增 serverless 约束后修正日志库决策，同时保留原始证据和后继工作。",
+          "proof_point": "宿主原生 Agent 可以改变计划，同时保留旧计划为何被替代的证据。",
+          "loopx_intervention": "原生 Skill 激活、Replan、后继 Todo、证据与 GoalBar",
           "problem": "新的关键约束可能推翻 Agent 的旧决策；普通聊天修正容易抹掉计划为什么变化、后续还需验证什么。",
           "loopx_behavior": [
             "在 DSH 技能选择器中显式激活 loopx",
