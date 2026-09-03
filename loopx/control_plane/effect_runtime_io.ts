@@ -395,7 +395,8 @@ async function atomicWriteTextFile(
   path: string,
   content: string,
 ): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "wx", 0o600);
   try {
@@ -406,6 +407,14 @@ async function atomicWriteTextFile(
       await handle.close();
     }
     await rename(temporary, path);
+    if (process.platform !== "win32") {
+      const directoryHandle = await open(directory, "r");
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
+    }
   } finally {
     await rm(temporary, { force: true });
   }

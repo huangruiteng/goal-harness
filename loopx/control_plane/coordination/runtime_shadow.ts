@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 
 import type { JsonObject } from "../effect_program.ts";
@@ -11,8 +10,10 @@ import type {
 import {
   canonicalAuthorityBytes,
   canonicalAuthorityObject,
+  canonicalAuthoritySha256,
   requireAuthorityStoreId,
 } from "./authority_store_codec.ts";
+import { indexCoordinationProjectionTodos } from "./coordination_projection.ts";
 import { FileAuthorityStore } from "./file_authority_store.ts";
 
 export const COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA =
@@ -228,16 +229,12 @@ function decodeTodoReadRequest(value: unknown): RuntimeShadowTodoReadRequest {
   };
 }
 
-function sha256(value: unknown): string {
-  return createHash("sha256").update(canonicalAuthorityBytes(value)).digest("hex");
-}
-
 function bootstrapEvent(request: RuntimeShadowBootstrapRequest): JsonObject {
   return {
     schema_version: "loopx_coordination_runtime_shadow_bootstrap_event_v0",
     operation_id: request.operation_id,
     source_version: request.source_version,
-    source_projection_sha256: sha256(request.projection),
+    source_projection_sha256: canonicalAuthoritySha256(request.projection),
     mode_declaration: "legacy_canonical_shadow",
   };
 }
@@ -295,7 +292,7 @@ function bootstrapResult(
     status,
     operation_id: request.operation_id,
     source_version: request.source_version,
-    source_projection_sha256: sha256(request.projection),
+    source_projection_sha256: canonicalAuthoritySha256(request.projection),
     mode_declaration: "legacy_canonical_shadow",
     cursor: readback.cursor,
     provider_revision: readback.provider_revision,
@@ -515,7 +512,7 @@ function expectedReceipt(request: RuntimeShadowRequest): JsonObject {
     operation_id: request.operation_id,
     event_kind: request.event_kind,
     source_version: request.source_version,
-    projection_sha256: sha256(request.projection),
+    projection_sha256: canonicalAuthoritySha256(request.projection),
   };
 }
 
@@ -607,7 +604,8 @@ async function verifyAppliedProjection(
       current_provider_revision: head.provider_revision,
     };
   }
-  const projectionMatches = sha256(head.head) === sha256(request.projection);
+  const projectionMatches = canonicalAuthoritySha256(head.head) ===
+    canonicalAuthoritySha256(request.projection);
   return {
     verified: projectionMatches,
     status: projectionMatches ? "matched_current_head" : "projection_mismatch",
@@ -643,7 +641,7 @@ export async function inspectCoordinationRuntimeShadow(
   const directory = join(request.runtime_root, "authority-shadow", "file-v0");
   const store = dependencies.createStore?.(directory, request.goal_id) ??
     new FileAuthorityStore(directory, request.goal_id);
-  const expectedProjectionSha256 = sha256(request.projection);
+  const expectedProjectionSha256 = canonicalAuthoritySha256(request.projection);
   try {
     const head = await store.loadAuthority();
     if (head.status === "missing") {
@@ -668,7 +666,7 @@ export async function inspectCoordinationRuntimeShadow(
         decision_read_from_shadow: false,
       };
     }
-    const observedProjectionSha256 = sha256(head.head);
+    const observedProjectionSha256 = canonicalAuthoritySha256(head.head);
     const parityMatches = observedProjectionSha256 === expectedProjectionSha256;
     return {
       schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
@@ -693,28 +691,6 @@ export async function inspectCoordinationRuntimeShadow(
       decision_read_from_shadow: false,
     };
   }
-}
-
-function decodeTodoReadProjection(
-  value: JsonObject,
-  goalId: string,
-): { todos: Map<string, JsonObject>; todoIds: string[] } {
-  if (value.goal_id !== goalId) {
-    throw new Error("shadow Todo read projection goal mismatch");
-  }
-  if (!Array.isArray(value.todos)) {
-    throw new Error("shadow Todo read projection todos must be an array");
-  }
-  const todos = new Map<string, JsonObject>();
-  for (const [index, candidate] of value.todos.entries()) {
-    const todo = canonicalAuthorityObject(candidate, `projection.todos[${index}]`);
-    const todoId = requireAuthorityStoreId(todo.todo_id, `projection.todos[${index}].todo_id`);
-    if (todos.has(todoId)) {
-      throw new Error("shadow Todo read projection contains duplicate todo ids");
-    }
-    todos.set(todoId, todo);
-  }
-  return { todos, todoIds: [...todos.keys()].sort() };
 }
 
 /**
@@ -744,7 +720,7 @@ export async function readCoordinationRuntimeShadowTodoCandidate(
   const directory = join(request.runtime_root, "authority-shadow", "file-v0");
   const store = dependencies.createStore?.(directory, request.goal_id) ??
     new FileAuthorityStore(directory, request.goal_id);
-  const expectedProjectionSha256 = sha256(request.projection);
+  const expectedProjectionSha256 = canonicalAuthoritySha256(request.projection);
   try {
     const head = await store.loadAuthority();
     if (head.status === "missing") {
@@ -769,7 +745,7 @@ export async function readCoordinationRuntimeShadowTodoCandidate(
         decision_read_from_shadow: false,
       };
     }
-    const observedProjectionSha256 = sha256(head.head);
+    const observedProjectionSha256 = canonicalAuthoritySha256(head.head);
     if (observedProjectionSha256 !== expectedProjectionSha256) {
       return {
         schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
@@ -784,7 +760,7 @@ export async function readCoordinationRuntimeShadowTodoCandidate(
         decision_read_from_shadow: false,
       };
     }
-    const projection = decodeTodoReadProjection(head.head, request.goal_id);
+    const projection = indexCoordinationProjectionTodos(head.head, request.goal_id);
     const todo = projection.todos.get(request.todo_id);
     if (todo === undefined) {
       return {
@@ -792,7 +768,7 @@ export async function readCoordinationRuntimeShadowTodoCandidate(
         status: "todo_missing",
         reason_code: "shadow_todo_read_todo_missing",
         todo_id: request.todo_id,
-        todo_ids: projection.todoIds,
+        todo_ids: projection.todo_ids,
         expected_projection_sha256: expectedProjectionSha256,
         observed_projection_sha256: observedProjectionSha256,
         provider_revision: head.provider_revision,
@@ -807,7 +783,7 @@ export async function readCoordinationRuntimeShadowTodoCandidate(
       status: "matched",
       todo_id: request.todo_id,
       todo,
-      todo_ids: projection.todoIds,
+      todo_ids: projection.todo_ids,
       expected_projection_sha256: expectedProjectionSha256,
       observed_projection_sha256: observedProjectionSha256,
       provider_revision: head.provider_revision,
@@ -841,7 +817,7 @@ function validateBootstrapTransaction(
     event.schema_version !== "loopx_coordination_runtime_shadow_bootstrap_event_v0" ||
     event.operation_id !== transaction.operation_id ||
     event.mode_declaration !== "legacy_canonical_shadow" ||
-    event.source_projection_sha256 !== sha256(transaction.projection) ||
+    event.source_projection_sha256 !== canonicalAuthoritySha256(transaction.projection) ||
     transaction.receipts.length !== 0
   ) {
     return "shadow_qualification_bootstrap_identity_invalid";
@@ -872,7 +848,7 @@ function validateMirroredTransaction(
     receipt.source_version !== event.source_version ||
     typeof event.projection_sha256 !== "string" ||
     receipt.projection_sha256 !== event.projection_sha256 ||
-    event.projection_sha256 !== sha256(transaction.projection)
+    event.projection_sha256 !== canonicalAuthoritySha256(transaction.projection)
   ) {
     return {
       reason_code: "shadow_qualification_transaction_identity_invalid",
@@ -977,8 +953,8 @@ export async function qualifyCoordinationRuntimeShadow(
         decision_read_from_shadow: false,
       };
     }
-    const expectedProjectionSha256 = sha256(request.projection);
-    const observedProjectionSha256 = sha256(head.head);
+    const expectedProjectionSha256 = canonicalAuthoritySha256(request.projection);
+    const observedProjectionSha256 = canonicalAuthoritySha256(head.head);
     const lineage = await scanShadowLineage(store);
     if (lineage.status === "failed") {
       return {
