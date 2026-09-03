@@ -1,12 +1,14 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { Check, RotateCcw, ServerCog, ShieldCheck } from "lucide-react";
+import { Check, RotateCcw, ServerCog, ShieldCheck, Trash2 } from "lucide-react";
 
 import {
   applyMachineConfiguration,
+  applyMachineConfigurationRemoval,
   applyMachineConfigurationRollback,
   fetchMachineConfiguration,
   periodicReportMachineConfigurationSchema,
   previewMachineConfiguration,
+  previewMachineConfigurationRemoval,
   previewMachineConfigurationRollback,
   type MachineConfigurationInspection,
   type MachineConfigurationNamespaceDescriptor,
@@ -97,6 +99,7 @@ export function MachineConfigurationSettings() {
   const [editorMode, setEditorMode] = useState<"form" | "json">("form");
   const [jsonDraft, setJsonDraft] = useState("{}");
   const [preview, setPreview] = useState<MachineConfigurationPreview | null>(null);
+  const [previewOperation, setPreviewOperation] = useState<"upsert" | "remove">("upsert");
   const [transaction, setTransaction] = useState<MachineConfigurationTransaction | null>(null);
   const [rollbackPlan, setRollbackPlan] = useState<MachineConfigurationRollbackPlan | null>(null);
   const [busy, setBusy] = useState<"load" | "preview" | "apply" | "rollback-preview" | "rollback" | null>("load");
@@ -166,6 +169,7 @@ export function MachineConfigurationSettings() {
   function updateDraft(patch: Partial<PeriodicReportDraft>) {
     setDraft((current) => ({ ...current, ...patch }));
     setPreview(null);
+    setPreviewOperation("upsert");
     setRollbackPlan(null);
     setError(null);
     setNotice(null);
@@ -174,6 +178,7 @@ export function MachineConfigurationSettings() {
   function updateJsonDraft(value: string) {
     setJsonDraft(value);
     setPreview(null);
+    setPreviewOperation("upsert");
     setRollbackPlan(null);
     setError(null);
     setNotice(null);
@@ -188,6 +193,7 @@ export function MachineConfigurationSettings() {
       setJsonDraft(jsonDraftForNamespace(inspection, descriptor));
     }
     setPreview(null);
+    setPreviewOperation("upsert");
     setRollbackPlan(null);
     setError(null);
     setNotice(null);
@@ -213,6 +219,7 @@ export function MachineConfigurationSettings() {
     }
     setEditorMode(mode);
     setPreview(null);
+    setPreviewOperation("upsert");
     setRollbackPlan(null);
     setError(null);
     setNotice(null);
@@ -224,6 +231,7 @@ export function MachineConfigurationSettings() {
     setError(null);
     setNotice(null);
     try {
+      setPreviewOperation("upsert");
       setPreview(await previewMachineConfiguration(
         selectedNamespace,
         desiredNamespaceConfiguration,
@@ -235,23 +243,49 @@ export function MachineConfigurationSettings() {
     }
   }
 
+  async function createRemovalPreview() {
+    if (!configuredNamespaces.has(selectedNamespace) || busy) return;
+    setBusy("preview");
+    setError(null);
+    setNotice(null);
+    try {
+      setPreviewOperation("remove");
+      setPreview(await previewMachineConfigurationRemoval(selectedNamespace));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("machine.previewError"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function applyPreview() {
-    if (!preview || !desiredNamespaceConfiguration || busy) return;
+    if (
+      !preview
+      || busy
+      || (previewOperation === "upsert" && !desiredNamespaceConfiguration)
+    ) return;
     setBusy("apply");
     setError(null);
+    const appliedOperation = previewOperation;
     try {
-      const result = await applyMachineConfiguration(
-        selectedNamespace,
-        desiredNamespaceConfiguration,
-        preview.plan_revision,
-      );
+      const result = appliedOperation === "remove"
+        ? await applyMachineConfigurationRemoval(selectedNamespace, preview.plan_revision)
+        : await applyMachineConfiguration(
+          selectedNamespace,
+          desiredNamespaceConfiguration!,
+          preview.plan_revision,
+        );
       setTransaction(result);
       setPreview(null);
+      setPreviewOperation("upsert");
       setRollbackPlan(null);
       await reload();
-      setNotice(result.status === "applied" ? t("machine.applied") : t("machine.unchanged"));
+      setNotice(result.status === "applied"
+        ? t(appliedOperation === "remove" ? "machine.removed" : "machine.applied")
+        : t("machine.unchanged"));
     } catch (cause) {
       setPreview(null);
+      setPreviewOperation("upsert");
       setError(cause instanceof Error ? cause.message : t("machine.applyError"));
     } finally {
       setBusy(null);
@@ -335,6 +369,19 @@ export function MachineConfigurationSettings() {
       ) : null}
 
       <footer>
+        {configuredNamespaces.has(selectedNamespace) ? (
+          <button
+            className="personal-danger-action"
+            disabled={Boolean(busy)}
+            onClick={() => void createRemovalPreview()}
+            type="button"
+          >
+            <Trash2 aria-hidden size={15} />
+            {busy === "preview" && previewOperation === "remove"
+              ? t("common.loading")
+              : t("machine.previewRemoval")}
+          </button>
+        ) : null}
         <button
           className="personal-secondary-action"
           disabled={Boolean(busy) || !editorValid}

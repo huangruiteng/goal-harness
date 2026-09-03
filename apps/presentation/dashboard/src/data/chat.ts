@@ -953,12 +953,12 @@ export const machineConfigurationInspectionSchema = machineConfigurationBaseSche
 export const machineConfigurationPreviewSchema = machineConfigurationBaseSchema.extend({
   schema_version: z.literal("machine_configuration_update_plan_v0"),
   status: z.literal("preview"),
-  action: z.enum(["create", "update", "unchanged"]),
+  action: z.enum(["create", "update", "delete", "unchanged"]),
   current_revision: z.string(),
   desired_revision: z.string(),
   plan_revision: z.string(),
   writes_required: z.number().int().nonnegative(),
-  machine_configuration: machineConfigurationSchema,
+  machine_configuration: machineConfigurationSchema.nullable(),
 });
 
 export const machineConfigurationTransactionSchema = machineConfigurationBaseSchema.extend({
@@ -1032,6 +1032,31 @@ export async function applyMachineConfiguration(
         expected_plan_revision: expectedPlanRevision,
         namespace,
         namespace_configuration: namespaceConfiguration,
+      }),
+    }),
+  );
+}
+
+export async function previewMachineConfigurationRemoval(namespace: string) {
+  return machineConfigurationPreviewSchema.parse(
+    await requestJson<unknown>("/api/chat/machine-configuration/preview", {
+      method: "POST",
+      body: JSON.stringify({ namespace, operation: "remove" }),
+    }),
+  );
+}
+
+export async function applyMachineConfigurationRemoval(
+  namespace: string,
+  expectedPlanRevision: string,
+) {
+  return machineConfigurationTransactionSchema.parse(
+    await requestJson<unknown>("/api/chat/machine-configuration/apply", {
+      method: "POST",
+      body: JSON.stringify({
+        expected_plan_revision: expectedPlanRevision,
+        namespace,
+        operation: "remove",
       }),
     }),
   );

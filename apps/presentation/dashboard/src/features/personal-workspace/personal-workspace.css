@@ -425,7 +425,7 @@
 .personal-machine-rollback p { margin: 3px 0 0; color: var(--pw-muted); font-size: 10.5px; line-height: 1.45; }
 .personal-machine-rollback .personal-secondary-action { flex: 0 0 auto; width: auto; min-height: 40px; margin: 0; padding: 0 13px; }
 .personal-machine-editor > footer { display: flex; justify-content: flex-end; gap: 10px; padding: 15px 20px; border-top: 1px solid var(--pw-line); background: #faf9f6; }
-.personal-machine-editor > footer .personal-primary-action, .personal-machine-editor > footer .personal-secondary-action { width: auto; min-height: 42px; margin: 0; padding: 0 15px; }
+.personal-machine-editor > footer .personal-primary-action, .personal-machine-editor > footer .personal-secondary-action, .personal-machine-editor > footer .personal-danger-action { width: auto; min-height: 42px; margin: 0; padding: 0 15px; }
 .personal-machine-unavailable { display: grid; justify-items: start; gap: 8px; min-height: 180px; padding: 26px; border: 1px dashed var(--pw-line-strong); border-radius: 14px; background: #fff; color: var(--pw-muted); }
 .personal-machine-unavailable strong { color: var(--pw-text); font-size: 13px; }
 .personal-machine-unavailable p { max-width: 540px; margin: 0; font-size: 11px; line-height: 1.6; }

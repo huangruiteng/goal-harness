@@ -30,6 +30,18 @@ def _normalize_required_input(value: Mapping[str, Any]) -> dict[str, Any]:
     return dict(value)
 
 
+def _apply_example_public_update(
+    current: Mapping[str, Any] | None,
+    update: Mapping[str, Any],
+) -> dict[str, Any]:
+    unknown = sorted(set(update) - {"schema_version", "enabled"})
+    if unknown:
+        raise ValueError(
+            "example public update contains unsupported fields: " + ", ".join(unknown)
+        )
+    return {**dict(current or {}), **dict(update)}
+
+
 def _registry() -> MachineConfigurationRegistry:
     return MachineConfigurationRegistry().register(
         MachineConfigurationNamespace(
@@ -39,6 +51,7 @@ def _registry() -> MachineConfigurationRegistry:
             project_public=lambda value: {
                 key: item for key, item in value.items() if key != "secret"
             },
+            apply_public_update=_apply_example_public_update,
             title="Example defaults",
             description="Example machine-level defaults.",
             default_configuration={
@@ -137,6 +150,7 @@ def test_registry_catalog_keeps_namespaces_without_defaults_discoverable() -> No
             schema_versions=frozenset({"required_input_v0"}),
             normalize=_normalize_required_input,
             project_public=lambda value: dict(value),
+            apply_public_update=lambda _current, update: dict(update),
         )
     )
 
@@ -155,6 +169,7 @@ def test_registry_rejects_an_invalid_provider_template_before_effects() -> None:
                 schema_versions=frozenset({"example_v0"}),
                 normalize=_normalize_example,
                 project_public=lambda value: dict(value),
+                apply_public_update=lambda _current, update: dict(update),
                 default_configuration={"schema_version": "example_v0"},
             )
         )
@@ -167,6 +182,7 @@ def test_namespace_merge_preserves_siblings_and_validates_the_patch() -> None:
             schema_versions=frozenset({"second_v0"}),
             normalize=lambda value: dict(value),
             project_public=lambda value: dict(value),
+            apply_public_update=lambda _current, update: dict(update),
         )
     )
     current = _config()
@@ -183,3 +199,32 @@ def test_namespace_merge_preserves_siblings_and_validates_the_patch() -> None:
         "schema_version": "second_v0",
         "limit": 4,
     }
+
+
+def test_namespace_merge_delegates_public_updates_and_preserves_private_fields() -> None:
+    merged = merge_machine_configuration_namespace(
+        _config(),
+        namespace="example",
+        namespace_configuration={"schema_version": "example_v0", "enabled": False},
+        registry=_registry(),
+    )
+
+    assert merged["namespaces"]["example"] == {
+        "schema_version": "example_v0",
+        "enabled": False,
+        "secret": "redacted",
+    }
+
+
+def test_namespace_merge_rejects_private_fields_in_a_public_update() -> None:
+    with pytest.raises(ValueError, match="public update contains unsupported fields"):
+        merge_machine_configuration_namespace(
+            _config(),
+            namespace="example",
+            namespace_configuration={
+                "schema_version": "example_v0",
+                "enabled": False,
+                "secret": "replacement",
+            },
+            registry=_registry(),
+        )

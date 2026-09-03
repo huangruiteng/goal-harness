@@ -155,7 +155,7 @@ assert.match(dashboard, /statusRequestCanCommit\(statusRequestFenceRef\.current,
 assert.match(sidebar, /Trash2/, "Stopped Goals expose a delete icon");
 assert.match(sidebar, /onRequestGoalLifecycle\(goal, "delete"\)/, "Goal deletion stays behind the lifecycle request boundary");
 assert.match(page, /\{ select: operation !== "stop" \}/, "Goal stop suppresses the confirmation drawer while other lifecycle actions retain it");
-assert.match(page, /await applyProposal\(proposal, \{ presentation: "feedback" \}\)/, "Goal stop reuses the canonical apply state machine and surfaces its receipt as feedback");
+assert.match(page, /await applyProposal\(proposal,\s*\{[\s\S]*?presentation: "feedback"/, "Goal stop reuses the canonical apply state machine and surfaces its receipt as feedback");
 assert.match(page, /if \(proposal\.status === "ready"\)[\s\S]*setSelection\(\{ item: proposal, kind: "proposal" \}\)/, "A stop action only bypasses review when its typed preview is ready");
 assert.match(page, /A newly discovered authority gate always deserves review/, "A direct action escalates a newly discovered authority gate to the drawer");
 assert.match(sidebar, /disabled=\{lifecycleBusyGoalIds\?\.has\(goal\.goalId\)\}/, "An in-flight Goal stop cannot be submitted twice from the sidebar");
@@ -320,10 +320,15 @@ assert.match(machineSettings, /futureGoalsOnlyDescription/, "Machine policy is v
 assert.match(machineSettings, /namespace_catalog/, "Machine settings discover capability namespaces from the registry catalog");
 assert.match(machineSettings, /personal-machine-json-editor/, "Every registered namespace has a generic JSON editor fallback");
 assert.match(machineSettings, /selectedNamespace,\s*desiredNamespaceConfiguration/, "Preview targets the selected namespace instead of a periodic-report constant");
+assert.match(machineSettings, /previewMachineConfigurationRemoval\(selectedNamespace\)/, "Configured namespaces expose a typed removal preview");
+assert.match(machineSettings, /applyMachineConfigurationRemoval\(selectedNamespace, preview\.plan_revision\)/, "Removal applies the exact reviewed revision");
+assert.match(machineSettings, /configuredNamespaces\.has\(selectedNamespace\)/, "Only configured namespaces expose removal");
 assert.doesNotMatch(machineSettings, /password|secret|credential/i, "Machine settings do not collect credentials");
 assert.match(chatData, /machineConfigurationSchema/, "Machine configuration uses a typed frontend contract");
 assert.match(chatData, /machineConfigurationCatalogSchema/, "The frontend validates the generic namespace catalog");
 assert.match(chatData, /namespace_configuration:\s*namespaceConfiguration/, "The browser patches one owned namespace without round-tripping private namespaces");
+assert.match(chatData, /operation:\s*"remove"/, "The browser uses an explicit typed removal operation");
+assert.match(chatData, /z\.enum\(\["create", "update", "delete", "unchanged"\]\)/, "Machine previews recognize deletion as a first-class action");
 assert.match(chatData, /\/api\/chat\/machine-configuration\/preview/, "Machine configuration uses a generic preview API");
 assert.match(styles, /personal-settings-sidebar[^{]*\{[^}]*overflow-y:\s*auto/, "The settings rail remains scrollable on short screens");
 assert.match(i18n, /workspaceLocaleStorageKey = "loopx-pw-locale"/, "Locale persistence uses a stable local key");

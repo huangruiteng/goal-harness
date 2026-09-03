@@ -151,6 +151,7 @@ def periodic_report_machine_configuration_namespace() -> MachineConfigurationNam
         schema_versions=frozenset({PERIODIC_REPORT_MACHINE_DEFAULTS_SCHEMA}),
         normalize=normalize_periodic_report_machine_defaults,
         project_public=lambda value: dict(value),
+        apply_public_update=lambda _current, update: dict(update),
         title="Periodic reports",
         description=(
             "Defaults materialized into newly connected Goals. Existing Goals are "

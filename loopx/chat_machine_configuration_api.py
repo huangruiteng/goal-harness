@@ -9,6 +9,7 @@ from .capabilities.machine_configuration.builtins import (
 from .capabilities.machine_configuration.contract import (
     MachineConfigurationRegistry,
     merge_machine_configuration_namespace,
+    remove_machine_configuration_namespace,
 )
 from .capabilities.machine_configuration.store import (
     configure_machine_configuration,
@@ -91,16 +92,29 @@ class MachineConfigurationRequestMixin:
         body: dict[str, Any],
         *,
         registry: MachineConfigurationRegistry,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         namespace = str(body.get("namespace") or "").strip()
         registry.resolve(namespace)
-        namespace_configuration = body.get("namespace_configuration")
-        if not isinstance(namespace_configuration, dict):
-            raise TypeError("namespace_configuration must be an object")
         current = read_machine_configuration(
             self.server.runtime_root,
             registry=registry,
         )
+        operation = str(body.get("operation") or "upsert").strip()
+        if operation == "remove":
+            if "namespace_configuration" in body:
+                raise ValueError(
+                    "namespace_configuration is not accepted for remove operations"
+                )
+            return remove_machine_configuration_namespace(
+                current,
+                namespace=namespace,
+                registry=registry,
+            )
+        if operation != "upsert":
+            raise ValueError("operation must be upsert or remove")
+        namespace_configuration = body.get("namespace_configuration")
+        if not isinstance(namespace_configuration, dict):
+            raise TypeError("namespace_configuration must be an object")
         return merge_machine_configuration_namespace(
             current,
             namespace=namespace,
@@ -135,7 +149,7 @@ class MachineConfigurationRequestMixin:
         registry = self._machine_configuration_registry()
         try:
             body = self._read_json()
-            allowed = {"namespace", "namespace_configuration"}
+            allowed = {"namespace", "namespace_configuration", "operation"}
             if execute:
                 allowed.add("expected_plan_revision")
             if set(body) - allowed:
