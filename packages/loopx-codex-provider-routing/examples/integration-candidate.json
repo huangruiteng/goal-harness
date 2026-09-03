@@ -6,8 +6,10 @@
       "base_sha": "1111111111111111111111111111111111111111",
       "integration_sha": "6666666666666666666666666666666666666666",
       "source_heads": {
+        "compat-stream-repair": "7777777777777777777777777777777777777777",
         "history-normalization": "2222222222222222222222222222222222222222",
         "modality-routing": "4444444444444444444444444444444444444444",
+        "rate-limit-wait": "8888888888888888888888888888888888888888",
         "route-fallback": "5555555555555555555555555555555555555555",
         "transport-pool": "3333333333333333333333333333333333333333"
       }
@@ -16,8 +18,10 @@
       "base_sha": "1111111111111111111111111111111111111111",
       "integration_sha": "6666666666666666666666666666666666666666",
       "source_heads": {
+        "compat-stream-repair": "7777777777777777777777777777777777777777",
         "history-normalization": "2222222222222222222222222222222222222222",
         "modality-routing": "4444444444444444444444444444444444444444",
+        "rate-limit-wait": "8888888888888888888888888888888888888888",
         "route-fallback": "5555555555555555555555555555555555555555",
         "transport-pool": "3333333333333333333333333333333333333333"
       }
@@ -28,7 +32,8 @@
       "transport_pool",
       "modality_routing",
       "request_normalizer",
-      "route_fallback"
+      "route_fallback",
+      "retry_policy"
     ],
     "sources": [
       {
@@ -68,6 +73,25 @@
         "id": "route-fallback",
         "kind": "pull_request",
         "ref": "fork/route-specific-fallback"
+      },
+      {
+        "changed_seams": [
+          "history_projection",
+          "sse_lifecycle"
+        ],
+        "head_sha": "7777777777777777777777777777777777777777",
+        "id": "compat-stream-repair",
+        "kind": "public_safe_patch",
+        "ref": "operator/compat-stream-repair"
+      },
+      {
+        "changed_seams": [
+          "retry_policy"
+        ],
+        "head_sha": "8888888888888888888888888888888888888888",
+        "id": "rate-limit-wait",
+        "kind": "pull_request",
+        "ref": "fork/openai-compat-bounded-rate-limit-waits"
       }
     ]
   },

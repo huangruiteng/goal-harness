@@ -9,6 +9,7 @@
       "model_catalog",
       "modality_routing",
       "request_normalizer",
+      "retry_policy",
       "route_fallback",
       "settings_revision"
     ],
