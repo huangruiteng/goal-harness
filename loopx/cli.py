@@ -43,6 +43,10 @@ from .capabilities.periodic_report.cli import (
     handle_periodic_report_command,
     register_periodic_report_commands,
 )
+from .capabilities.machine_configuration.cli import (
+    handle_machine_configuration_command,
+    register_machine_configuration_commands,
+)
 from .capabilities.periodic_report.post_writeback_hook import (
     build_periodic_report_post_writeback_projection,
     periodic_report_post_writeback_hooks_for_goal,
@@ -270,6 +274,8 @@ def build_parser() -> LoopXArgumentParser:
         add_subcommand_format,
         provider_command_registrars=(register_lark_periodic_report_commands,),
     )
+
+    register_machine_configuration_commands(sub, add_subcommand_format)
 
     register_semantic_preference_commands(sub, add_subcommand_format)
 
@@ -606,6 +612,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     if periodic_report_result is not None:
         return periodic_report_result
+
+    machine_configuration_result = handle_machine_configuration_command(
+        args,
+        runtime_root_arg=args.runtime_root,
+        registry_path=registry_path,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if machine_configuration_result is not None:
+        return machine_configuration_result
 
     semantic_preference_result = handle_semantic_preference_command(
         args,

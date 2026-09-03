@@ -158,6 +158,12 @@ def normalize_loopx_machine_defaults(raw: object) -> dict[str, Any]:
     )
 
 
+def loopx_machine_defaults_revision(raw: object) -> str:
+    """Compatibility revision for a validated machine configuration."""
+
+    return machine_configuration_revision(normalize_loopx_machine_defaults(raw))
+
+
 def _periodic_report_defaults(machine_defaults: Mapping[str, Any]) -> dict[str, Any]:
     normalized = normalize_loopx_machine_defaults(machine_defaults)
     return dict(normalized["namespaces"]["periodic_report"])
@@ -435,6 +441,7 @@ __all__ = [
     "PERIODIC_REPORT_MACHINE_DEFAULTS_SCHEMA",
     "build_goal_periodic_report_delivery_identity",
     "build_goal_periodic_report_delivery_plan",
+    "loopx_machine_defaults_revision",
     "normalize_loopx_machine_defaults",
     "normalize_periodic_report_machine_defaults",
     "periodic_report_machine_configuration_namespace",
