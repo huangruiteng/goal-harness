@@ -19,6 +19,10 @@ from ..effect_runtime import effect_runtime_result
 RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION = "loopx_coordination_runtime_shadow_config_v0"
 RUNTIME_SHADOW_REQUEST_SCHEMA_VERSION = "loopx_coordination_runtime_shadow_commit_v0"
 RUNTIME_SHADOW_METHOD = "coordination.runtime_shadow.commit"
+RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA_VERSION = (
+    "loopx_coordination_runtime_shadow_inspect_v0"
+)
+RUNTIME_SHADOW_INSPECT_METHOD = "coordination.runtime_shadow.inspect"
 
 
 @dataclass(frozen=True)
@@ -217,6 +221,56 @@ def dispatch_coordination_runtime_shadow(
             "status": "failed",
             "reason_code": "shadow_runtime_result_invalid",
             "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    return dict(result)
+
+
+def inspect_coordination_runtime_shadow(
+    *,
+    goal: Mapping[str, Any] | None,
+    runtime_root: Path,
+    goal_id: str,
+    projection: Mapping[str, Any],
+    runtime_invoker: RuntimeInvoker = effect_runtime_result,
+) -> dict[str, object]:
+    """Read parity evidence without allowing the shadow to drive decisions."""
+
+    config = resolve_coordination_runtime_shadow_config(goal)
+    if not config.enabled:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_inspection_v0",
+            "status": "disabled",
+            "reason_code": config.reason_code,
+            "parity_matches": False,
+            "bootstrap_required": False,
+            "decision_read_from_shadow": False,
+        }
+    request = {
+        "schema_version": RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA_VERSION,
+        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "goal_id": goal_id,
+        "projection": dict(projection),
+    }
+    try:
+        result = runtime_invoker(RUNTIME_SHADOW_INSPECT_METHOD, request)
+    except Exception as exc:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_inspection_v0",
+            "status": "failed",
+            "reason_code": "shadow_runtime_unavailable",
+            "reason": str(exc),
+            "parity_matches": False,
+            "bootstrap_required": False,
+            "decision_read_from_shadow": False,
+        }
+    if not isinstance(result, Mapping):
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_inspection_v0",
+            "status": "failed",
+            "reason_code": "shadow_runtime_result_invalid",
+            "parity_matches": False,
+            "bootstrap_required": False,
             "decision_read_from_shadow": False,
         }
     return dict(result)

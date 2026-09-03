@@ -1004,7 +1004,11 @@ task-lease writer。
 跨 runtime 测试从 Todo 与 task-lease 两条 hook 验证真实的 Python -> TypeScript ->
 `FileAuthorityStore` 路径，覆盖 default-off、稳定 replay、内容漂移拒绝、ambiguous
 commit 恢复、projection read-back 与 shadow failure isolation。这里仅关闭第一个
-runtime-shadow 切片；migration/import、一键 rollback、baseline 与持续 parity 报告、
+runtime-shadow 切片。后续 typed inspection seam 会把当前紧凑 legacy projection 与
+file head 对比，返回 `missing`、`matched` 或 `drifted` 以及两侧内容摘要。该 seam 默认
+关闭、只读，并始终返回 `decision_read_from_shadow=false`；它为 migration 提供可复用
+的 baseline/parity observation，但不会把 observation 升格为 authority。后续仍需完成
+migration/import 编排、一键 rollback、持续 parity policy、
 provider-first read flip，以及 fence 全部 legacy coordination writer，仍是独立评审的
 本地 canonical promotion 的强制证据。因此 NoKV/PostgreSQL 远端 shadow 仍属于 Stage
 3，不能把这个默认关闭的 hook 当作 authority。

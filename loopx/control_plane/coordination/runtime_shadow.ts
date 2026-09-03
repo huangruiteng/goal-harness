@@ -20,6 +20,10 @@ export const COORDINATION_RUNTIME_SHADOW_RESULT_SCHEMA =
   "loopx_coordination_runtime_shadow_result_v0";
 export const COORDINATION_RUNTIME_SHADOW_RECEIPT_SCHEMA =
   "loopx_coordination_runtime_shadow_receipt_v0";
+export const COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA =
+  "loopx_coordination_runtime_shadow_inspect_v0";
+export const COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA =
+  "loopx_coordination_runtime_shadow_inspection_v0";
 
 interface RuntimeShadowRequest {
   runtime_root: string;
@@ -32,6 +36,12 @@ interface RuntimeShadowRequest {
 
 interface RuntimeShadowDependencies {
   createStore?: (directory: string, goalId: string) => AuthorityStore;
+}
+
+interface RuntimeShadowInspectionRequest {
+  runtime_root: string;
+  goal_id: string;
+  projection: JsonObject;
 }
 
 function requiredString(value: unknown, label: string): string {
@@ -56,6 +66,22 @@ function decodeRequest(value: unknown): RuntimeShadowRequest {
     operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
     event_kind: requiredString(input.event_kind, "event_kind"),
     source_version: requiredString(input.source_version, "source_version"),
+    projection: canonicalAuthorityObject(input.projection, "projection"),
+  };
+}
+
+function decodeInspectionRequest(value: unknown): RuntimeShadowInspectionRequest {
+  const input = requireJsonObject(value, "coordination runtime shadow inspection request");
+  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA) {
+    throw new Error("coordination runtime shadow inspection request schema mismatch");
+  }
+  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
+  if (!isAbsolute(runtimeRoot)) {
+    throw new Error("runtime_root must be absolute");
+  }
+  return {
+    runtime_root: runtimeRoot,
+    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
     projection: canonicalAuthorityObject(input.projection, "projection"),
   };
 }
@@ -169,6 +195,85 @@ async function verifyAppliedProjection(
     projection_matches: projectionMatches,
     provider_revision: head.provider_revision,
   };
+}
+
+/**
+ * Compare the current legacy coordination projection with the file shadow.
+ * This is an evidence-only read for Stage 2C migration/parity qualification;
+ * callers must never use it to make a runtime coordination decision.
+ */
+export async function inspectCoordinationRuntimeShadow(
+  value: unknown,
+  dependencies: RuntimeShadowDependencies = {},
+): Promise<JsonObject> {
+  let request: RuntimeShadowInspectionRequest;
+  try {
+    request = decodeInspectionRequest(value);
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_shadow_inspection_request",
+      reason: error instanceof Error ? error.message : "invalid shadow inspection request",
+      parity_matches: false,
+      bootstrap_required: false,
+      decision_read_from_shadow: false,
+    };
+  }
+
+  const directory = join(request.runtime_root, "authority-shadow", "file-v0");
+  const store = dependencies.createStore?.(directory, request.goal_id) ??
+    new FileAuthorityStore(directory, request.goal_id);
+  const expectedProjectionSha256 = sha256(request.projection);
+  try {
+    const head = await store.loadAuthority();
+    if (head.status === "missing") {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
+        status: "missing",
+        expected_projection_sha256: expectedProjectionSha256,
+        parity_matches: false,
+        bootstrap_required: true,
+        decision_read_from_shadow: false,
+      };
+    }
+    if (head.status !== "loaded") {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
+        status: "failed",
+        reason_code: head.reason_code,
+        reason: head.reason,
+        expected_projection_sha256: expectedProjectionSha256,
+        parity_matches: false,
+        bootstrap_required: false,
+        decision_read_from_shadow: false,
+      };
+    }
+    const observedProjectionSha256 = sha256(head.head);
+    const parityMatches = observedProjectionSha256 === expectedProjectionSha256;
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
+      status: parityMatches ? "matched" : "drifted",
+      expected_projection_sha256: expectedProjectionSha256,
+      observed_projection_sha256: observedProjectionSha256,
+      provider_revision: head.provider_revision,
+      cursor: head.cursor,
+      parity_matches: parityMatches,
+      bootstrap_required: false,
+      decision_read_from_shadow: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "shadow_read_unavailable",
+      reason: error instanceof Error ? error.message : "shadow read unavailable",
+      expected_projection_sha256: expectedProjectionSha256,
+      parity_matches: false,
+      bootstrap_required: false,
+      decision_read_from_shadow: false,
+    };
+  }
 }
 
 /**

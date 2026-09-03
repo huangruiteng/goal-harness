@@ -1245,8 +1245,13 @@ Cross-runtime tests exercise the real Python -> TypeScript ->
 `FileAuthorityStore` path from both Todo and task-lease hooks, including
 default-off behavior, stable replay, content-drift rejection, ambiguous-commit
 recovery, projection read-back, and shadow-failure isolation. This closes the
-first runtime-shadow slice only. Migration/import, a rollback command, baseline
-and sustained parity reports, the provider-first read flip, and fencing every
+first runtime-shadow slice. A follow-up typed inspection seam now compares the
+current compact legacy projection with the file head and reports `missing`,
+`matched`, or `drifted` plus both content digests. It is default-off,
+read-only, and always returns `decision_read_from_shadow=false`; this provides
+the reusable baseline/parity observation needed by migration without turning
+an observation into authority. Migration/import orchestration, a rollback
+command, sustained parity policy, the provider-first read flip, and fencing every
 legacy coordination writer remain mandatory evidence for the separately
 reviewed local canonical promotion. Remote NoKV/PostgreSQL shadowing therefore
 remains Stage 3 and cannot use this default-off hook as authority.

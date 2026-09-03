@@ -11,6 +11,7 @@ from loopx.control_plane.coordination.runtime_shadow import (
     RUNTIME_SHADOW_METHOD,
     build_todo_runtime_shadow_projection,
     dispatch_coordination_runtime_shadow,
+    inspect_coordination_runtime_shadow,
     load_task_lease_runtime_shadow_records,
     resolve_coordination_runtime_shadow_config,
 )
@@ -122,6 +123,63 @@ def test_runtime_shadow_failure_never_changes_primary_truth(tmp_path: Path) -> N
     assert result["reason_code"] == "shadow_runtime_unavailable"
     assert result["primary_writeback_preserved"] is True
     assert result["decision_read_from_shadow"] is False
+
+
+def test_runtime_shadow_inspection_is_default_off_and_forwards_compact_projection(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+    disabled = inspect_coordination_runtime_shadow(
+        goal={"id": "goal-a"},
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        projection={"schema_version": "projection_v0", "todos": []},
+        runtime_invoker=lambda *args: calls.append(args),
+    )
+    assert disabled["status"] == "disabled"
+    assert disabled["decision_read_from_shadow"] is False
+    assert calls == []
+
+    goal = {
+        "id": "goal-a",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+    captured: dict[str, object] = {}
+
+    def inspect(method: str, params: dict[str, object]) -> dict[str, object]:
+        captured["method"] = method
+        captured["params"] = params
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_inspection_v0",
+            "status": "matched",
+            "parity_matches": True,
+            "bootstrap_required": False,
+            "decision_read_from_shadow": False,
+        }
+
+    matched = inspect_coordination_runtime_shadow(
+        goal=goal,
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        projection={"schema_version": "projection_v0", "todos": []},
+        runtime_invoker=inspect,
+    )
+    assert matched["status"] == "matched"
+    assert matched["decision_read_from_shadow"] is False
+    assert captured["method"] == "coordination.runtime_shadow.inspect"
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert params["runtime_root"] == str(tmp_path.resolve())
+    assert params["projection"] == {
+        "schema_version": "projection_v0",
+        "todos": [],
+    }
 
 
 def test_todo_projection_is_compact_stable_and_excludes_private_fields() -> None:
@@ -321,6 +379,66 @@ def test_committed_todo_hook_reaches_the_file_shadow_through_typescript(
     assert result["decision_read_from_shadow"] is False
     assert result["parity"]["receipt_matches"] is True
     assert result["parity"]["projection_readback"]["verified"] is True
+
+
+def test_runtime_shadow_inspection_reaches_file_store_through_typescript(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    goal = {
+        "id": "goal-a",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+    projection = {
+        "schema_version": "projection_v0",
+        "goal_id": "goal-a",
+        "todos": [{"todo_id": "todo_one", "status": "open"}],
+        "leases": [],
+    }
+    runtime_root = tmp_path / "state"
+    monkeypatch.setattr(
+        effect_runtime,
+        "_runtime_dir",
+        lambda: tmp_path / "effect-runtime",
+    )
+
+    try:
+        before = inspect_coordination_runtime_shadow(
+            goal=goal,
+            runtime_root=runtime_root,
+            goal_id="goal-a",
+            projection=projection,
+        )
+        applied = dispatch_coordination_runtime_shadow(
+            goal=goal,
+            runtime_root=runtime_root,
+            goal_id="goal-a",
+            operation_id="todo-shadow:event-inspect",
+            event_kind="todo_update",
+            source_version="state:1",
+            projection=projection,
+        )
+        after = inspect_coordination_runtime_shadow(
+            goal=goal,
+            runtime_root=runtime_root,
+            goal_id="goal-a",
+            projection=projection,
+        )
+    finally:
+        effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
+
+    assert before["status"] == "missing"
+    assert before["bootstrap_required"] is True
+    assert applied["status"] == "applied"
+    assert after["status"] == "matched"
+    assert after["parity_matches"] is True
+    assert after["decision_read_from_shadow"] is False
 
 
 def test_lease_projection_reads_compact_terminal_records(tmp_path: Path) -> None:

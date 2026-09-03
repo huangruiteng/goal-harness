@@ -98,7 +98,10 @@ import {
 } from "./work_items/task_lease_acquire.ts";
 import { executeTaskLeaseLifecycle } from "./work_items/task_lease_lifecycle.ts";
 import { evaluateTaskLeaseLifecycleDecision } from "./work_items/task_lease_lifecycle_decision.ts";
-import { commitCoordinationRuntimeShadow } from "./coordination/runtime_shadow.ts";
+import {
+  commitCoordinationRuntimeShadow,
+  inspectCoordinationRuntimeShadow,
+} from "./coordination/runtime_shadow.ts";
 import {
   projectTodoPlanningInventory,
   projectTodoPlanningInventoryDetail,
@@ -359,6 +362,7 @@ export function createEffectRuntimeHandlers(
     ["task_lease.lifecycle.decide", evaluateTaskLeaseLifecycleDecision],
     ["task_lease.lifecycle.native", executeTaskLeaseLifecycle],
     ["coordination.runtime_shadow.commit", commitCoordinationRuntimeShadow],
+    ["coordination.runtime_shadow.inspect", inspectCoordinationRuntimeShadow],
     ["task_lease.write_scopes.overlap", evaluateTaskLeaseWriteScopesOverlap],
     ["quota.monitor_poll.commit", evaluateQuotaMonitorPollCommit],
     [
