@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ...control_plane.todos.contract import normalize_todo_claimed_by
 from ..machine_configuration.contract import (
     MACHINE_CONFIGURATION_SCHEMA,
     MachineConfigurationNamespace,
@@ -56,6 +57,15 @@ def _text(value: object, label: str, *, maximum: int = 160) -> str:
     if len(text) > maximum:
         raise ValueError(f"{label} exceeds {maximum} characters")
     return text
+
+
+def _agent_id(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{label} must be a string")
+    normalized = normalize_todo_claimed_by(value)
+    if normalized is None:
+        raise ValueError(f"{label} must be a public-safe Agent id")
+    return normalized
 
 
 def _digest(value: object) -> str:
@@ -180,48 +190,62 @@ def _goal_periodic_report(goal: Mapping[str, Any]) -> dict[str, Any] | None:
 def _normalized_goal_subscription(
     *, goal_id: str, config: Mapping[str, Any], source: str
 ) -> dict[str, Any]:
-    enabled = config.get("enabled") is True
+    enabled = config.get("enabled")
+    if not isinstance(enabled, bool):
+        raise TypeError("goal periodic_report.enabled must be a boolean")
+    timezone_name = _text(
+        config.get("timezone", "UTC"), "goal periodic_report.timezone"
+    )
+    try:
+        ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("goal periodic_report.timezone is unknown") from exc
+    profile_preset = str(config.get("profile_preset") or "").strip() or None
+    route_ref = str(config.get("route_ref") or "").strip() or None
+    if enabled:
+        profile_preset = _text(
+            profile_preset, "goal periodic_report.profile_preset"
+        )
+        route_ref = _text(route_ref, "goal periodic_report.route_ref")
     subscription: dict[str, Any] = {
         "schema_version": GOAL_SUBSCRIPTION_SCHEMA,
         "goal_id": goal_id,
         "enabled": enabled,
         "source": source,
-        "profile_preset": str(config.get("profile_preset") or "").strip() or None,
-        "route_ref": str(config.get("route_ref") or "").strip() or None,
-        "timezone": str(config.get("timezone") or "UTC").strip(),
+        "profile_preset": profile_preset,
+        "route_ref": route_ref,
+        "timezone": timezone_name,
     }
     subscription["effective_revision"] = _digest(subscription)
     return subscription
 
 
 def resolve_goal_periodic_report_subscription(
-    goal: Mapping[str, Any], machine_defaults: Mapping[str, Any]
+    goal: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Resolve ownership without making the executing Agent part of identity."""
+    """Resolve the runtime subscription from Goal-owned state only.
 
+    Machine configuration is a connection and explicit-migration input. It is
+    deliberately absent here so changing machine policy cannot silently alter
+    an already-running Goal.
+    """
     goal_id = _text(goal.get("id"), "goal.id")
-    periodic_defaults = _periodic_report_defaults(machine_defaults)
     existing = _goal_periodic_report(goal)
-    if existing is not None:
-        effective = {
-            **periodic_defaults,
-            **existing,
-        }
-        effective.pop("inheritance", None)
-        source = (
-            "machine_default"
-            if existing.get("source") == "machine_default"
-            else "goal_override"
-        )
+    if existing is None:
         return _normalized_goal_subscription(
             goal_id=goal_id,
-            config=effective,
-            source=source,
+            config={"enabled": False, "timezone": "UTC"},
+            source="not_configured",
         )
+    source = (
+        "machine_default"
+        if existing.get("source") == "machine_default"
+        else "goal_override"
+    )
     return _normalized_goal_subscription(
         goal_id=goal_id,
-        config=periodic_defaults,
-        source="machine_default_preview",
+        config=existing,
+        source=source,
     )
 
 
@@ -341,16 +365,15 @@ def build_goal_periodic_report_delivery_identity(
 
 
 def select_goal_periodic_report_executor(
-    *, reporting_agent_id: str, eligible_agent_ids: list[str]
+    *, reporting_agent_id: object, eligible_agent_ids: list[object]
 ) -> dict[str, Any]:
     """Prefer the selected candidate's reporter while keeping Goal-owned failover."""
 
-    reporter = _text(reporting_agent_id, "reporting_agent_id")
+    reporter = _agent_id(reporting_agent_id, "reporting_agent_id")
     eligible = sorted(
         {
-            str(agent_id).strip()
-            for agent_id in eligible_agent_ids
-            if str(agent_id).strip()
+            _agent_id(agent_id, f"eligible_agent_ids[{index}]")
+            for index, agent_id in enumerate(eligible_agent_ids)
         }
     )
     if reporter in eligible:
@@ -381,7 +404,6 @@ def build_goal_periodic_report_delivery_plan(
         allowed={
             "schema_version",
             "goal",
-            "machine_defaults",
             "period_window",
             "reporting_agent_id",
             "eligible_agent_ids",
@@ -391,14 +413,11 @@ def build_goal_periodic_report_delivery_plan(
     if payload.get("schema_version") != DELIVERY_PLAN_REQUEST_SCHEMA:
         raise ValueError(f"request must use {DELIVERY_PLAN_REQUEST_SCHEMA}")
     goal = _mapping(payload.get("goal"), "request.goal")
-    machine_defaults = _mapping(
-        payload.get("machine_defaults"), "request.machine_defaults"
-    )
     period = _mapping(payload.get("period_window"), "request.period_window")
     eligible_raw = payload.get("eligible_agent_ids")
     if not isinstance(eligible_raw, list):
         raise TypeError("request.eligible_agent_ids must be a list")
-    subscription = resolve_goal_periodic_report_subscription(goal, machine_defaults)
+    subscription = resolve_goal_periodic_report_subscription(goal)
     if subscription["enabled"] is not True:
         return {
             "ok": True,
@@ -416,10 +435,8 @@ def build_goal_periodic_report_delivery_plan(
         route_id=route_ref,
     )
     executor = select_goal_periodic_report_executor(
-        reporting_agent_id=_text(
-            payload.get("reporting_agent_id"), "request.reporting_agent_id"
-        ),
-        eligible_agent_ids=[str(agent_id) for agent_id in eligible_raw],
+        reporting_agent_id=payload.get("reporting_agent_id"),
+        eligible_agent_ids=eligible_raw,
     )
     return {
         "ok": True,

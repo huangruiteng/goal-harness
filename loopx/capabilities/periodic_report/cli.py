@@ -331,20 +331,28 @@ def render_periodic_report_markdown(payload: dict[str, object]) -> str:
             ]
         )
     if payload.get("schema_version") in {
+        "machine_configuration_update_plan_v0",
+        "machine_configuration_transaction_v0",
+        "machine_configuration_inspection_v0",
+        "machine_configuration_rollback_plan_v0",
+        "machine_configuration_rollback_receipt_v0",
         "periodic_report_machine_default_backfill_plan_v0",
-        "periodic_report_machine_default_update_plan_v0",
-        "periodic_report_machine_default_transaction_v0",
-        "periodic_report_machine_default_inspection_v0",
-        "periodic_report_machine_default_rollback_plan_v0",
-        "periodic_report_machine_default_rollback_receipt_v0",
         "periodic_report_goal_delivery_plan_v0",
     }:
+        machine_configuration = str(payload.get("schema_version") or "").startswith(
+            "machine_configuration_"
+        )
         return "\n".join(
             [
-                "# Periodic Report Goal Plan",
+                (
+                    "# Machine Configuration"
+                    if machine_configuration
+                    else "# Periodic Report Goal Plan"
+                ),
                 "",
                 f"- schema: `{payload.get('schema_version')}`",
                 f"- status: `{payload.get('status', 'preview')}`",
+                f"- action: `{payload.get('action', 'none')}`",
                 f"- writes_required: `{payload.get('writes_required', 0)}`",
                 "",
             ]

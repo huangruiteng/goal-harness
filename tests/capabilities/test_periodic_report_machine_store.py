@@ -366,6 +366,44 @@ def test_canonical_machine_config_cli_uses_the_same_store_and_projection(
     )
 
 
+def test_periodic_report_compatibility_cli_renders_generic_machine_schemas(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text('{"goals": []}', encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    defaults_path = tmp_path / "defaults.json"
+    defaults_path.write_text(json.dumps(_defaults()), encoding="utf-8")
+    common = [
+        "--registry",
+        str(registry_path),
+        "--runtime-root",
+        str(runtime_root),
+        "periodic-report",
+    ]
+
+    assert (
+        main(
+            [
+                *common,
+                "configure-machine-defaults",
+                "--config-json",
+                str(defaults_path),
+            ]
+        )
+        == 0
+    )
+    preview = capsys.readouterr().out
+    assert preview.startswith("# Machine Configuration")
+    assert "- status: `preview`" in preview
+    assert "- action: `create`" in preview
+
+    assert main([*common, "inspect-machine-defaults"]) == 0
+    inspection = capsys.readouterr().out
+    assert inspection.startswith("# Machine Configuration")
+    assert "- status: `absent`" in inspection
+
+
 def test_inspection_is_path_free_and_reports_absence(tmp_path: Path) -> None:
     result = inspect_periodic_report_machine_defaults(tmp_path)
 

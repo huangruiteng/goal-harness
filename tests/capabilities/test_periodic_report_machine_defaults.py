@@ -68,39 +68,32 @@ def test_goal_override_beats_machine_default() -> None:
         }
     }
 
-    subscription = resolve_goal_periodic_report_subscription(goal, _defaults())
+    subscription = resolve_goal_periodic_report_subscription(goal)
 
     assert subscription["enabled"] is False
     assert subscription["route_ref"] == "project-room"
     assert subscription["source"] == "goal_override"
 
 
-def test_partial_goal_override_inherits_unspecified_machine_fields() -> None:
+def test_runtime_goal_subscription_does_not_fall_back_to_machine_defaults() -> None:
     goal = _goal("research")
     goal["control_plane"] = {"periodic_report": {"enabled": True}}
 
-    subscription = resolve_goal_periodic_report_subscription(goal, _defaults())
-
-    assert subscription["enabled"] is True
-    assert subscription["profile_preset"] == "weekly-progress"
-    assert subscription["route_ref"] == "loopx-concierge"
-    assert subscription["timezone"] == "Asia/Shanghai"
-    assert subscription["source"] == "goal_override"
+    with pytest.raises(ValueError, match="profile_preset"):
+        resolve_goal_periodic_report_subscription(goal)
 
 
-def test_unconfigured_goal_previews_machine_default_without_an_agent_identity() -> None:
-    subscription = resolve_goal_periodic_report_subscription(
-        _goal("research"), _defaults()
-    )
+def test_unconfigured_goal_is_not_subscribed_at_runtime() -> None:
+    subscription = resolve_goal_periodic_report_subscription(_goal("research"))
 
     assert subscription == {
         "schema_version": "periodic_report_goal_subscription_v0",
         "goal_id": "research",
-        "enabled": True,
-        "source": "machine_default_preview",
-        "profile_preset": "weekly-progress",
-        "route_ref": "loopx-concierge",
-        "timezone": "Asia/Shanghai",
+        "enabled": False,
+        "source": "not_configured",
+        "profile_preset": None,
+        "route_ref": None,
+        "timezone": "UTC",
         "effective_revision": subscription["effective_revision"],
     }
     assert "agent_id" not in subscription
@@ -193,11 +186,20 @@ def test_reporting_agent_is_preferred_but_failover_keeps_goal_identity() -> None
 
 
 def test_goal_delivery_plan_prefers_the_candidate_reporting_agent() -> None:
+    goal = _goal("research")
+    goal["control_plane"] = {
+        "periodic_report": {
+            "enabled": True,
+            "profile_preset": "weekly-progress",
+            "route_ref": "loopx-concierge",
+            "timezone": "Asia/Shanghai",
+            "source": "machine_default",
+        }
+    }
     result = build_goal_periodic_report_delivery_plan(
         {
             "schema_version": "periodic_report_goal_delivery_plan_request_v0",
-            "goal": _goal("research"),
-            "machine_defaults": _defaults(),
+            "goal": goal,
             "period_window": {
                 "start_at": "2026-08-24T00:00:00+08:00",
                 "end_at": "2026-08-31T00:00:00+08:00",
@@ -210,6 +212,50 @@ def test_goal_delivery_plan_prefers_the_candidate_reporting_agent() -> None:
     assert result["status"] == "ready"
     assert result["executor"]["selected_agent_id"] == "agent-b"
     assert "agent_id" not in result["delivery_identity"]
+
+
+def test_goal_delivery_plan_does_not_activate_an_unconfigured_goal() -> None:
+    result = build_goal_periodic_report_delivery_plan(
+        {
+            "schema_version": "periodic_report_goal_delivery_plan_request_v0",
+            "goal": _goal("research"),
+            "period_window": {
+                "start_at": "2026-08-24T00:00:00+08:00",
+                "end_at": "2026-08-31T00:00:00+08:00",
+            },
+            "reporting_agent_id": "agent-b",
+            "eligible_agent_ids": ["agent-a", "agent-b"],
+        }
+    )
+
+    assert result["status"] == "not_subscribed"
+    assert result["subscription"]["source"] == "not_configured"
+    assert result["delivery_identity"] is None
+    assert result["executor"] is None
+
+
+@pytest.mark.parametrize(
+    "invalid_agent_id",
+    [None, 1, True, {"id": "agent-a"}, ""],
+)
+def test_goal_delivery_executor_rejects_untyped_agent_ids(
+    invalid_agent_id: object,
+) -> None:
+    with pytest.raises((TypeError, ValueError), match=r"eligible_agent_ids\[0\]"):
+        select_goal_periodic_report_executor(
+            reporting_agent_id="agent-b",
+            eligible_agent_ids=[invalid_agent_id],
+        )
+
+
+def test_goal_delivery_executor_reports_an_empty_eligible_set() -> None:
+    result = select_goal_periodic_report_executor(
+        reporting_agent_id="agent-b",
+        eligible_agent_ids=[],
+    )
+
+    assert result["selected_agent_id"] is None
+    assert result["selection_reason"] == "no_eligible_executor"
 
 
 def test_delivery_identity_normalizes_equivalent_timestamp_offsets() -> None:
@@ -298,8 +344,18 @@ def test_goal_delivery_plan_cli_prefers_the_reporting_agent(
         json.dumps(
             {
                 "schema_version": "periodic_report_goal_delivery_plan_request_v0",
-                "goal": _goal("research"),
-                "machine_defaults": _defaults(),
+                "goal": {
+                    **_goal("research"),
+                    "control_plane": {
+                        "periodic_report": {
+                            "enabled": True,
+                            "profile_preset": "weekly-progress",
+                            "route_ref": "loopx-concierge",
+                            "timezone": "Asia/Shanghai",
+                            "source": "machine_default",
+                        }
+                    },
+                },
                 "period_window": {
                     "start_at": "2026-08-24T00:00:00+08:00",
                     "end_at": "2026-08-31T00:00:00+08:00",
