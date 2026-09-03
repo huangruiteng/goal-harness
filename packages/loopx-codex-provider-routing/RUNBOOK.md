@@ -146,6 +146,7 @@ merge commit，并重新运行本文矩阵。
 | Codex App selector projection | 本机与 SSH App Server readback 通过 | `model/list` 暴露三组 Standard/Fast Sol 行、Luna、Ark 共八个可见 selector，并保留隐藏 `gpt-5.6-sol` 兼容 alias；C 不存在 |
 | 图片能力投影 | 正向 E2E 通过，Auto 负向路径有已复现缺口 | Auto、Prefer A、Prefer B、Luna 声明 `text + image`，Ark 保持 `text`；健康 A/B 下图片到达 Codex。A/B 失败后，当前 Auto affinity 可能错误粘到 Ark，尚未做到 modality-aware fail closed |
 | 模型切换快照 | 已复现设置落盘与新 turn 启动竞态 | UI 显示已选择 B 不足以证明正在运行或重试的 turn 已采用 B；旧 turn 可能继续携带 Auto 快照。需要 durable settings revision / readback 后再启动新 turn |
+| Provider incident 恢复 | 真实故障链已复现；in-memory restart 已恢复，待 CPA 固化 | incident 期间 Ark affinity 粘住后，Code Mode exec 以 incompatible payload 失败；恢复后必须先失效 incident cooldown、完成 bounded probe 并清 degraded affinity；Ark HTTP 200 不能作为 native 已恢复的证据 |
 | Fast tier 投影 | 本机与 SSH App Server readback 通过 | Auto、Prefer A、Prefer B 各有显式 `fast/` sibling 行，默认 tier 为 `fast` 并在请求规整时强制 `priority`；普通行与 Luna 保持 `default`，Fast 行不进入 Ark |
 | SSH CPA 远端 | reverse-loopback 与 App Server 通过 | 远端只连接 loopback tunnel，不保存本机 OAuth/Ark secret；同一 SSH alias 与同一远端 `CODEX_HOME` 可继续原 task，新建 task 不删除旧 session |
 | CPA upstream review | quota PR 已合并；四个分发 PR 等待 maintainer review | #5211 merge `ca601db0`；#5410 head `566da3b`、#5261 head `c8e76e1`、#5336 head `cc16e38`、#5435 head `6f16121` 的 CI 已通过 |
@@ -615,6 +616,28 @@ failover 队列前进；session affinity 随后粘到 text-only Ark；App 又对
 资格通过标准。AgentSwap 也不参与这条在线路径；它无法修复 settings race 或
 modality-blind affinity。
 
+### Provider incident 结束后的恢复边界
+
+2026-09-03 的公开 ChatGPT/Codex incident 暴露了一个与图片无关的等价失败链：
+
+1. native A/B 在 provider incident 中全部返回 4xx/5xx（`model_not_found` 或
+   `no healthy upstream`），CPA 因此把 session 粘到 text-only Ark tail；
+2. incident 结束、native 上游恢复后，Ark affinity 仍被当作普通 1h 亲和保留；
+   native 账号在 incident 中进入的 cooldown 也没有 half-open 探测；
+3. 文本请求经 Ark 返回 HTTP 200，看起来已经恢复，但需要 Code Mode
+   `custom_tool_call`（如 exec）的请求仍走 Ark，最终以 incompatible payload
+   失败；新的冷 session 又优先撞在已耗尽配额的 native 账号上。
+
+结论与图片路径一致：affinity 只是 hint，fallback binding 必须标记 degraded。
+一旦观察到晚于 cooldown 来源的 recovery signal，先失效 incident cooldown 并
+执行 bounded probe，再把 native-capability 请求重绑到 A/B。fallback 返回的
+HTTP 200 不能作为 native 已恢复的证据。
+
+`qualify_outage_recovery` 用 symbolic、content-free 观察固化这条恢复顺序；
+手工重启 in-memory runtime 只是 operator remedy，不是资格通过标准。要根治需要
+CPA 在在线 selector 中实现 incident 错误分类、恢复后自动失效/probe 与 degraded
+affinity 重绑，LoopX 只维护 contract 和验收门。
+
 ## 一键切模型时如何切轨迹
 
 “切轨迹”不应理解成修改或覆盖本地 rollout。安全的抽象是：一个逻辑 task 保留一份
@@ -777,17 +800,19 @@ in-band SSE error、客户端取消和 handler 自己补出的 lifecycle event�
 
 ## 运行时恢复与兼容门
 
-在把异构 provider 纳入自动 fallback 前，还要过三类独立恢复门。它们不能被“HTTP 200”
+在把异构 provider 纳入自动 fallback 前，还要过四类独立恢复门。它们不能被“HTTP 200”
 或“进程已经启动”替代：
 
 | 故障面 | 必须观察 | fail-closed 行为 |
 | --- | --- | --- |
 | 桌面补丁升级 | 当前构建只有一个已应用锚点；所有改动文件的 ASAR integrity 匹配；header digest 与 bundle metadata 匹配；签名、启动、heartbeat readback 均成功 | 停留在旧 runtime 或回滚，不把未知构建投入使用 |
 | quota reset | reset receipt 晚于 cooldown 来源；旧 cooldown 已失效；目标账号先完成一次 bounded probe | probe 前不得因旧 cooldown 直接选择 fallback；新 probe 明确 quota-limited 后才允许新 cooldown |
+| provider incident 结束 | recovery signal（官方状态恢复或 bounded probe success）晚于 cooldown 来源；旧 incident cooldown 已失效；目标账号先完成一次 bounded probe；degraded fallback affinity 已清或按能力重绑 | 未完成 probe 前不得继续 fallback；native-capability 请求（Code Mode `custom_tool_call`、图片、Fast）不得留在只支持文本的 degraded binding 上，无 eligible native 时 fail closed |
 | Code Mode 工具 | selector normalization 声明 `required_tool_transport=custom_tool_call`；实际响应仍为 `custom_tool_call`；host dispatch 完成 | function-only provider 在遍历前被过滤；适配层若降级 item type，qualification 失败 |
 
-这三类证据分别由 `qualify_desktop_patch`、`qualify_quota_recovery`、
-`qualify_tool_transport` 接收。它们只处理 symbolic、content-free observation。
+这四类证据分别由 `qualify_desktop_patch`、`qualify_quota_recovery`、
+`qualify_outage_recovery`、`qualify_tool_transport` 接收。它们只处理 symbolic、
+content-free observation。
 本机 bundle 路径、账号身份、task ID、原始日志、OAuth 和 reset token 都不得进入
 LoopX state 或公开 PR。
 
@@ -814,6 +839,7 @@ LoopX state 或公开 PR。
 | hidden bare alias | 旧 task 或跨 host metadata 使用 `gpt-5.6-sol` 时按 Auto 路由，不在 selector 重复显示 |
 | Auto / A / B 图片输入 | App admission 通过，图片实际到达 A/B；A/B 均不可用时明确失败，不降级为 Ark 文本请求 |
 | Auto affinity + 图片 + Codex 故障 | 每个 attempt 重算 required modalities；旧 Ark affinity 失效；A/B 无 eligible target 时首字节前返回 typed error |
+| Provider incident 结束 | recovery signal 晚于 cooldown 来源；incident cooldown 已失效；bounded probe 完成；degraded Ark affinity 不得用于 Code Mode / 图片 / Fast；text-only 只在 still-outage probe 后保留 |
 | Ark 图片输入 | App 或 provider 明确拒绝；不把 Ark catalog 伪装为 image-capable |
 | Fast selector rows | Auto/Prefer A/Prefer B 各有 Standard 与 Fast 行；普通行和 Luna 默认 `default`，Fast 行强制 `priority`；Fast A/B 都失败时不落 Ark |
 | Fast request normalization | 在 alias mapping 前捕获原始 `fast/` selector；剥离前缀后保持同一底层 route；普通 selector 的 model/tier 不被误改 |
@@ -835,7 +861,7 @@ LoopX state 或公开 PR。
 | Upstream | 计划 | 合并门槛 |
 | --- | --- | --- |
 | CPA | **公共分发 PR**：[history / SSE normalization #5410](https://github.com/router-for-me/CLIProxyAPI/pull/5410) head `566da3b`；[ChatGPT uTLS HTTP/2 连接复用与 TLS session resumption #5261](https://github.com/router-for-me/CLIProxyAPI/pull/5261) head `c8e76e1`；[route priority #5336](https://github.com/router-for-me/CLIProxyAPI/pull/5336) head `cc16e38`；[OpenAI-compatible bounded rate-limit waits #5435](https://github.com/router-for-me/CLIProxyAPI/pull/5435) head `6f16121` | 截至 2026-09-03，四者 CI 均通过并等待 review；self-use 锁定 integrated fork SHA，但不得把它表述为 upstream release |
-| CPA modality-aware Auto | **待提交公共 PR**：required-modality admission、affinity invalidation、无 eligible provider 的 typed error | 先用 text-only fallback + image history 复现；验证 A/B 正常、B 网络失败、A/B 全不可用与旧 Ark affinity 四类路径；不得把图片剥离后继续文本请求 |
+| CPA modality-aware Auto + incident recovery | **待提交公共 PR**：required-modality / required-tool-transport admission、affinity invalidation、incident 错误分类与恢复后自动失效/probe/重绑、无 eligible provider 的 typed error | 先用 text-only fallback + image history 与 2026-09-03 provider incident 恢复链复现；验证 A/B 正常、B 网络失败、A/B 全不可用、旧 Ark affinity 与官方故障结束后 stale cooldown 五类路径；不得把图片剥离后继续文本请求，也不得让 Code Mode exec 走 text-only degraded binding |
 | AgentSwap | **条件 PR**：只有 locked commit 的 Codex writer 不能保持 multipart tool-result 1:1，或需要 provider-neutral checkpoint export 时才提交 | round-trip test 先复现真实缺口；不增加在线 retry、模型选择或第二 data plane |
 | Codex App / App Server | **待验证上游 seam**：settings revision 持久化/readback 与 turn-start 原子顺序；compaction barrier 仍只需要 fork + navigate host hook | 新 turn 必须证明采用新 revision；旧 turn 的 retry 不得被 UI 显示伪装为新模型；hook 不获得 provider 路由、凭据或 LoopX authority |
 | CC Switch | 当前无 PR | 只保留 bootstrap、credential import、snapshot 和 rollback；不重新进入 per-turn 在线切换 |
@@ -863,9 +889,12 @@ commit 作为升级候选并重跑 qualification。#5261 已进入 integrated se
 5. **本机与 SSH selector（self-use 已完成）**：八个可见 selector、hidden bare alias、图片
    能力、逐行 tier 与 Fast request-normalizer contract 已在两端 App Server readback 通过；
    上游 release 升级仍要重启对应 App Server 并重复 readback。
-6. **多模态 Auto 负向路径（待修复）**：健康 A/B 的图片 E2E 已通过；modality-aware
-   affinity、A/B 全不可用时的 typed fail-closed，以及 settings revision / turn-start 竞态仍要
-   修复并重跑矩阵。在此之前不宣称 Auto 图片 failover 已完整资格化。
+6. **Provider incident 恢复与多模态 Auto 负向路径（待修复）**：健康 A/B 的图片
+   E2E 已通过；2026-09-03 incident 复现了 provider incident 结束后 stale
+   cooldown + degraded Ark affinity 的失败链。modality-aware affinity、incident
+   错误分类与恢复后自动失效/probe/重绑、A/B 全不可用时的 typed fail-closed，以及
+   settings revision / turn-start 竞态仍要修复并重跑矩阵。在此之前不宣称 Auto
+   failover 已完整资格化。
 7. **连接复用升级（self-use 已完成，上游待 review）**：#5261 已通过公共 CI 与 integrated
    self-use matrix，覆盖 HTTP/2 reuse、TLS resumed、draining transport close、异常重建和
    已提交输出不重放；上游合并后仍要以 merge commit 重新验证。

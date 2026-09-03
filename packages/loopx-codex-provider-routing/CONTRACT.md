@@ -18,6 +18,8 @@ Desktop patch qualification: `codex_desktop_patch_qualification_v0`
 
 Quota recovery qualification: `codex_quota_recovery_qualification_v0`
 
+Outage recovery qualification: `codex_outage_recovery_qualification_v0`
+
 Tool transport qualification: `codex_tool_transport_qualification_v0`
 
 The provider accepts exactly one public-safe operation per invocation and
@@ -112,6 +114,15 @@ invalidate it and probe that account before selecting a fallback. A fresh probe
 may either succeed or return a new quota limit; only the latter permits a new
 cooldown and fallback. This contract prevents a reset account from remaining
 unreachable until an obsolete expiry.
+
+An observed provider-incident end is ordered the same way. A cooldown created
+by incident errors (for example repeated 4xx/5xx across every native profile)
+is stale once a recovery signal newer than its source is observed. CPA must
+invalidate that cooldown, complete a bounded probe and revalidate any degraded
+fallback affinity before admitting a request that needs native capabilities.
+The fallback may keep serving text-only traffic only while the probe still
+reports an outage; a native-capability request must fail closed rather than
+travel through an unqualified fallback binding.
 
 Patched desktop builds have a separate post-build gate. The patch anchor must
 be unique for the current build, every changed ASAR member must have matching

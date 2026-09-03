@@ -14,6 +14,7 @@ ports, accounts or private receipts.
 | Generate a Codex catalog from cached model entries, start an isolated App Server, call `model/list` | Partially migrated | Catalog contract and content-free readback assertions are public; spawning the host-owned App Server remains an operator adapter |
 | Verify a patched desktop runtime across versioned anchors, ASAR member/header integrity, signature, launch and heartbeat readback | Migrated as a read-only qualification | `qualify_desktop_patch`; patching, signing and process lifecycle remain operator-owned effects |
 | Invalidate a provider cooldown after a newer successful quota reset | Migrated as a recovery ordering contract | `qualify_quota_recovery`; CPA owns the live invalidation and bounded reprobe |
+| Invalidate incident cooldown and revalidate degraded fallback affinity after a provider-wide outage ends | Migrated as a recovery ordering contract | `qualify_outage_recovery`; CPA owns the live invalidation, bounded probe and binding revalidation |
 | Preserve Code Mode tool item shape across heterogeneous fallback | Migrated as admission plus qualification | profile `tool_transports`, `normalize_selector_request` and `qualify_tool_transport`; adapters must prove custom-item preservation before declaring support |
 | Reconcile an ordered multi-PR candidate against exact heads and required seams | Migrated as a public-safe planning contract | `reconcile_integration_candidate` returns core `integration-branch` inputs; Git effects remain outside the extension |
 | Prepare/start/serve/stop CPA; reconcile A/B OAuth slots; load third-party API credentials | Private runtime boundary | Not copied. A future permissioned provider may wrap install/status/validate, but login and secret loading stay operator-owned |
@@ -49,6 +50,8 @@ The package keeps credential-free examples for every operation, including:
   signature, launch and heartbeat qualification;
 - [`examples/quota-recovery.json`](examples/quota-recovery.json): reset/cooldown
   ordering with bounded reprobe;
+- [`examples/outage-recovery.json`](examples/outage-recovery.json): incident-end
+  ordering with stale cooldown invalidation, bounded probe and affinity revalidation;
 - [`examples/tool-transport.json`](examples/tool-transport.json): requested and
   observed tool item transport plus dispatch outcome.
 
