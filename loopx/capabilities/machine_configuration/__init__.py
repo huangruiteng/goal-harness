@@ -7,6 +7,7 @@ from .contract import (
     machine_configuration_revision,
     normalize_machine_configuration,
     project_machine_configuration,
+    remove_machine_configuration_namespace,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "machine_configuration_revision",
     "normalize_machine_configuration",
     "project_machine_configuration",
+    "remove_machine_configuration_namespace",
 ]

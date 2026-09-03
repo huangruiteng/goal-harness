@@ -10,6 +10,7 @@ from loopx.capabilities.machine_configuration.contract import (
     MachineConfigurationRegistry,
     normalize_machine_configuration,
     project_machine_configuration,
+    remove_machine_configuration_namespace,
 )
 
 
@@ -78,3 +79,19 @@ def test_consumer_schema_version_and_fields_are_enforced() -> None:
     config["namespaces"]["example"]["surprise"] = True
     with pytest.raises(ValueError, match="example contains unsupported fields"):
         normalize_machine_configuration(config, registry=_registry())
+
+
+def test_removing_the_last_namespace_returns_document_absence() -> None:
+    assert (
+        remove_machine_configuration_namespace(
+            _config(), namespace="example", registry=_registry()
+        )
+        is None
+    )
+
+
+def test_removing_an_unknown_namespace_fails_closed() -> None:
+    with pytest.raises(ValueError, match="unsupported machine-configuration namespace"):
+        remove_machine_configuration_namespace(
+            _config(), namespace="unknown", registry=_registry()
+        )

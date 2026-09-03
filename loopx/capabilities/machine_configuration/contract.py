@@ -134,6 +134,31 @@ def project_machine_configuration(
     }
 
 
+def remove_machine_configuration_namespace(
+    current: Mapping[str, Any] | None,
+    *,
+    namespace: str,
+    registry: MachineConfigurationRegistry,
+) -> dict[str, Any] | None:
+    """Remove one typed namespace, returning absence for an empty document."""
+
+    registry.resolve(namespace)
+    if current is None:
+        return None
+    normalized = normalize_machine_configuration(current, registry=registry)
+    namespaces = dict(normalized["namespaces"])
+    namespaces.pop(namespace, None)
+    if not namespaces:
+        return None
+    return normalize_machine_configuration(
+        {
+            "schema_version": MACHINE_CONFIGURATION_SCHEMA,
+            "namespaces": namespaces,
+        },
+        registry=registry,
+    )
+
+
 __all__ = [
     "MACHINE_CONFIGURATION_SCHEMA",
     "MachineConfigurationNamespace",
@@ -141,4 +166,5 @@ __all__ = [
     "machine_configuration_revision",
     "normalize_machine_configuration",
     "project_machine_configuration",
+    "remove_machine_configuration_namespace",
 ]

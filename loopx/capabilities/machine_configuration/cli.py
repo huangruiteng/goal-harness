@@ -10,9 +10,11 @@ from typing import Any
 from ...paths import resolve_runtime_root
 from ...registry import read_json
 from .builtins import build_builtin_machine_configuration_registry
+from .contract import remove_machine_configuration_namespace
 from .store import (
     configure_machine_configuration,
     inspect_machine_configuration,
+    read_machine_configuration,
     rollback_machine_configuration,
 )
 
@@ -68,6 +70,13 @@ def register_machine_configuration_commands(
     apply.add_argument("--execute", action="store_true", required=True)
     inspect = commands.add_parser("inspect")
     add_subcommand_format(inspect)
+    remove = commands.add_parser(
+        "remove", help="Preview or remove one machine-configuration namespace."
+    )
+    add_subcommand_format(remove)
+    remove.add_argument("--namespace", required=True)
+    remove.add_argument("--expected-plan-revision")
+    remove.add_argument("--execute", action="store_true")
     rollback = commands.add_parser("rollback")
     add_subcommand_format(rollback)
     rollback.add_argument("--transaction-id", required=True)
@@ -110,6 +119,18 @@ def handle_machine_configuration_command(
             )
         elif args.machine_config_command == "inspect":
             payload = inspect_machine_configuration(runtime_root, registry=registry)
+        elif args.machine_config_command == "remove":
+            payload = configure_machine_configuration(
+                runtime_root=runtime_root,
+                configuration=remove_machine_configuration_namespace(
+                    read_machine_configuration(runtime_root, registry=registry),
+                    namespace=args.namespace,
+                    registry=registry,
+                ),
+                registry=registry,
+                execute=args.execute,
+                expected_plan_revision=args.expected_plan_revision,
+            )
         else:
             payload = rollback_machine_configuration(
                 runtime_root=runtime_root,

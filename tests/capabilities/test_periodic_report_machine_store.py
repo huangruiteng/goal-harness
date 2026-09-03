@@ -81,6 +81,46 @@ def test_generic_store_reports_changed_typed_namespaces(tmp_path: Path) -> None:
     assert preview["machine_configuration"] == _defaults()
 
 
+def test_generic_store_deletes_and_rolls_back_the_last_namespace(
+    tmp_path: Path,
+) -> None:
+    registry = build_builtin_machine_configuration_registry()
+    _apply(tmp_path, _defaults())
+
+    preview = configure_machine_configuration(
+        runtime_root=tmp_path,
+        configuration=None,
+        registry=registry,
+    )
+    assert preview["action"] == "delete"
+    assert preview["changed_namespaces"] == ["periodic_report"]
+    assert preview["machine_configuration"] is None
+
+    removed = configure_machine_configuration(
+        runtime_root=tmp_path,
+        configuration=None,
+        registry=registry,
+        execute=True,
+        expected_plan_revision=preview["plan_revision"],
+    )
+    assert removed["status"] == "applied"
+    assert removed["machine_configuration"] is None
+    assert not machine_defaults_store_path(tmp_path).exists()
+
+    rollback_preview = plan_periodic_report_machine_defaults_rollback(
+        runtime_root=tmp_path,
+        transaction_id=removed["transaction_id"],
+    )
+    restored = rollback_periodic_report_machine_defaults(
+        runtime_root=tmp_path,
+        transaction_id=removed["transaction_id"],
+        execute=True,
+        expected_plan_revision=rollback_preview["plan_revision"],
+    )
+    assert restored["status"] == "rolled_back"
+    assert read_periodic_report_machine_defaults(tmp_path) == _defaults()
+
+
 def test_apply_requires_the_exact_preview_revision(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="expected_plan_revision is required"):
         configure_periodic_report_machine_defaults(
@@ -402,6 +442,46 @@ def test_periodic_report_compatibility_cli_renders_generic_machine_schemas(
     inspection = capsys.readouterr().out
     assert inspection.startswith("# Machine Configuration")
     assert "- status: `absent`" in inspection
+
+
+def test_machine_config_cli_removes_a_namespace_with_preview_fencing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text('{"goals": []}', encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    _apply(runtime_root, _defaults())
+    common = [
+        "--registry",
+        str(registry_path),
+        "--runtime-root",
+        str(runtime_root),
+        "--format",
+        "json",
+        "machine-config",
+        "remove",
+        "--namespace",
+        "periodic_report",
+    ]
+
+    assert main(common) == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["action"] == "delete"
+
+    assert (
+        main(
+            [
+                *common,
+                "--execute",
+                "--expected-plan-revision",
+                preview["plan_revision"],
+            ]
+        )
+        == 0
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "applied"
+    assert result["machine_configuration"] is None
 
 
 def test_inspection_is_path_free_and_reports_absence(tmp_path: Path) -> None:

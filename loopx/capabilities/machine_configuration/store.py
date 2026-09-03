@@ -137,10 +137,14 @@ def inspect_machine_configuration(
 def _update_plan(
     *,
     current: Mapping[str, Any] | None,
-    desired: Mapping[str, Any],
+    desired: Mapping[str, Any] | None,
     registry: MachineConfigurationRegistry,
 ) -> dict[str, Any]:
-    normalized_desired = normalize_machine_configuration(desired, registry=registry)
+    normalized_desired = (
+        normalize_machine_configuration(desired, registry=registry)
+        if desired is not None
+        else None
+    )
     normalized_current = (
         normalize_machine_configuration(current, registry=registry)
         if current is not None
@@ -151,12 +155,18 @@ def _update_plan(
         if normalized_current is not None
         else _MISSING_REVISION
     )
-    desired_revision = machine_configuration_revision(normalized_desired)
+    desired_revision = (
+        machine_configuration_revision(normalized_desired)
+        if normalized_desired is not None
+        else _MISSING_REVISION
+    )
     action = (
         "create"
-        if normalized_current is None
+        if normalized_current is None and normalized_desired is not None
         else "unchanged"
         if current_revision == desired_revision
+        else "delete"
+        if normalized_desired is None
         else "update"
     )
     identity = {
@@ -166,10 +176,10 @@ def _update_plan(
         "action": action,
         "changed_namespaces": sorted(
             namespace
-            for namespace in set(normalized_desired["namespaces"])
+            for namespace in set((normalized_desired or {}).get("namespaces", {}))
             | set((normalized_current or {}).get("namespaces", {}))
             if (normalized_current or {}).get("namespaces", {}).get(namespace)
-            != normalized_desired["namespaces"].get(namespace)
+            != (normalized_desired or {}).get("namespaces", {}).get(namespace)
         ),
     }
     return {
@@ -179,8 +189,10 @@ def _update_plan(
         **identity,
         "plan_revision": _digest(identity),
         "writes_required": int(action != "unchanged"),
-        "machine_configuration": project_machine_configuration(
-            normalized_desired, registry=registry
+        "machine_configuration": (
+            project_machine_configuration(normalized_desired, registry=registry)
+            if normalized_desired is not None
+            else None
         ),
     }
 
@@ -188,7 +200,7 @@ def _update_plan(
 def plan_machine_configuration_update(
     *,
     runtime_root: Path,
-    configuration: Mapping[str, Any],
+    configuration: Mapping[str, Any] | None,
     registry: MachineConfigurationRegistry,
 ) -> dict[str, Any]:
     return _update_plan(
@@ -213,7 +225,7 @@ def _restore_prior_state(
 def configure_machine_configuration(
     *,
     runtime_root: Path,
-    configuration: Mapping[str, Any],
+    configuration: Mapping[str, Any] | None,
     registry: MachineConfigurationRegistry,
     execute: bool = False,
     expected_plan_revision: str | None = None,
@@ -263,10 +275,17 @@ def configure_machine_configuration(
             "prior_revision": prior_revision,
             "prior_machine_configuration": current,
         }
-        desired = normalize_machine_configuration(configuration, registry=registry)
+        desired = (
+            normalize_machine_configuration(configuration, registry=registry)
+            if configuration is not None
+            else None
+        )
         try:
             _secure_write(backup_path, backup, writer=writer)
-            _secure_write(store_path, desired, writer=writer)
+            if desired is None:
+                store_path.unlink(missing_ok=True)
+            else:
+                _secure_write(store_path, desired, writer=writer)
             readback = read_machine_configuration(runtime_root, registry=registry)
             if readback != desired:
                 raise RuntimeError(
@@ -287,8 +306,10 @@ def configure_machine_configuration(
                 "readback_verified": True,
                 "rollback_available": True,
                 "changed_namespaces": plan["changed_namespaces"],
-                "machine_configuration": project_machine_configuration(
-                    readback, registry=registry
+                "machine_configuration": (
+                    project_machine_configuration(readback, registry=registry)
+                    if readback is not None
+                    else None
                 ),
             }
             receipt["receipt_revision"] = _digest(receipt)
@@ -327,7 +348,9 @@ def _read_transaction(runtime_root: Path, transaction_id: str) -> dict[str, Any]
         raise ValueError("machine-configuration transaction receipt is invalid")
     receipt["receipt_revision"] = receipt_revision
     applied_revision = str(receipt.get("applied_revision") or "")
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}", applied_revision):
+    if applied_revision != _MISSING_REVISION and not re.fullmatch(
+        r"sha256:[0-9a-f]{64}", applied_revision
+    ):
         raise ValueError("machine-configuration transaction revision is invalid")
     return receipt
 
