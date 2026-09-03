@@ -37,6 +37,14 @@ _PR_REF_NUMBER_PATTERN = re.compile(
     r"(?:/pull/|#|pr[-_\s]*)([1-9]\d{0,8})(?:\b|/|#|\?|$)",
     re.IGNORECASE,
 )
+_GITHUB_PULL_URL_PATTERN = re.compile(
+    r"^https://github\.com/([^/]+/[^/]+)/pull/([1-9]\d{0,8})(?:\b|/|#|\?)",
+    re.IGNORECASE,
+)
+_QUALIFIED_PR_REF_PATTERN = re.compile(
+    r"^([a-z\d_.-]+/[a-z\d_.-]+)#([1-9]\d{0,8})$",
+    re.IGNORECASE,
+)
 _PR_MERGED_EVENT_KINDS = {
     "pr_merge",
     "pr_merged",
@@ -128,24 +136,72 @@ def _pr_ref_number(value: Any) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _resume_pr_numbers(items: list[dict[str, Any]]) -> set[int]:
-    numbers: set[int] = set()
+def _normalized_pr_ref(value: Any) -> tuple[str | None, int] | None:
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip().lower()
+    pull_url = _GITHUB_PULL_URL_PATTERN.match(candidate)
+    if pull_url:
+        return pull_url.group(1), int(pull_url.group(2))
+    qualified = _QUALIFIED_PR_REF_PATTERN.match(candidate)
+    if qualified:
+        return qualified.group(1), int(qualified.group(2))
+    number = _pr_ref_number(candidate)
+    return (None, number) if number is not None else None
+
+
+def _github_repository(value: Any) -> str | None:
+    candidate = str(value or "").strip().lower()
+    prefix = "git:github.com/"
+    if not candidate.startswith(prefix):
+        return None
+    repository = candidate[len(prefix) :].rstrip("/")
+    return repository if len(repository.split("/")) == 2 else None
+
+
+def _resume_pr_targets(
+    items: list[dict[str, Any]],
+) -> set[tuple[str | None, int]]:
+    targets: set[tuple[str | None, int]] = set()
     for item in items:
         resume_when = normalize_supported_todo_resume_when(item.get("resume_when"))
         if not resume_when or not resume_when.startswith(
             f"{TODO_RESUME_KIND_PR_MERGED}:"
         ):
             continue
-        number = _pr_ref_number(resume_when)
-        if number is not None:
-            numbers.add(number)
-    return numbers
+        target = _normalized_pr_ref(resume_when.partition(":")[2])
+        if target is None:
+            continue
+        repository, number = target
+        targets.add(
+            (
+                repository or _github_repository(item.get("task_repository")),
+                number,
+            )
+        )
+    return targets
+
+
+def _pr_ref_matches_targets(
+    value: Any,
+    *,
+    targets: set[tuple[str | None, int]],
+) -> bool:
+    ref = _normalized_pr_ref(value)
+    if ref is None:
+        return False
+    repository, number = ref
+    return any(
+        target_number == number
+        and (target_repository is None or target_repository == repository)
+        for target_repository, target_number in targets
+    )
 
 
 def _compact_merge_event(
     event: Mapping[str, Any],
     *,
-    target_numbers: set[int],
+    targets: set[tuple[str | None, int]],
 ) -> dict[str, Any] | None:
     event_kind = str(event.get("event_kind") or "").strip().lower()
     if event_kind not in _PR_MERGED_EVENT_KINDS:
@@ -157,11 +213,17 @@ def _compact_merge_event(
             compact[field] = value.strip()
     refs: list[str] = []
     direct_ref = event.get("pr_ref")
-    if isinstance(direct_ref, str):
+    if isinstance(direct_ref, str) and _pr_ref_matches_targets(
+        direct_ref, targets=targets
+    ):
         refs.append(direct_ref)
         compact["pr_ref"] = direct_ref
     code_refs = event.get("code_refs")
-    if isinstance(code_refs, Mapping) and isinstance(code_refs.get("pr_ref"), str):
+    if (
+        isinstance(code_refs, Mapping)
+        and isinstance(code_refs.get("pr_ref"), str)
+        and _pr_ref_matches_targets(code_refs["pr_ref"], targets=targets)
+    ):
         refs.append(code_refs["pr_ref"])
         compact["code_refs"] = {"pr_ref": code_refs["pr_ref"]}
     source_refs: list[dict[str, str]] = []
@@ -172,11 +234,12 @@ def _compact_merge_event(
         ref = source_ref.get("ref")
         if kind not in {"pull_request", "pr"} or not isinstance(ref, str):
             continue
-        refs.append(ref)
-        source_refs.append({"kind": kind, "ref": ref})
+        if _pr_ref_matches_targets(ref, targets=targets):
+            refs.append(ref)
+            source_refs.append({"kind": kind, "ref": ref})
     if source_refs:
         compact["source_refs"] = source_refs
-    if not any(_pr_ref_number(ref) in target_numbers for ref in refs):
+    if not refs:
         return None
     return compact
 
@@ -185,14 +248,14 @@ def _compact_resume_rollout_events(
     items: list[dict[str, Any]],
     rollout_events: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
-    target_numbers = _resume_pr_numbers(items)
-    if not target_numbers:
+    targets = _resume_pr_targets(items)
+    if not targets:
         return []
     compacted: list[dict[str, Any]] = []
     for event in reversed(rollout_events or []):
         if not isinstance(event, Mapping):
             continue
-        compact = _compact_merge_event(event, target_numbers=target_numbers)
+        compact = _compact_merge_event(event, targets=targets)
         if compact is None:
             continue
         compacted.append(compact)
