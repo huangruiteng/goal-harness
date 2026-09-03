@@ -1068,6 +1068,16 @@ Todo 读取，尚无 lifecycle 或 settlement 调用方消费这个答案。正�
 仍是独立评审的本地 canonical promotion 的强制证据。因此 NoKV/PostgreSQL 远端 shadow
 仍属于 Stage 3，不能把这个默认关闭的 hook 当作 authority。
 
+下一块 Stage 2C 实现加入了 TypeScript cutover kernel，但尚未改变默认 runtime。
+同一个纯 reducer 从一次 Todo/lease mutation 派生 projection、event 与 receipt；显式
+promotion 必须同时验证 qualified shadow 的精确 provider revision、projection digest，
+以及独立持久化、绑定到同一 revision 的 legacy-writer fence。该 fence 提供共享的
+fail-closed write-check hook；promotion 可按 operation receipt 重放，provider-first read
+与 mutation 也绝不回退到 Markdown。在 Python Todo/task-lease 入口真正调用这个 hook
+并选择 promoted mode 之前，这些仍只是切换机械结构，不代表生产权威源已经翻转。
+后续必须接齐所有 legacy writer、显式配置与 rollback，并证明默认 legacy 兼容性，
+才能启用本地 promotion。
+
 完成续接（continuation）的持久化读回
 （`durable_completion.py`：`read_persisted_todo_record` /
 `project_durable_completion_outcome`）是一个 provider read point：它在完成写入之后、

@@ -1323,6 +1323,19 @@ remain mandatory evidence for the separately reviewed local canonical
 promotion. Remote NoKV/PostgreSQL shadowing therefore remains Stage 3 and
 cannot use this default-off hook as authority.
 
+The next Stage 2C implementation slice adds the TypeScript cutover kernel but
+does not yet change the default runtime. One pure reducer now derives the
+Todo/lease projection, event, and receipt from the same mutation. An explicit
+promotion operation requires a qualified shadow at one exact provider revision
+and digest, plus an independently persisted legacy-writer fence bound to that
+same revision. The fence has a shared fail-closed write-check hook; promotion
+is replayable through its operation receipt, and provider-first reads and
+mutations never fall back to Markdown. Until the Python Todo and task-lease
+entry points call that hook and select the promoted mode, these surfaces remain
+cutover machinery rather than a production authority flip. The follow-up must
+wire every legacy writer, make configuration and rollback explicit, and prove
+default legacy compatibility before the local promotion can be enabled.
+
 Durable completion continuation read-back
 (`durable_completion.py`: `read_persisted_todo_record` /
 `project_durable_completion_outcome`) is a provider read point: it re-reads
