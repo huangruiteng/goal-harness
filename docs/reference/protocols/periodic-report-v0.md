@@ -143,6 +143,33 @@ local report generation independent from provider availability:
   generation and readiness receipts. A sent sink is accepted only with an
   idempotency key, compact receipt reference, and verified exact readback.
 
+## Personal Workspace publication projection
+
+`periodic_report_workspace_projection_v0` is the built-in, read-only
+`milestone_report` view model for the Personal Workspace. It is frozen from the
+same typed document and progress facts as the generated report; the browser
+does not parse rendered Markdown or infer titles from fingerprints. Its
+interaction semantics are `attention_kind=progress`, `interaction=inform`,
+`delivery=surface`, and `writable=false`. Compact counts distinguish facts
+added since the preceding verified publication from facts whose semantic
+fingerprint changed.
+
+Generation alone does not expose this projection. The publication candidate
+binds its exact SHA-256, and the Goal Channel sink may advance that binding into the
+publication cursor only after delivery readback succeeds. The compact
+`periodic_report_workspace_index_v0` hot path contains identity, delivery time,
+predecessor lineage, and an exact content-addressed detail reference, but no
+report prose. The full projection is a loopback-only cold read and must match
+the current publication cursor. Approval-pending, generation-only, stale, or
+digest-mismatched projections therefore fail closed instead of appearing as
+published.
+
+The Personal Workspace projection does not generate, approve, publish, acknowledge, or
+edit a report. The periodic-report capability remains the only owner of report
+trigger, document, delivery, and publication-cursor state. This is a bounded
+implementation of the intelligent presentation RFC for milestone reports, not
+the generic cross-capability compiler described by that RFC.
+
 The dependency policy is `required`, `optional`, or `disabled`. Required sinks
 block formal delivery when unavailable. Optional sinks degrade without
 invalidating the generation receipt. Disabled sinks are skipped. Provider

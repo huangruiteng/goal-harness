@@ -44,6 +44,39 @@ interface FileAuthorityStoreDocument extends JsonObject {
 
 class FileStoreUnavailableError extends Error {}
 
+export type FileAuthorityArchiveResult =
+  | {
+    status: "applied";
+    archived_provider_revision: string;
+    archived_cursor: string;
+    archive_id: string;
+  }
+  | {
+    status: "replayed";
+    archived_provider_revision: string;
+    archived_cursor: string;
+    archive_id: string;
+  }
+  | { status: "missing" }
+  | {
+    status: "conflict";
+    conflict_kind: string;
+    current_provider_revision?: string;
+    current_cursor?: string;
+    archived_provider_revision?: string;
+    archive_id?: string;
+  }
+  | {
+    status: "ambiguous";
+    reason_code: string;
+    reason: string;
+  }
+  | {
+    status: "failed";
+    reason_code: string;
+    reason: string;
+  };
+
 function cloneTransaction(
   value: AuthorityStoreCommittedTransaction,
 ): AuthorityStoreCommittedTransaction {
@@ -462,6 +495,114 @@ export class FileAuthorityStore implements AuthorityStore {
       };
     } catch (error) {
       return readFailure(error);
+    }
+  }
+
+  /**
+   * Quarantine one exact pre-promotion shadow lineage without deleting it.
+   *
+   * This is intentionally file-provider-specific administrative behavior, not
+   * part of the provider-neutral AuthorityStore contract. The caller must
+   * fence the exact observed revision; an exact retry replays from the durable
+   * archive while a re-used operation id cannot retire a later lineage.
+   */
+  async archiveAuthorityDocument(
+    expectedProviderRevision: string,
+    operationId: string,
+  ): Promise<FileAuthorityArchiveResult> {
+    let expectedRevision: string;
+    let normalizedOperationId: string;
+    try {
+      expectedRevision = requireAuthorityStoreId(
+        expectedProviderRevision,
+        "expected provider revision",
+      );
+      normalizedOperationId = requireAuthorityStoreId(operationId, "operation id");
+    } catch (error) {
+      return {
+        status: "failed",
+        reason_code: "invalid_archive_request",
+        reason: error instanceof Error ? error.message : "invalid archive request",
+      };
+    }
+    const archiveId = createHash("sha256")
+      .update(this.goalId, "utf8")
+      .update("\0", "utf8")
+      .update(normalizedOperationId, "utf8")
+      .digest("hex")
+      .slice(0, 24);
+    const archiveDirectory = join(this.directory, "rollback");
+    const archivePath = join(archiveDirectory, `authority-store-${archiveId}.json`);
+    let renameStarted = false;
+    try {
+      return await withFileMutationLock(this.path, async () => {
+        const identity = await this.readStoreIdentity();
+        let archived: FileAuthorityStoreDocument | null = null;
+        try {
+          archived = decodeDocument(
+            JSON.parse(await readFile(archivePath, "utf8")),
+            this.goalId,
+            identity,
+          );
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        const current = await this.readDocument();
+        if (archived) {
+          if (archived.provider_revision !== expectedRevision) {
+            return {
+              status: "conflict",
+              conflict_kind: "archive_operation_identity_mismatch",
+              archived_provider_revision: archived.provider_revision,
+              archive_id: archiveId,
+            };
+          }
+          if (current) {
+            return {
+              status: "conflict",
+              conflict_kind: "archive_operation_reused_after_rebootstrap",
+              current_provider_revision: current.provider_revision,
+              archive_id: archiveId,
+            };
+          }
+          return {
+            status: "replayed",
+            archived_provider_revision: archived.provider_revision,
+            archived_cursor: archived.cursor,
+            archive_id: archiveId,
+          };
+        }
+        if (!current) return { status: "missing" };
+        if (current.provider_revision !== expectedRevision) {
+          return {
+            status: "conflict",
+            conflict_kind: "provider_revision_mismatch",
+            current_provider_revision: current.provider_revision,
+            current_cursor: current.cursor,
+          };
+        }
+        await mkdir(archiveDirectory, { recursive: true, mode: 0o700 });
+        renameStarted = true;
+        await rename(this.path, archivePath);
+        await syncDirectory(this.directory);
+        await syncDirectory(archiveDirectory);
+        return {
+          status: "applied",
+          archived_provider_revision: current.provider_revision,
+          archived_cursor: current.cursor,
+          archive_id: archiveId,
+        };
+      });
+    } catch (error) {
+      return {
+        status: renameStarted ? "ambiguous" : "failed",
+        reason_code: renameStarted
+          ? "archive_outcome_unknown"
+          : error instanceof EffectRuntimeLockTimeoutError
+            ? "provider_lock_timeout"
+            : "provider_archive_unavailable",
+        reason: error instanceof Error ? error.message : "provider archive unavailable",
+      };
     }
   }
 }

@@ -933,9 +933,9 @@ async function captureHomeVisualAcceptance(page, url, label) {
       throw new Error(`Manager projection answer exposed a raw Goal id: ${projectedAnswerText}`);
     }
 
-    const agentSelect = page.getByRole("combobox", { name: "选择 Agent" });
+    const agentSelect = page.getByRole("combobox", { name: "选择聊天 Runtime" });
     await agentSelect.click();
-    const agentListbox = page.getByRole("listbox", { name: "选择 Agent" });
+    const agentListbox = page.getByRole("listbox", { name: "选择聊天 Runtime" });
     const agentOptions = await agentListbox.getByRole("option").allTextContents();
     for (const text of ["Codex", "仅查状态"]) {
       if (!agentOptions.some((option) => option.includes(text))) {
@@ -953,12 +953,12 @@ async function captureHomeVisualAcceptance(page, url, label) {
       }
     }
     await page.reload({ waitUntil: "networkidle" });
-    const persistedAgent = await page.getByRole("combobox", { name: "选择 Agent" }).getAttribute("data-value");
+    const persistedAgent = await page.getByRole("combobox", { name: "选择聊天 Runtime" }).getAttribute("data-value");
     if (persistedAgent !== "status-only") {
       throw new Error(`Manager Agent selection did not persist per Chat: ${persistedAgent}`);
     }
-    await page.getByRole("combobox", { name: "选择 Agent" }).click();
-    await page.getByRole("listbox", { name: "选择 Agent" }).getByRole("option", { name: "Codex", exact: true }).click();
+    await page.getByRole("combobox", { name: "选择聊天 Runtime" }).click();
+    await page.getByRole("listbox", { name: "选择聊天 Runtime" }).getByRole("option", { name: "Codex", exact: true }).click();
   }
 
   const goalList = page.locator(".personal-goal-list");
@@ -1095,9 +1095,9 @@ async function captureHomeVisualAcceptance(page, url, label) {
     throw new Error(`${label} Goal Chat does not expose the owning Agent.`);
   }
 
-  const agentTrigger = page.getByRole("combobox", { name: "选择 Agent" });
+  const agentTrigger = page.getByRole("combobox", { name: "选择聊天 Runtime" });
   await agentTrigger.click();
-  const agentMenu = page.getByRole("listbox", { name: "选择 Agent" });
+  const agentMenu = page.getByRole("listbox", { name: "选择聊天 Runtime" });
   const agentMenuText = (await agentMenu.getByRole("option").allTextContents()).join("\n");
   for (const text of ["Codex", "仅查状态"]) {
     if (!agentMenuText.includes(text)) {

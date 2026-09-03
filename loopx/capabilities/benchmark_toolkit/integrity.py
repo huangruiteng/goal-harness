@@ -6,13 +6,14 @@ import hashlib
 import ipaddress
 import json
 import re
+import shlex
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from enum import Enum
 from typing import Any
 from urllib.parse import urlsplit
 
-from .environment_access import credential_probe_present
+from .environment_access import _heredoc_delimiters, credential_probe_present
 
 BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION = "benchmark_integrity_policy_v0"
 BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION = (
@@ -125,6 +126,7 @@ _GIT_CLONE_COMMAND_PATTERN = re.compile(r"(?is)\bgit\s+clone\b")
 _GIT_REMOTE_PATTERN = re.compile(
     r"(?is)(?:\b(?:git|ssh)://[^\s\"'<>]+|(?<![A-Za-z0-9_.@/-])[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+:[^\s\"'<>]+)"
 )
+_PATCH_BRIDGE_EXECUTABLES = frozenset({"pier-env-exec"})
 _COMMAND_TEXT_FIELDS = ("cmd", "command")
 _COMMAND_ARGUMENT_FIELDS = ("args", "argv")
 # ATIF currently carries a function name rather than a typed side-effect class.
@@ -484,6 +486,92 @@ def _command_text_values(value: object) -> Iterable[str]:
             yield from _command_text_values(item)
 
 
+def _patch_heredoc_declarations(
+    command_line: str,
+) -> tuple[tuple[str, bool, bool], ...]:
+    """Bind each heredoc to its own shell segment and patch consumer.
+
+    The boolean in each result says whether that one body is proven to be
+    patch data.  Unknown syntax and unknown ``--apply-patch`` consumers stay
+    visible so the integrity scan fails closed.
+    """
+
+    try:
+        lexer = shlex.shlex(
+            command_line,
+            posix=True,
+            punctuation_chars=";&|\n<>",
+        )
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return tuple((*declaration, False) for declaration in _heredoc_delimiters(command_line))
+
+    declarations: list[tuple[str, bool, bool]] = []
+    segment: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token and all(character in ";&|\n" for character in token):
+            segment = []
+            index += 1
+            continue
+        if token != "<<":
+            segment.append(token)
+            index += 1
+            continue
+
+        index += 1
+        strip_tabs = index < len(tokens) and tokens[index] == "-"
+        if strip_tabs:
+            index += 1
+        if index >= len(tokens):
+            break
+        delimiter = tokens[index]
+        if not strip_tabs and delimiter.startswith("-") and len(delimiter) > 1:
+            strip_tabs = True
+            delimiter = delimiter[1:]
+
+        executable = segment[0].rsplit("/", 1)[-1] if segment else ""
+        proven_patch_consumer = executable == "apply_patch" or (
+            executable in _PATCH_BRIDGE_EXECUTABLES and "--apply-patch" in segment
+        )
+        if delimiter and all(character not in ";&|\n<>" for character in delimiter):
+            declarations.append((delimiter, strip_tabs, proven_patch_consumer))
+        index += 1
+    return tuple(declarations)
+
+
+def _without_patch_stdin_bodies(command: str) -> str:
+    """Exclude heredoc source payloads consumed by patch commands.
+
+    The shell executes the declaration line, while ``apply_patch`` and the
+    benchmark bridge's ``--apply-patch`` mode consume the heredoc body as
+    source data.  URLs or command-looking text inside that patch are not
+    network requests.  Keep bodies for every other heredoc fail-closed because
+    they may be executable input to a shell or interpreter.
+    """
+
+    visible_lines: list[str] = []
+    pending: list[tuple[str, bool, bool]] = []
+    for raw_line in command.splitlines(keepends=True):
+        if pending:
+            delimiter, strip_tabs, hide_body = pending[0]
+            candidate = raw_line.rstrip("\r\n")
+            if strip_tabs:
+                candidate = candidate.lstrip("\t")
+            if candidate == delimiter:
+                pending.pop(0)
+            elif not hide_body:
+                visible_lines.append(raw_line)
+            continue
+        visible_lines.append(raw_line)
+        pending.extend(_patch_heredoc_declarations(raw_line))
+    return "".join(visible_lines)
+
+
 def _scope_for_url(url: str) -> NetworkRequestScope:
     if _loopback_http_url(url):
         return NetworkRequestScope.LOOPBACK
@@ -494,7 +582,12 @@ def _network_request_scope(arguments: object) -> NetworkRequestScope:
     """Classify common shell HTTP requests while preserving argv association."""
 
     scope = NetworkRequestScope.NONE
-    command_texts = tuple(dict.fromkeys(_command_text_values(arguments)))
+    command_texts = tuple(
+        dict.fromkeys(
+            _without_patch_stdin_bodies(text)
+            for text in _command_text_values(arguments)
+        )
+    )
     for text in command_texts:
         if not _NETWORK_COMMAND_PATTERN.search(text):
             continue
@@ -509,7 +602,10 @@ def _network_request_scope(arguments: object) -> NetworkRequestScope:
     # Unknown command/target field names cannot prove safe association. If the
     # same argument object contains a supported network client and literal URLs,
     # classify those URLs fail-closed instead of silently losing split argv.
-    leaves = tuple(_argument_text_values(arguments))
+    leaves = tuple(
+        _without_patch_stdin_bodies(text)
+        for text in _argument_text_values(arguments)
+    )
     if not any(_NETWORK_COMMAND_PATTERN.search(text) for text in leaves):
         return scope
     for text in leaves:

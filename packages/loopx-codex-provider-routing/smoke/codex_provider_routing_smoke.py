@@ -23,6 +23,7 @@ compile_catalog = contract.compile_catalog
 normalize_selector_request = contract.normalize_selector_request
 project_runtime_status = contract.project_runtime_status
 qualify_heartbeat_transport = contract.qualify_heartbeat_transport
+qualify_host_control_recovery = contract.qualify_host_control_recovery
 qualify_snapshot = contract.qualify_snapshot
 reconcile_integration_candidate = contract.reconcile_integration_candidate
 
@@ -30,12 +31,8 @@ reconcile_integration_candidate = contract.reconcile_integration_candidate
 def _assert_layered_retry_templates() -> None:
     app = (PACKAGE_ROOT / "templates" / "codex-app-config.toml").read_text()
     local_cpa = app.split("[model_providers.local-cpa]", maxsplit=1)[1]
-    request_retries = re.search(
-        r"(?m)^request_max_retries\s*=\s*(\d+)\s*$", local_cpa
-    )
-    stream_retries = re.search(
-        r"(?m)^stream_max_retries\s*=\s*(\d+)\s*$", local_cpa
-    )
+    request_retries = re.search(r"(?m)^request_max_retries\s*=\s*(\d+)\s*$", local_cpa)
+    stream_retries = re.search(r"(?m)^stream_max_retries\s*=\s*(\d+)\s*$", local_cpa)
     assert request_retries is not None and int(request_retries.group(1)) == 30
     assert stream_retries is not None and int(stream_retries.group(1)) == 30
 
@@ -257,6 +254,94 @@ def main() -> int:
         ),
         "heartbeat user input accepted a non-user role",
     )
+
+    recovered_instruction = qualify_host_control_recovery(
+        {
+            "tool_name": "send_message_to_thread",
+            "call_id_present": False,
+            "matching_call_count": 0,
+            "semantic_output_present": True,
+            "observed_action": "project_as_user",
+            "projection": {
+                "type": "message",
+                "role": "user",
+                "tool_identity_removed": True,
+                "semantic_output_preserved": True,
+                "next_action_observed": True,
+                "next_action_matches_instruction": True,
+            },
+        }
+    )
+    assert recovered_instruction["qualified"] is True
+    assert recovered_instruction["expected_action"] == "project_as_user"
+    assert (
+        recovered_instruction["required_contract"][
+            "qualification_requires_instruction_follow_through"
+        ]
+        is True
+    )
+
+    silently_dropped_instruction = qualify_host_control_recovery(
+        {
+            "tool_name": "automation_update",
+            "call_id_present": False,
+            "matching_call_count": 0,
+            "semantic_output_present": True,
+            "observed_action": "project_as_user",
+            "projection": {
+                "type": "message",
+                "role": "user",
+                "tool_identity_removed": True,
+                "semantic_output_preserved": False,
+                "next_action_observed": True,
+                "next_action_matches_instruction": False,
+            },
+        },
+    )
+    assert silently_dropped_instruction["qualified"] is False
+    assert {
+        item["id"]
+        for item in silently_dropped_instruction["checks"]
+        if not item["passed"]
+    } == {"semantic_output_preserved", "instruction_follow_through"}
+
+    for rejected_observation in (
+        {
+            "tool_name": "unknown_host_tool",
+            "call_id_present": False,
+            "matching_call_count": 0,
+            "semantic_output_present": True,
+            "observed_action": "fail_closed",
+            "error_status": 409,
+        },
+        {
+            "tool_name": "send_message_to_thread",
+            "call_id_present": False,
+            "matching_call_count": 1,
+            "semantic_output_present": True,
+            "observed_action": "fail_closed",
+            "error_status": 409,
+        },
+        {
+            "tool_name": "automation_update",
+            "call_id_present": True,
+            "matching_call_count": 0,
+            "semantic_output_present": True,
+            "observed_action": "fail_closed",
+            "error_status": 409,
+        },
+        {
+            "tool_name": "automation_update",
+            "call_id_present": False,
+            "matching_call_count": 0,
+            "semantic_output_present": False,
+            "observed_action": "fail_closed",
+            "error_status": 409,
+        },
+    ):
+        rejected = qualify_host_control_recovery(rejected_observation)
+        assert rejected["qualified"] is True
+        assert rejected["expected_action"] == "fail_closed"
 
     catalog = compile_catalog(_source())
     assert catalog["credential_free"] is True
@@ -677,6 +762,7 @@ def main() -> int:
         "runtime-status.json",
         "qualification-snapshot.json",
         "heartbeat-transport.json",
+        "host-control-recovery.json",
         "integration-candidate.json",
         "upgrade-request.json",
     ):

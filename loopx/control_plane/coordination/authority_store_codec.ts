@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { JsonObject } from "../effect_program.ts";
 import type { AuthorityStoreCommit } from "./authority_store.ts";
 
@@ -100,6 +102,10 @@ export function canonicalAuthorityObjectList(
 
 export function canonicalAuthorityBytes(value: unknown): Buffer {
   return Buffer.from(JSON.stringify(canonicalAuthorityJson(value)), "utf8");
+}
+
+export function canonicalAuthoritySha256(value: unknown): string {
+  return createHash("sha256").update(canonicalAuthorityBytes(value)).digest("hex");
 }
 
 export function parseAuthorityCursor(value: string | null): bigint {

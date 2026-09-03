@@ -99,6 +99,23 @@ import {
 import { executeTaskLeaseLifecycle } from "./work_items/task_lease_lifecycle.ts";
 import { evaluateTaskLeaseLifecycleDecision } from "./work_items/task_lease_lifecycle_decision.ts";
 import {
+  bootstrapCoordinationRuntimeShadow,
+  commitCoordinationRuntimeShadow,
+  inspectCoordinationRuntimeShadow,
+  qualifyCoordinationRuntimeShadow,
+  readCoordinationRuntimeShadowTodoCandidate,
+  rollbackCoordinationRuntimeShadow,
+} from "./coordination/runtime_shadow.ts";
+import {
+  mutateLocalCoordinationAuthority,
+  promoteLocalCoordinationAuthority,
+  readLocalCoordinationTodo,
+} from "./coordination/local_authority_runtime.ts";
+import {
+  checkLegacyCoordinationWriteAllowed,
+  engageLegacyCoordinationWriterFence,
+} from "./coordination/legacy_writer_fence.ts";
+import {
   projectTodoPlanningInventory,
   projectTodoPlanningInventoryDetail,
 } from "./work_items/planning_inventory.ts";
@@ -357,6 +374,26 @@ export function createEffectRuntimeHandlers(
     ["task_lease.acquire.native", executeTaskLeaseAcquire],
     ["task_lease.lifecycle.decide", evaluateTaskLeaseLifecycleDecision],
     ["task_lease.lifecycle.native", executeTaskLeaseLifecycle],
+    ["coordination.runtime_shadow.bootstrap", bootstrapCoordinationRuntimeShadow],
+    ["coordination.runtime_shadow.commit", commitCoordinationRuntimeShadow],
+    ["coordination.runtime_shadow.inspect", inspectCoordinationRuntimeShadow],
+    ["coordination.runtime_shadow.qualify", qualifyCoordinationRuntimeShadow],
+    [
+      "coordination.runtime_shadow.todo_read_candidate",
+      readCoordinationRuntimeShadowTodoCandidate,
+    ],
+    ["coordination.runtime_shadow.rollback", rollbackCoordinationRuntimeShadow],
+    ["coordination.local_authority.promote", promoteLocalCoordinationAuthority],
+    ["coordination.local_authority.mutate", mutateLocalCoordinationAuthority],
+    ["coordination.local_authority.todo_read", readLocalCoordinationTodo],
+    [
+      "coordination.local_authority.legacy_writer_fence.engage",
+      engageLegacyCoordinationWriterFence,
+    ],
+    [
+      "coordination.local_authority.legacy_write_check",
+      checkLegacyCoordinationWriteAllowed,
+    ],
     ["task_lease.write_scopes.overlap", evaluateTaskLeaseWriteScopesOverlap],
     ["quota.monitor_poll.commit", evaluateQuotaMonitorPollCommit],
     [

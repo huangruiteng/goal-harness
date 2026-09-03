@@ -26,13 +26,15 @@ const productDoc = readRepoFile("docs/product/surfaces/frontstage-dashboard-inte
 const surfaceReadme = readRepoFile("docs/product/surfaces/README.md");
 const dashboardReadme = readRepoFile("apps/presentation/dashboard/README.md");
 const frontstageSource = readRepoFile("apps/presentation/dashboard/src/views/frontstage-page.tsx");
+const deprecatedOpsSource = readRepoFile("apps/presentation/dashboard/src/views/deprecated/frontstage-ops-page.tsx");
+const deprecatedOpsStyles = readRepoFile("apps/presentation/dashboard/src/views/deprecated/frontstage-ops.css");
 const stylesSource = readRepoFile("apps/presentation/dashboard/src/styles.css");
 const browserSmoke = readRepoFile("examples/dashboard-frontstage-browser-smoke.mjs");
 const packageSource = readRepoFile("apps/presentation/dashboard/package.json");
 
 includes(productDoc, "## Surface Split", "surface split section");
 includes(productDoc, "Showcase/homepage", "showcase surface row");
-includes(productDoc, "Ops/control-plane", "ops surface row");
+includes(productDoc, "Legacy Ops diagnostics", "deprecated diagnostics surface row");
 includes(productDoc, "Multica-style agent workspace direction", "Multica-style product benchmark");
 includes(productDoc, "React, Vite, TypeScript, and TanStack Router", "frontend stack baseline");
 includes(productDoc, "TanStack Table", "table stack baseline");
@@ -55,21 +57,23 @@ includes(productDoc, "npm run smoke:frontstage-design-baseline", "design smoke a
 includes(surfaceReadme, "frontstage-dashboard-interaction-baseline.md", "surface README link");
 includes(dashboardReadme, "frontstage-dashboard-interaction-baseline.md", "dashboard README link");
 includes(dashboardReadme, "showcase mode is", "dashboard README surface split");
-includes(dashboardReadme, "mode=ops", "dashboard README ops route");
+includes(dashboardReadme, "/deprecated/frontstage/ops", "dashboard README deprecated diagnostics route");
 
-includes(frontstageSource, 'data-frontstage-surface={isOpsMode ? "ops-control-plane" : "showcase-homepage"}', "surface data attribute");
-includes(frontstageSource, 'data-testid={isOpsMode ? "frontstage-ops-workspace-shell" : "frontstage-showcase-workspace-shell"}', "workspace shell test id");
-includes(frontstageSource, 'frontstage-ops-main-pane', "ops main pane class");
-includes(frontstageSource, 'data-testid="frontstage-ops-command-strip"', "ops command strip test id");
-includes(frontstageSource, 'data-testid="frontstage-todo-discovery"', "todo discovery anchor");
-includes(frontstageSource, 'data-testid="frontstage-todo-search"', "todo search anchor");
-includes(frontstageSource, 'data-testid="frontstage-todo-lane-filter"', "todo lane filter anchor");
-includes(frontstageSource, 'data-testid="frontstage-todo-result-count"', "todo result count anchor");
-includes(frontstageSource, 'data-testid="frontstage-role-map"', "role map anchor");
-includes(frontstageSource, 'data-testid="frontstage-active-claims"', "active claims anchor");
-includes(frontstageSource, 'data-testid="frontstage-open-gates"', "open gates anchor");
-includes(frontstageSource, 'data-testid="frontstage-artifacts"', "artifacts anchor");
-includes(frontstageSource, 'data-testid="frontstage-timeline"', "timeline anchor");
+includes(frontstageSource, 'data-frontstage-surface="showcase-homepage"', "public surface data attribute");
+includes(frontstageSource, 'data-testid="frontstage-showcase-workspace-shell"', "public workspace shell test id");
+excludes(frontstageSource, 'frontstage-ops-main-pane', "public source ops main pane");
+excludes(frontstageSource, 'data-testid="frontstage-ops-command-strip"', "public source ops command strip");
+includes(deprecatedOpsSource, 'frontstage-ops-main-pane', "deprecated ops main pane class");
+includes(deprecatedOpsSource, 'data-testid="frontstage-ops-command-strip"', "deprecated ops command strip test id");
+includes(deprecatedOpsSource, 'data-testid="frontstage-todo-discovery"', "deprecated todo discovery anchor");
+includes(deprecatedOpsSource, 'data-testid="frontstage-todo-search"', "deprecated todo search anchor");
+includes(deprecatedOpsSource, 'data-testid="frontstage-todo-lane-filter"', "deprecated todo lane filter anchor");
+includes(deprecatedOpsSource, 'data-testid="frontstage-todo-result-count"', "deprecated todo result count anchor");
+includes(deprecatedOpsSource, 'data-testid="frontstage-role-map"', "deprecated role map anchor");
+includes(deprecatedOpsSource, 'data-testid="frontstage-active-claims"', "deprecated active claims anchor");
+includes(deprecatedOpsSource, 'data-testid="frontstage-open-gates"', "deprecated open gates anchor");
+includes(deprecatedOpsSource, 'data-testid="frontstage-artifacts"', "deprecated artifacts anchor");
+includes(deprecatedOpsSource, 'data-testid="frontstage-timeline"', "deprecated timeline anchor");
 includes(frontstageSource, "long-horizon-self-iteration-rollout.public.json", "self-iteration rollout fixture import");
 includes(frontstageSource, 'data-testid="frontstage-self-iteration-timeline"', "public self-iteration timeline anchor");
 includes(frontstageSource, 'data-testid="frontstage-self-iteration-lane"', "public self-iteration lane anchor");
@@ -84,9 +88,10 @@ includes(frontstageSource, 'data-testid="frontstage-state-flow-beam"', "state-fl
 excludes(frontstageSource, 'data-testid="frontstage-enable-ops-live"', "public in-page ops switch");
 
 includes(stylesSource, ".frontstage-workspace-shell", "workspace shell CSS");
-includes(stylesSource, ".frontstage-ops-workspace", "ops workspace CSS");
-includes(stylesSource, ".frontstage-ops-main-pane", "ops main pane CSS");
-includes(stylesSource, ".frontstage-ops-command-strip", "ops command strip CSS");
+excludes(stylesSource, ".frontstage-ops-workspace", "global stylesheet deprecated ops CSS");
+includes(deprecatedOpsStyles, ".frontstage-ops-workspace", "deprecated ops workspace CSS");
+includes(deprecatedOpsStyles, ".frontstage-ops-main-pane", "deprecated ops main pane CSS");
+includes(deprecatedOpsStyles, ".frontstage-ops-command-strip", "deprecated ops command strip CSS");
 includes(stylesSource, ".frontstage-showcase-workspace", "showcase workspace CSS");
 includes(stylesSource, "@media (max-width: 640px)", "responsive command strip CSS");
 includes(stylesSource, "@media (prefers-reduced-motion: reduce)", "reduced motion fallback");

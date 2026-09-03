@@ -26,6 +26,17 @@ from loopx.capabilities.benchmark_toolkit import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _loopx_json(*args: str) -> dict[str, object]:
+    result = subprocess.run(
+        [str(REPO_ROOT / "scripts/loopx"), *args],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return json.loads(result.stdout)
+
+
 def _manifest(*, four_arm: bool = False) -> dict[str, object]:
     factors = [{"factor_id": "orchestrator", "levels": ["goal", "loopx"]}]
     arms: list[dict[str, object]] = [
@@ -121,6 +132,30 @@ def _manifest(*, four_arm: bool = False) -> dict[str, object]:
     }
 
 
+def _five_mode_manifest() -> dict[str, object]:
+    manifest = _manifest()
+    manifest["study_id"] = "five-mode-v1"
+    levels = ["plain", "goal", "managed_a", "managed_b", "scheduled"]
+    manifest["factors"] = [{"factor_id": "execution_mode", "levels": levels}]
+    manifest["arms"] = [
+        {
+            "arm_id": level,
+            "arm_role": (
+                "baseline"
+                if level == "plain"
+                else "control"
+                if level == "goal"
+                else "treatment"
+            ),
+            "factor_assignments": {"execution_mode": level},
+        }
+        for level in levels
+    ]
+    manifest["baseline_arm_id"] = "plain"
+    manifest["labels"] = {"title": "Fictional five-mode software benchmark"}
+    return manifest
+
+
 def _row(
     *,
     arm_id: str,
@@ -192,14 +227,19 @@ def _row(
     return row
 
 
-def _insight(*, study_id: str = "paired-v1") -> dict[str, object]:
+def _insight(
+    *,
+    study_id: str = "paired-v1",
+    run_id: str = "loopx_plain-case-1",
+    outcome_status: str = "completed",
+) -> dict[str, object]:
     return {
         "schema_version": BENCHMARK_CASE_INSIGHT_PROJECTION_SCHEMA_VERSION,
         "benchmark_id": "fixture-swe@1",
         "study_id": study_id,
         "case_id": "case-1",
-        "run_id": "loopx_plain-case-1",
-        "outcome_status": "completed",
+        "run_id": run_id,
+        "outcome_status": outcome_status,
         "failure_class": "none",
         "causal_summary": "The implementation preserved the declared API contract.",
         "expectedness": "expected",
@@ -235,6 +275,22 @@ def _envelope(
     )
 
 
+def _upload_default_insight_run(store: Path) -> dict[str, object]:
+    run = _envelope(
+        _row(
+            arm_id="loopx_plain",
+            arm_role="treatment",
+            feature=9,
+            reward=1,
+            anchor="goal_plain-case-1",
+        ),
+        record_kind="experiment_board_row",
+        key="insight-run",
+    )
+    simulate_benchmark_upload(store, run, execute=True)
+    return run
+
+
 def _four_arm_contract() -> dict[str, object]:
     return compact_benchmark_four_arm_contract(
         build_benchmark_four_arm_contract(
@@ -251,6 +307,7 @@ def test_two_arm_and_factorized_four_arm_manifests_validate() -> None:
     assert (
         len(normalize_benchmark_study_manifest(_manifest(four_arm=True))["arms"]) == 4
     )
+    assert len(normalize_benchmark_study_manifest(_five_mode_manifest())["arms"]) == 5
 
 
 @pytest.mark.parametrize("mutation", ["assignment", "baseline", "metrics"])
@@ -382,6 +439,7 @@ def test_changed_board_row_requires_legal_explicit_supersession(tmp_path: Path) 
 
 def test_case_insight_supersession_preserves_run_identity(tmp_path: Path) -> None:
     store = tmp_path / "simulated-upload.jsonl"
+    _upload_default_insight_run(store)
     first = _envelope(
         _insight(), record_kind="case_insight_projection", key="insight-1"
     )
@@ -425,6 +483,7 @@ def test_supersession_preserves_producer_and_immutable_study_identity(
     insight = _envelope(
         _insight(), record_kind="case_insight_projection", key="insight-v1"
     )
+    _upload_default_insight_run(store)
     simulate_benchmark_upload(store, insight, execute=True)
     other_producer = build_benchmark_upload_envelope(
         _insight(),
@@ -451,6 +510,114 @@ def test_redacted_insight_rejects_raw_fields_and_path_references() -> None:
     insight["evidence_refs"] = ["/tmp/private/trajectory.json"]
     with pytest.raises(ValueError, match="public-safe token"):
         normalize_benchmark_case_insight_projection(insight)
+    insight = _insight(outcome_status="running")
+    with pytest.raises(ValueError, match="must be terminal"):
+        normalize_benchmark_case_insight_projection(insight)
+
+
+def test_case_insight_upload_requires_exact_terminal_run(tmp_path: Path) -> None:
+    store = tmp_path / "simulated-upload.jsonl"
+    insight = _envelope(
+        _insight(), record_kind="case_insight_projection", key="insight-v1"
+    )
+    with pytest.raises(ValueError, match="exact-run board record"):
+        simulate_benchmark_upload(store, insight)
+
+    running = _row(
+        arm_id="loopx_plain",
+        arm_role="treatment",
+        feature=0,
+        reward=0,
+        anchor="goal_plain-case-1",
+    )
+    running.update(
+        {
+            "status": "running",
+            "metrics": {},
+            "countability": {
+                "integrity_qualified": False,
+                "official_result_present": False,
+                "score_countable": False,
+            },
+            "treatment_fidelity": "pending",
+            "effort": {},
+            "insight": {"status": "pending"},
+        }
+    )
+    running_envelope = _envelope(
+        running, record_kind="experiment_board_row", key="run-start"
+    )
+    simulate_benchmark_upload(store, running_envelope, execute=True)
+    with pytest.raises(ValueError, match="requires a terminal run"):
+        simulate_benchmark_upload(store, insight)
+
+    terminal_envelope = _envelope(
+        _row(
+            arm_id="loopx_plain",
+            arm_role="treatment",
+            feature=9,
+            reward=1,
+            anchor="goal_plain-case-1",
+        ),
+        record_kind="experiment_board_row",
+        key="run-terminal",
+        supersedes=running_envelope["record_id"],
+    )
+    simulate_benchmark_upload(store, terminal_envelope, execute=True)
+    accepted = simulate_benchmark_upload(store, insight, execute=True)
+    assert accepted["disposition"] == "accepted"
+
+    invalidated_run = copy.deepcopy(terminal_envelope["payload"])
+    invalidated_run["insight"] = {"status": "not_required"}
+    invalidation = _envelope(
+        invalidated_run,
+        record_kind="experiment_board_row",
+        key="run-without-insight",
+        supersedes=terminal_envelope["record_id"],
+    )
+    with pytest.raises(ValueError, match="complete post-run analysis"):
+        simulate_benchmark_upload(store, invalidation)
+
+    mismatch = _envelope(
+        _insight(outcome_status="cancelled"),
+        record_kind="case_insight_projection",
+        key="insight-mismatch",
+    )
+    with pytest.raises(ValueError, match="outcome does not match"):
+        simulate_benchmark_upload(store, mismatch)
+
+
+@pytest.mark.parametrize("status", ["runner_invalid", "cancelled"])
+def test_case_insight_upload_accepts_non_score_terminal_outcomes(
+    tmp_path: Path, status: str
+) -> None:
+    store = tmp_path / f"{status}.jsonl"
+    run = _row(
+        arm_id="goal_plain", arm_role="baseline", feature=0, reward=0
+    )
+    run.update(
+        {
+            "status": status,
+            "metrics": {},
+            "countability": {
+                "integrity_qualified": False,
+                "official_result_present": False,
+                "score_countable": False,
+            },
+        }
+    )
+    run_envelope = _envelope(
+        run, record_kind="experiment_board_row", key=f"{status}-run"
+    )
+    insight_envelope = _envelope(
+        _insight(run_id="goal_plain-case-1", outcome_status=status),
+        record_kind="case_insight_projection",
+        key=f"{status}-insight",
+    )
+    simulate_benchmark_upload(store, run_envelope, execute=True)
+    assert simulate_benchmark_upload(store, insight_envelope, execute=True)[
+        "disposition"
+    ] == "accepted"
 
 
 def test_dashboard_exposes_denominators_native_metrics_and_existing_comparisons() -> (
@@ -541,6 +708,14 @@ def test_four_arm_dashboard_reuses_factorial_authority() -> None:
         )
         for index, row in enumerate(rows)
     ]
+    records.append(
+        _envelope(
+            _insight(study_id="factorial-v1"),
+            record_kind="case_insight_projection",
+            key="factorial-insight",
+            study_id="factorial-v1",
+        )
+    )
     dashboard = build_benchmark_study_dashboard(
         _manifest(four_arm=True),
         records,
@@ -554,6 +729,11 @@ def test_four_arm_dashboard_reuses_factorial_authority() -> None:
         ]["difference_in_differences"]
         == 2
     )
+    assert next(
+        run
+        for run in dashboard["runs"]
+        if run["run_id"] == "loopx_plain-case-1"
+    )["redacted_insight"]["confidence"] == "high"
 
 
 def test_cli_local_simulation_flow(tmp_path: Path) -> None:
@@ -561,64 +741,51 @@ def test_cli_local_simulation_flow(tmp_path: Path) -> None:
     payload_path = tmp_path / "payload.json"
     envelope_path = tmp_path / "envelope.json"
     store = tmp_path / "store.jsonl"
-    manifest_path.write_text(json.dumps(_manifest()), encoding="utf-8")
-    baseline = _row(arm_id="goal_plain", arm_role="baseline", feature=6, reward=0)
+    manifest_path.write_text(json.dumps(_five_mode_manifest()), encoding="utf-8")
+    baseline = _row(
+        arm_id="plain",
+        arm_role="baseline",
+        feature=6,
+        reward=0,
+        study_id="five-mode-v1",
+    )
     payload_path.write_text(json.dumps(baseline), encoding="utf-8")
 
-    validate = subprocess.run(
-        [
-            str(REPO_ROOT / "scripts/loopx"),
-            "benchmark",
-            "study-validate",
-            "--manifest-json",
-            str(manifest_path),
-            "--format",
-            "json",
-        ],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=True,
+    validate = _loopx_json(
+        "benchmark",
+        "study-validate",
+        "--manifest-json",
+        str(manifest_path),
+        "--format",
+        "json",
     )
-    assert (
-        json.loads(validate.stdout)["schema_version"]
-        == BENCHMARK_STUDY_MANIFEST_SCHEMA_VERSION
+    assert validate["schema_version"] == BENCHMARK_STUDY_MANIFEST_SCHEMA_VERSION
+    envelope = _loopx_json(
+        "benchmark",
+        "upload-envelope",
+        "--payload-json",
+        str(payload_path),
+        "--record-kind",
+        "experiment_board_row",
+        "--producer-id",
+        "fixture-adapter",
+        "--producer-version",
+        "1.0.0",
+        "--benchmark-id",
+        "fixture-swe@1",
+        "--study-id",
+        "five-mode-v1",
+        "--idempotency-key",
+        "baseline-case-1",
+        "--observed-at",
+        "2026-09-02T12:00:00+00:00",
+        "--source-revision",
+        "0123456789abcdef",
+        "--format",
+        "json",
     )
-    built = subprocess.run(
-        [
-            str(REPO_ROOT / "scripts/loopx"),
-            "benchmark",
-            "upload-envelope",
-            "--payload-json",
-            str(payload_path),
-            "--record-kind",
-            "experiment_board_row",
-            "--producer-id",
-            "fixture-adapter",
-            "--producer-version",
-            "1.0.0",
-            "--benchmark-id",
-            "fixture-swe@1",
-            "--study-id",
-            "paired-v1",
-            "--idempotency-key",
-            "baseline-case-1",
-            "--observed-at",
-            "2026-09-02T12:00:00+00:00",
-            "--source-revision",
-            "0123456789abcdef",
-            "--format",
-            "json",
-        ],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    envelope = json.loads(built.stdout)
     envelope_path.write_text(json.dumps(envelope), encoding="utf-8")
-    base = [
-        str(REPO_ROOT / "scripts/loopx"),
+    upload_args = [
         "benchmark",
         "upload-local",
         "--envelope-json",
@@ -628,48 +795,73 @@ def test_cli_local_simulation_flow(tmp_path: Path) -> None:
         "--format",
         "json",
     ]
-    preview = subprocess.run(
-        base, cwd=REPO_ROOT, text=True, capture_output=True, check=True
+    assert _loopx_json(*upload_args)["write_performed"] is False
+    _loopx_json(*upload_args, "--execute")
+    readback = _loopx_json(
+        "benchmark",
+        "upload-readback",
+        "--store",
+        str(store),
+        "--record-id",
+        str(envelope["record_id"]),
+        "--format",
+        "json",
     )
-    assert json.loads(preview.stdout)["write_performed"] is False
-    subprocess.run(
-        [*base, "--execute"], cwd=REPO_ROOT, text=True, capture_output=True, check=True
+    assert readback["disposition"] == "readback_verified"
+
+    payload_path.write_text(
+        json.dumps(_insight(study_id="five-mode-v1", run_id="plain-case-1")),
+        encoding="utf-8",
     )
-    readback = subprocess.run(
-        [
-            str(REPO_ROOT / "scripts/loopx"),
-            "benchmark",
-            "upload-readback",
-            "--store",
-            str(store),
-            "--record-id",
-            envelope["record_id"],
-            "--format",
-            "json",
-        ],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=True,
+    insight_envelope = _loopx_json(
+        "benchmark",
+        "upload-envelope",
+        "--payload-json",
+        str(payload_path),
+        "--record-kind",
+        "case_insight_projection",
+        "--producer-id",
+        "fixture-adapter",
+        "--producer-version",
+        "1.0.0",
+        "--benchmark-id",
+        "fixture-swe@1",
+        "--study-id",
+        "five-mode-v1",
+        "--idempotency-key",
+        "insight-case-1",
+        "--observed-at",
+        "2026-09-02T12:01:00+00:00",
+        "--source-revision",
+        "0123456789abcdef",
+        "--format",
+        "json",
     )
-    assert json.loads(readback.stdout)["disposition"] == "readback_verified"
-    dashboard = subprocess.run(
-        [
-            str(REPO_ROOT / "scripts/loopx"),
-            "benchmark",
-            "study-dashboard",
-            "--manifest-json",
-            str(manifest_path),
-            "--store",
-            str(store),
-            "--format",
-            "json",
-        ],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=True,
+    envelope_path.write_text(json.dumps(insight_envelope), encoding="utf-8")
+    assert _loopx_json(*upload_args)["disposition"] == "preview_accepted"
+    _loopx_json(*upload_args, "--execute")
+    insight_readback = _loopx_json(
+        "benchmark",
+        "upload-readback",
+        "--store",
+        str(store),
+        "--record-id",
+        str(insight_envelope["record_id"]),
+        "--format",
+        "json",
     )
-    packet = json.loads(dashboard.stdout)
+    assert insight_readback["payload_digest"] == insight_envelope["payload_digest"]
+    packet = _loopx_json(
+        "benchmark",
+        "study-dashboard",
+        "--manifest-json",
+        str(manifest_path),
+        "--store",
+        str(store),
+        "--format",
+        "json",
+    )
+    assert packet["campaign"]["intended_arm_count"] == 5
     assert packet["campaign"]["selected_score_countable_cell_count"] == 1
+    assert packet["runs"][0]["redacted_insight"]["confidence"] == "high"
     assert packet["network_access_performed"] is False

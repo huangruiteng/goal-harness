@@ -14,6 +14,7 @@ export function WorkspaceSelect({
   icon,
   onChange,
   options,
+  prefixLabel,
   value,
 }: {
   ariaLabel: string;
@@ -21,6 +22,7 @@ export function WorkspaceSelect({
   icon?: ReactNode;
   onChange: (value: string) => void;
   options: WorkspaceSelectOption[];
+  prefixLabel?: string;
   value: string;
 }) {
   const listboxId = useId();
@@ -130,7 +132,10 @@ export function WorkspaceSelect({
         type="button"
       >
         {icon ? <span className="personal-select-icon">{icon}</span> : null}
-        <span className="personal-select-value">{selected?.label ?? value}</span>
+        <span className="personal-select-value">
+          {prefixLabel ? <small>{prefixLabel}</small> : null}
+          <span>{selected?.label ?? value}</span>
+        </span>
         <ChevronDown aria-hidden className={open ? "is-open" : undefined} size={14} />
       </button>
       {open ? (

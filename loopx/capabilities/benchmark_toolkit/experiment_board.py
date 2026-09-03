@@ -61,6 +61,12 @@ _ROW_FIELDS = {
 }
 
 
+def benchmark_run_status_is_terminal(value: object) -> bool:
+    """Return whether a normalized run status closes its lifecycle."""
+
+    return isinstance(value, str) and value in _TERMINAL_RUN_STATUSES
+
+
 def _reject_unknown_fields(
     value: Mapping[str, Any],
     *,

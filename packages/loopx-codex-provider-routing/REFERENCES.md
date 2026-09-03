@@ -23,7 +23,7 @@ ports, accounts or private receipts.
 | uTLS connection experiments | Upstreamed, not duplicated | CLIProxyAPI PR #5261 is the implementation owner |
 | Route-specific fallback ring | Upstreamed, not duplicated | CLIProxyAPI PR #5336 is the implementation owner |
 | OpenAI-compatible bounded rate-limit waits | Upstreamed, not duplicated | CLIProxyAPI PR #5435 propagates `Retry-After`, uses a one-minute fallback only for explicit TPM limits, and leaves generic 429 behavior unchanged |
-| Delimiterless compatible SSE and recoverable orphan host outputs | Integrated public-safe patch, not duplicated | The CPA integration candidate carries the protocol repair until its upstream dependency chain is ready for an independent PR |
+| Delimiterless compatible SSE and recoverable orphan host outputs | Integrated public-safe patch, not duplicated | The CPA integration candidate removes host tool identity but retypes confirmed orphan control output as a user message; qualification must prove instruction follow-through, while unknown, paired and empty outputs remain typed failures |
 
 ## Configuration References
 

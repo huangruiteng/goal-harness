@@ -180,6 +180,11 @@ def normalize_periodic_report_publication_cursor(
         normalized["predecessor_publication_id"] = _identity_text(
             predecessor, "publication_cursor.predecessor_publication_id"
         )
+    workspace_digest = str(raw.get("workspace_projection_sha256") or "").strip()
+    if workspace_digest:
+        normalized["workspace_projection_sha256"] = _digest(
+            workspace_digest, "publication_cursor.workspace_projection_sha256"
+        )
     normalized["cursor_id"] = _identity(
         {key: value for key, value in normalized.items() if key != "cursor_id"},
         prefix="report_cursor",
@@ -300,6 +305,7 @@ def build_periodic_report_publication_candidate(
     trigger_receipt: Mapping[str, Any],
     facts: Sequence[Mapping[str, Any]],
     baseline: Mapping[str, Any] | None,
+    workspace_projection_sha256: str | None = None,
 ) -> dict[str, Any]:
     normalized_facts: dict[str, dict[str, str]] = {}
     for index, raw in enumerate(facts):
@@ -324,6 +330,10 @@ def build_periodic_report_publication_candidate(
     }
     if baseline is not None:
         candidate["incremental_baseline"] = _normalize_incremental_baseline(baseline)
+    if workspace_projection_sha256:
+        candidate["workspace_projection_sha256"] = _digest(
+            workspace_projection_sha256, "workspace_projection_sha256"
+        )
     candidate["candidate_id"] = _identity(
         {key: value for key, value in candidate.items() if key != "candidate_id"},
         prefix="report_candidate",
@@ -395,6 +405,7 @@ def commit_periodic_report_publication_cursor(
         "covered_trigger_ids",
         "fact_states",
         "incremental_baseline",
+        "workspace_projection_sha256",
     }
     unknown = sorted(set(supplied) - allowed_fields)
     if unknown:
@@ -478,6 +489,13 @@ def commit_periodic_report_publication_cursor(
         }
         if previous is not None:
             cursor["predecessor_publication_id"] = previous["publication_id"]
+        workspace_digest = str(
+            candidate.get("workspace_projection_sha256") or ""
+        ).strip()
+        if workspace_digest:
+            cursor["workspace_projection_sha256"] = _digest(
+                workspace_digest, "candidate.workspace_projection_sha256"
+            )
         cursor["cursor_id"] = _identity(
             {key: value for key, value in cursor.items() if key != "cursor_id"},
             prefix="report_cursor",

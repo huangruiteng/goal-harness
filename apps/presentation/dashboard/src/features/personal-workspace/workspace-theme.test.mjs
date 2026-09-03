@@ -51,6 +51,7 @@ assert.match(select, /event.key === "Escape"/, "Workspace select supports keyboa
 assert.doesNotMatch(header, /<select/, "The primary Agent selector is not browser-native");
 assert.doesNotMatch(statusSource, /<select/, "The primary control-plane selector is not browser-native");
 assert.match(header, /<WorkspaceSelect/, "The Agent selector uses the shared menu");
+assert.match(header, /prefixLabel={t\("header.chatRuntime"\)}/, "The chat runtime remains visibly distinct from work-Agent lanes");
 assert.match(statusSource, /<WorkspaceSelect/, "The control-plane selector uses the shared menu");
 assert.match(i18n, /"settings.themeLoopx": "LoopX standard"/, "English theme label is present");
 assert.match(i18n, /"settings.themeLoopx": "LoopX 标准"/, "Chinese theme label is present");

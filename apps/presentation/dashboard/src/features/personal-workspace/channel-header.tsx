@@ -45,7 +45,9 @@ export function ChannelHeader({
       <div className="personal-channel-title">
         <h1>{selectedGoal?.title ?? t("header.manager")}</h1>
         <p>{selectedGoal
-          ? `${selectedGoal.agentLabel ?? selectedGoal.agentId} · ${localizedGoalState(selectedGoal.state, locale)}${goalUsageLabel(selectedGoal.usage) ? ` · ${goalUsageLabel(selectedGoal.usage)}` : ""} · ${selectedGoal.nextSentence}`
+          ? `${selectedGoal.agentLaneCount && selectedGoal.agentLaneCount > 1
+            ? t("header.workAgentCount", { count: selectedGoal.agentLaneCount })
+            : selectedGoal.agentLabel ?? selectedGoal.agentId} · ${localizedGoalState(selectedGoal.state, locale)}${goalUsageLabel(selectedGoal.usage) ? ` · ${goalUsageLabel(selectedGoal.usage)}` : ""} · ${selectedGoal.nextSentence}`
           : t("header.managerDescription")}</p>
       </div>
       {selectedGoal ? (
@@ -70,7 +72,7 @@ export function ChannelHeader({
           <span className="personal-read-only-source" title={t("header.readOnlySourceDescription", { source: readOnlySourceLabel })}><Eye size={15} />{readOnlySourceLabel}<small>{t("common.readOnly")}</small></span>
         ) : (
           <WorkspaceSelect
-            ariaLabel={t("header.selectAgent")}
+            ariaLabel={t("header.selectChatRuntime")}
             className="personal-agent-select"
             icon={<Bot size={16} />}
             onChange={onSelectAgent}
@@ -79,6 +81,7 @@ export function ChannelHeader({
               label: `${agent.label}${agent.available ? "" : ` · ${t("header.agentUnavailable")}`}`,
               value: agent.agentId,
             }))}
+            prefixLabel={t("header.chatRuntime")}
             value={selectedAgentId}
           />
         )}

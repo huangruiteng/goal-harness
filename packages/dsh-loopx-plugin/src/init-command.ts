@@ -31,7 +31,9 @@ const INIT_SOURCE_ID = 'dsh-loopx-plugin/init-command'
 const MAX_FOLLOWUP_TEXT_CHARS = 800
 const PYTHON_VERSION_PROBE = 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'
 const PIP_VERSION_ARGS = Object.freeze(['-m', 'pip', '--version'])
-const LOOPX_REQUIREMENT = 'loopx>=0.5.3'
+// 0.5.4 is the first release that discovers wheel data-files after the
+// plugin's pip --target installation on Linux (the DSH managed-runtime path).
+const LOOPX_REQUIREMENT = 'loopx>=0.5.4'
 const MANAGED_LAUNCHER_SOURCE = [
   'from pathlib import Path',
   'import runpy',

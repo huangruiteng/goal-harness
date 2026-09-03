@@ -16,12 +16,15 @@ from ...control_plane.goals.goal_frontier import (
 from ...control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from ...control_plane.todos.quota_summary import summarize_user_todos_for_quota
 from ...history import collect_history, load_registry
+from ...paths import resolve_runtime_root
 from ...registry import registry_goals
 from .stage_completion import STAGE_COMPLETION_RECEIPT_SCHEMA
 from .stage_completion import derive_periodic_report_stage_completion_from_runs
 from .presets import build_periodic_report_preset_activation
 from .project_progress_snapshot import build_project_progress_snapshot_from_state
 from .incremental import read_periodic_report_publication_cursor
+from .machine_defaults import resolve_goal_periodic_report_subscription
+from .machine_store import read_periodic_report_machine_defaults
 from .triggers import build_periodic_report_trigger_decision
 
 
@@ -60,14 +63,38 @@ def _goal_config(registry_path: Path, goal_id: str) -> Mapping[str, Any]:
 
 
 def periodic_report_post_writeback_hooks_for_goal(
-    *, registry_path: Path, goal_id: str
+    *, registry_path: Path, goal_id: str, runtime_root: Path | None = None
 ) -> tuple[PostWritebackHookRegistration, ...]:
-    """Resolve the explicit project profile opt-in at the composition root."""
+    """Resolve a Goal override or live machine-default profile at composition."""
 
-    config = _goal_config(registry_path, goal_id)
-    if config.get("enabled") is not True:
+    registry = load_registry(registry_path)
+    effective_runtime_root = runtime_root or resolve_runtime_root(
+        registry,
+        registry_path=registry_path,
+    )
+    goal = next(
+        (
+            item
+            for item in registry_goals(registry)
+            if str(item.get("id") or "").strip() == str(goal_id or "").strip()
+        ),
+        None,
+    )
+    if not isinstance(goal, Mapping):
         return ()
-    preset = str(config.get("profile_preset") or "").strip()
+    goal_override = _goal_config(registry_path, goal_id)
+    if goal_override:
+        if goal_override.get("enabled") is not True:
+            return ()
+        preset = str(goal_override.get("profile_preset") or "").strip()
+    else:
+        subscription = resolve_goal_periodic_report_subscription(
+            goal,
+            read_periodic_report_machine_defaults(effective_runtime_root),
+        )
+        if subscription.get("enabled") is not True:
+            return ()
+        preset = str(subscription.get("profile_preset") or "").strip()
     if not preset:
         return ()
     activation = build_periodic_report_preset_activation(preset)
