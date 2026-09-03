@@ -1299,6 +1299,25 @@ and reports `qualified`, `insufficient_evidence`, or `drifted`. Replays do not
 increase the operation count, missing coverage fails the gate, and every result
 continues to declare `decision_read_from_shadow=false`.
 
+The next read-only seam exercises the provider shape needed by the future
+read flip without granting it authority:
+
+```bash
+loopx coordination-shadow read-candidate \
+  --goal-id <goal-id> \
+  --todo-id <todo-id>
+```
+
+TypeScript loads the file head, requires its digest to match the complete
+current legacy coordination projection, validates unique Todo identities, and
+returns the exact compact Todo plus the provider revision and cursor. Missing,
+drifted, malformed, or duplicate state fails closed. The result deliberately
+keeps `decision_read_from_shadow=false`: it proves that a parity-matched
+provider can answer an exact Todo read, but no lifecycle or settlement caller
+uses that answer yet. Promotion still requires an atomic provider-first read
+flip together with legacy-writer fencing; a fallback to Markdown after that
+flip would recreate split authority and is forbidden.
+
 The provider-first read flip and fencing every legacy coordination writer
 remain mandatory evidence for the separately reviewed local canonical
 promotion. Remote NoKV/PostgreSQL shadowing therefore remains Stage 3 and

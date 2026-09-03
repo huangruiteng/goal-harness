@@ -1048,6 +1048,22 @@ event/receipt/projection identity，以及当前 legacy/file head digest，并�
 `qualified`、`insufficient_evidence` 或 `drifted`。replay 不增加 operation 计数，缺少
 覆盖会让 gate 失败，所有结果仍明确声明 `decision_read_from_shadow=false`。
 
+下一个只读 seam 会演练未来 read flip 所需的 provider 读取形态，但不授予它 authority：
+
+```bash
+loopx coordination-shadow read-candidate \
+  --goal-id <goal-id> \
+  --todo-id <todo-id>
+```
+
+TypeScript 会读取 file head，要求其 digest 与当前完整 legacy coordination projection
+一致，校验 Todo identity 唯一，再返回精确的紧凑 Todo、provider revision 与 cursor。
+provider 缺失、漂移、结构非法或 Todo 重复都会 fail closed。结果刻意保持
+`decision_read_from_shadow=false`：它只证明 parity 匹配的 provider 能回答一次精确
+Todo 读取，尚无 lifecycle 或 settlement 调用方消费这个答案。正式 promotion 仍必须
+把 provider-first read flip 与 legacy-writer fencing 作为同一个受审原子边界；flip 后
+回退 Markdown 会重新制造双权威，因此禁止。
+
 后续仍需完成 provider-first read flip，并 fence 全部 legacy coordination writer；这些
 仍是独立评审的本地 canonical promotion 的强制证据。因此 NoKV/PostgreSQL 远端 shadow
 仍属于 Stage 3，不能把这个默认关闭的 hook 当作 authority。
