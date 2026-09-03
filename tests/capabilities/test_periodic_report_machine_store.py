@@ -32,7 +32,7 @@ def _defaults(*, route_ref: str = "loopx-concierge") -> dict:
             "periodic_report": {
                 "schema_version": "periodic_report_machine_defaults_v0",
                 "enabled": True,
-                "inheritance": "materialize_on_goal_connect",
+        "inheritance": "live_machine_default",
                 "profile_preset": "weekly-progress",
                 "route_ref": route_ref,
                 "timezone": "Asia/Shanghai",

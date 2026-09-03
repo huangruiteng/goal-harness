@@ -908,7 +908,7 @@ export async function configureGoalChannelAutoNotify(options: { autoNotify: bool
 export const periodicReportMachineConfigurationSchema = z.object({
   schema_version: z.literal("periodic_report_machine_defaults_v0"),
   enabled: z.boolean(),
-  inheritance: z.literal("materialize_on_goal_connect"),
+  inheritance: z.literal("live_machine_default"),
   profile_preset: z.string().optional(),
   route_ref: z.string().optional(),
   timezone: z.string(),

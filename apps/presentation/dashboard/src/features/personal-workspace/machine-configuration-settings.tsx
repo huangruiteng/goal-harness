@@ -56,7 +56,7 @@ function configurationFromDraft(draft: PeriodicReportDraft): Record<string, unkn
   return {
     schema_version: "periodic_report_machine_defaults_v0",
     enabled: draft.enabled,
-    inheritance: "materialize_on_goal_connect",
+    inheritance: "live_machine_default",
     profile_preset: draft.profilePreset.trim(),
     route_ref: draft.routeRef.trim(),
     timezone: draft.timezone.trim(),
@@ -476,8 +476,8 @@ export function MachineConfigurationSettings() {
             <div className="personal-machine-scope-note">
               <ShieldCheck aria-hidden size={18} />
               <div>
-                <strong>{t("machine.futureGoalsOnly")}</strong>
-                <p>{t("machine.futureGoalsOnlyDescription")}</p>
+                <strong>{t("machine.liveDefault")}</strong>
+                <p>{t("machine.liveDefaultDescription")}</p>
               </div>
             </div>
 

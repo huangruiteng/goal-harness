@@ -316,7 +316,7 @@ assert.match(machineSettings, /periodicReportNamespace = "periodic_report"/, "Pe
 assert.match(machineSettings, /previewMachineConfiguration\(/, "Machine settings require a preview before apply");
 assert.match(machineSettings, /applyMachineConfiguration\([\s\S]*preview\.plan_revision/, "Machine settings apply the exact reviewed revision");
 assert.match(machineSettings, /previewMachineConfigurationRollback\(/, "Machine settings preview rollback before execution");
-assert.match(machineSettings, /futureGoalsOnlyDescription/, "Machine policy is visibly distinct from Goal migration");
+assert.match(machineSettings, /liveDefaultDescription/, "Live defaults and Goal overrides are explained together");
 assert.match(machineSettings, /namespace_catalog/, "Machine settings discover capability namespaces from the registry catalog");
 assert.match(machineSettings, /personal-machine-json-editor/, "Every registered namespace has a generic JSON editor fallback");
 assert.match(machineSettings, /selectedNamespace,\s*desiredNamespaceConfiguration/, "Preview targets the selected namespace instead of a periodic-report constant");

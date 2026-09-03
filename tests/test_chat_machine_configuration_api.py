@@ -30,7 +30,7 @@ def _configuration(*, enabled: bool = True) -> dict[str, Any]:
             "periodic_report": {
                 "schema_version": "periodic_report_machine_defaults_v0",
                 "enabled": enabled,
-                "inheritance": "materialize_on_goal_connect",
+                "inheritance": "live_machine_default",
                 "profile_preset": "weekly-progress",
                 "route_ref": "loopx-manager",
                 "timezone": "Asia/Shanghai",
@@ -145,14 +145,15 @@ def test_inspection_lists_registered_namespaces_without_local_refs(
                 "namespace": "periodic_report",
                 "title": "Periodic reports",
                 "description": (
-                    "Defaults materialized into newly connected Goals. Existing "
-                    "Goals are not migrated by changing this machine policy."
+                    "Live default for Goals without an explicit periodic-report "
+                    "override. Goal overrides remain fixed; changing or removing "
+                    "this policy updates inherited behavior on the next plan."
                 ),
                 "schema_versions": ["periodic_report_machine_defaults_v0"],
                 "configuration_template": {
                     "schema_version": "periodic_report_machine_defaults_v0",
                     "enabled": False,
-                    "inheritance": "materialize_on_goal_connect",
+                    "inheritance": "live_machine_default",
                     "timezone": "UTC",
                 },
                 "template_status": "ready",

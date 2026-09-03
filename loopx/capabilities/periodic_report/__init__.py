@@ -30,7 +30,6 @@ from .machine_defaults import (
     normalize_loopx_machine_defaults,
     normalize_periodic_report_machine_defaults,
     periodic_report_machine_configuration_namespace,
-    plan_periodic_report_machine_default_backfill,
     resolve_goal_periodic_report_subscription,
     select_goal_periodic_report_executor,
 )
@@ -83,7 +82,6 @@ __all__ = [
     "normalize_loopx_machine_defaults",
     "normalize_periodic_report_machine_defaults",
     "periodic_report_machine_configuration_namespace",
-    "plan_periodic_report_machine_default_backfill",
     "normalize_periodic_report_audience_policy",
     "normalize_periodic_report_sink_bindings",
     "normalize_periodic_report_trigger_policy",
