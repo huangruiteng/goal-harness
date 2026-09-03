@@ -677,6 +677,13 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
                 "review observes qualified startup and zero post-start semantic "
                 "control transitions; otherwise absence remains unknown."
             ),
+            "persistence_rule": (
+                "Only task-facing Todo transitions and technical replans that "
+                "change the solving course before the result is fixed establish "
+                "sustained control. Terminal-only Todo settlement, replan "
+                "bookkeeping, and closeout remain recorded as closeout events but "
+                "do not establish persistence."
+            ),
             "observation_template": {
                 "schema_version": (
                     "benchmark_treatment_continuation_observation_v0"

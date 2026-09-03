@@ -69,6 +69,47 @@ def test_receipt_reports_post_start_semantic_control_without_claiming_closeout()
     assert "terminal_control_unsettled" in receipt["reason_codes"]
 
 
+def test_terminal_only_closeout_does_not_establish_sustained_control() -> None:
+    observation = _observation()
+    observation["post_start_control_events"] = {
+        "todo_transition_count": 0,
+        "technical_replan_count": 0,
+        "control_closeout_count": 3,
+    }
+    observation["terminal_control_state"] = "settled"
+
+    receipt = build_benchmark_treatment_continuation_receipt(observation)
+
+    assert receipt["classification"] == "startup_only"
+    assert receipt["post_start_control_observed"] is True
+    assert receipt["post_start_control_event_count"] == 3
+    assert receipt["post_start_control_event_counts"] == {
+        "control_closeout_count": 3,
+        "technical_replan_count": 0,
+        "todo_transition_count": 0,
+    }
+    assert (
+        "terminal_only_control_does_not_establish_persistence"
+        in receipt["reason_codes"]
+    )
+
+
+def test_incomplete_terminal_only_observation_remains_unknown() -> None:
+    observation = _observation()
+    observation["observation_complete"] = False
+    observation["post_start_control_events"] = {
+        "todo_transition_count": 0,
+        "technical_replan_count": 0,
+        "control_closeout_count": 1,
+    }
+
+    receipt = build_benchmark_treatment_continuation_receipt(observation)
+
+    assert receipt["classification"] == "unknown"
+    assert receipt["post_start_control_event_count"] == 1
+    assert "post_run_observation_incomplete" in receipt["reason_codes"]
+
+
 def test_absence_requires_complete_post_run_observation() -> None:
     observation = _observation()
     observation["observation_complete"] = False
@@ -195,6 +236,7 @@ def test_catalog_teaches_score_neutral_treatment_continuation_readback() -> None
     ]
     assert continuation["score_semantics"] == "unchanged"
     assert "does not change" in continuation["analysis_boundary"]
+    assert "terminal-only" in continuation["persistence_rule"].lower()
     assert continuation["observation_template"]["schema_version"] == (
         "benchmark_treatment_continuation_observation_v0"
     )

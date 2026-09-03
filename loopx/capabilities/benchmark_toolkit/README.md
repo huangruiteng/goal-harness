@@ -1148,15 +1148,23 @@ loopx benchmark treatment-continuation-receipt \
 
 The observation names startup state, whether the review is complete, counts of
 post-start Todo transitions, technical replans, and control closeouts, terminal
-control settlement, and whether pre-commit validation was observed. It contains no
-task text, trajectory content, paths, run identity, verifier output, or score.
+control settlement, and whether pre-commit validation was observed. Count a Todo
+transition only when it advances or revises task-facing technical work before the
+result is fixed. Count a technical replan only when it changes that technical
+course. Record terminal-only Todo settlement, replan bookkeeping, and final
+closeout under `control_closeout_count`; those events are visible but do not prove
+continued technical control. The observation contains no task text, trajectory
+content, paths, run identity, verifier output, or score.
 
 The receipt classifies the mechanism as `sustained`, `startup_only`, `unknown`, or
-`not_applicable`. Here, `sustained` means at least one semantic control transition
-was observed after qualified startup; terminal settlement remains a separate field.
-Absence becomes `startup_only` only when the authorized post-run observation is
-complete. This receipt is analysis-only: it never changes score countability,
-integrity qualification, treatment fidelity, or matched-pair eligibility.
+`not_applicable`. Here, `sustained` means at least one qualifying task-facing Todo
+transition or technical replan was observed after qualified startup and before the
+result was fixed. Terminal-only control never establishes `sustained`, even when
+terminal settlement succeeds; the existing total and per-kind event counts still
+record that closeout activity. Absence becomes `startup_only` only when the
+authorized post-run observation is complete. This receipt is analysis-only: it
+never changes score countability, integrity qualification, treatment fidelity, or
+matched-pair eligibility.
 
 ## Study manifest, local upload simulation, and dashboard packet
 
