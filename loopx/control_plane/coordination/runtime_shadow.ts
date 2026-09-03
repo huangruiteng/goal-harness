@@ -13,7 +13,10 @@ import {
   canonicalAuthoritySha256,
   requireAuthorityStoreId,
 } from "./authority_store_codec.ts";
-import { indexCoordinationProjectionTodos } from "./coordination_projection.ts";
+import {
+  indexCoordinationProjectionTodos,
+  validateCoordinationTodoReadModel,
+} from "./coordination_projection.ts";
 import { FileAuthorityStore } from "./file_authority_store.ts";
 
 export const COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA =
@@ -955,6 +958,27 @@ export async function qualifyCoordinationRuntimeShadow(
     }
     const expectedProjectionSha256 = canonicalAuthoritySha256(request.projection);
     const observedProjectionSha256 = canonicalAuthoritySha256(head.head);
+    let todoReadModel: JsonObject;
+    try {
+      validateCoordinationTodoReadModel(request.projection, request.goal_id);
+      todoReadModel = validateCoordinationTodoReadModel(head.head, request.goal_id);
+    } catch (error) {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+        status: "drifted",
+        reason_code: "shadow_todo_consumer_semantics_invalid",
+        reason: error instanceof Error ? error.message : "Todo read-model validation failed",
+        policy,
+        qualified: false,
+        parity_matches: false,
+        expected_projection_sha256: expectedProjectionSha256,
+        observed_projection_sha256: observedProjectionSha256,
+        provider_revision: head.provider_revision,
+        cursor: head.cursor,
+        primary_writeback_preserved: true,
+        decision_read_from_shadow: false,
+      };
+    }
     const lineage = await scanShadowLineage(store);
     if (lineage.status === "failed") {
       return {
@@ -1011,6 +1035,8 @@ export async function qualifyCoordinationRuntimeShadow(
         missing_required_event_kinds: missingRequiredEventKinds,
         enough_operations: enoughOperations,
         coverage_complete: coverageComplete,
+        todo_consumer_semantics_verified: true,
+        todo_read_model: todoReadModel,
         ...(transactionFailure === null ? {} : { reason_code: transactionFailure }),
       },
       primary_writeback_preserved: true,

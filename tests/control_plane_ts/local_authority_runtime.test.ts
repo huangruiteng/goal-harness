@@ -8,6 +8,10 @@ import test from "node:test";
 import { FileAuthorityStore } from "../../loopx/control_plane/coordination/file_authority_store.ts";
 import { canonicalAuthorityBytes } from "../../loopx/control_plane/coordination/authority_store_codec.ts";
 import {
+  TODO_CANONICAL_READ_RECORD_FIELDS,
+  TODO_CANONICAL_READ_RECORD_SCHEMA,
+} from "../../loopx/control_plane/coordination/coordination_projection.ts";
+import {
   LOCAL_COORDINATION_PROMOTION_REQUEST_SCHEMA,
   LOCAL_COORDINATION_MUTATION_REQUEST_SCHEMA,
   LOCAL_COORDINATION_TODO_READ_REQUEST_SCHEMA,
@@ -40,12 +44,39 @@ function sha256(value: unknown): string {
   return createHash("sha256").update(canonicalAuthorityBytes(value)).digest("hex");
 }
 
-async function qualifiedShadow(root: string) {
-  const baseline = {
-    goal_id: "goal-a",
-    todos: [{ todo_id: "todo_a", status: "open" }],
-    leases: [],
+function withTodoReadModel<T extends Record<string, unknown>>(projection: T): T {
+  const todos = projection.todos as Record<string, unknown>[];
+  return {
+    ...projection,
+    todo_read_model: {
+      schema_version: TODO_CANONICAL_READ_RECORD_SCHEMA,
+      todo_count: todos.length,
+      records_sha256: sha256(todos),
+      contract_fields: [...TODO_CANONICAL_READ_RECORD_FIELDS],
+    },
   };
+}
+
+function todoRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schema_version: "todo_item_v0",
+    todo_id: "todo_a",
+    role: "agent",
+    status: "open",
+    done: false,
+    text: "Qualify canonical Todo semantics",
+    archive_state: "active",
+    source_section: "Agent Todo",
+    ...overrides,
+  };
+}
+
+async function qualifiedShadow(root: string) {
+  const baseline = withTodoReadModel({
+    goal_id: "goal-a",
+    todos: [todoRecord()],
+    leases: [],
+  });
   const bootstrapped = await bootstrapCoordinationRuntimeShadow({
     schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
     runtime_root: root,
@@ -55,10 +86,10 @@ async function qualifiedShadow(root: string) {
     projection: baseline,
   });
   assert.equal(bootstrapped.status, "applied");
-  const projection = {
+  const projection = withTodoReadModel({
     ...baseline,
-    todos: [{ todo_id: "todo_a", status: "open", claimed_by: "agent-a" }],
-  };
+    todos: [todoRecord({ claimed_by: "agent-a" })],
+  });
   const mirrored = await commitCoordinationRuntimeShadow({
     schema_version: COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
     runtime_root: root,
@@ -160,7 +191,7 @@ test("explicit local promotion requires qualified shadow and creates replayable 
     expected_provider_revision: applied.provider_revision,
     mutations: [{
       kind: "todo_upsert",
-      todo: { todo_id: "todo_a", status: "in_progress", claimed_by: "agent-a" },
+      todo: todoRecord({ status: "in_progress", claimed_by: "agent-a" }),
     }],
   });
   assert.equal(advanced.status, "applied");
@@ -218,6 +249,57 @@ test("local promotion fences shadow revision, digest, and writer-fence identity"
   assert.equal((await canonical.loadAuthority()).status, "missing");
 });
 
+test("promotion and provider list fail closed without exact Todo consumer semantics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-local-authority-semantic-fence-"));
+  const incomplete = {
+    goal_id: "goal-a",
+    todos: [{ todo_id: "todo_a", role: "agent", status: "open" }],
+    leases: [],
+  };
+  const bootstrapped = await bootstrapCoordinationRuntimeShadow({
+    schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    operation_id: "bootstrap:goal-a:incomplete",
+    source_version: "state:0",
+    projection: incomplete,
+  });
+  assert.equal(bootstrapped.status, "applied");
+  const mirrored = await commitCoordinationRuntimeShadow({
+    schema_version: COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    operation_id: "todo:goal-a:incomplete",
+    event_kind: "todo_update",
+    source_version: "state:1",
+    projection: incomplete,
+  });
+  assert.equal(mirrored.status, "applied");
+  const request = promotionRequest(root, incomplete, String(mirrored.provider_revision));
+  request.required_event_kinds = ["todo_update"];
+  await engageFence(request);
+  const rejected = await promoteLocalCoordinationAuthority(request);
+  assert.equal(rejected.status, "failed");
+  assert.equal(rejected.reason_code, "local_authority_shadow_not_qualified");
+
+  const canonical = new FileAuthorityStore(join(root, "authority", "file-v0"), "goal-a");
+  const committed = await canonical.commitAuthority({
+    expected_provider_revision: null,
+    operation_id: "unsafe:test-only",
+    events: [{ schema_version: "test_v0" }],
+    next_projection: incomplete,
+    receipts: [],
+  });
+  assert.equal(committed.status, "applied");
+  const listed = await listLocalCoordinationTodos({
+    schema_version: LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+  });
+  assert.equal(listed.status, "failed");
+  assert.equal(listed.reason_code, "invalid_local_coordination_todo_list_request");
+});
+
 test("local canonical runtime reads and mutates only the provider head", async () => {
   const root = await mkdtemp(join(tmpdir(), "loopx-local-authority-runtime-"));
   const store = new FileAuthorityStore(join(root, "authority", "file-v0"), "goal-a");
@@ -225,12 +307,12 @@ test("local canonical runtime reads and mutates only the provider head", async (
     expected_provider_revision: null,
     operation_id: "promote:goal-a",
     events: [{ schema_version: "promotion_v0" }],
-    next_projection: {
+    next_projection: withTodoReadModel({
       goal_id: "goal-a",
       source_authority: "file_v0",
-      todos: [{ todo_id: "todo_a", status: "open" }],
+      todos: [todoRecord()],
       leases: [],
-    },
+    }),
     receipts: [],
   });
   assert.equal(initial.status, "applied");
@@ -254,7 +336,7 @@ test("local canonical runtime reads and mutates only the provider head", async (
     expected_provider_revision: initial.provider_revision,
     mutations: [{
       kind: "todo_upsert",
-      todo: { todo_id: "todo_a", status: "open", claimed_by: "agent-a" },
+      todo: todoRecord({ claimed_by: "agent-a" }),
     }],
   });
   assert.equal(mutation.status, "applied");

@@ -6,6 +6,7 @@ import {
   commitCoordinationProjectionMutation,
   indexCoordinationProjection,
   indexCoordinationProjectionTodos,
+  validateCoordinationTodoReadModel,
   type CoordinationProjectionMutation,
 } from "./coordination_projection.ts";
 import type { AuthorityStore, AuthorityStoreReceiptResult } from "./authority_store.ts";
@@ -517,6 +518,7 @@ export async function readLocalCoordinationTodo(
       };
     }
     const projection = indexCoordinationProjectionTodos(head.head, goalId);
+    validateCoordinationTodoReadModel(head.head, goalId);
     const todo = projection.todos.get(todoId);
     return {
       schema_version: LOCAL_COORDINATION_TODO_READ_RESULT_SCHEMA,
@@ -568,11 +570,13 @@ export async function listLocalCoordinationTodos(
       };
     }
     const projection = indexCoordinationProjectionTodos(head.head, goalId);
+    const todoReadModel = validateCoordinationTodoReadModel(head.head, goalId);
     return {
       schema_version: LOCAL_COORDINATION_TODO_LIST_RESULT_SCHEMA,
       status: "loaded",
       todos: projection.todo_ids.map((todoId) => projection.todos.get(todoId)!),
       todo_ids: projection.todo_ids,
+      todo_read_model: todoReadModel,
       provider_revision: head.provider_revision,
       cursor: head.cursor,
       source_authority: "file_v0",

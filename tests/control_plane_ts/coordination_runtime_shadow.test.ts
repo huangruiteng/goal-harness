@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { canonicalAuthorityBytes } from "../../loopx/control_plane/coordination/authority_store_codec.ts";
+import {
+  TODO_CANONICAL_READ_RECORD_FIELDS,
+  TODO_CANONICAL_READ_RECORD_SCHEMA,
+} from "../../loopx/control_plane/coordination/coordination_projection.ts";
 
 import type {
   AuthorityStoreCommit,
@@ -27,6 +33,19 @@ import {
   COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
 } from "../../loopx/control_plane/coordination/runtime_shadow.ts";
 
+function withTodoReadModel<T extends Record<string, unknown>>(projection: T): T {
+  const todos = projection.todos as Record<string, unknown>[];
+  return {
+    ...projection,
+    todo_read_model: {
+      schema_version: TODO_CANONICAL_READ_RECORD_SCHEMA,
+      todo_count: todos.length,
+      records_sha256: createHash("sha256").update(canonicalAuthorityBytes(todos)).digest("hex"),
+      contract_fields: [...TODO_CANONICAL_READ_RECORD_FIELDS],
+    },
+  };
+}
+
 async function request(root: string, operationId = "todo:goal-a:todo_one:v1") {
   return {
     schema_version: COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
@@ -35,12 +54,22 @@ async function request(root: string, operationId = "todo:goal-a:todo_one:v1") {
     operation_id: operationId,
     event_kind: "todo_claim",
     source_version: "state:1",
-    projection: {
+    projection: withTodoReadModel({
       schema_version: "loopx_coordination_shadow_projection_v0",
       goal_id: "goal-a",
-      todos: [{ todo_id: "todo_one", status: "open", claimed_by: "agent-a" }],
+      todos: [{
+        schema_version: "todo_item_v0",
+        todo_id: "todo_one",
+        role: "agent",
+        status: "open",
+        done: false,
+        text: "Qualify shadow semantics",
+        archive_state: "active",
+        source_section: "Agent Todo",
+        claimed_by: "agent-a",
+      }],
       leases: [],
-    },
+    }),
   };
 }
 

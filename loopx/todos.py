@@ -304,6 +304,7 @@ def list_goal_todos(
             "source_authority": canonical_read["source_authority"],
             "provider_revision": canonical_read.get("provider_revision"),
             "cursor": canonical_read.get("cursor"),
+            "todo_read_model": canonical_read.get("todo_read_model"),
             "decision_read_from_provider": True,
             "legacy_fallback_used": False,
         }
