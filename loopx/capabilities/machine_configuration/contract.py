@@ -14,6 +14,10 @@ MACHINE_CONFIGURATION_CATALOG_SCHEMA = "machine_configuration_catalog_v0"
 _NAMESPACE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 Normalizer = Callable[[Mapping[str, Any]], dict[str, Any]]
 Projector = Callable[[Mapping[str, Any]], dict[str, Any]]
+PublicUpdater = Callable[
+    [Mapping[str, Any] | None, Mapping[str, Any]],
+    dict[str, Any],
+]
 
 
 @dataclass(frozen=True)
@@ -24,6 +28,7 @@ class MachineConfigurationNamespace:
     schema_versions: frozenset[str]
     normalize: Normalizer
     project_public: Projector
+    apply_public_update: PublicUpdater
     title: str | None = None
     description: str | None = None
     default_configuration: Mapping[str, Any] | None = None
@@ -117,7 +122,7 @@ def merge_machine_configuration_namespace(
 ) -> dict[str, Any]:
     """Build one whole-document update while preserving sibling namespaces."""
 
-    registry.resolve(namespace)
+    contract = registry.resolve(namespace)
     normalized_current = (
         normalize_machine_configuration(current, registry=registry)
         if current is not None
@@ -126,12 +131,21 @@ def merge_machine_configuration_namespace(
     current_namespaces = _mapping(
         normalized_current.get("namespaces"), "machine_configuration.namespaces"
     )
+    current_namespace = current_namespaces.get(namespace)
+    if current_namespace is not None and not isinstance(current_namespace, Mapping):
+        raise TypeError(
+            f"machine_configuration.namespaces.{namespace} must be an object"
+        )
+    updated_namespace = _mapping(
+        contract.apply_public_update(current_namespace, namespace_configuration),
+        f"machine_configuration.namespaces.{namespace}",
+    )
     return normalize_machine_configuration(
         {
             "schema_version": MACHINE_CONFIGURATION_SCHEMA,
             "namespaces": {
                 **current_namespaces,
-                namespace: dict(namespace_configuration),
+                namespace: updated_namespace,
             },
         },
         registry=registry,

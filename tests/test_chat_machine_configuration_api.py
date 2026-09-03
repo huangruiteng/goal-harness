@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -8,6 +9,10 @@ from typing import Any
 from loopx.capabilities.machine_configuration.contract import (
     MachineConfigurationNamespace,
     MachineConfigurationRegistry,
+)
+from loopx.capabilities.machine_configuration.store import (
+    configure_machine_configuration,
+    read_machine_configuration,
 )
 from loopx.chat_machine_configuration_api import (
     CHAT_MACHINE_CONFIGURATION_APPLY_PATH,
@@ -77,6 +82,41 @@ class _MultiNamespaceHandler(_Handler):
                 schema_versions=frozenset({"search_defaults_v0"}),
                 normalize=lambda value: dict(value),
                 project_public=lambda value: dict(value),
+                apply_public_update=lambda _current, update: dict(update),
+            )
+        )
+
+
+def _normalize_private_namespace(value: Mapping[str, Any]) -> dict[str, Any]:
+    unknown = sorted(set(value) - {"schema_version", "enabled", "secret"})
+    if unknown:
+        raise ValueError("private namespace contains unsupported fields")
+    if not isinstance(value.get("enabled"), bool):
+        raise TypeError("private namespace enabled must be a boolean")
+    return dict(value)
+
+
+def _apply_private_namespace_public_update(
+    current: Mapping[str, Any] | None,
+    update: Mapping[str, Any],
+) -> dict[str, Any]:
+    unknown = sorted(set(update) - {"schema_version", "enabled"})
+    if unknown:
+        raise ValueError("private namespace public update contains unsupported fields")
+    return {**dict(current or {}), **dict(update)}
+
+
+class _PrivateNamespaceHandler(_Handler):
+    def _machine_configuration_registry(self) -> MachineConfigurationRegistry:
+        return MachineConfigurationRegistry().register(
+            MachineConfigurationNamespace(
+                namespace="private_defaults",
+                schema_versions=frozenset({"private_defaults_v0"}),
+                normalize=_normalize_private_namespace,
+                project_public=lambda value: {
+                    key: item for key, item in value.items() if key != "secret"
+                },
+                apply_public_update=_apply_private_namespace_public_update,
             )
         )
 
@@ -254,4 +294,70 @@ def test_namespace_patch_preserves_other_capability_namespaces(tmp_path: Path) -
     assert namespaces["search_defaults"] == {
         "schema_version": "search_defaults_v0",
         "index": "public",
+    }
+
+
+def test_public_api_update_preserves_provider_private_namespace_state(
+    tmp_path: Path,
+) -> None:
+    registry = _PrivateNamespaceHandler(tmp_path)._machine_configuration_registry()
+    initial = {
+        "schema_version": "loopx_machine_configuration_v0",
+        "namespaces": {
+            "private_defaults": {
+                "schema_version": "private_defaults_v0",
+                "enabled": False,
+                "secret": "keep-me",
+            }
+        },
+    }
+    seed_plan = configure_machine_configuration(
+        runtime_root=tmp_path,
+        configuration=initial,
+        registry=registry,
+    )
+    configure_machine_configuration(
+        runtime_root=tmp_path,
+        configuration=initial,
+        registry=registry,
+        execute=True,
+        expected_plan_revision=seed_plan["plan_revision"],
+    )
+
+    preview_handler = _PrivateNamespaceHandler(
+        tmp_path,
+        {
+            "namespace": "private_defaults",
+            "namespace_configuration": {
+                "schema_version": "private_defaults_v0",
+                "enabled": True,
+            },
+        },
+    )
+    preview_handler._machine_configuration_update(execute=False)
+    preview = preview_handler.responses[0]
+    assert preview["machine_configuration"]["namespaces"]["private_defaults"] == {
+        "schema_version": "private_defaults_v0",
+        "enabled": True,
+    }
+
+    apply_handler = _PrivateNamespaceHandler(
+        tmp_path,
+        {
+            "namespace": "private_defaults",
+            "namespace_configuration": {
+                "schema_version": "private_defaults_v0",
+                "enabled": True,
+            },
+            "expected_plan_revision": preview["plan_revision"],
+        },
+    )
+    apply_handler._machine_configuration_update(execute=True)
+
+    persisted = read_machine_configuration(tmp_path, registry=registry)
+    assert persisted is not None
+    assert persisted["namespaces"]["private_defaults"] == {
+        "schema_version": "private_defaults_v0",
+        "enabled": True,
+        "secret": "keep-me",
     }
