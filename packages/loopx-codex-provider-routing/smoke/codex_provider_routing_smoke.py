@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib
 import json
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -24,6 +25,32 @@ project_runtime_status = contract.project_runtime_status
 qualify_heartbeat_transport = contract.qualify_heartbeat_transport
 qualify_snapshot = contract.qualify_snapshot
 reconcile_integration_candidate = contract.reconcile_integration_candidate
+
+
+def _assert_layered_retry_templates() -> None:
+    app = (PACKAGE_ROOT / "templates" / "codex-app-config.toml").read_text()
+    local_cpa = app.split("[model_providers.local-cpa]", maxsplit=1)[1]
+    request_retries = re.search(
+        r"(?m)^request_max_retries\s*=\s*(\d+)\s*$", local_cpa
+    )
+    stream_retries = re.search(
+        r"(?m)^stream_max_retries\s*=\s*(\d+)\s*$", local_cpa
+    )
+    assert request_retries is not None and int(request_retries.group(1)) == 30
+    assert stream_retries is not None and int(stream_retries.group(1)) == 30
+
+    cpa = (PACKAGE_ROOT / "templates" / "cpa-config.public.yaml").read_text()
+    interval = re.search(r"(?m)^max-retry-interval:\s*(\d+)\s*$", cpa)
+    assert interval is not None and int(interval.group(1)) >= 60
+    compat = re.search(
+        r"(?ms)^openai-compatibility:\s*\n(?P<body>(?:^[ \t].*(?:\n|$))*)",
+        cpa,
+    )
+    assert compat is not None
+    provider_retry = re.search(
+        r"(?m)^\s{4}request-retry:\s*(\d+)\s*$", compat.group("body")
+    )
+    assert provider_retry is not None and int(provider_retry.group(1)) == 1
 
 
 def _source() -> dict[str, Any]:
@@ -192,6 +219,7 @@ def expect_error(action: Callable[[], Any], message: str) -> None:
 
 
 def main() -> int:
+    _assert_layered_retry_templates()
     heartbeat = qualify_heartbeat_transport(
         {
             "turn_trigger": "automation_heartbeat",
@@ -605,6 +633,8 @@ def main() -> int:
         "fork/reusable-http2-transport",
         "operator/modality-routing",
         "fork/route-specific-fallback",
+        "operator/compat-stream-repair",
+        "fork/openai-compat-bounded-rate-limit-waits",
     ]
     assert integration["deployment_contract"]["session_store_policy"] == (
         "preserve_in_place_never_copy_or_delete"
@@ -612,9 +642,9 @@ def main() -> int:
 
     moved_source = copy.deepcopy(integration_request["integration"])
     moved_source["observed"]["source_heads"]["transport-pool"] = (
-        "7777777777777777777777777777777777777777"
+        "9999999999999999999999999999999999999999"
     )
-    moved_source["sources"][1]["head_sha"] = "7777777777777777777777777777777777777777"
+    moved_source["sources"][1]["head_sha"] = "9999999999999999999999999999999999999999"
     integration = reconcile_integration_candidate(moved_source)
     assert integration["sync_required"] is True
     assert integration["drift_reasons"] == [
@@ -622,7 +652,7 @@ def main() -> int:
             "kind": "source_moved",
             "source_id": "transport-pool",
             "last_sync_sha": "3333333333333333333333333333333333333333",
-            "observed_sha": "7777777777777777777777777777777777777777",
+            "observed_sha": "9999999999999999999999999999999999999999",
         }
     ]
 

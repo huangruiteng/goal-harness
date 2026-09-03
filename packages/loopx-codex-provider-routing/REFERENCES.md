@@ -22,6 +22,8 @@ ports, accounts or private receipts.
 | Provider history and SSE normalizer prototypes | Upstreamed, not duplicated | CLIProxyAPI PR #5410 supersedes closed PR #5220 as the implementation owner |
 | uTLS connection experiments | Upstreamed, not duplicated | CLIProxyAPI PR #5261 is the implementation owner |
 | Route-specific fallback ring | Upstreamed, not duplicated | CLIProxyAPI PR #5336 is the implementation owner |
+| OpenAI-compatible bounded rate-limit waits | Upstreamed, not duplicated | CLIProxyAPI PR #5435 propagates `Retry-After`, uses a one-minute fallback only for explicit TPM limits, and leaves generic 429 behavior unchanged |
+| Delimiterless compatible SSE and recoverable orphan host outputs | Integrated public-safe patch, not duplicated | The CPA integration candidate carries the protocol repair until its upstream dependency chain is ready for an independent PR |
 
 ## Configuration References
 
@@ -43,7 +45,9 @@ The package keeps six credential-free examples:
 
 [`templates/codex-app-config.toml`](templates/codex-app-config.toml) and
 [`templates/cpa-config.public.yaml`](templates/cpa-config.public.yaml) preserve
-the working field shape and retry/Fast defaults. They contain placeholders and
+the working field shape and retry/Fast defaults. The App keeps its 30/30 outer
+recovery budget, while the OpenAI-compatible text fallback gets one additional
+provider round and a 65-second cooldown ceiling. They contain placeholders and
 omit all credential-bearing CPA sections. The extension never fills those
 placeholders or writes the templates into a Codex home.
 

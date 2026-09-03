@@ -10,7 +10,18 @@ remote-management:
 
 request-retry: 10
 max-retry-credentials: 0
-max-retry-interval: 0
+# Permit one provider-declared minute window plus small scheduling jitter. This
+# is a ceiling, not a fixed sleep and not permission to invent a cooldown for a
+# generic 429 that has no Retry-After signal.
+max-retry-interval: 65
+
+# Credential-bearing fields are intentionally omitted. The OpenAI-compatible
+# text fallback uses one additional provider round so an explicit Retry-After,
+# or a provider error that explicitly identifies a TPM window, can be honored
+# once without multiplying a large request across the global retry budget.
+openai-compatibility:
+  - name: "<OPENAI_COMPATIBILITY_TEXT_FALLBACK>"
+    request-retry: 1
 
 routing:
   strategy: "fill-first"
