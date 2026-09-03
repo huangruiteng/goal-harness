@@ -132,3 +132,101 @@ def test_resume_evaluator_retains_the_latest_bounded_matching_events(
     assert len(compacted) == 256
     assert compacted[0]["event_id"] == "merge-44"
     assert compacted[-1]["event_id"] == "merge-299"
+
+
+def test_resume_evaluator_filters_exact_repository_before_bounding_events(
+    monkeypatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_runtime(method: str, request: dict[str, Any]) -> dict[str, Any]:
+        captured.update(request)
+        assert method == "todo.resume_condition.evaluate"
+        return {
+            "schema_version": "todo_resume_evaluation_v0",
+            "conditions": [],
+        }
+
+    monkeypatch.setattr(resume_condition, "effect_runtime_result", fake_runtime)
+    events = [
+        {
+            "event_id": "exact-repository-merge",
+            "event_kind": "pr_merge",
+            "pr_ref": "owner/repo#42",
+        },
+        *[
+            {
+                "event_id": f"other-repository-merge-{index}",
+                "event_kind": "pr_merge",
+                "pr_ref": "other/repo#42",
+            }
+            for index in range(300)
+        ],
+    ]
+
+    resume_condition.evaluate_todo_resume_conditions(
+        [
+            {
+                "todo_id": "todo_waiting",
+                "status": "deferred",
+                "resume_when": "pr_merged:owner/repo#42",
+            }
+        ],
+        source_items=[],
+        rollout_events=events,
+    )
+
+    assert captured["rollout_events"] == [
+        {
+            "event_kind": "pr_merge",
+            "event_id": "exact-repository-merge",
+            "pr_ref": "owner/repo#42",
+        }
+    ]
+
+
+def test_resume_evaluator_uses_task_repository_to_bound_unqualified_pr_wait(
+    monkeypatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_runtime(method: str, request: dict[str, Any]) -> dict[str, Any]:
+        captured.update(request)
+        assert method == "todo.resume_condition.evaluate"
+        return {
+            "schema_version": "todo_resume_evaluation_v0",
+            "conditions": [],
+        }
+
+    monkeypatch.setattr(resume_condition, "effect_runtime_result", fake_runtime)
+    resume_condition.evaluate_todo_resume_conditions(
+        [
+            {
+                "todo_id": "todo_waiting",
+                "status": "deferred",
+                "resume_when": "pr_merged:#42",
+                "task_repository": "git:github.com/owner/repo",
+            }
+        ],
+        source_items=[],
+        rollout_events=[
+            {
+                "event_id": "wrong-repository",
+                "event_kind": "pr_merge",
+                "pr_ref": "other/repo#42",
+            },
+            {
+                "event_id": "matching-repository",
+                "event_kind": "pr_merge",
+                "pr_ref": "https://github.com/owner/repo/pull/42",
+            },
+        ],
+    )
+
+    assert captured["rollout_events"] == [
+        {
+            "event_kind": "pr_merge",
+            "event_id": "matching-repository",
+            "pr_ref": "https://github.com/owner/repo/pull/42",
+        }
+    ]
