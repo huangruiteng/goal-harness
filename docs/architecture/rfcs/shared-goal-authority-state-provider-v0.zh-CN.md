@@ -853,7 +853,9 @@ Stage 3/4 qualification 必须保持以下 ownership 与 proof 边界：
    把现有 Markdown/task-lease writer shadow 到 `FileAuthorityStore`；验证 parity、
    crash recovery、migration 与一键 rollback。随后通过一个单独评审的 promotion，
    让 file aggregate 成为本地 coordination authority，并 fence legacy writer；
-   只有晋升后 Markdown 与 task-lease 文件才退为 projection。
+   只有晋升后 Markdown 与 task-lease 文件才退为 projection。仅证明 projection
+   结构或 head digest 相等仍然不够；promotion 还必须在精确的 qualified revision
+   上证明 provider 完整复现 Todo 消费方可见语义。
 5. **Stage 3——远端单向 shadow parity。** 晋升后的本地 `FileAuthorityStore` 仍是
    唯一 authority；将已提交观察投影到 NoKV 或 PostgreSQL 候选。Provider parity
    只对比 Todo/claim、lease fence、
@@ -1022,9 +1024,10 @@ task-lease writer。
 
 - legacy Markdown Todo writer 或 task-lease writer 先成功提交且继续作为 canonical；
   只有 primary mutation 成功后才派发 shadow；
-- Python adapter 把已提交的 Todo 与 lease read model 收敛为 coordination 自有字段，
-  按稳定 Todo identity 排序，再通过既有 TypeScript effect runtime 发送一份提交后
-  projection；
+- Python adapter 通过 `todo list` 共用的 canonical read-record 合同投影已提交 Todo
+  view，完整保留消费方可见的 identity、文本、优先级、过滤、continuation、resume、
+  调度、归档、完成、note 与 evidence 字段；随后按稳定 Todo identity 排序，并把该
+  view 与紧凑 lease 一起通过既有 TypeScript effect runtime 发送；
 - TypeScript owner 在同一笔 `AuthorityStore` transaction 中写 projection 与 operation
   receipt。写前先查询既有 receipt；同一 operation id 搭配不同 normalized content
   会被拒绝；provider-revision contention 只做固定次数重试；ambiguous commit 只能
@@ -1080,6 +1083,23 @@ event/receipt/projection identity，以及当前 legacy/file head digest，并�
 `qualified`、`insufficient_evidence` 或 `drifted`。replay 不增加 operation 计数，缺少
 覆盖会让 gate 失败，所有结果仍明确声明 `decision_read_from_shadow=false`。
 
+结构 parity 不等于消费语义 parity。因此，可 promotion 的 projection 还必须携带一个
+版本化 Todo read-model receipt，其中包含精确字段合同、记录数和 canonical record
+digest。TypeScript 会在 qualification、promotion 以及每次 provider-first collection
+read 时，对 deterministic provider records 校验该 receipt；schema 缺失、digest 过期、
+字段合同被截断、记录数不符或顺序不稳定都会 fail closed。provider-first mutation 必须
+在同一原子 head 更新中重算 receipt。新增 Todo 消费字段属于合同变更，必须重新
+qualification，不能宽松 fallback。
+
+任何真实 Goal promotion 前，还必须在同一个 revision 上分别让 legacy source 与
+provider round-trip 经过既有消费 pipeline。语义矩阵至少覆盖：user/agent role；open、
+done、blocked、deferred；优先级与排序；claim、exclusion、bound-agent、global-gate
+过滤；resume condition；successor/continuation；continuous monitor 的 cadence、due、
+watch-only 与 material generation；note、evidence、completion、archival；以及 Markdown
+文件不可用后的 provider-only read。任一差异都阻止 promotion，并保持 legacy authority。
+synthetic stub 可作为单元测试，但不能替代真实复杂 Goal qualification。真实 Goal 内容
+只保留在本机；公开证据只包含脱敏 coverage、计数、精确 revision 标识与 digest。
+
 下一个只读 seam 会演练未来 read flip 所需的 provider 读取形态，但不授予它 authority：
 
 ```bash
@@ -1118,6 +1138,12 @@ fail-closed write-check hook；promotion 可按 operation receipt 重放，provi
 lock，再 engage fence，从而保证不存在某次 legacy write 已通过检查、却在 cutover 后才
 提交。provider-first CLI 路由和持锁 promotion operation 仍是下一切片；在它们落地前，
 本集成选择阻断 split-brain 写入，而不会静默回退。
+
+Todo collection-read 切片只在 durable fence 已存在时把 `loopx todo list` 路由到
+`FileAuthorityStore`。它与 legacy 路径复用同一套过滤、排序、resume 和 summary
+pipeline；Markdown 缺失时仍可执行 provider-only read，并在响应中携带 authority
+receipt。provider 缺失、损坏、协议漂移或 Todo read-model 语义漂移都会 fail closed；
+cutover 后禁止回退 Markdown。
 
 完成续接（continuation）的持久化读回
 （`durable_completion.py`：`read_persisted_todo_record` /

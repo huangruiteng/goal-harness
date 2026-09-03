@@ -1062,7 +1062,10 @@ The sequence is:
    it for decisions. Prove parity, crash recovery, migration, and one-command
    rollback; then, in a separately reviewed promotion, make the file aggregate
    the local coordination authority and fence the legacy writers. Markdown and
-   task-lease files become projections only after that promotion.
+   task-lease files become projections only after that promotion. Projection
+   shape or head-digest parity alone is insufficient: promotion must also prove
+   that the provider reproduces the complete consumer-visible Todo semantics at
+   the exact qualified revision.
 5. **Stage 3 - one-way remote shadow parity.** The promoted local
    `FileAuthorityStore` remains the only authority while committed observations
    are projected to a NoKV or PostgreSQL candidate. Provider parity compares
@@ -1265,9 +1268,12 @@ disabled evidence. When enabled, the runtime obeys the following boundary:
 - the legacy Markdown Todo writer or task-lease writer commits first and
   remains canonical; only a successful primary mutation dispatches the
   shadow;
-- the Python adapter reduces the committed Todo and lease read models to the
-  coordination-owned fields, sorts them by stable Todo identity, and sends one
-  post-commit projection through the existing TypeScript effect runtime;
+- the Python adapter projects the committed Todo view through the same shared
+  canonical read-record contract used by `todo list`, retains every
+  consumer-visible identity, text, priority, filtering, continuation, resume,
+  scheduling, archival, completion, note, and evidence field, sorts records by
+  stable Todo identity, and sends that view plus compact leases through the
+  existing TypeScript effect runtime;
 - the TypeScript owner writes that projection and its operation receipt in one
   `AuthorityStore` transaction. It checks an existing receipt before writing,
   rejects reuse of an operation id with different normalized content, retries
@@ -1337,6 +1343,29 @@ and reports `qualified`, `insufficient_evidence`, or `drifted`. Replays do not
 increase the operation count, missing coverage fails the gate, and every result
 continues to declare `decision_read_from_shadow=false`.
 
+Structural parity is not consumer semantic parity. A promotable projection
+therefore also carries a versioned Todo read-model receipt containing the exact
+field contract, record count, and canonical record digest. TypeScript validates
+that receipt against deterministic provider records during qualification,
+promotion, and every provider-first collection read; a missing schema, stale
+digest, truncated field contract, count mismatch, or unstable order fails
+closed. Provider-first mutations regenerate the receipt atomically with the
+head. Adding a Todo consumer field is a contract change and requires a new
+qualification rather than a permissive fallback.
+
+Before any real Goal is promoted, qualification must additionally execute the
+existing consumer pipeline on both the legacy source and the provider
+round-trip at the same revision. The semantic matrix covers user and agent
+roles; open, done, blocked, and deferred status; priority and ordering; claim,
+exclusion, bound-agent, and global-gate filtering; resume conditions;
+successor/continuation behavior; continuous-monitor cadence, due time,
+watch-only and material-generation state; notes, evidence, completion, and
+archival; and provider-only reads after the Markdown file is unavailable. Any
+difference blocks promotion and leaves legacy authority in place. Synthetic
+stubs remain useful unit tests but cannot substitute for this real complex-Goal
+qualification. Real Goal content stays local; public evidence contains only
+redacted coverage, counts, exact revision identifiers, and digests.
+
 The next read-only seam exercises the provider shape needed by the future
 read flip without granting it authority:
 
@@ -1385,6 +1414,13 @@ so no legacy write can pass its check and commit after cutover. Provider-first
 CLI routing and the lock-owning promotion operation remain the next slice; until
 they land, this integration deliberately blocks split-brain writes rather than
 silently falling back.
+
+The Todo collection-read slice routes `loopx todo list` to `FileAuthorityStore`
+only after the durable fence exists. It reuses the same filtering, ordering,
+resume, and summary pipeline as the legacy path, permits provider-only reads
+when Markdown is absent, and carries an authority receipt in the response.
+Provider missing, corruption, protocol drift, or Todo read-model semantic drift
+all fail closed; no post-cutover Markdown fallback is permitted.
 
 Durable completion continuation read-back
 (`durable_completion.py`: `read_persisted_todo_record` /
