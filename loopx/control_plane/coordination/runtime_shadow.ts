@@ -5,6 +5,7 @@ import type { JsonObject } from "../effect_program.ts";
 import { requireJsonObject } from "../runtime_decode.ts";
 import type {
   AuthorityStore,
+  AuthorityStoreCommittedTransaction,
   AuthorityStoreReceiptResult,
 } from "./authority_store.ts";
 import {
@@ -32,6 +33,10 @@ export const COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA =
   "loopx_coordination_runtime_shadow_rollback_v0";
 export const COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA =
   "loopx_coordination_runtime_shadow_rollback_result_v0";
+export const COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA =
+  "loopx_coordination_runtime_shadow_qualify_v0";
+export const COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA =
+  "loopx_coordination_runtime_shadow_qualification_v0";
 
 interface RuntimeShadowRequest {
   runtime_root: string;
@@ -68,11 +73,38 @@ interface RuntimeShadowRollbackRequest {
   expected_provider_revision: string;
 }
 
+interface RuntimeShadowQualificationRequest {
+  runtime_root: string;
+  goal_id: string;
+  projection: JsonObject;
+  minimum_operations: number;
+  required_event_kinds: string[];
+}
+
 function requiredString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim() !== value || value.length === 0) {
     throw new Error(`${label} must be a non-empty trimmed string`);
   }
   return value;
+}
+
+function requiredPositiveSafeInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > 10_000) {
+    throw new Error(`${label} must be a positive safe integer no greater than 10000`);
+  }
+  return Number(value);
+}
+
+function requiredUniqueStrings(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  if (value.length > 32) throw new Error(`${label} must contain at most 32 entries`);
+  const normalized = value.map((entry, index) =>
+    requiredString(entry, `${label}[${index}]`)
+  );
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error(`${label} must not contain duplicates`);
+  }
+  return normalized;
 }
 
 function decodeRequest(value: unknown): RuntimeShadowRequest {
@@ -144,6 +176,28 @@ function decodeRollbackRequest(value: unknown): RuntimeShadowRollbackRequest {
     expected_provider_revision: requireAuthorityStoreId(
       input.expected_provider_revision,
       "expected provider revision",
+    ),
+  };
+}
+
+function decodeQualificationRequest(value: unknown): RuntimeShadowQualificationRequest {
+  const input = requireJsonObject(value, "coordination runtime shadow qualification request");
+  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA) {
+    throw new Error("coordination runtime shadow qualification request schema mismatch");
+  }
+  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
+  if (!isAbsolute(runtimeRoot)) throw new Error("runtime_root must be absolute");
+  return {
+    runtime_root: runtimeRoot,
+    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
+    projection: canonicalAuthorityObject(input.projection, "projection"),
+    minimum_operations: requiredPositiveSafeInteger(
+      input.minimum_operations,
+      "minimum_operations",
+    ),
+    required_event_kinds: requiredUniqueStrings(
+      input.required_event_kinds,
+      "required_event_kinds",
     ),
   };
 }
@@ -610,6 +664,230 @@ export async function inspectCoordinationRuntimeShadow(
       expected_projection_sha256: expectedProjectionSha256,
       parity_matches: false,
       bootstrap_required: false,
+      decision_read_from_shadow: false,
+    };
+  }
+}
+
+function validateBootstrapTransaction(
+  transaction: AuthorityStoreCommittedTransaction,
+): string | null {
+  if (transaction.cursor !== "1" || transaction.events.length !== 1) {
+    return "shadow_qualification_bootstrap_shape_invalid";
+  }
+  const event = transaction.events[0]!;
+  if (
+    event.schema_version !== "loopx_coordination_runtime_shadow_bootstrap_event_v0" ||
+    event.operation_id !== transaction.operation_id ||
+    event.mode_declaration !== "legacy_canonical_shadow" ||
+    event.source_projection_sha256 !== sha256(transaction.projection) ||
+    transaction.receipts.length !== 0
+  ) {
+    return "shadow_qualification_bootstrap_identity_invalid";
+  }
+  return null;
+}
+
+function validateMirroredTransaction(
+  transaction: AuthorityStoreCommittedTransaction,
+): { reason_code: string | null; event_kind: string | null } {
+  if (transaction.events.length !== 1 || transaction.receipts.length !== 1) {
+    return {
+      reason_code: "shadow_qualification_transaction_shape_invalid",
+      event_kind: null,
+    };
+  }
+  const event = transaction.events[0]!;
+  const receipt = transaction.receipts[0]!;
+  const eventKind = typeof event.event_kind === "string" ? event.event_kind : null;
+  if (
+    event.schema_version !== "loopx_coordination_runtime_shadow_event_v0" ||
+    receipt.schema_version !== COORDINATION_RUNTIME_SHADOW_RECEIPT_SCHEMA ||
+    event.operation_id !== transaction.operation_id ||
+    receipt.operation_id !== transaction.operation_id ||
+    eventKind === null ||
+    receipt.event_kind !== eventKind ||
+    typeof event.source_version !== "string" ||
+    receipt.source_version !== event.source_version ||
+    typeof event.projection_sha256 !== "string" ||
+    receipt.projection_sha256 !== event.projection_sha256 ||
+    event.projection_sha256 !== sha256(transaction.projection)
+  ) {
+    return {
+      reason_code: "shadow_qualification_transaction_identity_invalid",
+      event_kind: eventKind,
+    };
+  }
+  return { reason_code: null, event_kind: eventKind };
+}
+
+async function scanShadowLineage(
+  store: AuthorityStore,
+): Promise<
+  | { status: "loaded"; transactions: AuthorityStoreCommittedTransaction[] }
+  | { status: "failed"; reason_code: string; reason: string }
+> {
+  const transactions: AuthorityStoreCommittedTransaction[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const page = await store.scanCommitted(cursor, 256);
+    if (page.status !== "page") {
+      return {
+        status: "failed",
+        reason_code: page.reason_code,
+        reason: page.reason,
+      };
+    }
+    transactions.push(...page.transactions.map((entry) => structuredClone(entry)));
+    if (transactions.length > 10_000) {
+      return {
+        status: "failed",
+        reason_code: "shadow_qualification_history_too_large",
+        reason: "shadow qualification history exceeds the bounded 10000 transaction limit",
+      };
+    }
+    if (!page.has_more) return { status: "loaded", transactions };
+    if (page.next_cursor === null || page.next_cursor === cursor) {
+      return {
+        status: "failed",
+        reason_code: "shadow_qualification_cursor_stalled",
+        reason: "shadow qualification scan did not advance its cursor",
+      };
+    }
+    cursor = page.next_cursor;
+  }
+}
+
+/**
+ * Produce promotion evidence across a lineage of distinct mirrored operations.
+ * The policy is coverage-based rather than time-based: the caller selects a
+ * minimum operation count and the mutation kinds that must have been observed.
+ * This remains an evidence-only read and cannot promote or serve the shadow.
+ */
+export async function qualifyCoordinationRuntimeShadow(
+  value: unknown,
+  dependencies: RuntimeShadowDependencies = {},
+): Promise<JsonObject> {
+  let request: RuntimeShadowQualificationRequest;
+  try {
+    request = decodeQualificationRequest(value);
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_shadow_qualification_request",
+      reason: error instanceof Error ? error.message : "invalid qualification request",
+      qualified: false,
+      primary_writeback_preserved: true,
+      decision_read_from_shadow: false,
+    };
+  }
+
+  const directory = join(request.runtime_root, "authority-shadow", "file-v0");
+  const store = dependencies.createStore?.(directory, request.goal_id) ??
+    new FileAuthorityStore(directory, request.goal_id);
+  const policy = {
+    schema_version: "loopx_coordination_runtime_shadow_parity_policy_v0",
+    minimum_operations: request.minimum_operations,
+    required_event_kinds: request.required_event_kinds,
+  };
+  try {
+    const head = await store.loadAuthority();
+    if (head.status === "missing") {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+        status: "missing",
+        policy,
+        qualified: false,
+        bootstrap_required: true,
+        primary_writeback_preserved: true,
+        decision_read_from_shadow: false,
+      };
+    }
+    if (head.status !== "loaded") {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+        status: "failed",
+        reason_code: head.reason_code,
+        reason: head.reason,
+        policy,
+        qualified: false,
+        primary_writeback_preserved: true,
+        decision_read_from_shadow: false,
+      };
+    }
+    const expectedProjectionSha256 = sha256(request.projection);
+    const observedProjectionSha256 = sha256(head.head);
+    const lineage = await scanShadowLineage(store);
+    if (lineage.status === "failed") {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+        status: "failed",
+        reason_code: lineage.reason_code,
+        reason: lineage.reason,
+        policy,
+        qualified: false,
+        primary_writeback_preserved: true,
+        decision_read_from_shadow: false,
+      };
+    }
+    const bootstrap = lineage.transactions[0];
+    const bootstrapFailure = bootstrap === undefined
+      ? "shadow_qualification_bootstrap_missing"
+      : validateBootstrapTransaction(bootstrap);
+    const eventKinds = new Set<string>();
+    let transactionFailure: string | null = bootstrapFailure;
+    for (const transaction of lineage.transactions.slice(1)) {
+      const validation = validateMirroredTransaction(transaction);
+      if (validation.event_kind !== null) eventKinds.add(validation.event_kind);
+      transactionFailure ??= validation.reason_code;
+    }
+    const observedEventKinds = [...eventKinds].sort();
+    const missingRequiredEventKinds = request.required_event_kinds.filter(
+      (eventKind) => !eventKinds.has(eventKind),
+    );
+    const operationCount = Math.max(0, lineage.transactions.length - 1);
+    const currentHeadMatches = expectedProjectionSha256 === observedProjectionSha256;
+    const enoughOperations = operationCount >= request.minimum_operations;
+    const coverageComplete = missingRequiredEventKinds.length === 0;
+    const qualified = currentHeadMatches && transactionFailure === null &&
+      enoughOperations && coverageComplete;
+    let status: "qualified" | "insufficient_evidence" | "drifted";
+    if (!currentHeadMatches || transactionFailure !== null) status = "drifted";
+    else status = qualified ? "qualified" : "insufficient_evidence";
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+      status,
+      policy,
+      qualified,
+      parity_matches: currentHeadMatches,
+      expected_projection_sha256: expectedProjectionSha256,
+      observed_projection_sha256: observedProjectionSha256,
+      provider_revision: head.provider_revision,
+      cursor: head.cursor,
+      evidence: {
+        schema_version: "loopx_coordination_runtime_shadow_parity_evidence_v0",
+        bootstrap_verified: bootstrapFailure === null,
+        transaction_lineage_verified: transactionFailure === null,
+        operation_count: operationCount,
+        observed_event_kinds: observedEventKinds,
+        missing_required_event_kinds: missingRequiredEventKinds,
+        enough_operations: enoughOperations,
+        coverage_complete: coverageComplete,
+        ...(transactionFailure === null ? {} : { reason_code: transactionFailure }),
+      },
+      primary_writeback_preserved: true,
+      decision_read_from_shadow: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "shadow_qualification_unavailable",
+      reason: error instanceof Error ? error.message : "qualification unavailable",
+      policy,
+      qualified: false,
+      primary_writeback_preserved: true,
       decision_read_from_shadow: false,
     };
   }

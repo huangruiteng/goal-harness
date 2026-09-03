@@ -16,9 +16,11 @@ import {
   bootstrapCoordinationRuntimeShadow,
   commitCoordinationRuntimeShadow,
   inspectCoordinationRuntimeShadow,
+  qualifyCoordinationRuntimeShadow,
   rollbackCoordinationRuntimeShadow,
   COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
 } from "../../loopx/control_plane/coordination/runtime_shadow.ts";
@@ -378,4 +380,68 @@ test("runtime shadow inspection reports missing, matched, and drifted evidence",
     drifted.observed_projection_sha256,
   );
   assert.equal(drifted.decision_read_from_shadow, false);
+});
+
+test("runtime shadow qualification requires sustained operation and event coverage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-qualify-"));
+  const bootstrap = await bootstrapRequest(root);
+  assert.equal((await bootstrapCoordinationRuntimeShadow(bootstrap)).status, "applied");
+
+  const first = await request(root, "todo:goal-a:todo_one:v2");
+  assert.equal((await commitCoordinationRuntimeShadow(first)).status, "applied");
+  const second = await request(root, "lease:goal-a:todo_one:v3");
+  second.event_kind = "task_lease_acquire";
+  second.source_version = "state:3";
+  assert.equal((await commitCoordinationRuntimeShadow(second)).status, "applied");
+  const third = await request(root, "todo:goal-a:todo_one:v4");
+  third.source_version = "state:4";
+  assert.equal((await commitCoordinationRuntimeShadow(third)).status, "applied");
+
+  const input = {
+    schema_version: COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    projection: third.projection,
+    minimum_operations: 3,
+    required_event_kinds: ["todo_claim", "task_lease_acquire"],
+  };
+  const qualified = await qualifyCoordinationRuntimeShadow(input);
+  assert.equal(qualified.status, "qualified");
+  assert.equal(qualified.qualified, true);
+  assert.equal(qualified.parity_matches, true);
+  assert.equal(
+    (qualified.evidence as Record<string, unknown>).operation_count,
+    3,
+  );
+  assert.deepEqual(
+    (qualified.evidence as Record<string, unknown>).observed_event_kinds,
+    ["task_lease_acquire", "todo_claim"],
+  );
+  assert.equal(qualified.decision_read_from_shadow, false);
+
+  const insufficient = await qualifyCoordinationRuntimeShadow({
+    ...input,
+    minimum_operations: 4,
+  });
+  assert.equal(insufficient.status, "insufficient_evidence");
+  assert.equal(insufficient.qualified, false);
+
+  const missingKind = await qualifyCoordinationRuntimeShadow({
+    ...input,
+    required_event_kinds: ["todo_complete"],
+  });
+  assert.equal(missingKind.status, "insufficient_evidence");
+  assert.deepEqual(
+    (missingKind.evidence as Record<string, unknown>).missing_required_event_kinds,
+    ["todo_complete"],
+  );
+
+  const driftedProjection = structuredClone(third.projection);
+  (driftedProjection.todos[0] as Record<string, unknown>).status = "done";
+  const drifted = await qualifyCoordinationRuntimeShadow({
+    ...input,
+    projection: driftedProjection,
+  });
+  assert.equal(drifted.status, "drifted");
+  assert.equal(drifted.qualified, false);
 });

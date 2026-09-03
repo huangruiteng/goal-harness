@@ -11,6 +11,7 @@ from ..control_plane.coordination.runtime_shadow import (
     build_todo_runtime_shadow_projection,
     inspect_coordination_runtime_shadow,
     load_task_lease_runtime_shadow_records,
+    qualify_coordination_runtime_shadow,
     resolve_coordination_runtime_shadow_config,
     rollback_coordination_runtime_shadow,
 )
@@ -20,7 +21,9 @@ from ..registry import find_registry_goal
 from ..todos import list_goal_todos
 
 
-PrintPayload = Callable[[dict[str, object], str, Callable[[dict[str, object]], str]], None]
+PrintPayload = Callable[
+    [dict[str, object], str, Callable[[dict[str, object]], str]], None
+]
 
 
 def register_coordination_shadow_command(
@@ -38,7 +41,14 @@ def register_coordination_shadow_command(
     )
     for name, help_text in (
         ("inspect", "Compare the current legacy projection with the file shadow."),
-        ("bootstrap", "Import the current legacy projection into an empty file shadow."),
+        (
+            "qualify",
+            "Qualify sustained parity coverage across the file shadow lineage.",
+        ),
+        (
+            "bootstrap",
+            "Import the current legacy projection into an empty file shadow.",
+        ),
         ("rollback", "Quarantine one exact pre-promotion file shadow lineage."),
     ):
         action = actions.add_parser(name, help=help_text)
@@ -56,6 +66,19 @@ def register_coordination_shadow_command(
                 "--provider-revision",
                 required=True,
                 help="Exact file shadow revision observed by inspect.",
+            )
+        if name == "qualify":
+            action.add_argument(
+                "--minimum-operations",
+                type=int,
+                default=3,
+                help="Minimum distinct mirrored operations required (default: 3).",
+            )
+            action.add_argument(
+                "--require-event-kind",
+                action="append",
+                default=[],
+                help="Required mirrored mutation kind; repeat for multiple kinds.",
             )
 
 
@@ -95,6 +118,9 @@ def _render(payload: dict[str, object]) -> str:
     rollback = payload.get("rollback")
     if isinstance(rollback, dict):
         lines.append(f"- rollback: `{rollback.get('status')}`")
+    qualification = payload.get("qualification")
+    if isinstance(qualification, dict):
+        lines.append(f"- qualification: `{qualification.get('status')}`")
     error = payload.get("error")
     if error:
         lines.append(f"- error: `{error}`")
@@ -211,14 +237,22 @@ def handle_coordination_shadow_command(
                 and isinstance(final_inspection, dict)
                 and final_inspection.get("status") == "matched"
             )
+        if args.coordination_shadow_command == "qualify":
+            qualification = qualify_coordination_runtime_shadow(
+                goal=goal,
+                runtime_root=runtime_root,
+                goal_id=args.goal_id,
+                projection=projection,
+                minimum_operations=args.minimum_operations,
+                required_event_kinds=args.require_event_kind,
+            )
+            payload["qualification"] = qualification
+            payload["ok"] = qualification.get("status") == "qualified"
         if args.coordination_shadow_command == "rollback":
             provider_revision = str(args.provider_revision).strip()
             payload["expected_provider_revision"] = provider_revision
             observed_revision = inspection.get("provider_revision")
-            if (
-                observed_revision is not None
-                and observed_revision != provider_revision
-            ):
+            if observed_revision is not None and observed_revision != provider_revision:
                 payload["ok"] = False
                 payload["error"] = "provider revision does not match active shadow"
                 payload["error_code"] = "shadow_provider_revision_mismatch"

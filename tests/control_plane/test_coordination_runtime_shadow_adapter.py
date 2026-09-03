@@ -18,6 +18,7 @@ from loopx.control_plane.coordination.runtime_shadow import (
     dispatch_coordination_runtime_shadow,
     inspect_coordination_runtime_shadow,
     load_task_lease_runtime_shadow_records,
+    qualify_coordination_runtime_shadow,
     resolve_coordination_runtime_shadow_config,
     rollback_coordination_runtime_shadow,
 )
@@ -293,6 +294,66 @@ def test_runtime_shadow_inspection_is_default_off_and_forwards_compact_projectio
     }
 
 
+def test_runtime_shadow_qualification_is_default_off_and_forwards_policy(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+    disabled = qualify_coordination_runtime_shadow(
+        goal={"id": "goal-a"},
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        projection={"schema_version": "projection_v0", "todos": []},
+        minimum_operations=3,
+        required_event_kinds=["todo_claim"],
+        runtime_invoker=lambda *args: calls.append(args),
+    )
+    assert disabled["status"] == "disabled"
+    assert disabled["qualified"] is False
+    assert calls == []
+
+    goal = {
+        "id": "goal-a",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+    captured: dict[str, object] = {}
+
+    def qualify(method: str, params: dict[str, object]) -> dict[str, object]:
+        captured["method"] = method
+        captured["params"] = params
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_qualification_v0",
+            "status": "qualified",
+            "qualified": True,
+            "decision_read_from_shadow": False,
+        }
+
+    result = qualify_coordination_runtime_shadow(
+        goal=goal,
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        projection={"schema_version": "projection_v0", "todos": []},
+        minimum_operations=5,
+        required_event_kinds=["todo_claim", "task_lease_acquire"],
+        runtime_invoker=qualify,
+    )
+    assert result["status"] == "qualified"
+    assert result["decision_read_from_shadow"] is False
+    assert captured["method"] == "coordination.runtime_shadow.qualify"
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert params["minimum_operations"] == 5
+    assert params["required_event_kinds"] == [
+        "todo_claim",
+        "task_lease_acquire",
+    ]
+
+
 def test_todo_projection_is_compact_stable_and_excludes_private_fields() -> None:
     projection = build_todo_runtime_shadow_projection(
         goal_id="goal-a",
@@ -338,7 +399,9 @@ def test_committed_todo_hook_has_no_default_output_or_runtime_call(
         raise AssertionError("default-off hook must not build or dispatch")
 
     monkeypatch.setattr(todo_command, "list_goal_todos", unexpected)
-    monkeypatch.setattr(todo_command, "dispatch_coordination_runtime_shadow", unexpected)
+    monkeypatch.setattr(
+        todo_command, "dispatch_coordination_runtime_shadow", unexpected
+    )
     result = todo_command._mirror_committed_todo_runtime_shadow(
         {
             "ok": True,
@@ -550,6 +613,74 @@ def test_runtime_shadow_inspection_reaches_file_store_through_typescript(
     assert after["status"] == "matched"
     assert after["parity_matches"] is True
     assert after["decision_read_from_shadow"] is False
+
+
+def test_runtime_shadow_qualification_reaches_file_store_through_typescript(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    goal = {
+        "id": "goal-a",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+    projection = {
+        "schema_version": "projection_v0",
+        "goal_id": "goal-a",
+        "todos": [{"todo_id": "todo_one", "status": "open"}],
+        "leases": [],
+    }
+    runtime_root = tmp_path / "state"
+    monkeypatch.setattr(
+        effect_runtime,
+        "_runtime_dir",
+        lambda: tmp_path / "effect-runtime",
+    )
+
+    try:
+        bootstrap = bootstrap_coordination_runtime_shadow(
+            goal=goal,
+            runtime_root=runtime_root,
+            goal_id="goal-a",
+            operation_id="bootstrap:goal-a:state-0",
+            source_version="state:0",
+            projection=projection,
+        )
+        for index, event_kind in enumerate(
+            ("todo_claim", "task_lease_acquire", "todo_complete"),
+            start=1,
+        ):
+            result = dispatch_coordination_runtime_shadow(
+                goal=goal,
+                runtime_root=runtime_root,
+                goal_id="goal-a",
+                operation_id=f"shadow:goal-a:{index}",
+                event_kind=event_kind,
+                source_version=f"state:{index}",
+                projection=projection,
+            )
+            assert result["status"] == "applied"
+        qualified = qualify_coordination_runtime_shadow(
+            goal=goal,
+            runtime_root=runtime_root,
+            goal_id="goal-a",
+            projection=projection,
+            minimum_operations=3,
+            required_event_kinds=["todo_claim", "task_lease_acquire"],
+        )
+    finally:
+        effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
+
+    assert bootstrap["status"] == "applied"
+    assert qualified["status"] == "qualified"
+    assert qualified["qualified"] is True
+    assert qualified["evidence"]["operation_count"] == 3
+    assert qualified["decision_read_from_shadow"] is False
 
 
 def test_lease_projection_reads_compact_terminal_records(tmp_path: Path) -> None:

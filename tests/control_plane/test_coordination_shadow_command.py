@@ -27,9 +27,13 @@ def _run(
     action: str,
     execute: bool = False,
     provider_revision: str | None = None,
+    minimum_operations: int = 3,
+    require_event_kind: list[str] | None = None,
 ) -> tuple[int, dict[str, object]]:
     monkeypatch.setattr(command, "load_registry", lambda _path: {"goals": [_goal()]})
-    monkeypatch.setattr(command, "resolve_runtime_root", lambda *_args, **_kwargs: tmp_path)
+    monkeypatch.setattr(
+        command, "resolve_runtime_root", lambda *_args, **_kwargs: tmp_path
+    )
     monkeypatch.setattr(
         command,
         "list_goal_todos",
@@ -58,6 +62,8 @@ def _run(
         state_file=None,
         execute=execute,
         provider_revision=provider_revision,
+        minimum_operations=minimum_operations,
+        require_event_kind=require_event_kind or [],
         format="json",
     )
     result = command.handle_coordination_shadow_command(
@@ -141,12 +147,8 @@ def test_coordination_shadow_bootstrap_requires_execute_and_reads_back_parity(
     assert payload["executed"] is True
     assert payload["ok"] is True
     assert payload["inspection"]["status"] == "matched"
-    assert str(bootstrap_request["operation_id"]).startswith(
-        "shadow-bootstrap:goal-a:"
-    )
-    assert str(bootstrap_request["source_version"]).startswith(
-        "legacy-projection:"
-    )
+    assert str(bootstrap_request["operation_id"]).startswith("shadow-bootstrap:goal-a:")
+    assert str(bootstrap_request["source_version"]).startswith("legacy-projection:")
     assert bootstrap_request["projection"]["todos"] == [
         {"todo_id": "todo_a", "status": "done"},
         {"todo_id": "todo_b", "status": "open"},
@@ -184,6 +186,66 @@ def test_coordination_shadow_parser_exposes_explicit_execute_gate() -> None:
     )
     assert rollback.provider_revision == "file:revision-1"
     assert rollback.execute is True
+
+    qualify = parser.parse_args(
+        [
+            "coordination-shadow",
+            "qualify",
+            "--goal-id",
+            "goal-a",
+            "--minimum-operations",
+            "5",
+            "--require-event-kind",
+            "todo_claim",
+            "--require-event-kind",
+            "task_lease_acquire",
+        ]
+    )
+    assert qualify.minimum_operations == 5
+    assert qualify.require_event_kind == ["todo_claim", "task_lease_acquire"]
+
+
+def test_coordination_shadow_qualify_applies_coverage_policy(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        command,
+        "inspect_coordination_runtime_shadow",
+        lambda **_kwargs: {
+            "status": "matched",
+            "parity_matches": True,
+            "decision_read_from_shadow": False,
+        },
+    )
+    request: dict[str, object] = {}
+
+    def qualify(**kwargs) -> dict[str, object]:
+        request.update(kwargs)
+        return {
+            "status": "qualified",
+            "qualified": True,
+            "decision_read_from_shadow": False,
+        }
+
+    monkeypatch.setattr(command, "qualify_coordination_runtime_shadow", qualify)
+    result, payload = _run(
+        monkeypatch,
+        tmp_path,
+        action="qualify",
+        minimum_operations=5,
+        require_event_kind=["todo_claim", "task_lease_acquire"],
+    )
+
+    assert result == 0
+    assert payload["ok"] is True
+    assert payload["executed"] is False
+    assert payload["qualification"]["status"] == "qualified"
+    assert request["minimum_operations"] == 5
+    assert request["required_event_kinds"] == [
+        "todo_claim",
+        "task_lease_acquire",
+    ]
 
 
 def test_coordination_shadow_rollback_is_revision_fenced_and_reads_back_missing(

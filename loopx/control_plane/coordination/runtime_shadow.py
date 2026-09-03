@@ -31,6 +31,10 @@ RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA_VERSION = (
     "loopx_coordination_runtime_shadow_rollback_v0"
 )
 RUNTIME_SHADOW_ROLLBACK_METHOD = "coordination.runtime_shadow.rollback"
+RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA_VERSION = (
+    "loopx_coordination_runtime_shadow_qualify_v0"
+)
+RUNTIME_SHADOW_QUALIFY_METHOD = "coordination.runtime_shadow.qualify"
 
 
 @dataclass(frozen=True)
@@ -379,6 +383,60 @@ def inspect_coordination_runtime_shadow(
             "reason_code": "shadow_runtime_result_invalid",
             "parity_matches": False,
             "bootstrap_required": False,
+            "decision_read_from_shadow": False,
+        }
+    return dict(result)
+
+
+def qualify_coordination_runtime_shadow(
+    *,
+    goal: Mapping[str, Any] | None,
+    runtime_root: Path,
+    goal_id: str,
+    projection: Mapping[str, Any],
+    minimum_operations: int,
+    required_event_kinds: list[str],
+    runtime_invoker: RuntimeInvoker = effect_runtime_result,
+) -> dict[str, object]:
+    """Qualify coverage across a shadow lineage without serving from it."""
+
+    config = resolve_coordination_runtime_shadow_config(goal)
+    if not config.enabled:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_qualification_v0",
+            "status": "disabled",
+            "reason_code": config.reason_code,
+            "qualified": False,
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    request = {
+        "schema_version": RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA_VERSION,
+        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "goal_id": goal_id,
+        "projection": dict(projection),
+        "minimum_operations": minimum_operations,
+        "required_event_kinds": list(required_event_kinds),
+    }
+    try:
+        result = runtime_invoker(RUNTIME_SHADOW_QUALIFY_METHOD, request)
+    except Exception as exc:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_qualification_v0",
+            "status": "failed",
+            "reason_code": "shadow_qualification_runtime_unavailable",
+            "reason": str(exc),
+            "qualified": False,
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    if not isinstance(result, Mapping):
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_qualification_v0",
+            "status": "failed",
+            "reason_code": "shadow_qualification_runtime_result_invalid",
+            "qualified": False,
+            "primary_writeback_preserved": True,
             "decision_read_from_shadow": False,
         }
     return dict(result)
