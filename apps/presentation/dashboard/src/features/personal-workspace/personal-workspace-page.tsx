@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from "react";
-import { AlertCircle, Bot, CalendarClock, ListPlus, MessageCircleQuestion, Paperclip, Plus, Send, X } from "lucide-react";
+import { AlertCircle, Bot, CalendarClock, FileText, ListPlus, MessageCircleQuestion, Paperclip, Plus, Send, X } from "lucide-react";
 
 import {
   applyTypedAction,
@@ -42,6 +42,7 @@ import type {
 import { goalTitleFor, workspaceHomeLaneForGoal } from "./personal-workspace-model";
 import { routeWorkspaceInput } from "./personal-workspace-router";
 import { WorkspaceSettingsPage } from "./workspace-settings-page";
+import { readWorkspaceTheme, writeWorkspaceTheme, type WorkspaceTheme } from "./workspace-theme";
 import { WorkspaceShell } from "./workspace-shell";
 import type { StatusSourceControl } from "./status-source-switcher";
 import "./personal-workspace.css";
@@ -675,13 +676,7 @@ export function PersonalWorkspacePage({
   const [refreshState, setRefreshState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [sessionProposalIds, setSessionProposalIds] = useState<string[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [theme, setTheme] = useState<"brutal" | "paper">(() => {
-    try {
-      return window.localStorage.getItem("loopx-pw-theme") === "brutal" ? "brutal" : "paper";
-    } catch {
-      return "paper";
-    }
-  });
+  const [theme, setTheme] = useState<WorkspaceTheme>(readWorkspaceTheme);
   const [goalContexts, setGoalContexts] = useState<Record<string, GoalRepositoryContext>>({});
   const [larkConnections, setLarkConnections] = useState<LarkGoalConnection[]>([]);
   const digestInitRef = useRef(false);
@@ -1360,9 +1355,9 @@ export function PersonalWorkspacePage({
     callbacks.onSelectAgent?.(agentId);
   }
 
-  function updateTheme(next: "brutal" | "paper") {
+  function updateTheme(next: WorkspaceTheme) {
     setTheme(next);
-    try { window.localStorage.setItem("loopx-pw-theme", next); } catch { /* Keep the in-memory preference. */ }
+    writeWorkspaceTheme(next);
   }
 
   async function sendMessage(messageOverride?: string) {
@@ -1701,7 +1696,7 @@ export function PersonalWorkspacePage({
                 userTodos={model.userTodos}
               />
             ) : selectedGoal && selectedGoalTab === "files" ? (
-              <section className="personal-object-list"><header><strong>{t("files.title")}</strong><span>{items.filter((item) => item.kind === "output").length}</span></header>{items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "output" }> => item.kind === "output").map((item) => <button key={item.id} onClick={() => setSelection({ item: item.output, kind: "output" })} type="button"><span>↗</span><strong>{item.output.title}</strong><p>{item.output.summary ?? item.output.safePreview ?? item.output.kind ?? t("files.emptySummary")}</p><small title={item.output.createdAt}>{[item.output.goalTitle, item.output.todoId ? `${t("common.task")} ${item.output.todoId}` : null, activityTimeLabel(item.output.createdAt, locale, t)].filter(Boolean).join(" · ")}</small></button>)}</section>
+              <section className="personal-object-list personal-files-list"><header><strong>{t("files.title")}</strong><span>{items.filter((item) => item.kind === "output").length}</span></header>{items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "output" }> => item.kind === "output").map((item) => <button key={item.id} onClick={() => setSelection({ item: item.output, kind: "output" })} type="button"><span className="personal-file-icon"><FileText size={16} /></span><strong>{item.output.title}</strong><p>{item.output.summary ?? item.output.safePreview ?? item.output.kind ?? t("files.emptySummary")}</p><small title={item.output.createdAt}>{[item.output.goalTitle, item.output.todoId ? `${t("common.task")} ${item.output.todoId}` : null, activityTimeLabel(item.output.createdAt, locale, t)].filter(Boolean).join(" · ")}</small></button>)}</section>
             ) : !selectedGoal && !managerChatOpen ? (
               <ManagerHomeBoard goals={workspaceGoals} onSelectGoal={selectGoal} systemHealth={model.systemHealth} />
             ) : !selectedGoal ? (

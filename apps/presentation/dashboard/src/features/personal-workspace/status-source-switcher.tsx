@@ -1,4 +1,4 @@
-import { ChevronDown, Copy, Plus, RotateCw, Server, Trash2, X } from "lucide-react";
+import { Copy, Plus, RotateCw, Server, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { StatusSource } from "../../data/status-source-catalog";
@@ -8,6 +8,7 @@ import {
   type ConfiguredSshHost,
 } from "../../data/ssh-host-catalog";
 import { useWorkspaceI18n } from "./i18n";
+import { WorkspaceSelect } from "./workspace-select";
 
 export type StatusSourceConnectionState = "connected" | "error" | "loading";
 
@@ -43,6 +44,16 @@ export function StatusSourceSwitcher({
   const [localPort, setLocalPort] = useState("8876");
   const [statusUrl, setStatusUrl] = useState("");
   const quickAddPrefix = "configured:";
+  const sourceOptions = [
+    ...sources.map((source) => ({ label: source.label, value: source.id })),
+    ...configuredHosts
+      .filter((host) => !sources.some((source) => source.label === host.alias))
+      .map((host) => ({
+        group: t("source.configuredGroup", { count: configuredHosts.length }),
+        label: host.alias,
+        value: `${quickAddPrefix}${host.alias}`,
+      })),
+  ];
   const configuredDraft = useMemo(() => {
     if (!configuredHosts.some((host) => host.alias === hostAlias)) {
       return { error: t("source.selectHost") } as const;
@@ -157,31 +168,20 @@ export function StatusSourceSwitcher({
         <span>Control plane</span>
         <button aria-label={t("source.addSsh")} onClick={openForm} title={t("source.add")} type="button"><Plus size={14} /></button>
       </header>
-      <label className="personal-status-source-select">
-        <Server size={15} />
-        <select
-          aria-label={t("source.select")}
-          onChange={(event) => {
-            const value = event.target.value;
-            if (value.startsWith(quickAddPrefix)) {
-              quickAddConfiguredHost(value.slice(quickAddPrefix.length));
-              return;
-            }
-            onSelect(value);
-          }}
-          value={activeSource.id}
-        >
-          {sources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
-          {configuredHosts.length > 0 ? (
-            <optgroup label={t("source.configuredGroup", { count: configuredHosts.length })}>
-              {configuredHosts
-                .filter((host) => !sources.some((source) => source.label === host.alias))
-                .map((host) => <option key={`${quickAddPrefix}${host.alias}`} value={`${quickAddPrefix}${host.alias}`}>{host.alias}</option>)}
-            </optgroup>
-          ) : null}
-        </select>
-        <ChevronDown aria-hidden size={13} />
-      </label>
+      <WorkspaceSelect
+        ariaLabel={t("source.select")}
+        className="personal-status-source-select"
+        icon={<Server size={15} />}
+        onChange={(value) => {
+          if (value.startsWith(quickAddPrefix)) {
+            quickAddConfiguredHost(value.slice(quickAddPrefix.length));
+            return;
+          }
+          onSelect(value);
+        }}
+        options={sourceOptions}
+        value={activeSource.id}
+      />
       <div className="personal-status-source-meta">
         <span className={`is-${connectionState}`}><i />{connectionState === "loading" ? t("source.connecting") : connectionState === "error" ? t("source.notAvailable") : t("source.connected")}</span>
         <small>{activeSource.readOnly ? t("source.readOnly") : t("source.localInteractive")}</small>
