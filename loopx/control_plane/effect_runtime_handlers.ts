@@ -109,6 +109,7 @@ import {
 } from "./coordination/runtime_shadow.ts";
 import {
   mutateLocalCoordinationAuthority,
+  listLocalCoordinationTodos,
   promoteLocalCoordinationAuthority,
   readLocalCoordinationTodo,
 } from "./coordination/local_authority_runtime.ts";
@@ -387,6 +388,7 @@ export function createEffectRuntimeHandlers(
     ["coordination.local_authority.promote", promoteLocalCoordinationAuthority],
     ["coordination.local_authority.mutate", mutateLocalCoordinationAuthority],
     ["coordination.local_authority.todo_read", readLocalCoordinationTodo],
+    ["coordination.local_authority.todo_list", listLocalCoordinationTodos],
     [
       "coordination.local_authority.legacy_writer_fence.engage",
       engageLegacyCoordinationWriterFence,

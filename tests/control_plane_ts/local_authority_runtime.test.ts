@@ -11,6 +11,8 @@ import {
   LOCAL_COORDINATION_PROMOTION_REQUEST_SCHEMA,
   LOCAL_COORDINATION_MUTATION_REQUEST_SCHEMA,
   LOCAL_COORDINATION_TODO_READ_REQUEST_SCHEMA,
+  LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA,
+  listLocalCoordinationTodos,
   mutateLocalCoordinationAuthority,
   promoteLocalCoordinationAuthority,
   readLocalCoordinationTodo,
@@ -266,6 +268,17 @@ test("local canonical runtime reads and mutates only the provider head", async (
     todo_id: "todo_a",
   });
   assert.equal((after.todo as Record<string, unknown>).claimed_by, "agent-a");
+
+  const listed = await listLocalCoordinationTodos({
+    schema_version: LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+  });
+  assert.equal(listed.status, "loaded");
+  assert.deepEqual(listed.todo_ids, ["todo_a"]);
+  assert.equal((listed.todos as Record<string, unknown>[])[0]?.claimed_by, "agent-a");
+  assert.equal(listed.decision_read_from_provider, true);
+  assert.equal(listed.legacy_fallback_used, false);
 });
 
 test("local canonical runtime never falls back when provider state is missing", async () => {
