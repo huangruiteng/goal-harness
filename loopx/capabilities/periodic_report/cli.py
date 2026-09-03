@@ -15,7 +15,6 @@ from ...rollout_event_log import iter_rollout_events
 from .core import build_periodic_report_run
 from .machine_defaults import (
     build_goal_periodic_report_delivery_plan,
-    plan_periodic_report_machine_default_backfill,
 )
 from .machine_store import (
     configure_periodic_report_machine_defaults,
@@ -109,16 +108,6 @@ def register_periodic_report_commands(
     consume_pending.add_argument("--goal-id", required=True)
     consume_pending.add_argument("--agent-id", required=True)
     consume_pending.add_argument("--execute", action="store_true")
-    plan_machine_defaults = commands.add_parser(
-        "plan-machine-defaults",
-        help="Preview per-Goal weekly-report inheritance without writing registries.",
-    )
-    add_subcommand_format(plan_machine_defaults)
-    plan_machine_defaults.add_argument(
-        "--config-json",
-        required=True,
-        help="Path to loopx_machine_configuration_v0 JSON; use '-' for stdin.",
-    )
     configure_machine_defaults = commands.add_parser(
         "configure-machine-defaults",
         help="Preview or apply the runtime-root machine periodic-report policy.",
@@ -336,7 +325,6 @@ def render_periodic_report_markdown(payload: dict[str, object]) -> str:
         "machine_configuration_inspection_v0",
         "machine_configuration_rollback_plan_v0",
         "machine_configuration_rollback_receipt_v0",
-        "periodic_report_machine_default_backfill_plan_v0",
         "periodic_report_goal_delivery_plan_v0",
     }:
         machine_configuration = str(payload.get("schema_version") or "").startswith(
@@ -432,12 +420,6 @@ def handle_periodic_report_command(
                 agent_id=args.agent_id,
                 execute=bool(args.execute),
             )
-        elif args.periodic_report_command == "plan-machine-defaults":
-            payload = plan_periodic_report_machine_default_backfill(
-                read_json(registry_path),
-                _load_json_object(args.config_json),
-            )
-            payload["ok"] = True
         elif args.periodic_report_command in {
             "configure-machine-defaults",
             "inspect-machine-defaults",

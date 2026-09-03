@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -21,21 +20,11 @@ from ..machine_configuration.contract import (
 MACHINE_DEFAULTS_SCHEMA = MACHINE_CONFIGURATION_SCHEMA
 PERIODIC_REPORT_MACHINE_DEFAULTS_SCHEMA = "periodic_report_machine_defaults_v0"
 GOAL_SUBSCRIPTION_SCHEMA = "periodic_report_goal_subscription_v0"
-BACKFILL_PLAN_SCHEMA = "periodic_report_machine_default_backfill_plan_v0"
 DELIVERY_IDENTITY_SCHEMA = "periodic_report_goal_delivery_identity_v0"
 DELIVERY_PLAN_REQUEST_SCHEMA = "periodic_report_goal_delivery_plan_request_v0"
 DELIVERY_PLAN_SCHEMA = "periodic_report_goal_delivery_plan_v0"
 
-_INHERITANCE_MODE = "materialize_on_goal_connect"
-_TERMINAL_GOAL_STATUSES = {
-    "archived",
-    "canceled",
-    "cancelled",
-    "completed",
-    "disconnected",
-    "retired",
-    "stopped",
-}
+_INHERITANCE_MODE = "live_machine_default"
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
@@ -108,9 +97,7 @@ def normalize_periodic_report_machine_defaults(
         "periodic_report.inheritance",
     )
     if inheritance != _INHERITANCE_MODE:
-        raise ValueError(
-            "periodic_report.inheritance must be materialize_on_goal_connect"
-        )
+        raise ValueError("periodic_report.inheritance must be live_machine_default")
     timezone = _text(
         periodic.get("timezone", "UTC"),
         "periodic_report.timezone",
@@ -188,7 +175,11 @@ def _goal_periodic_report(goal: Mapping[str, Any]) -> dict[str, Any] | None:
 
 
 def _normalized_goal_subscription(
-    *, goal_id: str, config: Mapping[str, Any], source: str
+    *,
+    goal_id: str,
+    config: Mapping[str, Any],
+    source: str,
+    source_revision: str | None,
 ) -> dict[str, Any]:
     enabled = config.get("enabled")
     if not isinstance(enabled, bool):
@@ -212,6 +203,7 @@ def _normalized_goal_subscription(
         "goal_id": goal_id,
         "enabled": enabled,
         "source": source,
+        "source_revision": source_revision,
         "profile_preset": profile_preset,
         "route_ref": route_ref,
         "timezone": timezone_name,
@@ -222,109 +214,33 @@ def _normalized_goal_subscription(
 
 def resolve_goal_periodic_report_subscription(
     goal: Mapping[str, Any],
+    machine_defaults: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Resolve the runtime subscription from Goal-owned state only.
+    """Resolve one live machine default beneath a complete Goal override."""
 
-    Machine configuration is a connection and explicit-migration input. It is
-    deliberately absent here so changing machine policy cannot silently alter
-    an already-running Goal.
-    """
     goal_id = _text(goal.get("id"), "goal.id")
     existing = _goal_periodic_report(goal)
-    if existing is None:
+    if existing is not None:
+        return _normalized_goal_subscription(
+            goal_id=goal_id,
+            config=existing,
+            source="goal_override",
+            source_revision=None,
+        )
+    if machine_defaults is None:
         return _normalized_goal_subscription(
             goal_id=goal_id,
             config={"enabled": False, "timezone": "UTC"},
             source="not_configured",
+            source_revision=None,
         )
-    source = (
-        "machine_default"
-        if existing.get("source") == "machine_default"
-        else "goal_override"
-    )
+    normalized_defaults = normalize_loopx_machine_defaults(machine_defaults)
     return _normalized_goal_subscription(
         goal_id=goal_id,
-        config=existing,
-        source=source,
+        config=_periodic_report_defaults(normalized_defaults),
+        source="machine_default",
+        source_revision=machine_configuration_revision(normalized_defaults),
     )
-
-
-def _materialized_periodic_config(
-    machine_defaults: Mapping[str, Any],
-) -> dict[str, Any]:
-    normalized = normalize_loopx_machine_defaults(machine_defaults)
-    periodic = dict(normalized["namespaces"]["periodic_report"])
-    periodic.pop("schema_version", None)
-    periodic.pop("inheritance", None)
-    periodic["source"] = "machine_default"
-    periodic["source_revision"] = machine_configuration_revision(normalized)
-    return periodic
-
-
-def _state_path(goal: Mapping[str, Any]) -> Path | None:
-    state_file = str(goal.get("state_file") or "").strip()
-    repo = str(goal.get("repo") or "").strip()
-    if not state_file or not repo:
-        return None
-    path = Path(state_file).expanduser()
-    return path if path.is_absolute() else Path(repo).expanduser() / path
-
-
-def plan_periodic_report_machine_default_backfill(
-    registry: Mapping[str, Any],
-    machine_defaults: Mapping[str, Any],
-    *,
-    state_file_exists: Callable[[Path], bool] = Path.is_file,
-) -> dict[str, Any]:
-    """Build a path-free per-Goal migration ledger before any registry write."""
-
-    normalized_defaults = normalize_loopx_machine_defaults(machine_defaults)
-    intended = _materialized_periodic_config(normalized_defaults)
-    rows: list[dict[str, Any]] = []
-    goals = registry.get("goals")
-    for raw_goal in goals if isinstance(goals, list) else []:
-        if not isinstance(raw_goal, Mapping):
-            continue
-        goal_id = str(raw_goal.get("id") or "").strip()
-        if not goal_id:
-            continue
-        existing = _goal_periodic_report(raw_goal)
-        status = str(raw_goal.get("status") or "active").strip().lower()
-        state_path = _state_path(raw_goal)
-        if status in _TERMINAL_GOAL_STATUSES:
-            action, reason = "excluded", "goal_not_active"
-        elif state_path is None or not state_file_exists(state_path):
-            action, reason = "excluded", "authoritative_state_unavailable"
-        elif existing is not None and existing.get("source") != "machine_default":
-            action, reason = "preserve", "goal_override"
-        elif existing == intended:
-            action, reason = "unchanged", "already_materialized"
-        elif existing is None:
-            action, reason = "materialize", "machine_default_missing"
-        else:
-            action, reason = "update", "inherited_default_revision_changed"
-        rows.append(
-            {
-                "goal_id": goal_id,
-                "action": action,
-                "reason": reason,
-            }
-        )
-    counts = {
-        action: sum(row["action"] == action for row in rows)
-        for action in ("materialize", "update", "unchanged", "preserve", "excluded")
-    }
-    plan: dict[str, Any] = {
-        "schema_version": BACKFILL_PLAN_SCHEMA,
-        "machine_defaults_revision": machine_configuration_revision(
-            normalized_defaults
-        ),
-        "rows": rows,
-        "counts": counts,
-        "writes_required": counts["materialize"] + counts["update"],
-    }
-    plan["plan_revision"] = _digest(plan)
-    return plan
 
 
 def build_goal_periodic_report_delivery_identity(
@@ -395,6 +311,8 @@ def select_goal_periodic_report_executor(
 
 def build_goal_periodic_report_delivery_plan(
     request: Mapping[str, Any],
+    *,
+    machine_defaults: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Arbitrate one effect-free Goal delivery plan from a reporting Agent event."""
 
@@ -417,7 +335,10 @@ def build_goal_periodic_report_delivery_plan(
     eligible_raw = payload.get("eligible_agent_ids")
     if not isinstance(eligible_raw, list):
         raise TypeError("request.eligible_agent_ids must be a list")
-    subscription = resolve_goal_periodic_report_subscription(goal)
+    subscription = resolve_goal_periodic_report_subscription(
+        goal,
+        machine_defaults,
+    )
     if subscription["enabled"] is not True:
         return {
             "ok": True,
@@ -449,7 +370,6 @@ def build_goal_periodic_report_delivery_plan(
 
 
 __all__ = [
-    "BACKFILL_PLAN_SCHEMA",
     "DELIVERY_IDENTITY_SCHEMA",
     "DELIVERY_PLAN_REQUEST_SCHEMA",
     "DELIVERY_PLAN_SCHEMA",
@@ -462,7 +382,6 @@ __all__ = [
     "normalize_loopx_machine_defaults",
     "normalize_periodic_report_machine_defaults",
     "periodic_report_machine_configuration_namespace",
-    "plan_periodic_report_machine_default_backfill",
     "resolve_goal_periodic_report_subscription",
     "select_goal_periodic_report_executor",
 ]

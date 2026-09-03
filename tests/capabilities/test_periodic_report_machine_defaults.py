@@ -9,7 +9,6 @@ from loopx.capabilities.periodic_report.machine_defaults import (
     build_goal_periodic_report_delivery_identity,
     build_goal_periodic_report_delivery_plan,
     normalize_loopx_machine_defaults,
-    plan_periodic_report_machine_default_backfill,
     resolve_goal_periodic_report_subscription,
     select_goal_periodic_report_executor,
 )
@@ -19,7 +18,7 @@ from loopx.cli import main
 def _defaults(*, enabled: bool = True, route_ref: str = "loopx-concierge") -> dict:
     periodic_report = {
         "enabled": enabled,
-        "inheritance": "materialize_on_goal_connect",
+        "inheritance": "live_machine_default",
         "timezone": "Asia/Shanghai",
     }
     if enabled:
@@ -68,7 +67,7 @@ def test_goal_override_beats_machine_default() -> None:
         }
     }
 
-    subscription = resolve_goal_periodic_report_subscription(goal)
+    subscription = resolve_goal_periodic_report_subscription(goal, _defaults())
 
     assert subscription["enabled"] is False
     assert subscription["route_ref"] == "project-room"
@@ -80,17 +79,18 @@ def test_runtime_goal_subscription_does_not_fall_back_to_machine_defaults() -> N
     goal["control_plane"] = {"periodic_report": {"enabled": True}}
 
     with pytest.raises(ValueError, match="profile_preset"):
-        resolve_goal_periodic_report_subscription(goal)
+        resolve_goal_periodic_report_subscription(goal, _defaults())
 
 
 def test_unconfigured_goal_is_not_subscribed_at_runtime() -> None:
-    subscription = resolve_goal_periodic_report_subscription(_goal("research"))
+    subscription = resolve_goal_periodic_report_subscription(_goal("research"), None)
 
     assert subscription == {
         "schema_version": "periodic_report_goal_subscription_v0",
         "goal_id": "research",
         "enabled": False,
         "source": "not_configured",
+        "source_revision": None,
         "profile_preset": None,
         "route_ref": None,
         "timezone": "UTC",
@@ -99,48 +99,26 @@ def test_unconfigured_goal_is_not_subscribed_at_runtime() -> None:
     assert "agent_id" not in subscription
 
 
-def test_backfill_preserves_overrides_and_excludes_unusable_goals() -> None:
-    inherited = _goal("inherited")
-    overridden = _goal("overridden")
-    overridden["control_plane"] = {
-        "periodic_report": {"enabled": False, "timezone": "UTC"}
-    }
-    missing = _goal("missing")
-    retired = _goal("retired", status="retired")
-    registry = {"goals": [inherited, overridden, missing, retired]}
+def test_existing_goal_follows_live_machine_default_without_mutation() -> None:
+    goal = _goal("research")
+    original = json.loads(json.dumps(goal))
 
-    plan = plan_periodic_report_machine_default_backfill(
-        registry,
-        _defaults(),
-        state_file_exists=lambda path: (
-            path == Path("/projects/inherited/GOAL.md")
-            or path == Path("/projects/overridden/GOAL.md")
-        ),
+    first = resolve_goal_periodic_report_subscription(
+        goal,
+        _defaults(route_ref="project-room-a"),
+    )
+    second = resolve_goal_periodic_report_subscription(
+        goal,
+        _defaults(route_ref="project-room-b"),
     )
 
-    assert plan["rows"] == [
-        {
-            "goal_id": "inherited",
-            "action": "materialize",
-            "reason": "machine_default_missing",
-        },
-        {
-            "goal_id": "overridden",
-            "action": "preserve",
-            "reason": "goal_override",
-        },
-        {
-            "goal_id": "missing",
-            "action": "excluded",
-            "reason": "authoritative_state_unavailable",
-        },
-        {
-            "goal_id": "retired",
-            "action": "excluded",
-            "reason": "goal_not_active",
-        },
-    ]
-    assert plan["writes_required"] == 1
+    assert first["source"] == "machine_default"
+    assert first["route_ref"] == "project-room-a"
+    assert second["source"] == "machine_default"
+    assert second["route_ref"] == "project-room-b"
+    assert first["source_revision"] != second["source_revision"]
+    assert first["effective_revision"] != second["effective_revision"]
+    assert goal == original
 
 
 def test_delivery_identity_is_goal_period_route_owned_not_agent_owned() -> None:
@@ -187,15 +165,6 @@ def test_reporting_agent_is_preferred_but_failover_keeps_goal_identity() -> None
 
 def test_goal_delivery_plan_prefers_the_candidate_reporting_agent() -> None:
     goal = _goal("research")
-    goal["control_plane"] = {
-        "periodic_report": {
-            "enabled": True,
-            "profile_preset": "weekly-progress",
-            "route_ref": "loopx-concierge",
-            "timezone": "Asia/Shanghai",
-            "source": "machine_default",
-        }
-    }
     result = build_goal_periodic_report_delivery_plan(
         {
             "schema_version": "periodic_report_goal_delivery_plan_request_v0",
@@ -206,7 +175,8 @@ def test_goal_delivery_plan_prefers_the_candidate_reporting_agent() -> None:
             },
             "reporting_agent_id": "agent-b",
             "eligible_agent_ids": ["agent-a", "agent-b"],
-        }
+        },
+        machine_defaults=_defaults(),
     )
 
     assert result["status"] == "ready"
@@ -283,55 +253,6 @@ def test_delivery_identity_rejects_an_invalid_period() -> None:
             period_end_at="2026-08-24T00:00:00Z",
             route_id="loopx-concierge",
         )
-
-
-def test_machine_default_preview_cli_is_an_effect_free_active_callsite(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    state_path = tmp_path / "GOAL.md"
-    state_path.write_text("# Goal\n", encoding="utf-8")
-    registry_path = tmp_path / "registry.json"
-    registry_path.write_text(
-        json.dumps(
-            {
-                "goals": [
-                    {
-                        "id": "research",
-                        "repo": str(tmp_path),
-                        "state_file": "GOAL.md",
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    defaults_path = tmp_path / "machine-defaults.json"
-    defaults_path.write_text(json.dumps(_defaults()), encoding="utf-8")
-
-    assert (
-        main(
-            [
-                "--registry",
-                str(registry_path),
-                "--format",
-                "json",
-                "periodic-report",
-                "plan-machine-defaults",
-                "--config-json",
-                str(defaults_path),
-            ]
-        )
-        == 0
-    )
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["writes_required"] == 1
-    assert payload["rows"] == [
-        {
-            "goal_id": "research",
-            "action": "materialize",
-            "reason": "machine_default_missing",
-        }
-    ]
 
 
 def test_goal_delivery_plan_cli_prefers_the_reporting_agent(
