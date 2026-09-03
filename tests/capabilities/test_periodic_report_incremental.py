@@ -441,3 +441,50 @@ def test_snapshot_applies_cursor_before_the_six_item_report_limit(
     assert second is not None
     assert len(second["items"]) == 1
     assert second["items"][0]["title"] == "Completed item 0."
+
+
+def test_snapshot_skips_done_items_without_valid_completion_timestamps(
+    tmp_path: Path,
+) -> None:
+    state = (
+        "# Goal\n\n## User Todo\n\n## Agent Todo\n\n"
+        "- [x] Valid outcome with receipt.\n"
+        "  <!-- loopx:todo todo_id=todo_valid status=done task_class=advancement_task "
+        f"claimed_by={AGENT_ID} updated_at=2026-08-01T07:00:00Z -->\n"
+        "- [x] Handwritten outcome without a timestamp.\n"
+        "  <!-- loopx:todo todo_id=todo_handwritten status=done"
+        f" task_class=advancement_task claimed_by={AGENT_ID} -->\n"
+        "- [x] Naive timestamp outcome.\n"
+        "  <!-- loopx:todo todo_id=todo_naive status=done task_class=advancement_task "
+        f"claimed_by={AGENT_ID} updated_at=2026-08-01T07:30:00 -->\n"
+    )
+    snapshot = build_project_progress_snapshot_from_state(
+        state_text=state,
+        goal={"id": GOAL_ID},
+        state_path=tmp_path / "goal.md",
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        completed_at="2026-08-01T08:00:00Z",
+    )
+
+    assert snapshot is not None
+    assert [item["source_ref"] for item in snapshot["items"]] == ["todo:todo_valid"]
+    assert snapshot["items"][0]["completed_at"] == "2026-08-01T07:00:00Z"
+
+    handwritten_only = (
+        "# Goal\n\n## User Todo\n\n## Agent Todo\n\n"
+        "- [x] Handwritten outcome without a timestamp.\n"
+        "  <!-- loopx:todo todo_id=todo_handwritten status=done"
+        f" task_class=advancement_task claimed_by={AGENT_ID} -->\n"
+    )
+    assert (
+        build_project_progress_snapshot_from_state(
+            state_text=handwritten_only,
+            goal={"id": GOAL_ID},
+            state_path=tmp_path / "goal.md",
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            completed_at="2026-08-01T08:00:00Z",
+        )
+        is None
+    )

@@ -513,6 +513,37 @@ def test_consumption_uses_the_stage_progress_snapshot(tmp_path: Path) -> None:
     )
 
 
+def test_consumption_skips_done_todos_without_valid_completion_timestamps(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    state_path = registry.parent / "ACTIVE_GOAL_STATE.md"
+    state_path.write_text(
+        state_path.read_text(encoding="utf-8")
+        + "- [x] Handwritten outcome without a timestamp.\n"
+        "  <!-- loopx:todo todo_id=todo_handwritten status=done"
+        f" task_class=advancement_task claimed_by={AGENT_ID} -->\n",
+        encoding="utf-8",
+    )
+
+    result = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    assert result["status"] == "editorial_required"
+    request = json.loads(
+        Path(result["editorial_request_path"]).read_text(encoding="utf-8")
+    )
+    facts = request["facts"]
+
+    assert [fact["source_ref"] for fact in facts] == ["todo:todo_finished"]
+    assert facts[0]["completed_at"] == "2026-08-30T09:00:00Z"
+    assert not any("Handwritten outcome" in fact["title"] for fact in facts)
+
+
 def test_publication_candidate_keeps_the_trigger_snapshot_baseline(
     tmp_path: Path,
 ) -> None:
