@@ -62,6 +62,7 @@ from ..extensions.runtime import (
     default_extension_state_file,
     resolve_extension_activation,
 )
+from ..file_lock import lock_timeout_error_fields
 
 
 def _goal_inbox_config(
@@ -708,6 +709,7 @@ def handle_lark_inbox_command(
             "ok": False,
             "schema_version": "lark_event_inbox_error_v0",
             "error": str(exc),
+            **lock_timeout_error_fields(exc),
         }
     if activation is not None and payload.get("ok"):
         payload["extension_activation"] = activation

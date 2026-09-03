@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from loopx.extensions.lark.routed_inbox import (
     resolve_routed_lark_inbox_config,
     resolve_routed_lark_inbox_route,
 )
+from loopx.file_lock import LockAcquireTimeoutError, exclusive_file_lock
 
 
 def _project(tmp_path: Path) -> Path:
@@ -301,15 +303,29 @@ def test_collector_route_reconcile_rejects_binding_conflicts_without_writing(
 
 def test_collector_route_reconcile_rejects_concurrent_writer_without_writing(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, collector, _, _ = _two_route_config(tmp_path)
     before = collector.read_bytes()
     chat_id = "oc_public_fixture_locked"
     inbox = _write_inbox(project, name="requirements-locked", chat_id=chat_id)
-    lock = collector.with_suffix(collector.suffix + ".route-reconcile.lock")
-    lock.write_text("locked\n", encoding="utf-8")
+    original_lock = exclusive_file_lock
 
-    with pytest.raises(ValueError, match="already in progress"):
+    def fail_fast_lock(
+        path: Path, *, operation: str | None = None
+    ) -> AbstractContextManager[Path]:
+        return original_lock(path, timeout_seconds=0, operation=operation)
+
+    monkeypatch.setattr(
+        event_collector_routes,
+        "exclusive_file_lock",
+        fail_fast_lock,
+    )
+
+    with (
+        exclusive_file_lock(collector, operation="test_lark_route_holder"),
+        pytest.raises(LockAcquireTimeoutError),
+    ):
         reconcile_lark_event_collector_route(
             project=project,
             config_path=collector,
@@ -320,6 +336,81 @@ def test_collector_route_reconcile_rejects_concurrent_writer_without_writing(
         )
 
     assert collector.read_bytes() == before
+
+
+def test_collector_route_reconcile_ignores_released_lock_file(
+    tmp_path: Path,
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+    chat_id = "oc_public_fixture_released_lock"
+    inbox = _write_inbox(project, name="requirements-released-lock", chat_id=chat_id)
+    with exclusive_file_lock(collector, operation="test_released_lark_route_lock"):
+        pass
+
+    receipt = reconcile_lark_event_collector_route(
+        project=project,
+        config_path=collector,
+        route_key="requirements-released-lock",
+        chat_id=chat_id,
+        event_inbox_config=inbox,
+        execute=True,
+    )
+
+    assert receipt["status"] == "applied"
+    assert receipt["write_performed"] is True
+
+
+def test_cli_collector_route_reconcile_preserves_typed_lock_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+    chat_id = "oc_public_fixture_cli_locked"
+    inbox = _write_inbox(project, name="requirements-cli-locked", chat_id=chat_id)
+    monkeypatch.setattr(
+        lark_inbox,
+        "_resolve_lark_activation",
+        lambda *_args, **_kwargs: {"enabled": True},
+    )
+    original_lock = exclusive_file_lock
+
+    def fail_fast_lock(
+        path: Path, *, operation: str | None = None
+    ) -> AbstractContextManager[Path]:
+        return original_lock(path, timeout_seconds=0, operation=operation)
+
+    monkeypatch.setattr(
+        event_collector_routes,
+        "exclusive_file_lock",
+        fail_fast_lock,
+    )
+    rendered: list[dict[str, object]] = []
+    args = argparse.Namespace(
+        command="lark-inbox",
+        lark_inbox_command="collector-route-reconcile",
+        project=str(project),
+        config=str(collector),
+        route_key="requirements-cli-locked",
+        chat_id=chat_id,
+        event_inbox_config=inbox,
+        execute=True,
+    )
+
+    with exclusive_file_lock(collector, operation="test_lark_route_cli_holder"):
+        code = lark_inbox.handle_lark_inbox_command(
+            args,
+            registry_path=tmp_path / "registry.json",
+            runtime_root_arg=None,
+            output_format=lambda _args: "json",
+            print_payload=lambda payload, *_args: rendered.append(payload),
+        )
+
+    assert code == 1
+    assert rendered[0]["error_code"] == "lock_acquire_timeout"
+    assert rendered[0]["incident_recorded"] is True
+    serialized = json.dumps(rendered[0])
+    assert chat_id not in serialized
+    assert inbox not in serialized
+    assert str(project) not in serialized
 
 
 def test_collector_route_reconcile_rolls_back_unverified_write(

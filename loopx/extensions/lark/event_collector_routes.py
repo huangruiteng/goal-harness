@@ -6,11 +6,11 @@ import hashlib
 import json
 import os
 import tempfile
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from ...file_lock import exclusive_file_lock
 from .event_collector import (
     CHAT_RE,
     CONFIG_SCHEMA_VERSION,
@@ -116,21 +116,6 @@ def _atomic_write_collector_config(path: Path, payload: Mapping[str, Any]) -> No
         if descriptor >= 0:
             os.close(descriptor)
         temporary.unlink(missing_ok=True)
-
-
-@contextmanager
-def _collector_route_reconcile_lock(path: Path) -> Iterator[None]:
-    lock_path = path.with_suffix(path.suffix + ".route-reconcile.lock")
-    try:
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError as exc:
-        raise ValueError("collector route reconcile is already in progress") from exc
-    try:
-        os.write(descriptor, b"locked\n")
-        yield
-    finally:
-        os.close(descriptor)
-        lock_path.unlink(missing_ok=True)
 
 
 def _prepare_route_reconcile(
@@ -332,7 +317,7 @@ def reconcile_lark_event_collector_route(
             execute=False,
         )
     path = _project_config_path(project, config_path)
-    with _collector_route_reconcile_lock(path):
+    with exclusive_file_lock(path, operation="lark_collector_route_reconcile"):
         return _reconcile_lark_event_collector_route_once(
             project=project,
             config_path=path,
