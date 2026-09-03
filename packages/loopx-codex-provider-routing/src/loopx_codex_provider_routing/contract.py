@@ -16,6 +16,7 @@ HOST_CONTROL_RECOVERY_SCHEMA_VERSION = "codex_host_control_recovery_qualificatio
 DESKTOP_PATCH_SCHEMA_VERSION = "codex_desktop_patch_qualification_v0"
 QUOTA_RECOVERY_SCHEMA_VERSION = "codex_quota_recovery_qualification_v0"
 TOOL_TRANSPORT_SCHEMA_VERSION = "codex_tool_transport_qualification_v0"
+OUTAGE_RECOVERY_SCHEMA_VERSION = "codex_outage_recovery_qualification_v0"
 
 RECOVERABLE_HOST_CONTROL_NAMES = {
     "automation_update",
@@ -236,6 +237,132 @@ def qualify_desktop_patch(observation: Mapping[str, Any]) -> dict[str, Any]:
             "read_back_heartbeat_transport",
         ],
         "responsible_layer": "codex_desktop_runtime_builder",
+        "effect_boundary": "content_free_observation_only",
+    }
+
+
+def qualify_outage_recovery(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Qualify state transitions after a provider-wide outage ends.
+
+    A provider incident (for example repeated 4xx/5xx across every native
+    profile) creates two kinds of state: a cooldown on native profiles and a
+    degraded affinity to a text-only fallback. Once a recovery signal newer
+    than the cooldown source is observed, both must be revalidated before a
+    request that needs native capabilities is admitted.
+    """
+
+    reject_private_material(observation)
+    _reject_unexpected_keys(
+        observation,
+        {
+            "outage_ended",
+            "outage_ended_observed_at",
+            "cooldown_source_observed_at",
+            "cooldown_expires_at",
+            "cooldown_invalidated",
+            "post_recovery_probe",
+            "degraded_fallback_binding_cleared",
+            "native_capability_requested",
+            "fallback_attempted",
+        },
+        "outage_recovery",
+    )
+    outage_ended = _boolean(
+        observation.get("outage_ended"), "outage_recovery.outage_ended"
+    )
+    cooldown_source_at = _utc_datetime(
+        observation.get("cooldown_source_observed_at"),
+        "outage_recovery.cooldown_source_observed_at",
+    )
+    cooldown_expires_at = _utc_datetime(
+        observation.get("cooldown_expires_at"),
+        "outage_recovery.cooldown_expires_at",
+    )
+    if cooldown_expires_at <= cooldown_source_at:
+        raise ValueError("outage_recovery cooldown expiry must follow its source")
+    invalidated = _boolean(
+        observation.get("cooldown_invalidated"),
+        "outage_recovery.cooldown_invalidated",
+    )
+    probe = _non_empty_string(
+        observation.get("post_recovery_probe"),
+        "outage_recovery.post_recovery_probe",
+    )
+    if probe not in {"not_attempted", "success", "still_outage", "transport_failed"}:
+        raise ValueError("outage_recovery.post_recovery_probe is unsupported")
+    degraded_cleared = _boolean(
+        observation.get("degraded_fallback_binding_cleared"),
+        "outage_recovery.degraded_fallback_binding_cleared",
+    )
+    native_requested = _boolean(
+        observation.get("native_capability_requested"),
+        "outage_recovery.native_capability_requested",
+    )
+    fallback_attempted = _boolean(
+        observation.get("fallback_attempted"),
+        "outage_recovery.fallback_attempted",
+    )
+
+    if outage_ended:
+        outage_ended_at = _utc_datetime(
+            observation.get("outage_ended_observed_at"),
+            "outage_recovery.outage_ended_observed_at",
+        )
+        if outage_ended_at <= cooldown_source_at:
+            raise ValueError("outage end must follow the cooldown source")
+        checks = [
+            {
+                "id": "stale_cooldown_invalidated",
+                "passed": invalidated,
+                "failure_code": "stale_outage_cooldown_retained",
+            },
+            {
+                "id": "recovery_probe_performed",
+                "passed": probe in {"success", "still_outage"},
+                "failure_code": "recovery_probe_missing",
+            },
+            {
+                "id": "fallback_gated_by_probe",
+                "passed": not fallback_attempted or probe == "still_outage",
+                "failure_code": "fallback_selected_after_recovery_probe",
+            },
+            {
+                "id": "degraded_binding_not_used_for_native",
+                "passed": not native_requested
+                or (
+                    degraded_cleared
+                    and not (fallback_attempted and probe == "still_outage")
+                ),
+                "failure_code": "degraded_fallback_binding_used_for_native_request",
+            },
+        ]
+        expected_action = "invalidate_cooldown_and_revalidate_affinity"
+    else:
+        checks = [
+            {
+                "id": "cooldown_retained_without_outage_end",
+                "passed": not invalidated,
+                "failure_code": "cooldown_invalidated_without_outage_end",
+            }
+        ]
+        expected_action = "retain_cooldown_until_recovery_observed"
+    failure_codes = [check["failure_code"] for check in checks if not check["passed"]]
+    return {
+        "schema_version": OUTAGE_RECOVERY_SCHEMA_VERSION,
+        "qualified": not failure_codes,
+        "failure_codes": failure_codes,
+        "outage_ended": outage_ended,
+        "expected_action": expected_action,
+        "checks": checks,
+        "required_contract": {
+            "incident_cooldown": "outage_end_newer_than_source_invalidates_cooldown",
+            "recovery_gate": "bounded_probe_before_fallback_admission",
+            "degraded_affinity": (
+                "fallback_binding_revalidated_before_native_capability_request"
+            ),
+            "native_capability": "fail_closed_when_no_eligible_native_provider",
+        },
+        "responsible_layer": "cpa_provider_health_state_and_selector",
         "effect_boundary": "content_free_observation_only",
     }
 

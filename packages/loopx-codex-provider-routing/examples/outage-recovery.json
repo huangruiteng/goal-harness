@@ -1,0 +1,15 @@
+{
+  "operation": "qualify_outage_recovery",
+  "outage_recovery": {
+    "cooldown_expires_at": "2026-09-03T18:00:00Z",
+    "cooldown_invalidated": true,
+    "cooldown_source_observed_at": "2026-09-03T14:00:00Z",
+    "degraded_fallback_binding_cleared": true,
+    "fallback_attempted": false,
+    "native_capability_requested": true,
+    "outage_ended": true,
+    "outage_ended_observed_at": "2026-09-03T15:00:00Z",
+    "post_recovery_probe": "success"
+  },
+  "schema_version": "loopx_codex_provider_routing_request_v0"
+}

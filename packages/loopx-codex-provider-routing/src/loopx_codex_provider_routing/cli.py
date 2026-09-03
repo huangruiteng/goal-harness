@@ -16,6 +16,7 @@ from .contract import (
     qualify_desktop_patch,
     qualify_heartbeat_transport,
     qualify_host_control_recovery,
+    qualify_outage_recovery,
     qualify_quota_recovery,
     qualify_snapshot,
     qualify_tool_transport,
@@ -53,6 +54,7 @@ def _doctor() -> int:
                 "qualify_desktop_patch",
                 "qualify_heartbeat_transport",
                 "qualify_host_control_recovery",
+                "qualify_outage_recovery",
                 "qualify_quota_recovery",
                 "qualify_snapshot",
                 "qualify_tool_transport",
@@ -79,6 +81,7 @@ def _run_request(request: Any) -> dict[str, Any]:
         "qualify_desktop_patch": "desktop_patch",
         "qualify_heartbeat_transport": "heartbeat_transport",
         "qualify_host_control_recovery": "host_control_recovery",
+        "qualify_outage_recovery": "outage_recovery",
         "qualify_quota_recovery": "quota_recovery",
         "qualify_snapshot": "snapshot",
         "qualify_tool_transport": "tool_transport",
@@ -129,6 +132,13 @@ def _run_request(request: Any) -> dict[str, Any]:
                 "qualify_host_control_recovery requires object `host_control_recovery`"
             )
         result = qualify_host_control_recovery(host_control_recovery)
+    elif operation == "qualify_outage_recovery":
+        outage_recovery = request.get("outage_recovery")
+        if not isinstance(outage_recovery, Mapping):
+            raise ValueError(
+                "qualify_outage_recovery requires object `outage_recovery`"
+            )
+        result = qualify_outage_recovery(outage_recovery)
     elif operation == "qualify_quota_recovery":
         quota_recovery = request.get("quota_recovery")
         if not isinstance(quota_recovery, Mapping):

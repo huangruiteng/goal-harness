@@ -7,6 +7,7 @@
         "operation": {
           "const": "qualify_heartbeat_transport"
         },
+        "outage_recovery": false,
         "desktop_patch": false,
         "host_control_recovery": false,
         "integration": false,
@@ -27,6 +28,7 @@
         "operation": {
           "const": "qualify_host_control_recovery"
         },
+        "outage_recovery": false,
         "desktop_patch": false,
         "heartbeat_transport": false,
         "integration": false,
@@ -47,6 +49,7 @@
         "operation": {
           "const": "reconcile_integration_candidate"
         },
+        "outage_recovery": false,
         "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
@@ -67,6 +70,7 @@
         "operation": {
           "const": "project_runtime_status"
         },
+        "outage_recovery": false,
         "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
@@ -87,6 +91,7 @@
         "operation": {
           "const": "compile_catalog"
         },
+        "outage_recovery": false,
         "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
@@ -107,6 +112,7 @@
         "operation": {
           "const": "normalize_selector_request"
         },
+        "outage_recovery": false,
         "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
@@ -127,6 +133,7 @@
         "operation": {
           "const": "qualify_snapshot"
         },
+        "outage_recovery": false,
         "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
@@ -147,6 +154,7 @@
         "operation": {
           "const": "upgrade_plan"
         },
+        "outage_recovery": false,
         "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
@@ -167,6 +175,7 @@
         "operation": {
           "const": "qualify_desktop_patch"
         },
+        "outage_recovery": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
         "integration": false,
@@ -187,6 +196,7 @@
         "operation": {
           "const": "qualify_quota_recovery"
         },
+        "outage_recovery": false,
         "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
@@ -207,6 +217,7 @@
         "operation": {
           "const": "qualify_tool_transport"
         },
+        "outage_recovery": false,
         "desktop_patch": false,
         "heartbeat_transport": false,
         "host_control_recovery": false,
@@ -221,6 +232,27 @@
       "required": [
         "tool_transport"
       ]
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "qualify_outage_recovery"
+        },
+        "desktop_patch": false,
+        "heartbeat_transport": false,
+        "host_control_recovery": false,
+        "integration": false,
+        "normalization": false,
+        "quota_recovery": false,
+        "snapshot": false,
+        "source": false,
+        "status": false,
+        "tool_transport": false,
+        "upgrade": false
+      },
+      "required": [
+        "outage_recovery"
+      ]
     }
   ],
   "properties": {
@@ -231,6 +263,9 @@
       "type": "object"
     },
     "host_control_recovery": {
+      "type": "object"
+    },
+    "outage_recovery": {
       "type": "object"
     },
     "quota_recovery": {
@@ -247,6 +282,7 @@
         "qualify_desktop_patch",
         "qualify_heartbeat_transport",
         "qualify_host_control_recovery",
+        "qualify_outage_recovery",
         "qualify_quota_recovery",
         "qualify_snapshot",
         "qualify_tool_transport",
