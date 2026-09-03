@@ -1024,6 +1024,10 @@ promotion shadow，也不能参与协调决策。
 loopx coordination-shadow inspect --goal-id <goal-id>
 loopx coordination-shadow bootstrap --goal-id <goal-id>
 loopx coordination-shadow bootstrap --goal-id <goal-id> --execute
+loopx coordination-shadow qualify --goal-id <goal-id> \
+  --minimum-operations 3 \
+  --require-event-kind todo_claim \
+  --require-event-kind task_lease_acquire
 loopx coordination-shadow rollback --goal-id <goal-id> \
   --provider-revision <revision-from-inspect> --execute
 ```
@@ -1037,10 +1041,16 @@ file-shadow lineage 移入持久 quarantine archive；精确重试复用 archive
 漂移 fail closed，legacy Todo/task-lease source 全程保持 canonical。之后可以从 legacy
 source 重新 bootstrap 新 shadow，而无需恢复或信任退役 lineage。
 
-后续仍需完成持续 parity policy、provider-first read flip，以及 fence 全部 legacy
-coordination writer，仍是独立评审的
-本地 canonical promotion 的强制证据。因此 NoKV/PostgreSQL 远端 shadow 仍属于 Stage
-3，不能把这个默认关闭的 hook 当作 authority。
+只读 `qualify` action 把单点 inspection 提升为 typed 持续 parity 报告。它采用覆盖式
+策略：调用方指定至少需要多少个不同的已提交 operation，以及必须覆盖哪些 Todo/lease
+mutation kind。TypeScript 会扫描完整且有界的 lineage，校验 bootstrap、每条
+event/receipt/projection identity，以及当前 legacy/file head digest，并返回
+`qualified`、`insufficient_evidence` 或 `drifted`。replay 不增加 operation 计数，缺少
+覆盖会让 gate 失败，所有结果仍明确声明 `decision_read_from_shadow=false`。
+
+后续仍需完成 provider-first read flip，并 fence 全部 legacy coordination writer；这些
+仍是独立评审的本地 canonical promotion 的强制证据。因此 NoKV/PostgreSQL 远端 shadow
+仍属于 Stage 3，不能把这个默认关闭的 hook 当作 authority。
 
 完成续接（continuation）的持久化读回
 （`durable_completion.py`：`read_persisted_todo_record` /

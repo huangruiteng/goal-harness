@@ -1269,6 +1269,10 @@ The administrative caller is explicit and preview-first:
 loopx coordination-shadow inspect --goal-id <goal-id>
 loopx coordination-shadow bootstrap --goal-id <goal-id>
 loopx coordination-shadow bootstrap --goal-id <goal-id> --execute
+loopx coordination-shadow qualify --goal-id <goal-id> \
+  --minimum-operations 3 \
+  --require-event-kind todo_claim \
+  --require-event-kind task_lease_acquire
 loopx coordination-shadow rollback --goal-id <goal-id> \
   --provider-revision <revision-from-inspect> --execute
 ```
@@ -1286,10 +1290,19 @@ legacy Todo/task-lease source remains canonical throughout. A later bootstrap
 may therefore reconstruct a fresh shadow without restoring or trusting the
 retired lineage.
 
-A sustained parity policy, the provider-first read flip, and fencing every
-legacy coordination writer remain mandatory evidence for the separately
-reviewed local canonical promotion. Remote NoKV/PostgreSQL shadowing therefore
-remains Stage 3 and cannot use this default-off hook as authority.
+The read-only `qualify` action turns one-point inspection into a typed sustained
+parity report. Its coverage-based policy requires a caller-selected number of
+distinct committed operations and any explicitly named Todo/lease mutation
+kinds. TypeScript scans the complete bounded lineage, verifies the bootstrap,
+every event/receipt/projection identity, the current legacy/file head digest,
+and reports `qualified`, `insufficient_evidence`, or `drifted`. Replays do not
+increase the operation count, missing coverage fails the gate, and every result
+continues to declare `decision_read_from_shadow=false`.
+
+The provider-first read flip and fencing every legacy coordination writer
+remain mandatory evidence for the separately reviewed local canonical
+promotion. Remote NoKV/PostgreSQL shadowing therefore remains Stage 3 and
+cannot use this default-off hook as authority.
 
 Durable completion continuation read-back
 (`durable_completion.py`: `read_persisted_todo_record` /
