@@ -1347,9 +1347,9 @@ def metadata_line_for_todo_block(
                 key
             ].normalize_for_write(value)
         elif key == "task_repository":
-            normalized = normalize_todo_task_repository(value)
-            if normalized:
-                metadata[key] = normalized
+            normalized_repository = normalize_todo_task_repository(value)
+            if normalized_repository:
+                metadata[key] = normalized_repository
             else:
                 metadata.pop(key, None)
         elif key == "required_capabilities":
@@ -1377,9 +1377,9 @@ def metadata_line_for_todo_block(
             else:
                 metadata.pop(key, None)
         elif key == "continuation_policy":
-            normalized = normalize_todo_continuation_policy(value)
-            if normalized:
-                metadata[key] = normalized
+            normalized_continuation_policy = normalize_todo_continuation_policy(value)
+            if normalized_continuation_policy:
+                metadata[key] = normalized_continuation_policy
             elif value:
                 raise ValueError(
                     "todo continuation_policy must be one of: "
@@ -1390,9 +1390,9 @@ def metadata_line_for_todo_block(
         elif key == "decision_scope":
             metadata[key] = require_todo_decision_scope(value)
         elif key == "required_decision_scopes":
-            normalized = require_todo_required_decision_scopes(value)
-            if normalized:
-                metadata[key] = normalized
+            normalized_decision_scopes = require_todo_required_decision_scopes(value)
+            if normalized_decision_scopes:
+                metadata[key] = normalized_decision_scopes
             else:
                 metadata.pop(key, None)
         elif key == "decision_outcome":
@@ -1404,9 +1404,9 @@ def metadata_line_for_todo_block(
             else:
                 metadata.pop(key, None)
         elif key == "no_followup":
-            normalized = normalize_todo_no_followup(value)
-            if normalized is not None:
-                metadata[key] = normalized
+            normalized_no_followup = normalize_todo_no_followup(value)
+            if normalized_no_followup is not None:
+                metadata[key] = normalized_no_followup
             else:
                 metadata.pop(key, None)
         elif key == "successor_todo_ids":
@@ -1416,15 +1416,15 @@ def metadata_line_for_todo_block(
             else:
                 metadata.pop(key, None)
         elif key in {"completion_continuation", "completion_recovery"}:
-            normalized = require_todo_completion_metadata(key, value)
-            if normalized:
-                metadata[key] = normalized
+            normalized_completion = require_todo_completion_metadata(key, value)
+            if normalized_completion:
+                metadata[key] = normalized_completion
             else:
                 metadata.pop(key, None)
         elif key in {"global_gate", "goal_bound"}:
-            normalized = normalize_todo_global_gate(value)
-            if normalized is not None:
-                metadata[key] = normalized
+            normalized_global_gate = normalize_todo_global_gate(value)
+            if normalized_global_gate is not None:
+                metadata[key] = normalized_global_gate
             else:
                 metadata.pop(key, None)
         elif str(value).strip():
