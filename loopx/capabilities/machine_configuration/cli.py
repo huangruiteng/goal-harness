@@ -37,6 +37,7 @@ def _render(payload: dict[str, object]) -> str:
         "revision",
         "current_revision",
         "desired_revision",
+        "plan_revision",
         "transaction_id",
         "rollback_id",
         "error",
@@ -60,13 +61,23 @@ def register_machine_configuration_commands(
         help="Inspect, preview, apply, or roll back typed machine configuration.",
     )
     commands = parser.add_subparsers(dest="machine_config_command", required=True)
-    preview = commands.add_parser("preview")
+    preview = commands.add_parser(
+        "preview",
+        help="Preview an exact change and return the plan revision required by apply.",
+    )
     add_subcommand_format(preview)
     preview.add_argument("--config-json", required=True)
-    apply = commands.add_parser("apply")
+    apply = commands.add_parser(
+        "apply",
+        help="Apply an exact preview using its returned plan revision.",
+    )
     add_subcommand_format(apply)
     apply.add_argument("--config-json", required=True)
-    apply.add_argument("--expected-plan-revision", required=True)
+    apply.add_argument(
+        "--expected-plan-revision",
+        required=True,
+        help="Exact plan_revision returned by machine-config preview.",
+    )
     apply.add_argument("--execute", action="store_true", required=True)
     inspect = commands.add_parser("inspect")
     add_subcommand_format(inspect)
@@ -75,12 +86,21 @@ def register_machine_configuration_commands(
     )
     add_subcommand_format(remove)
     remove.add_argument("--namespace", required=True)
-    remove.add_argument("--expected-plan-revision")
+    remove.add_argument(
+        "--expected-plan-revision",
+        help="Exact plan_revision returned by the preceding removal preview.",
+    )
     remove.add_argument("--execute", action="store_true")
-    rollback = commands.add_parser("rollback")
+    rollback = commands.add_parser(
+        "rollback",
+        help="Preview a rollback, then apply it with the returned plan revision.",
+    )
     add_subcommand_format(rollback)
     rollback.add_argument("--transaction-id", required=True)
-    rollback.add_argument("--expected-plan-revision")
+    rollback.add_argument(
+        "--expected-plan-revision",
+        help="Exact plan_revision returned by the preceding rollback preview.",
+    )
     rollback.add_argument("--execute", action="store_true")
 
 

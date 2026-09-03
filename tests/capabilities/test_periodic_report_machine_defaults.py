@@ -5,12 +5,21 @@ from pathlib import Path
 
 import pytest
 
+from loopx.capabilities.machine_configuration.builtins import (
+    build_builtin_machine_configuration_registry,
+)
+from loopx.capabilities.machine_configuration.store import (
+    configure_machine_configuration,
+)
 from loopx.capabilities.periodic_report.machine_defaults import (
     build_goal_periodic_report_delivery_identity,
     build_goal_periodic_report_delivery_plan,
     normalize_loopx_machine_defaults,
     resolve_goal_periodic_report_subscription,
     select_goal_periodic_report_executor,
+)
+from loopx.capabilities.periodic_report.machine_store import (
+    configure_periodic_report_machine_defaults,
 )
 from loopx.cli import main
 
@@ -46,6 +55,35 @@ def _goal(goal_id: str, *, status: str = "active") -> dict:
         "state_file": "GOAL.md",
         "status": status,
     }
+
+
+def _apply_defaults(runtime_root: Path, defaults: dict) -> None:
+    preview = configure_periodic_report_machine_defaults(
+        runtime_root=runtime_root,
+        machine_defaults=defaults,
+    )
+    configure_periodic_report_machine_defaults(
+        runtime_root=runtime_root,
+        machine_defaults=defaults,
+        execute=True,
+        expected_plan_revision=preview["plan_revision"],
+    )
+
+
+def _remove_defaults(runtime_root: Path) -> None:
+    registry = build_builtin_machine_configuration_registry()
+    preview = configure_machine_configuration(
+        runtime_root=runtime_root,
+        configuration=None,
+        registry=registry,
+    )
+    configure_machine_configuration(
+        runtime_root=runtime_root,
+        configuration=None,
+        registry=registry,
+        execute=True,
+        expected_plan_revision=preview["plan_revision"],
+    )
 
 
 def test_machine_defaults_require_a_route_when_weekly_reports_are_enabled() -> None:
@@ -287,28 +325,19 @@ def test_delivery_identity_rejects_an_invalid_period() -> None:
         )
 
 
-def test_goal_delivery_plan_cli_prefers_the_reporting_agent(
+def test_goal_delivery_plan_cli_reads_live_default_for_the_same_goal(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     registry_path = tmp_path / "registry.json"
     registry_path.write_text('{"goals": []}', encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    _apply_defaults(runtime_root, _defaults(route_ref="project-room-a"))
     request_path = tmp_path / "request.json"
     request_path.write_text(
         json.dumps(
             {
                 "schema_version": "periodic_report_goal_delivery_plan_request_v0",
-                "goal": {
-                    **_goal("research"),
-                    "control_plane": {
-                        "periodic_report": {
-                            "enabled": True,
-                            "profile_preset": "weekly-progress",
-                            "route_ref": "loopx-concierge",
-                            "timezone": "Asia/Shanghai",
-                            "source": "machine_default",
-                        }
-                    },
-                },
+                "goal": _goal("research"),
                 "period_window": {
                     "start_at": "2026-08-24T00:00:00+08:00",
                     "end_at": "2026-08-31T00:00:00+08:00",
@@ -319,12 +348,84 @@ def test_goal_delivery_plan_cli_prefers_the_reporting_agent(
         ),
         encoding="utf-8",
     )
+    request_before = request_path.read_bytes()
+    command = [
+        "--registry",
+        str(registry_path),
+        "--runtime-root",
+        str(runtime_root),
+        "--format",
+        "json",
+        "periodic-report",
+        "plan-goal-delivery",
+        "--request-json",
+        str(request_path),
+    ]
+
+    assert main(command) == 0
+    first = json.loads(capsys.readouterr().out)
+    _apply_defaults(runtime_root, _defaults(route_ref="project-room-b"))
+    assert main(command) == 0
+    second = json.loads(capsys.readouterr().out)
+    _remove_defaults(runtime_root)
+    assert main(command) == 0
+    removed = json.loads(capsys.readouterr().out)
+
+    assert first["status"] == second["status"] == "ready"
+    assert first["subscription"]["source"] == "machine_default"
+    assert first["subscription"]["route_ref"] == "project-room-a"
+    assert second["subscription"]["route_ref"] == "project-room-b"
+    assert first["subscription"]["source_revision"] != second["subscription"][
+        "source_revision"
+    ]
+    assert first["subscription"]["effective_revision"] != second["subscription"][
+        "effective_revision"
+    ]
+    assert second["executor"]["reporting_agent_id"] == "agent-b"
+    assert second["executor"]["selected_agent_id"] == "agent-b"
+    assert second["executor"]["selection_reason"] == "reporting_agent_preferred"
+    assert "agent_id" not in second["delivery_identity"]
+    assert removed["status"] == "not_subscribed"
+    assert removed["subscription"]["source"] == "not_configured"
+    assert removed["subscription"]["source_revision"] is None
+    assert request_path.read_bytes() == request_before
+
+
+def test_goal_delivery_plan_cli_fails_closed_on_invalid_machine_store(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text('{"goals": []}', encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    store_path = runtime_root / "machine" / "configuration.json"
+    store_path.parent.mkdir(parents=True)
+    invalid = _defaults()
+    invalid["namespaces"]["periodic_report"].pop("route_ref")
+    store_path.write_text(json.dumps(invalid), encoding="utf-8")
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "periodic_report_goal_delivery_plan_request_v0",
+                "goal": _goal("research"),
+                "period_window": {
+                    "start_at": "2026-08-24T00:00:00+08:00",
+                    "end_at": "2026-08-31T00:00:00+08:00",
+                },
+                "reporting_agent_id": "agent-b",
+                "eligible_agent_ids": ["agent-b"],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     assert (
         main(
             [
                 "--registry",
                 str(registry_path),
+                "--runtime-root",
+                str(runtime_root),
                 "--format",
                 "json",
                 "periodic-report",
@@ -333,11 +434,9 @@ def test_goal_delivery_plan_cli_prefers_the_reporting_agent(
                 str(request_path),
             ]
         )
-        == 0
+        == 1
     )
     payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "ready"
-    assert payload["executor"]["reporting_agent_id"] == "agent-b"
-    assert payload["executor"]["selected_agent_id"] == "agent-b"
-    assert payload["executor"]["selection_reason"] == "reporting_agent_preferred"
-    assert "agent_id" not in payload["delivery_identity"]
+    assert payload["ok"] is False
+    assert payload["command"] == "plan-goal-delivery"
+    assert "route_ref is required" in payload["error"]
