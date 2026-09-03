@@ -1047,6 +1047,19 @@ def run_git_hook_provider(
     hook_stdin: bytes = b"",
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    if event == SSH_TRANSPORT_EVENT and not _ssh_transport_is_push(hook_args):
+        return {
+            "ok": True,
+            "schema_version": "repository_change_window_hook_result_v1",
+            "status": "allowed",
+            "event": event,
+            "exit_code": 0,
+            "guarded_change": False,
+            "previous_hook_invoked": False,
+            "policy_evaluated": False,
+            "reason": "read_only_ssh_transport",
+        }
+
     context = resolve_repository_context(repo_path)
     state = _read_state(_state_path(context.common_dir))
     enforcement = _state_enforcement_level(state)
@@ -1078,8 +1091,6 @@ def run_git_hook_provider(
             hook_args=hook_args,
             hook_stdin=hook_stdin,
         )
-    elif event == SSH_TRANSPORT_EVENT:
-        guarded_change = _ssh_transport_is_push(hook_args)
     else:
         guarded_change = True
     if guarded_change and not decision["allowed"]:
