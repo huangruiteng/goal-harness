@@ -51,6 +51,9 @@ from .capabilities.periodic_report.post_writeback_hook import (
     build_periodic_report_post_writeback_projection,
     periodic_report_post_writeback_hooks_for_goal,
 )
+from .control_plane.coordination.local_authority_shadow_adapter import (
+    effective_runtime_root,
+)
 from .capabilities.semantic_preference.cli import (
     handle_semantic_preference_command,
     register_semantic_preference_commands,
@@ -675,6 +678,10 @@ def main(argv: list[str] | None = None) -> int:
             periodic_report_post_writeback_hooks_for_goal(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
+                runtime_root=effective_runtime_root(
+                    registry_path,
+                    args.runtime_root,
+                ),
             )
             if args.command == "refresh-state"
             else ()

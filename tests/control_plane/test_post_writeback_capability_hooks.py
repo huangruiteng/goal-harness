@@ -8,6 +8,8 @@ import sys
 import threading
 import time
 
+import pytest
+
 from loopx.control_plane.capability_hooks import (
     POST_WRITEBACK_HOOK_INPUT_SCHEMA_VERSION,
     POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION,
@@ -918,3 +920,110 @@ with journal.execution_lease(sys.argv[3]):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=3)
+
+
+def _split_root_registry(tmp_path: Path) -> tuple[Path, Path, Path]:
+    runtime_registry = tmp_path / "runtime-registry"
+    runtime_override = tmp_path / "runtime-override"
+    runtime_registry.mkdir()
+    runtime_override.mkdir()
+    registry_path = tmp_path / "registry.global.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "common_runtime_root": str(runtime_registry),
+                "goals": [{"id": "goal-1"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return registry_path, runtime_registry, runtime_override
+
+
+def test_todo_complete_composition_passes_effective_runtime_root_to_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The todo complete hook composition reads machine defaults under the override."""
+
+    import argparse
+
+    from loopx.cli_runtime import dispatch_common_command
+
+    registry_path, _runtime_registry, runtime_override = _split_root_registry(tmp_path)
+    captured: dict[str, object] = {}
+
+    def capture_hooks(
+        *, registry_path: Path, goal_id: str, runtime_root: Path | None
+    ) -> tuple[PostWritebackHookRegistration, ...]:
+        captured["runtime_root"] = runtime_root
+        return ()
+
+    monkeypatch.setattr(
+        "loopx.capabilities.periodic_report.post_writeback_hook"
+        ".periodic_report_post_writeback_hooks_for_goal",
+        capture_hooks,
+    )
+    monkeypatch.setattr(
+        "loopx.cli_commands.todo.handle_todo_command",
+        lambda *_args, **_kwargs: 0,
+    )
+    args = argparse.Namespace(
+        command="todo",
+        todo_command="complete",
+        goal_id="goal-1",
+        runtime_root=str(runtime_override),
+    )
+
+    result = dispatch_common_command(
+        args,
+        registry_path=registry_path,
+        allow_missing_registry=False,
+    )
+
+    assert result == 0
+    assert captured["runtime_root"] == runtime_override
+
+
+def test_refresh_state_composition_passes_effective_runtime_root_to_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The refresh-state hook composition reads machine defaults under the override."""
+
+    from loopx import cli as cli_module
+
+    registry_path, _runtime_registry, runtime_override = _split_root_registry(tmp_path)
+    captured: dict[str, object] = {}
+
+    def capture_hooks(
+        *, registry_path: Path, goal_id: str, runtime_root: Path | None
+    ) -> tuple[PostWritebackHookRegistration, ...]:
+        captured["runtime_root"] = runtime_root
+        return ()
+
+    monkeypatch.setattr(
+        cli_module,
+        "periodic_report_post_writeback_hooks_for_goal",
+        capture_hooks,
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "handle_project_lifecycle_command",
+        lambda *_args, **_kwargs: 7,
+    )
+
+    exit_code = cli_module.main(
+        [
+            "--registry",
+            str(registry_path),
+            "--runtime-root",
+            str(runtime_override),
+            "refresh-state",
+            "--goal-id",
+            "goal-1",
+        ]
+    )
+
+    assert exit_code == 7
+    assert captured["runtime_root"] == runtime_override
