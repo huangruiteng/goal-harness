@@ -99,6 +99,7 @@ import {
 import { executeTaskLeaseLifecycle } from "./work_items/task_lease_lifecycle.ts";
 import { evaluateTaskLeaseLifecycleDecision } from "./work_items/task_lease_lifecycle_decision.ts";
 import {
+  bootstrapCoordinationRuntimeShadow,
   commitCoordinationRuntimeShadow,
   inspectCoordinationRuntimeShadow,
 } from "./coordination/runtime_shadow.ts";
@@ -361,6 +362,7 @@ export function createEffectRuntimeHandlers(
     ["task_lease.acquire.native", executeTaskLeaseAcquire],
     ["task_lease.lifecycle.decide", evaluateTaskLeaseLifecycleDecision],
     ["task_lease.lifecycle.native", executeTaskLeaseLifecycle],
+    ["coordination.runtime_shadow.bootstrap", bootstrapCoordinationRuntimeShadow],
     ["coordination.runtime_shadow.commit", commitCoordinationRuntimeShadow],
     ["coordination.runtime_shadow.inspect", inspectCoordinationRuntimeShadow],
     ["task_lease.write_scopes.overlap", evaluateTaskLeaseWriteScopesOverlap],

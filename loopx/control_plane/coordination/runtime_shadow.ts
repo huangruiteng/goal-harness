@@ -24,6 +24,10 @@ export const COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA =
   "loopx_coordination_runtime_shadow_inspect_v0";
 export const COORDINATION_RUNTIME_SHADOW_INSPECT_RESULT_SCHEMA =
   "loopx_coordination_runtime_shadow_inspection_v0";
+export const COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA =
+  "loopx_coordination_runtime_shadow_bootstrap_v0";
+export const COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA =
+  "loopx_coordination_runtime_shadow_bootstrap_result_v0";
 
 interface RuntimeShadowRequest {
   runtime_root: string;
@@ -41,6 +45,14 @@ interface RuntimeShadowDependencies {
 interface RuntimeShadowInspectionRequest {
   runtime_root: string;
   goal_id: string;
+  projection: JsonObject;
+}
+
+interface RuntimeShadowBootstrapRequest {
+  runtime_root: string;
+  goal_id: string;
+  operation_id: string;
+  source_version: string;
   projection: JsonObject;
 }
 
@@ -86,8 +98,224 @@ function decodeInspectionRequest(value: unknown): RuntimeShadowInspectionRequest
   };
 }
 
+function decodeBootstrapRequest(value: unknown): RuntimeShadowBootstrapRequest {
+  const input = requireJsonObject(value, "coordination runtime shadow bootstrap request");
+  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA) {
+    throw new Error("coordination runtime shadow bootstrap request schema mismatch");
+  }
+  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
+  if (!isAbsolute(runtimeRoot)) {
+    throw new Error("runtime_root must be absolute");
+  }
+  return {
+    runtime_root: runtimeRoot,
+    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
+    operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+    source_version: requiredString(input.source_version, "source_version"),
+    projection: canonicalAuthorityObject(input.projection, "projection"),
+  };
+}
+
 function sha256(value: unknown): string {
   return createHash("sha256").update(canonicalAuthorityBytes(value)).digest("hex");
+}
+
+function bootstrapEvent(request: RuntimeShadowBootstrapRequest): JsonObject {
+  return {
+    schema_version: "loopx_coordination_runtime_shadow_bootstrap_event_v0",
+    operation_id: request.operation_id,
+    source_version: request.source_version,
+    source_projection_sha256: sha256(request.projection),
+    mode_declaration: "legacy_canonical_shadow",
+  };
+}
+
+async function bootstrapReadback(
+  store: AuthorityStore,
+  request: RuntimeShadowBootstrapRequest,
+): Promise<{
+  matched: boolean;
+  cursor?: string;
+  provider_revision?: string;
+  reason_code?: string;
+}> {
+  const head = await store.loadAuthority();
+  if (head.status !== "loaded") {
+    return {
+      matched: false,
+      reason_code: head.status === "missing" ? "shadow_bootstrap_missing" : head.reason_code,
+    };
+  }
+  const history = await store.scanCommitted(null, 1);
+  if (history.status !== "page" || history.transactions.length !== 1) {
+    return {
+      matched: false,
+      reason_code: history.status === "page"
+        ? "shadow_bootstrap_history_missing"
+        : history.reason_code,
+    };
+  }
+  const first = history.transactions[0]!;
+  const matches = first.cursor === "1" &&
+    first.operation_id === request.operation_id &&
+    first.receipts.length === 0 &&
+    canonicalAuthorityBytes(first.events).equals(
+      canonicalAuthorityBytes([bootstrapEvent(request)]),
+    ) &&
+    canonicalAuthorityBytes(first.projection).equals(
+      canonicalAuthorityBytes(request.projection),
+    );
+  return {
+    matched: matches,
+    cursor: head.cursor,
+    provider_revision: head.provider_revision,
+    ...(matches ? {} : { reason_code: "shadow_bootstrap_identity_mismatch" }),
+  };
+}
+
+function bootstrapResult(
+  request: RuntimeShadowBootstrapRequest,
+  status: "applied" | "replayed" | "recovered",
+  readback: Awaited<ReturnType<typeof bootstrapReadback>>,
+): JsonObject {
+  return {
+    schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+    status,
+    operation_id: request.operation_id,
+    source_version: request.source_version,
+    source_projection_sha256: sha256(request.projection),
+    mode_declaration: "legacy_canonical_shadow",
+    cursor: readback.cursor,
+    provider_revision: readback.provider_revision,
+    bootstrap_receipts_empty: true,
+    primary_writeback_preserved: true,
+    decision_read_from_shadow: false,
+  };
+}
+
+/**
+ * Install the existing legacy coordination projection as the first file-shadow
+ * head. This is an administrative import seam, not an agent mutation: it only
+ * succeeds against an uninitialized store and intentionally creates no
+ * operation receipt. The source digest and mode declaration live in the first
+ * committed event so restart can distinguish migration from missing state.
+ */
+export async function bootstrapCoordinationRuntimeShadow(
+  value: unknown,
+  dependencies: RuntimeShadowDependencies = {},
+): Promise<JsonObject> {
+  let request: RuntimeShadowBootstrapRequest;
+  try {
+    request = decodeBootstrapRequest(value);
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_shadow_bootstrap_request",
+      reason: error instanceof Error ? error.message : "invalid bootstrap request",
+      primary_writeback_preserved: true,
+      decision_read_from_shadow: false,
+    };
+  }
+
+  const directory = join(request.runtime_root, "authority-shadow", "file-v0");
+  const store = dependencies.createStore?.(directory, request.goal_id) ??
+    new FileAuthorityStore(directory, request.goal_id);
+  try {
+    const existing = await store.loadAuthority();
+    if (existing.status === "loaded") {
+      const readback = await bootstrapReadback(store, request);
+      return readback.matched
+        ? bootstrapResult(request, "replayed", readback)
+        : {
+          schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+          status: "failed",
+          reason_code: readback.reason_code ?? "shadow_already_initialized",
+          reason: "shadow store is already initialized by different content",
+          current_provider_revision: existing.provider_revision,
+          current_cursor: existing.cursor,
+          primary_writeback_preserved: true,
+          decision_read_from_shadow: false,
+        };
+    }
+    if (existing.status !== "missing") {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+        status: "failed",
+        reason_code: existing.reason_code,
+        reason: existing.reason,
+        primary_writeback_preserved: true,
+        decision_read_from_shadow: false,
+      };
+    }
+
+    const result = await store.commitAuthority({
+      expected_provider_revision: null,
+      operation_id: request.operation_id,
+      events: [bootstrapEvent(request)],
+      next_projection: request.projection,
+      receipts: [],
+    });
+    if (result.status === "applied") {
+      const readback = await bootstrapReadback(store, request);
+      if (!readback.matched) {
+        return {
+          schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+          status: "failed",
+          reason_code: readback.reason_code ?? "shadow_bootstrap_readback_mismatch",
+          reason: "bootstrap commit did not produce the expected initial lineage",
+          primary_writeback_preserved: true,
+          decision_read_from_shadow: false,
+        };
+      }
+      return bootstrapResult(request, "applied", readback);
+    }
+    if (result.status === "ambiguous") {
+      const readback = await bootstrapReadback(store, request);
+      if (readback.matched) return bootstrapResult(request, "recovered", readback);
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+        status: "ambiguous",
+        operation_id: request.operation_id,
+        reason_code: result.reason_code,
+        reason: result.reason,
+        reconciliation_required: true,
+        primary_writeback_preserved: true,
+        decision_read_from_shadow: false,
+      };
+    }
+    if (result.status === "conflict") {
+      const readback = await bootstrapReadback(store, request);
+      if (readback.matched) return bootstrapResult(request, "replayed", readback);
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+        status: "failed",
+        reason_code: "shadow_already_initialized",
+        reason: result.conflict_kind,
+        current_provider_revision: result.current_provider_revision,
+        current_cursor: result.current_cursor,
+        primary_writeback_preserved: true,
+        decision_read_from_shadow: false,
+      };
+    }
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: result.reason_code,
+      reason: result.reason,
+      primary_writeback_preserved: true,
+      decision_read_from_shadow: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "shadow_bootstrap_unavailable",
+      reason: error instanceof Error ? error.message : "bootstrap unavailable",
+      primary_writeback_preserved: true,
+      decision_read_from_shadow: false,
+    };
+  }
 }
 
 function expectedReceipt(request: RuntimeShadowRequest): JsonObject {

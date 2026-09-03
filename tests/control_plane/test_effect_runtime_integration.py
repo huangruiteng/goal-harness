@@ -15,7 +15,9 @@ import pytest
 from loopx.control_plane import effect_runtime
 from loopx.control_plane.coordination.runtime_shadow import (
     RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+    bootstrap_coordination_runtime_shadow,
     dispatch_coordination_runtime_shadow,
+    inspect_coordination_runtime_shadow,
 )
 
 
@@ -193,6 +195,56 @@ def test_coordination_runtime_shadow_crosses_python_typescript_boundary(
     assert applied["parity"]["projection_readback"]["verified"] is True
     assert replayed["status"] == "replayed"
     assert replayed["cursor"] == applied["cursor"] == "1"
+
+    effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
+
+
+def test_coordination_runtime_shadow_bootstrap_crosses_python_typescript_boundary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: tmp_path / "runtime")
+    goal = {
+        "id": "shadow-bootstrap-goal",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+    projection = {
+        "schema_version": "loopx_coordination_runtime_shadow_projection_v0",
+        "goal_id": "shadow-bootstrap-goal",
+        "source_authority": "legacy_markdown_and_task_lease",
+        "todos": [{"todo_id": "todo_existing", "status": "open"}],
+        "leases": [],
+    }
+    request = {
+        "goal": goal,
+        "runtime_root": tmp_path / "state",
+        "goal_id": "shadow-bootstrap-goal",
+        "operation_id": "bootstrap:shadow-bootstrap-goal:state-1",
+        "source_version": "state:1",
+        "projection": projection,
+    }
+
+    applied = bootstrap_coordination_runtime_shadow(**request)
+    replayed = bootstrap_coordination_runtime_shadow(**request)
+    inspected = inspect_coordination_runtime_shadow(
+        goal=goal,
+        runtime_root=tmp_path / "state",
+        goal_id="shadow-bootstrap-goal",
+        projection=projection,
+    )
+
+    assert applied["status"] == "applied"
+    assert applied["bootstrap_receipts_empty"] is True
+    assert applied["cursor"] == "1"
+    assert replayed["status"] == "replayed"
+    assert inspected["status"] == "matched"
+    assert inspected["decision_read_from_shadow"] is False
 
     effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
 

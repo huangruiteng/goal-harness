@@ -7,8 +7,11 @@ from loopx.cli_commands import todo as todo_command
 from loopx.cli_commands import task_lease as task_lease_command
 from loopx.control_plane import effect_runtime
 from loopx.control_plane.coordination.runtime_shadow import (
+    RUNTIME_SHADOW_BOOTSTRAP_METHOD,
+    RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA_VERSION,
     RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
     RUNTIME_SHADOW_METHOD,
+    bootstrap_coordination_runtime_shadow,
     build_todo_runtime_shadow_projection,
     dispatch_coordination_runtime_shadow,
     inspect_coordination_runtime_shadow,
@@ -44,6 +47,59 @@ def test_runtime_shadow_is_zero_call_default_off(tmp_path: Path) -> None:
     assert result["primary_writeback_preserved"] is True
     assert result["decision_read_from_shadow"] is False
     assert calls == []
+
+
+def test_runtime_shadow_bootstrap_is_explicit_default_off_and_typed(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+    disabled = bootstrap_coordination_runtime_shadow(
+        goal={"id": "goal-a"},
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        operation_id="bootstrap:goal-a:state-1",
+        source_version="state:1",
+        projection={"schema_version": "projection_v0", "todos": []},
+        runtime_invoker=lambda *args: calls.append(args),
+    )
+    assert disabled["status"] == "disabled"
+    assert disabled["decision_read_from_shadow"] is False
+    assert calls == []
+
+    goal = {
+        "id": "goal-a",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+
+    def invoke(method: str, params: dict[str, object]) -> dict[str, object]:
+        calls.append((method, params))
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_bootstrap_result_v0",
+            "status": "applied",
+            "bootstrap_receipts_empty": True,
+            "decision_read_from_shadow": False,
+        }
+
+    applied = bootstrap_coordination_runtime_shadow(
+        goal=goal,
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        operation_id="bootstrap:goal-a:state-1",
+        source_version="state:1",
+        projection={"schema_version": "projection_v0", "todos": []},
+        runtime_invoker=invoke,
+    )
+    assert applied["status"] == "applied"
+    method, params = calls[-1]
+    assert method == RUNTIME_SHADOW_BOOTSTRAP_METHOD
+    assert params["schema_version"] == RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA_VERSION
+    assert params["source_version"] == "state:1"
 
 
 def test_runtime_shadow_requires_complete_explicit_file_opt_in(tmp_path: Path) -> None:

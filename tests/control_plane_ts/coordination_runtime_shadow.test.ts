@@ -10,8 +10,10 @@ import type {
 } from "../../loopx/control_plane/coordination/authority_store.ts";
 import { FileAuthorityStore } from "../../loopx/control_plane/coordination/file_authority_store.ts";
 import {
+  bootstrapCoordinationRuntimeShadow,
   commitCoordinationRuntimeShadow,
   inspectCoordinationRuntimeShadow,
+  COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
 } from "../../loopx/control_plane/coordination/runtime_shadow.ts";
@@ -32,6 +34,95 @@ async function request(root: string, operationId = "todo:goal-a:todo_one:v1") {
     },
   };
 }
+
+async function bootstrapRequest(root: string) {
+  const commit = await request(root);
+  return {
+    schema_version: COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: commit.goal_id,
+    operation_id: "bootstrap:goal-a:state-1",
+    source_version: "state:1",
+    projection: commit.projection,
+  };
+}
+
+test("runtime shadow bootstrap records a replayable baseline with no receipt", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-bootstrap-"));
+  const input = await bootstrapRequest(root);
+
+  const applied = await bootstrapCoordinationRuntimeShadow(input);
+  assert.equal(applied.status, "applied");
+  assert.equal(applied.cursor, "1");
+  assert.equal(applied.mode_declaration, "legacy_canonical_shadow");
+  assert.equal(applied.bootstrap_receipts_empty, true);
+  assert.equal(applied.decision_read_from_shadow, false);
+
+  const replayed = await bootstrapCoordinationRuntimeShadow(input);
+  assert.equal(replayed.status, "replayed");
+  assert.equal(replayed.provider_revision, applied.provider_revision);
+
+  const store = new FileAuthorityStore(
+    join(root, "authority-shadow", "file-v0"),
+    "goal-a",
+  );
+  const receipt = await store.readReceipt(input.operation_id);
+  assert.equal(receipt.status, "found");
+  if (receipt.status === "found") assert.deepEqual(receipt.receipts, []);
+  const scan = await store.scanCommitted(null, 1);
+  assert.equal(scan.status, "page");
+  if (scan.status === "page") {
+    assert.equal(scan.transactions[0]?.receipts.length, 0);
+    assert.equal(
+      (scan.transactions[0]?.events[0] as Record<string, unknown>).source_version,
+      "state:1",
+    );
+  }
+
+  const next = await request(root, "todo:goal-a:todo_one:v2");
+  const committed = await commitCoordinationRuntimeShadow(next);
+  assert.equal(committed.status, "applied");
+  assert.equal(committed.cursor, "2");
+});
+
+test("runtime shadow bootstrap fails closed against different initialized content", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-bootstrap-conflict-"));
+  assert.equal((await commitCoordinationRuntimeShadow(await request(root))).status, "applied");
+
+  const result = await bootstrapCoordinationRuntimeShadow(await bootstrapRequest(root));
+  assert.equal(result.status, "failed");
+  assert.equal(result.reason_code, "shadow_bootstrap_identity_mismatch");
+  assert.equal(result.primary_writeback_preserved, true);
+});
+
+test("runtime shadow bootstrap reconciles an applied commit whose response was lost", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-bootstrap-ambiguous-"));
+  class LostBootstrapResponseStore extends FileAuthorityStore {
+    override async commitAuthority(
+      commit: AuthorityStoreCommit,
+    ): Promise<AuthorityStoreCommitResult> {
+      const result = await super.commitAuthority(commit);
+      return result.status === "applied"
+        ? {
+          status: "ambiguous",
+          reason_code: "simulated_response_loss",
+          reason: "commit response was lost",
+        }
+        : result;
+    }
+  }
+
+  const result = await bootstrapCoordinationRuntimeShadow(
+    await bootstrapRequest(root),
+    {
+      createStore: (directory, goalId) =>
+        new LostBootstrapResponseStore(directory, goalId),
+    },
+  );
+  assert.equal(result.status, "recovered");
+  assert.equal(result.cursor, "1");
+  assert.equal(result.bootstrap_receipts_empty, true);
+});
 
 test("runtime shadow commits and exactly replays one legacy mutation", async () => {
   const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-"));

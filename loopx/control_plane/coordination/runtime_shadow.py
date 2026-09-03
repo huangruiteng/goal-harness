@@ -23,6 +23,10 @@ RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA_VERSION = (
     "loopx_coordination_runtime_shadow_inspect_v0"
 )
 RUNTIME_SHADOW_INSPECT_METHOD = "coordination.runtime_shadow.inspect"
+RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA_VERSION = (
+    "loopx_coordination_runtime_shadow_bootstrap_v0"
+)
+RUNTIME_SHADOW_BOOTSTRAP_METHOD = "coordination.runtime_shadow.bootstrap"
 
 
 @dataclass(frozen=True)
@@ -220,6 +224,57 @@ def dispatch_coordination_runtime_shadow(
             "schema_version": "loopx_coordination_runtime_shadow_dispatch_v0",
             "status": "failed",
             "reason_code": "shadow_runtime_result_invalid",
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    return dict(result)
+
+
+def bootstrap_coordination_runtime_shadow(
+    *,
+    goal: Mapping[str, Any] | None,
+    runtime_root: Path,
+    goal_id: str,
+    operation_id: str,
+    source_version: str,
+    projection: Mapping[str, Any],
+    runtime_invoker: RuntimeInvoker = effect_runtime_result,
+) -> dict[str, object]:
+    """Import one legacy baseline into an empty shadow without promoting it."""
+
+    config = resolve_coordination_runtime_shadow_config(goal)
+    if not config.enabled:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_bootstrap_result_v0",
+            "status": "disabled",
+            "reason_code": config.reason_code,
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    request = {
+        "schema_version": RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA_VERSION,
+        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "goal_id": goal_id,
+        "operation_id": operation_id,
+        "source_version": source_version,
+        "projection": dict(projection),
+    }
+    try:
+        result = runtime_invoker(RUNTIME_SHADOW_BOOTSTRAP_METHOD, request)
+    except Exception as exc:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_bootstrap_result_v0",
+            "status": "failed",
+            "reason_code": "shadow_bootstrap_runtime_unavailable",
+            "reason": str(exc),
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    if not isinstance(result, Mapping):
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_bootstrap_result_v0",
+            "status": "failed",
+            "reason_code": "shadow_bootstrap_runtime_result_invalid",
             "primary_writeback_preserved": True,
             "decision_read_from_shadow": False,
         }
