@@ -105,7 +105,11 @@ Windows, and uploads them to the GitHub Release that triggered the workflow.
 It verifies the ad-hoc macOS app signature and disk-image integrity before
 upload. A separate `DESKTOP-SHA256SUMS` manifest covers all desktop artifacts
 attached by the workflow, and release builds use the Git tag as the desktop
-bundle version.
+bundle version. A manual rerun for an existing tag is an explicit full desktop
+republish: it rebuilds both macOS and Windows assets, preserves the previous
+desktop set as a short-lived workflow artifact, validates the complete new
+four-file set, replaces all desktop binaries, and uploads the new checksum
+manifest last. Binary hashes may therefore change after a manual rerun.
 
 ## Disable Or Remove
 

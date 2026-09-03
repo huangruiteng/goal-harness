@@ -8,6 +8,7 @@ on:
       - "apps/presentation/dashboard/**"
       - "examples/desktop-icon-alpha-smoke.py"
       - "examples/desktop-release-workflow-smoke.py"
+      - "scripts/desktop_release_artifacts.py"
   release:
     types: [published]
   workflow_dispatch:
@@ -187,23 +188,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out release workflow source
+        uses: actions/checkout@v7
+
       - name: Download desktop artifacts
         uses: actions/download-artifact@v7
         with:
           pattern: loopx-*
           path: dist/desktop
           merge-multiple: true
-
-      - name: Generate desktop checksums
-        run: |
-          set -euo pipefail
-          cd dist/desktop
-          find . -maxdepth 1 -type f ! -name DESKTOP-SHA256SUMS -printf '%f\n' \
-            | LC_ALL=C sort \
-            | while IFS= read -r artifact; do sha256sum "${artifact}"; done \
-            > DESKTOP-SHA256SUMS
-          test -s DESKTOP-SHA256SUMS
-          sha256sum --check DESKTOP-SHA256SUMS
 
       - name: Resolve release identity
         id: identity
@@ -218,15 +211,129 @@ jobs:
             exit 1
           fi
           echo "release-tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "release-version=${release_tag#v}" >> "${GITHUB_OUTPUT}"
 
-      - name: Upload desktop artifacts to GitHub Release
+      - name: Validate target release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+        run: gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+
+      - name: Back up existing desktop release assets
+        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
         run: |
           set -euo pipefail
-          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+          mkdir -p dist/previous-desktop
+          mapfile -t assets < <(
+            gh release view "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json assets \
+              --jq '.assets[].name | select(. == "DESKTOP-SHA256SUMS" or (startswith("LoopX") and (endswith(".dmg") or endswith(".zip") or endswith(".exe") or endswith(".msi"))))'
+          )
+          for asset in "${assets[@]}"; do
+            gh release download "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pattern "${asset}" \
+              --dir dist/previous-desktop
+          done
+          {
+            echo "release_tag=${RELEASE_TAG}"
+            echo "asset_count=${#assets[@]}"
+            printf '%s\n' "${assets[@]}"
+          } > dist/previous-desktop/ASSET-INVENTORY.txt
+          cd dist/previous-desktop
+          find . -maxdepth 1 -type f \
+            ! -name PREVIOUS-DESKTOP-SHA256SUMS \
+            -printf '%f\n' \
+            | LC_ALL=C sort \
+            | while IFS= read -r artifact; do
+                sha256sum "${artifact}"
+              done \
+            > PREVIOUS-DESKTOP-SHA256SUMS
+
+      - name: Preserve previous desktop release assets
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: previous-desktop-${{ steps.identity.outputs.release-tag }}-${{ github.run_id }}
+          path: dist/previous-desktop
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Validate complete rebuild and generate desktop checksums
+        env:
+          RELEASE_VERSION: ${{ steps.identity.outputs.release-version }}
+        run: |
+          set -euo pipefail
+          python scripts/desktop_release_artifacts.py write-checksums \
+            --dist-dir dist/desktop \
+            --version "${RELEASE_VERSION}" \
+            --output dist/desktop/DESKTOP-SHA256SUMS
+          python scripts/desktop_release_artifacts.py verify-checksums \
+            --dist-dir dist/desktop \
+            --version "${RELEASE_VERSION}" \
+            --checksum-file dist/desktop/DESKTOP-SHA256SUMS
+          cd dist/desktop
+          sha256sum --check DESKTOP-SHA256SUMS
+
+      - name: Replace complete desktop binary set
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --json assets \
+            --jq 'any(.assets[]; .name == "DESKTOP-SHA256SUMS")' \
+            | grep -qx true
+          then
+            gh release delete-asset "${RELEASE_TAG}" DESKTOP-SHA256SUMS \
+              --repo "${GITHUB_REPOSITORY}" \
+              --yes
+          fi
           gh release upload "${RELEASE_TAG}" \
-            dist/desktop/* \
+            dist/desktop/*.dmg \
+            dist/desktop/*.zip \
+            dist/desktop/*.exe \
+            dist/desktop/*.msi \
             --repo "${GITHUB_REPOSITORY}" \
             --clobber
+
+      - name: Replace desktop checksum manifest last
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+        run: |
+          gh release upload "${RELEASE_TAG}" \
+            dist/desktop/DESKTOP-SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+
+      - name: Verify published desktop release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+          RELEASE_VERSION: ${{ steps.identity.outputs.release-version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/published-desktop
+          for asset in \
+            LoopX.app.zip \
+            "LoopX_${RELEASE_VERSION}_aarch64.dmg" \
+            "LoopX_${RELEASE_VERSION}_x64-setup.exe" \
+            "LoopX_${RELEASE_VERSION}_x64_en-US.msi" \
+            DESKTOP-SHA256SUMS
+          do
+            gh release download "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pattern "${asset}" \
+              --dir dist/published-desktop
+          done
+          python scripts/desktop_release_artifacts.py verify-checksums \
+            --dist-dir dist/published-desktop \
+            --version "${RELEASE_VERSION}" \
+            --checksum-file dist/published-desktop/DESKTOP-SHA256SUMS
