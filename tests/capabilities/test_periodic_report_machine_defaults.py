@@ -121,6 +121,38 @@ def test_existing_goal_follows_live_machine_default_without_mutation() -> None:
     assert goal == original
 
 
+def test_periodic_report_provenance_ignores_unowned_machine_namespaces() -> None:
+    goal = _goal("research")
+    periodic_only = _defaults()
+    with_sibling = json.loads(json.dumps(periodic_only))
+    with_sibling["namespaces"]["search_defaults"] = {
+        "schema_version": "search_defaults_v0",
+        "provider": "example",
+    }
+
+    first = resolve_goal_periodic_report_subscription(goal, periodic_only)
+    second = resolve_goal_periodic_report_subscription(goal, with_sibling)
+
+    assert first == second
+
+
+def test_machine_document_without_periodic_namespace_is_not_configured() -> None:
+    subscription = resolve_goal_periodic_report_subscription(
+        _goal("research"),
+        {
+            "schema_version": "loopx_machine_configuration_v0",
+            "namespaces": {
+                "search_defaults": {
+                    "schema_version": "search_defaults_v0",
+                }
+            },
+        },
+    )
+
+    assert subscription["source"] == "not_configured"
+    assert subscription["source_revision"] is None
+
+
 def test_delivery_identity_is_goal_period_route_owned_not_agent_owned() -> None:
     first = build_goal_periodic_report_delivery_identity(
         goal_id="research",

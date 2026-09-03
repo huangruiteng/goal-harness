@@ -161,9 +161,41 @@ def loopx_machine_defaults_revision(raw: object) -> str:
     return machine_configuration_revision(normalize_loopx_machine_defaults(raw))
 
 
-def _periodic_report_defaults(machine_defaults: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = normalize_loopx_machine_defaults(machine_defaults)
-    return dict(normalized["namespaces"]["periodic_report"])
+def _periodic_report_defaults(
+    machine_configuration: Mapping[str, Any],
+) -> tuple[dict[str, Any], str] | None:
+    """Read only this capability's namespace from a generic machine document."""
+
+    payload = _mapping(machine_configuration, "machine_configuration")
+    _reject_unknown(
+        payload,
+        allowed={"schema_version", "namespaces"},
+        label="machine_configuration",
+    )
+    if payload.get("schema_version") != MACHINE_CONFIGURATION_SCHEMA:
+        raise ValueError(
+            f"machine_configuration must use {MACHINE_CONFIGURATION_SCHEMA}"
+        )
+    namespaces = _mapping(
+        payload.get("namespaces"),
+        "machine_configuration.namespaces",
+    )
+    raw_periodic = namespaces.get("periodic_report")
+    if raw_periodic is None:
+        return None
+    periodic = normalize_periodic_report_machine_defaults(
+        _mapping(
+            raw_periodic,
+            "machine_configuration.namespaces.periodic_report",
+        )
+    )
+    source_revision = _digest(
+        {
+            "namespace": "periodic_report",
+            "configuration": periodic,
+        }
+    )
+    return periodic, source_revision
 
 
 def _goal_periodic_report(goal: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -234,12 +266,20 @@ def resolve_goal_periodic_report_subscription(
             source="not_configured",
             source_revision=None,
         )
-    normalized_defaults = normalize_loopx_machine_defaults(machine_defaults)
+    resolved_default = _periodic_report_defaults(machine_defaults)
+    if resolved_default is None:
+        return _normalized_goal_subscription(
+            goal_id=goal_id,
+            config={"enabled": False, "timezone": "UTC"},
+            source="not_configured",
+            source_revision=None,
+        )
+    periodic_defaults, source_revision = resolved_default
     return _normalized_goal_subscription(
         goal_id=goal_id,
-        config=_periodic_report_defaults(normalized_defaults),
+        config=periodic_defaults,
         source="machine_default",
-        source_revision=machine_configuration_revision(normalized_defaults),
+        source_revision=source_revision,
     )
 
 
