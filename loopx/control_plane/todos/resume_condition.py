@@ -7,7 +7,6 @@ from typing import Any
 from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
 from .external_wait_contract import TodoExternalWaitAuthoringError
 
-
 TODO_RESUME_NORMALIZE_REQUEST_SCHEMA_VERSION = "todo_resume_normalize_request_v0"
 TODO_RESUME_EVALUATION_REQUEST_SCHEMA_VERSION = "todo_resume_evaluation_request_v0"
 TODO_RESUME_EVALUATION_SCHEMA_VERSION = "todo_resume_evaluation_v0"
@@ -48,6 +47,13 @@ _RESUME_ITEM_FIELDS = (
     "resume_monitor_generation",
     "material_change_generation",
 )
+
+# The TypeScript reducer remains authoritative for event-kind and merge
+# matching.  Its transport adapter only retains fields that can contribute a
+# PR reference; an event without one cannot affect that reducer.  Keeping this
+# projection bounded prevents unrelated long-running Goal history from making a
+# small resume-condition request exceed the managed Effect runtime request limit.
+_PR_EVENT_FIELDS = ("event_id", "event_kind", "pr_ref", "recorded_at")
 
 
 def normalize_todo_generation(value: Any) -> int | None:
@@ -110,6 +116,40 @@ def _compact_item(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_pr_rollout_events(
+    values: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    for value in values or []:
+        if not isinstance(value, Mapping):
+            continue
+        event = {
+            field: value[field]
+            for field in _PR_EVENT_FIELDS
+            if value.get(field) is not None
+        }
+        code_refs = value.get("code_refs")
+        if isinstance(code_refs, Mapping) and code_refs.get("pr_ref") is not None:
+            event["code_refs"] = {"pr_ref": code_refs["pr_ref"]}
+        source_refs = value.get("source_refs")
+        if isinstance(source_refs, list):
+            compact_refs = [
+                {
+                    field: ref[field]
+                    for field in ("kind", "ref")
+                    if ref.get(field) is not None
+                }
+                for ref in source_refs
+                if isinstance(ref, Mapping)
+            ]
+            compact_refs = [ref for ref in compact_refs if ref]
+            if compact_refs:
+                event["source_refs"] = compact_refs
+        if any(field in event for field in ("pr_ref", "code_refs", "source_refs")):
+            compact.append(event)
+    return compact
+
+
 def normalize_todo_resume_when_via_runtime(value: Any) -> str | None:
     """Normalize new resume authoring through the Todo-domain TS contract."""
 
@@ -146,11 +186,7 @@ def evaluate_todo_resume_conditions(
         "source_items": [
             _compact_item(item) for item in source_items if item.get("todo_id")
         ],
-        "rollout_events": [
-            dict(event)
-            for event in (rollout_events or [])
-            if isinstance(event, Mapping)
-        ],
+        "rollout_events": _compact_pr_rollout_events(rollout_events),
     }
     if available_capabilities is not None:
         request["available_capabilities"] = sorted(
