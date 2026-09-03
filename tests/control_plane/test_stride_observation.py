@@ -284,9 +284,9 @@ def test_boundary_authority_changes_require_explicit_markers(
     tmp_path: Path,
 ) -> None:
     # Criterion 6: reports with no authority delta are not counted as heavy
-    # steering. Only explicit replan/vision/gate classifications restart the
-    # bounded-slice count; status, monitor, and review classifications never
-    # do, and the latest explicit marker wins.
+    # steering. Only complete values from the controlled writer allowlist
+    # restart the bounded-slice count; status, monitor, review, and vision
+    # checkpoint classifications never do, and the latest explicit value wins.
     _write_run_index(
         tmp_path / "with_markers",
         [
@@ -311,8 +311,8 @@ def test_boundary_authority_changes_require_explicit_markers(
                 minutes_ago=60,
             ),
             _run(
-                classification="vision_refresh_accepted",
-                outcome="outcome_progress",
+                classification="operator_gate_deferred",
+                outcome="surface_only",
                 minutes_ago=30,
             ),
             _run(
@@ -328,7 +328,8 @@ def test_boundary_authority_changes_require_explicit_markers(
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
     )
-    # Latest explicit marker sits at index 4; only the final review follows.
+    # Latest controlled authority value sits at index 4; only the final review
+    # follows.
     assert marked["authority"]["bounded_slices_since_change"] == 1
 
     _write_run_index(
@@ -367,9 +368,20 @@ def test_boundary_authority_changes_require_explicit_markers(
         "supervision_check",
         "waiting_at_approval_gate",
         "provisional_benchmark_reward",
+        "not_replan",
+        "vision_check",
+        "gate_not_approved",
+        "gate_status_recorded_without_transition",
+        "no_gate_changed",
+        "replan_noop",
+        "autonomous_replan_recorded",
+        "route_continuation_replan_recorded",
+        "successor_replan_recorded",
+        "monitor_poll_autonomous_replan_recorded_v0",
+        "goal_vision_checkpoint",
     ],
 )
-def test_boundary_authority_markers_do_not_use_substring_or_waiting_state(
+def test_boundary_unknown_classifications_stay_no_change(
     tmp_path: Path,
     classification: str,
 ) -> None:
@@ -406,15 +418,13 @@ def test_boundary_authority_markers_do_not_use_substring_or_waiting_state(
 @pytest.mark.parametrize(
     "classification",
     [
-        "replan",
-        "vision",
-        "gate",
         "bounded_replan_progress",
-        "vision_refresh_accepted",
         "operator_gate_approved",
+        "operator_gate_rejected",
+        "operator_gate_deferred",
     ],
 )
-def test_boundary_authority_markers_preserve_explicit_positive_values(
+def test_boundary_controlled_authority_classifications_reset_stride(
     tmp_path: Path,
     classification: str,
 ) -> None:
