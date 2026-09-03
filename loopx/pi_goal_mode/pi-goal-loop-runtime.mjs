@@ -701,8 +701,8 @@ export function shouldRunNow(decision) {
 export function waitPlan(decision, binding) {
   const hint = decision?.scheduler_hint || {}
   const unchanged = hint?.unchanged_poll || {}
-  const local = unchanged?.local_scheduler
-  if (!local || local === "stop") {
+  const local = hint?.cold_path_detail?.local_scheduler
+  if (!local || unchanged?.local_scheduler === "stop") {
     return {
       stop: true,
       minutes: DEFAULT_RETRY_MINUTES,
