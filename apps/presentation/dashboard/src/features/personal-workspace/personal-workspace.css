@@ -125,10 +125,12 @@
 .personal-stopped-goals > summary { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 34px; padding: 5px 10px; border-radius: 9px; color: var(--pw-muted); cursor: pointer; font-size: 11px; font-weight: 650; letter-spacing: .04em; list-style: none; }
 .personal-stopped-goals > summary::-webkit-details-marker { display: none; }
 .personal-stopped-goals > summary:hover { background: rgb(255 255 255 / 55%); color: var(--pw-text); }
-.personal-stopped-goals > summary svg { transition: transform .14s ease; }
-.personal-stopped-goals[open] > summary svg { transform: rotate(180deg); }
+.personal-stopped-goals > summary > svg:first-child { transition: transform .14s ease; }
+.personal-stopped-goals[open] > summary > svg:first-child { transform: rotate(180deg); }
 .personal-stopped-goals > summary small { min-width: 22px; padding: 2px 6px; border-radius: 99px; background: #ebe9e3; text-align: center; }
 .personal-goal-list.is-stopped { margin-top: 2px; opacity: .82; }
+.personal-stopped-goal-error { display: grid; gap: 7px; margin: 6px 8px; padding: 9px 10px; border: 1px solid #edc1ba; border-radius: 9px; background: var(--pw-red-bg); color: var(--pw-red); font-size: 11px; line-height: 1.45; }
+.personal-stopped-goal-error button { justify-self: start; min-height: 28px; padding: 0 9px; border: 1px solid currentColor; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-weight: 650; }
 
 .personal-priority-dot { width: 7px; height: 7px; border-radius: 50%; background: #aab2bf; }
 .personal-priority-dot.is-high { background: #dd5b47; }
@@ -978,7 +980,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .personal-timeline-row, .personal-diagnostics-trigger svg, .personal-workspace-sidebar, .personal-stopped-goals > summary svg { transition: none; }
+  .personal-timeline-row, .personal-diagnostics-trigger svg, .personal-workspace-sidebar, .personal-stopped-goals > summary > svg:first-child { transition: none; }
   .personal-goal-lifecycle.is-pending svg { animation: none; }
   .personal-spin { animation: none; }
 }

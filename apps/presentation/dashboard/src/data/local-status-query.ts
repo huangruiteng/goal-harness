@@ -91,6 +91,16 @@ export async function fetchFrontstageStatusPayload(statusUrl: string) {
   return parseStatusPayload(await response.json());
 }
 
+export function scopedStatusUrl(
+  statusUrl: string,
+  scope: "active" | "stopped",
+  baseHref: string,
+) {
+  const url = new URL(statusUrl, baseHref);
+  url.searchParams.set("goal_activation", scope);
+  return url.toString();
+}
+
 export function statusContractFreshnessIssue(
   payload: StatusPayload,
   source: ResolvedFrontstageStatusUrl,

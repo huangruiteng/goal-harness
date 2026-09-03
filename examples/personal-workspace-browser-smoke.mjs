@@ -97,11 +97,13 @@ async function installApi(page) {
     nextLifecyclePreviewDelayMs: 0,
     nextActionPreviewDelayMs: 0,
     nextStatusDelayMs: 0,
+    nextFullStatusDelayMs: 0,
+    failNextFullStatus: false,
     statusRequestCount: 0,
     turnRequests: [],
     get larkConnections() { return runtime.larkConnections; },
   };
-  await page.route(`http://127.0.0.1:${port}/status.json`, async (route) => {
+  await page.route(`http://127.0.0.1:${port}/status.json*`, async (route) => {
     state.statusRequestCount += 1;
     const fixture = structuredClone(require(resolve(repoRoot, "examples/status.example.json")));
     fixture.local_dashboard_api = {
@@ -253,6 +255,10 @@ async function installApi(page) {
         },
       );
     }
+    const goalActivationScope = new URL(route.request().url()).searchParams.get("goal_activation");
+    const isActiveScope = goalActivationScope === "active";
+    const activeGoalCount = fixture.run_history.goals.filter((goal) => goal.activation_state !== "stopped").length;
+    const stoppedGoalCount = fixture.run_history.goals.length - activeGoalCount;
     const delayMs = state.nextStatusDelayMs;
     state.nextStatusDelayMs = 0;
     if (delayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, delayMs));
@@ -260,6 +266,41 @@ async function installApi(page) {
       state.failNextStatusRequest = false;
       await route.fulfill({ contentType: "application/json", json: { error: "temporary status failure" }, status: 503 });
       return;
+    }
+    if (isActiveScope) {
+      fixture.goal_projection = {
+        schema_version: "loopx_goal_projection_scope_v0",
+        scope: "active",
+        complete: false,
+        projected_goal_count: activeGoalCount,
+        registry_goal_count: fixture.run_history.goals.length,
+      };
+      fixture.run_history.goals = fixture.run_history.goals.filter((goal) => goal.activation_state !== "stopped");
+    } else if (goalActivationScope === "stopped") {
+      const fullDelayMs = state.nextFullStatusDelayMs;
+      state.nextFullStatusDelayMs = 0;
+      if (fullDelayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, fullDelayMs));
+      if (state.failNextFullStatus) {
+        state.failNextFullStatus = false;
+        await route.fulfill({ contentType: "application/json", json: { error: "stopped goals unavailable" }, status: 503 });
+        return;
+      }
+      fixture.goal_projection = {
+        schema_version: "loopx_goal_projection_scope_v0",
+        scope: "stopped",
+        complete: false,
+        projected_goal_count: stoppedGoalCount,
+        registry_goal_count: fixture.run_history.goals.length,
+      };
+      fixture.run_history.goals = fixture.run_history.goals.filter((goal) => goal.activation_state === "stopped");
+    } else {
+      fixture.goal_projection = {
+        schema_version: "loopx_goal_projection_scope_v0",
+        scope: "all",
+        complete: true,
+        projected_goal_count: fixture.run_history.goals.length,
+        registry_goal_count: fixture.run_history.goals.length,
+      };
     }
     await route.fulfill({ contentType: "application/json", json: fixture, status: 200 });
   });
@@ -740,6 +781,7 @@ async function main() {
     if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("Active Goal directory did not exclude stopped Goals");
     const stoppedDirectory = page.locator(".personal-stopped-goals");
     if (!(await stoppedDirectory.isVisible()) || await stoppedDirectory.getAttribute("open") !== null) throw new Error("Stopped Goals are not available in a collapsed directory section");
+    await page.waitForFunction(() => document.querySelectorAll(".personal-stopped-goals .personal-goal-row").length === 2, null, { timeout: 3_000 });
     const writesBeforeLifecyclePreview = api.durableWriteCount;
     const statusRequestsBeforeStop = api.statusRequestCount;
     api.nextLifecyclePreviewDelayMs = 900;
@@ -806,7 +848,7 @@ async function main() {
     const closeLifecycleDrawer = page.getByRole("button", { name: "关闭", exact: true });
     if (await closeLifecycleDrawer.count()) await closeLifecycleDrawer.click();
     await page.emulateMedia({ reducedMotion: "reduce" });
-    const stoppedChevronTransition = await stoppedDirectory.locator("summary svg").evaluate((element) => getComputedStyle(element).transitionDuration);
+    const stoppedChevronTransition = await stoppedDirectory.locator("summary > svg:first-child").evaluate((element) => getComputedStyle(element).transitionDuration);
     if (stoppedChevronTransition !== "0s") throw new Error(`Stopped Goals disclosure ignores reduced motion: ${stoppedChevronTransition}`);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.screenshot({ path: resolve(outputDir, "goal-lifecycle-directory.png"), fullPage: false, animations: "disabled" });
@@ -1706,6 +1748,41 @@ async function main() {
     await mobileManagerLink.click();
     await mobile.locator(".personal-home-board").waitFor({ state: "visible" });
     await mobile.close();
+
+    const progressive = await browser.newPage({ viewport: { width: 1512, height: 982 } });
+    const progressiveApi = await installApi(progressive);
+    progressiveApi.nextFullStatusDelayMs = 1_500;
+    await progressive.goto(url, { waitUntil: "domcontentloaded" });
+    await progressive.getByTestId("personal-goal-home").waitFor({ state: "visible", timeout: 10_000 });
+    const progressiveActiveVisibleBeforeStopped = await progressive.waitForFunction(
+      () => document.querySelectorAll(".personal-goal-list:not(.is-stopped) .personal-goal-row").length === 5,
+      null,
+      { timeout: 3_000 },
+    );
+    const stoppedLoadingVisible = await progressive.locator(".personal-stopped-goals summary svg.is-spinning, .personal-stopped-goals summary svg[class*='spinning']").count();
+    if (!progressiveActiveVisibleBeforeStopped) throw new Error("Active Goals did not render first while the stopped archive was still loading");
+    if (stoppedLoadingVisible === 0) throw new Error("Stopped Goals archive did not expose an accessible loading state");
+    await progressive.locator(".personal-stopped-goals .personal-goal-row").first().waitFor({ state: "attached", timeout: 6_000 });
+    const progressiveStoppedCount = await progressive.locator(".personal-stopped-goals .personal-goal-row").count();
+    if (progressiveStoppedCount !== 2) throw new Error(`Stopped Goals archive loaded the wrong count: ${progressiveStoppedCount}`);
+    if ((await progressive.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("Active Goal directory regressed after the stopped archive loaded");
+    pass(21, "The stopped archive loads after active Goals: active Goals are interactive first, the stopped section shows an accessible loading state, then stopped Goals arrive without replacing the page.");
+    await progressive.close();
+
+    const progressiveError = await browser.newPage({ viewport: { width: 1512, height: 982 } });
+    const errorApi = await installApi(progressiveError);
+    errorApi.failNextFullStatus = true;
+    await progressiveError.goto(url, { waitUntil: "domcontentloaded" });
+    await progressiveError.getByTestId("personal-goal-home").waitFor({ state: "visible", timeout: 10_000 });
+    await progressiveError.locator(".personal-stopped-goal-error").waitFor({ state: "visible", timeout: 4_000 });
+    if ((await progressiveError.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("A failed stopped archive replaced the active workspace");
+    await progressiveError.getByText("重试", { exact: true }).click();
+    await progressiveError.locator(".personal-stopped-goals .personal-goal-row").first().waitFor({ state: "attached", timeout: 6_000 });
+    const errorRecoveredCount = await progressiveError.locator(".personal-stopped-goals .personal-goal-row").count();
+    if (errorRecoveredCount !== 2) throw new Error(`Retry did not recover the stopped archive: ${errorRecoveredCount}`);
+    pass(22, "A stopped-archive failure keeps active Goals usable and offers a retry that restores the stopped section without a full-page error.");
+    await progressiveError.close();
+
     if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "paper") throw new Error("Personal workspace did not start with the default theme");
     if (await page.getByRole("button", { name: /切换到野兽主题|切换到默认主题/ }).count()) throw new Error("Workspace header still exposes the old theme toggle");
     await page.getByRole("button", { name: "设置", exact: true }).click();

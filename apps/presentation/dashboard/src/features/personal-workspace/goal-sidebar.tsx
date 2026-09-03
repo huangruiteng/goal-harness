@@ -1,7 +1,7 @@
 import { Bot, ChevronDown, ChevronRight, LoaderCircle, Pause, Plus, RotateCcw, Settings2, Trash2 } from "lucide-react";
 
 import { localizedGoalState, useWorkspaceI18n } from "./i18n";
-import type { WorkspaceGoal } from "./personal-workspace-model";
+import type { WorkspaceGoal, WorkspaceGoalArchiveLoadState } from "./personal-workspace-model";
 import { StatusSourceSwitcher, type StatusSourceControl } from "./status-source-switcher";
 
 const goalStateClass: Record<WorkspaceGoal["state"], string> = {
@@ -17,9 +17,11 @@ const goalStateClass: Record<WorkspaceGoal["state"], string> = {
 export function GoalSidebar({
   attentionCount,
   goals,
+  goalArchiveLoadState = { error: null, phase: "ready" },
   lifecycleBusyGoalIds,
   onRequestGoalCreate,
   onOpenSettings,
+  onRetryGoalArchive,
   onRequestGoalLifecycle,
   onSelectGoal,
   selectedGoalId,
@@ -27,9 +29,11 @@ export function GoalSidebar({
 }: {
   attentionCount: number;
   goals: WorkspaceGoal[];
+  goalArchiveLoadState?: WorkspaceGoalArchiveLoadState;
   lifecycleBusyGoalIds?: ReadonlySet<string>;
   onRequestGoalCreate?: () => void;
   onOpenSettings?: () => void;
+  onRetryGoalArchive?: () => void;
   onRequestGoalLifecycle?: (goal: WorkspaceGoal, operation: "stop" | "resume" | "delete") => void;
   onSelectGoal: (goalId: string | null) => void;
   selectedGoalId: string | null;
@@ -112,14 +116,25 @@ export function GoalSidebar({
         <div className="personal-goal-list">
           {activeGoals.map((goal) => goalRow(goal, false))}
         </div>
-        {stoppedGoals.length ? (
-          <details className="personal-stopped-goals">
+        {stoppedGoals.length || goalArchiveLoadState.phase === "loading" || goalArchiveLoadState.phase === "error" ? (
+          <details
+            className="personal-stopped-goals"
+            open={goalArchiveLoadState.phase === "error" ? true : undefined}
+          >
             <summary>
               <ChevronDown size={13} />
               <span>{t("sidebar.stopped")}</span>
-              <small>{stoppedGoals.length}</small>
+              {goalArchiveLoadState.phase === "loading"
+                ? <LoaderCircle aria-label={t("sidebar.stoppedLoading")} className="is-spinning" size={13} />
+                : <small>{stoppedGoals.length}</small>}
             </summary>
             <div className="personal-goal-list is-stopped">
+              {goalArchiveLoadState.phase === "error" ? (
+                <div className="personal-stopped-goal-error" role="alert">
+                  <span>{t("sidebar.stoppedLoadFailed")}</span>
+                  {onRetryGoalArchive ? <button onClick={onRetryGoalArchive} type="button">{t("sidebar.retryStopped")}</button> : null}
+                </div>
+              ) : null}
               {stoppedGoals.map((goal) => goalRow(goal, true))}
             </div>
           </details>
