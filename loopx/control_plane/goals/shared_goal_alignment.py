@@ -11,17 +11,21 @@ Derivation invariants (RFC shared-goal-alignment-and-governed-amendment-v0
 ``Next Action`` prose, agent vision prose, and chat prose are never inputs.
 
 The projection is strictly read-only: no writer path is touched, and no
-approval or escalation semantics exist here. ``intent_digest`` is a typed
-facts identity/basis summary, not a semantic intent-envelope digest — the
-full RFC §3.1 envelope has no typed storage yet and belongs to Stage 2's
-proposal contract.
+approval or escalation semantics exist here. ``source_basis_digest`` is a
+typed source-facts basis summary (goal status, registered agents, and
+event-log basis facts), not a canonical intent-envelope digest — the full
+RFC §3.1 envelope (objective, non-goals, acceptance, permission scope,
+terminal conditions) has no typed storage yet, so nothing here claims
+canonical intent identity.
 
-Revision semantics: the only goal-level monotonic revision carrier on this
-codebase is the state event log's ``append_sequence``. Goals without a
-parsable ``events.jsonl`` project ``revision_basis="markdown_active_state"``
-with ``goal_revision=0`` and every Agent frontier ``unbound``; drift is then
-reported as ``frontier_basis_unverifiable`` instead of a fabricated stale
-fact.
+Basis semantics: the only goal-level monotonic sequence carrier on this
+codebase is the state event log's ``append_sequence``, so
+``state_event_basis_sequence`` reports that event projection basis — it is
+NOT a canonical goal/intent revision. Goals without a parsable
+``events.jsonl`` project ``revision_basis="markdown_active_state"`` with
+``state_event_basis_sequence=0`` and every Agent frontier ``unbound``;
+drift is then reported as ``frontier_basis_unverifiable`` instead of a
+fabricated behind fact.
 """
 
 from __future__ import annotations
@@ -127,15 +131,15 @@ def _agent_frontier_basis(
 ) -> dict[str, Any]:
     """Derive the Agent's frontier basis from its own attributed events.
 
-    ``based_on_goal_revision`` is the highest append sequence among events
-    whose ``actor_agent_id`` belongs to this Agent. Events attributed to
-    peers never advance another Agent's basis.
+    ``based_on_state_event_sequence`` is the highest append sequence among
+    events whose ``actor_agent_id`` belongs to this Agent. Events attributed
+    to peers never advance another Agent's basis.
     """
 
     events = event_facts.get("events") if event_facts else None
     if not isinstance(events, list):
         return {
-            "based_on_goal_revision": None,
+            "based_on_state_event_sequence": None,
             "basis_source": BASIS_SOURCE_UNBOUND,
             "last_agent_event_id": None,
         }
@@ -159,18 +163,18 @@ def _agent_frontier_basis(
         last_agent_event_id = event_id or None
     if based_on is None:
         return {
-            "based_on_goal_revision": None,
+            "based_on_state_event_sequence": None,
             "basis_source": BASIS_SOURCE_UNBOUND,
             "last_agent_event_id": None,
         }
     return {
-        "based_on_goal_revision": based_on,
+        "based_on_state_event_sequence": based_on,
         "basis_source": BASIS_SOURCE_STATE_EVENT_LOG,
         "last_agent_event_id": last_agent_event_id,
     }
 
 
-def _intent_facts_envelope(
+def _source_basis_facts_envelope(
     *,
     goal_id: str,
     goal_status: str | None,
@@ -341,25 +345,25 @@ def project_shared_goal_alignment(
         projection = event_facts["projection"]
         revision_basis = REVISION_BASIS_STATE_EVENT_LOG
         try:
-            goal_revision = int(projection.get("last_append_sequence") or 0)
+            basis_sequence = int(projection.get("last_append_sequence") or 0)
         except (TypeError, ValueError):
-            goal_revision = 0
+            basis_sequence = 0
         source_checksum = (
             str(projection.get("source_checksum") or "").strip() or None
         )
     else:
         revision_basis = REVISION_BASIS_MARKDOWN_ACTIVE_STATE
-        goal_revision = 0
+        basis_sequence = 0
         source_checksum = None
 
-    intent_digest = _canonical_digest(
-        _intent_facts_envelope(
+    source_basis_digest = _canonical_digest(
+        _source_basis_facts_envelope(
             goal_id=normalized_goal_id,
             goal_status=goal_status,
             registered_agents=registered_agents,
             revision_basis=revision_basis,
             last_append_sequence=(
-                goal_revision
+                basis_sequence
                 if revision_basis == REVISION_BASIS_STATE_EVENT_LOG
                 else None
             ),
@@ -367,9 +371,9 @@ def project_shared_goal_alignment(
             state_updated_at=state_updated_at,
         )
     )
-    canonical_goal = {
-        "goal_revision": goal_revision,
-        "intent_digest": intent_digest,
+    source_basis = {
+        "state_event_basis_sequence": basis_sequence,
+        "source_basis_digest": source_basis_digest,
         "revision_basis": revision_basis,
         "state_updated_at": state_updated_at,
     }
@@ -435,7 +439,7 @@ def project_shared_goal_alignment(
         "schema_version": SHARED_GOAL_ALIGNMENT_REQUEST_SCHEMA_VERSION,
         "goal_id": normalized_goal_id,
         "agent_id": normalized_agent_id,
-        "canonical_goal": canonical_goal,
+        "source_basis": source_basis,
         "frontier_basis": frontier_basis,
         "frontier_counts": frontier_counts,
         "claims": claims,

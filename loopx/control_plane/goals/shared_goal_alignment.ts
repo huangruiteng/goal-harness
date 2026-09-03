@@ -16,11 +16,19 @@ import {
  *
  * The reducer is deterministic: every projected field is derived from the
  * typed facts in the request. Shared `Next Action` prose, agent vision, and
- * chat prose are never inputs. The canonical revision, digest, and frontier
- * basis are decoded and passed through unchanged — the digest is computed
- * once on the Python side so both runtimes observe one value. This contract
- * has no writer surface: it projects drift and conflict facts only and
- * always answers with `read_only: true`.
+ * chat prose are never inputs. The source basis sequence, digest, and
+ * frontier basis are decoded and passed through unchanged — the digest is
+ * computed once on the Python side so both runtimes observe one value.
+ *
+ * Basis semantics: `source_basis` is an event-log-derived projection basis,
+ * NOT a canonical intent revision. `state_event_basis_sequence` is the state
+ * event log's append sequence (or 0 with the markdown fallback), and
+ * `source_basis_digest` hashes goal status, registered agents, and event-log
+ * basis facts — the RFC §3.1 canonical intent envelope (objective,
+ * non-goals, acceptance, permissions, terminal conditions) has no typed
+ * storage yet, so no field here claims canonical intent identity. This
+ * contract has no writer surface: it projects drift and conflict facts only
+ * and always answers with `read_only: true`.
  */
 
 export const SHARED_GOAL_ALIGNMENT_REQUEST_SCHEMA_VERSION =
@@ -28,7 +36,7 @@ export const SHARED_GOAL_ALIGNMENT_REQUEST_SCHEMA_VERSION =
 export const SHARED_GOAL_ALIGNMENT_SCHEMA_VERSION = "shared_goal_alignment_v0";
 
 export const SHARED_GOAL_ALIGNMENT_DRIFT_FACTS = [
-  "frontier_basis_stale",
+  "frontier_basis_behind",
 ] as const;
 export const SHARED_GOAL_ALIGNMENT_CONFLICT_FACTS = [
   "frontier_basis_unverifiable",
@@ -50,21 +58,26 @@ const BASIS_SOURCE_VALUES = ["state_event_log", "unbound"] as const;
 
 const TODO_ID_PATTERN = /^todo_[a-z0-9_-]{3,64}$/;
 const AGENT_ID_PATTERN = /^[a-z][a-z0-9_.:@-]{0,79}$/;
-const GOAL_ID_PATTERN = /^goal-[a-z0-9][a-z0-9_.:-]{0,63}$/;
-const INTENT_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+// Mirrors loopx.runtime.validate_goal_id_path_segment (and the loopx.history
+// copy): a goal id is any non-empty, safe single filesystem path segment —
+// not "." or "..", and never containing "/", "\", or whitespace. The
+// repository Goal-ID contract does not require a "goal-" prefix; registered
+// goal ids such as "loopx-meta" must decode.
+const GOAL_ID_PATTERN = /^(?!\.\.?$)[^\s/\\]+$/;
+const SOURCE_BASIS_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 export type RevisionBasis = (typeof REVISION_BASIS_VALUES)[number];
 export type BasisSource = (typeof BASIS_SOURCE_VALUES)[number];
 
-export interface CanonicalGoalFacts extends JsonObject {
-  goal_revision: number;
-  intent_digest: string;
+export interface SourceBasisFacts extends JsonObject {
+  state_event_basis_sequence: number;
+  source_basis_digest: string;
   revision_basis: RevisionBasis;
   state_updated_at: string | null;
 }
 
 export interface FrontierBasisFacts extends JsonObject {
-  based_on_goal_revision: number | null;
+  based_on_state_event_sequence: number | null;
   basis_source: BasisSource;
   last_agent_event_id: string | null;
 }
@@ -92,7 +105,7 @@ export interface SharedGoalAlignmentRequest extends JsonObject {
   schema_version: typeof SHARED_GOAL_ALIGNMENT_REQUEST_SCHEMA_VERSION;
   goal_id: string;
   agent_id: string;
-  canonical_goal: CanonicalGoalFacts;
+  source_basis: SourceBasisFacts;
   frontier_basis: FrontierBasisFacts;
   frontier_counts: FrontierCounts;
   claims: AlignmentClaimFacts[];
@@ -105,7 +118,7 @@ export interface SharedGoalAlignment extends JsonObject {
   schema_version: typeof SHARED_GOAL_ALIGNMENT_SCHEMA_VERSION;
   goal_id: string;
   agent_id: string;
-  canonical_goal: CanonicalGoalFacts;
+  source_basis: SourceBasisFacts;
   frontier_basis: FrontierBasisFacts;
   frontier_counts: FrontierCounts;
   unclaimed_eligible_work: Array<{
@@ -155,51 +168,51 @@ function requireNoDuplicates(values: string[], label: string): void {
   }
 }
 
-function decodeCanonicalGoal(value: unknown): CanonicalGoalFacts {
-  const raw = requireJsonObject(value, "shared_goal_alignment.canonical_goal");
+function decodeSourceBasis(value: unknown): SourceBasisFacts {
+  const raw = requireJsonObject(value, "shared_goal_alignment.source_basis");
   const revisionBasis = requireStringLiteral(
     raw.revision_basis,
     REVISION_BASIS_VALUES,
-    "shared_goal_alignment.canonical_goal.revision_basis",
-    "shared_goal_alignment canonical revision_basis is unsupported",
+    "shared_goal_alignment.source_basis.revision_basis",
+    "shared_goal_alignment source_basis revision_basis is unsupported",
   );
-  const goalRevision = nonNegativeInteger(
-    raw.goal_revision,
-    "shared_goal_alignment.canonical_goal.goal_revision",
+  const basisSequence = nonNegativeInteger(
+    raw.state_event_basis_sequence,
+    "shared_goal_alignment.source_basis.state_event_basis_sequence",
   );
-  if (revisionBasis === "state_event_log" && goalRevision < 1) {
+  if (revisionBasis === "state_event_log" && basisSequence < 1) {
     throw new EffectRuntimeRequestError(
-      "shared_goal_alignment canonical goal_revision must be a positive event append sequence when revision_basis is state_event_log",
+      "shared_goal_alignment source_basis state_event_basis_sequence must be a positive event append sequence when revision_basis is state_event_log",
     );
   }
-  if (revisionBasis === "markdown_active_state" && goalRevision !== 0) {
+  if (revisionBasis === "markdown_active_state" && basisSequence !== 0) {
     throw new EffectRuntimeRequestError(
-      "shared_goal_alignment canonical goal_revision must be 0 when revision_basis is markdown_active_state",
+      "shared_goal_alignment source_basis state_event_basis_sequence must be 0 when revision_basis is markdown_active_state",
     );
   }
-  const intentDigest = requireNonEmptyString(
-    raw.intent_digest,
-    "shared_goal_alignment.canonical_goal.intent_digest",
+  const sourceBasisDigest = requireNonEmptyString(
+    raw.source_basis_digest,
+    "shared_goal_alignment.source_basis.source_basis_digest",
   );
-  if (!INTENT_DIGEST_PATTERN.test(intentDigest)) {
+  if (!SOURCE_BASIS_DIGEST_PATTERN.test(sourceBasisDigest)) {
     throw new EffectRuntimeRequestError(
-      "shared_goal_alignment.canonical_goal.intent_digest must be a sha256:<hex> digest computed from typed facts",
+      "shared_goal_alignment.source_basis.source_basis_digest must be a sha256:<hex> digest computed from typed source facts",
     );
   }
   return {
-    goal_revision: goalRevision,
-    intent_digest: intentDigest,
+    state_event_basis_sequence: basisSequence,
+    source_basis_digest: sourceBasisDigest,
     revision_basis: revisionBasis,
     state_updated_at: optionalNonEmptyString(
       raw.state_updated_at,
-      "shared_goal_alignment.canonical_goal.state_updated_at",
+      "shared_goal_alignment.source_basis.state_updated_at",
     ),
   };
 }
 
 function decodeFrontierBasis(
   value: unknown,
-  canonical: CanonicalGoalFacts,
+  sourceBasis: SourceBasisFacts,
 ): FrontierBasisFacts {
   const raw = requireJsonObject(value, "shared_goal_alignment.frontier_basis");
   const basisSource = requireStringLiteral(
@@ -209,22 +222,22 @@ function decodeFrontierBasis(
     "shared_goal_alignment frontier basis_source is unsupported",
   );
   if (basisSource === "state_event_log") {
-    if (canonical.revision_basis !== "state_event_log") {
+    if (sourceBasis.revision_basis !== "state_event_log") {
       throw new EffectRuntimeRequestError(
-        "shared_goal_alignment frontier basis_source state_event_log cannot be compared against a markdown_active_state canonical basis",
+        "shared_goal_alignment frontier basis_source state_event_log cannot be compared against a markdown_active_state source basis",
       );
     }
     const basedOn = requireInteger(
-      raw.based_on_goal_revision,
-      "shared_goal_alignment.frontier_basis.based_on_goal_revision",
+      raw.based_on_state_event_sequence,
+      "shared_goal_alignment.frontier_basis.based_on_state_event_sequence",
     );
     if (basedOn < 1) {
       throw new EffectRuntimeRequestError(
-        "shared_goal_alignment.frontier_basis.based_on_goal_revision must be a positive event append sequence when basis_source is state_event_log",
+        "shared_goal_alignment.frontier_basis.based_on_state_event_sequence must be a positive event append sequence when basis_source is state_event_log",
       );
     }
     return {
-      based_on_goal_revision: basedOn,
+      based_on_state_event_sequence: basedOn,
       basis_source: basisSource,
       last_agent_event_id: optionalNonEmptyString(
         raw.last_agent_event_id,
@@ -232,9 +245,12 @@ function decodeFrontierBasis(
       ),
     };
   }
-  if (raw.based_on_goal_revision !== null && raw.based_on_goal_revision !== undefined) {
+  if (
+    raw.based_on_state_event_sequence !== null &&
+    raw.based_on_state_event_sequence !== undefined
+  ) {
     throw new EffectRuntimeRequestError(
-      "shared_goal_alignment.frontier_basis.based_on_goal_revision must be null when basis_source is unbound",
+      "shared_goal_alignment.frontier_basis.based_on_state_event_sequence must be null when basis_source is unbound",
     );
   }
   if (
@@ -246,7 +262,7 @@ function decodeFrontierBasis(
     );
   }
   return {
-    based_on_goal_revision: null,
+    based_on_state_event_sequence: null,
     basis_source: basisSource,
     last_agent_event_id: null,
   };
@@ -403,25 +419,25 @@ function decodePeerClaimedBoundTodoIds(
 }
 
 function driftFacts(
-  canonical: CanonicalGoalFacts,
+  sourceBasis: SourceBasisFacts,
   frontier: FrontierBasisFacts,
 ): SharedGoalAlignmentDriftFact[] {
   const facts: SharedGoalAlignmentDriftFact[] = [];
   const comparable =
-    canonical.revision_basis === "state_event_log" &&
+    sourceBasis.revision_basis === "state_event_log" &&
     frontier.basis_source === "state_event_log" &&
-    frontier.based_on_goal_revision !== null;
+    frontier.based_on_state_event_sequence !== null;
   if (
     comparable &&
-    frontier.based_on_goal_revision! < canonical.goal_revision
+    frontier.based_on_state_event_sequence! < sourceBasis.state_event_basis_sequence
   ) {
-    facts.push("frontier_basis_stale");
+    facts.push("frontier_basis_behind");
   }
   return facts;
 }
 
 function conflictFacts(
-  canonical: CanonicalGoalFacts,
+  sourceBasis: SourceBasisFacts,
   frontier: FrontierBasisFacts,
   claims: AlignmentClaimFacts[],
   peerClaimedBoundTodoIds: string[],
@@ -430,7 +446,7 @@ function conflictFacts(
   const facts: SharedGoalAlignmentConflictFact[] = [];
   if (
     frontier.basis_source === "unbound" ||
-    canonical.revision_basis === "markdown_active_state"
+    sourceBasis.revision_basis === "markdown_active_state"
   ) {
     facts.push("frontier_basis_unverifiable");
   }
@@ -467,12 +483,12 @@ export function decodeSharedGoalAlignmentRequest(
   );
   if (!GOAL_ID_PATTERN.test(goalIdValue)) {
     throw new EffectRuntimeRequestError(
-      "shared_goal_alignment.goal_id must match the goal id pattern",
+      "shared_goal_alignment.goal_id must be a safe single-segment goal id (no \"/\", \"\\\", whitespace, or path traversal)",
     );
   }
   const agentIdValue = agentId(request.agent_id, "shared_goal_alignment.agent_id");
-  const canonical = decodeCanonicalGoal(request.canonical_goal);
-  const frontier = decodeFrontierBasis(request.frontier_basis, canonical);
+  const sourceBasis = decodeSourceBasis(request.source_basis);
+  const frontier = decodeFrontierBasis(request.frontier_basis, sourceBasis);
   const claims = decodeClaims(request.claims, agentIdValue);
   const claimedTodoIds = new Set(claims.map((claim) => claim.todo_id));
   const openLaneReplanObligationRequired = requireBoolean(
@@ -483,7 +499,7 @@ export function decodeSharedGoalAlignmentRequest(
     schema_version: SHARED_GOAL_ALIGNMENT_REQUEST_SCHEMA_VERSION,
     goal_id: goalIdValue,
     agent_id: agentIdValue,
-    canonical_goal: canonical,
+    source_basis: sourceBasis,
     frontier_basis: frontier,
     frontier_counts: decodeFrontierCounts(request.frontier_counts),
     claims,
@@ -506,16 +522,16 @@ export function projectSharedGoalAlignment(value: unknown): SharedGoalAlignment 
     schema_version: SHARED_GOAL_ALIGNMENT_SCHEMA_VERSION,
     goal_id: request.goal_id,
     agent_id: request.agent_id,
-    canonical_goal: request.canonical_goal,
+    source_basis: request.source_basis,
     frontier_basis: request.frontier_basis,
     frontier_counts: request.frontier_counts,
     unclaimed_eligible_work: request.unclaimed_eligible.map((item) => ({
       todo_id: item.todo_id,
       claim_required_before_work: true,
     })),
-    drift_facts: driftFacts(request.canonical_goal, request.frontier_basis),
+    drift_facts: driftFacts(request.source_basis, request.frontier_basis),
     conflict_facts: conflictFacts(
-      request.canonical_goal,
+      request.source_basis,
       request.frontier_basis,
       request.claims,
       request.peer_claimed_bound_todo_ids,

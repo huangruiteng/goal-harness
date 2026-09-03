@@ -68,10 +68,11 @@ def _write_fixture(
     events: list[dict[str, str]] | None = None,
     leases: dict[str, dict[str, object]] | None = None,
     agents: tuple[str, ...] = AGENTS,
+    goal_id: str = GOAL_ID,
 ) -> dict[str, Path]:
     project = root / "project"
     runtime = root / "runtime"
-    state_relative = Path(".codex") / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    state_relative = Path(".codex") / "goals" / goal_id / "ACTIVE_GOAL_STATE.md"
     state_file = project / state_relative
     state_file.parent.mkdir(parents=True)
     state_file.write_text(
@@ -88,7 +89,7 @@ def _write_fixture(
                 "common_runtime_root": str(runtime),
                 "goals": [
                     {
-                        "id": GOAL_ID,
+                        "id": goal_id,
                         "domain": "shared-goal-alignment-stage1",
                         "status": "active",
                         "repo": str(project),
@@ -115,7 +116,7 @@ def _write_fixture(
             store.append(
                 make_state_event(
                     event_id=event["event_id"],
-                    goal_id=GOAL_ID,
+                    goal_id=goal_id,
                     event_type=TODO_ADDED,
                     actor_agent_id=event["actor_agent_id"],
                     refs={"todo_id": event["todo_id"]},
@@ -126,7 +127,7 @@ def _write_fixture(
     if leases:
         for todo_id, lease in leases.items():
             lease_path = (
-                runtime / "goals" / GOAL_ID / "task-leases" / f"{todo_id}.json"
+                runtime / "goals" / goal_id / "task-leases" / f"{todo_id}.json"
             )
             lease_path.parent.mkdir(parents=True, exist_ok=True)
             lease_path.write_text(
@@ -222,7 +223,7 @@ def _default_events() -> list[dict[str, str]]:
     ]
 
 
-def test_projects_revision_binding_and_unclaimed_work(
+def test_projects_basis_binding_and_unclaimed_work(
     tmp_path: Path,
 ) -> None:
     paths = _write_fixture(
@@ -241,13 +242,13 @@ def test_projects_revision_binding_and_unclaimed_work(
     assert projection["goal_id"] == GOAL_ID
     assert projection["agent_id"] == "agent-a"
     assert projection["read_only"] is True
-    canonical = projection["canonical_goal"]
-    assert canonical["revision_basis"] == "state_event_log"
-    assert canonical["goal_revision"] == 3
-    assert canonical["intent_digest"].startswith("sha256:")
-    assert canonical["state_updated_at"] == "2026-09-01T00:00:00+00:00"
+    basis = projection["source_basis"]
+    assert basis["revision_basis"] == "state_event_log"
+    assert basis["state_event_basis_sequence"] == 3
+    assert basis["source_basis_digest"].startswith("sha256:")
+    assert basis["state_updated_at"] == "2026-09-01T00:00:00+00:00"
     frontier = projection["frontier_basis"]
-    assert frontier["based_on_goal_revision"] == 3
+    assert frontier["based_on_state_event_sequence"] == 3
     assert frontier["basis_source"] == "state_event_log"
     assert frontier["last_agent_event_id"] == "evt_stage1_003"
     assert projection["frontier_counts"] == {
@@ -262,6 +263,31 @@ def test_projects_revision_binding_and_unclaimed_work(
         item["claim_required_before_work"] is True
         for item in projection["unclaimed_eligible_work"]
     )
+    assert projection["drift_facts"] == []
+    assert projection["conflict_facts"] == []
+
+
+def test_a_goal_id_without_the_goal_prefix_projects(
+    tmp_path: Path,
+) -> None:
+    # The repository Goal-ID contract (validate_goal_id_path_segment) is any
+    # safe single path segment: real goal ids such as "loopx-meta" carry no
+    # "goal-" prefix and must survive the TypeScript decoder.
+    paths = _write_fixture(
+        tmp_path,
+        goal_id="loopx-meta",
+        todo_specs=_default_todo_specs(),
+        events=_default_events(),
+    )
+
+    projection = project_shared_goal_alignment(
+        goal_id="loopx-meta",
+        agent_id="agent-a",
+        project=paths["project"],
+    )
+
+    assert projection["goal_id"] == "loopx-meta"
+    assert projection["source_basis"]["state_event_basis_sequence"] == 3
     assert projection["drift_facts"] == []
     assert projection["conflict_facts"] == []
 
@@ -283,15 +309,15 @@ def test_peer_events_do_not_advance_another_agents_basis(
 
     # agent-a authored events 2 and 3; agent-b's basis stays at its own
     # latest attributed event (1) and never inherits the peer sequences.
-    assert projection["canonical_goal"]["goal_revision"] == 3
-    assert projection["frontier_basis"]["based_on_goal_revision"] == 1
+    assert projection["source_basis"]["state_event_basis_sequence"] == 3
+    assert projection["frontier_basis"]["based_on_state_event_sequence"] == 1
     assert projection["frontier_basis"]["last_agent_event_id"] == (
         "evt_stage1_001"
     )
-    assert projection["drift_facts"] == ["frontier_basis_stale"]
+    assert projection["drift_facts"] == ["frontier_basis_behind"]
 
 
-def test_appending_one_event_rotates_the_projection_into_stale(
+def test_appending_one_event_rotates_the_projection_into_frontier_behind(
     tmp_path: Path,
 ) -> None:
     paths = _write_fixture(
@@ -306,8 +332,8 @@ def test_appending_one_event_rotates_the_projection_into_stale(
         agent_id="agent-a",
         project=paths["project"],
     )
-    assert before["canonical_goal"]["goal_revision"] == 3
-    assert before["frontier_basis"]["based_on_goal_revision"] == 3
+    assert before["source_basis"]["state_event_basis_sequence"] == 3
+    assert before["frontier_basis"]["based_on_state_event_sequence"] == 3
     assert before["drift_facts"] == []
 
     AppendOnlyStateEventStore(event_log).append(
@@ -317,7 +343,7 @@ def test_appending_one_event_rotates_the_projection_into_stale(
             event_type=TODO_ADDED,
             actor_agent_id="agent-b",
             refs={"todo_id": "todo_lane_a"},
-            payload={"text": "Fixture event that moves the canonical head."},
+            payload={"text": "Fixture event that moves the state event basis head."},
         )
     )
 
@@ -326,12 +352,12 @@ def test_appending_one_event_rotates_the_projection_into_stale(
         agent_id="agent-a",
         project=paths["project"],
     )
-    assert after["canonical_goal"]["goal_revision"] == 4
-    assert after["frontier_basis"]["based_on_goal_revision"] == 3
-    assert after["drift_facts"] == ["frontier_basis_stale"]
+    assert after["source_basis"]["state_event_basis_sequence"] == 4
+    assert after["frontier_basis"]["based_on_state_event_sequence"] == 3
+    assert after["drift_facts"] == ["frontier_basis_behind"]
 
 
-def test_without_an_event_log_the_basis_is_unverifiable_not_stale(
+def test_without_an_event_log_the_basis_is_unverifiable_not_behind(
     tmp_path: Path,
 ) -> None:
     paths = _write_fixture(
@@ -346,12 +372,12 @@ def test_without_an_event_log_the_basis_is_unverifiable_not_stale(
         project=paths["project"],
     )
 
-    assert projection["canonical_goal"]["revision_basis"] == (
+    assert projection["source_basis"]["revision_basis"] == (
         "markdown_active_state"
     )
-    assert projection["canonical_goal"]["goal_revision"] == 0
+    assert projection["source_basis"]["state_event_basis_sequence"] == 0
     assert projection["frontier_basis"] == {
-        "based_on_goal_revision": None,
+        "based_on_state_event_sequence": None,
         "basis_source": "unbound",
         "last_agent_event_id": None,
     }
@@ -359,7 +385,7 @@ def test_without_an_event_log_the_basis_is_unverifiable_not_stale(
     assert projection["conflict_facts"] == ["frontier_basis_unverifiable"]
 
 
-def test_next_action_prose_never_changes_the_intent_digest(
+def test_next_action_prose_never_changes_the_source_basis_digest(
     tmp_path: Path,
 ) -> None:
     paths = _write_fixture(
@@ -387,8 +413,8 @@ def test_next_action_prose_never_changes_the_intent_digest(
         project=paths["project"],
     )
 
-    assert first["canonical_goal"]["intent_digest"] == (
-        second["canonical_goal"]["intent_digest"]
+    assert first["source_basis"]["source_basis_digest"] == (
+        second["source_basis"]["source_basis_digest"]
     )
 
 
@@ -600,13 +626,14 @@ def test_registered_agent_without_any_events_projects_an_unbound_basis(
         project=paths["project"],
     )
 
-    # The goal head stays verifiable (the log exists at revision 3), but an
-    # Agent with zero attributed events must not fabricate a frontier: the
-    # basis is unbound and reported as unverifiable instead of stale.
-    assert projection["canonical_goal"]["revision_basis"] == "state_event_log"
-    assert projection["canonical_goal"]["goal_revision"] == 3
+    # The state event basis head stays verifiable (the log exists at
+    # sequence 3), but an Agent with zero attributed events must not
+    # fabricate a frontier: the basis is unbound and reported as
+    # unverifiable instead of behind.
+    assert projection["source_basis"]["revision_basis"] == "state_event_log"
+    assert projection["source_basis"]["state_event_basis_sequence"] == 3
     assert projection["frontier_basis"] == {
-        "based_on_goal_revision": None,
+        "based_on_state_event_sequence": None,
         "basis_source": "unbound",
         "last_agent_event_id": None,
     }
@@ -631,13 +658,13 @@ def test_a_corrupt_event_log_falls_back_to_the_markdown_basis(
         project=paths["project"],
     )
 
-    # A present-but-corrupt log must not fabricate revisions: the adapter
-    # falls back to the markdown active state and reports the frontier as
-    # unverifiable instead of trusting the head.
-    assert projection["canonical_goal"]["revision_basis"] == (
+    # A present-but-corrupt log must not fabricate a basis sequence: the
+    # adapter falls back to the markdown active state and reports the
+    # frontier as unverifiable instead of trusting the head.
+    assert projection["source_basis"]["revision_basis"] == (
         "markdown_active_state"
     )
-    assert projection["canonical_goal"]["goal_revision"] == 0
+    assert projection["source_basis"]["state_event_basis_sequence"] == 0
     assert projection["frontier_basis"]["basis_source"] == "unbound"
     assert projection["drift_facts"] == []
     assert projection["conflict_facts"] == ["frontier_basis_unverifiable"]
@@ -691,8 +718,8 @@ def test_projection_is_deterministic_across_repeated_calls(
     assert json.dumps(first, sort_keys=True) == json.dumps(
         second, sort_keys=True
     )
-    assert first["canonical_goal"]["intent_digest"] == (
-        second["canonical_goal"]["intent_digest"]
+    assert first["source_basis"]["source_basis_digest"] == (
+        second["source_basis"]["source_basis_digest"]
     )
     assert first["drift_facts"] == second["drift_facts"]
     assert first["conflict_facts"] == second["conflict_facts"]
@@ -725,8 +752,8 @@ def test_adapter_sends_typed_facts_only(monkeypatch, tmp_path: Path) -> None:
     assert "prose" not in json.dumps(request)
     assert request["goal_id"] == GOAL_ID
     assert request["agent_id"] == "agent-a"
-    assert request["canonical_goal"]["goal_revision"] == 3
-    assert request["frontier_basis"]["based_on_goal_revision"] == 3
+    assert request["source_basis"]["state_event_basis_sequence"] == 3
+    assert request["frontier_basis"]["based_on_state_event_sequence"] == 3
     assert request["claims"] == [
         {
             "todo_id": "todo_lane_a",
@@ -751,14 +778,14 @@ def test_registered_method_rejects_an_illegal_request() -> None:
                 "schema_version": "shared_goal_alignment_request_v0",
                 "goal_id": GOAL_ID,
                 "agent_id": "agent-a",
-                "canonical_goal": {
-                    "goal_revision": 3,
-                    "intent_digest": digest,
+                "source_basis": {
+                    "state_event_basis_sequence": 3,
+                    "source_basis_digest": digest,
                     "revision_basis": "state_event_log",
                     "state_updated_at": None,
                 },
                 "frontier_basis": {
-                    "based_on_goal_revision": 3,
+                    "based_on_state_event_sequence": 3,
                     "basis_source": "state_event_log",
                     "last_agent_event_id": "evt_stage1_003",
                 },

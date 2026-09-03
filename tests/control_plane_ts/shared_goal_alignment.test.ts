@@ -13,14 +13,14 @@ function baseRequest(overrides: Record<string, unknown> = {}) {
     schema_version: "shared_goal_alignment_request_v0",
     goal_id: "goal-shared",
     agent_id: "agent-a",
-    canonical_goal: {
-      goal_revision: 42,
-      intent_digest: DIGEST,
+    source_basis: {
+      state_event_basis_sequence: 42,
+      source_basis_digest: DIGEST,
       revision_basis: "state_event_log",
       state_updated_at: "2026-09-01T00:00:00+00:00",
     },
     frontier_basis: {
-      based_on_goal_revision: 42,
+      based_on_state_event_sequence: 42,
       basis_source: "state_event_log",
       last_agent_event_id: "evt_agent_a_last",
     },
@@ -53,9 +53,9 @@ test("projects the full read-only alignment from typed facts", () => {
   assert.equal(result.schema_version, SHARED_GOAL_ALIGNMENT_SCHEMA_VERSION);
   assert.equal(result.goal_id, "goal-shared");
   assert.equal(result.agent_id, "agent-a");
-  assert.equal(result.canonical_goal.goal_revision, 42);
-  assert.equal(result.canonical_goal.intent_digest, DIGEST);
-  assert.equal(result.frontier_basis.based_on_goal_revision, 42);
+  assert.equal(result.source_basis.state_event_basis_sequence, 42);
+  assert.equal(result.source_basis.source_basis_digest, DIGEST);
+  assert.equal(result.frontier_basis.based_on_state_event_sequence, 42);
   assert.equal(
     result.frontier_counts.unclaimed_advancement_count,
     2,
@@ -69,38 +69,38 @@ test("projects the full read-only alignment from typed facts", () => {
   assert.equal(result.read_only, true);
 });
 
-test("a frontier basis behind the canonical revision drifts stale", () => {
+test("a frontier basis behind the state event basis head drifts behind", () => {
   const result = projectSharedGoalAlignment(
     baseRequest({
       frontier_basis: {
-        based_on_goal_revision: 39,
+        based_on_state_event_sequence: 39,
         basis_source: "state_event_log",
         last_agent_event_id: "evt_agent_a_39",
       },
     }),
   );
 
-  assert.deepEqual(result.drift_facts, ["frontier_basis_stale"]);
+  assert.deepEqual(result.drift_facts, ["frontier_basis_behind"]);
   assert.deepEqual(result.conflict_facts, []);
 });
 
-test("an equal frontier basis never drifts stale", () => {
+test("an equal frontier basis never drifts behind", () => {
   const result = projectSharedGoalAlignment(baseRequest());
 
   assert.deepEqual(result.drift_facts, []);
 });
 
-test("an unbound frontier basis is unverifiable, never stale", () => {
+test("an unbound frontier basis is unverifiable, never behind", () => {
   const result = projectSharedGoalAlignment(
     baseRequest({
-      canonical_goal: {
-        goal_revision: 0,
-        intent_digest: DIGEST,
+      source_basis: {
+        state_event_basis_sequence: 0,
+        source_basis_digest: DIGEST,
         revision_basis: "markdown_active_state",
         state_updated_at: null,
       },
       frontier_basis: {
-        based_on_goal_revision: null,
+        based_on_state_event_sequence: null,
         basis_source: "unbound",
         last_agent_event_id: null,
       },
@@ -109,7 +109,7 @@ test("an unbound frontier basis is unverifiable, never stale", () => {
 
   assert.deepEqual(result.drift_facts, []);
   assert.deepEqual(result.conflict_facts, ["frontier_basis_unverifiable"]);
-  assert.equal(result.canonical_goal.goal_revision, 0);
+  assert.equal(result.source_basis.state_event_basis_sequence, 0);
 });
 
 test("mixed revision bases are rejected instead of compared", () => {
@@ -117,9 +117,9 @@ test("mixed revision bases are rejected instead of compared", () => {
     () =>
       projectSharedGoalAlignment(
         baseRequest({
-          canonical_goal: {
-            goal_revision: 0,
-            intent_digest: DIGEST,
+          source_basis: {
+            state_event_basis_sequence: 0,
+            source_basis_digest: DIGEST,
             revision_basis: "markdown_active_state",
             state_updated_at: null,
           },
@@ -202,20 +202,20 @@ test("a claim owned by another agent is rejected", () => {
   );
 });
 
-test("a digest that is not a typed-facts sha256 envelope is rejected", () => {
+test("a source basis digest that is not sha256 hex is rejected", () => {
   assert.throws(
     () =>
       projectSharedGoalAlignment(
         baseRequest({
-          canonical_goal: {
-            goal_revision: 42,
-            intent_digest: "md5:zz",
+          source_basis: {
+            state_event_basis_sequence: 42,
+            source_basis_digest: "md5:zz",
             revision_basis: "state_event_log",
             state_updated_at: null,
           },
         }),
       ),
-    /intent_digest/,
+    /source_basis_digest/,
   );
 });
 
@@ -225,7 +225,7 @@ test("an unbound basis with a fabricated revision is rejected", () => {
       projectSharedGoalAlignment(
         baseRequest({
           frontier_basis: {
-            based_on_goal_revision: 7,
+            based_on_state_event_sequence: 7,
             basis_source: "unbound",
             last_agent_event_id: null,
           },
@@ -249,14 +249,14 @@ test("a todo both claimed and unclaimed-eligible is rejected", () => {
   );
 });
 
-test("goal_revision boundary values are rejected per revision basis", () => {
+test("state_event_basis_sequence boundary values are rejected per revision basis", () => {
   assert.throws(
     () =>
       projectSharedGoalAlignment(
         baseRequest({
-          canonical_goal: {
-            goal_revision: 0,
-            intent_digest: DIGEST,
+          source_basis: {
+            state_event_basis_sequence: 0,
+            source_basis_digest: DIGEST,
             revision_basis: "state_event_log",
             state_updated_at: null,
           },
@@ -268,9 +268,9 @@ test("goal_revision boundary values are rejected per revision basis", () => {
     () =>
       projectSharedGoalAlignment(
         baseRequest({
-          canonical_goal: {
-            goal_revision: 1,
-            intent_digest: DIGEST,
+          source_basis: {
+            state_event_basis_sequence: 1,
+            source_basis_digest: DIGEST,
             revision_basis: "markdown_active_state",
             state_updated_at: null,
           },
@@ -282,32 +282,32 @@ test("goal_revision boundary values are rejected per revision basis", () => {
     () =>
       projectSharedGoalAlignment(
         baseRequest({
-          canonical_goal: {
-            goal_revision: "3",
-            intent_digest: DIGEST,
+          source_basis: {
+            state_event_basis_sequence: "3",
+            source_basis_digest: DIGEST,
             revision_basis: "state_event_log",
             state_updated_at: null,
           },
         }),
       ),
-    /goal_revision must be an integer/,
+    /state_event_basis_sequence must be an integer/,
   );
 });
 
-test("an intent digest of the wrong length or case is rejected", () => {
+test("a source basis digest of the wrong length or case is rejected", () => {
   const badDigests = [
     "sha256:" + "a".repeat(63),
     "sha256:" + "a".repeat(65),
     "sha256:" + "A".repeat(64),
   ];
-  for (const intent_digest of badDigests) {
+  for (const source_basis_digest of badDigests) {
     assert.throws(
       () =>
         projectSharedGoalAlignment(
           baseRequest({
-            canonical_goal: {
-              goal_revision: 42,
-              intent_digest,
+            source_basis: {
+              state_event_basis_sequence: 42,
+              source_basis_digest,
               revision_basis: "state_event_log",
               state_updated_at: null,
             },
@@ -409,7 +409,7 @@ test("an unbound basis with a fabricated last event id is rejected", () => {
       projectSharedGoalAlignment(
         baseRequest({
           frontier_basis: {
-            based_on_goal_revision: null,
+            based_on_state_event_sequence: null,
             basis_source: "unbound",
             last_agent_event_id: "evt_fabricated",
           },
@@ -474,15 +474,32 @@ test("repeated projection of identical facts is deterministic", () => {
   ]);
 });
 
-test("a goal id outside the goal namespace is rejected", () => {
-  assert.throws(
-    () => projectSharedGoalAlignment(baseRequest({ goal_id: "Goal_X" })),
-    /goal id pattern/,
-  );
-  assert.throws(
-    () => projectSharedGoalAlignment(baseRequest({ goal_id: "goal-" })),
-    /goal id pattern/,
-  );
+test("goal ids follow the repository safe single-segment contract", () => {
+  // The repository Goal-ID contract (validate_goal_id_path_segment) is any
+  // non-empty, safe single path segment — no "goal-" prefix required.
+  // Registered ids such as "loopx-meta" must decode.
+  for (const goalId of ["loopx-meta", "goal-shared", "Goal_X"]) {
+    const result = projectSharedGoalAlignment(
+      baseRequest({ goal_id: goalId }),
+    );
+    assert.equal(result.goal_id, goalId);
+  }
+  // Path traversal, separators, whitespace, and dot-only segments stay
+  // rejected.
+  for (const goalId of [
+    ".",
+    "..",
+    "goal/../etc",
+    "a\\b",
+    "my goal",
+    " goal-x",
+    "goal-x ",
+  ]) {
+    assert.throws(
+      () => projectSharedGoalAlignment(baseRequest({ goal_id: goalId })),
+      /safe single-segment goal id/,
+    );
+  }
 });
 
 test("a non-boolean open lane replan flag is rejected", () => {
