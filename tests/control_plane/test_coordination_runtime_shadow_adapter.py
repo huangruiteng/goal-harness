@@ -19,9 +19,67 @@ from loopx.control_plane.coordination.runtime_shadow import (
     inspect_coordination_runtime_shadow,
     load_task_lease_runtime_shadow_records,
     qualify_coordination_runtime_shadow,
+    read_coordination_runtime_shadow_todo_candidate,
     resolve_coordination_runtime_shadow_config,
     rollback_coordination_runtime_shadow,
 )
+
+
+def test_runtime_shadow_todo_read_candidate_is_default_off_and_typed(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+    disabled = read_coordination_runtime_shadow_todo_candidate(
+        goal={"id": "goal-a"},
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        todo_id="todo_one",
+        projection={"schema_version": "projection_v0", "todos": []},
+        runtime_invoker=lambda *args: calls.append(args),
+    )
+    assert disabled["status"] == "disabled"
+    assert disabled["read_candidate_qualified"] is False
+    assert disabled["decision_read_from_shadow"] is False
+    assert calls == []
+
+    goal = {
+        "id": "goal-a",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+
+    def invoke(method: str, params: dict[str, object]) -> dict[str, object]:
+        calls.append((method, params))
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_todo_read_result_v0",
+            "status": "matched",
+            "todo_id": "todo_one",
+            "todo": {"todo_id": "todo_one", "status": "open"},
+            "read_candidate_qualified": True,
+            "decision_read_from_shadow": False,
+        }
+
+    matched = read_coordination_runtime_shadow_todo_candidate(
+        goal=goal,
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        todo_id="todo_one",
+        projection={
+            "schema_version": "projection_v0",
+            "goal_id": "goal-a",
+            "todos": [{"todo_id": "todo_one", "status": "open"}],
+        },
+        runtime_invoker=invoke,
+    )
+    assert matched["status"] == "matched"
+    assert matched["read_candidate_qualified"] is True
+    assert calls[0][0] == "coordination.runtime_shadow.todo_read_candidate"
+    assert calls[0][1]["todo_id"] == "todo_one"
 
 
 def _dispatch(

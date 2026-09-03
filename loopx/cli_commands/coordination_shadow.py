@@ -12,6 +12,7 @@ from ..control_plane.coordination.runtime_shadow import (
     inspect_coordination_runtime_shadow,
     load_task_lease_runtime_shadow_records,
     qualify_coordination_runtime_shadow,
+    read_coordination_runtime_shadow_todo_candidate,
     resolve_coordination_runtime_shadow_config,
     rollback_coordination_runtime_shadow,
 )
@@ -44,6 +45,10 @@ def register_coordination_shadow_command(
         (
             "qualify",
             "Qualify sustained parity coverage across the file shadow lineage.",
+        ),
+        (
+            "read-candidate",
+            "Read one parity-matched file Todo as pre-promotion evidence.",
         ),
         (
             "bootstrap",
@@ -79,6 +84,12 @@ def register_coordination_shadow_command(
                 action="append",
                 default=[],
                 help="Required mirrored mutation kind; repeat for multiple kinds.",
+            )
+        if name == "read-candidate":
+            action.add_argument(
+                "--todo-id",
+                required=True,
+                help="Exact Todo identity to read from the parity-matched file head.",
             )
 
 
@@ -121,6 +132,14 @@ def _render(payload: dict[str, object]) -> str:
     qualification = payload.get("qualification")
     if isinstance(qualification, dict):
         lines.append(f"- qualification: `{qualification.get('status')}`")
+    read_candidate = payload.get("read_candidate")
+    if isinstance(read_candidate, dict):
+        lines.extend(
+            [
+                f"- read_candidate: `{read_candidate.get('status')}`",
+                f"- read_candidate_qualified: `{read_candidate.get('read_candidate_qualified')}`",
+            ]
+        )
     error = payload.get("error")
     if error:
         lines.append(f"- error: `{error}`")
@@ -248,6 +267,20 @@ def handle_coordination_shadow_command(
             )
             payload["qualification"] = qualification
             payload["ok"] = qualification.get("status") == "qualified"
+        if args.coordination_shadow_command == "read-candidate":
+            read_candidate = read_coordination_runtime_shadow_todo_candidate(
+                goal=goal,
+                runtime_root=runtime_root,
+                goal_id=args.goal_id,
+                todo_id=args.todo_id,
+                projection=projection,
+            )
+            payload["read_candidate"] = read_candidate
+            payload["ok"] = bool(
+                read_candidate.get("status") == "matched"
+                and read_candidate.get("read_candidate_qualified") is True
+                and read_candidate.get("decision_read_from_shadow") is False
+            )
         if args.coordination_shadow_command == "rollback":
             provider_revision = str(args.provider_revision).strip()
             payload["expected_provider_revision"] = provider_revision

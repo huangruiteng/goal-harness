@@ -35,6 +35,10 @@ RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA_VERSION = (
     "loopx_coordination_runtime_shadow_qualify_v0"
 )
 RUNTIME_SHADOW_QUALIFY_METHOD = "coordination.runtime_shadow.qualify"
+RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA_VERSION = (
+    "loopx_coordination_runtime_shadow_todo_read_v0"
+)
+RUNTIME_SHADOW_TODO_READ_METHOD = "coordination.runtime_shadow.todo_read_candidate"
 
 
 @dataclass(frozen=True)
@@ -437,6 +441,55 @@ def qualify_coordination_runtime_shadow(
             "reason_code": "shadow_qualification_runtime_result_invalid",
             "qualified": False,
             "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    return dict(result)
+
+
+def read_coordination_runtime_shadow_todo_candidate(
+    *,
+    goal: Mapping[str, Any] | None,
+    runtime_root: Path,
+    goal_id: str,
+    todo_id: str,
+    projection: Mapping[str, Any],
+    runtime_invoker: RuntimeInvoker = effect_runtime_result,
+) -> dict[str, object]:
+    """Read one parity-matched file Todo as pre-promotion evidence only."""
+
+    config = resolve_coordination_runtime_shadow_config(goal)
+    if not config.enabled:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_todo_read_result_v0",
+            "status": "disabled",
+            "reason_code": config.reason_code,
+            "read_candidate_qualified": False,
+            "decision_read_from_shadow": False,
+        }
+    request = {
+        "schema_version": RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA_VERSION,
+        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "goal_id": goal_id,
+        "todo_id": todo_id,
+        "projection": dict(projection),
+    }
+    try:
+        result = runtime_invoker(RUNTIME_SHADOW_TODO_READ_METHOD, request)
+    except Exception as exc:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_todo_read_result_v0",
+            "status": "failed",
+            "reason_code": "shadow_todo_read_runtime_unavailable",
+            "reason": str(exc),
+            "read_candidate_qualified": False,
+            "decision_read_from_shadow": False,
+        }
+    if not isinstance(result, Mapping):
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_todo_read_result_v0",
+            "status": "failed",
+            "reason_code": "shadow_todo_read_runtime_result_invalid",
+            "read_candidate_qualified": False,
             "decision_read_from_shadow": False,
         }
     return dict(result)

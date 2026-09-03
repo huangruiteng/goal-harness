@@ -17,10 +17,12 @@ import {
   commitCoordinationRuntimeShadow,
   inspectCoordinationRuntimeShadow,
   qualifyCoordinationRuntimeShadow,
+  readCoordinationRuntimeShadowTodoCandidate,
   rollbackCoordinationRuntimeShadow,
   COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
 } from "../../loopx/control_plane/coordination/runtime_shadow.ts";
@@ -380,6 +382,76 @@ test("runtime shadow inspection reports missing, matched, and drifted evidence",
     drifted.observed_projection_sha256,
   );
   assert.equal(drifted.decision_read_from_shadow, false);
+});
+
+test("runtime shadow Todo read candidate requires exact legacy parity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-todo-read-"));
+  const input = await request(root);
+  const readRequest = {
+    schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: input.goal_id,
+    todo_id: "todo_one",
+    projection: input.projection,
+  };
+
+  const missing = await readCoordinationRuntimeShadowTodoCandidate(readRequest);
+  assert.equal(missing.status, "missing");
+  assert.equal(missing.read_candidate_qualified, false);
+
+  assert.equal((await commitCoordinationRuntimeShadow(input)).status, "applied");
+  const matched = await readCoordinationRuntimeShadowTodoCandidate(readRequest);
+  assert.equal(matched.status, "matched");
+  assert.equal(matched.read_candidate_qualified, true);
+  assert.equal(matched.decision_read_from_shadow, false);
+  assert.deepEqual(matched.todo, input.projection.todos[0]);
+  assert.deepEqual(matched.todo_ids, ["todo_one"]);
+
+  const driftedProjection = structuredClone(input.projection);
+  (driftedProjection.todos[0] as Record<string, unknown>).claimed_by = "agent-b";
+  const drifted = await readCoordinationRuntimeShadowTodoCandidate({
+    ...readRequest,
+    projection: driftedProjection,
+  });
+  assert.equal(drifted.status, "drifted");
+  assert.equal(drifted.read_candidate_qualified, false);
+  assert.equal(drifted.parity_matches, false);
+});
+
+test("runtime shadow Todo read candidate fails closed for missing or duplicate Todo ids", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-todo-read-invalid-"));
+  const input = await request(root);
+  assert.equal((await commitCoordinationRuntimeShadow(input)).status, "applied");
+
+  const absent = await readCoordinationRuntimeShadowTodoCandidate({
+    schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: input.goal_id,
+    todo_id: "todo_absent",
+    projection: input.projection,
+  });
+  assert.equal(absent.status, "todo_missing");
+  assert.equal(absent.read_candidate_qualified, false);
+
+  const duplicateProjection = structuredClone(input.projection);
+  duplicateProjection.todos.push(structuredClone(duplicateProjection.todos[0]!));
+  const duplicateRoot = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-todo-duplicate-"));
+  assert.equal((await commitCoordinationRuntimeShadow({
+    ...input,
+    runtime_root: duplicateRoot,
+    operation_id: "todo:goal-a:duplicate:v1",
+    projection: duplicateProjection,
+  })).status, "applied");
+  const duplicate = await readCoordinationRuntimeShadowTodoCandidate({
+    schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA,
+    runtime_root: duplicateRoot,
+    goal_id: input.goal_id,
+    todo_id: "todo_one",
+    projection: duplicateProjection,
+  });
+  assert.equal(duplicate.status, "failed");
+  assert.equal(duplicate.reason_code, "shadow_todo_read_unavailable");
+  assert.equal(duplicate.read_candidate_qualified, false);
 });
 
 test("runtime shadow qualification requires sustained operation and event coverage", async () => {

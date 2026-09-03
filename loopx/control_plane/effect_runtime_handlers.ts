@@ -103,6 +103,7 @@ import {
   commitCoordinationRuntimeShadow,
   inspectCoordinationRuntimeShadow,
   qualifyCoordinationRuntimeShadow,
+  readCoordinationRuntimeShadowTodoCandidate,
   rollbackCoordinationRuntimeShadow,
 } from "./coordination/runtime_shadow.ts";
 import {
@@ -368,6 +369,10 @@ export function createEffectRuntimeHandlers(
     ["coordination.runtime_shadow.commit", commitCoordinationRuntimeShadow],
     ["coordination.runtime_shadow.inspect", inspectCoordinationRuntimeShadow],
     ["coordination.runtime_shadow.qualify", qualifyCoordinationRuntimeShadow],
+    [
+      "coordination.runtime_shadow.todo_read_candidate",
+      readCoordinationRuntimeShadowTodoCandidate,
+    ],
     ["coordination.runtime_shadow.rollback", rollbackCoordinationRuntimeShadow],
     ["task_lease.write_scopes.overlap", evaluateTaskLeaseWriteScopesOverlap],
     ["quota.monitor_poll.commit", evaluateQuotaMonitorPollCommit],

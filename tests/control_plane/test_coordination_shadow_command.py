@@ -29,6 +29,7 @@ def _run(
     provider_revision: str | None = None,
     minimum_operations: int = 3,
     require_event_kind: list[str] | None = None,
+    todo_id: str | None = None,
 ) -> tuple[int, dict[str, object]]:
     monkeypatch.setattr(command, "load_registry", lambda _path: {"goals": [_goal()]})
     monkeypatch.setattr(
@@ -64,6 +65,7 @@ def _run(
         provider_revision=provider_revision,
         minimum_operations=minimum_operations,
         require_event_kind=require_event_kind or [],
+        todo_id=todo_id,
         format="json",
     )
     result = command.handle_coordination_shadow_command(
@@ -203,6 +205,66 @@ def test_coordination_shadow_parser_exposes_explicit_execute_gate() -> None:
     )
     assert qualify.minimum_operations == 5
     assert qualify.require_event_kind == ["todo_claim", "task_lease_acquire"]
+
+    read_candidate = parser.parse_args(
+        [
+            "coordination-shadow",
+            "read-candidate",
+            "--goal-id",
+            "goal-a",
+            "--todo-id",
+            "todo_b",
+        ]
+    )
+    assert read_candidate.todo_id == "todo_b"
+
+
+def test_coordination_shadow_reads_parity_matched_todo_candidate(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        command,
+        "inspect_coordination_runtime_shadow",
+        lambda **_kwargs: {
+            "status": "matched",
+            "parity_matches": True,
+            "decision_read_from_shadow": False,
+        },
+    )
+    request: dict[str, object] = {}
+
+    def read_candidate(**kwargs) -> dict[str, object]:
+        request.update(kwargs)
+        return {
+            "status": "matched",
+            "todo_id": "todo_b",
+            "todo": {"todo_id": "todo_b", "status": "open"},
+            "read_candidate_qualified": True,
+            "decision_read_from_shadow": False,
+        }
+
+    monkeypatch.setattr(
+        command,
+        "read_coordination_runtime_shadow_todo_candidate",
+        read_candidate,
+    )
+    result, payload = _run(
+        monkeypatch,
+        tmp_path,
+        action="read-candidate",
+        todo_id="todo_b",
+    )
+
+    assert result == 0
+    assert payload["ok"] is True
+    assert payload["executed"] is False
+    assert payload["read_candidate"]["todo_id"] == "todo_b"
+    assert request["todo_id"] == "todo_b"
+    assert request["projection"]["todos"] == [
+        {"todo_id": "todo_a", "status": "done"},
+        {"todo_id": "todo_b", "status": "open"},
+    ]
 
 
 def test_coordination_shadow_qualify_applies_coverage_policy(

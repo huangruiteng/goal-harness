@@ -37,6 +37,10 @@ export const COORDINATION_RUNTIME_SHADOW_QUALIFY_REQUEST_SCHEMA =
   "loopx_coordination_runtime_shadow_qualify_v0";
 export const COORDINATION_RUNTIME_SHADOW_QUALIFY_RESULT_SCHEMA =
   "loopx_coordination_runtime_shadow_qualification_v0";
+export const COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA =
+  "loopx_coordination_runtime_shadow_todo_read_v0";
+export const COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA =
+  "loopx_coordination_runtime_shadow_todo_read_result_v0";
 
 interface RuntimeShadowRequest {
   runtime_root: string;
@@ -79,6 +83,13 @@ interface RuntimeShadowQualificationRequest {
   projection: JsonObject;
   minimum_operations: number;
   required_event_kinds: string[];
+}
+
+interface RuntimeShadowTodoReadRequest {
+  runtime_root: string;
+  goal_id: string;
+  todo_id: string;
+  projection: JsonObject;
 }
 
 function requiredString(value: unknown, label: string): string {
@@ -199,6 +210,21 @@ function decodeQualificationRequest(value: unknown): RuntimeShadowQualificationR
       input.required_event_kinds,
       "required_event_kinds",
     ),
+  };
+}
+
+function decodeTodoReadRequest(value: unknown): RuntimeShadowTodoReadRequest {
+  const input = requireJsonObject(value, "coordination runtime shadow Todo read request");
+  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_TODO_READ_REQUEST_SCHEMA) {
+    throw new Error("coordination runtime shadow Todo read request schema mismatch");
+  }
+  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
+  if (!isAbsolute(runtimeRoot)) throw new Error("runtime_root must be absolute");
+  return {
+    runtime_root: runtimeRoot,
+    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
+    todo_id: requireAuthorityStoreId(input.todo_id, "todo id"),
+    projection: canonicalAuthorityObject(input.projection, "projection"),
   };
 }
 
@@ -664,6 +690,141 @@ export async function inspectCoordinationRuntimeShadow(
       expected_projection_sha256: expectedProjectionSha256,
       parity_matches: false,
       bootstrap_required: false,
+      decision_read_from_shadow: false,
+    };
+  }
+}
+
+function decodeTodoReadProjection(
+  value: JsonObject,
+  goalId: string,
+): { todos: Map<string, JsonObject>; todoIds: string[] } {
+  if (value.goal_id !== goalId) {
+    throw new Error("shadow Todo read projection goal mismatch");
+  }
+  if (!Array.isArray(value.todos)) {
+    throw new Error("shadow Todo read projection todos must be an array");
+  }
+  const todos = new Map<string, JsonObject>();
+  for (const [index, candidate] of value.todos.entries()) {
+    const todo = canonicalAuthorityObject(candidate, `projection.todos[${index}]`);
+    const todoId = requireAuthorityStoreId(todo.todo_id, `projection.todos[${index}].todo_id`);
+    if (todos.has(todoId)) {
+      throw new Error("shadow Todo read projection contains duplicate todo ids");
+    }
+    todos.set(todoId, todo);
+  }
+  return { todos, todoIds: [...todos.keys()].sort() };
+}
+
+/**
+ * Exercise the first provider-read seam without promoting it to decision
+ * authority. The file head is eligible as a read candidate only when it
+ * matches the current legacy projection byte-for-byte; missing, drifted, or
+ * malformed provider state fails closed and never falls back silently.
+ */
+export async function readCoordinationRuntimeShadowTodoCandidate(
+  value: unknown,
+  dependencies: RuntimeShadowDependencies = {},
+): Promise<JsonObject> {
+  let request: RuntimeShadowTodoReadRequest;
+  try {
+    request = decodeTodoReadRequest(value);
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_shadow_todo_read_request",
+      reason: error instanceof Error ? error.message : "invalid Todo read request",
+      read_candidate_qualified: false,
+      decision_read_from_shadow: false,
+    };
+  }
+
+  const directory = join(request.runtime_root, "authority-shadow", "file-v0");
+  const store = dependencies.createStore?.(directory, request.goal_id) ??
+    new FileAuthorityStore(directory, request.goal_id);
+  const expectedProjectionSha256 = sha256(request.projection);
+  try {
+    const head = await store.loadAuthority();
+    if (head.status === "missing") {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
+        status: "missing",
+        reason_code: "shadow_todo_read_store_missing",
+        expected_projection_sha256: expectedProjectionSha256,
+        read_candidate_qualified: false,
+        bootstrap_required: true,
+        decision_read_from_shadow: false,
+      };
+    }
+    if (head.status !== "loaded") {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
+        status: "failed",
+        reason_code: head.reason_code,
+        reason: head.reason,
+        expected_projection_sha256: expectedProjectionSha256,
+        read_candidate_qualified: false,
+        decision_read_from_shadow: false,
+      };
+    }
+    const observedProjectionSha256 = sha256(head.head);
+    if (observedProjectionSha256 !== expectedProjectionSha256) {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
+        status: "drifted",
+        reason_code: "shadow_todo_read_projection_drift",
+        expected_projection_sha256: expectedProjectionSha256,
+        observed_projection_sha256: observedProjectionSha256,
+        provider_revision: head.provider_revision,
+        cursor: head.cursor,
+        parity_matches: false,
+        read_candidate_qualified: false,
+        decision_read_from_shadow: false,
+      };
+    }
+    const projection = decodeTodoReadProjection(head.head, request.goal_id);
+    const todo = projection.todos.get(request.todo_id);
+    if (todo === undefined) {
+      return {
+        schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
+        status: "todo_missing",
+        reason_code: "shadow_todo_read_todo_missing",
+        todo_id: request.todo_id,
+        todo_ids: projection.todoIds,
+        expected_projection_sha256: expectedProjectionSha256,
+        observed_projection_sha256: observedProjectionSha256,
+        provider_revision: head.provider_revision,
+        cursor: head.cursor,
+        parity_matches: true,
+        read_candidate_qualified: false,
+        decision_read_from_shadow: false,
+      };
+    }
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
+      status: "matched",
+      todo_id: request.todo_id,
+      todo,
+      todo_ids: projection.todoIds,
+      expected_projection_sha256: expectedProjectionSha256,
+      observed_projection_sha256: observedProjectionSha256,
+      provider_revision: head.provider_revision,
+      cursor: head.cursor,
+      parity_matches: true,
+      read_candidate_qualified: true,
+      source: "file_v0",
+      decision_read_from_shadow: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_TODO_READ_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "shadow_todo_read_unavailable",
+      reason: error instanceof Error ? error.message : "Todo read unavailable",
+      expected_projection_sha256: expectedProjectionSha256,
+      read_candidate_qualified: false,
       decision_read_from_shadow: false,
     };
   }
