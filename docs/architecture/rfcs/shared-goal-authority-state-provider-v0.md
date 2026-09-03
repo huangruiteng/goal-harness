@@ -1589,6 +1589,11 @@ Per stage, this increment implements:
   `todo update`) and reads them back through `FileAuthorityStore` with
   `loadAuthority`, paged `scanCommitted`, and `readReceipt`: cursor `3`, the
   three operation ids in order, and the first receipt found.
+- Stage 2A: `s2a.nokv_live_qualification` runs the merged live qualification
+  probe (`examples/nokv-authority-store/live-qualification.ts --execute-live`)
+  against an existing workbench with a fresh tenant/goal pair and requires
+  `ok=true`, the single-node store-conformance scope, every check passed, NoKV
+  SDK `0.11.0` / API `1`, and no promotion or availability claim.
 - Stage 2B: `s2b.postgresql_conformance_live` runs the PostgreSQL integration
   test file under node's TAP reporter and requires at least nine passes, zero
   failures, and zero skips.
@@ -1608,9 +1613,13 @@ Per stage, this increment implements:
   `migrate-state` seeds a fresh lineage without legacy bytes.
 
 Live rows are environment-gated (`LOOPX_TEST_POSTGRES_URL`;
-`NOKV_COORDINATION_LIVE=1` plus the `NOKV_*` stack variables). Without a
-stack they report `unverified`, and the ladder exits non-zero unless
+`NOKV_COORDINATION_LIVE=1` plus the `NOKV_*` stack variables;
+`LOOPX_NOKV_AUTHORITY_LIVE=1` plus the `LOOPX_NOKV_AUTHORITY_*` inputs).
+Without a stack they report `unverified`, and the ladder exits non-zero unless
 `--allow-unverified` is passed; an unverified row is never counted as green.
+A pending row is an unmet obligation as well: selecting one exits non-zero
+unless `--allow-pending` is passed, so a report cannot read as green while it
+executed nothing.
 The report binds the LoopX commit, tree dirtiness, probe digests, and hashed
 connection facts, and its privacy scan turns any leak of a temporary root,
 home directory, connection URL, or configuration path into
@@ -1618,8 +1627,7 @@ home directory, connection URL, or configuration path into
 
 Delivery boundary: test-only. No production entry point constructs any store;
 the ladder adds no product path and reads the candidate only through the
-retained TypeScript store. Stage 2A live qualification
-(`s2a.nokv_live_qualification`, pending PR #3819) and the Stage 2C parity half
+retained TypeScript store. The Stage 2C parity half
 (`s2c2.*`: outbox entries, idempotent drain, SIGKILL before and during drain,
 rollback with pending entries, parity equal and divergent,
 migration seed-and-drain, growth measurement) are declared as pending rows,

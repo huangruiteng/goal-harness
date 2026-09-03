@@ -202,8 +202,10 @@ live NoKV 测试。确定性 fake 的通过结果与这项静态 API 核对必�
 
 1. **精确 commit**：LoopX 侧为 `test/shared-authority-e2e-ladder` 分支（基于
    PR #3818 第三轮修订头，含单一 effective runtime root 修复；ladder 报告的 `bindings.loopx_commit` 与
-   `bindings.loopx_tree_dirty` 记录实际运行的树）。NoKV 侧与 PostgreSQL 侧本轮
-   无可达栈，对应行按设计报告 `unverified`。
+   `bindings.loopx_tree_dirty` 记录实际运行的树）。NoKV 侧本轮在本机单节点栈上
+   执行（`nokv` 83971e62ab，Python SDK 0.11.0，`nokv serve` 以静态 etcd 路由 +
+   RustFS 对象存储运行；报告只记录 `bindings.nokv_client_config_sha256` 与 SDK
+   版本，不记录任何连接值）；PostgreSQL 侧无可达栈，对应行按设计报告 `unverified`。
 2. **探针源码**：`loopx/control_plane/testing/authority_e2e_ladder.py`、
    `loopx/control_plane/testing/authority_e2e_fixtures.py` 与只读 TypeScript
    探针 `tests/control_plane_ts/authority_store_readback_probe.ts`（随分支评审；
@@ -211,7 +213,12 @@ live NoKV 测试。确定性 fake 的通过结果与这项静态 API 核对必�
    `examples/shared-goal-authority-e2e/ladder.py`，pytest 投影为
    `tests/control_plane/test_shared_goal_authority_e2e.py`。各行驱动的是真实
    `python -m loopx.cli` 与生产 `FileAuthorityStore`，不是参考实现。
-3. **断言**：本轮 9 个 deterministic 行全部 pass：`s0.file_matrix_twelve_rows`
+3. **断言**：本轮 9 个 deterministic 行全部 pass，2 个 NoKV live 行在本机栈上
+   pass：`s0.nokv_live_matrix` 十三个 NoKV 场景行全为 true 且与 file provider 的
+   十二个共享行逐行一致；`s2a.nokv_live_qualification` 对既有 workbench 以新铸
+   tenant/goal 运行已合并的 live 资格探针，13 项 check 全部 `passed`，final
+   generation `3`，SDK `0.11.0` / API `1`，且报告声明未改变 authority source、未
+   证明可用性。deterministic 行：`s0.file_matrix_twelve_rows`
    十二个 file provider 场景行全为 true；`s1.cli_document_decodes_through_ts_store`
    三次 CLI 写入经 TypeScript store 回读 cursor `3`、operation id 按序一致、首条
    receipt found；七个 `s2c1.*` 行（configure 往返、12 个 writer family 全部
@@ -225,9 +232,10 @@ live NoKV 测试。确定性 fake 的通过结果与这项静态 API 核对必�
    迁移后的候选序列化中不含旧 store identity、legacy revision、源路径与私有
    字节；报告隐私扫描把注入的临时路径改写为 `fail/privacy_violation`，且
    live 变量清空时 ladder 退出码为 1（均由 pytest 钉住）。
-5. **未执行与限定**：`s0.nokv_live_matrix`（`nokv_live_env_missing`）与
-   `s2b.postgresql_conformance_live`（`postgres_url_missing`）本轮 unverified，
-   ladder 默认退出码 1，`--allow-unverified` 才为 0；`s2a.nokv_live_qualification`
-   与 9 个 `s2c2.*` 行以 pending 声明，未宣称。Stage 2C parity、outbox、drain
-   与增长门槛均未验证；本记录不构成任何 provider 晋升
+5. **未执行与限定**：`s2b.postgresql_conformance_live`（`postgres_url_missing`）
+   本轮 unverified；在没有 NoKV 与 PostgreSQL 栈的 CI 环境里三个 live 行都报告
+   `unverified`。9 个 `s2c2.*` 行以 pending 声明，未宣称；选中任一 pending 行而不传
+   `--allow-pending` 时 ladder 以非零退出，零执行的报告不可能显示为 green。默认
+   全量运行退出码为 1，`--allow-unverified --allow-pending` 才为 0。Stage 2C
+   parity、outbox、drain 与增长门槛均未验证；本记录不构成任何 provider 晋升
    或生产结论。

@@ -1273,6 +1273,11 @@ CLI runner、observation-lock 窗口、候选回读）、只读 TypeScript 探�
   `FileAuthorityStore` 的 `loadAuthority`、分页 `scanCommitted` 与
   `readReceipt` 回读：cursor 为 `3`、三个 operation id 按序一致、首条 receipt
   可找到。
+- Stage 2A：`s2a.nokv_live_qualification` 对一个已存在的 workbench 以新铸的
+  tenant/goal 运行已合并的 live 资格探针
+  （`examples/nokv-authority-store/live-qualification.ts --execute-live`），要求
+  `ok=true`、单节点 store conformance 范围、每项 check 通过、NoKV SDK `0.11.0`
+  / API `1`，且不宣称晋升或可用性。
 - Stage 2B：`s2b.postgresql_conformance_live` 在 node TAP reporter 下运行
   PostgreSQL 集成测试文件，要求至少九个 pass、零 fail、零 skip。
 - Stage 2C 观察基础：七个 `s2c1.*` 行移植本地 shadow CLI E2E 与迁移断言，并钉住单一
@@ -1289,15 +1294,16 @@ CLI runner、observation-lock 窗口、候选回读）、只读 TypeScript 探�
   产生 lease 状态；`migrate-state` 在不携带 legacy 字节的前提下建立新 lineage。
 
 Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1` 加
-`NOKV_*` 栈变量）。没有栈时它们报告 `unverified`，除非传入
-`--allow-unverified`，否则 ladder 以非零退出；unverified 行永不计为 green。
+`NOKV_*` 栈变量；`LOOPX_NOKV_AUTHORITY_LIVE=1` 加 `LOOPX_NOKV_AUTHORITY_*` 输入）。
+没有栈时它们报告 `unverified`，除非传入 `--allow-unverified`，否则 ladder 以非零
+退出；unverified 行永不计为 green。pending 行同样是未兑现的义务：选中它而不传
+`--allow-pending` 就非零退出，所以一份零执行的报告不可能显示为 green。
 报告绑定 LoopX commit、工作树是否 dirty、探针 digest 与经哈希的连接事实；其隐私
 扫描会把任何临时根目录、home 目录、连接 URL 或配置路径的泄露改写为
 `fail/privacy_violation`。
 
 交付边界：test-only。没有任何生产入口构造任何 store；ladder 不新增产品路径，
-只经保留的 TypeScript store 读取候选。Stage 2A live 资格验证
-（`s2a.nokv_live_qualification`，待 PR #3819 合并）与 Stage 2C parity 后半段
+只经保留的 TypeScript store 读取候选。Stage 2C parity 后半段
 （`s2c2.*`：outbox 条目、幂等 drain、drain 前与 drain 中的 SIGKILL、带 pending
 条目的 rollback、parity 相等与分歧、迁移 seed-and-drain、增长
 度量）以 pending 行声明，而非宣称已完成。本小节记录的是上述阶段的可执行证据；
