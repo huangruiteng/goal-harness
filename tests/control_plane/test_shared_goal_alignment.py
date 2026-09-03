@@ -453,6 +453,8 @@ def test_lease_owner_mismatch_projects_a_conflict_fact(
                 "schema_version": "task_lease_v0",
                 "goal_id": GOAL_ID,
                 "todo_id": "todo_lane_a",
+                "status": "active",
+                "expires_at": "2099-01-01T00:00:00Z",
                 "owner": "agent-b",
                 "lease_epoch": 2,
                 "version": 1,
@@ -482,6 +484,8 @@ def test_matching_lease_owner_is_not_a_conflict(
                 "schema_version": "task_lease_v0",
                 "goal_id": GOAL_ID,
                 "todo_id": "todo_lane_a",
+                "status": "active",
+                "expires_at": "2099-01-01T00:00:00Z",
                 "owner": "agent-a",
                 "lease_epoch": 1,
                 "version": 1,
@@ -508,6 +512,8 @@ def test_corrupt_lease_epoch_fails_closed(
         leases={
             "todo_lane_a": {
                 "schema_version": "task_lease_v0",
+                "status": "active",
+                "expires_at": "2099-01-01T00:00:00Z",
                 "owner": "agent-a",
                 "lease_epoch": 0,
                 "version": 1,
@@ -680,6 +686,8 @@ def test_non_numeric_lease_epoch_fails_closed(
         leases={
             "todo_lane_a": {
                 "schema_version": "task_lease_v0",
+                "status": "active",
+                "expires_at": "2099-01-01T00:00:00Z",
                 "owner": "agent-a",
                 "lease_epoch": "two",
                 "version": 1,
@@ -693,6 +701,98 @@ def test_non_numeric_lease_epoch_fails_closed(
             agent_id="agent-a",
             project=paths["project"],
         )
+
+
+def test_released_lease_record_does_not_project_ownership_conflict(
+    tmp_path: Path,
+) -> None:
+    paths = _write_fixture(
+        tmp_path,
+        todo_specs=_default_todo_specs(),
+        events=_default_events(),
+        leases={
+            "todo_lane_a": {
+                "schema_version": "task_lease_v0",
+                "goal_id": GOAL_ID,
+                "todo_id": "todo_lane_a",
+                "status": "released",
+                "expires_at": "2099-01-01T00:00:00Z",
+                "owner": "agent-b",
+                "lease_epoch": 2,
+                "version": 1,
+            },
+        },
+    )
+
+    projection = project_shared_goal_alignment(
+        goal_id=GOAL_ID,
+        agent_id="agent-a",
+        project=paths["project"],
+    )
+
+    assert "lease_owner_mismatch" not in projection["conflict_facts"]
+    assert projection["conflict_facts"] == []
+
+
+def test_expired_lease_record_does_not_project_ownership_conflict(
+    tmp_path: Path,
+) -> None:
+    paths = _write_fixture(
+        tmp_path,
+        todo_specs=_default_todo_specs(),
+        events=_default_events(),
+        leases={
+            "todo_lane_a": {
+                "schema_version": "task_lease_v0",
+                "goal_id": GOAL_ID,
+                "todo_id": "todo_lane_a",
+                "status": "active",
+                "expires_at": "2020-01-01T00:00:00Z",
+                "owner": "agent-b",
+                "lease_epoch": 2,
+                "version": 1,
+            },
+        },
+    )
+
+    projection = project_shared_goal_alignment(
+        goal_id=GOAL_ID,
+        agent_id="agent-a",
+        project=paths["project"],
+    )
+
+    assert "lease_owner_mismatch" not in projection["conflict_facts"]
+    assert projection["conflict_facts"] == []
+
+
+def test_active_lease_owner_mismatch_projects_conflict_fact(
+    tmp_path: Path,
+) -> None:
+    paths = _write_fixture(
+        tmp_path,
+        todo_specs=_default_todo_specs(),
+        events=_default_events(),
+        leases={
+            "todo_lane_a": {
+                "schema_version": "task_lease_v0",
+                "goal_id": GOAL_ID,
+                "todo_id": "todo_lane_a",
+                "status": "active",
+                "expires_at": "2099-01-01T00:00:00Z",
+                "owner": "agent-b",
+                "lease_epoch": 2,
+                "version": 1,
+            },
+        },
+    )
+
+    projection = project_shared_goal_alignment(
+        goal_id=GOAL_ID,
+        agent_id="agent-a",
+        project=paths["project"],
+    )
+
+    assert projection["conflict_facts"] == ["lease_owner_mismatch"]
 
 
 def test_projection_is_deterministic_across_repeated_calls(

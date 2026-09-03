@@ -57,7 +57,7 @@ from ..todos.projection import (
     todo_item_is_actionable_open,
 )
 from ..work_items.local_lease_record import lease_epoch, read_lease
-from ..work_items.task_lease import task_lease_path
+from ..work_items.task_lease import lease_is_active, task_lease_path
 from .active_state_event_projection import state_event_log_candidates
 from .active_state_metadata import parse_state_frontmatter
 from .goal_frontier import (
@@ -277,7 +277,7 @@ def _claim_lease_facts(
             todo_id=todo_id,
         )
     )
-    if not lease:
+    if not lease or not lease_is_active(lease):
         return {"lease_epoch": None, "lease_owner": None}
     return {
         "lease_epoch": lease_epoch(lease),
