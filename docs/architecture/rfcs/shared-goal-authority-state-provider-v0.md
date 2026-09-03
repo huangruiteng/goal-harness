@@ -1740,6 +1740,64 @@ it does not promote any provider or complete the Stage 2C promotion.
    store identity or lineage, and an explicit TEST ONLY canary marker; a Goal
    without that marker cannot be admitted by a shared-authority guard, and
    the runtime resolves the provider from the record rather than from argv.*
+8. Which head schema does the local promotion commit, and which fields does
+   the aggregate own? *Proposed answer: a new `loopx_local_authority_head_v1`
+   that is a superset of the Stage 2C shadow projection (`goal_id`,
+   `handoff_mode`, the closed todo and lease field sets) plus
+   `authority_revision`, `store_binding`, and an `authority_source` record,
+   rather than the Python reference `loopx_coordination_head_v1`; Stage 3
+   projects from it. The aggregate is canonical only for the closed
+   coordination set C (per todo: identity, role, status, claim and binding
+   fields, gates, task class and action kind, required scopes and
+   capabilities, continuation and successor links, the completion triple
+   and evidence pointers, the archived flag, `todo_revision`, and
+   `last_lease_epoch`; every lease record; the goal `handoff_mode`). Prose
+   (text, notes, next action, monitor metadata, feedback, `updated_at`)
+   stays Markdown-canonical. `archive-completed` is a head transition, not a
+   projection rewrite. Appendix C carries the design.*
+9. Does v0 promotion cover only `hard_lease` goals? *Proposed answer: yes. A
+   `legacy` or `soft_claim` goal first switches mode under the Appendix B
+   quiescence rule; promotion never changes the mode implicitly.*
+10. Once the aggregate is canonical, is prose persisted through a projection
+    outbox, or does the RFC accept a crash window between the head commit and
+    the Markdown rewrite? *Proposed answer: a projection outbox that shares
+    the direction-neutral entry schema of the Stage 2C parity half
+    (artifact-first: outbox entry, TypeScript commit, Markdown render, entry
+    retirement). Readers compare the front-matter watermark with the head
+    revision and replay the outbox when behind. A promoted goal stops writing
+    `.lifecycle-operations` and `.lifecycle-fences`; the transaction replaces
+    both.*
+11. What declares a promoted goal, and who may write that declaration?
+    *Proposed answer: a goal-level registry record
+    `coordination.authority_source` (`legacy_local | file_aggregate`,
+    provider, store identity and directory, `promoted_at`, the promotion
+    operation id, the source digest, a TEST ONLY marker, `rolled_back_from`),
+    duplicated into the state-file front matter so it travels with the file
+    (Appendix B, rule 2). Only `loopx authority promote|rollback --execute`
+    may write it; `configure-goal` refuses to edit it; `bootstrap --force`
+    refuses a promoted goal. In v0 a second endpoint that sees the
+    front-matter declaration gets `goal_promoted_on_other_endpoint` on
+    coordination-field writes; an older endpoint can only be detected
+    (`projection_diverged`), not blocked, until shared mode.*
+12. Which file-profile retention, fast-path, and capacity rules gate the
+    first real promotion, and may `committed[].projection` degrade to a
+    digest? *Proposed answer: question 5 applied to the file profile before
+    any real goal is promoted: sealed segments outside the head document
+    (create-only, chained by path, digest, count, and cursor range; a missing
+    segment fails closed), a head-only fast path that validates the chain
+    once per process or through an in-document checkpoint, and a
+    `store_capacity_exhausted` fail-closed limit (proposed 8 MiB). The
+    projection of a retained transaction may degrade to a digest only if the
+    Stage 3 scan keeps every field parity compares. Question 6 couples here:
+    Host renewals must be transactions, never direct lease-file writes,
+    because their rate sets the segment window.*
+13. What happens to the Python reference executor (`executor.py`,
+    `file_provider.py`, `head.py`, `goal_state_shadow.py`)? *Proposed answer:
+    keep it coverage-only until the TypeScript transaction module exists,
+    port its scenario batteries to TypeScript tests, then delete it in the
+    promotion PR; two local aggregate formats cannot both be canonical.
+    Flipping the file profile's `qualification_holds` to `[]` and its `stage`
+    literal happens only inside that PR.*
 
 ---
 
@@ -1890,3 +1948,104 @@ claim overriding an active lease; the completion fence disarming in the
 conflicted state; authorization running before the lease fence; claim-change
 entry points not yet gated; the window between the lease acquire's projection
 read and the state-file lock.
+
+
+## Appendix C: Stage 2C Promotion Design (proposal, 2026-09-03)
+
+This appendix records the design the second half of Stage 2C promotes toward.
+It is a proposal for questions 8 to 13 in section 12; nothing in it is
+implemented, and the parity half (transaction-bound outbox, drain, typed
+parity verdict) must merge and this design must be approved before any
+promotion code starts.
+
+### Target state
+
+- Field-split authority. The local `FileAuthorityStore` aggregate becomes
+  canonical for the closed coordination set C named in question 8; prose
+  stays canonical in Markdown. Every legal transition of a C field is exactly
+  one `commitAuthority` (events, next head, receipt); the receipt index of
+  `FileAuthorityStore.committed[]` is the receipt store, so section 6.2
+  atomicity holds without embedding receipts in the head.
+- Decisions stay in TypeScript. Lease decisions reuse
+  `evaluateTaskLeaseAcquireDecision` and `decideTaskLeaseLifecycle`; todo,
+  terminal, and handoff decisions need the Stage 1 Part 2 TypeScript cutover
+  first. A new `local_authority_transaction.ts` handler reads the head under
+  the store lock, runs the section 5 steps, composes the pure decisions,
+  commits, reconciles conflict or ambiguity through `readReceipt`, and returns
+  the affected records for rendering. The happy path is two round trips.
+- Markdown and lease files become projections. The front matter carries
+  `authority_source`, `authority_store_identity`, `authority_revision`, and
+  `authority_projection_digest`; lease projection files carry
+  `projected_from`. Prose persistence goes through the projection outbox of
+  question 10; `projection_freshness(goal)` compares the watermark with the
+  head revision and replays the outbox, and a digest mismatch is
+  `projection_diverged`, which blocks until `loopx authority reconcile`.
+
+### Fencing legacy writers
+
+- One gate, `require_local_authority_write_grant`, runs after every Markdown
+  lock is taken and before any decision, in every Todo, follow-up,
+  handoff-mode, refresh-state, bootstrap, and feedback writer; the lease side
+  receives the `authority_source` fact through the existing native requests
+  and refuses lease-file writes for a promoted goal
+  (`legacy_lease_writer_fenced`). Error codes: `legacy_writer_fenced`,
+  `authority_unavailable` (store missing, corrupt, or lock timeout; always
+  fail closed, never fall back), `store_lineage_mismatch`,
+  `projection_diverged`, `goal_promoted_on_other_endpoint`,
+  `promoted_field_write_without_transition`.
+- Prose writers stay allowed on a promoted goal but must pass the gate: the
+  watermark equals the head revision, the outbox is empty, and the C fields
+  parse identically before and after the write.
+- Section 8's no-automatic-fallback rule is local: the first authority write
+  is `authority_revision > 0`, the gate never degrades, and only
+  `loopx authority rollback --execute` returns a goal to `legacy_local`,
+  retiring the store lineage so a later promotion mints a new identity.
+
+### Commands
+
+- `loopx authority promote --goal-id G [--execute]` takes the Markdown
+  (cross-runtime), lease, and store locks in that order; requires an enabled
+  shadow whose `verify` is `equal` for the current source digest,
+  `handoff_mode == hard_lease`, Appendix B quiescence, no prepared
+  `.lifecycle-operations` or held `.lifecycle-fences`, no event-only todo, and
+  one runtime root; bootstraps the head from every todo (including done ones,
+  with lease watermarks against ABA) at revision 0; commits it to a fresh
+  store directory (`operation_id = "promote:" + sha256(goal, source_digest)`,
+  event `authority_promoted`); renders and verifies the projection digest;
+  then flips the registry record and retires `authority_shadow`. A rerun
+  after a crash refuses a store whose source digest differs unless
+  `--discard-abandoned-store` is given, and completes idempotently once the
+  watermark is in place.
+- `loopx authority rollback --goal-id G --execute` needs the same quiescence
+  and an empty outbox, exports the head into the Markdown C fields and the
+  final lease records, verifies `equal`, removes the watermark, records
+  `legacy_local` plus `rolled_back_from`, and retires the lineage. At
+  revision 0 it is section 8's return to an untouched local source; after
+  that it is the reviewed fenced export of question 3 and never runs during
+  an active lease.
+- `loopx authority verify --goal-id G` is the post-promotion parity check
+  (`equal | diverged | stale`, plus pending outbox) and joins `loopx doctor`.
+
+### Growth is a promotion prerequisite
+
+`retain_all_v0` in one document is quadratic: a 600 s TTL renewed every
+300 s with three active todos is roughly 300 transitions a day and 9000 a
+month, about 140 MB of document at a 15 KiB head, with every CLI command
+parsing and hashing the whole file, past the 5 s effect timeout and the 2 MiB
+response cap. Question 12 therefore precedes any real promotion; retaining
+everything in one document is acceptable only for the promotion bootstrap and
+for test goals.
+
+### Sequence
+
+A. todo, terminal, and handoff decisions cut over to TypeScript;
+B. `local_authority_transaction.ts` reference implementation, unwired, with
+the executor batteries ported; C. file-store retention, fast path, and
+capacity (questions 5 and 12); D. registry record, gate, watermark, and
+projection outbox, dormant with `authority_source` fixed at `legacy_local`;
+E. the promotion PR (promote, rollback, verify, routing to B, projection
+rendering, deletion of the four reference modules, flipping the holds and
+stage literal, governance rows, and this RFC's status section). E and every
+`file_aggregate` return path in D wait for the parity half to merge and for
+this design to be approved; D's outbox reuses the parity half's entry schema
+so the repository never carries two record formats.

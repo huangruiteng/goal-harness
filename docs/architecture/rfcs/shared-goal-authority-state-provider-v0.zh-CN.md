@@ -1394,6 +1394,48 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
    布，记录 provider 种类、store identity 或 lineage，以及显式的 TEST ONLY canary
    标记；没有该标记的 Goal 不得被 shared-authority guard 准入，runtime 从该记录而
    非 argv 解析 provider。*
+8. 本地 promotion 提交哪种 head schema，aggregate 拥有哪些字段？*拟议答案：新的
+   `loopx_local_authority_head_v1`，它是 Stage 2C shadow 投影（`goal_id`、
+   `handoff_mode`、闭合的 todo 与 lease 字段集）的超集，再加 `authority_revision`、
+   `store_binding` 与一条 `authority_source` 记录，而不是 Python 参考实现的
+   `loopx_coordination_head_v1`；Stage 3 从它投影。aggregate 只对闭合的协调字段集
+   C 具有权威（每个 todo：身份、role、status、claim 与 binding 字段、gate、task
+   class 与 action kind、required scopes 与 capabilities、continuation 与
+   successor 链接、completion 三元组与 evidence 指针、archived 标记、
+   `todo_revision`、`last_lease_epoch`；每条 lease 记录；goal 的
+   `handoff_mode`）。prose（正文、note、next action、monitor 元数据、feedback、
+   `updated_at`）仍以 Markdown 为准。`archive-completed` 是一次 head transition，
+   不是投影重写。设计见附录 C。*
+9. v0 promotion 是否只覆盖 `hard_lease` goal？*拟议答案：是。`legacy` 或
+   `soft_claim` goal 先按附录 B 的静止规则切换模式；promotion 从不隐式改变模式。*
+10. aggregate 成为权威后，prose 是走 projection outbox 持久化，还是接受 head 提交与
+    Markdown 重写之间的崩溃窗口？*拟议答案：走 projection outbox，并与 Stage 2C
+    parity 半段共用同一个方向中立的 entry schema（artifact-first：outbox entry、
+    TypeScript commit、Markdown 渲染、entry 退役）。读者用 front matter 水印比对
+    head revision，落后则回放 outbox。已晋升的 goal 不再写
+    `.lifecycle-operations` 与 `.lifecycle-fences`，事务取代二者。*
+11. 什么声明一个 goal 已晋升，谁可以写这条声明？*拟议答案：goal 级 registry 记录
+    `coordination.authority_source`（`legacy_local | file_aggregate`、provider、
+    store identity 与目录、`promoted_at`、promotion operation id、源 digest、TEST
+    ONLY 标记、`rolled_back_from`），并复制到 state 文件 front matter 以随文件传播
+    （附录 B 规则 2）。只有 `loopx authority promote|rollback --execute` 能写它；
+    `configure-goal` 拒绝修改；`bootstrap --force` 拒绝已晋升的 goal。v0 里另一
+    端点看到 front matter 声明后，对协调字段的写得到
+    `goal_promoted_on_other_endpoint`；旧版本端点只能被检出
+    （`projection_diverged`）而不能被阻止，直到 shared mode。*
+12. 哪些 file profile 的保留、快速路径与容量规则是第一次真实 promotion 的前置，
+    `committed[].projection` 可否退化为 digest？*拟议答案：在任何真实 goal 晋升之
+    前把问题 5 落实到 file profile：head 文档之外的封段（create-only，按 path、
+    digest、count 与 cursor 区间成链；缺段 fail closed）、每进程校验一次链或依靠
+    文档内 checkpoint 的 head-only 快速路径、以及 `store_capacity_exhausted` 的
+    fail-closed 上限（拟 8 MiB）。已保留事务的 projection 只有在 Stage 3 scan 仍
+    保留 parity 比较的全部字段时才可退化为 digest。问题 6 在此耦合：Host 续约必须
+    经事务而不是直写 lease 文件，因为续约频率决定封段窗口。*
+13. Python 参考执行器（`executor.py`、`file_provider.py`、`head.py`、
+    `goal_state_shadow.py`）如何处置？*拟议答案：在 TypeScript 事务模块存在之前
+    保持 coverage-only，先把它们的场景电池移植为 TypeScript 测试，再在 promotion
+    PR 中删除；两种本地 aggregate 格式不能同时为准。file profile 的
+    `qualification_holds` 翻为 `[]` 与 `stage` 字面量的改变只在该 PR 内发生。*
 
 ---
 
@@ -1506,3 +1548,81 @@ shadow 读取决策，上述 migration、rollback、parity、read flip 与 legac
 characterization 阶段的负向用例在原清单上补充：软认领盖掉活租约、完成栅栏在
 矛盾态失效、授权检查先于租约栅栏、尚未设防的认领变更入口、租约获取读取投影
 与状态文件锁之间的窗口。
+
+
+## 附录 C：Stage 2C promotion 设计（提案，2026-09-03）
+
+本附录记录 Stage 2C 后半段所指向的设计，是第 12 节问题 8 到 13 的提案；其中没有
+任何内容已实现。parity 半段（事务绑定的 outbox、drain、typed parity verdict）合并
+且本设计获批之前，不得开始任何 promotion 代码。
+
+### 目标态
+
+- 字段拆分权威。本地 `FileAuthorityStore` aggregate 只对问题 8 命名的闭合协调字段集
+  C 成为权威；prose 仍以 Markdown 为准。C 字段的每一次合法 transition 恰是一次
+  `commitAuthority`（events、next head、receipt）；`FileAuthorityStore.committed[]`
+  按 operation_id 的 receipt 索引就是 receipt 存储，因此第 6.2 节的原子性无需把
+  receipt 嵌进 head。
+- 决策留在 TypeScript。lease 决策复用 `evaluateTaskLeaseAcquireDecision` 与
+  `decideTaskLeaseLifecycle`；todo、terminal 与 handoff 决策需先完成 Stage 1 Part 2
+  预留的 TypeScript cutover。新的 `local_authority_transaction.ts` handler 在 store
+  锁内自读 head，执行第 5 节步骤，组合纯决策，提交，并经 `readReceipt` 调和
+  conflict 与 ambiguity，返回受影响记录用于渲染。happy path 两次往返。
+- Markdown 与 lease 文件成为投影。front matter 携带 `authority_source`、
+  `authority_store_identity`、`authority_revision` 与
+  `authority_projection_digest`；lease 投影文件携带 `projected_from`。prose 持久化
+  经问题 10 的 projection outbox；`projection_freshness(goal)` 比对水印与 head
+  revision 并回放 outbox，digest 不符即 `projection_diverged`，阻塞直到
+  `loopx authority reconcile`。
+
+### fence legacy writer
+
+- 单一 gate `require_local_authority_write_grant` 在每个 Todo、follow-up、
+  handoff-mode、refresh-state、bootstrap 与 feedback 写者取得 Markdown 锁之后、决策
+  之前运行；lease 侧经既有 native 请求拿到 `authority_source` 事实，对已晋升 goal
+  拒绝写 lease 文件（`legacy_lease_writer_fenced`）。错误码：
+  `legacy_writer_fenced`、`authority_unavailable`（store 缺失、损坏或锁超时一律
+  fail closed，绝不回退）、`store_lineage_mismatch`、`projection_diverged`、
+  `goal_promoted_on_other_endpoint`、`promoted_field_write_without_transition`。
+- prose 写者在已晋升 goal 上仍允许，但必须过 gate：水印等于 head revision、outbox
+  为空、写前后 C 字段解析逐字段一致。
+- 第 8 节"首次权威写之后禁止自动回退"在本地的落实：首次权威写即
+  `authority_revision > 0`，gate 从不降级，只有 `loopx authority rollback
+  --execute` 能回到 `legacy_local`，并退役 store lineage，使再次晋升铸造新身份。
+
+### 命令
+
+- `loopx authority promote --goal-id G [--execute]` 依次取 Markdown（跨运行时）、
+  lease 与 store 锁；前置：shadow 已启用且对当前源 digest 的 `verify` 为 `equal`、
+  `handoff_mode == hard_lease`、附录 B 静止、无 prepared 态 `.lifecycle-operations`
+  与 held 态 `.lifecycle-fences`、无仅事件 todo、单一 runtime root；从全部 todo
+  （含 done，带防 ABA 的 lease 水印）在 revision 0 引导 head；提交到新 store 目录
+  （`operation_id = "promote:" + sha256(goal, source_digest)`，事件
+  `authority_promoted`）；渲染并校验投影 digest；再翻注册表记录并退役
+  `authority_shadow`。崩溃后重跑若发现源 digest 不同的既有 store 则拒绝，除非给出
+  `--discard-abandoned-store`；水印一旦落盘即幂等完成。
+- `loopx authority rollback --goal-id G --execute` 需同样的静止与空 outbox，把 head
+  导出到 Markdown C 字段与 lease 终态记录，校验 `equal`，去水印，记录
+  `legacy_local` 与 `rolled_back_from`，退役 lineage。revision 0 时即第 8 节回到未
+  触碰的本地源；之后即问题 3 要求的经评审的 fenced export，且永不在活跃 lease 期间
+  运行。
+- `loopx authority verify --goal-id G` 是晋升后的 parity 检查（`equal | diverged |
+  stale`，加 pending outbox），并入 `loopx doctor`。
+
+### 增长是晋升前置
+
+单文档 `retain_all_v0` 是二次方增长：TTL 600 秒、每 300 秒续约、三个活跃 todo 约
+等于每天 300 次、每月 9000 次 transition，在 15 KiB head 下约 140 MB 文档，且每条
+CLI 命令都要解析并哈希整个文件，超过 5 秒 effect 超时与 2 MiB 响应上限。因此问题
+12 先于任何真实 promotion；单文档全量保留只对 promotion bootstrap 与测试 goal 可接受。
+
+### 顺序
+
+A. todo、terminal 与 handoff 决策 cutover 到 TypeScript；B.
+`local_authority_transaction.ts` 参考实现，未接线，移植执行器电池；C. file-store
+保留、快速路径与容量（问题 5 与 12）；D. 注册表记录、gate、水印与 projection
+outbox，惰性发布，`authority_source` 恒为 `legacy_local`；E. promotion PR（promote、
+rollback、verify、路由到 B、渲染投影、删除四个参考模块、翻 holds 与 stage 字面量、
+治理行与本 RFC 状态段）。E 与 D 中一切返回 `file_aggregate` 的路径都等 parity 半
+段合并且本设计获批；D 的 outbox 复用 parity 半段的 entry schema，仓库永不同时携带
+两种记录格式。
