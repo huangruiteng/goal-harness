@@ -19,8 +19,8 @@ overridden for tests or alternate installations.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -60,7 +60,7 @@ def _subprocess_failure_detail(completed: subprocess.CompletedProcess[str]) -> s
 
 
 def _scheduler_hint_turn_instance_id(parent_turn_instance_id: str) -> str:
-    """Derive one replay-safe child receipt identity for the fallback query."""
+    """Reuse the host Turn so the fallback query replays its quota receipt."""
 
     try:
         normalized = normalize_turn_instance_id(parent_turn_instance_id)
@@ -68,8 +68,14 @@ def _scheduler_hint_turn_instance_id(parent_turn_instance_id: str) -> str:
         raise SystemExit(str(exc)) from exc
     if not normalized:
         raise SystemExit("--turn-instance-id must not be empty")
-    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
-    return f"apply-rrule:{digest}"
+    return normalized
+
+
+def _codex_home() -> Path:
+    """Resolve the active Codex App home without changing LoopX registry roots."""
+
+    configured = os.environ.get("CODEX_HOME", "").strip()
+    return Path(configured).expanduser() if configured else Path.home() / ".codex"
 
 
 def _load_registry_goal(registry: Path, goal_id: str) -> dict[str, Any]:
@@ -445,25 +451,25 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--automations-root",
         type=Path,
-        default=Path.home() / ".codex/automations",
+        default=_codex_home() / "automations",
     )
     parser.add_argument(
         "--db-path",
         type=Path,
-        default=Path.home() / ".codex/sqlite/codex-dev.db",
+        default=_codex_home() / "sqlite/codex-dev.db",
     )
     parser.add_argument("--loopx", default="loopx")
     parser.add_argument(
         "--capability",
         action="append",
-        default=["network", "external_evidence_poll"],
+        default=[],
     )
     parser.add_argument(
         "--turn-instance-id",
         default=f"apply-rrule-{_now_ms()}",
         help=(
-            "outer host turn identity; the bridge derives a stable child identity "
-            "for its internal quota query"
+            "outer host turn identity; the bridge reuses it when replaying the "
+            "scheduler hint"
         ),
     )
     parser.add_argument("--dry-run", action="store_true")
