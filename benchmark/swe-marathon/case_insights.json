@@ -1,0 +1,102 @@
+{
+  "note": "public-safe case-insight projections for the codex×LoopX SWE-Marathon study; conforms to benchmark_case_insight_projection_v0 (upstream #3878 / RFC #3812). Attaching to an experiment-board run is a follow-up.",
+  "schema_version": "benchmark_case_insight_projection_v0",
+  "count": 5,
+  "records": [
+    {
+      "schema_version": "benchmark_case_insight_projection_v0",
+      "benchmark_id": "swe-marathon",
+      "study_id": "codex-loopx-access-modes",
+      "case_id": "kubernetes-rust-rewrite",
+      "run_id": "kubernetes-rust-rewrite__codex-cli",
+      "outcome_status": "runner_invalid",
+      "failure_class": "build_failed_gate_zeroed",
+      "causal_summary": "codex-cli 在 kubernetes-rust-rewrite 构建阶段失败，partial_score 被门禁归零；属运行/环境侧失败，非模型能力定论。",
+      "expectedness": "unexpected",
+      "implication": "该格作为观测计入 matched 分母并单列标注，不单臂剔除。",
+      "next_probe": "重复运行以区分偶发构建失败与稳定失配；必要时对齐镜像/依赖。",
+      "confidence": "medium",
+      "evidence_refs": [
+        "run:kubernetes-rust-rewrite__codex-cli"
+      ],
+      "privacy_classification": "public_safe",
+      "producer_redaction_attested": true
+    },
+    {
+      "schema_version": "benchmark_case_insight_projection_v0",
+      "benchmark_id": "swe-marathon",
+      "study_id": "codex-loopx-access-modes",
+      "case_id": "kubernetes-rust-rewrite",
+      "run_id": "kubernetes-rust-rewrite__heartbeat",
+      "outcome_status": "completed",
+      "failure_class": "none_observed",
+      "causal_summary": "heartbeat 在 kubernetes-rust-rewrite 由外部 driver 持有 Turn 边界、每轮重读 worktree，经 9 轮续跑稳定收敛（reward=1.0, partial=1.0）。",
+      "expectedness": "expected",
+      "implication": "external automation 驱动的续跑在无人长程下更稳（本轮观测，非因果定论）。",
+      "next_probe": "在更多任务与重复运行上验证该趋势是否持续。",
+      "confidence": "low",
+      "evidence_refs": [
+        "run:kubernetes-rust-rewrite__heartbeat"
+      ],
+      "privacy_classification": "public_safe",
+      "producer_redaction_attested": true
+    },
+    {
+      "schema_version": "benchmark_case_insight_projection_v0",
+      "benchmark_id": "swe-marathon",
+      "study_id": "codex-loopx-access-modes",
+      "case_id": "vliw-kernel-optimization",
+      "run_id": "vliw-kernel-optimization__heartbeat",
+      "outcome_status": "completed",
+      "failure_class": "none_observed",
+      "causal_summary": "heartbeat 在 vliw-kernel-optimization 由外部 driver 持有 Turn 边界、每轮重读 worktree，经 1 轮续跑稳定收敛（reward=1.0, partial=1.0）。",
+      "expectedness": "expected",
+      "implication": "external automation 驱动的续跑在无人长程下更稳（本轮观测，非因果定论）。",
+      "next_probe": "在更多任务与重复运行上验证该趋势是否持续。",
+      "confidence": "low",
+      "evidence_refs": [
+        "run:vliw-kernel-optimization__heartbeat"
+      ],
+      "privacy_classification": "public_safe",
+      "producer_redaction_attested": true
+    },
+    {
+      "schema_version": "benchmark_case_insight_projection_v0",
+      "benchmark_id": "swe-marathon",
+      "study_id": "codex-loopx-access-modes",
+      "case_id": "zstd-decoder",
+      "run_id": "zstd-decoder__codex-cli",
+      "outcome_status": "runner_invalid",
+      "failure_class": "unattended_continuation_idle_churn",
+      "causal_summary": "codex-cli 在 zstd-decoder 多轮续跑退化为空转：unblock=8、cont=10、终态未 complete；与其 guard 缺 --begin-turn、按人值守 TUI 设计而被适配到无人运行有关（假设）。",
+      "expectedness": "unexpected",
+      "implication": "codex-cli 的表现更可能受 harness 与无人运行方式匹配度影响，而非模型能力弱。",
+      "next_probe": "补 --begin-turn / 对齐回合边界后重跑；比较有效工作 Turn 与重复 blocked。",
+      "confidence": "medium",
+      "evidence_refs": [
+        "run:zstd-decoder__codex-cli"
+      ],
+      "privacy_classification": "public_safe",
+      "producer_redaction_attested": true
+    },
+    {
+      "schema_version": "benchmark_case_insight_projection_v0",
+      "benchmark_id": "swe-marathon",
+      "study_id": "codex-loopx-access-modes",
+      "case_id": "zstd-decoder",
+      "run_id": "zstd-decoder__heartbeat",
+      "outcome_status": "completed",
+      "failure_class": "none_observed",
+      "causal_summary": "heartbeat 在 zstd-decoder 由外部 driver 持有 Turn 边界、每轮重读 worktree，经 4 轮续跑稳定收敛（reward=1.0, partial=1.0）。",
+      "expectedness": "expected",
+      "implication": "external automation 驱动的续跑在无人长程下更稳（本轮观测，非因果定论）。",
+      "next_probe": "在更多任务与重复运行上验证该趋势是否持续。",
+      "confidence": "low",
+      "evidence_refs": [
+        "run:zstd-decoder__heartbeat"
+      ],
+      "privacy_classification": "public_safe",
+      "producer_redaction_attested": true
+    }
+  ]
+}
