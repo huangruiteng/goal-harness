@@ -1018,8 +1018,20 @@ Agent operation，它刻意携带空 receipt payload。精确重放从第一条 
 这是后续管理面 migration command 所需的 provider-owned bootstrap effect，但它仍不能
 promotion shadow，也不能参与协调决策。
 
-后续仍需完成管理面 CLI/import 编排、一键 rollback、持续 parity policy、
-provider-first read flip，以及 fence 全部 legacy coordination writer，仍是独立评审的
+管理面 caller 是显式且 preview-first 的：
+
+```bash
+loopx coordination-shadow inspect --goal-id <goal-id>
+loopx coordination-shadow bootstrap --goal-id <goal-id>
+loopx coordination-shadow bootstrap --goal-id <goal-id> --execute
+```
+
+它从当前 canonical Todo 与 task-lease view 派生紧凑 projection，只报告计数与摘要，
+并要求 `--execute` 才调用 bootstrap。写入成功后会立即通过 typed parity inspection
+读回。除非目标开启精确的 goal-level `file_v0` shadow opt-in，否则该命令不可执行。
+
+后续仍需完成显式 rollback command、持续 parity policy、provider-first read flip，
+以及 fence 全部 legacy coordination writer，仍是独立评审的
 本地 canonical promotion 的强制证据。因此 NoKV/PostgreSQL 远端 shadow 仍属于 Stage
 3，不能把这个默认关闭的 hook 当作 authority。
 

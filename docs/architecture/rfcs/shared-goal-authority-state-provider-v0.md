@@ -1263,8 +1263,22 @@ different existing lineage fails closed. This is the provider-owned bootstrap
 effect needed by a later administrative migration command; it still cannot
 promote the shadow or make a coordination decision.
 
-The administrative CLI/import orchestration, a rollback command, sustained
-parity policy, the provider-first read flip, and fencing every
+The administrative caller is explicit and preview-first:
+
+```bash
+loopx coordination-shadow inspect --goal-id <goal-id>
+loopx coordination-shadow bootstrap --goal-id <goal-id>
+loopx coordination-shadow bootstrap --goal-id <goal-id> --execute
+```
+
+It derives the compact projection from the current canonical Todo and
+task-lease views, reports only counts and digests, and requires `--execute`
+before invoking bootstrap. A successful write is immediately read back through
+the typed parity inspection. The command remains unavailable unless the exact
+goal-level `file_v0` shadow opt-in is active.
+
+An explicit rollback command, sustained parity policy, the provider-first read
+flip, and fencing every
 legacy coordination writer remain mandatory evidence for the separately
 reviewed local canonical promotion. Remote NoKV/PostgreSQL shadowing therefore
 remains Stage 3 and cannot use this default-off hook as authority.
