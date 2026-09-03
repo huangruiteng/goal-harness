@@ -45,6 +45,10 @@ def _load_exports() -> None:
         register_bootstrap_connect_command,
     )
     from .canary import handle_canary_command, register_canary_commands
+    from .coordination_shadow import (
+        handle_coordination_shadow_command,
+        register_coordination_shadow_command,
+    )
     from .capability import handle_capability_command, register_capability_commands
     from .extension import handle_extension_command, register_extension_commands
     from .doctor import handle_doctor_command, register_doctor_command
@@ -159,6 +163,7 @@ __all__ = [
     "handle_benchmark_external_agent_command",
     "handle_bootstrap_connect_command",
     "handle_canary_command",
+    "handle_coordination_shadow_command",
     "handle_capability_command",
     "handle_extension_command",
     "handle_check_command",
@@ -228,6 +233,7 @@ __all__ = [
     "register_benchmark_external_agent_commands",
     "register_bootstrap_connect_command",
     "register_canary_commands",
+    "register_coordination_shadow_command",
     "register_capability_commands",
     "register_extension_commands",
     "register_doctor_command",

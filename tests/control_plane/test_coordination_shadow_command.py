@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+from argparse import Namespace
+from pathlib import Path
+
+from loopx.cli import build_parser
+from loopx.cli_commands import coordination_shadow as command
+
+
+def _goal() -> dict[str, object]:
+    return {
+        "id": "goal-a",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": "loopx_coordination_runtime_shadow_config_v0",
+                "provider": "file_v0",
+            }
+        },
+    }
+
+
+def _run(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    action: str,
+    execute: bool = False,
+) -> tuple[int, dict[str, object]]:
+    monkeypatch.setattr(command, "load_registry", lambda _path: {"goals": [_goal()]})
+    monkeypatch.setattr(command, "resolve_runtime_root", lambda *_args, **_kwargs: tmp_path)
+    monkeypatch.setattr(
+        command,
+        "list_goal_todos",
+        lambda **_kwargs: {
+            "todos": [
+                {"todo_id": "todo_b", "status": "open"},
+                {"todo_id": "todo_a", "status": "done"},
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        command,
+        "load_task_lease_runtime_shadow_records",
+        lambda **_kwargs: [{"todo_id": "todo_b", "owner": "agent-a"}],
+    )
+    captured: dict[str, object] = {}
+
+    def print_payload(payload, *_args) -> None:
+        captured.update(payload)
+
+    args = Namespace(
+        command="coordination-shadow",
+        coordination_shadow_command=action,
+        goal_id="goal-a",
+        project=None,
+        state_file=None,
+        execute=execute,
+        format="json",
+    )
+    result = command.handle_coordination_shadow_command(
+        args,
+        registry_path=tmp_path / "registry.json",
+        runtime_root_arg=None,
+        output_format=lambda _args: "json",
+        print_payload=print_payload,
+    )
+    assert result is not None
+    return result, captured
+
+
+def test_coordination_shadow_inspect_is_read_only_and_compact(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        command,
+        "inspect_coordination_runtime_shadow",
+        lambda **_kwargs: {
+            "status": "missing",
+            "bootstrap_required": True,
+            "decision_read_from_shadow": False,
+        },
+    )
+    monkeypatch.setattr(
+        command,
+        "bootstrap_coordination_runtime_shadow",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("must not bootstrap")),
+    )
+
+    result, payload = _run(monkeypatch, tmp_path, action="inspect")
+
+    assert result == 0
+    assert payload["executed"] is False
+    assert payload["projection_summary"] == {"todo_count": 2, "lease_count": 1}
+    assert "projection" not in payload
+    assert payload["decision_read_from_shadow"] is False
+
+
+def test_coordination_shadow_bootstrap_requires_execute_and_reads_back_parity(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    inspections = iter(
+        [
+            {
+                "status": "missing",
+                "bootstrap_required": True,
+                "decision_read_from_shadow": False,
+            },
+            {
+                "status": "matched",
+                "parity_matches": True,
+                "decision_read_from_shadow": False,
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        command,
+        "inspect_coordination_runtime_shadow",
+        lambda **_kwargs: next(inspections),
+    )
+    bootstrap_request: dict[str, object] = {}
+
+    def bootstrap(**kwargs) -> dict[str, object]:
+        bootstrap_request.update(kwargs)
+        return {"status": "applied", "decision_read_from_shadow": False}
+
+    monkeypatch.setattr(command, "bootstrap_coordination_runtime_shadow", bootstrap)
+
+    result, payload = _run(
+        monkeypatch,
+        tmp_path,
+        action="bootstrap",
+        execute=True,
+    )
+
+    assert result == 0
+    assert payload["executed"] is True
+    assert payload["ok"] is True
+    assert payload["inspection"]["status"] == "matched"
+    assert str(bootstrap_request["operation_id"]).startswith(
+        "shadow-bootstrap:goal-a:"
+    )
+    assert str(bootstrap_request["source_version"]).startswith(
+        "legacy-projection:"
+    )
+    assert bootstrap_request["projection"]["todos"] == [
+        {"todo_id": "todo_a", "status": "done"},
+        {"todo_id": "todo_b", "status": "open"},
+    ]
+
+
+def test_coordination_shadow_parser_exposes_explicit_execute_gate() -> None:
+    parser = build_parser()
+    preview = parser.parse_args(
+        ["coordination-shadow", "bootstrap", "--goal-id", "goal-a"]
+    )
+    execute = parser.parse_args(
+        [
+            "coordination-shadow",
+            "bootstrap",
+            "--goal-id",
+            "goal-a",
+            "--execute",
+        ]
+    )
+
+    assert preview.execute is False
+    assert execute.execute is True
+
+
+def test_coordination_shadow_rejects_goal_without_exact_opt_in(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        command,
+        "load_registry",
+        lambda _path: {"goals": [{"id": "goal-a"}]},
+    )
+    monkeypatch.setattr(
+        command,
+        "list_goal_todos",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not read legacy state without opt-in")
+        ),
+    )
+    captured: dict[str, object] = {}
+    args = Namespace(
+        command="coordination-shadow",
+        coordination_shadow_command="inspect",
+        goal_id="goal-a",
+        project=None,
+        state_file=None,
+        execute=False,
+        format="json",
+    )
+
+    result = command.handle_coordination_shadow_command(
+        args,
+        registry_path=tmp_path / "registry.json",
+        runtime_root_arg=None,
+        output_format=lambda _args: "json",
+        print_payload=lambda payload, *_args: captured.update(payload),
+    )
+
+    assert result == 1
+    assert captured["error_code"] == "coordination_shadow_not_enabled"
+    assert captured["configuration"] == {
+        "enabled": False,
+        "provider": None,
+        "reason_code": "configuration_absent",
+    }
+    assert captured["decision_read_from_shadow"] is False
