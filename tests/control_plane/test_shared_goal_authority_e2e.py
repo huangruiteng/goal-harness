@@ -31,7 +31,6 @@ REQUIRED_PENDING_ROW_IDS = (
     "s2c2.sigkill_between_primary_write_and_drain",
     "s2c2.sigkill_mid_drain",
     "s2c2.rollback_with_pending_entries",
-    "s2c2.dual_runtime_root_consistency",
     "s2c2.parity_equal",
     "s2c2.parity_divergent_detects_foreign_edit",
     "s2c2.migration_seeds_and_drains",

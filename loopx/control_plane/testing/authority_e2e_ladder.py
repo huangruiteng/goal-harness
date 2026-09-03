@@ -874,6 +874,86 @@ def _row_migration_seeds_new_lineage(context: RowContext) -> RowOutcome:
     return passed(seed_outcome="captured", seeded_cursor=str(store.get("cursor")), legacy_lineage_excluded=True)
 
 
+def _row_dual_runtime_root_consistency(context: RowContext) -> RowOutcome:
+    """``--runtime-root`` differs from ``common_runtime_root``: one lineage per goal."""
+
+    workspace = build_goal_workspace(
+        context.root,
+        goal_id=unique_goal_id("ladder-one-root"),
+        handoff_mode="hard_lease",
+        shadow_enabled=True,
+        runtime_root_binding="cli_override_divergent",
+    )
+    _expect(
+        workspace.registry_runtime_root != workspace.runtime_root,
+        "fixture must register a different common_runtime_root than the override",
+    )
+    added = _add_todo(workspace, "Every hook of one CLI call shares one runtime root.")
+    todo_id = str(added["todo_id"])
+    acquired = _acquire_lease(
+        workspace,
+        todo_id=todo_id,
+        owner=AGENT_A,
+        idempotency_key="ladder-one-root-lease",
+    )
+    updated = run_cli(
+        workspace, "todo", "update", "--goal-id", workspace.goal_id, "--todo-id", todo_id,
+        "--note", "Observed under the override root.", "--agent-id", AGENT_A,
+    )
+    followups = run_cli(
+        workspace, "todo", "capture-followups", "--goal-id", workspace.goal_id,
+        "--follow-up", "Keep one candidate lineage per goal.",
+        "--evidence", "validation://ladder-one-root",
+    )
+    completed = run_cli(
+        workspace, "todo", "complete", "--goal-id", workspace.goal_id, "--todo-id", todo_id,
+        "--agent-id", AGENT_A, "--task-lease-idempotency-key", "ladder-one-root-lease",
+        "--task-lease-expected-version", _lease_version(acquired, label="acquire"),
+        "--evidence", "validation://ladder-one-root-complete", "--no-follow-up",
+    )
+    observations = [
+        _committed_observation(payload, label=label)
+        for label, payload in (
+            ("todo add", added),
+            ("task-lease acquire", acquired),
+            ("todo update", updated),
+            ("todo capture-followups", followups),
+            ("todo complete", completed),
+        )
+    ]
+    identities = {str(evidence.get("store_identity")) for evidence in observations}
+    _expect(len(identities) == 1, "every writer family must observe into one store identity")
+    document = candidate_document(workspace)
+    _expect(document.store_identity in identities, "candidate bytes must carry the observed identity")
+    _expect(document.cursor == str(len(observations)), "candidate cursor must equal the observation count")
+    _expect(
+        todo_id in document.todo_ids and len(document.todo_ids) == 2,
+        "head must hold the completed todo and its captured follow-up",
+    )
+    _expect(
+        [lease.get("todo_id") for lease in document.leases] == [todo_id]
+        and document.leases[0].get("status") == "released",
+        "head must hold exactly the released lease of the completed todo",
+    )
+    lease_path = workspace.runtime_root / "goals" / workspace.goal_id / "task-leases" / f"{todo_id}.json"
+    _expect(lease_path.exists(), "lease state must live under the override root")
+    _expect(
+        not (workspace.registry_runtime_root / "authority-shadow").exists(),
+        "the registry root must not gain a candidate lineage",
+    )
+    _expect(
+        not (workspace.registry_runtime_root / "goals").exists(),
+        "the registry root must not gain lease state",
+    )
+    return passed(
+        observations=len(observations),
+        store_identities=len(identities),
+        candidate_cursor=document.cursor,
+        head_todos=len(document.todo_ids),
+        head_leases=len(document.leases),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -962,6 +1042,15 @@ LADDER_ROWS: tuple[LadderRow, ...] = (
         run=_row_crash_gap_loses_observation,
     ),
     LadderRow(
+        id="s2c1.dual_runtime_root_consistency",
+        stage="2c1",
+        title="A --runtime-root override that differs from common_runtime_root keeps one candidate lineage",
+        product_path="real_cli",
+        gate="deterministic",
+        posix_only=False,
+        run=_row_dual_runtime_root_consistency,
+    ),
+    LadderRow(
         id="s2c1.migration_seeds_new_lineage",
         stage="2c1",
         title="migrate-state excludes the legacy lineage and seeds a fresh candidate",
@@ -979,7 +1068,6 @@ PENDING_ROWS: tuple[PendingRow, ...] = (
     PendingRow("s2c2.sigkill_between_primary_write_and_drain", "2c2", "Stage 2C parity PRs"),
     PendingRow("s2c2.sigkill_mid_drain", "2c2", "Stage 2C parity PRs"),
     PendingRow("s2c2.rollback_with_pending_entries", "2c2", "Stage 2C parity PRs"),
-    PendingRow("s2c2.dual_runtime_root_consistency", "2c2", "Stage 2C parity PRs"),
     PendingRow("s2c2.parity_equal", "2c2", "Stage 2C parity PRs"),
     PendingRow("s2c2.parity_divergent_detects_foreign_edit", "2c2", "Stage 2C parity PRs"),
     PendingRow("s2c2.migration_seeds_and_drains", "2c2", "Stage 2C parity PRs"),

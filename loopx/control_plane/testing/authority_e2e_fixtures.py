@@ -26,7 +26,7 @@ from ...file_lock import exclusive_file_lock
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TS_READBACK_PROBE = Path("tests") / "control_plane_ts" / "authority_store_readback_probe.ts"
 DEFAULT_REGISTERED_AGENTS: tuple[str, ...] = ("agent-a", "agent-b")
-RUNTIME_ROOT_BINDINGS: tuple[str, ...] = ("registry", "cli_override")
+RUNTIME_ROOT_BINDINGS: tuple[str, ...] = ("registry", "cli_override", "cli_override_divergent")
 HANDOFF_MODES: tuple[str, ...] = ("legacy", "soft_claim", "hard_lease")
 LOCAL_AUTHORITY_SHADOW_CONFIG = {
     "schema_version": "loopx_local_authority_shadow_config_v0",
@@ -85,6 +85,7 @@ class GoalWorkspace:
     runtime_root: Path
     home: Path
     runtime_root_binding: str
+    registry_runtime_root: Path
 
     @property
     def shadow_directory(self) -> Path:
@@ -96,7 +97,7 @@ class GoalWorkspace:
 
     def cli_prefix(self) -> list[str]:
         prefix = ["--registry", str(self.registry_path)]
-        if self.runtime_root_binding == "cli_override":
+        if self.runtime_root_binding in ("cli_override", "cli_override_divergent"):
             prefix.extend(["--runtime-root", str(self.runtime_root)])
         prefix.extend(["--format", "json"])
         return prefix
@@ -227,11 +228,12 @@ def build_goal_workspace(
 ) -> GoalWorkspace:
     """Materialize one goal exactly as the local-shadow CLI E2E fixture does.
 
-    ``runtime_root_binding`` selects how the CLI learns the runtime root. Both
-    bindings resolve to the same directory in this increment: ``registry``
-    relies on ``common_runtime_root`` alone, ``cli_override`` also passes
-    ``--runtime-root``. Divergent roots are the pending
-    ``s2c2.dual_runtime_root_consistency`` row.
+    ``runtime_root_binding`` selects how the CLI learns the runtime root:
+    ``registry`` relies on ``common_runtime_root`` alone, ``cli_override`` also
+    passes the same directory as ``--runtime-root``, and
+    ``cli_override_divergent`` registers a different ``common_runtime_root``
+    than the ``--runtime-root`` override so a row can prove that every writer
+    hook of one CLI call shares the override root.
     """
 
     if handoff_mode not in HANDOFF_MODES:
@@ -243,6 +245,11 @@ def build_goal_workspace(
     state_path = repo / "ACTIVE_GOAL_STATE.md"
     _write_active_state(state_path, goal_id=goal_id, handoff_mode=handoff_mode)
     runtime_root = root / f"{goal_id}-runtime"
+    registry_runtime_root = (
+        root / f"{goal_id}-registry-runtime"
+        if runtime_root_binding == "cli_override_divergent"
+        else runtime_root
+    )
     home = root / f"{goal_id}-home"
     home.mkdir()
     coordination: JsonObject = {
@@ -255,7 +262,7 @@ def build_goal_workspace(
     registry_path.write_text(
         json.dumps(
             {
-                "common_runtime_root": str(runtime_root),
+                "common_runtime_root": str(registry_runtime_root),
                 "goals": [
                     {
                         "id": goal_id,
@@ -278,6 +285,7 @@ def build_goal_workspace(
         runtime_root=runtime_root,
         home=home,
         runtime_root_binding=runtime_root_binding,
+        registry_runtime_root=registry_runtime_root,
     )
 
 

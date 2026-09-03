@@ -32,14 +32,14 @@ skips on Windows.
 | `s2c1.default_off_isolation` | 2c1 | real_cli | deterministic | a default-off goal returns the same response fields as an observed goal, carries no `authority_shadow`, and creates no `authority-shadow/` directory |
 | `s2c1.candidate_failure_preserves_primary` | 2c1 | real_cli | deterministic | a blocked candidate directory yields `outcome=failed`, `reason_code=shadow_observation_failed`, and the committed todo is in the primary state |
 | `s2c1.crash_gap_loses_observation` | 2c1 | real_cli | deterministic (POSIX) | a writer SIGKILLed while the observation lock is held commits its todo but leaves no candidate document; the next write captures the full two-todo snapshot without claiming an outbox or correlation |
+| `s2c1.dual_runtime_root_consistency` | 2c1 | real_cli | deterministic | with `common_runtime_root` different from `--runtime-root`, todo add, task-lease acquire, todo update, capture-followups, and a leased completion all observe into one store identity; the head holds both todos and the released lease; the registry root gains neither a candidate lineage nor lease state |
 | `s2c1.migration_seeds_new_lineage` | 2c1 | real_cli | deterministic | `migrate-state` dry run plans the seed without writing; execute seeds one fresh `file:` lineage at cursor `1` that carries no legacy identity, revision, source path, or private byte |
 
 Pending rows are declared in the report as `pending`, never counted as pass:
 `s2a.nokv_live_qualification` (until PR #3819 merges) and the Stage 2C parity
 rows `s2c2.outbox_prepared_then_committed_entries`, `s2c2.drain_idempotent`,
 `s2c2.sigkill_between_primary_write_and_drain`, `s2c2.sigkill_mid_drain`,
-`s2c2.rollback_with_pending_entries`, `s2c2.dual_runtime_root_consistency`,
-`s2c2.parity_equal`, `s2c2.parity_divergent_detects_foreign_edit`,
+`s2c2.rollback_with_pending_entries`, `s2c2.parity_equal`, `s2c2.parity_divergent_detects_foreign_edit`,
 `s2c2.migration_seeds_and_drains`, `s2c2.growth_measurement_gate` (until the
 Stage 2C parity PRs land).
 
@@ -87,6 +87,6 @@ parity PR that does not expose them cannot be ladder-verified:
   candidate digests, so parity-equal and foreign-edit rows can assert on
   typed fields rather than prose;
 - the same commands must resolve the runtime root the way `todo` and
-  `task-lease` do, so `s2c2.dual_runtime_root_consistency` can pass a
-  `--runtime-root` override that differs from `common_runtime_root` and
-  assert one lineage.
+  `task-lease` do (`effective_runtime_root`), so the one-lineage guarantee that
+  `s2c1.dual_runtime_root_consistency` proves for the observation hooks also
+  holds for drain and verify.

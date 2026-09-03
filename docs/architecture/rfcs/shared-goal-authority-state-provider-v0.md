@@ -1592,8 +1592,8 @@ Per stage, this increment implements:
 - Stage 2B: `s2b.postgresql_conformance_live` runs the PostgreSQL integration
   test file under node's TAP reporter and requires at least nine passes, zero
   failures, and zero skips.
-- Stage 2C observation foundation: six `s2c1.*` rows port the local-shadow CLI
-  E2E and migration assertions. The configure round trip previews, enables,
+- Stage 2C observation foundation: seven `s2c1.*` rows port the local-shadow CLI
+  E2E and migration assertions and pin the single-lineage guarantee. The configure round trip previews, enables,
   reads back, and disables the observer; every writer family (handoff-mode,
   todo add/update/complete/supersede/capture-followups/archive-completed,
   task-lease acquire/renew/transfer) captures with
@@ -1601,7 +1601,11 @@ Per stage, this increment implements:
   `candidate_read_for_decision=false`, while an idempotent re-acquire does not
   observe; default-off goals stay isolated; candidate failure preserves the
   primary commit; a POSIX SIGKILL in the crash gap loses only that
-  observation; and `migrate-state` seeds a fresh lineage without legacy bytes.
+  observation; a `--runtime-root` override that differs from
+  `common_runtime_root` keeps todo add, task-lease acquire, todo update,
+  follow-up capture, and a leased completion in one store identity while the
+  registry root gains neither a candidate lineage nor lease state; and
+  `migrate-state` seeds a fresh lineage without legacy bytes.
 
 Live rows are environment-gated (`LOOPX_TEST_POSTGRES_URL`;
 `NOKV_COORDINATION_LIVE=1` plus the `NOKV_*` stack variables). Without a
@@ -1617,7 +1621,7 @@ the ladder adds no product path and reads the candidate only through the
 retained TypeScript store. Stage 2A live qualification
 (`s2a.nokv_live_qualification`, pending PR #3819) and the Stage 2C parity half
 (`s2c2.*`: outbox entries, idempotent drain, SIGKILL before and during drain,
-rollback with pending entries, dual runtime roots, parity equal and divergent,
+rollback with pending entries, parity equal and divergent,
 migration seed-and-drain, growth measurement) are declared as pending rows,
 not claimed. This subsection records executable evidence for the stages above;
 it does not promote any provider or complete the Stage 2C promotion.

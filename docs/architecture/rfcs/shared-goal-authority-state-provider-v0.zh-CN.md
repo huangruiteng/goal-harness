@@ -1275,15 +1275,18 @@ CLI runner、observation-lock 窗口、候选回读）、只读 TypeScript 探�
   可找到。
 - Stage 2B：`s2b.postgresql_conformance_live` 在 node TAP reporter 下运行
   PostgreSQL 集成测试文件，要求至少九个 pass、零 fail、零 skip。
-- Stage 2C 观察基础：六个 `s2c1.*` 行移植本地 shadow CLI E2E 与迁移断言。
+- Stage 2C 观察基础：七个 `s2c1.*` 行移植本地 shadow CLI E2E 与迁移断言，并钉住单一
+  lineage 保证。
   configure 往返先预览、再开启、回读、最后关闭 observer；每个 writer family
   （handoff-mode、todo add/update/complete/supersede/capture-followups/
   archive-completed、task-lease acquire/renew/transfer）都以
   `primary_writeback_preserved`、`provider_to_local_writes=false`、
   `candidate_read_for_decision=false` 完成 capture，而幂等 re-acquire 不产生
   observation；default-off goal 保持隔离；候选失败不推翻主写；POSIX SIGKILL
-  落在崩溃间隙时只丢失该次 observation；`migrate-state` 在不携带 legacy 字节的
-  前提下建立新 lineage。
+  落在崩溃间隙时只丢失该次 observation；`--runtime-root` 与 `common_runtime_root`
+  不同时，todo add、task-lease acquire、todo update、follow-up 捕获与带 lease 的
+  complete 仍落入同一个 store identity，registry root 既不产生候选 lineage 也不
+  产生 lease 状态；`migrate-state` 在不携带 legacy 字节的前提下建立新 lineage。
 
 Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1` 加
 `NOKV_*` 栈变量）。没有栈时它们报告 `unverified`，除非传入
@@ -1296,7 +1299,7 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
 只经保留的 TypeScript store 读取候选。Stage 2A live 资格验证
 （`s2a.nokv_live_qualification`，待 PR #3819 合并）与 Stage 2C parity 后半段
 （`s2c2.*`：outbox 条目、幂等 drain、drain 前与 drain 中的 SIGKILL、带 pending
-条目的 rollback、双 runtime root、parity 相等与分歧、迁移 seed-and-drain、增长
+条目的 rollback、parity 相等与分歧、迁移 seed-and-drain、增长
 度量）以 pending 行声明，而非宣称已完成。本小节记录的是上述阶段的可执行证据；
 它不晋升任何 provider，也不完成 Stage 2C promotion。
 

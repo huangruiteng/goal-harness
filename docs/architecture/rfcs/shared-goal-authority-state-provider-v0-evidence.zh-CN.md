@@ -201,7 +201,7 @@ live NoKV 测试。确定性 fake 的通过结果与这项静态 API 核对必�
 按第 5 节的复跑要求逐项记录本轮 stage ladder 证据：
 
 1. **精确 commit**：LoopX 侧为 `test/shared-authority-e2e-ladder` 分支（基于
-   PR #3818 头 `422757dd9`；ladder 报告的 `bindings.loopx_commit` 与
+   PR #3818 第三轮修订头，含单一 effective runtime root 修复；ladder 报告的 `bindings.loopx_commit` 与
    `bindings.loopx_tree_dirty` 记录实际运行的树）。NoKV 侧与 PostgreSQL 侧本轮
    无可达栈，对应行按设计报告 `unverified`。
 2. **探针源码**：`loopx/control_plane/testing/authority_e2e_ladder.py`、
@@ -211,12 +211,14 @@ live NoKV 测试。确定性 fake 的通过结果与这项静态 API 核对必�
    `examples/shared-goal-authority-e2e/ladder.py`，pytest 投影为
    `tests/control_plane/test_shared_goal_authority_e2e.py`。各行驱动的是真实
    `python -m loopx.cli` 与生产 `FileAuthorityStore`，不是参考实现。
-3. **断言**：本轮 8 个 deterministic 行全部 pass：`s0.file_matrix_twelve_rows`
+3. **断言**：本轮 9 个 deterministic 行全部 pass：`s0.file_matrix_twelve_rows`
    十二个 file provider 场景行全为 true；`s1.cli_document_decodes_through_ts_store`
    三次 CLI 写入经 TypeScript store 回读 cursor `3`、operation id 按序一致、首条
-   receipt found；六个 `s2c1.*` 行（configure 往返、12 个 writer family 全部
+   receipt found；七个 `s2c1.*` 行（configure 往返、12 个 writer family 全部
    captured 且候选 cursor `12`、default-off 隔离、候选失败保主写、SIGKILL 崩溃
-   间隙只丢失一次 observation、`migrate-state` 新 lineage cursor `1`）。
+   间隙只丢失一次 observation、`--runtime-root` 与 `common_runtime_root` 不同时
+   五次写入落入单一 store identity 且候选 cursor `5`、`migrate-state` 新 lineage
+   cursor `1`）。
 4. **负例**：幂等 re-acquire 不携带 `authority_shadow`；default-off goal 无
    `authority-shadow/` 目录且响应字段与 observed goal 一致；候选目录被占用时
    `outcome=failed` / `reason_code=shadow_observation_failed` 但主写已提交；
@@ -226,6 +228,6 @@ live NoKV 测试。确定性 fake 的通过结果与这项静态 API 核对必�
 5. **未执行与限定**：`s0.nokv_live_matrix`（`nokv_live_env_missing`）与
    `s2b.postgresql_conformance_live`（`postgres_url_missing`）本轮 unverified，
    ladder 默认退出码 1，`--allow-unverified` 才为 0；`s2a.nokv_live_qualification`
-   与 10 个 `s2c2.*` 行以 pending 声明，未宣称。Stage 2C parity、outbox、
-   drain、双 runtime root 与增长门槛均未验证；本记录不构成任何 provider 晋升
+   与 9 个 `s2c2.*` 行以 pending 声明，未宣称。Stage 2C parity、outbox、drain
+   与增长门槛均未验证；本记录不构成任何 provider 晋升
    或生产结论。
