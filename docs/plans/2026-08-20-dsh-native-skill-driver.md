@@ -73,14 +73,15 @@ sequence:
    installation capability.
 3. If the CLI is missing or incompatible, run one fixed-argv private install:
    `<compatible-python> -m pip install --upgrade --target
-   <agents-home>/runtime/dsh-loopx-plugin/site-packages 'loopx>=0.5.3'`, then
+   <agents-home>/runtime/dsh-loopx-plugin/site-packages 'loopx>=0.5.4'`, then
    write a managed launcher beside that target. An explicit `PYTHON_BIN` wins;
    otherwise the plugin probes `python3` and named Python 3.11-3.14
    executables, then keeps the selected interpreter and launcher for readback,
    Driver/GoalBar calls, and generated skill commands. This does not mutate an
    externally managed system Python or use `--break-system-packages`.
-   The package requirement is `loopx>=0.5.3`, the first release contract whose
-   Python wheel includes the workflow-skill resources.
+   The package requirement is `loopx>=0.5.4`, the first release contract that
+   both includes the workflow-skill resources and discovers them after the
+   Linux `pip --target` install used by the managed runtime.
 4. Resolve the resulting executable again; fail if it is still unavailable.
 5. Run `loopx workflow-skills --install --skills-dir ~/.agents/skills
    --host-surface deepseek-harness-native`.

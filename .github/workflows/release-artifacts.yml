@@ -195,6 +195,36 @@ jobs:
               assert committed["appended"] is True, committed
               assert committed["replayed"] is False, committed
           PY
+
+      - name: Verify wheel through the DSH managed-runtime install shape
+        run: |
+          set -euo pipefail
+          target="${RUNNER_TEMP}/loopx-wheel-target"
+          skills_dir="${RUNNER_TEMP}/loopx-wheel-target-skills"
+          python -m pip install \
+            --disable-pip-version-check \
+            --no-deps \
+            --target "${target}" \
+            dist/packages/*.whl
+          (
+            cd "${RUNNER_TEMP}"
+            PYTHONPATH="${target}" python -m loopx.cli --format json \
+              workflow-skills --skills-dir "${skills_dir}" \
+              --host-surface deepseek-harness-native \
+              > "${RUNNER_TEMP}/loopx-wheel-target-inspect.json"
+          )
+          python - "${RUNNER_TEMP}/loopx-wheel-target-inspect.json" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert payload["ok"] is True, payload
+          assert payload["operation"] == "inspect", payload
+          assert payload["host_surface"] == "deepseek-harness-native", payload
+          assert payload["source"]["kind"] == "python_distribution", payload
+          assert payload["install_required"] is True, payload
+          PY
           export CODEX_HOME="${RUNNER_TEMP}/loopx-wheel-codex"
           skills_dir="${CODEX_HOME}/skills"
           "${RUNNER_TEMP}/loopx-wheel/bin/loopx" --format json \
@@ -346,17 +376,39 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          verify_venv="${RUNNER_TEMP}/loopx-pypi-${version}"
-          python -m venv "${verify_venv}"
+          verify_target="${RUNNER_TEMP}/loopx-pypi-target-${version}"
+          skills_dir="${RUNNER_TEMP}/loopx-pypi-skills-${version}"
           for attempt in {1..12}; do
-            if "${verify_venv}/bin/python" -m pip install \
+            if python -m pip install \
               --disable-pip-version-check \
               --index-url https://pypi.org/simple \
               --no-cache-dir \
               --no-deps \
+              --target "${verify_target}" \
               "loopx==${version}"; then
-              test "$("${verify_venv}/bin/loopx" --version)" = "loopx ${version}"
-              exit 0
+              if (
+                cd "${RUNNER_TEMP}"
+                test "$(PYTHONPATH="${verify_target}" python -m loopx.cli --version)" = \
+                  "loopx ${version}"
+                PYTHONPATH="${verify_target}" python -m loopx.cli --format json \
+                  workflow-skills --install --skills-dir "${skills_dir}" \
+                  --host-surface deepseek-harness-native \
+                  > "${RUNNER_TEMP}/loopx-pypi-workflow-skills.json"
+              ); then
+                python - "${RUNNER_TEMP}/loopx-pypi-workflow-skills.json" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert payload["ok"] is True, payload
+          assert payload["operation"] == "install", payload
+          assert payload["host_surface"] == "deepseek-harness-native", payload
+          assert payload["source"]["kind"] == "python_distribution", payload
+          assert payload["after"]["ready"] is True, payload
+          PY
+                exit 0
+              fi
             fi
             if [[ "${attempt}" -eq 12 ]]; then
               break
