@@ -1334,6 +1334,7 @@ def metadata_line_for_todo_block(
     for key, value in updates.items():
         if key not in TODO_METADATA_FIELDS:
             continue
+        normalized: Any
         if value is None:
             metadata.pop(key, None)
         elif key == "required_write_scopes":
