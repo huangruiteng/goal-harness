@@ -1336,6 +1336,18 @@ cutover machinery rather than a production authority flip. The follow-up must
 wire every legacy writer, make configuration and rollback explicit, and prove
 default legacy compatibility before the local promotion can be enabled.
 
+The first production fencing integration now closes the write side of that
+follow-up. Every Python Todo mutation checks the TypeScript-owned durable fence
+while holding the existing active-state mutation lock, and native TypeScript
+task-lease acquire/renew/transfer/release check the same fence while holding the
+lease lock. The absent-fence path remains a zero-runtime-call compatibility
+path; a present, unreadable, or invalid fence fails closed. The promotion
+orchestrator must acquire those same two legacy locks before engaging the fence,
+so no legacy write can pass its check and commit after cutover. Provider-first
+CLI routing and the lock-owning promotion operation remain the next slice; until
+they land, this integration deliberately blocks split-brain writes rather than
+silently falling back.
+
 Durable completion continuation read-back
 (`durable_completion.py`: `read_persisted_todo_record` /
 `project_durable_completion_outcome`) is a provider read point: it re-reads

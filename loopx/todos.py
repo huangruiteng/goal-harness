@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from .agent_registry import registered_agent_ids_from_registry, require_registered_agent_id
-from .file_lock import exclusive_file_lock
 from .history import load_registry
 from .paths import resolve_runtime_root
 from .rollout_event_log import load_rollout_events, rollout_event_log_path
@@ -121,6 +120,7 @@ from .control_plane.todos.write_policy import (
     require_user_todo_task_class,
     resolve_user_gate_global_gate_update,
 )
+from .control_plane.coordination.legacy_writer_fence import legacy_todo_write_transaction
 from .control_plane.todos.handoff_mode import (
     enter_added_todo_ownership_handoff_gate,
     enter_todo_ownership_handoff_gate,
@@ -956,10 +956,8 @@ def add_goal_todo(
         state_file=state_file,
     )
 
-    with exclusive_file_lock(
-        resolved_state_file,
-        agent_id=agent_id or claimed_by,
-        operation="todo_add",
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, agent_id or claimed_by, "todo_add", dry_run,
     ), ExitStack() as handoff_gate_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -1273,10 +1271,8 @@ def update_goal_todo(
             return validation_failure
     external_wait_transition: dict[str, Any] | None = None
     resume_monitor_generation: int | None = None
-    with exclusive_file_lock(
-        resolved_state_file,
-        agent_id=agent_id or claimed_by,
-        operation="todo_update",
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, agent_id or claimed_by, "todo_update", dry_run,
     ), ExitStack() as handoff_gate_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -1699,10 +1695,8 @@ def complete_goal_todo(
     validation_failure = validation_gate.get("failure")
     if validation_failure is not None:
         return validation_failure
-    with exclusive_file_lock(
-        resolved_state_file,
-        agent_id=agent_id or claimed_by,
-        operation="todo_complete",
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, agent_id or claimed_by, "todo_complete", dry_run,
     ), ExitStack() as lease_fence_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -2055,8 +2049,8 @@ def supersede_goal_todo(
         project=project,
         state_file=state_file,
     )
-    with exclusive_file_lock(
-        resolved_state_file, agent_id=agent_id, operation="todo_supersede",
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, agent_id, "todo_supersede", dry_run,
     ), ExitStack() as lease_fence_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -2248,7 +2242,9 @@ def archive_completed_todos(
         state_file=state_file,
     )
 
-    with exclusive_file_lock(resolved_state_file, operation="todo_archive_completed"):
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, None, "todo_archive_completed", dry_run,
+    ):
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         archive_result = archive_completed_todo_lines(

@@ -21,6 +21,8 @@ export const LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA =
   "loopx_legacy_coordination_write_check_request_v0";
 export const LEGACY_COORDINATION_WRITE_CHECK_RESULT_SCHEMA =
   "loopx_legacy_coordination_write_check_result_v0";
+export const LEGACY_COORDINATION_TODO_LOCK_KEY = "legacy-todo-writer";
+export const LEGACY_COORDINATION_LEASE_LOCK_KEY = "legacy-task-lease-writer";
 
 function runtimeRoot(value: unknown): string {
   if (typeof value !== "string" || value.trim() !== value || !isAbsolute(value)) {
@@ -29,9 +31,19 @@ function runtimeRoot(value: unknown): string {
   return value;
 }
 
-function fencePath(root: string, goalId: string): string {
+export function legacyCoordinationWriterFencePath(root: string, goalId: string): string {
   const digest = createHash("sha256").update(goalId, "utf8").digest("hex").slice(0, 16);
   return join(root, "authority-transition", "file-v0", `legacy-writer-fence-${digest}.json`);
+}
+
+export function legacyCoordinationTodoLockPath(root: string, goalId: string): string {
+  const digest = createHash("sha256").update(goalId, "utf8").digest("hex").slice(0, 16);
+  return join(root, "authority-transition", "file-v0", `legacy-todo-writer-${digest}`);
+}
+
+export function legacyCoordinationLeaseLockPath(root: string, goalId: string): string {
+  const digest = createHash("sha256").update(goalId, "utf8").digest("hex").slice(0, 16);
+  return join(root, "authority-transition", "file-v0", `legacy-task-lease-writer-${digest}`);
 }
 
 export function decodeLegacyCoordinationWriterFence(value: unknown): JsonObject {
@@ -69,7 +81,7 @@ export async function loadLegacyCoordinationWriterFence(
   reason: string;
 }> {
   try {
-    const raw = await readFile(fencePath(runtimeRoot(root), goalId), "utf8");
+    const raw = await readFile(legacyCoordinationWriterFencePath(runtimeRoot(root), goalId), "utf8");
     const fence = decodeLegacyCoordinationWriterFence(JSON.parse(raw));
     if (fence.goal_id !== goalId) throw new Error("legacy writer fence goal mismatch");
     return { status: "loaded", fence };
@@ -94,7 +106,7 @@ export async function engageLegacyCoordinationWriterFence(value: unknown): Promi
     const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
     const fence = decodeLegacyCoordinationWriterFence(input.fence);
     if (fence.goal_id !== goalId) throw new Error("legacy writer fence goal mismatch");
-    const path = fencePath(root, goalId);
+    const path = legacyCoordinationWriterFencePath(root, goalId);
     return await withFileMutationLock(path, async () => {
       const existing = await loadLegacyCoordinationWriterFence(root, goalId);
       if (existing.status === "loaded") {

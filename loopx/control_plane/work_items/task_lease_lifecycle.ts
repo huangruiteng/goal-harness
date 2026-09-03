@@ -20,6 +20,11 @@ import {
   type FileMutationLockClaim,
 } from "../effect_runtime_io.ts";
 import {
+  checkLegacyCoordinationWriteAllowed,
+  legacyCoordinationLeaseLockPath,
+  LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
+} from "../coordination/legacy_writer_fence.ts";
+import {
   settlementIdentity,
   type JsonObject,
 } from "../effect_program.ts";
@@ -2679,7 +2684,26 @@ export async function executeTaskLeaseLifecycle(
       const fence = await fenceVerify(request, dependencies);
       return { ok: true, schema_version: "task_lease_v0", action: request.operation, fence, settlement: lifecycleSettlement(request, "committed") };
     }
-    return await withFileMutationLock(lockPathFor(request), () => ordinaryOperation(request!, dependencies));
+    return await withFileMutationLock(
+      legacyCoordinationLeaseLockPath(request.runtime_root, request.goal_id),
+      () => withFileMutationLock(lockPathFor(request!), async () => {
+        const writerGuard = await checkLegacyCoordinationWriteAllowed({
+          schema_version: LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
+          runtime_root: request!.runtime_root,
+          goal_id: request!.goal_id,
+        });
+        if (writerGuard.status !== "allowed") {
+          throw new TaskLeaseLifecycleError(
+            writerGuard.status === "blocked"
+              ? "legacy task-lease writer is fenced; use the canonical file authority"
+              : String(writerGuard.reason ?? "legacy writer fence check failed"),
+            String(writerGuard.reason_code ?? "legacy_writer_fence_check_failed"),
+            writerGuard,
+          );
+        }
+        return await ordinaryOperation(request!, dependencies);
+      }),
+    );
   } catch (error) {
     const info = errorInfo(error);
     return failureEnvelope(request ?? failureRequestContext(value), info);

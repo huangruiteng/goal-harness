@@ -1078,6 +1078,15 @@ fail-closed write-check hook；promotion 可按 operation receipt 重放，provi
 后续必须接齐所有 legacy writer、显式配置与 rollback，并证明默认 legacy 兼容性，
 才能启用本地 promotion。
 
+第一块生产 fencing 集成现在已经收口了上述工作中的写入侧：所有 Python Todo mutation
+都会在持有现有 active-state mutation lock 时检查 TypeScript 权威拥有的 durable fence；
+原生 TypeScript task-lease 的 acquire / renew / transfer / release 也会在持有 lease lock
+时检查同一个 fence。fence 不存在时保持零 runtime 调用的默认兼容路径；fence 存在、
+不可读或不合法时一律 fail closed。后续 promotion orchestrator 必须先取得这两把 legacy
+lock，再 engage fence，从而保证不存在某次 legacy write 已通过检查、却在 cutover 后才
+提交。provider-first CLI 路由和持锁 promotion operation 仍是下一切片；在它们落地前，
+本集成选择阻断 split-brain 写入，而不会静默回退。
+
 完成续接（continuation）的持久化读回
 （`durable_completion.py`：`read_persisted_todo_record` /
 `project_durable_completion_outcome`）是一个 provider read point：它在完成写入之后、

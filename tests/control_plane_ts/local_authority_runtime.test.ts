@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -28,6 +28,11 @@ import {
   COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
 } from "../../loopx/control_plane/coordination/runtime_shadow.ts";
+import { executeTaskLeaseAcquire } from "../../loopx/control_plane/work_items/task_lease_acquire.ts";
+import {
+  TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION,
+  executeTaskLeaseLifecycle,
+} from "../../loopx/control_plane/work_items/task_lease_lifecycle.ts";
 
 function sha256(value: unknown): string {
   return createHash("sha256").update(canonicalAuthorityBytes(value)).digest("hex");
@@ -274,4 +279,64 @@ test("local canonical runtime never falls back when provider state is missing", 
   assert.equal(result.status, "missing");
   assert.equal(result.decision_read_from_provider, true);
   assert.equal(result.legacy_fallback_used, false);
+});
+
+test("engaged promotion fence blocks every native legacy task-lease writer", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-local-authority-lease-fence-"));
+  const shadow = await qualifiedShadow(root);
+  const request = promotionRequest(root, shadow.projection, shadow.providerRevision);
+  await engageFence(request);
+
+  const authorityPath = join(root, "authority-source.json");
+  const authorityContent = "authority-v1";
+  await writeFile(authorityPath, authorityContent, "utf8");
+  const authority = {
+    handoff_mode: "hard_lease",
+    registered_agent_candidates: [["agent-a"]],
+    todos: [{
+      todo_id: "todo_abc",
+      status: "open",
+      claimed_by: "agent-a",
+      role: "agent",
+      task_class: "advancement_task",
+    }],
+    todo_projection_error: null,
+    source_receipts: [{
+      source_id: "authority",
+      path: authorityPath,
+      state: "file",
+      sha256: createHash("sha256").update(authorityContent).digest("hex"),
+    }],
+  };
+  const acquire = await executeTaskLeaseAcquire({
+    schema_version: "loopx_task_lease_acquire_native_v0",
+    runtime_root: root,
+    goal_id: "goal-a",
+    todo_id: "todo_abc",
+    owner: "agent-a",
+    idempotency_key: "lease:fenced-acquire",
+    write_scopes: [],
+    ttl_seconds: 60,
+    expected_version: null,
+    authority,
+  });
+  assert.equal(acquire.ok, false);
+  assert.equal(acquire.error_code, "legacy_coordination_writer_fenced");
+
+  const renew = await executeTaskLeaseLifecycle({
+    schema_version: TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION,
+    operation: "renew",
+    runtime_root: root,
+    goal_id: "goal-a",
+    todo_id: "todo_abc",
+    owner: "agent-a",
+    idempotency_key: "lease:fenced-renew",
+    expected_version: 1,
+    ttl_seconds: 60,
+    new_owner: null,
+    new_idempotency_key: null,
+    authority,
+  });
+  assert.equal(renew.ok, false);
+  assert.equal(renew.error_code, "legacy_coordination_writer_fenced");
 });
