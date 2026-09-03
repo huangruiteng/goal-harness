@@ -99,6 +99,70 @@ def test_collect_history_orders_runs_across_goals_by_utc_instant(
     assert [run["classification"] for run in history["runs"]] == ["utc-later"]
 
 
+def test_collect_history_filters_stopped_goals_before_reading_run_indexes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    registry_path, runtime_root = _write_history_fixture(
+        tmp_path,
+        {
+            "goal-active": [{"classification": "active", "generated_at": "2026-08-18T17:00:00Z"}],
+            "goal-legacy-runtime": [{"classification": "legacy", "generated_at": "2026-08-18T19:00:00Z"}],
+            "goal-stopped": [{"classification": "stopped", "generated_at": "2026-08-18T18:00:00Z"}],
+        },
+    )
+    registry_path.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {"id": "goal-active"},
+                    {
+                        "id": "goal-stopped",
+                        "activation": {
+                            "schema_version": "loopx_goal_activation_v1",
+                            "state": "stopped",
+                        },
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded_indexes: list[str] = []
+    original_load_index = history_module.load_index
+
+    def record_load_index(path: Path, **kwargs: Any):
+        loaded_indexes.append(path.parts[-3])
+        return original_load_index(path, **kwargs)
+
+    monkeypatch.setattr(history_module, "load_index", record_load_index)
+
+    history = collect_history(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=None,
+        limit=10,
+        activation_state_filter="active",
+    )
+
+    assert [goal["id"] for goal in history["goals"]] == ["goal-active"]
+    assert loaded_indexes == ["goal-active"]
+
+    loaded_indexes.clear()
+    full_history = collect_history(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=None,
+        limit=10,
+    )
+    assert {goal["id"] for goal in full_history["goals"]} == {
+        "goal-active",
+        "goal-legacy-runtime",
+        "goal-stopped",
+    }
+    assert "goal-legacy-runtime" in loaded_indexes
+
+
 def test_collect_history_keeps_invalid_legacy_timestamps_below_valid_runs(
     tmp_path: Path,
 ) -> None:

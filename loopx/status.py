@@ -1301,6 +1301,7 @@ def collect_status(
     available_capabilities: Any = None,
     include_public_boundary_scan: bool = True,
     recent_run_limit: int | None = None,
+    activation_state_filter: str | None = None,
 ) -> dict[str, Any]:
     return _collect_status_read_model(
         registry_path=registry_path,
@@ -1312,5 +1313,6 @@ def collect_status(
         available_capabilities=available_capabilities,
         include_public_boundary_scan=include_public_boundary_scan,
         recent_run_limit=recent_run_limit,
+        activation_state_filter=activation_state_filter,
         context=build_status_collection_context(),
     )

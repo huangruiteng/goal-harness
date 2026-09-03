@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..goals.contract_health import project_contract_health_for_goal
+from ..goals.activation import GoalActivationState, normalize_goal_activation_state
 from ..runtime.runtime_projection_route import (
     collect_runtime_projection_route_diagnostics,
 )
+from ...registry import registry_goals
 
 
 StatusCallback = Callable[..., Any]
@@ -45,6 +47,7 @@ def collect_status(
     available_capabilities: Any = None,
     include_public_boundary_scan: bool = True,
     recent_run_limit: int | None = None,
+    activation_state_filter: GoalActivationState | str | None = None,
 ) -> dict[str, Any]:
     display_limit = max(0, limit)
     control_plane_limit = max(
@@ -53,6 +56,11 @@ def collect_status(
         max(0, recent_run_limit) if recent_run_limit is not None else 0,
     )
     goal_filter = str(goal_id or "").strip() or None
+    activation_filter = (
+        normalize_goal_activation_state(activation_state_filter)
+        if activation_state_filter is not None
+        else None
+    )
     registry = context.load_registry(registry_path)
     runtime_root = context.resolve_runtime_root(
         registry,
@@ -71,6 +79,7 @@ def collect_status(
         goal_id=goal_filter,
         limit=control_plane_limit,
         include_runtime_goals=include_runtime_goals,
+        activation_state_filter=activation_filter,
     )
     contract = context.check_contract(
         registry_path=registry_path,
@@ -79,6 +88,7 @@ def collect_status(
         limit=limit,
         goal_id_filter=goal_filter,
         include_public_boundary_scan=include_public_boundary_scan,
+        activation_state_filter=activation_filter,
     )
     contract = project_contract_health_for_goal(contract, goal_id=goal_filter)
     queue = context.build_attention_queue(
@@ -106,6 +116,7 @@ def collect_status(
         registry_path=registry_path,
         runtime_root=runtime_root,
         goal_id=goal_filter,
+        activation_state_filter=activation_filter,
     )
     runtime_projection_route_health = {
         "healthy": (
@@ -143,6 +154,14 @@ def collect_status(
         **runtime_summaries,
         "promotion_gate": promotion_gate,
     }
+    if activation_filter is not None:
+        payload["goal_projection"] = {
+            "schema_version": "loopx_goal_projection_scope_v0",
+            "scope": activation_filter.value,
+            "complete": False,
+            "projected_goal_count": int(history.get("goal_count") or 0),
+            "registry_goal_count": len(registry_goals(registry)),
+        }
     payload["runtime_projection_routes"] = runtime_projection_route_health
     agent_management_projection = context.build_agent_management_projection(
         payload,
