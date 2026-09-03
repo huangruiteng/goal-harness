@@ -1740,45 +1740,51 @@ it does not promote any provider or complete the Stage 2C promotion.
    store identity or lineage, and an explicit TEST ONLY canary marker; a Goal
    without that marker cannot be admitted by a shared-authority guard, and
    the runtime resolves the provider from the record rather than from argv.*
-8. Which head schema does the local promotion commit, and which fields does
-   the aggregate own? *Proposed answer: a new `loopx_local_authority_head_v1`
-   that is a superset of the Stage 2C shadow projection (`goal_id`,
-   `handoff_mode`, the closed todo and lease field sets) plus
-   `authority_revision`, `store_binding`, and an `authority_source` record,
-   rather than the Python reference `loopx_coordination_head_v1`; Stage 3
-   projects from it. The aggregate is canonical only for the closed
-   coordination set C (per todo: identity, role, status, claim and binding
-   fields, gates, task class and action kind, required scopes and
-   capabilities, continuation and successor links, the completion triple
-   and evidence pointers, the archived flag, `todo_revision`, and
-   `last_lease_epoch`; every lease record; the goal `handoff_mode`). Prose
-   (text, notes, next action, monitor metadata, feedback, `updated_at`)
-   stays Markdown-canonical. `archive-completed` is a head transition, not a
-   projection rewrite. Appendix C carries the design.*
+8. Which head shape does the local promotion commit, and which fields does
+   the aggregate own? The merged runtime shadow already fixes the shape:
+   `loopx_coordination_runtime_shadow_projection_v0` (nineteen todo fields
+   including `updated_at`, `superseding_todo_id`, `task_domain`, and
+   `task_repository`; ten lease fields), and the cutover kernel commits
+   mutations against it as `canonical_authority: file_v0`. *Proposed answer:
+   adopt that projection as the promoted head rather than a superset schema,
+   with three amendments before promotion: drop `updated_at` from the compared
+   set (it is rewritten by every prose edit, so keeping it makes every prose
+   write a coordination transaction and every parity compare prose-sensitive;
+   it stays on the receipt as `source_version`); add the fields promotion must
+   own but the projection lacks (`required_capabilities`, `decision_scope` and
+   `required_decision_scopes`, the completion triple and evidence pointers,
+   the archived flag, `todo_revision`); and treat `archive-completed` as a
+   head transition, not a projection rewrite. Appendix C lists what the kernel
+   already provides.*
 9. Does v0 promotion cover only `hard_lease` goals? *Proposed answer: yes. A
    `legacy` or `soft_claim` goal first switches mode under the Appendix B
    quiescence rule; promotion never changes the mode implicitly.*
-10. Once the aggregate is canonical, is prose persisted through a projection
-    outbox, or does the RFC accept a crash window between the head commit and
-    the Markdown rewrite? *Proposed answer: a projection outbox that shares
-    the direction-neutral entry schema of the Stage 2C parity half
-    (artifact-first: outbox entry, TypeScript commit, Markdown render, entry
-    retirement). Readers compare the front-matter watermark with the head
-    revision and replay the outbox when behind. A promoted goal stops writing
-    `.lifecycle-operations` and `.lifecycle-fences`; the transaction replaces
-    both.*
-11. What declares a promoted goal, and who may write that declaration?
-    *Proposed answer: a goal-level registry record
-    `coordination.authority_source` (`legacy_local | file_aggregate`,
-    provider, store identity and directory, `promoted_at`, the promotion
-    operation id, the source digest, a TEST ONLY marker, `rolled_back_from`),
-    duplicated into the state-file front matter so it travels with the file
-    (Appendix B, rule 2). Only `loopx authority promote|rollback --execute`
-    may write it; `configure-goal` refuses to edit it; `bootstrap --force`
-    refuses a promoted goal. In v0 a second endpoint that sees the
-    front-matter declaration gets `goal_promoted_on_other_endpoint` on
-    coordination-field writes; an older endpoint can only be detected
-    (`projection_diverged`), not blocked, until shared mode.*
+10. After the provider-first read flip, Markdown and the lease files are
+    projections and the kernel forbids any fallback to them. How is prose
+    (text, notes, next action, monitor metadata, feedback) persisted then:
+    through a projection outbox, or by accepting a crash window between the
+    head commit and the Markdown rewrite? *Proposed answer: a projection
+    outbox that reuses the transaction-bound outbox entry schema of the
+    parity half (artifact-first: outbox entry, TypeScript commit, Markdown
+    render, entry retirement), so both directions share one record format;
+    readers compare the front-matter watermark with the head revision and
+    replay the outbox when behind.*
+11. What declares a promoted goal, and who may write that declaration? The
+    merged fence is a durable TypeScript-owned file under
+    `authority-transition/file-v0/`, bound to a fence id, the source version,
+    and the qualified shadow revision, and every Python Todo mutation and
+    native task-lease mutation checks it under its own lock. *Proposed
+    answer: the fence file stays the local authority of the cutover; a
+    goal-level registry record (`coordination.authority_source`: provider,
+    store identity, `promoted_at`, promotion operation id, source digest,
+    `rolled_back_from`) plus its copy in the state-file front matter exists
+    for discovery and for cross-endpoint detection; only the promotion
+    orchestrator and rollback may write either; `configure-goal` refuses to
+    edit the record and `bootstrap --force` refuses a promoted goal. In v0 a
+    second endpoint that sees the front-matter copy gets
+    `goal_promoted_on_other_endpoint` on coordination-field writes; an older
+    endpoint can only be detected (`projection_diverged`), not blocked, until
+    shared mode.*
 12. Which file-profile retention, fast-path, and capacity rules gate the
     first real promotion, and may `committed[].projection` degrade to a
     digest? *Proposed answer: question 5 applied to the file profile before
@@ -1793,11 +1799,27 @@ it does not promote any provider or complete the Stage 2C promotion.
     because their rate sets the segment window.*
 13. What happens to the Python reference executor (`executor.py`,
     `file_provider.py`, `head.py`, `goal_state_shadow.py`)? *Proposed answer:
-    keep it coverage-only until the TypeScript transaction module exists,
-    port its scenario batteries to TypeScript tests, then delete it in the
-    promotion PR; two local aggregate formats cannot both be canonical.
+    keep it coverage-only until the kernel's mutation path is routed from the
+    CLI, port its scenario batteries to TypeScript tests, then delete it in
+    the promotion PR; two local aggregate formats cannot both be canonical.
     Flipping the file profile's `qualification_holds` to `[]` and its `stage`
     literal happens only inside that PR.*
+14. `main` now carries two default-off shadow lineages for the same writers:
+    the observation capture of #3818 (`coordination.authority_shadow`,
+    `authority-shadow/file/<goal>`, projection v0) and the runtime shadow
+    (`coordination.runtime_shadow`, `authority-shadow/file-v0`, projection v0
+    with `inspect`, `qualify`, `bootstrap`, `rollback`, and `read-candidate`).
+    Both re-sample the source after the primary commit, so both share the
+    concurrent-writer and commit-to-dispatch loss windows that the review of
+    #3818 named. Which lineage is Stage 2C's, and what closes those windows?
+    *Proposed answer: the runtime shadow is the lineage, because the parity
+    report, bootstrap, quarantine rollback, read shape, and promotion kernel
+    already bind to it. The transaction-bound outbox of the parity half
+    (prepared entry inside the writer's own lock, committed marker after the
+    primary write, bounded drain with `operation_id = entry id`) becomes the
+    durable capture that feeds `coordination.runtime_shadow.commit`, and the
+    #3818 observation path retires once that capture is wired. The RFC must
+    not keep two shadow record formats.*
 
 ---
 
@@ -1950,81 +1972,63 @@ entry points not yet gated; the window between the lease acquire's projection
 read and the state-file lock.
 
 
-## Appendix C: Stage 2C Promotion Design (proposal, 2026-09-03)
+## Appendix C: Stage 2C Promotion Design (proposal, 2026-09-04)
 
-This appendix records the design the second half of Stage 2C promotes toward.
-It is a proposal for questions 8 to 13 in section 12; nothing in it is
-implemented, and the parity half (transaction-bound outbox, drain, typed
-parity verdict) must merge and this design must be approved before any
-promotion code starts.
+This appendix records the design that questions 8 to 14 in section 12
+decide. It starts from what `main` already ships and names only what is still
+missing; nothing below is implemented by this document, and the parity half
+must merge and the questions must be answered before any promotion code
+starts.
 
-### Target state
+### Shipped on `main` (2026-09-03)
 
-- Field-split authority. The local `FileAuthorityStore` aggregate becomes
-  canonical for the closed coordination set C named in question 8; prose
-  stays canonical in Markdown. Every legal transition of a C field is exactly
-  one `commitAuthority` (events, next head, receipt); the receipt index of
-  `FileAuthorityStore.committed[]` is the receipt store, so section 6.2
-  atomicity holds without embedding receipts in the head.
-- Decisions stay in TypeScript. Lease decisions reuse
-  `evaluateTaskLeaseAcquireDecision` and `decideTaskLeaseLifecycle`; todo,
-  terminal, and handoff decisions need the Stage 1 Part 2 TypeScript cutover
-  first. A new `local_authority_transaction.ts` handler reads the head under
-  the store lock, runs the section 5 steps, composes the pure decisions,
-  commits, reconciles conflict or ambiguity through `readReceipt`, and returns
-  the affected records for rendering. The happy path is two round trips.
-- Markdown and lease files become projections. The front matter carries
-  `authority_source`, `authority_store_identity`, `authority_revision`, and
-  `authority_projection_digest`; lease projection files carry
-  `projected_from`. Prose persistence goes through the projection outbox of
-  question 10; `projection_freshness(goal)` compares the watermark with the
-  head revision and replays the outbox, and a digest mismatch is
-  `projection_diverged`, which blocks until `loopx authority reconcile`.
+- The default-off runtime shadow: one `AuthorityStore` transaction per
+  committed Todo or task-lease mutation, keyed by the mutation's rollout event
+  id and `updated_at`, with receipt replay, content-drift rejection,
+  ambiguous-commit reconciliation, and read-back.
+- `loopx coordination-shadow inspect | qualify | read-candidate | bootstrap |
+  rollback`: typed one-point parity (`missing | matched | drifted` with both
+  digests), a coverage-based sustained parity report, the provider-first read
+  shape (still `decision_read_from_shadow=false`), the bootstrap of an empty
+  shadow from the legacy projection, and a revision-fenced quarantine rollback
+  of a pre-promotion lineage.
+- The cutover kernel: a pure reducer from mutation to projection, event, and
+  receipt; `coordination.local_authority.promote` requiring a qualified shadow
+  at one exact revision and digest plus an independently persisted legacy
+  writer fence bound to that revision; provider-first `mutate` and
+  `todo_read` that never fall back to Markdown.
+- The fence integration: every Python Todo mutation and every native task-lease
+  acquire, renew, transfer, and release checks the durable fence while holding
+  its own lock; an absent fence costs no runtime call; a present, unreadable,
+  or invalid fence fails closed.
 
-### Fencing legacy writers
+### Still missing before promotion
 
-- One gate, `require_local_authority_write_grant`, runs after every Markdown
-  lock is taken and before any decision, in every Todo, follow-up,
-  handoff-mode, refresh-state, bootstrap, and feedback writer; the lease side
-  receives the `authority_source` fact through the existing native requests
-  and refuses lease-file writes for a promoted goal
-  (`legacy_lease_writer_fenced`). Error codes: `legacy_writer_fenced`,
-  `authority_unavailable` (store missing, corrupt, or lock timeout; always
-  fail closed, never fall back), `store_lineage_mismatch`,
-  `projection_diverged`, `goal_promoted_on_other_endpoint`,
-  `promoted_field_write_without_transition`.
-- Prose writers stay allowed on a promoted goal but must pass the gate: the
-  watermark equals the head revision, the outbox is empty, and the C fields
-  parse identically before and after the write.
-- Section 8's no-automatic-fallback rule is local: the first authority write
-  is `authority_revision > 0`, the gate never degrades, and only
-  `loopx authority rollback --execute` returns a goal to `legacy_local`,
-  retiring the store lineage so a later promotion mints a new identity.
-
-### Commands
-
-- `loopx authority promote --goal-id G [--execute]` takes the Markdown
-  (cross-runtime), lease, and store locks in that order; requires an enabled
-  shadow whose `verify` is `equal` for the current source digest,
-  `handoff_mode == hard_lease`, Appendix B quiescence, no prepared
-  `.lifecycle-operations` or held `.lifecycle-fences`, no event-only todo, and
-  one runtime root; bootstraps the head from every todo (including done ones,
-  with lease watermarks against ABA) at revision 0; commits it to a fresh
-  store directory (`operation_id = "promote:" + sha256(goal, source_digest)`,
-  event `authority_promoted`); renders and verifies the projection digest;
-  then flips the registry record and retires `authority_shadow`. A rerun
-  after a crash refuses a store whose source digest differs unless
-  `--discard-abandoned-store` is given, and completes idempotently once the
-  watermark is in place.
-- `loopx authority rollback --goal-id G --execute` needs the same quiescence
-  and an empty outbox, exports the head into the Markdown C fields and the
-  final lease records, verifies `equal`, removes the watermark, records
-  `legacy_local` plus `rolled_back_from`, and retires the lineage. At
-  revision 0 it is section 8's return to an untouched local source; after
-  that it is the reviewed fenced export of question 3 and never runs during
-  an active lease.
-- `loopx authority verify --goal-id G` is the post-promotion parity check
-  (`equal | diverged | stale`, plus pending outbox) and joins `loopx doctor`.
+- Provider-first CLI routing and the lock-owning promotion orchestrator (the
+  kernel's own next slice): take the Todo and lease legacy locks, require
+  `qualify` to be `qualified` at the current revision and digest, engage the
+  fence, run `promote`, render the projections, and record the declaration of
+  question 11; refuse a rerun whose source digest changed unless the abandoned
+  store is explicitly discarded.
+- A transaction-bound capture (question 14): the runtime shadow samples the
+  source after the commit, from outside the writer's lock, so a concurrent
+  writer can land inside the sampled projection and a crash between the commit
+  and the dispatch loses the mirror. The parity-half outbox closes both: the
+  prepared entry is written inside the lock the writer already holds, the
+  committed marker after the primary write returns, and a bounded drain turns
+  each entry into exactly one shadow transaction whose `operation_id` is the
+  entry id. `qualify` then counts entries, not samples.
+- Prose persistence after the read flip (question 10) and the declaration
+  record (question 11).
+- Retention, fast path, and capacity for the file profile (question 12); the
+  reference executor's removal and the status flips (question 13).
+- Post-promotion rollback: the shipped rollback quarantines a pre-promotion
+  lineage. After the first authority write (`authority_revision > 0`) the
+  return path is question 3's reviewed fenced export: quiescence, an empty
+  projection outbox, export of the head into the Markdown coordination fields
+  and the final lease records, an `equal` verify, removal of the watermark and
+  fence, and retirement of the lineage; never automatic, never during an
+  active lease.
 
 ### Growth is a promotion prerequisite
 
@@ -2038,14 +2042,13 @@ for test goals.
 
 ### Sequence
 
-A. todo, terminal, and handoff decisions cut over to TypeScript;
-B. `local_authority_transaction.ts` reference implementation, unwired, with
-the executor batteries ported; C. file-store retention, fast path, and
-capacity (questions 5 and 12); D. registry record, gate, watermark, and
-projection outbox, dormant with `authority_source` fixed at `legacy_local`;
-E. the promotion PR (promote, rollback, verify, routing to B, projection
-rendering, deletion of the four reference modules, flipping the holds and
-stage literal, governance rows, and this RFC's status section). E and every
-`file_aggregate` return path in D wait for the parity half to merge and for
-this design to be approved; D's outbox reuses the parity half's entry schema
-so the repository never carries two record formats.
+A. provider-first CLI routing and the lock-owning promotion orchestrator, on
+the shipped kernel; B. the transaction-bound capture feeding
+`coordination.runtime_shadow.commit`, retiring the #3818 observation path;
+C. file-store retention, fast path, and capacity (questions 5 and 12); D. the
+declaration record and the prose projection outbox, dormant with
+`authority_source` fixed at `legacy_local`; E. the promotion PR (routing the
+orchestrator to the kernel, projection rendering, deletion of the reference
+modules, flipping the holds and stage literal, governance rows, and this RFC's
+status section). E and every `file_aggregate` return path in D wait for the
+parity half to merge and for questions 8 to 14 to be answered.

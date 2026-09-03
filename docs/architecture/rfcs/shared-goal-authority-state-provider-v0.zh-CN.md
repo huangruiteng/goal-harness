@@ -1394,34 +1394,37 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
    布，记录 provider 种类、store identity 或 lineage，以及显式的 TEST ONLY canary
    标记；没有该标记的 Goal 不得被 shared-authority guard 准入，runtime 从该记录而
    非 argv 解析 provider。*
-8. 本地 promotion 提交哪种 head schema，aggregate 拥有哪些字段？*拟议答案：新的
-   `loopx_local_authority_head_v1`，它是 Stage 2C shadow 投影（`goal_id`、
-   `handoff_mode`、闭合的 todo 与 lease 字段集）的超集，再加 `authority_revision`、
-   `store_binding` 与一条 `authority_source` 记录，而不是 Python 参考实现的
-   `loopx_coordination_head_v1`；Stage 3 从它投影。aggregate 只对闭合的协调字段集
-   C 具有权威（每个 todo：身份、role、status、claim 与 binding 字段、gate、task
-   class 与 action kind、required scopes 与 capabilities、continuation 与
-   successor 链接、completion 三元组与 evidence 指针、archived 标记、
-   `todo_revision`、`last_lease_epoch`；每条 lease 记录；goal 的
-   `handoff_mode`）。prose（正文、note、next action、monitor 元数据、feedback、
-   `updated_at`）仍以 Markdown 为准。`archive-completed` 是一次 head transition，
-   不是投影重写。设计见附录 C。*
+8. 本地 promotion 提交哪种 head 形状，aggregate 拥有哪些字段？已合并的 runtime
+   shadow 已经固定了形状：`loopx_coordination_runtime_shadow_projection_v0`
+   （19 个 todo 字段，含 `updated_at`、`superseding_todo_id`、`task_domain`、
+   `task_repository`；10 个 lease 字段），cutover kernel 以
+   `canonical_authority: file_v0` 对它提交 mutation。*拟议答案：采用该投影作为晋升
+   head，而不是再造一个超集 schema，并在晋升前做三处修正：把 `updated_at` 移出比较
+   集（每次 prose 编辑都会改写它，留下它会让每次 prose 写都变成协调事务、每次
+   parity 比较都对 prose 敏感；它留在 receipt 上作为 `source_version`）；补上
+   promotion 必须拥有但投影缺失的字段（`required_capabilities`、`decision_scope`
+   与 `required_decision_scopes`、completion 三元组与 evidence 指针、archived 标
+   记、`todo_revision`）；把 `archive-completed` 当作 head transition 而不是投影
+   重写。附录 C 列出 kernel 已提供的部分。*
 9. v0 promotion 是否只覆盖 `hard_lease` goal？*拟议答案：是。`legacy` 或
    `soft_claim` goal 先按附录 B 的静止规则切换模式；promotion 从不隐式改变模式。*
-10. aggregate 成为权威后，prose 是走 projection outbox 持久化，还是接受 head 提交与
-    Markdown 重写之间的崩溃窗口？*拟议答案：走 projection outbox，并与 Stage 2C
-    parity 半段共用同一个方向中立的 entry schema（artifact-first：outbox entry、
-    TypeScript commit、Markdown 渲染、entry 退役）。读者用 front matter 水印比对
-    head revision，落后则回放 outbox。已晋升的 goal 不再写
-    `.lifecycle-operations` 与 `.lifecycle-fences`，事务取代二者。*
-11. 什么声明一个 goal 已晋升，谁可以写这条声明？*拟议答案：goal 级 registry 记录
-    `coordination.authority_source`（`legacy_local | file_aggregate`、provider、
-    store identity 与目录、`promoted_at`、promotion operation id、源 digest、TEST
-    ONLY 标记、`rolled_back_from`），并复制到 state 文件 front matter 以随文件传播
-    （附录 B 规则 2）。只有 `loopx authority promote|rollback --execute` 能写它；
-    `configure-goal` 拒绝修改；`bootstrap --force` 拒绝已晋升的 goal。v0 里另一
-    端点看到 front matter 声明后，对协调字段的写得到
-    `goal_promoted_on_other_endpoint`；旧版本端点只能被检出
+10. provider-first read flip 之后 Markdown 与 lease 文件成为投影，kernel 禁止任何
+    回退到它们。那么 prose（正文、note、next action、monitor 元数据、feedback）如何
+    持久化：走 projection outbox，还是接受 head 提交与 Markdown 重写之间的崩溃窗
+    口？*拟议答案：走 projection outbox，并复用 parity 半段事务绑定 outbox 的 entry
+    schema（artifact-first：outbox entry、TypeScript commit、Markdown 渲染、entry
+    退役），两个方向共用一种记录格式；读者用 front matter 水印比对 head revision，
+    落后则回放 outbox。*
+11. 什么声明一个 goal 已晋升，谁可以写这条声明？已合并的 fence 是 TypeScript 拥有的
+    持久文件，位于 `authority-transition/file-v0/`，绑定 fence id、源版本与已资格化的
+    shadow revision；每个 Python Todo mutation 与 native task-lease mutation 都在自
+    己的锁内检查它。*拟议答案：fence 文件仍是 cutover 的本地权威；goal 级 registry
+    记录（`coordination.authority_source`：provider、store identity、
+    `promoted_at`、promotion operation id、源 digest、`rolled_back_from`）及其在
+    state 文件 front matter 里的副本用于发现与跨端点检出；只有 promotion
+    orchestrator 与 rollback 能写这两者；`configure-goal` 拒绝修改该记录，
+    `bootstrap --force` 拒绝已晋升的 goal。v0 里看到 front matter 副本的另一端点对
+    协调字段的写得到 `goal_promoted_on_other_endpoint`；旧版本端点只能被检出
     （`projection_diverged`）而不能被阻止，直到 shared mode。*
 12. 哪些 file profile 的保留、快速路径与容量规则是第一次真实 promotion 的前置，
     `committed[].projection` 可否退化为 digest？*拟议答案：在任何真实 goal 晋升之
@@ -1432,10 +1435,22 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
     保留 parity 比较的全部字段时才可退化为 digest。问题 6 在此耦合：Host 续约必须
     经事务而不是直写 lease 文件，因为续约频率决定封段窗口。*
 13. Python 参考执行器（`executor.py`、`file_provider.py`、`head.py`、
-    `goal_state_shadow.py`）如何处置？*拟议答案：在 TypeScript 事务模块存在之前
-    保持 coverage-only，先把它们的场景电池移植为 TypeScript 测试，再在 promotion
-    PR 中删除；两种本地 aggregate 格式不能同时为准。file profile 的
+    `goal_state_shadow.py`）如何处置？*拟议答案：在 kernel 的 mutation 路径接到
+    CLI 之前保持 coverage-only，先把它们的场景电池移植为 TypeScript 测试，再在
+    promotion PR 中删除；两种本地 aggregate 格式不能同时为准。file profile 的
     `qualification_holds` 翻为 `[]` 与 `stage` 字面量的改变只在该 PR 内发生。*
+14. `main` 上现在有两条针对同一批写者的默认关闭 shadow lineage：#3818 的观察捕获
+    （`coordination.authority_shadow`，`authority-shadow/file/<goal>`，投影 v0）与
+    runtime shadow（`coordination.runtime_shadow`，`authority-shadow/file-v0`，
+    投影 v0，带 `inspect`、`qualify`、`bootstrap`、`rollback`、`read-candidate`）。
+    两者都在主写提交之后重新采样源，因此都带着 #3818 评审点名的并发写者混入与
+    commit 到 dispatch 之间的丢失窗口。哪条是 Stage 2C 的 lineage，什么来关闭这两
+    个窗口？*拟议答案：runtime shadow 是 lineage，因为 parity 报告、bootstrap、隔离
+    式 rollback、读形状与 promotion kernel 已经绑定在它上面。parity 半段的事务绑
+    定 outbox（写者在自己已持有的锁内写 prepared entry，主写返回后写 committed
+    标记，有界 drain 以 `operation_id = entry id` 提交）成为喂给
+    `coordination.runtime_shadow.commit` 的持久捕获；该捕获接线后 #3818 的观察路径
+    退役。RFC 不得保留两种 shadow 记录格式。*
 
 ---
 
@@ -1550,64 +1565,47 @@ characterization 阶段的负向用例在原清单上补充：软认领盖掉活
 与状态文件锁之间的窗口。
 
 
-## 附录 C：Stage 2C promotion 设计（提案，2026-09-03）
+## 附录 C：Stage 2C promotion 设计（提案，2026-09-04）
 
-本附录记录 Stage 2C 后半段所指向的设计，是第 12 节问题 8 到 13 的提案；其中没有
-任何内容已实现。parity 半段（事务绑定的 outbox、drain、typed parity verdict）合并
-且本设计获批之前，不得开始任何 promotion 代码。
+本附录记录第 12 节问题 8 到 14 所决定的设计。它从 `main` 已交付的部分出发，只列出
+仍缺失的部分；本文档不实现其中任何内容，parity 半段合并且这些问题得到回答之前，不得
+开始任何 promotion 代码。
 
-### 目标态
+### `main` 已交付（2026-09-03）
 
-- 字段拆分权威。本地 `FileAuthorityStore` aggregate 只对问题 8 命名的闭合协调字段集
-  C 成为权威；prose 仍以 Markdown 为准。C 字段的每一次合法 transition 恰是一次
-  `commitAuthority`（events、next head、receipt）；`FileAuthorityStore.committed[]`
-  按 operation_id 的 receipt 索引就是 receipt 存储，因此第 6.2 节的原子性无需把
-  receipt 嵌进 head。
-- 决策留在 TypeScript。lease 决策复用 `evaluateTaskLeaseAcquireDecision` 与
-  `decideTaskLeaseLifecycle`；todo、terminal 与 handoff 决策需先完成 Stage 1 Part 2
-  预留的 TypeScript cutover。新的 `local_authority_transaction.ts` handler 在 store
-  锁内自读 head，执行第 5 节步骤，组合纯决策，提交，并经 `readReceipt` 调和
-  conflict 与 ambiguity，返回受影响记录用于渲染。happy path 两次往返。
-- Markdown 与 lease 文件成为投影。front matter 携带 `authority_source`、
-  `authority_store_identity`、`authority_revision` 与
-  `authority_projection_digest`；lease 投影文件携带 `projected_from`。prose 持久化
-  经问题 10 的 projection outbox；`projection_freshness(goal)` 比对水印与 head
-  revision 并回放 outbox，digest 不符即 `projection_diverged`，阻塞直到
-  `loopx authority reconcile`。
+- 默认关闭的 runtime shadow：每次已提交的 Todo 或 task-lease mutation 对应一笔
+  `AuthorityStore` 事务，以该 mutation 的 rollout event id 与 `updated_at` 为键，带
+  receipt 重放、内容漂移拒绝、ambiguous commit 调和与回读。
+- `loopx coordination-shadow inspect | qualify | read-candidate | bootstrap |
+  rollback`：带双 digest 的单点 parity（`missing | matched | drifted`）、基于覆盖
+  的持续 parity 报告、provider-first 读形状（仍 `decision_read_from_shadow=false`）、
+  从 legacy 投影引导空 shadow、以及按 revision 围栏的晋升前 lineage 隔离式 rollback。
+- cutover kernel：从 mutation 到投影、事件与 receipt 的纯 reducer；要求 shadow 在
+  一个精确 revision 与 digest 上已资格化、并带独立持久化且绑定该 revision 的 legacy
+  writer fence 的 `coordination.local_authority.promote`；永不回退到 Markdown 的
+  provider-first `mutate` 与 `todo_read`。
+- fence 集成：每个 Python Todo mutation 与每个 native task-lease
+  acquire/renew/transfer/release 都在自己的锁内检查持久 fence；fence 不存在时零运行时
+  调用；fence 存在但不可读或无效时 fail closed。
 
-### fence legacy writer
+### 晋升前仍缺
 
-- 单一 gate `require_local_authority_write_grant` 在每个 Todo、follow-up、
-  handoff-mode、refresh-state、bootstrap 与 feedback 写者取得 Markdown 锁之后、决策
-  之前运行；lease 侧经既有 native 请求拿到 `authority_source` 事实，对已晋升 goal
-  拒绝写 lease 文件（`legacy_lease_writer_fenced`）。错误码：
-  `legacy_writer_fenced`、`authority_unavailable`（store 缺失、损坏或锁超时一律
-  fail closed，绝不回退）、`store_lineage_mismatch`、`projection_diverged`、
-  `goal_promoted_on_other_endpoint`、`promoted_field_write_without_transition`。
-- prose 写者在已晋升 goal 上仍允许，但必须过 gate：水印等于 head revision、outbox
-  为空、写前后 C 字段解析逐字段一致。
-- 第 8 节"首次权威写之后禁止自动回退"在本地的落实：首次权威写即
-  `authority_revision > 0`，gate 从不降级，只有 `loopx authority rollback
-  --execute` 能回到 `legacy_local`，并退役 store lineage，使再次晋升铸造新身份。
-
-### 命令
-
-- `loopx authority promote --goal-id G [--execute]` 依次取 Markdown（跨运行时）、
-  lease 与 store 锁；前置：shadow 已启用且对当前源 digest 的 `verify` 为 `equal`、
-  `handoff_mode == hard_lease`、附录 B 静止、无 prepared 态 `.lifecycle-operations`
-  与 held 态 `.lifecycle-fences`、无仅事件 todo、单一 runtime root；从全部 todo
-  （含 done，带防 ABA 的 lease 水印）在 revision 0 引导 head；提交到新 store 目录
-  （`operation_id = "promote:" + sha256(goal, source_digest)`，事件
-  `authority_promoted`）；渲染并校验投影 digest；再翻注册表记录并退役
-  `authority_shadow`。崩溃后重跑若发现源 digest 不同的既有 store 则拒绝，除非给出
-  `--discard-abandoned-store`；水印一旦落盘即幂等完成。
-- `loopx authority rollback --goal-id G --execute` 需同样的静止与空 outbox，把 head
-  导出到 Markdown C 字段与 lease 终态记录，校验 `equal`，去水印，记录
-  `legacy_local` 与 `rolled_back_from`，退役 lineage。revision 0 时即第 8 节回到未
-  触碰的本地源；之后即问题 3 要求的经评审的 fenced export，且永不在活跃 lease 期间
-  运行。
-- `loopx authority verify --goal-id G` 是晋升后的 parity 检查（`equal | diverged |
-  stale`，加 pending outbox），并入 `loopx doctor`。
+- provider-first CLI 路由与持锁的 promotion orchestrator（kernel 自己声明的下一切
+  片）：取 Todo 与 lease 两把 legacy 锁，要求 `qualify` 在当前 revision 与 digest 上
+  为 `qualified`，engage fence，执行 `promote`，渲染投影，写入问题 11 的声明；源
+  digest 已变时拒绝重跑，除非显式丢弃被放弃的 store。
+- 事务绑定的捕获（问题 14）：runtime shadow 在提交之后、写者锁之外采样源，并发写者
+  可能落进被采样的投影，commit 与 dispatch 之间崩溃则丢失镜像。parity 半段的 outbox
+  同时关闭两者：prepared entry 在写者已持有的锁内写入，committed 标记在主写返回后
+  写入，有界 drain 把每条 entry 变成恰好一笔 `operation_id` 为 entry id 的 shadow
+  事务。此后 `qualify` 数的是 entry，不是采样。
+- read flip 之后的 prose 持久化（问题 10）与声明记录（问题 11）。
+- file profile 的保留、快速路径与容量（问题 12）；参考执行器的删除与状态翻转
+  （问题 13）。
+- 晋升后的 rollback：已交付的 rollback 隔离的是晋升前 lineage。首次权威写
+  （`authority_revision > 0`）之后的返回路径是问题 3 要求的经评审的 fenced export：
+  静止、空 projection outbox、把 head 导出到 Markdown 协调字段与 lease 终态记录、
+  `equal` 校验、去水印与 fence、退役 lineage；永不自动，永不在活跃 lease 期间。
 
 ### 增长是晋升前置
 
@@ -1618,11 +1616,10 @@ CLI 命令都要解析并哈希整个文件，超过 5 秒 effect 超时与 2 Mi
 
 ### 顺序
 
-A. todo、terminal 与 handoff 决策 cutover 到 TypeScript；B.
-`local_authority_transaction.ts` 参考实现，未接线，移植执行器电池；C. file-store
-保留、快速路径与容量（问题 5 与 12）；D. 注册表记录、gate、水印与 projection
-outbox，惰性发布，`authority_source` 恒为 `legacy_local`；E. promotion PR（promote、
-rollback、verify、路由到 B、渲染投影、删除四个参考模块、翻 holds 与 stage 字面量、
-治理行与本 RFC 状态段）。E 与 D 中一切返回 `file_aggregate` 的路径都等 parity 半
-段合并且本设计获批；D 的 outbox 复用 parity 半段的 entry schema，仓库永不同时携带
-两种记录格式。
+A. 在已交付 kernel 上做 provider-first CLI 路由与持锁 promotion orchestrator；B.
+喂给 `coordination.runtime_shadow.commit` 的事务绑定捕获，并退役 #3818 的观察路径；
+C. file-store 保留、快速路径与容量（问题 5 与 12）；D. 声明记录与 prose projection
+outbox，惰性发布，`authority_source` 恒为 `legacy_local`；E. promotion PR（把
+orchestrator 路由到 kernel、渲染投影、删除参考模块、翻 holds 与 stage 字面量、治理行
+与本 RFC 状态段）。E 与 D 中一切返回 `file_aggregate` 的路径都等 parity 半段合并且
+问题 8 到 14 得到回答。
