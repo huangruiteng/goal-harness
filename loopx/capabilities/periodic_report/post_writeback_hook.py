@@ -286,6 +286,9 @@ def build_periodic_report_post_writeback_projection(
         goal_id=goal_id,
         agent_id=normalized_agent_id,
     )
+    available_capabilities = payload.get("available_capabilities")
+    if available_capabilities is None and isinstance(payload.get("turn"), Mapping):
+        available_capabilities = payload["turn"].get("available_capabilities")
     project_progress = build_project_progress_snapshot_from_state(
         state_text=state_text,
         goal=goal,
@@ -294,6 +297,7 @@ def build_periodic_report_post_writeback_projection(
         agent_id=normalized_agent_id,
         completed_at=str(receipt["completed_at"]),
         publication_cursor=publication_cursor,
+        available_capabilities=available_capabilities,
         rollout_events=load_rollout_events(
             rollout_event_log_path(runtime_root, goal_id),
             limit=MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,

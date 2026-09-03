@@ -785,6 +785,123 @@ def test_periodic_report_projection_reduces_terminal_after_todo_completion(
     assert receipt["frontier_identity"] == "validated-goal-terminal"
 
 
+def test_periodic_report_projection_evaluates_turn_capabilities_absent_and_present(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    state_path = tmp_path / "goal.md"
+    state_path.write_text(
+        """# Goal
+
+## User Todo
+
+## Agent Todo
+
+- [ ] Resume the follow-up once network capacity returns.
+  <!-- loopx:todo todo_id=todo_capacity status=open task_class=advancement_task claimed_by=agent-1 action_kind=gated_work resume_when=capacity_available:network -->
+- [ ] Analyze the next bounded family.
+  <!-- loopx:todo todo_id=todo_next status=open task_class=advancement_task claimed_by=agent-1 -->
+""",
+        encoding="utf-8",
+    )
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": "goal-1",
+                        "repo": str(tmp_path),
+                        "state_file": "goal.md",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    runs_dir = runtime_root / "goals" / "goal-1" / "runs"
+    runs_dir.mkdir(parents=True)
+    runs = [
+        {
+            "generated_at": "2026-08-30T11:00:00Z",
+            "goal_id": "goal-1",
+            "agent_vision": {
+                "schema_version": "goal_vision_replan_contract_v0",
+                "agent_id": "agent-1",
+                "state": "active",
+                "vision_patch": {"acceptance_summary": "Next family is bounded."},
+            },
+            "autonomous_replan_ack": {
+                "recorded": True,
+                "frontier_identity": "frontier-2",
+                "semantic_delta": {
+                    "accepted": True,
+                    "outcomes": ["fresh_vision_path_outcome"],
+                    "trigger_kinds": ["vision_successor_required"],
+                    "obligation_id": "replan-2",
+                },
+            },
+        },
+        {
+            "generated_at": "2026-08-30T10:00:00Z",
+            "goal_id": "goal-1",
+            "agent_vision": {
+                "schema_version": "goal_vision_replan_contract_v0",
+                "agent_id": "agent-1",
+                "state": "vision_closed",
+                "vision_patch": {"acceptance_summary": "First family accepted."},
+            },
+            "vision_checkpoint": {
+                "schema_version": "vision_checkpoint_v0",
+                "satisfied": True,
+                "decision": "patched",
+                "triggers": [
+                    {
+                        "kind": "material_delivery_outcome",
+                        "delivery_outcome": "outcome_progress",
+                    }
+                ],
+            },
+        },
+    ]
+    (runs_dir / "index.jsonl").write_text(
+        "".join(json.dumps(run) + "\n" for run in runs),
+        encoding="utf-8",
+    )
+
+    projection_absent = build_periodic_report_post_writeback_projection(
+        payload={"state_file": str(state_path)},
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id="goal-1",
+        agent_id="agent-1",
+    )
+    assert projection_absent.get("stage_completion") is not None
+    next_actions_absent = [
+        item["source_ref"]
+        for item in projection_absent["project_progress"]["items"]
+        if item.get("content_kind") == "next_action"
+    ]
+    assert next_actions_absent == ["todo:todo_next"]
+
+    projection_present = build_periodic_report_post_writeback_projection(
+        payload={
+            "state_file": str(state_path),
+            "available_capabilities": ["network"],
+        },
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id="goal-1",
+        agent_id="agent-1",
+    )
+    assert projection_present.get("stage_completion") is not None
+    next_actions_present = [
+        item["source_ref"]
+        for item in projection_present["project_progress"]["items"]
+        if item.get("content_kind") == "next_action"
+    ]
+    assert next_actions_present == ["todo:todo_capacity"]
+
 def _published_report_goal_fixtures(
     tmp_path,
     *,

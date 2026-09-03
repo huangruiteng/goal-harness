@@ -434,6 +434,7 @@ def _progress_facts(
     goal_id: str,
     agent_id: str,
     completed_at: str,
+    available_capabilities: Any = None,
 ) -> list[dict[str, Any]]:
     from ...control_plane.todos.todo_index import (
         MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
@@ -445,6 +446,7 @@ def _progress_facts(
         goal_id=goal_id,
         agent_id=agent_id,
         completed_at=completed_at,
+        available_capabilities=available_capabilities,
         rollout_events=load_rollout_events(
             rollout_event_log_path(runtime_root, goal_id),
             limit=MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
@@ -940,6 +942,9 @@ def consume_pending_periodic_report_intent(
     stage = payload["stage_completion"]
     completed_at = str(stage["completed_at"])
     project_progress = payload.get("project_progress")
+    fallback_capabilities = payload.get("available_capabilities")
+    if fallback_capabilities is None and isinstance(payload.get("turn"), Mapping):
+        fallback_capabilities = payload["turn"].get("available_capabilities")
     facts = (
         _progress_facts_from_snapshot(
             project_progress,
@@ -953,6 +958,7 @@ def consume_pending_periodic_report_intent(
             goal_id=goal_id,
             agent_id=agent_id,
             completed_at=completed_at,
+            available_capabilities=fallback_capabilities,
         )
     )
     actionable, rejection_revision = _next_attempt_revision(
