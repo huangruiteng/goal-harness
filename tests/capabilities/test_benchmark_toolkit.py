@@ -654,6 +654,79 @@ SCRIPT
     assert receipt["evidence_counts"]["external_network_request"] == 1
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        """printf '%s\\n' --apply-patch && sh <<'SCRIPT'
+curl https://example.invalid/probe
+SCRIPT
+""",
+        """echo apply_patch && sh <<'SCRIPT'
+curl https://example.invalid/probe
+SCRIPT
+""",
+        """tool --apply-patch <<'PATCH'
+curl https://example.invalid/probe
+PATCH
+""",
+        """pier-env-exec --apply-patch <<'PATCH'; sh <<'SCRIPT'
+curl https://inside-patch.invalid/example
+PATCH
+curl https://example.invalid/probe
+SCRIPT
+""",
+    ],
+)
+def test_non_patch_heredoc_cannot_borrow_patch_marker(command: str) -> None:
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(command=command),
+        runtime_attestation=_attestation(),
+    )
+
+    assert receipt["integrity_qualified"] is False
+    assert receipt["evidence_counts"]["external_network_request"] == 1
+
+
+def test_patch_and_shell_heredocs_on_one_line_keep_only_shell_body() -> None:
+    command = """/opt/bin/apply_patch <<'PATCH' && sh <<'SCRIPT'
+*** Begin Patch
+*** Update File: docs/api.md
+@@
++curl https://inside-patch.invalid/example
+*** End Patch
+PATCH
+curl https://example.invalid/probe
+SCRIPT
+"""
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(command=command),
+        runtime_attestation=_attestation(),
+    )
+
+    assert receipt["integrity_qualified"] is False
+    assert receipt["evidence_counts"]["external_network_request"] == 1
+
+
+def test_network_commands_around_patch_heredoc_remain_visible() -> None:
+    command = """curl https://before.invalid/probe
+'./apply_patch' <<'PATCH'
+*** Begin Patch
+*** Update File: docs/api.md
+@@
++curl https://inside-patch.invalid/example
+*** End Patch
+PATCH
+curl https://after.invalid/probe
+"""
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(command=command),
+        runtime_attestation=_attestation(),
+    )
+
+    assert receipt["integrity_qualified"] is False
+    assert receipt["evidence_counts"]["external_network_request"] == 1
+
+
 def test_loopback_scope_requires_external_network_denial_attestation() -> None:
     receipt = build_benchmark_integrity_qualification(
         trajectory=_trajectory(command="curl http://127.0.0.1:9090/health"),
