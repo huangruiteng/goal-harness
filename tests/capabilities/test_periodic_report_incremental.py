@@ -673,3 +673,73 @@ def test_snapshot_keeps_valid_item_order_and_ids_when_invalid_items_are_skipped(
         "completed_3",
     ]
     assert [item["value_rank"] for item in snapshot["items"]] == [10, 12]
+
+
+def _agent_todo_state(todo_lines: list[str]) -> str:
+    return "# Goal\n\n## User Todo\n\n## Agent Todo\n\n" + "\n".join(todo_lines)
+
+
+def test_snapshot_next_action_skips_resume_gated_open_todo(tmp_path: Path) -> None:
+    state = _agent_todo_state(
+        [
+            "\n".join(
+                [
+                    "- [ ] Resume the gated follow-up when network capacity returns.",
+                    "  <!-- loopx:todo todo_id=todo_gated status=open "
+                    "task_class=advancement_task "
+                    f"claimed_by={AGENT_ID} action_kind=gated_work "
+                    "resume_when=capacity_available:network -->",
+                ]
+            ),
+            "\n".join(
+                [
+                    "- [ ] Continue the ordinary advancement work.",
+                    "  <!-- loopx:todo todo_id=todo_plain status=open "
+                    "task_class=advancement_task "
+                    f"claimed_by={AGENT_ID} action_kind=plain_work -->",
+                ]
+            ),
+        ]
+    )
+    snapshot = build_project_progress_snapshot_from_state(
+        state_text=state,
+        goal={"id": GOAL_ID},
+        state_path=tmp_path / "goal.md",
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        completed_at="2026-08-01T08:00:00Z",
+    )
+    assert snapshot is not None
+    next_actions = [
+        item
+        for item in snapshot["items"]
+        if item.get("content_kind") == "next_action"
+    ]
+    assert [item["source_ref"] for item in next_actions] == ["todo:todo_plain"]
+
+
+def test_snapshot_next_action_requires_an_actionable_open_todo(
+    tmp_path: Path,
+) -> None:
+    state = _agent_todo_state(
+        [
+            "\n".join(
+                [
+                    "- [ ] Resume the gated follow-up when network capacity returns.",
+                    "  <!-- loopx:todo todo_id=todo_gated status=open "
+                    "task_class=advancement_task "
+                    f"claimed_by={AGENT_ID} action_kind=gated_work "
+                    "resume_when=capacity_available:network -->",
+                ]
+            ),
+        ]
+    )
+    snapshot = build_project_progress_snapshot_from_state(
+        state_text=state,
+        goal={"id": GOAL_ID},
+        state_path=tmp_path / "goal.md",
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        completed_at="2026-08-01T08:00:00Z",
+    )
+    assert snapshot is None
