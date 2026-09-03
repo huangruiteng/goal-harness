@@ -8,6 +8,8 @@ import sys
 import threading
 import time
 
+import pytest
+
 from loopx.control_plane.capability_hooks import (
     POST_WRITEBACK_HOOK_INPUT_SCHEMA_VERSION,
     POST_WRITEBACK_HOOK_RESULT_SCHEMA_VERSION,
@@ -341,7 +343,9 @@ def test_periodic_report_hook_requires_explicit_goal_profile_opt_in(tmp_path) ->
     )
 
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    registry["goals"][0]["control_plane"]["periodic_report"]["enabled"] = True
+    registry["goals"][0]["control_plane"]["periodic_report"].update(
+        {"enabled": True, "route_ref": "loopx-concierge"}
+    )
     registry_path.write_text(json.dumps(registry), encoding="utf-8")
 
     hooks = periodic_report_post_writeback_hooks_for_goal(
@@ -419,6 +423,190 @@ def test_periodic_report_hook_uses_live_machine_default_without_goal_mutation(
 
     assert len(hooks) == 1
     assert json.loads(registry_path.read_text(encoding="utf-8")) == registry_payload
+
+
+def _write_unreadable_periodic_report_machine_store(runtime_root: Path) -> None:
+    store = runtime_root / "machine" / "configuration.json"
+    store.parent.mkdir(parents=True)
+    store.write_text(
+        json.dumps(
+            {
+                "schema_version": "loopx_machine_configuration_v0",
+                "namespaces": {
+                    "periodic_report": {
+                        "schema_version": "periodic_report_machine_defaults_v0",
+                        "enabled": "true",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_periodic_report_hook_degrades_to_no_hooks_when_machine_store_is_unreadable(
+    tmp_path,
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps({"goals": [{"id": "goal-1"}]}),
+        encoding="utf-8",
+    )
+    runtime_root = tmp_path / "runtime"
+    _write_unreadable_periodic_report_machine_store(runtime_root)
+
+    with pytest.warns(UserWarning, match="periodic_report.enabled must be a boolean"):
+        assert (
+            periodic_report_post_writeback_hooks_for_goal(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id="goal-1",
+            )
+            == ()
+        )
+
+
+def test_periodic_report_hook_degrades_to_no_hooks_on_legacy_machine_namespace(
+    tmp_path,
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps({"goals": [{"id": "goal-1"}]}),
+        encoding="utf-8",
+    )
+    runtime_root = tmp_path / "runtime"
+    store = runtime_root / "machine" / "configuration.json"
+    store.parent.mkdir(parents=True)
+    store.write_text(
+        json.dumps(
+            {
+                "schema_version": "loopx_machine_configuration_v0",
+                "namespaces": {
+                    "periodic_report": {
+                        "schema_version": "periodic_report_machine_defaults_v0",
+                        "enabled": True,
+                        "delivery_style": "weekly",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="periodic_report contains unsupported fields"):
+        assert (
+            periodic_report_post_writeback_hooks_for_goal(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id="goal-1",
+            )
+            == ()
+        )
+
+
+def test_periodic_report_hook_reports_invalid_goal_overrides_like_canonical_resolver(
+    tmp_path,
+) -> None:
+    from loopx.capabilities.periodic_report.machine_defaults import (
+        resolve_goal_periodic_report_subscription,
+    )
+
+    invalid_overrides = [
+        (
+            {"enabled": True},
+            "goal periodic_report.profile_preset is required",
+        ),
+        (
+            {
+                "enabled": "true",
+                "profile_preset": "weekly-progress",
+                "route_ref": "loopx-concierge",
+            },
+            "goal periodic_report.enabled must be a boolean",
+        ),
+    ]
+    for override, expected_error in invalid_overrides:
+        goal = {"id": "goal-1", "control_plane": {"periodic_report": override}}
+        with pytest.raises((TypeError, ValueError), match=expected_error):
+            resolve_goal_periodic_report_subscription(goal)
+
+        registry_path = tmp_path / "registry.json"
+        registry_path.write_text(
+            json.dumps({"goals": [goal]}),
+            encoding="utf-8",
+        )
+        with pytest.warns(UserWarning, match=expected_error):
+            assert (
+                periodic_report_post_writeback_hooks_for_goal(
+                    registry_path=registry_path,
+                    runtime_root=tmp_path / "runtime",
+                    goal_id="goal-1",
+                )
+                == ()
+            )
+
+
+def test_todo_complete_survives_unreadable_periodic_report_machine_store(
+    tmp_path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from loopx.cli import main as cli_main
+
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir()
+    state = tmp_path / "STATE.md"
+    state.write_text(
+        "# Goal\n\n"
+        "## Agent Todo\n\n"
+        "- [ ] [P1] demo work item\n"
+        "  <!-- loopx:todo status=open task_class=advancement_task "
+        "claimed_by=agent-a todo_id=todo_dem0item -->\n",
+        encoding="utf-8",
+    )
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": "goal-1",
+                        "repo": str(tmp_path),
+                        "state_file": "STATE.md",
+                        "agents": [{"id": "agent-a"}],
+                    }
+                ],
+                "common_runtime_root": str(runtime_root),
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_unreadable_periodic_report_machine_store(runtime_root)
+
+    with pytest.warns(UserWarning, match="periodic_report.enabled must be a boolean"):
+        exit_code = cli_main(
+            [
+                "--registry",
+                str(registry_path),
+                "--format",
+                "json",
+                "todo",
+                "complete",
+                "--goal-id",
+                "goal-1",
+                "--todo-id",
+                "todo_dem0item",
+                "--agent-id",
+                "agent-a",
+                "--evidence",
+                "demo",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["completed"] is True
 
 
 def test_periodic_report_projection_reduces_durable_successor_transition(

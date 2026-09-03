@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -65,7 +66,15 @@ def _goal_config(registry_path: Path, goal_id: str) -> Mapping[str, Any]:
 def periodic_report_post_writeback_hooks_for_goal(
     *, registry_path: Path, goal_id: str, runtime_root: Path | None = None
 ) -> tuple[PostWritebackHookRegistration, ...]:
-    """Resolve a Goal override or live machine-default profile at composition."""
+    """Resolve a Goal override or live machine-default profile at composition.
+
+    Both branches resolve through the canonical subscription resolver, so an
+    invalid Goal override is reported here the same way the delivery paths
+    report it. Store read and subscription validation failures degrade to no
+    hooks with one warning: composition happens outside the dispatch
+    isolation boundary, so optional hooks never alter the primary truth of
+    the CLI command that composes them.
+    """
 
     registry = load_registry(registry_path)
     effective_runtime_root = runtime_root or resolve_runtime_root(
@@ -83,18 +92,26 @@ def periodic_report_post_writeback_hooks_for_goal(
     if not isinstance(goal, Mapping):
         return ()
     goal_override = _goal_config(registry_path, goal_id)
-    if goal_override:
-        if goal_override.get("enabled") is not True:
-            return ()
-        preset = str(goal_override.get("profile_preset") or "").strip()
-    else:
+    try:
         subscription = resolve_goal_periodic_report_subscription(
             goal,
-            read_periodic_report_machine_defaults(effective_runtime_root),
+            (
+                None
+                if goal_override
+                else read_periodic_report_machine_defaults(effective_runtime_root)
+            ),
         )
-        if subscription.get("enabled") is not True:
-            return ()
-        preset = str(subscription.get("profile_preset") or "").strip()
+    except (TypeError, ValueError) as exc:
+        warnings.warn(
+            f"periodic-report subscription for goal {goal_id} failed to resolve; "
+            f"post-writeback hooks are disabled: {exc}",
+            UserWarning,
+            stacklevel=2,
+        )
+        return ()
+    if subscription.get("enabled") is not True:
+        return ()
+    preset = str(subscription.get("profile_preset") or "").strip()
     if not preset:
         return ()
     activation = build_periodic_report_preset_activation(preset)

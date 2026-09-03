@@ -3491,6 +3491,7 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
         "periodic_report": {
             "enabled": True,
             "profile_preset": "weekly",
+            "route_ref": "project-room",
         }
     }
     registry_path.write_text(
