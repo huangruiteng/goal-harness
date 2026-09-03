@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -863,6 +865,23 @@ def _load_editorial_response(
     }
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    temporary_path = Path(temporary)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 def _build_authored_source(
     authored: Mapping[str, Any], *, completed_at: str
 ) -> dict[str, Any]:
@@ -1049,8 +1068,8 @@ def consume_pending_periodic_report_intent(
     html_path = artifact_dir / "report.html"
     generation_bundle_path = artifact_dir / "generation-bundle.json"
     publication_candidate_path = artifact_dir / "publication-candidate.json"
-    markdown_path.write_text(str(markdown["content"]), encoding="utf-8")
-    html_path.write_text(str(html["content"]), encoding="utf-8")
+    _atomic_write_text(markdown_path, str(markdown["content"]))
+    _atomic_write_text(html_path, str(html["content"]))
     atomic_write_json(generation_bundle_path, bundle)
     incremental_baseline = (
         project_progress.get("incremental_baseline")

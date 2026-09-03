@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 from loopx.capabilities.periodic_report.pending_intent import (
+    _atomic_write_text,
     _periodic_report_delivery_binding_ref,
     consume_pending_periodic_report_intent,
     pending_periodic_report_intents,
@@ -462,6 +464,97 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
     )
     assert quota["selected_todo"]["todo_id"] == delivery_after["todo_id"], quota
     assert quota["user_todo_summary"]["open_count"] == 0
+
+
+def test_report_artifacts_leave_no_temp_residue(tmp_path: Path) -> None:
+    registry, runtime = _fixture(tmp_path)
+
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    _write_editorial_response(required)
+    first = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+
+    assert first["status"] == "approval_pending"
+    artifact_dir = Path(first["artifacts"]["markdown_path"]).parent
+    names = sorted(item.name for item in artifact_dir.iterdir())
+    for expected in (
+        "generation-bundle.json",
+        "publication-candidate.json",
+        "report.html",
+        "report.md",
+    ):
+        assert expected in names
+    assert not [name for name in names if name.endswith(".tmp")]
+    html = Path(first["artifacts"]["html_path"]).read_text(encoding="utf-8")
+    assert html.rstrip().endswith("</html>")
+    assert Path(first["artifacts"]["markdown_path"]).read_text(encoding="utf-8").strip()
+
+
+def test_atomic_write_text_keeps_target_intact_when_replace_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "report.md"
+    _atomic_write_text(target, "previous content")
+    assert target.read_text(encoding="utf-8") == "previous content"
+
+    def _boom(source: object, destination: object) -> None:
+        raise OSError("simulated interruption before rename")
+
+    monkeypatch.setattr(
+        "loopx.capabilities.periodic_report.pending_intent.os.replace", _boom
+    )
+    with pytest.raises(OSError, match="simulated interruption"):
+        _atomic_write_text(target, "new content")
+
+    assert target.read_text(encoding="utf-8") == "previous content"
+    assert not [item for item in tmp_path.iterdir() if item.name.endswith(".tmp")]
+
+
+def test_report_markdown_not_left_behind_when_rename_is_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    _write_editorial_response(required)
+
+    real_replace = os.replace
+
+    def _interrupt_at_report_md(source: object, destination: object) -> None:
+        if Path(str(destination)).name == "report.md":
+            raise OSError("simulated interruption before report.md rename")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(
+        "loopx.capabilities.periodic_report.pending_intent.os.replace",
+        _interrupt_at_report_md,
+    )
+    with pytest.raises(OSError, match="before report.md rename"):
+        consume_pending_periodic_report_intent(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            execute=True,
+        )
+
+    assert list(runtime.rglob("report.md")) == []
 
 
 def test_consumption_uses_the_stage_progress_snapshot(tmp_path: Path) -> None:
