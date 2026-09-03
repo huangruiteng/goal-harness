@@ -92,8 +92,7 @@ def _extract_reset_token(payload: dict[str, Any]) -> str:
 def parse_tick(payload: dict[str, Any]) -> TickDecision:
     hint = _mapping(payload.get("scheduler_hint"))
     action = str(hint.get("action") or "").strip()
-    terminal = action in TERMINAL_ACTIONS
-    local = {} if terminal else _extract_local_scheduler(payload)
+    local = _extract_local_scheduler(payload)
 
     progression_values = local.get("example_progression_minutes")
     progression: tuple[int, ...] = ()
@@ -142,7 +141,7 @@ def parse_tick(payload: dict[str, Any]) -> TickDecision:
         final_probe_enabled=bool(final_probe.get("enabled")),
         final_probe_action=str(final_probe.get("action") or "").strip(),
         reset_token=_extract_reset_token(payload),
-        terminal=terminal,
+        terminal=action in TERMINAL_ACTIONS,
     )
 
 
