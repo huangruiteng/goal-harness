@@ -63,6 +63,7 @@ def build_run_history(
     compact_run: RunCompactor,
     quota_status: QuotaStatus,
     display_limit: int | None = None,
+    recent_run_limit: int | None = None,
 ) -> dict[str, Any]:
     display_limit = None if display_limit is None else max(0, display_limit)
     goals: list[dict[str, Any]] = []
@@ -123,8 +124,9 @@ def build_run_history(
         for run in history.get("runs") or []
         if isinstance(run, dict)
     ]
-    if display_limit is not None:
-        recent_runs = recent_runs[:display_limit]
+    recent_limit = recent_run_limit if recent_run_limit is not None else display_limit
+    if recent_limit is not None:
+        recent_runs = recent_runs[: max(0, recent_limit)]
     return {
         "available": True,
         "goal_count": history.get("goal_count"),

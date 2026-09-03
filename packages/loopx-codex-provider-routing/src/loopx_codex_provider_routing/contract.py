@@ -11,6 +11,12 @@ REQUEST_SCHEMA_VERSION = "loopx_codex_provider_routing_request_v0"
 RESPONSE_SCHEMA_VERSION = "loopx_codex_provider_routing_response_v0"
 INTEGRATION_CANDIDATE_SCHEMA_VERSION = "codex_provider_integration_candidate_v0"
 HEARTBEAT_TRANSPORT_SCHEMA_VERSION = "codex_app_heartbeat_transport_qualification_v0"
+HOST_CONTROL_RECOVERY_SCHEMA_VERSION = "codex_host_control_recovery_qualification_v0"
+
+RECOVERABLE_HOST_CONTROL_NAMES = {
+    "automation_update",
+    "send_message_to_thread",
+}
 
 FORBIDDEN_KEYS = {
     "account_id",
@@ -161,6 +167,161 @@ def qualify_heartbeat_transport(observation: Mapping[str, Any]) -> dict[str, Any
         },
         "responsible_layer": "codex_app_heartbeat_transport",
         "prompt_or_model_remediation": False,
+    }
+
+
+def qualify_host_control_recovery(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Qualify a content-free observation of CPA orphan host-output recovery."""
+
+    reject_private_material(observation)
+    _reject_unexpected_keys(
+        observation,
+        {
+            "tool_name",
+            "call_id_present",
+            "matching_call_count",
+            "semantic_output_present",
+            "observed_action",
+            "projection",
+            "error_status",
+        },
+        "host_control_recovery",
+    )
+    tool_name = _non_empty_string(
+        observation.get("tool_name"), "host_control_recovery.tool_name"
+    )
+    call_id_present = _boolean(
+        observation.get("call_id_present"),
+        "host_control_recovery.call_id_present",
+    )
+    matching_call_count = observation.get("matching_call_count")
+    if (
+        not isinstance(matching_call_count, int)
+        or isinstance(matching_call_count, bool)
+        or matching_call_count < 0
+    ):
+        raise TypeError(
+            "host_control_recovery.matching_call_count must be a non-negative integer"
+        )
+    semantic_output_present = _boolean(
+        observation.get("semantic_output_present"),
+        "host_control_recovery.semantic_output_present",
+    )
+    observed_action = _non_empty_string(
+        observation.get("observed_action"),
+        "host_control_recovery.observed_action",
+    )
+    if observed_action not in {"project_as_user", "fail_closed"}:
+        raise ValueError(
+            "host_control_recovery.observed_action must be project_as_user or fail_closed"
+        )
+
+    recoverable = (
+        tool_name in RECOVERABLE_HOST_CONTROL_NAMES
+        and not call_id_present
+        and matching_call_count == 0
+        and semantic_output_present
+    )
+    expected_action = "project_as_user" if recoverable else "fail_closed"
+    checks = [
+        {
+            "id": "recovery_action",
+            "passed": observed_action == expected_action,
+            "expected": expected_action,
+            "observed": observed_action,
+        }
+    ]
+
+    projection = observation.get("projection")
+    error_status = observation.get("error_status")
+    if expected_action == "project_as_user":
+        if not isinstance(projection, Mapping):
+            projection = {}
+        else:
+            _reject_unexpected_keys(
+                projection,
+                {
+                    "type",
+                    "role",
+                    "tool_identity_removed",
+                    "semantic_output_preserved",
+                    "next_action_observed",
+                    "next_action_matches_instruction",
+                },
+                "host_control_recovery.projection",
+            )
+        checks.extend(
+            [
+                {
+                    "id": "projection_type",
+                    "passed": projection.get("type") == "message",
+                },
+                {
+                    "id": "projection_role",
+                    "passed": projection.get("role") == "user",
+                },
+                {
+                    "id": "tool_identity_removed",
+                    "passed": projection.get("tool_identity_removed") is True,
+                },
+                {
+                    "id": "semantic_output_preserved",
+                    "passed": projection.get("semantic_output_preserved") is True,
+                },
+                {
+                    "id": "next_action_observed",
+                    "passed": projection.get("next_action_observed") is True,
+                },
+                {
+                    "id": "instruction_follow_through",
+                    "passed": projection.get("next_action_matches_instruction") is True,
+                },
+                {
+                    "id": "no_error_status",
+                    "passed": error_status is None,
+                },
+            ]
+        )
+    else:
+        checks.extend(
+            [
+                {
+                    "id": "typed_fail_closed",
+                    "passed": error_status == 409,
+                },
+                {
+                    "id": "no_projection_on_rejection",
+                    "passed": projection is None,
+                },
+            ]
+        )
+
+    return {
+        "schema_version": HOST_CONTROL_RECOVERY_SCHEMA_VERSION,
+        "qualified": all(check["passed"] for check in checks),
+        "expected_action": expected_action,
+        "checks": checks,
+        "required_contract": {
+            "allowlisted_tools": sorted(RECOVERABLE_HOST_CONTROL_NAMES),
+            "recoverable_shape": {
+                "call_id_present": False,
+                "matching_call_count": 0,
+                "semantic_output_present": True,
+            },
+            "projection": {
+                "type": "message",
+                "role": "user",
+                "remove_tool_identity": True,
+                "preserve_semantic_output": True,
+            },
+            "negative_paths": {
+                "action": "fail_closed",
+                "status": 409,
+            },
+            "qualification_requires_instruction_follow_through": True,
+        },
+        "responsible_layer": "cpa_provider_history_normalizer",
+        "effect_boundary": "content_free_observation_only",
     }
 
 

@@ -41,6 +41,10 @@ from .incremental import (
     build_periodic_report_publication_candidate,
     write_periodic_report_publication_candidate,
 )
+from .workspace import (
+    build_periodic_report_workspace_projection,
+    write_periodic_report_workspace_projection,
+)
 
 
 PENDING_INTENT_SCHEMA = "pending_capability_intent_projection_v0"
@@ -1049,9 +1053,21 @@ def consume_pending_periodic_report_intent(
     html_path = artifact_dir / "report.html"
     generation_bundle_path = artifact_dir / "generation-bundle.json"
     publication_candidate_path = artifact_dir / "publication-candidate.json"
+    workspace_projection_path = artifact_dir / "workspace-projection.json"
     markdown_path.write_text(str(markdown["content"]), encoding="utf-8")
     html_path.write_text(str(html["content"]), encoding="utf-8")
     atomic_write_json(generation_bundle_path, bundle)
+    workspace_projection = build_periodic_report_workspace_projection(
+        goal_id=goal_id,
+        agent_id=agent_id,
+        generation_id=str(generation["generation_id"]),
+        document=document,
+        facts=facts,
+    )
+    write_periodic_report_workspace_projection(
+        path=workspace_projection_path,
+        projection=workspace_projection,
+    )
     incremental_baseline = (
         project_progress.get("incremental_baseline")
         if isinstance(project_progress, Mapping)
@@ -1065,6 +1081,7 @@ def consume_pending_periodic_report_intent(
         trigger_receipt=trigger,
         facts=facts,
         baseline=incremental_baseline,
+        workspace_projection_sha256=str(workspace_projection["content_sha256"]),
     )
     write_periodic_report_publication_candidate(
         path=publication_candidate_path,
@@ -1131,6 +1148,8 @@ def consume_pending_periodic_report_intent(
             "markdown_digest": markdown["content_digest"],
             "generation_bundle_path": str(generation_bundle_path),
             "publication_candidate_path": str(publication_candidate_path),
+            "workspace_projection_path": str(workspace_projection_path),
+            "workspace_projection_sha256": workspace_projection["content_sha256"],
         },
         "incremental_baseline": publication_candidate.get("incremental_baseline"),
     }

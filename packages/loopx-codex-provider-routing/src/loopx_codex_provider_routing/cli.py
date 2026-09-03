@@ -14,6 +14,7 @@ from .contract import (
     normalize_selector_request,
     project_runtime_status,
     qualify_heartbeat_transport,
+    qualify_host_control_recovery,
     qualify_snapshot,
     reconcile_integration_candidate,
     reject_private_material,
@@ -47,6 +48,7 @@ def _doctor() -> int:
                 "normalize_selector_request",
                 "project_runtime_status",
                 "qualify_heartbeat_transport",
+                "qualify_host_control_recovery",
                 "qualify_snapshot",
                 "reconcile_integration_candidate",
                 "upgrade_plan",
@@ -69,6 +71,7 @@ def _run_request(request: Any) -> dict[str, Any]:
         "normalize_selector_request": "normalization",
         "project_runtime_status": "status",
         "qualify_heartbeat_transport": "heartbeat_transport",
+        "qualify_host_control_recovery": "host_control_recovery",
         "qualify_snapshot": "snapshot",
         "reconcile_integration_candidate": "integration",
         "upgrade_plan": "upgrade",
@@ -105,6 +108,13 @@ def _run_request(request: Any) -> dict[str, Any]:
                 "qualify_heartbeat_transport requires object `heartbeat_transport`"
             )
         result = qualify_heartbeat_transport(heartbeat_transport)
+    elif operation == "qualify_host_control_recovery":
+        host_control_recovery = request.get("host_control_recovery")
+        if not isinstance(host_control_recovery, Mapping):
+            raise ValueError(
+                "qualify_host_control_recovery requires object `host_control_recovery`"
+            )
+        result = qualify_host_control_recovery(host_control_recovery)
     elif operation == "qualify_snapshot":
         snapshot = request.get("snapshot")
         if not isinstance(snapshot, Mapping):

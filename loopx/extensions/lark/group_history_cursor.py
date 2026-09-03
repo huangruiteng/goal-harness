@@ -26,6 +26,12 @@ def normalize_group_history_timestamp(value: str, *, field: str) -> str:
     return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
+def _timestamp_order_key(value: str) -> datetime:
+    """Compare normalized RFC3339 values by time, not variable-width text."""
+
+    return datetime.fromisoformat(value)
+
+
 def group_history_source_fingerprint(
     *,
     route_key: str,
@@ -98,10 +104,14 @@ def load_group_history_cursor(
     coverage_end = normalize_group_history_timestamp(
         str(raw_coverage_end or ""), field="coverage_end"
     )
+    window_start_time = _timestamp_order_key(window_start)
+    window_end_time = _timestamp_order_key(window_end)
+    coverage_start_time = _timestamp_order_key(coverage_start)
+    coverage_end_time = _timestamp_order_key(coverage_end)
     if (
-        not window_start < window_end
-        or not coverage_start <= coverage_end
-        or (coverage_end > window_end and window_kind != "earlier")
+        not window_start_time < window_end_time
+        or not coverage_start_time <= coverage_end_time
+        or (coverage_end_time > window_end_time and window_kind != "earlier")
     ):
         raise ValueError("Lark group-history cursor window is invalid")
     history_complete = payload.get("history_complete")
@@ -222,8 +232,10 @@ def resolve_group_history_window(
     requested_start: str,
     snapshot_end: str,
 ) -> tuple[dict[str, Any], str, bool]:
+    requested_start_time = _timestamp_order_key(requested_start)
+    snapshot_end_time = _timestamp_order_key(snapshot_end)
     if existing is None:
-        if requested_start >= snapshot_end:
+        if requested_start_time >= snapshot_end_time:
             raise ValueError("Lark group-history start must be earlier than now")
         return (
             _new_group_history_cursor(
@@ -240,10 +252,13 @@ def resolve_group_history_window(
             False,
         )
     state = dict(existing)
+    coverage_start_time = _timestamp_order_key(str(state["coverage_start"]))
+    coverage_end_time = _timestamp_order_key(str(state["coverage_end"]))
+    window_start_time = _timestamp_order_key(str(state["window_start"]))
     if state["history_complete"] is not True:
         forward_start_is_covered = (
             state["window_kind"] == "forward"
-            and state["coverage_start"] <= requested_start <= state["window_start"]
+            and coverage_start_time <= requested_start_time <= window_start_time
         )
         if requested_start != state["window_start"] and not forward_start_is_covered:
             raise ValueError(
@@ -251,11 +266,11 @@ def resolve_group_history_window(
             )
         return state, "resumed", False
     if (
-        requested_start >= state["coverage_start"]
-        and snapshot_end <= state["coverage_end"]
+        requested_start_time >= coverage_start_time
+        and snapshot_end_time <= coverage_end_time
     ):
         return state, "replayed", True
-    if requested_start < state["coverage_start"]:
+    if requested_start_time < coverage_start_time:
         if state["earlier_start_used"] is True:
             raise ValueError(
                 "Lark group-history earlier-start backfill is already used"

@@ -46,13 +46,14 @@ copy under `$DSH_AGENTS_HOME/runtime/dsh-loopx-plugin` (default
 `~/.agents/runtime/dsh-loopx-plugin`) and never mutates the system Python
 environment. This works with externally managed Python distributions that
 enforce PEP 668; the plugin does not use `--break-system-packages`.
-The published plugin requires LoopX 0.5.3 or newer because that is the first
-release contract whose wheel carries the packaged workflow skills.
+The published plugin requires LoopX 0.5.4 or newer. Although 0.5.3 carried the
+workflow-skill files, 0.5.4 is the first release that discovers them after the
+plugin's Linux `pip --target` managed-runtime install.
 Install the prebuilt release into the web profile:
 
 ```bash
 dsh plugin --profile web add \
-  "https://github.com/huangruiteng/loopx/releases/download/dsh-loopx-plugin-v0.1.1-beta.3/dsh-loopx-plugin-0.1.1-beta.3.tgz"
+  "https://github.com/huangruiteng/loopx/releases/download/dsh-loopx-plugin-v0.1.1-beta.4/dsh-loopx-plugin-0.1.1-beta.4.tgz"
 ```
 
 For a source checkout, the equivalent build-and-install path is:
@@ -160,7 +161,7 @@ The repair command has no arguments. Extra input returns a usage error before an
 model work or CLI probe. A valid invocation queues a bounded start followup on
 the exact receiving Agent, then probes the current LoopX installation. When the
 CLI is missing or lacks the DSH-native skill contract, it runs exactly one
-fixed-argv `pip install --upgrade --target <plugin-runtime> 'loopx>=0.5.3'`, writes a
+fixed-argv `pip install --upgrade --target <plugin-runtime> 'loopx>=0.5.4'`, writes a
 small managed Python launcher beside that target, then uses that same
 interpreter and launcher to install and read back the skills. Driver and
 GoalBar resolve this same managed runtime, including after an explicit repair.

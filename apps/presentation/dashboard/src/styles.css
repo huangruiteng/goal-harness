@@ -2331,45 +2331,6 @@ select {
   align-items: start;
 }
 
-.frontstage-ops-workspace {
-  --frontstage-panel: rgb(255 255 255);
-  --frontstage-panel-muted: rgb(248 250 252);
-  --frontstage-border: rgb(226 232 240);
-  background:
-    linear-gradient(180deg, rgb(248 250 252), rgb(247 247 244) 18rem),
-    rgb(247 247 244);
-}
-
-.frontstage-ops-workspace :where(section, aside, .frontstage-ops-command-strip) {
-  border-radius: 0.5rem;
-}
-
-.frontstage-ops-main-pane {
-  min-width: 0;
-}
-
-.frontstage-ops-command-strip {
-  position: relative;
-  overflow: hidden;
-  background:
-    linear-gradient(180deg, var(--frontstage-panel), var(--frontstage-panel-muted)),
-    var(--frontstage-panel);
-}
-
-.frontstage-ops-command-strip::before {
-  position: absolute;
-  inset-block: 0;
-  left: 0;
-  width: 0.25rem;
-  content: "";
-  background: linear-gradient(180deg, rgb(20 184 166), rgb(99 102 241), rgb(245 158 11));
-}
-
-.frontstage-ops-command-strip input,
-.frontstage-ops-command-strip select {
-  min-width: 0;
-}
-
 .frontstage-showcase-workspace {
   background:
     linear-gradient(180deg, rgb(255 255 255), rgb(247 247 244) 20rem),
@@ -3467,11 +3428,5 @@ select {
   .frontstage-rollout-spine-card::before,
   .frontstage-rollout-layer-rail::before {
     display: none;
-  }
-}
-
-@media (max-width: 640px) {
-  .frontstage-ops-command-strip {
-    padding-inline: 0.875rem;
   }
 }

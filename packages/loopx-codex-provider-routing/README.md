@@ -58,6 +58,14 @@ qualification.
   transport rather than to the LoopX prompt or model provider. This operation
   diagnoses the boundary; it does not patch, restart or modify Codex App.
 
+`qualify_host_control_recovery`
+: Checks a content-free observation of CPA recovery for an orphan host control
+  output. Only confirmed host names with no `call_id`, no matching model call
+  and non-empty semantic output may be retyped as a `role=user` message. The
+  qualification also requires proof that the next observed action followed the
+  preserved instruction; HTTP success alone cannot pass. Unknown, paired or
+  empty outputs must remain a typed `409` failure.
+
 `project_runtime_status`
 : Joins a stable, route-independent host ChatGPT identity state with a
   content-free CPA execution observation and symbolic A/B quota/activity.
@@ -97,6 +105,10 @@ loopx extension run loopx-codex-provider-routing \
   --format json
 loopx extension run loopx-codex-provider-routing \
   --input-json packages/loopx-codex-provider-routing/examples/heartbeat-transport.json \
+  --execute \
+  --format json
+loopx extension run loopx-codex-provider-routing \
+  --input-json packages/loopx-codex-provider-routing/examples/host-control-recovery.json \
   --execute \
   --format json
 loopx extension run loopx-codex-provider-routing \

@@ -4,6 +4,12 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
+from ..control_plane.coordination.runtime_shadow import (
+    build_todo_runtime_shadow_projection,
+    dispatch_coordination_runtime_shadow,
+    load_task_lease_runtime_shadow_records,
+    resolve_coordination_runtime_shadow_config,
+)
 from ..control_plane.work_items.task_lease import (
     TaskLeaseError,
     inspect_task_lease,
@@ -16,13 +22,87 @@ from ..control_plane.work_items.task_lease_acquire_adapter import (
     execute_native_task_lease_acquire,
 )
 from ..file_lock import LockAcquireTimeoutError
+from ..history import load_registry
 from ..presentation.markdown import append_operator_action_markdown
+from ..registry import find_registry_goal
+from ..todos import list_goal_todos
 
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
     None,
 ]
+
+
+def _mirror_committed_task_lease_runtime_shadow(
+    payload: dict[str, object],
+    *,
+    args: argparse.Namespace,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    runtime_root: Path,
+) -> dict[str, object] | None:
+    if not payload.get("ok") or args.task_lease_command == "inspect":
+        return None
+    try:
+        registry = load_registry(registry_path)
+        goal = find_registry_goal(registry, args.goal_id)
+        shadow_enabled = resolve_coordination_runtime_shadow_config(goal).enabled
+    except Exception:
+        return None
+    if not shadow_enabled:
+        return None
+
+    lease = payload.get("lease")
+    source_version = (
+        str(lease.get("updated_at") or "").strip()
+        if isinstance(lease, dict)
+        else ""
+    )
+    idempotency_key = str(args.idempotency_key or "").strip()
+    if not source_version or not idempotency_key:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_dispatch_v0",
+            "status": "failed",
+            "reason_code": "canonical_mutation_identity_missing",
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    try:
+        todo_projection = list_goal_todos(
+            registry_path=registry_path,
+            goal_id=args.goal_id,
+            runtime_root_arg=runtime_root_arg,
+        )
+        projection = build_todo_runtime_shadow_projection(
+            goal_id=args.goal_id,
+            todos=todo_projection.get("todos"),
+            leases=load_task_lease_runtime_shadow_records(
+                runtime_root=runtime_root,
+                goal_id=args.goal_id,
+            ),
+        )
+    except Exception as exc:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_dispatch_v0",
+            "status": "failed",
+            "reason_code": "shadow_projection_unavailable",
+            "reason": str(exc),
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    return dispatch_coordination_runtime_shadow(
+        goal=goal,
+        runtime_root=runtime_root,
+        goal_id=args.goal_id,
+        operation_id=(
+            f"task-lease-shadow:{args.task_lease_command}:{args.goal_id}:"
+            f"{args.todo_id}:{idempotency_key}"
+        ),
+        event_kind=f"task_lease_{args.task_lease_command}",
+        source_version=source_version,
+        projection=projection,
+    )
 
 
 def render_task_lease_markdown(payload: dict[str, object]) -> str:
@@ -231,5 +311,15 @@ def handle_task_lease_command(
             "error": str(exc),
             "error_code": exc.__class__.__name__,
         }
+    if payload.get("ok") and args.task_lease_command != "inspect":
+        runtime_shadow = _mirror_committed_task_lease_runtime_shadow(
+            payload,
+            args=args,
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root_arg,
+            runtime_root=runtime_root,
+        )
+        if runtime_shadow is not None:
+            payload["coordination_runtime_shadow"] = runtime_shadow
     print_payload(payload, output_format(args), render_task_lease_markdown)
     return 0 if payload.get("ok") else 1

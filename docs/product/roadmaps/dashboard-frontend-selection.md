@@ -90,7 +90,7 @@ labels, raw task ids, raw benchmark material, screenshots from private tools,
 or machine-specific paths. This surface can be more aggressive visually because
 its job is to help new users feel the product value quickly.
 
-The **real control-plane frontstage** is the user/operator workspace. It should
+The **Personal Workspace** is the user/operator workspace. It should
 be denser, calmer, and more conservative: goal header, quota guard, user todo
 lane, agent todo lane, claims, gates, artifacts, source warnings, and run
 timeline. It may read live status only from relative or loopback URLs and stays
@@ -98,9 +98,10 @@ read-only until a separate local write capability is explicitly enabled. This
 surface should optimize for correctness, scanability, and repeat use.
 
 Do not blur these surfaces for convenience. A hosted or copied public link
-should land in showcase mode. A live ops link should require an explicit
-`mode=ops` route and a safe local status source. Shared UI primitives are fine;
-shared live data defaults are not.
+should land in showcase mode. The legacy live diagnostics link lives under
+`/deprecated/frontstage/ops` and requires a safe local status source. Shared UI
+primitives are fine; shared live data defaults are not, and new operator
+features must land in Personal Workspace.
 
 ## Why This Stack
 

@@ -13,6 +13,14 @@ from types import SimpleNamespace
 import pytest
 
 from loopx.control_plane import effect_runtime
+from loopx.control_plane.coordination.runtime_shadow import (
+    RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+    bootstrap_coordination_runtime_shadow,
+    dispatch_coordination_runtime_shadow,
+    inspect_coordination_runtime_shadow,
+    read_coordination_runtime_shadow_todo_candidate,
+    rollback_coordination_runtime_shadow,
+)
 
 
 _TURN_KEY = "sha256:" + "a" * 64
@@ -76,7 +84,9 @@ def _raw_runtime_response(
     return decoded
 
 
-def test_runtime_pid_liveness_delegates_to_shared_non_signaling_probe(monkeypatch) -> None:
+def test_runtime_pid_liveness_delegates_to_shared_non_signaling_probe(
+    monkeypatch,
+) -> None:
     calls: list[object] = []
 
     def probe(pid: object) -> bool:
@@ -143,6 +153,138 @@ def test_managed_runtime_is_reused_and_restart_safe_for_typed_write(
         {},
         retry_safe=False,
     )
+
+
+def test_coordination_runtime_shadow_crosses_python_typescript_boundary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: tmp_path / "runtime")
+    goal = {
+        "id": "shadow-goal",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+    request = {
+        "goal": goal,
+        "runtime_root": tmp_path / "state",
+        "goal_id": "shadow-goal",
+        "operation_id": "todo-shadow:cross-runtime",
+        "event_kind": "todo_claim",
+        "source_version": "state:1",
+        "projection": {
+            "schema_version": "loopx_coordination_runtime_shadow_projection_v0",
+            "goal_id": "shadow-goal",
+            "todos": [
+                {
+                    "todo_id": "todo_cross_runtime",
+                    "status": "open",
+                    "claimed_by": "agent-a",
+                }
+            ],
+            "leases": [],
+        },
+    }
+
+    applied = dispatch_coordination_runtime_shadow(**request)
+    replayed = dispatch_coordination_runtime_shadow(**request)
+    read_candidate = read_coordination_runtime_shadow_todo_candidate(
+        goal=goal,
+        runtime_root=tmp_path / "state",
+        goal_id="shadow-goal",
+        todo_id="todo_cross_runtime",
+        projection=request["projection"],
+    )
+
+    assert applied["status"] == "applied"
+    assert applied["parity"]["receipt_matches"] is True
+    assert applied["parity"]["projection_readback"]["verified"] is True
+    assert replayed["status"] == "replayed"
+    assert replayed["cursor"] == applied["cursor"] == "1"
+    assert read_candidate["status"] == "matched"
+    assert read_candidate["todo"]["claimed_by"] == "agent-a"
+    assert read_candidate["read_candidate_qualified"] is True
+    assert read_candidate["decision_read_from_shadow"] is False
+
+    effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
+
+
+def test_coordination_runtime_shadow_bootstrap_crosses_python_typescript_boundary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(effect_runtime, "_runtime_dir", lambda: tmp_path / "runtime")
+    goal = {
+        "id": "shadow-bootstrap-goal",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+    projection = {
+        "schema_version": "loopx_coordination_runtime_shadow_projection_v0",
+        "goal_id": "shadow-bootstrap-goal",
+        "source_authority": "legacy_markdown_and_task_lease",
+        "todos": [{"todo_id": "todo_existing", "status": "open"}],
+        "leases": [],
+    }
+    request = {
+        "goal": goal,
+        "runtime_root": tmp_path / "state",
+        "goal_id": "shadow-bootstrap-goal",
+        "operation_id": "bootstrap:shadow-bootstrap-goal:state-1",
+        "source_version": "state:1",
+        "projection": projection,
+    }
+
+    applied = bootstrap_coordination_runtime_shadow(**request)
+    replayed = bootstrap_coordination_runtime_shadow(**request)
+    inspected = inspect_coordination_runtime_shadow(
+        goal=goal,
+        runtime_root=tmp_path / "state",
+        goal_id="shadow-bootstrap-goal",
+        projection=projection,
+    )
+
+    assert applied["status"] == "applied"
+    assert applied["bootstrap_receipts_empty"] is True
+    assert applied["cursor"] == "1"
+    assert replayed["status"] == "replayed"
+    assert inspected["status"] == "matched"
+    assert inspected["decision_read_from_shadow"] is False
+
+    rollback_request = {
+        "goal": goal,
+        "runtime_root": tmp_path / "state",
+        "goal_id": "shadow-bootstrap-goal",
+        "operation_id": (
+            f"rollback:shadow-bootstrap-goal:{applied['provider_revision']}"
+        ),
+        "expected_provider_revision": str(applied["provider_revision"]),
+    }
+    rolled_back = rollback_coordination_runtime_shadow(**rollback_request)
+    rollback_replay = rollback_coordination_runtime_shadow(**rollback_request)
+    after_rollback = inspect_coordination_runtime_shadow(
+        goal=goal,
+        runtime_root=tmp_path / "state",
+        goal_id="shadow-bootstrap-goal",
+        projection=projection,
+    )
+
+    assert rolled_back["status"] == "applied"
+    assert rolled_back["archive_retained"] is True
+    assert rollback_replay["status"] == "replayed"
+    assert after_rollback["status"] == "missing"
+
+    effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
 
 
 def test_runtime_decode_change_rotates_identity_and_starts_replacement(
@@ -482,10 +624,13 @@ def test_runtime_ready_budget_starts_after_start_lock_acquisition(
         ),
     )
 
-    assert effect_runtime._start_runtime(
-        fingerprint=fingerprint,
-        info_path=info_path,
-    ) == ready_info
+    assert (
+        effect_runtime._start_runtime(
+            fingerprint=fingerprint,
+            info_path=info_path,
+        )
+        == ready_info
+    )
     assert clock["monotonic"] == 1.5
 
 
@@ -672,8 +817,7 @@ def test_non_object_json_request_is_rejected_at_the_socket_boundary(
         "message": "Effect runtime request must be an object",
     }
     assert (
-        effect_runtime.effect_runtime_result("runtime.ping", {})["pid"]
-        == ping["pid"]
+        effect_runtime.effect_runtime_result("runtime.ping", {})["pid"] == ping["pid"]
     )
     effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
 

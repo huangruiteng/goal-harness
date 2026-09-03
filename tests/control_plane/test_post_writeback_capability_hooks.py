@@ -333,7 +333,9 @@ def test_periodic_report_hook_requires_explicit_goal_profile_opt_in(tmp_path) ->
 
     assert (
         periodic_report_post_writeback_hooks_for_goal(
-            registry_path=registry_path, goal_id="goal-1"
+            registry_path=registry_path,
+            runtime_root=tmp_path / "runtime",
+            goal_id="goal-1",
         )
         == ()
     )
@@ -343,7 +345,7 @@ def test_periodic_report_hook_requires_explicit_goal_profile_opt_in(tmp_path) ->
     registry_path.write_text(json.dumps(registry), encoding="utf-8")
 
     hooks = periodic_report_post_writeback_hooks_for_goal(
-        registry_path=registry_path, goal_id="goal-1"
+        registry_path=registry_path, runtime_root=tmp_path / "runtime", goal_id="goal-1"
     )
     assert len(hooks) == 1
     assert hooks[0].hook_id == "periodic_report.runtime_trigger"
@@ -372,6 +374,51 @@ def test_periodic_report_hook_requires_explicit_goal_profile_opt_in(tmp_path) ->
     assert decision["eligible"] is True
     assert decision["selected_trigger_kind"] == "bounded_segment_milestone"
     assert decision["boundary"]["external_writes_performed"] is False
+
+
+def test_periodic_report_hook_uses_live_machine_default_without_goal_mutation(
+    tmp_path,
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    registry_payload = {"goals": [{"id": "goal-1"}]}
+    registry_path.write_text(json.dumps(registry_payload), encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    defaults = {
+        "schema_version": "loopx_machine_configuration_v0",
+        "namespaces": {
+            "periodic_report": {
+                "schema_version": "periodic_report_machine_defaults_v0",
+                "enabled": True,
+                "inheritance": "live_machine_default",
+                "profile_preset": "weekly-progress",
+                "route_ref": "loopx-concierge",
+                "timezone": "Asia/Shanghai",
+            }
+        },
+    }
+    from loopx.capabilities.periodic_report.machine_store import (
+        configure_periodic_report_machine_defaults,
+    )
+
+    preview = configure_periodic_report_machine_defaults(
+        runtime_root=runtime_root,
+        machine_defaults=defaults,
+    )
+    configure_periodic_report_machine_defaults(
+        runtime_root=runtime_root,
+        machine_defaults=defaults,
+        execute=True,
+        expected_plan_revision=preview["plan_revision"],
+    )
+
+    hooks = periodic_report_post_writeback_hooks_for_goal(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id="goal-1",
+    )
+
+    assert len(hooks) == 1
+    assert json.loads(registry_path.read_text(encoding="utf-8")) == registry_payload
 
 
 def test_periodic_report_projection_reduces_durable_successor_transition(
@@ -572,7 +619,9 @@ def test_post_writeback_concurrent_exact_dispatch_single_flight(tmp_path) -> Non
 
     def worker() -> None:
         barrier.wait()
-        res = dispatch_post_writeback_hooks([hook], hook_input=_input(), journal=journal)
+        res = dispatch_post_writeback_hooks(
+            [hook], hook_input=_input(), journal=journal
+        )
         results.append(res)
 
     t1 = threading.Thread(target=worker)
@@ -793,7 +842,9 @@ def test_post_writeback_concurrent_exact_dispatch_lease_timeout_isolated(
     assert result_timeout["invoked_count"] == 0
     assert len(result_timeout["failures"]) == 1
     assert result_timeout["failures"][0]["error_code"] == "lock_acquire_timeout"
-    assert result_timeout["failures"][0]["hook_id"] == "periodic_report.stage_completion"
+    assert (
+        result_timeout["failures"][0]["hook_id"] == "periodic_report.stage_completion"
+    )
 
     # Slow worker completes successfully and records intent
     assert result_slow["primary_writeback_preserved"] is True
@@ -805,9 +856,7 @@ def test_post_writeback_concurrent_exact_dispatch_lease_timeout_isolated(
     assert calls == 1
 
     # Subsequent dispatch replays cleanly from terminal receipt without invoking producer
-    replay = dispatch_post_writeback_hooks(
-        [hook], hook_input=_input(), journal=journal
-    )
+    replay = dispatch_post_writeback_hooks([hook], hook_input=_input(), journal=journal)
     assert replay["intent_count"] == 1
     assert replay["invoked_count"] == 0
     assert replay["replayed_hooks"] == ["periodic_report.stage_completion"]

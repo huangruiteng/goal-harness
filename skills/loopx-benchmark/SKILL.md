@@ -36,6 +36,12 @@ typed study flow rather than sharing a runner-specific ledger or raw evidence:
 5. Derive the campaign/arm/case/run packet with `benchmark study-dashboard`; pass a
    compact four-arm contract only when the study preregistered that design.
 
+For `case_insight_projection`, first upload the same run's active terminal
+experiment-board row with `insight.status=complete`. The case, run, and outcome
+must match; the run row remains the only arm, score, countability, integrity, and
+treatment-fidelity authority. Reduce private post-run evidence to bounded prose
+and public-safe handles or digests before building the envelope.
+
 The local provider is a no-network simulation. It does not grant remote upload,
 publication, credentials, retention, or benchmark submission authority. Adapters
 keep their native metric names and reduce private post-run evidence before envelope

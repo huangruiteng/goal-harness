@@ -7,6 +7,7 @@
         "operation": {
           "const": "qualify_heartbeat_transport"
         },
+        "host_control_recovery": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
@@ -21,9 +22,27 @@
     {
       "properties": {
         "operation": {
+          "const": "qualify_host_control_recovery"
+        },
+        "heartbeat_transport": false,
+        "integration": false,
+        "normalization": false,
+        "snapshot": false,
+        "source": false,
+        "status": false,
+        "upgrade": false
+      },
+      "required": [
+        "host_control_recovery"
+      ]
+    },
+    {
+      "properties": {
+        "operation": {
           "const": "reconcile_integration_candidate"
         },
         "heartbeat_transport": false,
+        "host_control_recovery": false,
         "normalization": false,
         "snapshot": false,
         "source": false,
@@ -40,6 +59,7 @@
           "const": "project_runtime_status"
         },
         "heartbeat_transport": false,
+        "host_control_recovery": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
@@ -56,6 +76,7 @@
           "const": "compile_catalog"
         },
         "heartbeat_transport": false,
+        "host_control_recovery": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
@@ -72,6 +93,7 @@
           "const": "normalize_selector_request"
         },
         "heartbeat_transport": false,
+        "host_control_recovery": false,
         "integration": false,
         "snapshot": false,
         "source": false,
@@ -88,6 +110,7 @@
           "const": "qualify_snapshot"
         },
         "heartbeat_transport": false,
+        "host_control_recovery": false,
         "integration": false,
         "normalization": false,
         "source": false,
@@ -104,6 +127,7 @@
           "const": "upgrade_plan"
         },
         "heartbeat_transport": false,
+        "host_control_recovery": false,
         "integration": false,
         "normalization": false,
         "snapshot": false,
@@ -119,12 +143,16 @@
     "heartbeat_transport": {
       "type": "object"
     },
+    "host_control_recovery": {
+      "type": "object"
+    },
     "operation": {
       "enum": [
         "compile_catalog",
         "normalize_selector_request",
         "project_runtime_status",
         "qualify_heartbeat_transport",
+        "qualify_host_control_recovery",
         "qualify_snapshot",
         "reconcile_integration_candidate",
         "upgrade_plan"

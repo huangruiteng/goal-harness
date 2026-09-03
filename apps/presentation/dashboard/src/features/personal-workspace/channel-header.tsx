@@ -44,7 +44,9 @@ export function ChannelHeader({
       <div className="personal-channel-title">
         <h1>{selectedGoal?.title ?? t("header.manager")}</h1>
         <p>{selectedGoal
-          ? `${selectedGoal.agentLabel ?? selectedGoal.agentId} · ${localizedGoalState(selectedGoal.state, locale)}${goalUsageLabel(selectedGoal.usage) ? ` · ${goalUsageLabel(selectedGoal.usage)}` : ""} · ${selectedGoal.nextSentence}`
+          ? `${selectedGoal.agentLaneCount && selectedGoal.agentLaneCount > 1
+            ? t("header.workAgentCount", { count: selectedGoal.agentLaneCount })
+            : selectedGoal.agentLabel ?? selectedGoal.agentId} · ${localizedGoalState(selectedGoal.state, locale)}${goalUsageLabel(selectedGoal.usage) ? ` · ${goalUsageLabel(selectedGoal.usage)}` : ""} · ${selectedGoal.nextSentence}`
           : t("header.managerDescription")}</p>
       </div>
       {selectedGoal ? (
@@ -70,8 +72,9 @@ export function ChannelHeader({
         ) : (
           <label className="personal-agent-select">
             <Bot size={16} />
+            <small>{t("header.chatRuntime")}</small>
             <select
-              aria-label={t("header.selectAgent")}
+              aria-label={t("header.selectChatRuntime")}
               onChange={(event) => onSelectAgent(event.target.value)}
               value={selectedAgentId}
             >

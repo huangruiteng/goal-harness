@@ -453,6 +453,58 @@ def test_completed_cursor_fetches_new_messages_from_a_later_provider_window(
     assert replay_runner.calls == []
 
 
+def test_completed_cursor_compares_fractional_timestamp_bounds_chronologically(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path)
+    initial_now = datetime(2026, 8, 21, tzinfo=UTC)
+    catch_up_lark_group_history(
+        project=project,
+        config_path=config,
+        route_key="requirements-a",
+        start=START,
+        execute=True,
+        runner=PageRunner(
+            [
+                {
+                    "messages": [_message("om_initial", "initial context")],
+                    "total": 1,
+                    "has_more": False,
+                    "page_token": "",
+                }
+            ]
+        ),
+        now=initial_now,
+    )
+    fractional_now = initial_now.replace(microsecond=500_000)
+    later = PageRunner(
+        [
+            {
+                "messages": [],
+                "total": 0,
+                "has_more": False,
+                "page_token": "",
+            }
+        ]
+    )
+
+    receipt = catch_up_lark_group_history(
+        project=project,
+        config_path=config,
+        route_key="requirements-a",
+        start=START,
+        execute=True,
+        runner=later,
+        now=fractional_now,
+    )
+
+    assert receipt["cursor_transition"] == "forward_window_initialized"
+    assert receipt["external_read_performed"] is True
+    argv = later.calls[0]
+    assert argv[argv.index("--start") + 1] == "2026-08-21T00:00:00Z"
+    assert argv[argv.index("--end") + 1] == "2026-08-21T00:00:00.500000Z"
+
+
 def test_forward_window_resumes_pagination_with_original_requested_start(
     tmp_path: Path,
 ) -> None:

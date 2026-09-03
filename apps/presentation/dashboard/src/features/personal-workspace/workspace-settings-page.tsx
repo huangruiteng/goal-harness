@@ -1,17 +1,19 @@
 import { useState } from "react";
-import { ArrowLeft, Check, Languages, Palette, Settings2 } from "lucide-react";
+import { ArrowLeft, Check, Languages, Palette, ServerCog, Settings2 } from "lucide-react";
 
 import type { WorkspaceLocale } from "./i18n";
 import { useWorkspaceI18n } from "./i18n";
 import { LarkSettingsPage } from "./lark-settings-page";
+import { MachineConfigurationSettings } from "./machine-configuration-settings";
 import type { WorkspaceGoal } from "./personal-workspace-model";
 
-type WorkspaceSettingsTab = "lark" | "appearance" | "language";
+type WorkspaceSettingsTab = "machine" | "lark" | "appearance" | "language";
 
 const tabIcons: Record<WorkspaceSettingsTab, typeof Settings2> = {
   appearance: Palette,
   language: Languages,
   lark: Settings2,
+  machine: ServerCog,
 };
 
 export function WorkspaceSettingsPage({
@@ -36,6 +38,7 @@ export function WorkspaceSettingsPage({
   const { locale, setLocale, t } = useWorkspaceI18n();
   const [tab, setTab] = useState<WorkspaceSettingsTab>(initialTab);
   const tabs: Array<{ description: string; key: WorkspaceSettingsTab; label: string }> = [
+    { description: t("settings.machineTabDescription"), key: "machine", label: t("machine.title") },
     { description: t("settings.larkTabDescription"), key: "lark", label: "Lark" },
     { description: t("settings.appearanceTabDescription"), key: "appearance", label: t("settings.appearance") },
     { description: t("settings.languageTabDescription"), key: "language", label: t("settings.language") },
@@ -67,6 +70,11 @@ export function WorkspaceSettingsPage({
       description: t("lark.description"),
       eyebrow: t("settings.goalConnections"),
       title: "Lark",
+    },
+    machine: {
+      description: t("machine.description"),
+      eyebrow: t("machine.machinePolicy"),
+      title: t("machine.title"),
     },
   };
   const heading = headings[tab];
@@ -116,6 +124,8 @@ export function WorkspaceSettingsPage({
             onClose={onClose}
           />
         ) : null}
+
+        {tab === "machine" ? <MachineConfigurationSettings /> : null}
 
         {tab === "appearance" ? (
           <section className="personal-detail-card personal-appearance-settings">
