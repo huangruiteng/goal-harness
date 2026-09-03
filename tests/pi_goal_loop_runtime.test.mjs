@@ -121,6 +121,10 @@ function backoffDecision() {
       action: "backoff_waiting_for_user",
       reset_policy: { reset_token: "wait-1" },
       unchanged_poll: {
+        limits: { local_scheduler: 3 },
+        after_limits: { local_scheduler: "stop_tick_loop" },
+      },
+      cold_path_detail: {
         local_scheduler: {
           recommended_interval_minutes: 3,
           example_progression_minutes: [3, 6, 12],
