@@ -44,7 +44,9 @@ qualification.
   The operation accepts no prompt, auth or request body. A caller may require
   `custom_tool_call`; providers that only preserve ordinary `function_call`
   items are then removed before traversal, so Code Mode fails closed instead
-  of reaching an incompatible fallback.
+  of reaching an incompatible fallback. Missing capability metadata is treated
+  as function-only, including for catalogs generated before version 0.7.0;
+  custom transport support must be declared explicitly after qualification.
 
 `qualify_desktop_patch`
 : Checks the public-safe post-build evidence for a patched desktop runtime:

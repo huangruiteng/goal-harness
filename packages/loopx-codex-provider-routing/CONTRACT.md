@@ -82,12 +82,13 @@ affinity:
    tier.
 
 A third filter applies when the host requires a specific tool item transport.
-Native Codex profiles default to both `function_call` and `custom_tool_call`;
-generic OpenAI-compatible profiles default to `function_call` only, while an
-adapter that truly preserves custom items may declare that capability. A Code
-Mode request requiring `custom_tool_call` therefore cannot silently fall
-through to a function-only fallback. The separate qualification operation
-compares requested and observed item types and requires completed dispatch.
+Every profile that omits `tool_transports`, including a legacy native Codex
+profile, defaults conservatively to `function_call` only. An adapter may declare
+`custom_tool_call` only after it has proved that it preserves the raw payload
+and item type. A Code Mode request requiring `custom_tool_call` therefore cannot
+silently fall through to an unqualified or function-only provider. The separate
+qualification operation compares requested and observed item types and requires
+completed dispatch.
 
 Affinity can reorder only the remaining eligible ring members. If none remain,
 the route fails closed before the first visible output or tool call. A

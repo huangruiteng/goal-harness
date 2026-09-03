@@ -359,7 +359,29 @@ def main() -> int:
     legacy_catalog = compile_catalog(legacy_source)
     assert next(
         profile for profile in legacy_catalog["profiles"] if profile["id"] == "codex-a"
-    )["tool_transports"] == ["function_call", "custom_tool_call"]
+    )["tool_transports"] == ["function_call"]
+    legacy_standard = normalize_selector_request(
+        {
+            "catalog_source": legacy_source,
+            "model_selector": "codex-a/gpt-5.6-sol",
+            "required_tool_transport": "function_call",
+        }
+    )
+    assert legacy_standard["eligible_candidates"] == [
+        "codex-a",
+        "codex-b",
+        "ark-text",
+    ]
+    expect_error(
+        lambda: normalize_selector_request(
+            {
+                "catalog_source": legacy_source,
+                "model_selector": "codex-a/gpt-5.6-sol",
+                "required_tool_transport": "custom_tool_call",
+            }
+        ),
+        "legacy catalog inferred unproven custom_tool_call support",
+    )
     assert auto["fast_candidates"] == ["codex-a", "codex-b"]
     assert auto["routing_policy"]["session_affinity"] == "hint_revalidated_per_attempt"
     assert auto["ring_id"] == "codex-accounts"

@@ -668,13 +668,8 @@ def _compile_profiles(raw_profiles: Any) -> dict[str, dict[str, Any]]:
         )
         if not modalities or not set(modalities) <= ALLOWED_MODALITIES:
             raise ValueError(f"profile {profile_id} has unsupported input modalities")
-        default_tool_transports = (
-            ["function_call", "custom_tool_call"]
-            if provider == "codex"
-            else ["function_call"]
-        )
         tool_transports = _string_list(
-            raw.get("tool_transports", default_tool_transports),
+            raw.get("tool_transports", ["function_call"]),
             f"profiles[{index}].tool_transports",
         )
         if not tool_transports or not set(tool_transports) <= ALLOWED_TOOL_TRANSPORTS:

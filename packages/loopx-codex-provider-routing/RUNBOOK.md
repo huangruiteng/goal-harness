@@ -791,11 +791,11 @@ in-band SSE error、客户端取消和 handler 自己补出的 lifecycle event�
 本机 bundle 路径、账号身份、task ID、原始日志、OAuth 和 reset token 都不得进入
 LoopX state 或公开 PR。
 
-`tool_transports` 是 profile capability，不是根据模型名字猜测的路由规则。默认情况下，
-原生 Codex profile 声明 `function_call` 与 `custom_tool_call`；普通
-OpenAI-compatible profile 只声明 `function_call`。只有适配器已经实现并验证 custom item
-保真时，才可显式追加 `custom_tool_call`。这样 text-only Ark 可以继续作为普通文本回答的
-terminal tail，却不会接住会触发 Code Mode `exec` 的 turn。
+`tool_transports` 是 profile capability，不是根据模型名字猜测的路由规则。字段缺失时，
+包括 0.6.x 生成的原生 Codex profile 在内，一律保守视为只支持 `function_call`。只有适配器
+已经实现并验证 custom item 保真时，才可显式声明 `custom_tool_call`。这样升级旧 catalog
+不会扩大隐式 authority；text-only Ark 可以继续作为普通文本回答的 terminal tail，却不会
+接住会触发 Code Mode `exec` 的 turn。
 
 ## Compatibility matrix
 
