@@ -1,5 +1,12 @@
 # Frontstage Two-Surface Strategy
 
+> **Deprecated compatibility surface:** `/frontstage?mode=ops` remains only for
+> bounded diagnostic compatibility. Personal Workspace (`/`) is the product
+> owner for operator workflows, Goal outputs, and milestone reports. New
+> product capabilities must not be added to the legacy Frontstage Ops board.
+> Remove the compatibility route in a dedicated cleanup after its remaining
+> fixture and smoke consumers migrate.
+
 LoopX frontstage work has two different products sharing some dashboard
 code. Treating them as one surface makes the next UI pass ambiguous: public
 showcase pages want visual storytelling, while the real operator control plane
@@ -8,12 +15,14 @@ contract to keep those jobs separate before more large UI changes.
 
 ## Decision
 
-The frontstage family has two first-class surfaces:
+The presentation family has two first-class product surfaces and one deprecated
+diagnostic compatibility route:
 
 | Surface | Job | Primary routes | Owner |
 | --- | --- | --- | --- |
 | Public showcase and homepage | Explain LoopX through public-safe cases, demos, animation, and product narrative. | `/frontstage`, hosted `/frontstage/`, future homepage entry points. | Product, outreach, and frontstage showcase work. |
-| Real ops control plane | Help the operator inspect current goals, gates, todos, claims, quota, run history, and safe local actions. | `/`, `?view=ops`, `/frontstage?mode=ops&statusUrl=<relative-or-loopback>`. | Runtime, status contract, dashboard, and control-plane work. |
+| Personal Workspace | Help the operator inspect and act on current Goals, Todos, runs, outputs, reports, and safe local actions. | `/` | Runtime, status contract, dashboard, and control-plane work. |
+| Legacy Ops diagnostics | Preserve bounded compatibility for old projection debugging while consumers migrate. | `/frontstage?mode=ops&statusUrl=<relative-or-loopback>` | Deprecated; no new product features. |
 
 The public surface is the default when a URL can be copied or hosted. The ops
 surface is explicit, local, and read-only unless a loopback server advertises a

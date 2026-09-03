@@ -122,6 +122,24 @@ export type WorkspaceOutput = {
   summary?: string;
   title: string;
   todoId?: string;
+  report?: {
+    addedCount: number;
+    changedCount: number;
+    deliveredAt: string;
+    generationId: string;
+    items: Array<{
+      changeKind: "added" | "changed";
+      previousStatus?: string;
+      sourceRef: string;
+      status: string;
+      summary: string;
+      title: string;
+    }>;
+    periodEndAt: string;
+    periodStartAt: string;
+    predecessorPublicationId?: string | null;
+    publicationId: string;
+  };
 };
 
 export type WorkspaceChannel = "manager" | "attention" | "running" | "outputs";
@@ -240,6 +258,10 @@ export type WorkspaceModel = {
   goalNotifications?: WorkspaceGoalNotification[];
   goals: WorkspaceGoal[];
   openUserTodoCount: number;
+  periodicReports?: {
+    error?: string | null;
+    loading: boolean;
+  };
   systemHealth?: WorkspaceSystemHealth;
   timeline?: WorkspaceTimelineItem[];
   userTodos: WorkspaceAttention[];

@@ -44,7 +44,9 @@ demo/diagnostic surface.
 The product interaction baseline lives in
 `docs/product/surfaces/frontstage-dashboard-interaction-baseline.md`: showcase mode is
 the public case-driven homepage surface, while `mode=ops` is the dense,
-read-only control-plane workspace.
+read-only legacy diagnostic workspace. `mode=ops` is deprecated for new product
+work; Personal Workspace (`/`) owns Goal workflows, outputs, and milestone
+reports.
 
 The frontstage first screen is meant to teach the control-plane model before a
 developer reads raw status JSON. The top operations strip answers whether the

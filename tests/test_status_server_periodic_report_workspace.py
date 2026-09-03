@@ -9,9 +9,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from loopx.capabilities.periodic_report.frontstage import (
-    build_periodic_report_frontstage_projection,
-    write_periodic_report_frontstage_projection,
+from loopx.capabilities.periodic_report.workspace import (
+    build_periodic_report_workspace_projection,
+    write_periodic_report_workspace_projection,
 )
 from loopx.capabilities.periodic_report.incremental import (
     build_periodic_report_publication_candidate,
@@ -81,16 +81,16 @@ def _server(tmp_path: Path) -> Iterator[tuple[str, dict[str, object]]]:
             "change_kind": "added",
         }
     ]
-    projection = build_periodic_report_frontstage_projection(
+    projection = build_periodic_report_workspace_projection(
         goal_id="synthetic-goal",
         agent_id="synthetic-agent",
         generation_id="report_generation_example",
         document=document,
         facts=facts,
     )
-    write_periodic_report_frontstage_projection(
+    write_periodic_report_workspace_projection(
         path=runtime
-        / "goals/synthetic-goal/periodic_reports/run/frontstage-projection.json",
+        / "goals/synthetic-goal/periodic_reports/run/workspace-projection.json",
         projection=projection,
     )
     candidate = build_periodic_report_publication_candidate(
@@ -105,7 +105,7 @@ def _server(tmp_path: Path) -> Iterator[tuple[str, dict[str, object]]]:
             }
         ],
         baseline=None,
-        frontstage_projection_sha256=str(projection["content_sha256"]),
+        workspace_projection_sha256=str(projection["content_sha256"]),
     )
     commit_periodic_report_publication_cursor(
         runtime_root=runtime,

@@ -472,8 +472,11 @@
 .personal-object-list > button:hover { background: #faf9f6; }
 .personal-object-list > button:last-child { border-bottom: 0; }
 .personal-object-list > button > p { grid-column: 2 / -1; margin: -3px 0 0; color: var(--pw-muted); font-size: 12px; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.personal-object-list > button > em { justify-self: end; padding: 2px 7px; border-radius: 999px; background: var(--pw-blue-soft); color: var(--pw-blue-ink); font-size: 10px; font-style: normal; font-weight: 700; }
 .personal-object-list small { color: var(--pw-muted); }
 .personal-object-list > button > small { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.personal-object-list-state { display: flex; align-items: center; gap: 8px; margin: 0; padding: 14px 15px; border-bottom: 1px solid var(--pw-line); color: var(--pw-muted); font-size: 12px; line-height: 1.5; }
+.personal-object-list-state.is-error { color: var(--pw-red); background: var(--pw-red-bg); }
 .personal-object-list .is-done { color: var(--pw-green); }
 .personal-object-list .is-attention { color: var(--pw-amber); font-weight: 700; }
 .personal-task-age { color: var(--pw-faint); font-size: 11px; }
@@ -710,6 +713,18 @@
 .personal-compact-menu > div button:hover { background: #f5f4f1; }
 .personal-compact-menu > div button:disabled { color: var(--pw-faint); cursor: default; opacity: .55; }
 .personal-safe-preview { max-height: 280px; padding: 14px; margin: 12px 0 0; overflow: auto; border: 1px solid var(--pw-line); border-radius: 11px; background: #f7f6f3; color: #333943; font: 12px/1.6 "Geist Mono", "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.personal-report-detail { margin-top: 12px; padding: 14px; border: 1px solid var(--pw-line); border-radius: 14px; background: #fff; }
+.personal-report-detail > header { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.personal-report-detail > header span { display: flex; flex-direction: column; gap: 2px; padding: 10px; border-radius: 10px; background: var(--pw-blue-soft); color: var(--pw-blue-ink); font-size: 10px; font-weight: 650; }
+.personal-report-detail > header strong { font-size: 18px; }
+.personal-report-detail > p { margin: 10px 0; color: var(--pw-muted); font-size: 11px; }
+.personal-report-detail ol { display: grid; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.personal-report-detail li { display: grid; gap: 4px; padding: 10px; border: 1px solid var(--pw-line); border-radius: 10px; }
+.personal-report-detail li[data-change-kind="changed"] { border-color: #e8d3a5; background: #fffaf0; }
+.personal-report-detail li small { color: var(--pw-muted); font-size: 10px; text-transform: uppercase; }
+.personal-report-detail li strong { font-size: 12px; line-height: 1.45; }
+.personal-report-detail li p { margin: 0; color: var(--pw-muted); font-size: 11px; line-height: 1.5; }
+.personal-report-detail > footer { display: grid; gap: 4px; margin-top: 10px; color: var(--pw-faint); font: 10px/1.5 "Geist Mono", "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
 .personal-execution-history { margin-top: 18px; }
 .personal-execution-history h3 { margin: 0 0 10px; font-size: 11.5px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--pw-faint); }
 .personal-execution-history > p { color: var(--pw-muted); font-size: 12px; }

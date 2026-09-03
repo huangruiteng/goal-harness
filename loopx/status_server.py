@@ -10,9 +10,9 @@ from urllib.parse import parse_qs, urlparse
 from .control_plane.goals.configure_goal_service import (
     configure_goal_with_global_sync,
 )
-from .capabilities.periodic_report.frontstage import (
-    collect_periodic_report_frontstage_index,
-    read_published_periodic_report_frontstage_projection,
+from .capabilities.periodic_report.workspace import (
+    collect_periodic_report_workspace_index,
+    read_published_periodic_report_workspace_projection,
 )
 from .control_plane.status.ssh_host_catalog import (
     SSH_HOST_CATALOG_PATH,
@@ -41,8 +41,8 @@ DEFAULT_CONFIGURE_GOAL_APPLY_PATH = "/control-plane/configure-goal/apply"
 DEFAULT_REVIEW_MATERIAL_PATH = "/review-material"
 DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH = "/extension-presentation-surfaces"
 DEFAULT_EXTENSION_PROJECTION_PATH = "/extension-projection"
-DEFAULT_PERIODIC_REPORT_INDEX_PATH = "/periodic-report-frontstage"
-DEFAULT_PERIODIC_REPORT_PROJECTION_PATH = "/periodic-report-projection"
+DEFAULT_PERIODIC_REPORT_INDEX_PATH = "/periodic-report-workspace"
+DEFAULT_PERIODIC_REPORT_PROJECTION_PATH = "/periodic-report-workspace-projection"
 DEFAULT_SSH_HOSTS_PATH = SSH_HOST_CATALOG_PATH
 
 REWARD_REQUEST_FIELDS = {
@@ -802,7 +802,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
                 registry_path=self.server.registry_path,
             )
             goal_id = (query.get("goal_id") or [""])[0].strip() or None
-            index = collect_periodic_report_frontstage_index(
+            index = collect_periodic_report_workspace_index(
                 runtime_root=runtime_root, goal_id=goal_id
             )
         except Exception as exc:  # noqa: BLE001 - local UI needs the read failure.
@@ -836,7 +836,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             return
         try:
             registry = load_registry(self.server.registry_path)
-            projection = read_published_periodic_report_frontstage_projection(
+            projection = read_published_periodic_report_workspace_projection(
                 runtime_root=resolve_runtime_root(
                     registry,
                     self.server.runtime_root_override,

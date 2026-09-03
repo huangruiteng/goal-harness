@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from loopx.capabilities.periodic_report.frontstage import (
-    build_periodic_report_frontstage_projection,
-    collect_periodic_report_frontstage_index,
-    read_published_periodic_report_frontstage_projection,
-    write_periodic_report_frontstage_projection,
+from loopx.capabilities.periodic_report.workspace import (
+    build_periodic_report_workspace_projection,
+    collect_periodic_report_workspace_index,
+    read_published_periodic_report_workspace_projection,
+    write_periodic_report_workspace_projection,
 )
 from loopx.capabilities.periodic_report.incremental import (
     build_periodic_report_publication_candidate,
@@ -73,7 +73,7 @@ def _facts() -> list[dict[str, str]]:
 
 
 def _published(tmp_path: Path) -> tuple[dict[str, object], dict[str, object]]:
-    projection = build_periodic_report_frontstage_projection(
+    projection = build_periodic_report_workspace_projection(
         goal_id="synthetic-goal",
         agent_id="synthetic-agent",
         generation_id="report_generation_example",
@@ -82,9 +82,9 @@ def _published(tmp_path: Path) -> tuple[dict[str, object], dict[str, object]]:
     )
     path = (
         tmp_path
-        / "goals/synthetic-goal/periodic_reports/run-one/frontstage-projection.json"
+        / "goals/synthetic-goal/periodic_reports/run-one/workspace-projection.json"
     )
-    write_periodic_report_frontstage_projection(path=path, projection=projection)
+    write_periodic_report_workspace_projection(path=path, projection=projection)
     candidate = build_periodic_report_publication_candidate(
         goal_id="synthetic-goal",
         agent_id="synthetic-agent",
@@ -98,7 +98,7 @@ def _published(tmp_path: Path) -> tuple[dict[str, object], dict[str, object]]:
             for index, fact in enumerate(_facts(), start=1)
         ],
         baseline=None,
-        frontstage_projection_sha256=str(projection["content_sha256"]),
+        workspace_projection_sha256=str(projection["content_sha256"]),
     )
     cursor = commit_periodic_report_publication_cursor(
         runtime_root=tmp_path,
@@ -110,38 +110,38 @@ def _published(tmp_path: Path) -> tuple[dict[str, object], dict[str, object]]:
     return projection, cursor
 
 
-def test_frontstage_index_excludes_generation_without_publication_cursor(
+def test_workspace_index_excludes_generation_without_publication_cursor(
     tmp_path: Path,
 ) -> None:
-    projection = build_periodic_report_frontstage_projection(
+    projection = build_periodic_report_workspace_projection(
         goal_id="synthetic-goal",
         agent_id="synthetic-agent",
         generation_id="report_generation_example",
         document=_document(),
         facts=_facts(),
     )
-    write_periodic_report_frontstage_projection(
+    write_periodic_report_workspace_projection(
         path=tmp_path
-        / "goals/synthetic-goal/periodic_reports/run/frontstage-projection.json",
+        / "goals/synthetic-goal/periodic_reports/run/workspace-projection.json",
         projection=projection,
     )
 
-    assert collect_periodic_report_frontstage_index(runtime_root=tmp_path) == {
-        "schema_version": "periodic_report_frontstage_index_v0",
+    assert collect_periodic_report_workspace_index(runtime_root=tmp_path) == {
+        "schema_version": "periodic_report_workspace_index_v0",
         "count": 0,
         "items": [],
     }
 
 
-def test_published_frontstage_projection_preserves_delta_and_lineage(
+def test_published_workspace_projection_preserves_delta_and_lineage(
     tmp_path: Path,
 ) -> None:
     projection, cursor = _published(tmp_path)
 
-    index = collect_periodic_report_frontstage_index(
+    index = collect_periodic_report_workspace_index(
         runtime_root=tmp_path, goal_id="synthetic-goal"
     )
-    detail = read_published_periodic_report_frontstage_projection(
+    detail = read_published_periodic_report_workspace_projection(
         runtime_root=tmp_path,
         **index["items"][0]["detail_ref"],
     )
@@ -160,11 +160,11 @@ def test_published_frontstage_projection_preserves_delta_and_lineage(
     }
 
 
-def test_frontstage_detail_rejects_stale_or_mismatched_ref(tmp_path: Path) -> None:
+def test_workspace_detail_rejects_stale_or_mismatched_ref(tmp_path: Path) -> None:
     projection, _cursor = _published(tmp_path)
 
     with pytest.raises(ValueError, match="not the current publication"):
-        read_published_periodic_report_frontstage_projection(
+        read_published_periodic_report_workspace_projection(
             runtime_root=tmp_path,
             goal_id="synthetic-goal",
             agent_id="synthetic-agent",

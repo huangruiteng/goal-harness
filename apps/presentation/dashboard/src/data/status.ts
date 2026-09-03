@@ -841,14 +841,14 @@ export const periodicReportIndexItemSchema = z.object({
 export const periodicReportIndexResponseSchema = z.object({
   ok: z.literal(true),
   periodic_reports: z.object({
-    schema_version: z.literal("periodic_report_frontstage_index_v0"),
+    schema_version: z.literal("periodic_report_workspace_index_v0"),
     count: z.number().int().nonnegative(),
     items: z.array(periodicReportIndexItemSchema),
   }).strict(),
 }).strict();
 
 export const periodicReportProjectionSchema = z.object({
-  schema_version: z.literal("periodic_report_frontstage_projection_v0"),
+  schema_version: z.literal("periodic_report_workspace_projection_v0"),
   goal_id: z.string().min(1),
   agent_id: z.string().min(1),
   generation_id: z.string().min(1),

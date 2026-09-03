@@ -511,7 +511,7 @@ hashes after dynamic content is mounted.
 Project profiles still own language, layout policy, audience, cadence, and
 selection rules.
 
-## Frontstage readback
+## Personal Workspace readback
 
 After the Goal Channel sink has verified delivery and committed the publication cursor, the
 local status server can expose the latest report as a typed, content-addressed

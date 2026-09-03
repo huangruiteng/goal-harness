@@ -5,7 +5,6 @@ import {
   CircleAlert,
   Clock3,
   ExternalLink,
-  FileText,
   GitBranch,
   LayoutDashboard,
   ListChecks,
@@ -33,15 +32,12 @@ import {
   sampleGoalChannelProjection,
   type BadgeTone,
 } from "../data/goal-channel-frontstage";
-import { PeriodicReportProjection, QueueItem, StatusPayload, formatStatusError } from "../data/status";
+import { QueueItem, StatusPayload, formatStatusError } from "../data/status";
 import {
   LocalDashboardApiCapabilities,
   StatusContractFreshnessIssue,
   fetchFrontstageStatusPayload,
-  fetchPeriodicReportIndex,
-  fetchPeriodicReportProjection,
   localDashboardApiCapabilities,
-  periodicReportApiUrls,
   resolveFrontstageOpsStatusUrl,
   statusContractFreshnessIssue,
 } from "../data/local-status-query";
@@ -1832,77 +1828,6 @@ function TodoLaneEmpty({ children }: { children: React.ReactNode }) {
   );
 }
 
-function MilestoneReportsPanel({
-  error,
-  isLoading,
-  report,
-}: {
-  error: string | null;
-  isLoading: boolean;
-  report: PeriodicReportProjection | null;
-}) {
-  return (
-    <Panel icon={FileText} title="Milestone Reports">
-      <div className="p-4" data-testid="frontstage-milestone-reports">
-        {isLoading ? (
-          <p className="text-sm font-medium text-slate-500">Loading the latest verified publication…</p>
-        ) : error ? (
-          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-950">
-            {error}
-          </p>
-        ) : !report ? (
-          <p className="text-sm font-medium leading-6 text-slate-500">
-            No delivery-verified milestone report has been published for this Goal.
-          </p>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="info">inform</Badge>
-                  <Badge variant="neutral">read-only</Badge>
-                  <Badge variant="neutral">{report.publication.delivered_at}</Badge>
-                </div>
-                <h3 className="mt-3 text-base font-semibold leading-6 text-slate-950">{report.title}</h3>
-                <p className="mt-1 text-sm leading-6 text-slate-600">{report.summary}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-2 self-start text-center">
-                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                  <div className="text-lg font-semibold text-slate-950">{report.delta.added_count}</div>
-                  <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">added</div>
-                </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                  <div className="text-lg font-semibold text-slate-950">{report.delta.changed_count}</div>
-                  <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">changed</div>
-                </div>
-              </div>
-            </div>
-            <div className="divide-y divide-slate-200 border-y border-slate-200">
-              {report.delta.items.map((item) => (
-                <div className="grid gap-2 py-3 md:grid-cols-[92px_minmax(0,1fr)_110px]" key={item.source_ref}>
-                  <div><Badge variant={item.change_kind === "changed" ? "warning" : "info"}>{item.change_kind}</Badge></div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold leading-6 text-slate-950">{item.title}</p>
-                    <p className="text-xs font-medium leading-5 text-slate-600">{item.summary}</p>
-                  </div>
-                  <div className="flex items-start md:justify-end"><Badge variant={statusTone(item.status)}>{item.status}</Badge></div>
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2 text-[11px] font-medium text-slate-500">
-              <span>publication {report.publication.publication_id}</span>
-              {report.publication.predecessor_publication_id ? (
-                <span>after {report.publication.predecessor_publication_id}</span>
-              ) : <span>first verified publication</span>}
-              <span>generation and delivery receipts remain distinct</span>
-            </div>
-          </div>
-        )}
-      </div>
-    </Panel>
-  );
-}
-
 function projectionOptionsFromPayload(payload: StatusPayload): ProjectionOption[] {
   return payload.attention_queue.items.flatMap((item) => {
     if (!item.goal_channel_projection) {
@@ -3172,9 +3097,6 @@ function FrontstageRoute({
   onTodoLaneChange,
   onTodoQueryChange,
   projection,
-  periodicReport,
-  periodicReportError,
-  periodicReportLoading,
   freshnessIssue,
   localApiCapabilities,
   queryStateLabel,
@@ -3196,9 +3118,6 @@ function FrontstageRoute({
   onTodoLaneChange: (value: TodoLaneFilter) => void;
   onTodoQueryChange: (value: string) => void;
   projection: GoalChannelProjection;
-  periodicReport: PeriodicReportProjection | null;
-  periodicReportError: string | null;
-  periodicReportLoading: boolean;
   freshnessIssue: StatusContractFreshnessIssue | null;
   localApiCapabilities: LocalDashboardApiCapabilities | null;
   queryStateLabel: string;
@@ -3348,6 +3267,10 @@ function FrontstageRoute({
     },
   ] satisfies Array<{ label: string; value: string; helper: string; tone: BadgeTone }>;
   const operatorStateSignals = deriveOperatorStateSignals(projection);
+  const personalWorkspaceHref = `/?${new URLSearchParams({
+    goalId: selectedGoalId,
+    statusUrl: source.kind === "url" ? source.label : "",
+  }).toString()}`;
 
   return (
     <main
@@ -3360,6 +3283,12 @@ function FrontstageRoute({
       data-schema={projection.schema_version}
       data-testid="goal-channel-frontstage-route"
     >
+      {isOpsMode ? (
+        <div className="mx-auto mb-4 flex max-w-[1500px] flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950" data-testid="frontstage-ops-deprecated" role="status">
+          <span><strong>Deprecated diagnostic surface.</strong> New operator workflows and milestone reports live in Personal Workspace.</span>
+          <a className="rounded-md bg-amber-950 px-3 py-2 font-semibold text-white" href={personalWorkspaceHref}>Open Personal Workspace</a>
+        </div>
+      ) : null}
       <div
         className={cn(
           "frontstage-workspace-shell mx-auto grid gap-4",
@@ -3713,12 +3642,6 @@ function FrontstageRoute({
                 </div>
               </Panel>
 
-              <MilestoneReportsPanel
-                error={periodicReportError}
-                isLoading={periodicReportLoading}
-                report={periodicReport}
-              />
-
               <div className="grid gap-4 lg:grid-cols-2">
                 <div
                   className="frontstage-ops-command-strip rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2"
@@ -3980,21 +3903,6 @@ export function FrontstagePage() {
   const localApiCapabilities = payload && resolvedSearchStatusUrl?.source
     ? localDashboardApiCapabilities(payload, resolvedSearchStatusUrl.source)
     : null;
-  const periodicReportUrls = payload && resolvedSearchStatusUrl?.source
-    ? periodicReportApiUrls(payload, resolvedSearchStatusUrl.source)
-    : { detailUrl: null, indexUrl: null };
-  const periodicReportIndexQuery = useQuery({
-    enabled: Boolean(liveMode && selectedGoalId && periodicReportUrls.indexUrl),
-    queryFn: () => fetchPeriodicReportIndex(periodicReportUrls.indexUrl ?? "", selectedGoalId),
-    queryKey: ["frontstage-periodic-report-index", periodicReportUrls.indexUrl, selectedGoalId],
-  });
-  const periodicReportRef = periodicReportIndexQuery.data?.items[0]?.detail_ref ?? null;
-  const periodicReportDetailQuery = useQuery({
-    enabled: Boolean(periodicReportRef && periodicReportUrls.detailUrl),
-    queryFn: () => fetchPeriodicReportProjection(periodicReportUrls.detailUrl ?? "", periodicReportRef!),
-    queryKey: ["frontstage-periodic-report-detail", periodicReportUrls.detailUrl, periodicReportRef],
-  });
-  const periodicReportError = periodicReportIndexQuery.error ?? periodicReportDetailQuery.error;
   const queryError = statusQuery.error ? formatStatusError(statusQuery.error) : null;
   const projectionError = liveMode && statusQuery.isSuccess && rawGoalOptions.length === 0
     ? "status feed has no goal_channel_projection items; showing demo fixture"
@@ -4093,9 +4001,6 @@ export function FrontstagePage() {
       onTodoLaneChange={changeTodoLane}
       onTodoQueryChange={changeTodoQuery}
       projection={selectedProjection}
-      periodicReport={periodicReportDetailQuery.data ?? null}
-      periodicReportError={periodicReportError ? formatStatusError(periodicReportError) : null}
-      periodicReportLoading={periodicReportIndexQuery.isFetching || periodicReportDetailQuery.isFetching}
       freshnessIssue={freshnessIssue}
       localApiCapabilities={localApiCapabilities}
       queryStateLabel={queryStateLabel}
