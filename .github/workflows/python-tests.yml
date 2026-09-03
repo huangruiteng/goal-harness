@@ -36,7 +36,10 @@ concurrency:
 jobs:
   pytest:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The parallel suite now reaches coverage collation at ~15 minutes on the
+    # hosted runner. Keep the fail-safe bounded while leaving enough headroom
+    # for collection and post-test coverage reporting.
+    timeout-minutes: 25
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
