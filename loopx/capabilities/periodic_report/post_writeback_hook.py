@@ -352,7 +352,7 @@ def periodic_report_post_writeback_hook(
         capability_id="periodic-report",
         event_kinds=("refresh_state", "todo_complete"),
         intent_kinds=(PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT,),
-        requested_read_scope=("stage_completion", "project_progress"),
+        requested_read_scope=("stage_completion", "project_progress", "last_report"),
         producer=producer,
         policy_version=policy_version,
     )
