@@ -10,6 +10,7 @@ import pytest
 
 from loopx.cli import main as cli_main
 from loopx.cli_commands import turn as turn_command
+from loopx.cli_commands import turn_rendering
 from loopx.control_plane.turn_driver import executor
 from loopx.control_plane.turn_driver import turn_journal_runtime
 
@@ -122,7 +123,7 @@ def test_existing_run_once_markdown_renderer_remains_intact() -> None:
 
 
 def test_inspection_markdown_distinguishes_current_plan_from_last_result() -> None:
-    rendered = turn_command._render_loopx_turn_journal_inspection_markdown(
+    rendered = turn_rendering.render_loopx_turn_journal_inspection_markdown(
         {
             "ok": True,
             "decision": "replay_legal",

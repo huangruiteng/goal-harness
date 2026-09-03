@@ -498,7 +498,7 @@ CLI_OUTPUT_MODE_VARIANT_SPECS: tuple[CliOutputModeVariantSpec, ...] = (
         output_formats=("json", "markdown"),
         semantic_json_keys=("task_body", "quota_guard_command", "interface_budget"),
         markdown_anchor="# Heartbeat Automation Prompt",
-        max_chars={"json": 8_500, "markdown": 7_500},
+        max_chars={"json": 10_500, "markdown": 9_000},
         max_lines={"json": 58, "markdown": 115},
     ),
     CliOutputModeVariantSpec(
@@ -508,7 +508,7 @@ CLI_OUTPUT_MODE_VARIANT_SPECS: tuple[CliOutputModeVariantSpec, ...] = (
         output_formats=("json", "markdown"),
         semantic_json_keys=("task_body", "quota_guard_command", "interface_budget"),
         markdown_anchor="# Heartbeat Automation Prompt",
-        max_chars={"json": 11_500, "markdown": 10_500},
+        max_chars={"json": 13_000, "markdown": 11_500},
         max_lines={"json": 58, "markdown": 155},
     ),
     CliOutputModeVariantSpec(
@@ -518,7 +518,7 @@ CLI_OUTPUT_MODE_VARIANT_SPECS: tuple[CliOutputModeVariantSpec, ...] = (
         output_formats=("json", "markdown"),
         semantic_json_keys=("task_body", "quota_guard_command", "interface_budget"),
         markdown_anchor="# Heartbeat Automation Prompt",
-        max_chars={"json": 19_000, "markdown": 18_000},
+        max_chars={"json": 20_000, "markdown": 18_000},
         max_lines={"json": 58, "markdown": 280},
     ),
     CliOutputModeVariantSpec(
@@ -674,6 +674,12 @@ CLI_OUTPUT_COMMAND_CLASSIFICATIONS: tuple[CliOutputCommandClassification, ...] =
         qualification="explicit_cold_path_exception",
         surface_id=None,
         rationale="explicit per-todo lease lifecycle command family",
+    ),
+    CliOutputCommandClassification(
+        command_id="coordination-shadow",
+        qualification="explicit_cold_path_exception",
+        surface_id=None,
+        rationale="explicit Stage 2C administrative inspection and bootstrap command family",
     ),
     CliOutputCommandClassification(
         command_id="quota",

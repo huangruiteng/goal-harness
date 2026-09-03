@@ -20,6 +20,11 @@ from loopx.extensions.lark.periodic_report_delivery import (
     GOAL_CHANNEL_DELIVERY_REQUEST_SCHEMA,
     deliver_periodic_report_to_goal_channel,
 )
+from loopx.capabilities.periodic_report.incremental import (
+    build_periodic_report_publication_candidate,
+    read_periodic_report_publication_cursor,
+    write_periodic_report_publication_candidate,
+)
 from loopx.extensions.lark import periodic_report_cli
 from loopx.presentation.renderers.periodic_report_markdown import (
     periodic_report_markdown_renderer_adapter,
@@ -94,6 +99,81 @@ def _extension_activation() -> dict[str, Any]:
     }
 
 
+def _write_publication_candidate(
+    runtime_root: Path, generation_bundle: dict[str, Any]
+) -> None:
+    candidate = build_periodic_report_publication_candidate(
+        goal_id=GOAL_ID,
+        agent_id="example-agent",
+        generation_id=generation_bundle["generation_receipt"]["generation_id"],
+        trigger_receipt={"coalesced_trigger_ids": ["trigger_stage_1"]},
+        facts=[
+            {
+                "source_ref": "todo:stage_1",
+                "title": "Stage 1 completed",
+                "summary": "The stage outcome was validated.",
+                "content_kind": "outcome",
+                "status": "done",
+            }
+        ],
+        baseline=None,
+    )
+    path = (
+        runtime_root
+        / "goals"
+        / GOAL_ID
+        / "periodic_reports"
+        / "fixture"
+        / "publication-candidate.json"
+    )
+    write_periodic_report_publication_candidate(path=path, candidate=candidate)
+
+
+def test_goal_channel_readback_advances_publication_cursor_only_on_success(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    registry_path.parent.mkdir()
+    registry_path.write_text("{}", encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    _write_binding(registry_path)
+    request = _request()
+    _write_publication_candidate(runtime_root, request["generation_bundle"])
+
+    preview = deliver_periodic_report_to_goal_channel(
+        request,
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        extension_activation=_extension_activation(),
+    )
+    assert preview["publication_cursor"] is None
+    assert (
+        read_periodic_report_publication_cursor(
+            runtime_root=runtime_root,
+            goal_id=GOAL_ID,
+            agent_id="example-agent",
+        )
+        is None
+    )
+
+    delivered = deliver_periodic_report_to_goal_channel(
+        request,
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        extension_activation=_extension_activation(),
+        execute=True,
+        runner=_runner([]),
+    )
+    cursor = delivered["publication_cursor"]
+    assert (
+        cursor["generation_id"]
+        == request["generation_bundle"]["generation_receipt"]["generation_id"]
+    )
+    assert cursor["covered_trigger_ids"] == ["trigger_stage_1"]
+
+
 def _write_binding(
     registry_path: Path,
     *,
@@ -165,8 +245,7 @@ def _runner(calls: list[list[str]], *, normalized_readback: bool = False):
                 markdown = card["elements"][0]["text"]["content"]
                 footer = card["elements"][2]["elements"][0]["content"]
                 message_content = (
-                    f'<card title="{title}">\n{markdown}\n---\n'
-                    f"📝 {footer}\n</card>"
+                    f'<card title="{title}">\n{markdown}\n---\n📝 {footer}\n</card>'
                 )
             payload = {
                 "ok": True,

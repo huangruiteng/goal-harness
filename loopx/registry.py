@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -101,6 +102,16 @@ PRIVATE_REGISTRY_TEXT_RE = re.compile(
 )
 
 
+def _definitely_outside_git_worktree(probe_dir: Path) -> bool:
+    if os.environ.get("GIT_DIR") or os.environ.get("GIT_WORK_TREE"):
+        return False
+    try:
+        current = probe_dir.resolve(strict=True)
+    except OSError:
+        return False
+    return not any(os.path.lexists(parent / ".git") for parent in (current, *current.parents))
+
+
 def _registry_git_probe(path: Path) -> dict[str, Any]:
     probe_dir = path if path.is_dir() else path.parent
 
@@ -129,6 +140,23 @@ def _registry_git_probe(path: Path) -> dict[str, Any]:
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
+
+    # Git discovers a normal repository only through an ancestor `.git`
+    # marker. Non-Git LoopX projects are common, and status can inspect the
+    # same registry more than once per command, so avoid a guaranteed-failing
+    # subprocess while retaining the Git path for worktrees, submodules, and
+    # explicit environment overrides.
+    if _definitely_outside_git_worktree(probe_dir):
+        if shutil.which("git") is None:
+            return unavailable()
+        return {
+            "available": True,
+            "probe_status": "ok",
+            "inside_worktree": False,
+            "tracked": False,
+            "ignored": False,
+            "worktree_root_recorded": False,
+        }
 
     root = run_git("rev-parse", "--show-toplevel")
     if root is None:

@@ -56,21 +56,25 @@ def _build_authority_boundary_table() -> list[dict[str, Any]]:
         {
             "rfc_section": "4 -- Coordination Ledger Shape",
             "proposal": (
-                "loopx_coordination_head_v0: unified aggregate with "
+                "loopx_coordination_head_v1: unified aggregate with "
                 "authority_revision, todo_revision, lease_epoch, "
                 "receipt_index, eligibility projections"
             ),
-            "shipped": True,
+            "shipped": False,
             "shipped_equivalent": (
-                "Stage-2 additive: loopx.control_plane.coordination.head "
-                "codec + file_provider CAS (+ NoKV candidate shadow). Not "
-                "the default runtime write path."
+                "Native task-lease acquire is owned by the TypeScript default "
+                "path. The coordination head codec + recoverable execution "
+                "reference executor + file/NoKV candidates exercise v1 behind "
+                "one CAS seam as coverage-only modules, not the runtime "
+                "source of truth. PostgreSQL remains an RFC workstream."
             ),
             "gap": (
-                "Default runtime still writes Markdown/lease files; the "
-                "coordination head is an additive Stage-2 shadow. Stage 3 "
-                "canonical promotion, renew/release/HA, and multi-node "
-                "remain open."
+                "Runtime still writes Markdown/lease files; no production "
+                "provider-neutral transaction boundary or canonical "
+                "coordination head exists. Stage 3 contract proof is complete "
+                "at the reference boundary; canonical promotion still needs "
+                "migration, writer fencing, authorization, provider "
+                "qualification, rollback, projection, and retention decisions"
             ),
         },
         {
@@ -79,19 +83,17 @@ def _build_authority_boundary_table() -> list[dict[str, Any]]:
                 "CAS claim+lease+receipt in one atomic transition against "
                 "the coordination head"
             ),
-            "shipped": True,
+            "shipped": False,
             "shipped_equivalent": (
-                "Stage-2 additive: coordination.executor claim_work "
-                "(lease acquire then hard-lease-gated claim) over "
-                "file_provider CAS with receipt_index; also "
-                "task_lease_acquire.ts native hard-fence transaction + "
-                "active-state claimed_by soft claim on the default path."
+                "The default path has task_lease_acquire.ts native hard-fence "
+                "acquire plus an independently versioned active-state soft "
+                "claim. The coverage-only coordination executor proves atomic "
+                "claim+lease+receipt behind the reference CAS seam."
             ),
             "gap": (
-                "claim_work is not the default production write path. "
-                "Leases remain an optional runtime fence, not write "
-                "authority. Soft claim still wins under legacy "
-                "handoff_mode on the default path."
+                "claim_work is not a production write path. Default leases "
+                "remain an optional runtime fence rather than write authority, "
+                "and the soft claim still wins under legacy handoff_mode."
             ),
         },
         {

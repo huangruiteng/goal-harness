@@ -488,10 +488,17 @@ def try_exclusive_file_lock(
 
 EFFECT_MUTATION_LOCK_SUFFIX = ".ts-effect.lock"
 EFFECT_MUTATION_INVALID_STALE_SECONDS = 10.0
+EFFECT_MUTATION_TOKEN_MAX_LENGTH = 256
+_EFFECT_MUTATION_INVALID_CLAIM_TOKEN = "__invalid_lock_reclaim__"
 
 
 def _effect_mutation_lock_path(path: Path) -> Path:
     return Path(f"{path}{EFFECT_MUTATION_LOCK_SUFFIX}")
+
+
+def _effect_mutation_claim_path(path: Path, token: str) -> Path:
+    token_digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return path.with_name(f"{path.name}.claim.{token_digest}")
 
 
 def process_is_alive(pid: object) -> bool:
@@ -559,13 +566,196 @@ def _read_effect_mutation_owner(path: Path) -> dict[str, object] | None:
     if (
         isinstance(pid, bool)
         or not isinstance(pid, int)
+        or pid <= 0
         or not isinstance(token, str)
+        or not token
+        or len(token) > EFFECT_MUTATION_TOKEN_MAX_LENGTH
+        or not token.strip()
     ):
         return None
     return {"pid": pid, "token": token}
 
 
+@dataclass(frozen=True)
+class _EffectMutationClaim:
+    path: Path
+    token: str
+    identity: tuple[int, int, int, int]
+
+
+def _effect_file_identity_from_stat(info: os.stat_result) -> tuple[int, int, int, int]:
+    """Capture a replacement-resistant identity on POSIX and Windows."""
+
+    return (
+        int(getattr(info, "st_dev", 0)),
+        int(getattr(info, "st_ino", 0)),
+        int(getattr(info, "st_birthtime_ns", 0)),
+        int(getattr(info, "st_ctime_ns", 0)),
+    )
+
+
+def _effect_file_identity_from_fd(descriptor: int) -> tuple[int, int, int, int]:
+    return _effect_file_identity_from_stat(os.fstat(descriptor))
+
+
+def _effect_file_identity(path: Path) -> tuple[int, int, int, int] | None:
+    try:
+        return _effect_file_identity_from_stat(path.stat())
+    except OSError:
+        return None
+
+
+def _same_effect_file_identity(
+    left: tuple[int, int, int, int] | None,
+    right: tuple[int, int, int, int] | None,
+) -> bool:
+    if left is None or right is None:
+        return False
+    left_has_device_identity = left[:2] != (0, 0)
+    right_has_device_identity = right[:2] != (0, 0)
+    if left_has_device_identity != right_has_device_identity:
+        return False
+    if left_has_device_identity:
+        if left[:2] != right[:2]:
+            return False
+        # A birth marker protects against rapid inode reuse when both stat
+        # calls expose it. On POSIX/macOS it may be absent; in that case the
+        # stable device/inode pair remains the best available identity and is
+        # not invalidated by ordinary content writes (which change ctime).
+        if left[2] or right[2]:
+            return left[2] != 0 and right[2] != 0 and left[2] == right[2]
+        return True
+    # Without device/inode identity, prefer a birth marker, then creation time.
+    # Two all-zero identities are ambiguous and must fail closed.
+    if left[2] or right[2]:
+        return left[2] != 0 and right[2] != 0 and left[2] == right[2]
+    # Some Windows filesystems expose no device/inode or birth marker.  ctime
+    # is the last available creation-like marker; two zero identities are not
+    # safe to compare.
+    return left[3] != 0 and right[3] != 0 and left[3] == right[3]
+
+
+def _remove_created_effect_file(
+    path: Path,
+    identity: tuple[int, int, int, int] | None,
+) -> None:
+    if identity is None:
+        return
+    try:
+        if _same_effect_file_identity(identity, _effect_file_identity(path)):
+            path.unlink(missing_ok=True)
+    except OSError:
+        # The path was already retired or replaced; never remove an unknown file.
+        pass
+
+
+def _remove_dead_effect_mutation_claim(path: Path) -> bool:
+    identity = _effect_file_identity(path)
+    if identity is None:
+        return False
+    owner = _read_effect_mutation_owner(path)
+    if owner is not None and _effect_mutation_process_is_alive(owner.get("pid")):
+        return False
+    if owner is None:
+        try:
+            age_seconds = time.time() - path.stat().st_mtime
+        except OSError:
+            return False
+        if age_seconds < EFFECT_MUTATION_INVALID_STALE_SECONDS:
+            return False
+    if not _same_effect_file_identity(identity, _effect_file_identity(path)):
+        return False
+    _remove_created_effect_file(path, identity)
+    return _effect_file_identity(path) is None
+
+
+def _claim_effect_mutation_lock(
+    path: Path,
+    token: str,
+) -> _EffectMutationClaim | None:
+    if (
+        not token
+        or len(token) > EFFECT_MUTATION_TOKEN_MAX_LENGTH
+        or not token.strip()
+    ):
+        return None
+    claim_path = _effect_mutation_claim_path(path, token)
+    for _attempt in range(2):
+        try:
+            descriptor = os.open(
+                claim_path,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                0o600,
+            )
+        except FileExistsError:
+            if not _remove_dead_effect_mutation_claim(claim_path):
+                return None
+            continue
+        # Capture identity before publication so a write/fsync failure can
+        # still retire the claim without relying on a later path read.
+        identity: tuple[int, int, int, int] | None = _effect_file_identity_from_fd(
+            descriptor
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as claim_file:
+                json.dump(
+                    {"pid": os.getpid(), "token": token},
+                    claim_file,
+                    separators=(",", ":"),
+                )
+                claim_file.flush()
+                os.fsync(claim_file.fileno())
+        except BaseException:
+            _remove_created_effect_file(claim_path, identity)
+            raise
+        if identity is None:
+            return None
+        return _EffectMutationClaim(claim_path, token, identity)
+    return None
+
+
+def _release_effect_mutation_claim(
+    claim: _EffectMutationClaim | Path,
+    token: str | None = None,
+) -> None:
+    expected_token: str | None
+    identity: tuple[int, int, int, int] | None
+    if isinstance(claim, _EffectMutationClaim):
+        path = claim.path
+        expected_token = claim.token
+        identity = claim.identity
+    else:
+        path = claim
+        expected_token = token
+        identity = _effect_file_identity(path)
+    if not expected_token:
+        return
+    owner = _read_effect_mutation_owner(path)
+    if isinstance(claim, _EffectMutationClaim):
+        if (
+            owner is None
+            or owner.get("pid") != os.getpid()
+            or owner.get("token") != expected_token
+        ):
+            # The pathname may have been corrupted or replaced after this
+            # caller created the claim.  Its captured identity still permits
+            # removing only its own inode, preventing claim leaks without
+            # touching a later claimant.
+            _remove_created_effect_file(path, identity)
+            return
+    elif (
+        owner is None
+        or owner.get("pid") != os.getpid()
+        or owner.get("token") != expected_token
+    ):
+        return
+    _remove_created_effect_file(path, identity)
+
+
 def _reclaim_stale_effect_mutation_lock(path: Path) -> None:
+    identity = _effect_file_identity(path)
+    if identity is None:
+        return
     owner = _read_effect_mutation_owner(path)
     if owner is not None and _effect_mutation_process_is_alive(owner.get("pid")):
         return
@@ -576,12 +766,113 @@ def _reclaim_stale_effect_mutation_lock(path: Path) -> None:
             return
         if age_seconds < EFFECT_MUTATION_INVALID_STALE_SECONDS:
             return
+    claim_token = (
+        str(owner["token"])
+        if owner is not None
+        else _EFFECT_MUTATION_INVALID_CLAIM_TOKEN
+    )
+    claim = _claim_effect_mutation_lock(path, claim_token)
+    if claim is None:
+        return
     stale_path = path.with_name(f"{path.name}.stale.{uuid4()}")
     try:
+        current = _read_effect_mutation_owner(path)
+        if owner is not None and (
+            current is None or current.get("token") != owner.get("token")
+        ):
+            return
+        if current is not None and _effect_mutation_process_is_alive(
+            current.get("pid")
+        ):
+            return
+        if current is None:
+            try:
+                if (
+                    time.time() - path.stat().st_mtime
+                    < EFFECT_MUTATION_INVALID_STALE_SECONDS
+                ):
+                    return
+            except OSError:
+                return
+        if not _same_effect_file_identity(identity, _effect_file_identity(path)):
+            return
         path.replace(stale_path)
     except FileNotFoundError:
         return
+    finally:
+        if claim is not None:
+            _release_effect_mutation_claim(claim)
     stale_path.unlink(missing_ok=True)
+
+
+def _release_effect_mutation_lock(
+    path: Path,
+    token: str,
+    *,
+    suppress_errors: bool = False,
+) -> bool:
+    claim: _EffectMutationClaim | None = None
+    try:
+        lock_identity = _effect_file_identity(path)
+        if lock_identity is None:
+            return False
+        owner = _read_effect_mutation_owner(path)
+        if owner is None or owner.get("token") != token:
+            _release_effect_mutation_claim(
+                _effect_mutation_claim_path(path, token),
+                token,
+            )
+            return False
+        claim = _claim_effect_mutation_lock(path, token)
+        if claim is None:
+            return False
+        retired_path = path.with_name(f"{path.name}.released.{uuid4()}")
+        try:
+            current = _read_effect_mutation_owner(path)
+            if current is None or current.get("token") != token:
+                return False
+            if not _same_effect_file_identity(lock_identity, _effect_file_identity(path)):
+                return False
+            try:
+                path.replace(retired_path)
+            except FileNotFoundError:
+                return False
+            try:
+                retired_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return True
+        finally:
+            if claim is not None:
+                _release_effect_mutation_claim(claim)
+            try:
+                retired_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    except OSError:
+        if suppress_errors:
+            return False
+        raise
+    finally:
+        if claim is not None:
+            _release_effect_mutation_claim(claim)
+
+
+def release_cross_runtime_mutation_lock(path: Path, *, token: str) -> bool:
+    """Safely abandon one token-owned TypeScript mutation lock.
+
+    This recovery path is for a caller that still owns a long-lived lock but
+    lost the managed-runtime response needed to close it. The token claim and
+    file-identity checks make the operation race safely with an in-flight
+    native closer: if that closer already owns the claim, this call returns
+    ``False`` and leaves the lock untouched.
+    """
+
+    return _release_effect_mutation_lock(
+        _effect_mutation_lock_path(path),
+        token,
+        suppress_errors=True,
+    )
 
 
 @contextmanager
@@ -642,6 +933,7 @@ def exclusive_cross_runtime_file_lock(
                 ) from None
             time.sleep(min(poll_interval, max(0.0, deadline - now)))
             continue
+        identity = _effect_file_identity_from_fd(descriptor)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as lock_file:
                 json.dump(
@@ -652,7 +944,7 @@ def exclusive_cross_runtime_file_lock(
                 lock_file.flush()
                 os.fsync(lock_file.fileno())
         except BaseException:
-            effect_lock_path.unlink(missing_ok=True)
+            _remove_created_effect_file(effect_lock_path, identity)
             raise
         break
 
@@ -667,6 +959,11 @@ def exclusive_cross_runtime_file_lock(
         ) as lock_path:
             yield lock_path
     finally:
-        owner = _read_effect_mutation_owner(effect_lock_path)
-        if owner is not None and owner.get("token") == token:
-            effect_lock_path.unlink(missing_ok=True)
+        _release_effect_mutation_lock(
+            effect_lock_path,
+            token,
+            # Lock cleanup is secondary to the durable body result.  A cleanup
+            # failure must not replace either a successful result or its
+            # original exception; stale-owner recovery handles a later retry.
+            suppress_errors=True,
+        )

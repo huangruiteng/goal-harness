@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,6 @@ from ...agent_registry import (
     registered_agent_ids_from_registry,
     require_registered_agent_id,
 )
-from ...file_lock import exclusive_cross_runtime_file_lock as exclusive_file_lock
 from ...history import load_registry
 from ...paths import resolve_runtime_root
 from ..runtime.time import now_utc as runtime_now_utc
@@ -19,27 +19,11 @@ from ..runtime.time import parse_timestamp, utc_isoformat
 from ..coordination.authority_core import (
     CoordinationSnapshot,
     DecisionOutcome,
-    HandoffMode,
-    LeaseAction,
-    LeaseFence,
-    LeaseModeGateCommand,
     LeaseOwnerEligibilityCommand,
-    LeaseReleaseCommand,
-    LeaseRenewCommand,
-    LeaseTransferCommand,
-    TerminalFenceCommand,
-    TodoAction,
-    TodoMutationCommand,
-    TodoSnapshot,
     decide,
     write_scopes_overlap as core_write_scopes_overlap,
 )
-from ..coordination.local_snapshot import (
-    lease_coordination_snapshot,
-    lease_snapshot_from_mapping,
-    lease_transition_error,
-    todo_snapshot_from_mapping,
-)
+from ..coordination.local_snapshot import todo_snapshot_from_mapping
 from ..todos.contract import (
     normalize_required_write_scopes,
     normalize_todo_claimed_by,
@@ -57,14 +41,13 @@ from .local_lease_record import (
     TASK_LEASE_SCHEMA_VERSION,
     TaskLeaseError,
     assert_expected_version as assert_expected_version,
-    build_lease,
+    build_lease as build_lease,
     lease_acquire_ttl_seconds as lease_acquire_ttl_seconds,
-    lease_epoch,
-    lease_version,
+    lease_epoch as lease_epoch,
+    lease_version as lease_version,
     read_lease,
-    released_lease_payload,
-    require_expected_version,
-    write_lease,
+    require_expected_version as require_expected_version,
+    write_lease as write_lease,
 )
 
 DEFAULT_TASK_LEASE_TTL_SECONDS = 45 * 60
@@ -76,7 +59,12 @@ def now_utc() -> datetime:
     return runtime_now_utc()
 
 
+_DEFAULT_NOW_UTC = now_utc
+
+
 def isoformat(value: datetime) -> str:
+    """Retain the historical task-lease timestamp helper import surface."""
+
     return utc_isoformat(value)
 
 
@@ -142,7 +130,104 @@ class _VerifiedTaskLeaseFence(dict):
     the payload stays JSON-serializable for every consumer at all times.
     """
 
-    release_hook: Callable[[], None] | None = None
+    release_hook: Callable[[bool, bool], dict[str, Any] | None] | None = None
+    abandon_hook: Callable[[], bool] | None = None
+    # The fence receipt id is an internal bridge detail.  Keep it out of the
+    # historical JSON mapping while carrying it across the one-shot close RPC.
+    fence_operation_id: str | None = None
+
+
+def _native_fence_payload(
+    result: dict[str, Any],
+    *,
+    operation: str,
+) -> tuple[dict[str, Any], str | None, str | None]:
+    raw = result.get("fence")
+    if not isinstance(raw, dict):
+        raise TaskLeaseError(
+            f"native task-lease {operation} result omitted fence",
+            code="invalid_fence_result",
+        )
+    token = raw.get("lock_token")
+    operation_id = raw.get("fence_operation_id")
+    if operation_id is not None and (
+        not isinstance(operation_id, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", operation_id)
+    ):
+        raise TaskLeaseError(
+            f"native task-lease {operation} result has an invalid fence operation id",
+            code="invalid_fence_result",
+        )
+    if raw.get("required") is False:
+        return {
+            key: value
+            for key, value in raw.items()
+            if key not in {"lock_token", "fence_operation_id"}
+        }, None, operation_id
+    if not isinstance(token, str) or not token:
+        raise TaskLeaseError(
+            f"native task-lease {operation} result omitted lock token",
+            code="invalid_fence_result",
+        )
+    public = {
+        key: value
+        for key, value in raw.items()
+        if key not in {"lock_token", "fence_operation_id"}
+    }
+    return public, token, operation_id
+
+
+def _close_native_fence(
+    fence: dict[str, Any] | None,
+    *,
+    committed: bool,
+    release_lease: bool,
+    suppress_errors: bool = False,
+) -> dict[str, Any] | None:
+    hook = getattr(fence, "release_hook", None)
+    if hook is None or not isinstance(fence, dict):
+        return None
+    try:
+        result = hook(committed, release_lease)
+    except (OSError, TaskLeaseError, RuntimeError):
+        abandon = getattr(fence, "abandon_hook", None)
+        abandoned = False
+        if abandon is not None:
+            try:
+                abandoned = abandon()
+            except OSError:
+                abandoned = False
+        if abandoned:
+            # A token claim proved that no native closer was in its critical
+            # section, so this caller safely retired only its own held lock.
+            # Disarm the semantic close hook; the lease intentionally remains
+            # active for explicit release or TTL expiry.
+            fence.release_hook = None  # type: ignore[attr-defined]
+            fence.abandon_hook = None  # type: ignore[attr-defined]
+        if not suppress_errors:
+            raise
+        fence["released"] = False
+        return None
+    # Only disarm after the close RPC has completed.  A failed close remains
+    # retryable by the context manager's cleanup path.
+    fence.release_hook = None  # type: ignore[attr-defined]
+    fence.abandon_hook = None  # type: ignore[attr-defined]
+    if isinstance(result, dict) and result.get("released") is True:
+        fence["released"] = True
+    elif committed and release_lease:
+        fence["released"] = False
+    return result
+
+
+def _execute_native_task_lease_lifecycle(**kwargs: Any) -> dict[str, Any]:
+    from .task_lease_acquire_adapter import execute_native_task_lease_lifecycle
+
+    # Existing Python parity tests monkeypatch this module's clock. Production
+    # calls leave time ownership in TypeScript; only the replaced test clock is
+    # forwarded through the internal adapter seam.
+    if now_utc is not _DEFAULT_NOW_UTC:
+        kwargs.setdefault("_now", now_utc())
+    return execute_native_task_lease_lifecycle(**kwargs)
 
 
 def goal_handoff_mode_for_lease(registry_path: Path, goal_id: str) -> str:
@@ -159,33 +244,6 @@ def goal_handoff_mode_for_lease(registry_path: Path, goal_id: str) -> str:
         raise TaskLeaseError(str(exc), code=exc.code, payload=exc.payload) from exc
     except (OSError, ValueError):
         return HANDOFF_MODE_LEGACY
-
-
-def _require_lease_mutation_allowed_by_handoff_mode(
-    *,
-    registry_path: Path,
-    goal_id: str,
-    todo_id: str,
-    action: str,
-) -> str:
-    handoff_mode = goal_handoff_mode_for_lease(registry_path, goal_id)
-    handoff_plan = decide(
-        CoordinationSnapshot(handoff_mode=HandoffMode(handoff_mode)),
-        LeaseModeGateCommand(action=LeaseAction(action)),
-    )
-    if handoff_plan.code == "handoff_mode_forbids_lease":
-        raise TaskLeaseError(
-            f"goal handoff mode 'soft_claim' forbids task lease {action}; "
-            "release and inspect remain available for legacy leftovers",
-            code="handoff_mode_forbids_lease",
-            payload={
-                "goal_id": goal_id,
-                "todo_id": todo_id,
-                "action": action,
-                "handoff_mode": handoff_mode,
-            },
-        )
-    return handoff_mode
 
 
 def _optional_handoff_mode(registry_path: Path | None, goal_id: str) -> str | None:
@@ -219,91 +277,77 @@ def hold_handoff_lease_holder_gate(
     normalized_goal_id = normalize_goal_id(goal_id)
     normalized_todo_id = normalize_lease_todo_id(todo_id)
     actor = normalize_todo_claimed_by(actor_agent_id)
-    runtime_root = runtime_root_from_registry(registry_path, None)
-    lease_path = task_lease_path(
-        runtime_root=runtime_root,
-        goal_id=normalized_goal_id,
-        todo_id=normalized_todo_id,
-    )
-    base_payload: dict[str, Any] = {
-        "goal_id": normalized_goal_id,
-        "todo_id": normalized_todo_id,
-        "handoff_mode": HANDOFF_MODE_HARD_LEASE,
-        "lease_path": str(lease_path),
-    }
     if not actor:
         raise TaskLeaseError(
             "hard_lease handoff mode requires an attributed actor for "
             "ownership changes; provide --agent-id",
             code="handoff_mode_requires_lease",
-            payload={**base_payload, "reason": "missing_actor"},
+            payload={
+                "goal_id": normalized_goal_id,
+                "todo_id": normalized_todo_id,
+                "handoff_mode": HANDOFF_MODE_HARD_LEASE,
+                "reason": "missing_actor",
+            },
         )
-    lock_target = task_lease_lock_path(
+    runtime_root = runtime_root_from_registry(registry_path, None)
+    result = _execute_native_task_lease_lifecycle(
         runtime_root=runtime_root,
+        registry_path=registry_path,
         goal_id=normalized_goal_id,
+        todo_id=normalized_todo_id,
+        operation="holder_verify",
+        owner=actor,
     )
-    with exclusive_file_lock(
-        lock_target,
-        agent_id=actor,
-        operation="handoff_lease_holder_gate",
-    ):
-        lease = read_lease(lease_path)
-        owner = normalize_todo_claimed_by((lease or {}).get("owner"))
-        transition = decide(
-            CoordinationSnapshot(
-                handoff_mode=HandoffMode.HARD_LEASE,
-                registered_agents=(actor,),
-                todo=TodoSnapshot(
-                    todo_id=normalized_todo_id,
-                    status="open",
-                    role="agent",
-                ),
-                lease=lease_snapshot_from_mapping(
-                    lease,
-                    active=lease_is_active(lease),
-                ),
-            ),
-            TodoMutationCommand(
-                action=TodoAction.UPDATE,
-                actor_agent_id=actor,
-                ownership_mutation=True,
-            ),
+    public, token, operation_id = _native_fence_payload(
+        result,
+        operation="holder_verify",
+    )
+    fence = _VerifiedTaskLeaseFence(public)
+    fence.fence_operation_id = operation_id
+
+    def close(committed: bool, release_lease: bool) -> dict[str, Any] | None:
+        return _execute_native_task_lease_lifecycle(
+            runtime_root=runtime_root,
+            registry_path=registry_path,
+            goal_id=normalized_goal_id,
+            todo_id=normalized_todo_id,
+            operation="fence_close",
+            lock_token=token,
+            committed=committed,
+            release_lease=release_lease,
+            fence_owner=actor,
+            fence_idempotency_key=None,
+            fence_expected_version=public.get("version")
+            if isinstance(public.get("version"), int)
+            else None,
+            fence_expected_lease_epoch=public.get("lease_epoch")
+            if isinstance(public.get("lease_epoch"), int)
+            else None,
+            fence_operation_id=operation_id,
+            owner_pid=os.getpid(),
         )
-        if transition.outcome is not DecisionOutcome.APPLY and not lease_is_active(
-            lease
-        ):
-            raise TaskLeaseError(
-                "hard_lease handoff mode requires a time-active task lease "
-                "before ownership of an existing todo can change; acquire one "
-                "with `loopx task-lease acquire`",
-                code="handoff_mode_requires_lease",
-                payload={**base_payload, "reason": "no_active_lease"},
-            )
-        if transition.outcome is not DecisionOutcome.APPLY:
-            assert lease is not None
-            raise TaskLeaseError(
-                f"hard_lease handoff mode: actor {actor!r} does not own the "
-                f"time-active task lease held by {owner!r}",
-                code="handoff_mode_requires_lease",
-                payload={
-                    **base_payload,
-                    "reason": "lease_owner_mismatch",
-                    "actor_agent_id": actor,
-                    "lease_owner": owner,
-                    "lease_version": lease.get("version"),
-                    "lease_epoch": lease_epoch(lease),
-                    "expires_at": lease.get("expires_at"),
-                },
-            )
-        assert lease is not None
-        yield {
-            "schema_version": TASK_LEASE_SCHEMA_VERSION,
-            "checked": True,
-            "active": True,
-            "owner": owner,
-            "version": lease.get("version"),
-            "lease_epoch": lease_epoch(lease),
-        }
+
+    fence.release_hook = close
+    from ...file_lock import release_cross_runtime_mutation_lock
+
+    fence.abandon_hook = lambda: release_cross_runtime_mutation_lock(
+        task_lease_lock_path(
+            runtime_root=runtime_root,
+            goal_id=normalized_goal_id,
+        ),
+        token=token,
+    )
+    try:
+        yield fence
+    finally:
+        # A holder gate is only a lock-scoped proof; it never releases the
+        # lease.  Always close it on exceptional caller paths.
+        _close_native_fence(
+            fence,
+            committed=False,
+            release_lease=False,
+            suppress_errors=True,
+        )
 
 
 @contextmanager
@@ -340,251 +384,82 @@ def hold_task_lease_mutation_fence(
 
     normalized_goal_id = normalize_goal_id(goal_id)
     normalized_todo_id = normalize_lease_todo_id(todo_id)
-    requested_key = (
-        normalize_idempotency_key(idempotency_key)
-        if idempotency_key is not None
-        else None
-    )
     runtime_root = runtime_root_from_registry(registry_path, None)
-    lease_path = task_lease_path(
+    handoff = handoff or {}
+    result = _execute_native_task_lease_lifecycle(
         runtime_root=runtime_root,
+        registry_path=registry_path,
         goal_id=normalized_goal_id,
         todo_id=normalized_todo_id,
+        operation="terminal_verify",
+        owner=normalize_todo_claimed_by(actor_agent_id),
+        idempotency_key=idempotency_key,
+        expected_version=expected_version,
+        todo=todo,
+        delegated_authority=handoff.get("handoff_gate_overridden") is True,
+        allow_user_gate_auto_acquire=not require_active_when_key_supplied,
+        require_active_when_fence_supplied=require_active_when_key_supplied,
     )
-    lock_target = task_lease_lock_path(
-        runtime_root=runtime_root,
-        goal_id=normalized_goal_id,
+    public, token, operation_id = _native_fence_payload(
+        result,
+        operation="terminal_verify",
     )
-    handoff = handoff or {}
-    handoff_mode = str(handoff.get("handoff_mode") or HANDOFF_MODE_LEGACY)
-    handoff_gate_overridden = handoff.get("handoff_gate_overridden") is True
-    # Caller policy only: auto-acquire may be offered when the caller supplied
-    # no explicit lease credentials. Mode, delegation, role, and task-class
-    # eligibility are decided once, in the core's terminal fence.
-    allow_user_gate_auto_acquire = not require_active_when_key_supplied
-    auto_acquired = False
-    with exclusive_file_lock(
-        lock_target,
-        agent_id=actor_agent_id,
-        operation="task_lease_mutation_fence",
-    ):
-        lease = read_lease(lease_path)
-        time_active = lease_is_active(lease)
-        registered_agents = registered_agent_ids_from_registry(
-            registry_path,
-            normalized_goal_id,
-        )
-        normalized_actor = normalize_todo_claimed_by(actor_agent_id)
-        constraint: dict[str, Any] | None = None
-        if time_active and lease:
-            constraint = task_lease_owner_constraint(
-                todo,
-                owner=lease.get("owner"),
-                registered_agents=registered_agents,
-            )
-        transition = decide(
-            lease_coordination_snapshot(
-                handoff_mode=handoff_mode,
-                registered_agents=registered_agents,
-                todo=todo,
-                lease=lease,
-                lease_active=time_active,
-                lease_version=lease_version(lease),
-                lease_epoch=lease_epoch(lease),
-            ),
-            TerminalFenceCommand(
-                actor_agent_id=normalized_actor,
-                lease_idempotency_key=requested_key,
-                lease_expected_version=expected_version,
-                delegated_authority=handoff_gate_overridden,
-                allow_user_gate_auto_acquire=allow_user_gate_auto_acquire,
-                require_active_when_fence_supplied=(
-                    require_active_when_key_supplied
-                ),
-            ),
-        )
-        if transition.outcome is not DecisionOutcome.APPLY:
-            if transition.code == "handoff_mode_lease_claim_divergence":
-                assert lease is not None
-                raise TaskLeaseError(
-                    "hard_lease handoff mode found a time-active lease "
-                    "diverged from the todo projection; refusing keyless "
-                    "completion. Repair ownership (release or transfer the "
-                    "lease, or restore claimed_by) before completing.",
-                    code=transition.code,
-                    payload={
-                        "goal_id": normalized_goal_id,
-                        "todo_id": normalized_todo_id,
-                        "handoff_mode": handoff_mode,
-                        "lease_owner": lease.get("owner"),
-                        "lease_version": lease.get("version"),
-                        "lease_epoch": lease_epoch(lease),
-                        "constraint": constraint,
-                        "lease_path": str(lease_path),
-                    },
-                )
-            if transition.code == "handoff_mode_requires_lease":
-                if transition.lease_fence is LeaseFence.AUTO_ACQUIRE and not time_active:
-                    if not normalized_actor:
-                        raise TaskLeaseError(
-                            "hard_lease handoff mode auto-acquire requires an "
-                            "attributed actor; provide --agent-id",
-                            code=transition.code,
-                            payload={
-                                "goal_id": normalized_goal_id,
-                                "todo_id": normalized_todo_id,
-                                "handoff_mode": handoff_mode,
-                                "lease_path": str(lease_path),
-                                "reason": "missing_actor",
-                            },
-                        )
-                    actor_constraint = task_lease_owner_constraint(
-                        todo,
-                        owner=normalized_actor,
-                        registered_agents=registered_agents,
-                    )
-                    if actor_constraint.get("effective") is not True:
-                        raise TaskLeaseError(
-                            "hard_lease handoff mode auto-acquire rejected for "
-                            "the acting agent",
-                            code=transition.code,
-                            payload={
-                                "goal_id": normalized_goal_id,
-                                "todo_id": normalized_todo_id,
-                                "handoff_mode": handoff_mode,
-                                "lease_path": str(lease_path),
-                                "reason": str(
-                                    actor_constraint.get("reason")
-                                    or "owner_not_allowed"
-                                ),
-                                "constraint": actor_constraint,
-                            },
-                        )
-                raise TaskLeaseError(
-                    "hard_lease handoff mode requires an effective task lease "
-                    "to complete this todo; acquire one with "
-                    "`loopx task-lease acquire`",
-                    code=transition.code,
-                    payload={
-                        "goal_id": normalized_goal_id,
-                        "todo_id": normalized_todo_id,
-                        "handoff_mode": handoff_mode,
-                        "lease_path": str(lease_path),
-                    },
-                )
-            if transition.code == "lease_not_active":
-                raise TaskLeaseError(
-                    "task lease fence was supplied but no effective lease is active",
-                    code=transition.code,
-                    payload={
-                        "goal_id": normalized_goal_id,
-                        "todo_id": normalized_todo_id,
-                        "lease_path": str(lease_path),
-                    },
-                )
-            if transition.code == "lease_fence_required":
-                assert lease is not None
-                raise TaskLeaseError(
-                    "todo has an active task lease; lifecycle mutation requires its idempotency key",
-                    code=transition.code,
-                    payload={
-                        "goal_id": normalized_goal_id,
-                        "todo_id": normalized_todo_id,
-                        "lease_owner": lease.get("owner"),
-                        "lease_version": lease.get("version"),
-                        "lease_epoch": lease_epoch(lease),
-                        "lease_path": str(lease_path),
-                    },
-                )
-            if transition.code == "lease_cas_mismatch":
-                assert lease is not None
-                raise TaskLeaseError(
-                    "task lease owner or execution-instance key mismatch",
-                    code=transition.code,
-                    payload={
-                        "goal_id": normalized_goal_id,
-                        "todo_id": normalized_todo_id,
-                        "lease_owner": lease.get("owner"),
-                        "lease_version": lease.get("version"),
-                        "lease_epoch": lease_epoch(lease),
-                        "actor_agent_id": normalized_actor,
-                        "lease_path": str(lease_path),
-                    },
-                )
-            _raise_lease_transition(
-                code=transition.code,
-                action="lifecycle writeback",
-                lease=lease,
-                lease_path=lease_path,
-                expected_version=expected_version,
-            )
+    if token is None:
+        yield public
+        return
+    fence = _VerifiedTaskLeaseFence(public)
+    fence.fence_operation_id = operation_id
+    native_fence = result.get("fence")
+    if not isinstance(native_fence, dict):
+        raise TaskLeaseError("native terminal fence result is malformed", code="invalid_fence_result")
+    verified_owner = native_fence.get("owner")
+    verified_key = idempotency_key or (
+        f"auto-{normalized_todo_id}"
+        if public.get("auto_acquired") is True
+        else None
+    )
+    verified_version = native_fence.get("version")
+    verified_lease_epoch = native_fence.get("lease_epoch")
 
-        if transition.lease_fence is LeaseFence.AUTO_ACQUIRE:
-            # The core plans the one logical terminal transition.  Persist the
-            # active lease first; the release hook retains its tombstone only
-            # after the Markdown mutation commits under this same lock.
-            next_lease = (
-                transition.next_snapshot.lease
-                if transition.next_snapshot is not None
-                else None
-            )
-            if next_lease is None or not normalized_actor:
-                raise TaskLeaseError(
-                    "task lease auto-acquire produced no lease transition",
-                    code="authority_transition_invalid",
-                )
-            at = now_utc()
-            auto_key = next_lease.idempotency_key or f"auto-{normalized_todo_id}"
-            updated_at = isoformat(at)
-            expires_at = isoformat(
-                at + timedelta(seconds=DEFAULT_TASK_LEASE_TTL_SECONDS)
-            )
-            lease = build_lease(
-                goal_id=normalized_goal_id,
-                todo_id=normalized_todo_id,
-                owner=normalized_actor,
-                idempotency_key=auto_key,
-                write_scopes=[],
-                acquire_ttl_seconds=DEFAULT_TASK_LEASE_TTL_SECONDS,
-                version=next_lease.version,
-                lease_epoch=next_lease.lease_epoch,
-                acquired_at=updated_at,
-                updated_at=updated_at,
-                expires_at=expires_at,
-            )
-            write_lease(lease_path, lease)
-            requested_key = auto_key
-            auto_acquired = True
-        elif transition.lease_fence in {
-            LeaseFence.NOT_REQUIRED,
-            LeaseFence.DELEGATED_OVERRIDE,
-        }:
-            yield {
-                "schema_version": TASK_LEASE_SCHEMA_VERSION,
-                "required": False,
-                "active": False,
-            }
-            return
-
-        assert lease is not None
-        fence_payload = {
-            "schema_version": TASK_LEASE_SCHEMA_VERSION,
-            "required": True,
-            "active": True,
-            "owner": normalized_actor,
-            "version": lease.get("version"),
-            "lease_epoch": lease_epoch(lease),
-            "execution_instance_verified": True,
-        }
-        if auto_acquired:
-            fence_payload["auto_acquired"] = True
-        fence = _VerifiedTaskLeaseFence(fence_payload)
-        verified_lease = dict(lease)
-        fence.release_hook = lambda: persist_released_lease(
-            lease_path,
-            verified_lease,
+    def close(committed: bool, release_lease: bool) -> dict[str, Any] | None:
+        return _execute_native_task_lease_lifecycle(
+            runtime_root=runtime_root,
+            registry_path=None,
+            goal_id=normalized_goal_id,
+            todo_id=normalized_todo_id,
+            operation="fence_close",
+            lock_token=token,
+            committed=committed,
+            release_lease=release_lease,
+            fence_owner=verified_owner if isinstance(verified_owner, str) else None,
+            fence_idempotency_key=verified_key if isinstance(verified_key, str) else None,
+            fence_expected_version=verified_version if isinstance(verified_version, int) else None,
+            fence_expected_lease_epoch=verified_lease_epoch
+            if isinstance(verified_lease_epoch, int)
+            else None,
+            fence_operation_id=operation_id,
+            owner_pid=os.getpid(),
         )
+
+    fence.release_hook = close
+    from ...file_lock import release_cross_runtime_mutation_lock
+
+    fence.abandon_hook = lambda: release_cross_runtime_mutation_lock(
+        task_lease_lock_path(
+            runtime_root=runtime_root,
+            goal_id=normalized_goal_id,
+        ),
+        token=token,
+    )
+    try:
         yield fence
+    finally:
+        _close_native_fence(
+            fence,
+            committed=False,
+            release_lease=False,
+            suppress_errors=True,
+        )
 
 
 def enter_terminal_todo_lease_fence(
@@ -655,18 +530,22 @@ def release_verified_task_lease_fence(
     or TTL expiry.
     """
 
-    hook = getattr(fence, "release_hook", None)
-    if hook is None or not isinstance(fence, dict):
+    if not isinstance(fence, dict):
         return
-    fence.release_hook = None  # type: ignore[attr-defined]
-    if not committed or fence.get("execution_instance_verified") is not True:
+    if fence.get("execution_instance_verified") is not True:
+        _close_native_fence(
+            fence,
+            committed=False,
+            release_lease=False,
+            suppress_errors=True,
+        )
         return
-    try:
-        hook()
-    except OSError:
-        fence["released"] = False
-        return
-    fence["released"] = True
+    _close_native_fence(
+        fence,
+        committed=committed,
+        release_lease=committed,
+        suppress_errors=True,
+    )
 
 
 def runtime_root_from_registry(
@@ -819,12 +698,6 @@ def require_task_lease_owner_allowed(
     return todo
 
 
-def persist_released_lease(path: Path, lease: dict[str, Any]) -> None:
-    """Atomically retain the terminal record that fences the next generation."""
-
-    write_lease(path, released_lease_payload(lease, at=now_utc()))
-
-
 def lease_expires_at(lease: dict[str, Any] | None) -> datetime | None:
     return parse_timestamp((lease or {}).get("expires_at"))
 
@@ -854,32 +727,6 @@ def write_scopes_overlap(left: list[str], right: list[str]) -> bool:
     left_scopes = normalize_required_write_scopes(left)
     right_scopes = normalize_required_write_scopes(right)
     return core_write_scopes_overlap(left_scopes, right_scopes)
-
-
-def _raise_lease_transition(
-    *,
-    code: str,
-    action: str,
-    lease: dict[str, Any] | None,
-    lease_path: Path,
-    expected_version: int | None = None,
-    requested_write_scopes: list[str] | None = None,
-    requested_ttl_seconds: int | None = None,
-    conflicts: list[dict[str, Any]] | None = None,
-    idempotency_reuse_kind: str | None = None,
-) -> None:
-    message, payload = lease_transition_error(
-        code=code,
-        action=action,
-        lease=lease,
-        lease_path=str(lease_path),
-        expected_version=expected_version,
-        requested_write_scopes=requested_write_scopes or [],
-        requested_ttl_seconds=requested_ttl_seconds,
-        conflicts=conflicts or [],
-        idempotency_reuse_kind=idempotency_reuse_kind,
-    )
-    raise TaskLeaseError(message, code=code, payload=payload)
 
 
 def acquire_task_lease(
@@ -941,89 +788,36 @@ def renew_task_lease(
     ttl_seconds: int | None = None,
     expected_version: int | None = None,
 ) -> dict[str, Any]:
-    goal_id = normalize_goal_id(goal_id)
-    todo_id = normalize_lease_todo_id(todo_id)
-    owner = normalize_owner(owner)
-    idempotency_key = normalize_idempotency_key(idempotency_key)
-    ttl = normalize_ttl_seconds(ttl_seconds)
-    lock_target = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
-    lease_path = task_lease_path(runtime_root=runtime_root, goal_id=goal_id, todo_id=todo_id)
-    at = now_utc()
-    with exclusive_file_lock(
-        lock_target,
-        agent_id=owner,
-        operation="task_lease_renew",
-    ):
-        handoff_mode = _require_lease_mutation_allowed_by_handoff_mode(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            action="renew",
-        )
-        expected_version = require_expected_version(expected_version, action="renew")
-        todo = require_task_lease_owner_allowed(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            owner=owner,
-        )
-        registered_agents = registered_agent_ids_from_registry(
-            registry_path,
-            goal_id,
-        )
-        if owner not in registered_agents:
-            registered_agents.append(owner)
-        lease = read_lease(lease_path)
-        transition = decide(
-            lease_coordination_snapshot(
-                handoff_mode=handoff_mode,
-                registered_agents=registered_agents,
-                todo=todo,
-                lease=lease,
-                lease_active=lease_is_active(lease, at=at),
-                lease_version=lease_version(lease),
-                lease_epoch=lease_epoch(lease),
-            ),
-            LeaseRenewCommand(
-                owner=owner,
-                idempotency_key=idempotency_key,
-                ttl_seconds=ttl,
-                expected_version=expected_version,
-            ),
-        )
-        if transition.outcome is not DecisionOutcome.APPLY:
-            _raise_lease_transition(
-                code=transition.code,
-                action="renew",
-                lease=lease,
-                lease_path=lease_path,
-                expected_version=expected_version,
-            )
-        next_lease = (
-            transition.next_snapshot.lease
-            if transition.next_snapshot is not None
-            else None
-        )
-        if next_lease is None:
-            raise TaskLeaseError(
-                "task lease renew produced no lease transition",
-                code="authority_transition_invalid",
-            )
-        lease = dict(lease)
-        lease["version"] = next_lease.version
-        lease["lease_epoch"] = next_lease.lease_epoch
-        lease["updated_at"] = isoformat(at)
-        lease["expires_at"] = isoformat(at + timedelta(seconds=ttl))
-        write_lease(lease_path, lease)
-        return {
-            "ok": True,
-            "schema_version": TASK_LEASE_SCHEMA_VERSION,
-            "action": "renew",
-            "renewed": True,
-            "lease": lease,
-            "lease_path": str(lease_path),
-            "handoff_mode": handoff_mode,
-        }
+    """Renew a local lease through the native TypeScript lifecycle owner.
+
+    This function is intentionally a compatibility facade: argument
+    normalization and the historical Python import/return surface remain, but
+    lifecycle authority, locking, CAS, and persistence live in the native
+    handler.
+    """
+
+    normalized_goal_id = normalize_goal_id(goal_id)
+    normalized_todo_id = normalize_lease_todo_id(todo_id)
+    normalized_owner = normalize_owner(owner)
+    normalized_key = normalize_idempotency_key(idempotency_key)
+    normalized_ttl = normalize_ttl_seconds(ttl_seconds)
+    # Keep version validation and handoff/error ordering in the native owner;
+    # the adapter performs only the legacy numeric coercion at the transport
+    # edge.  In particular, soft_claim must report its mode gate before a
+    # missing expected version, matching the historical writer.
+    normalized_expected_version = expected_version
+
+    return _execute_native_task_lease_lifecycle(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=normalized_goal_id,
+        todo_id=normalized_todo_id,
+        operation="renew",
+        owner=normalized_owner,
+        idempotency_key=normalized_key,
+        ttl_seconds=normalized_ttl,
+        expected_version=normalized_expected_version,
+    )
 
 
 def transfer_task_lease(
@@ -1039,103 +833,30 @@ def transfer_task_lease(
     ttl_seconds: int | None = None,
     expected_version: int | None = None,
 ) -> dict[str, Any]:
-    goal_id = normalize_goal_id(goal_id)
-    todo_id = normalize_lease_todo_id(todo_id)
-    owner = normalize_owner(owner)
-    idempotency_key = normalize_idempotency_key(idempotency_key)
-    new_owner = normalize_owner(new_owner)
-    new_idempotency_key = normalize_idempotency_key(new_idempotency_key)
-    ttl = normalize_ttl_seconds(ttl_seconds)
-    lock_target = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
-    lease_path = task_lease_path(runtime_root=runtime_root, goal_id=goal_id, todo_id=todo_id)
-    at = now_utc()
-    with exclusive_file_lock(
-        lock_target,
-        agent_id=owner,
-        operation="task_lease_transfer",
-    ):
-        handoff_mode = _require_lease_mutation_allowed_by_handoff_mode(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            action="transfer",
-        )
-        expected_version = require_expected_version(expected_version, action="transfer")
-        require_registered_task_lease_owner(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            owner=owner,
-        )
-        todo = require_task_lease_owner_allowed(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            owner=new_owner,
-        )
-        registered_agents = registered_agent_ids_from_registry(
-            registry_path,
-            goal_id,
-        )
-        for proven_owner in (owner, new_owner):
-            if proven_owner not in registered_agents:
-                registered_agents.append(proven_owner)
-        lease = read_lease(lease_path)
-        transition = decide(
-            lease_coordination_snapshot(
-                handoff_mode=handoff_mode,
-                registered_agents=registered_agents,
-                todo=todo,
-                lease=lease,
-                lease_active=lease_is_active(lease, at=at),
-                lease_version=lease_version(lease),
-                lease_epoch=lease_epoch(lease),
-            ),
-            LeaseTransferCommand(
-                owner=owner,
-                idempotency_key=idempotency_key,
-                new_owner=new_owner,
-                new_idempotency_key=new_idempotency_key,
-                ttl_seconds=ttl,
-                expected_version=expected_version,
-            ),
-        )
-        if transition.outcome is not DecisionOutcome.APPLY:
-            _raise_lease_transition(
-                code=transition.code,
-                action="transfer",
-                lease=lease,
-                lease_path=lease_path,
-                expected_version=expected_version,
-                idempotency_reuse_kind="transfer",
-            )
-        next_lease = (
-            transition.next_snapshot.lease
-            if transition.next_snapshot is not None
-            else None
-        )
-        if next_lease is None:
-            raise TaskLeaseError(
-                "task lease transfer produced no lease transition",
-                code="authority_transition_invalid",
-            )
-        lease = dict(lease)
-        lease["owner"] = next_lease.owner
-        lease["idempotency_key"] = next_lease.idempotency_key
-        lease["version"] = next_lease.version
-        lease["lease_epoch"] = next_lease.lease_epoch
-        lease["updated_at"] = isoformat(at)
-        lease["expires_at"] = isoformat(at + timedelta(seconds=ttl))
-        write_lease(lease_path, lease)
-        return {
-            "ok": True,
-            "schema_version": TASK_LEASE_SCHEMA_VERSION,
-            "action": "transfer",
-            "transferred": True,
-            "lease": lease,
-            "lease_path": str(lease_path),
-            "handoff_mode": handoff_mode,
-        }
+    """Transfer a local lease through the native TypeScript owner."""
+
+    normalized_goal_id = normalize_goal_id(goal_id)
+    normalized_todo_id = normalize_lease_todo_id(todo_id)
+    normalized_owner = normalize_owner(owner)
+    normalized_key = normalize_idempotency_key(idempotency_key)
+    normalized_new_owner = normalize_owner(new_owner)
+    normalized_new_key = normalize_idempotency_key(new_idempotency_key)
+    normalized_ttl = normalize_ttl_seconds(ttl_seconds)
+    normalized_expected_version = expected_version
+
+    return _execute_native_task_lease_lifecycle(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=normalized_goal_id,
+        todo_id=normalized_todo_id,
+        operation="transfer",
+        owner=normalized_owner,
+        idempotency_key=normalized_key,
+        new_owner=normalized_new_owner,
+        new_idempotency_key=normalized_new_key,
+        ttl_seconds=normalized_ttl,
+        expected_version=normalized_expected_version,
+    )
 
 
 def release_task_lease(
@@ -1148,80 +869,24 @@ def release_task_lease(
     expected_version: int | None = None,
     registry_path: Path | None = None,
 ) -> dict[str, Any]:
-    goal_id = normalize_goal_id(goal_id)
-    todo_id = normalize_lease_todo_id(todo_id)
-    owner = normalize_owner(owner)
-    idempotency_key = normalize_idempotency_key(idempotency_key)
-    expected_version = require_expected_version(expected_version, action="release")
-    # Release stays allowed in every handoff mode (cleanup of legacy
-    # leftovers); the mode is reported additively when resolvable.
-    handoff_mode = _optional_handoff_mode(registry_path, goal_id)
-    handoff_extra = {"handoff_mode": handoff_mode} if handoff_mode else {}
-    lock_target = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
-    lease_path = task_lease_path(runtime_root=runtime_root, goal_id=goal_id, todo_id=todo_id)
-    at = now_utc()
-    with exclusive_file_lock(
-        lock_target,
-        agent_id=owner,
-        operation="task_lease_release",
-    ):
-        lease = read_lease(lease_path)
-        transition = decide(
-            lease_coordination_snapshot(
-                handoff_mode=handoff_mode or HANDOFF_MODE_LEGACY,
-                lease=lease,
-                lease_active=lease_is_active(lease, at=at),
-                lease_version=lease_version(lease),
-            ),
-            LeaseReleaseCommand(
-                owner=owner,
-                idempotency_key=idempotency_key,
-                expected_version=expected_version,
-            ),
-        )
-        if transition.outcome is DecisionOutcome.NO_CHANGE:
-            if transition.code == "lease_release_replay":
-                assert lease is not None
-                return {
-                    "ok": True,
-                    "schema_version": TASK_LEASE_SCHEMA_VERSION,
-                    "action": "release",
-                    "released": True,
-                    "idempotent": True,
-                    "lease": lease,
-                    "lease_path": str(lease_path),
-                    **handoff_extra,
-                }
-            return {
-                "ok": True,
-                "schema_version": TASK_LEASE_SCHEMA_VERSION,
-                "action": "release",
-                "released": False,
-                "missing": True,
-                "lease_path": str(lease_path),
-                **handoff_extra,
-            }
-        if transition.outcome is not DecisionOutcome.APPLY:
-            _raise_lease_transition(
-                code=transition.code,
-                action="release",
-                lease=lease,
-                lease_path=lease_path,
-                expected_version=expected_version,
-            )
-        assert lease is not None
-        released_lease = released_lease_payload(lease, at=at)
-        write_lease(lease_path, released_lease)
-        return {
-            "ok": True,
-            "schema_version": TASK_LEASE_SCHEMA_VERSION,
-            "action": "release",
-            "released": True,
-            "idempotent": False,
-            "lease": released_lease,
-            "lease_path": str(lease_path),
-            **handoff_extra,
-        }
+    """Release a local lease through the native TypeScript lifecycle owner."""
+
+    normalized_goal_id = normalize_goal_id(goal_id)
+    normalized_todo_id = normalize_lease_todo_id(todo_id)
+    normalized_owner = normalize_owner(owner)
+    normalized_key = normalize_idempotency_key(idempotency_key)
+    normalized_expected_version = expected_version
+
+    return _execute_native_task_lease_lifecycle(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=normalized_goal_id,
+        todo_id=normalized_todo_id,
+        operation="release",
+        owner=normalized_owner,
+        idempotency_key=normalized_key,
+        expected_version=normalized_expected_version,
+    )
 
 
 def inspect_task_lease(

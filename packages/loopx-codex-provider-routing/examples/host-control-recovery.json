@@ -1,0 +1,19 @@
+{
+  "host_control_recovery": {
+    "call_id_present": false,
+    "matching_call_count": 0,
+    "observed_action": "project_as_user",
+    "projection": {
+      "next_action_matches_instruction": true,
+      "next_action_observed": true,
+      "role": "user",
+      "semantic_output_preserved": true,
+      "tool_identity_removed": true,
+      "type": "message"
+    },
+    "semantic_output_present": true,
+    "tool_name": "send_message_to_thread"
+  },
+  "operation": "qualify_host_control_recovery",
+  "schema_version": "loopx_codex_provider_routing_request_v0"
+}

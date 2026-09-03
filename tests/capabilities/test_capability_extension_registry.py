@@ -63,6 +63,18 @@ def test_benchmark_toolkit_catalog_exposes_integrity_boundary() -> None:
         for command in capability["commands"]
     )
     assert any(
+        "continuation-decision" in command["command"]
+        for command in capability["commands"]
+    )
+    assert any(
+        protocol["schema_version"] == "benchmark_public_progress_v0"
+        for protocol in capability["implemented_protocols"]
+    )
+    assert any(
+        protocol["schema_version"] == "benchmark_continuation_decision_v0"
+        for protocol in capability["implemented_protocols"]
+    )
+    assert any(
         protocol["schema_version"] == "benchmark_integrity_qualification_v0"
         for protocol in capability["implemented_protocols"]
     )
@@ -182,6 +194,33 @@ def test_benchmark_toolkit_catalog_exposes_packaged_task_triggered_skill() -> No
             "provider bindings, and host permissions remain authoritative."
         ),
     }
+
+
+def test_benchmark_toolkit_separates_monitor_observation_from_delivery() -> None:
+    capability = build_capability_detail_packet("benchmark-toolkit")["capability"]
+    handoff = capability["campaign_monitor_handoff"]
+
+    assert "continuous_monitor observes" in handoff["lane_boundary"]
+    command = handoff["material_transition_command"]
+    for required_option in (
+        "--material-change",
+        "--next-agent-todo",
+        "--next-action-kind",
+        "--next-task-repository",
+        "--next-required-capability",
+    ):
+        assert required_option in command
+    assert handoff["material_transition_result"] == {
+        "monitor_status": "open",
+        "successor_task_class": "advancement_task",
+        "successor_relationship": "independent_runnable_work",
+        "quota_spend": False,
+    }
+    external_wait = handoff["external_wait_command"]
+    assert "--status open" in external_wait
+    assert "--resume-when monitor_changed:<monitor-todo-id>" in external_wait
+    assert "--successor-todo-id <independent-runnable-successor-id>" in external_wait
+    assert "Do not mark it blocked" in handoff["external_wait_result"]
 
 
 def test_change_quality_catalog_exposes_default_off_managed_workflow() -> None:

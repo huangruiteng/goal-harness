@@ -18,6 +18,7 @@ from loopx.extensions.capability_admission import (
 from loopx.extensions.governed_capability_execution import (
     reconcile_governed_external_capability,
     start_governed_external_capability,
+    validate_governed_capability_result,
 )
 from loopx.extensions.runtime import install_extension
 from loopx.todos import list_goal_todos
@@ -41,7 +42,12 @@ result = {{
     "schema_version": "fixture_material_capability_result_v0",
     "invocation_id": request["invocation_id"],
     "status": "running" if phase == "start" else "succeeded",
-    "observations": [{{"kind": "synthetic-progress", "phase": phase}}],
+    "observations": [{{
+        "kind": "synthetic-progress",
+        "phase": phase,
+        "confidence": 1.0,
+        "label": "材料",
+    }}],
     "domain_state_mutations": [],
     "domain_transition_receipts": [],
     "transition_proposals": [{{
@@ -238,19 +244,50 @@ def _start_arguments(tmp_path: Path) -> dict[str, object]:
                     "digest": "sha256:synthetic-context",
                 }
             ],
-            "input": {"requirement_key": "REQ-1"},
+            "input": {
+                "requirement_key": "REQ-1",
+                "confidence": 1.0,
+                "label": "材料",
+            },
         },
         "admission": _admission(identity),
     }
 
 
-def test_material_start_is_previewable_and_provider_idempotent(tmp_path: Path) -> None:
+def _record_runtime_operations(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    operations: list[str] = []
+    runtime_result = governed_execution.effect_runtime_result
+
+    def record(
+        operation: str,
+        payload: Mapping[str, object],
+    ) -> object:
+        operations.append(operation)
+        return runtime_result(operation, payload)
+
+    monkeypatch.setattr(governed_execution, "effect_runtime_result", record)
+    return operations
+
+
+def test_material_start_is_previewable_and_provider_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     arguments = _start_arguments(tmp_path)
     call_log = tmp_path / "provider-calls.txt"
+    runtime_operations = _record_runtime_operations(monkeypatch)
 
     preview = start_governed_external_capability(**arguments)
+    assert runtime_operations == ["governed_capability.validate_result"]
+    runtime_operations.clear()
     started = start_governed_external_capability(**arguments, execute=True)
+    assert runtime_operations == [
+        "governed_capability.validate_result",
+        "governed_capability.validate_result",
+    ]
+    runtime_operations.clear()
     replay = start_governed_external_capability(**arguments, execute=True)
+    assert runtime_operations == ["governed_capability.validate_result"]
 
     assert preview["status"] == "ready"
     assert preview["executed"] is False
@@ -270,6 +307,44 @@ def test_material_start_is_previewable_and_provider_idempotent(tmp_path: Path) -
     assert monitors[0]["status"] == "open"
     journal = Path(arguments["run_dir"]) / f"{started['invocation_id']}.json"
     assert stat.S_IMODE(journal.stat().st_mode) == 0o600
+    journal_value = json.loads(journal.read_text(encoding="utf-8"))
+    assert started["provider_result_digest"] == governed_execution._canonical_digest(
+        journal_value["provider_result"]
+    )
+
+
+def test_legacy_provider_result_adapter_remains_available() -> None:
+    result = {
+        "schema_version": "fixture_material_capability_result_v0",
+        "invocation_id": "capability-legacy",
+        "status": "no_change",
+        "observations": [],
+        "domain_state_mutations": [],
+        "domain_transition_receipts": [],
+        "transition_proposals": [],
+        "effect_receipt": {
+            "schema_version": "loopx_external_effect_receipt_v0",
+            "invocation_id": "capability-legacy",
+            "idempotency_key": "legacy-effect",
+            "status": "no_change",
+            "external_ref": "legacy-ref",
+            "evidence_digest": "sha256:legacy-evidence",
+        },
+        "follow_up": {},
+    }
+
+    assert (
+        validate_governed_capability_result(
+            result,
+            invocation_id="capability-legacy",
+            effect_id="legacy-effect",
+            operation={
+                "result_schema": "fixture_material_capability_result_v0",
+                "effect_class": "external_write",
+            },
+        )
+        == result
+    )
 
 
 def test_material_start_recovers_monitor_after_pre_receipt_crash(
@@ -340,11 +415,13 @@ def test_material_operation_remains_unavailable_through_direct_invoke(
 
 def test_material_reconcile_writes_receipt_before_spending_and_replays(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     arguments = _start_arguments(tmp_path)
     started = start_governed_external_capability(**arguments, execute=True)
     identity = _identity()
     calls: list[str] = []
+    runtime_operations = _record_runtime_operations(monkeypatch)
 
     def writeback(context: Mapping[str, object]) -> dict[str, object]:
         calls.append("writeback")
@@ -369,12 +446,20 @@ def test_material_reconcile_writes_receipt_before_spending_and_replays(
         writeback=writeback,
         spend=spend,
     )
+    assert runtime_operations == [
+        "governed_capability.validate_result",
+        "governed_capability.validate_result",
+        "governed_capability.validate_settlement_callback",
+        "governed_capability.validate_settlement_callback",
+    ]
+    runtime_operations.clear()
     replay = reconcile_governed_external_capability(
         run_dir=arguments["run_dir"],
         invocation_id=str(started["invocation_id"]),
         writeback=writeback,
         spend=spend,
     )
+    assert runtime_operations == ["governed_capability.validate_result"]
 
     assert committed["status"] == "committed"
     assert committed["effect_id"] == identity.effect_id
@@ -460,6 +545,72 @@ def test_material_start_recovers_an_existing_journal_without_new_run_authority(
     replay = start_governed_external_capability(**arguments, execute=True)
 
     assert replay["invocation_id"] == started["invocation_id"]
+    assert (tmp_path / "provider-calls.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == ["start"]
+
+
+@pytest.mark.parametrize(
+    "admission_update, error",
+    [
+        ({"should_run": False}, "requires should_run=true"),
+        ({"selected_todo": None}, "selected_todo must be an object"),
+        (
+            {
+                "selected_todo": {
+                    "todo_id": "todo_fixturematerial1",
+                    "role": "agent",
+                    "status": "open",
+                    "action_kind": "different_material_action",
+                    "target_key": "fixture-material:delivery-1",
+                }
+            },
+            "not authorized by selected_todo action_kind",
+        ),
+    ],
+)
+def test_material_start_requires_current_authority_before_recovering_transitions(
+    tmp_path: Path,
+    admission_update: dict[str, object],
+    error: str,
+) -> None:
+    arguments = _start_arguments(tmp_path)
+    started = start_governed_external_capability(**arguments, execute=True)
+    journal_path = tmp_path / "runs" / f"{started['invocation_id']}.json"
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal["transition_receipts"] = []
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    arguments["admission"] = {
+        **arguments["admission"],
+        **admission_update,
+    }
+    before = journal_path.read_bytes()
+
+    with pytest.raises((ValueError, EffectRuntimeRejected), match=error):
+        start_governed_external_capability(**arguments, execute=True)
+
+    assert journal_path.read_bytes() == before
+    assert (tmp_path / "provider-calls.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == ["start"]
+
+
+def test_material_start_recovers_unsettled_transitions_with_current_authority(
+    tmp_path: Path,
+) -> None:
+    arguments = _start_arguments(tmp_path)
+    started = start_governed_external_capability(**arguments, execute=True)
+    journal_path = tmp_path / "runs" / f"{started['invocation_id']}.json"
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal["transition_receipts"] = []
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+
+    replay = start_governed_external_capability(**arguments, execute=True)
+
+    assert len(replay["transition_receipts"]) == 1
+    assert replay["transition_receipts"][0]["proposal_id"] == (
+        "fixture_monitor_upsert_1"
+    )
     assert (tmp_path / "provider-calls.txt").read_text(
         encoding="utf-8"
     ).splitlines() == ["start"]

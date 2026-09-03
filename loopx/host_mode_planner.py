@@ -120,11 +120,6 @@ SUPPORTED_HOST_CAPABILITIES = [
 ]
 _INTENT_PRIMARY_MODE = {meta["intent"]: mode for mode, meta in _MODE_METADATA.items()}
 
-# Host identities that map to a concrete visible Turn host. Visible TUI mapping
-# requires an explicit host identity so Codex CLI, Claude Code, and generic CLI
-# sessions keep their real host binding instead of a hard-coded Codex default.
-SUPPORTED_TURN_HOST_IDENTITIES = sorted(SUPPORTED_HOSTS)
-
 # Typed host identity -> runtime connector catalog id. Only identities with a
 # registered catalog connector may emit a host-specific visible mapping; any
 # other identity fails closed instead of fabricating a connector id.
@@ -135,6 +130,12 @@ VISIBLE_HOST_CONNECTOR_IDS: dict[str, str] = {
     # parity lives in the selector/catalog mapping, not a new Turn host kind.
     "generic-cli": "opencode_goal_loop",
 }
+
+# Host identities accepted by the public host-mode planner must own a concrete
+# visible connector. This is deliberately narrower than the Turn driver's
+# SUPPORTED_HOSTS: headless-only built-in hosts such as dsh do not become
+# visible identities merely by registering an execution backend.
+SUPPORTED_TURN_HOST_IDENTITIES = sorted(VISIBLE_HOST_CONNECTOR_IDS)
 
 # Host identities that are valid visible selections but map to the OpenCode
 # goal loop connector rather than their own Turn host kind.

@@ -2,8 +2,8 @@
 
 LoopX should not let a recurring heartbeat turn long-running agent work into
 tiny status-only turns. The cadence hint is a small, derived signal that tells a
-host or controller whether recent work looks blocked, thin, material, or
-unknown.
+host or controller whether recent work looks blocked, actively runnable, thin,
+material, or unknown.
 
 It is intentionally not a scheduler policy. Quota, gates, goal boundaries,
 permissions, public/private scans, and user/controller decisions remain the
@@ -45,9 +45,11 @@ Stable fields:
 | Field | Values | Meaning |
 | --- | --- | --- |
 | `schema_version` | `cadence_hint_v0` | The public projection shape. |
-| `signal` | `blocked`, `thin_progress`, `material_progress`, `unknown` | What the recent control-plane evidence suggests. |
+| `signal` | `blocked`, `active_work`, `thin_progress`, `material_progress`, `unknown` | What the recent control-plane evidence suggests. |
 | `recommendation` | `wait`, `widen`, `keep` | A lightweight host/controller hint. |
 | `reason_codes` | compact strings | Machine-readable explanation for the signal. |
+| `authority` | compact string, optional | The final authority that reconciled an earlier compatibility advisory. |
+| `superseded` | compact advisory, optional | The earlier signal, recommendation, and reason codes retained for diagnosis. |
 
 Typical examples:
 
@@ -57,6 +59,21 @@ Typical examples:
   "signal": "blocked",
   "recommendation": "wait",
   "reason_codes": ["quota_state_operator_gate", "open_user_todos_visible"]
+}
+```
+
+```json
+{
+  "schema_version": "cadence_hint_v0",
+  "signal": "active_work",
+  "recommendation": "keep",
+  "reason_codes": ["final_agent_scoped_active_work"],
+  "authority": "final_agent_scoped_interaction_and_scheduler",
+  "superseded": {
+    "signal": "blocked",
+    "recommendation": "wait",
+    "reason_codes": ["quota_state_operator_gate"]
+  }
 }
 ```
 
@@ -88,6 +105,14 @@ The hint is derived from existing public-safe control-plane metadata:
 - quota state;
 - whether open user todos are already visible.
 
+The status projection can be computed before final agent-scoped arbitration.
+If that early compatibility advisory says `wait`, but the final agent channel
+requires an attempt, disallows a quiet no-op, and the final scheduler selects
+`run_now` / `active_work`, quota reconciles the advisory to `active_work` +
+`keep`. The final interaction contract and scheduler are named as the authority,
+while the earlier signal and reason codes remain under `superseded`. This exact
+reconciliation does not apply to a genuine blocking user gate.
+
 The current "thin progress" detector is deliberately conservative. It is based
 on agent writeback metadata, not a perfect measure of actual agent-loop runtime.
 Elapsed wall time may become an optional future input, but it should not be the
@@ -97,6 +122,8 @@ be stuck.
 ## Controller Use
 
 - `blocked` + `wait`: do not widen; show the concrete gate or blocker.
+- `active_work` + `keep`: follow the final agent-scoped interaction and
+  scheduler decision; use `superseded` only for diagnosis.
 - `thin_progress` + `widen`: the next eligible turn should try for a coherent
   artifact plus validation/writeback, or write a blocker explaining why widening
   is unsafe.

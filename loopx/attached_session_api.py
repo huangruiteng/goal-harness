@@ -89,6 +89,12 @@ class AttachedSessionRequestMixin:
                 "attached_session_queue_pending": (
                     "complete queued attached Agent turns before closing the session"
                 ),
+                "managed_session_turn_active": (
+                    "interrupt the active Agent turn before closing the session"
+                ),
+                "managed_session_queue_pending": (
+                    "complete queued Agent turns before closing the session"
+                ),
             }
             if error_code not in messages:
                 raise

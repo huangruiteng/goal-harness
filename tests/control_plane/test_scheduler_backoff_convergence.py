@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
 from loopx.control_plane.agents.agent_scope_frontier import AgentScopeFrontierAction
+from loopx.control_plane.quota.scheduler_ack import (
+    record_quota_scheduler_ack_for_decision,
+)
 from loopx.control_plane.scheduler import scheduler_hint as scheduler_hint_module
-from loopx.control_plane.scheduler.ack import build_codex_app_scheduler_ack_event
 from loopx.control_plane.scheduler.execution_context import (
     scheduler_execution_context_for_runtime_profile,
 )
 from loopx.control_plane.scheduler.scheduler_hint import build_scheduler_hint
-
 
 GOAL_ID = "scheduler-backoff-convergence"
 AGENT_ID = "codex-fixture"
@@ -171,13 +173,23 @@ def _hint(
     )
 
 
-def _ack_state(hint: dict, *, applied_rrule: str, generated_at: datetime) -> dict:
-    event = build_codex_app_scheduler_ack_event(
+def _ack_state(
+    hint: dict,
+    *,
+    runtime_root: Path,
+    applied_rrule: str,
+    generated_at: datetime,
+) -> dict:
+    event = record_quota_scheduler_ack_for_decision(
         {"goal_id": GOAL_ID, "scheduler_hint": hint},
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
         agent_id=AGENT_ID,
+        execute=True,
         applied_rrule=applied_rrule,
         generated_at=generated_at.isoformat(),
     )
+    assert event["ok"] is True, event
     return event["scheduler_ack_event"]["scheduler_state"]
 
 
@@ -217,7 +229,9 @@ CADENCE_POLICY_CASES = [
     CADENCE_POLICY_CASES,
     ids=[case["id"] for case in CADENCE_POLICY_CASES],
 )
-def test_scheduler_hint_cadence_policy_decision_table(monkeypatch, case: dict) -> None:
+def test_scheduler_hint_cadence_policy_decision_table(
+    monkeypatch, tmp_path: Path, case: dict
+) -> None:
     now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     if case["decision"] == "agent_wait":
         decision = _agent_wait_decision()
@@ -233,6 +247,7 @@ def test_scheduler_hint_cadence_policy_decision_table(monkeypatch, case: dict) -
 
     scheduler_state = _ack_state(
         initial,
+        runtime_root=tmp_path,
         applied_rrule=case["initial_rrule"],
         generated_at=now,
     )
@@ -254,7 +269,9 @@ def test_scheduler_hint_cadence_policy_decision_table(monkeypatch, case: dict) -
         assert after_app["recommended_rrule"] == case["expected_rrule"]
 
 
-def test_monitor_identity_ignores_recommended_action_text_mutation(monkeypatch) -> None:
+def test_monitor_identity_ignores_recommended_action_text_mutation(
+    monkeypatch, tmp_path: Path
+) -> None:
     now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     original = _monitor_decision(
         now=now,
@@ -262,7 +279,12 @@ def test_monitor_identity_ignores_recommended_action_text_mutation(monkeypatch) 
         recommended_action="Monitor the post-merge run.",
     )
     first = _hint(monkeypatch, original, now=now)
-    scheduler_state = _ack_state(first, applied_rrule=HOST_15, generated_at=now)
+    scheduler_state = _ack_state(
+        first,
+        runtime_root=tmp_path,
+        applied_rrule=HOST_15,
+        generated_at=now,
+    )
 
     mutated = _monitor_decision(
         now=now,
@@ -284,6 +306,7 @@ def test_monitor_identity_ignores_recommended_action_text_mutation(monkeypatch) 
 
 def test_monitor_ack_settles_before_progression_and_avoids_3_6_3_flip(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     decision = _monitor_decision(now=now, minutes_until_due=31)
@@ -291,7 +314,12 @@ def test_monitor_ack_settles_before_progression_and_avoids_3_6_3_flip(
     first_app = first["codex_app"]
     assert first_app["recommended_rrule"] == HOST_15
 
-    settled_state = _ack_state(first, applied_rrule=HOST_15, generated_at=now)
+    settled_state = _ack_state(
+        first,
+        runtime_root=tmp_path,
+        applied_rrule=HOST_15,
+        generated_at=now,
+    )
     immediate = _hint(
         monkeypatch,
         decision,
@@ -335,11 +363,17 @@ def test_monitor_near_due_under_floor_uses_tight_cadence(monkeypatch) -> None:
 
 def test_monitor_progression_advances_after_elapsed_interval_and_then_converges(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     decision = _monitor_decision(now=now, minutes_until_due=119, cadence="30m")
     first = _hint(monkeypatch, decision, now=now)
-    settled_15 = _ack_state(first, applied_rrule=HOST_15, generated_at=now)
+    settled_15 = _ack_state(
+        first,
+        runtime_root=tmp_path,
+        applied_rrule=HOST_15,
+        generated_at=now,
+    )
 
     early = _hint(
         monkeypatch,
@@ -365,7 +399,12 @@ def test_monitor_progression_advances_after_elapsed_interval_and_then_converges(
         "drift_detected"
     )
 
-    settled_30 = _ack_state(advance, applied_rrule=HOST_30, generated_at=elapsed)
+    settled_30 = _ack_state(
+        advance,
+        runtime_root=tmp_path,
+        applied_rrule=HOST_30,
+        generated_at=elapsed,
+    )
     converged = _hint(
         monkeypatch,
         decision,
@@ -384,6 +423,7 @@ def test_monitor_progression_advances_after_elapsed_interval_and_then_converges(
 
 def test_capability_bridge_wait_backs_off_and_material_work_resets(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     bridge = _capability_bridge_decision()
@@ -394,7 +434,12 @@ def test_capability_bridge_wait_backs_off_and_material_work_resets(
     assert first["cadence_class"] == "active_work"
     assert first_app["recommended_rrule"] == HOST_3
 
-    settled_3 = _ack_state(first, applied_rrule=HOST_3, generated_at=now)
+    settled_3 = _ack_state(
+        first,
+        runtime_root=tmp_path,
+        applied_rrule=HOST_3,
+        generated_at=now,
+    )
     early = _hint(
         monkeypatch,
         bridge,
@@ -419,6 +464,7 @@ def test_capability_bridge_wait_backs_off_and_material_work_resets(
 
     settled_6 = _ack_state(
         advance_6,
+        runtime_root=tmp_path,
         applied_rrule=HOST_6,
         generated_at=elapsed_3,
     )
@@ -458,6 +504,7 @@ def test_capability_bridge_wait_backs_off_and_material_work_resets(
 
     settled_material = _ack_state(
         reset,
+        runtime_root=tmp_path,
         applied_rrule=HOST_3,
         generated_at=elapsed_6,
     )

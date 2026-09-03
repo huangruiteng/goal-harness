@@ -1,4 +1,4 @@
-"""Repeatable live Stage-2 slice: production executor over file and NoKV providers.
+"""Repeatable live Stage-3 lifecycle over file and NoKV providers.
 
 This is the bounded live qualification the direction tracker asks for before
 any provider promotion: the SAME invariant scenarios run against the
@@ -33,13 +33,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from loopx.control_plane.coordination.executor import (  # noqa: E402
     CoordinationAuthorityExecutor,
     sample_claim_envelope,
+    sample_work_envelope,
 )
 from loopx.control_plane.coordination.file_provider import (  # noqa: E402
     FileCoordinationProvider,
 )
 from loopx.control_plane.coordination.head import bootstrap_head  # noqa: E402
 
-from provider import NoKVCoordinationProvider  # noqa: E402
+from provider import open_nokv_coordination_provider  # noqa: E402
 
 
 def eligibility() -> dict:
@@ -66,7 +67,38 @@ def todo() -> dict:
     }
 
 
-def claim(executor, agent: str, todo_id: str, operation_id: str, ttl: int = 600):
+class MatrixClock:
+    """Deterministic, advanceable executor clock: expiry adjudication is the
+    authority's own decision, so the live matrix drives it explicitly while
+    the provider underneath stays real."""
+
+    def __init__(self, value: float = 1_800_000_000.0):
+        self.value = value
+
+    def __call__(self) -> float:
+        return self.value
+
+
+def work(executor, agent: str, operation_id: str, command: dict):
+    return executor.apply(
+        sample_work_envelope(
+            goal_id=executor.goal_id,
+            operation_id=operation_id,
+            agent_id=agent,
+            device_id=f"dev-{agent}",
+            command=command,
+        )
+    )
+
+
+def claim(
+    executor,
+    agent: str,
+    todo_id: str,
+    operation_id: str,
+    ttl: int = 600,
+    revision: int = 7,
+):
     return executor.apply(
         sample_claim_envelope(
             goal_id=executor.goal_id,
@@ -74,7 +106,7 @@ def claim(executor, agent: str, todo_id: str, operation_id: str, ttl: int = 600)
             agent_id=agent,
             device_id=f"dev-{agent}",
             todo_id=todo_id,
-            expected_todo_revision=7,
+            expected_todo_revision=revision,
             expected_preconditions={
                 "authorization_projection_revision": 3,
                 "authorization_projection_digest": "sha256:bootstrap-auth",
@@ -93,7 +125,11 @@ def scenario_matrix(make_provider) -> dict:
     goal_id = "g" + uuid.uuid4().hex[:8]
     provider_a = make_provider(goal_id)
     provider_b = make_provider(goal_id)
-    head = bootstrap_head(goal_id, {"todo-1": todo(), "todo-2": todo()})
+    head = bootstrap_head(
+        goal_id,
+        {"todo-1": todo(), "todo-2": todo()},
+        store_binding=provider_a.store_identity(),
+    )
     assert provider_a.load() == (None, 0)
     assert provider_a.compare_and_put(0, head)["result"] == "applied"
     executor_a = CoordinationAuthorityExecutor(
@@ -166,6 +202,9 @@ def scenario_matrix(make_provider) -> dict:
         def load(self):
             return self.inner.load()
 
+        def store_identity(self):
+            return self.inner.store_identity()
+
         def compare_and_put(self, expected, proposed):
             outcome = self.inner.compare_and_put(expected, proposed)
             if self.armed and outcome.get("result") == "applied":
@@ -180,7 +219,12 @@ def scenario_matrix(make_provider) -> dict:
     )
     goal2 = "g" + uuid.uuid4().hex[:8]
     provider2 = make_provider(goal2)
-    provider2.compare_and_put(0, bootstrap_head(goal2, {"todo-1": todo()}))
+    provider2.compare_and_put(
+        0,
+        bootstrap_head(
+            goal2, {"todo-1": todo()}, store_binding=provider2.store_identity()
+        ),
+    )
     lossy2 = CoordinationAuthorityExecutor(
         LossyOnce(provider2), goal_id=goal2, now=lambda: 1_800_000_000.0
     )
@@ -191,6 +235,86 @@ def scenario_matrix(make_provider) -> dict:
     final_head, _ = provider_a.load()
     rows["receipts_retained"] = len(final_head["receipt_index"]) == 2
     rows["authority_revision_advanced_twice"] = final_head["authority_revision"] == 2
+
+    # ---- Stage 3: recoverable execution ownership over the same seam ----
+    goal3 = "g" + uuid.uuid4().hex[:8]
+    provider3 = make_provider(goal3)
+    clock = MatrixClock()
+    provider3.compare_and_put(
+        0,
+        bootstrap_head(
+            goal3,
+            {"todo_parent01": todo(), "todo_other01": todo()},
+            store_binding=provider3.store_identity(),
+        ),
+    )
+    executor3 = CoordinationAuthorityExecutor(
+        provider3, goal_id=goal3, now=clock
+    )
+    first = claim(executor3, "agent-a", "todo_parent01", "r3-claim")
+    fence = {
+        "lease_id": first["original_receipt"]["lease_id"],
+        "expected_lease_epoch": first["original_receipt"]["lease_epoch"],
+    }
+    renewed = work(executor3, "agent-a", "r3-renew", {
+        "type": "renew_work", "todo_id": "todo_parent01",
+        "expected_todo_revision": 8, **fence, "lease_ttl_seconds": 600,
+    })
+    rows["renew_extends_the_active_lease"] = (
+        renewed["result"] == "applied"
+        and renewed["original_receipt"]["lease_epoch"]
+        == first["original_receipt"]["lease_epoch"]
+    )
+
+    clock.value += 600 + 31
+    reclaimed = work(executor3, "agent-b", "r3-reclaim", {
+        "type": "reclaim_work", "todo_id": "todo_parent01",
+        "expected_todo_revision": 9,
+        "expected_preconditions": {
+            "authorization_projection_revision": 3,
+            "authorization_projection_digest": "sha256:bootstrap-auth",
+            "dependency_revision": 12,
+            "gate_revision": 5,
+        },
+        "lease_ttl_seconds": 600,
+    })
+    rows["expired_lease_reclaimed_with_new_epoch"] = (
+        reclaimed["result"] == "applied"
+        and reclaimed["original_receipt"]["lease_epoch"]
+        == first["original_receipt"]["lease_epoch"] + 1
+        and reclaimed["original_receipt"]["superseded_owner"] == "agent-a"
+    )
+
+    stale = work(executor3, "agent-a", "r3-stale-writeback", {
+        "type": "complete_work", "todo_id": "todo_parent01",
+        "expected_todo_revision": 10, **fence,
+        "no_followup": False, "successor_todo_ids": [], "evidence": None,
+    })
+    rows["superseded_executor_cannot_write_back"] = (
+        stale["result"] == "rejected" and stale["reason"] == "stale_lease_fence"
+    )
+
+    new_fence = {
+        "lease_id": reclaimed["original_receipt"]["lease_id"],
+        "expected_lease_epoch": reclaimed["original_receipt"]["lease_epoch"],
+    }
+    done = work(executor3, "agent-b", "r3-complete", {
+        "type": "complete_work", "todo_id": "todo_parent01",
+        "expected_todo_revision": 10, **new_fence,
+        "no_followup": False, "successor_todo_ids": ["todo_next01"],
+        "evidence": None,
+    })
+    successor_claim = claim(
+        executor3, "agent-a", "todo_next01", "r3-successor", ttl=600, revision=0
+    ) if done["result"] == "applied" else {"result": "skipped"}
+    head3, _ = provider3.load()
+    rows["complete_creates_claimable_successor_atomically"] = (
+        done["result"] == "applied"
+        and done["original_receipt"]["completion_continuation"] == "successor"
+        and successor_claim["result"] == "applied"
+        and head3["coordination"]["todos"]["todo_parent01"]["status"] == "done"
+        and "todo_parent01" not in head3["coordination"]["leases"]
+    )
     return rows
 
 
@@ -219,15 +343,92 @@ def nokv_matrix() -> tuple[dict | None, str | None]:
             access_key_id=env["NOKV_OBJECT_KEY"],
             secret_access_key=env["NOKV_OBJECT_SECRET"],
         )
-        return nokv.Client(env["NOKV_ROOT_ID"], routing, objects)
+        return nokv.Client(
+            env["NOKV_ROOT_ID"],
+            routing,
+            objects,
+            workbench_root="/agents/live-e2e/wb",
+        )
 
     workbench = "wbstage2" + uuid.uuid4().hex[:10]
-    make_client().create_workspace(workbench)
+    # This handle provisions the evidence workspace; it cannot authorize a
+    # coordination-head state transition or participate in provider fallback.
+    provisioning_client = make_client()
+    provisioning_client.create_workspace(workbench)
 
     def make_provider(goal_id):
-        return NoKVCoordinationProvider(make_client(), workbench, goal_id)
+        return open_nokv_coordination_provider(
+            make_client,
+            workbench,
+            goal_id,
+        )
 
-    return scenario_matrix(make_provider), None
+    rows = scenario_matrix(make_provider)
+    rows["restored_lineage_fails_closed"] = _restored_lineage_fails_closed(
+        make_client
+    )
+    return rows, None
+
+
+def _restored_lineage_fails_closed(make_client) -> bool:
+    """The Stage 3 binding fence against a REAL NoKV restore: a head
+    bootstrapped in workbench A, committed, snapshotted, and restored into
+    workbench B must refuse every command on B with store_lineage_mismatch -
+    restored bytes never grant live authority."""
+
+    # Workspace lifecycle operations belong to the live-evidence provisioner;
+    # coordination reads and writes use a separately admitted provider handle.
+    provisioning_client = make_client()
+    source = "wbline" + uuid.uuid4().hex[:10]
+    provisioning_client.create_workspace(source)
+    goal_id = "g" + uuid.uuid4().hex[:8]
+    provider = open_nokv_coordination_provider(make_client, source, goal_id)
+    head = bootstrap_head(
+        goal_id, {"todo_parent01": todo()},
+        store_binding=provider.store_identity(),
+    )
+    if provider.compare_and_put(0, head)["result"] != "applied":
+        return False
+    executor = CoordinationAuthorityExecutor(
+        provider, goal_id=goal_id, now=MatrixClock()
+    )
+    if claim(executor, "agent-a", "todo_parent01", "line-claim")["result"] != "applied":
+        return False
+
+    stat = provisioning_client.stat(source, provider.head_path)
+    provisioning_client.commit(
+        source,
+        {"purpose": "stage3-lineage-fence"},
+        stat["body_digest"],
+    )
+    snapshot = provisioning_client.snapshot(source)
+    destination = "wbline" + uuid.uuid4().hex[:10]
+    provisioning_client.restore(
+        source,
+        destination,
+        at_snapshot=snapshot["snapshot_id"],
+    )
+
+    restored = open_nokv_coordination_provider(
+        make_client,
+        destination,
+        goal_id,
+    )
+    restored_executor = CoordinationAuthorityExecutor(
+        restored, goal_id=goal_id, now=MatrixClock()
+    )
+    fenced = claim(
+        restored_executor, "agent-b", "todo_parent01", "line-claim-2", revision=8
+    )
+    original_still_serves = claim(
+        executor, "agent-b", "todo_parent01", "line-claim-3", revision=8
+    )
+    return (
+        fenced["result"] == "failed"
+        and fenced["reason"] == "store_lineage_mismatch"
+        and original_still_serves["result"] == "rejected"
+        and original_still_serves["reason"] == "todo_not_open"
+    )
 
 
 def main() -> int:
@@ -239,13 +440,19 @@ def main() -> int:
         matrix["nokv_provider"] = {"unverified": skip_reason}
     else:
         matrix["nokv_provider"] = nokv_rows
-        parity = {
-            row: matrix["file_provider"].get(row) == value
+        shared = {
+            row: value
             for row, value in nokv_rows.items()
+            if row in matrix["file_provider"]
+        }
+        parity = {
+            row: matrix["file_provider"][row] == value
+            for row, value in shared.items()
         }
         matrix["file_nokv_parity"] = {
             "identical_row_outcomes": all(parity.values()),
             "rows": len(parity),
+            "provider_specific_rows": sorted(set(nokv_rows) - set(shared)),
         }
     print(json.dumps(matrix, indent=2, sort_keys=True))
     failed = [

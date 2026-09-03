@@ -49,6 +49,21 @@ def _project_config_path(project: str | Path, raw: str | Path) -> Path:
         relative = path.relative_to(root)
     except ValueError as exc:
         raise ValueError("lark collector config must stay inside the project") from exc
+    git_probe = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        check=False,
+    )
+    if git_probe.returncode != 0:
+        has_git_boundary = any(
+            (candidate / ".git").exists() for candidate in (root, *root.parents)
+        )
+        if has_git_boundary or relative.parts[:2] != (".loopx", "config"):
+            raise ValueError(
+                "lark collector config must be ignored and untracked, or stay "
+                "under .loopx/config in a non-Git project"
+            )
+        return path
     tracked = subprocess.run(
         ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", str(relative)],
         capture_output=True,

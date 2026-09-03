@@ -10,6 +10,7 @@ on:
       - "README.md"
       - "README.zh-CN.md"
       - "apps/presentation/dashboard/**"
+      - "loopx/web/chat/**"
       - "apps/presentation/site/**"
       - "docs/**"
       - "loopx/capabilities/**"
@@ -42,6 +43,7 @@ on:
       - "README.md"
       - "README.zh-CN.md"
       - "apps/presentation/dashboard/**"
+      - "loopx/web/chat/**"
       - "apps/presentation/site/**"
       - "docs/**"
       - "loopx/capabilities/**"
@@ -112,6 +114,18 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+
+      - name: Verify packaged Personal Workspace is current
+        working-directory: apps/presentation/dashboard
+        run: |
+          npm run build:chat
+          if [[ -n "$(git -C ../../.. status --short --untracked-files=all -- loopx/web/chat)" ]]; then
+            git -C ../../.. status --short --untracked-files=all -- loopx/web/chat
+            echo "Tracked packaged Dashboard assets differ from a clean source build." >&2
+            exit 1
+          fi
+          ./node_modules/.bin/playwright install --with-deps chromium
+          npm run smoke:personal-workspace-packaged
 
       - name: Install docs dependencies
         run: |

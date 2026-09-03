@@ -21,6 +21,12 @@ DELIVERY_WORKSPACE_CAUSALITY_RESULT_SCHEMA = (
     "loopx_delivery_workspace_causality_result_v0"
 )
 DELIVERY_WORKSPACE_RESOLUTION_SCHEMA_VERSION = "delivery_workspace_resolution_v0"
+SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION = (
+    "settlement_workspace_requirement_v0"
+)
+LEGACY_SETTLEMENT_RECEIPT_EVIDENCE_SCHEMA_VERSION = (
+    "legacy_settlement_receipt_evidence_v0"
+)
 DELIVERY_WORKSPACE_REQUIREMENTS = frozenset({"required", "not_required", "unknown"})
 
 
@@ -285,6 +291,49 @@ def missing_delivery_workspace_resolution(
             "TypeScript delivery workspace resolution result shape mismatch"
         )
     return dict(value)
+
+
+def resolve_settlement_workspace_requirement(
+    causality: Mapping[str, Any] | None,
+    *,
+    settlement_binding_kind: str,
+    legacy_settlement_evidence: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Resolve workspace policy from the original typed settlement binding."""
+
+    result = _runtime_result(
+        "settlement_requirement",
+        expected_todo_id=None,
+        causality=_prepared_causality(causality),
+        settlement_binding_kind=settlement_binding_kind,
+        legacy_settlement_evidence=(
+            dict(legacy_settlement_evidence)
+            if isinstance(legacy_settlement_evidence, Mapping)
+            else None
+        ),
+    )
+    value = result.get("settlement_requirement")
+    expected_keys = {
+        "schema_version",
+        "settlement_binding_kind",
+        "requirement",
+        "source",
+        "reason",
+    }
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != expected_keys
+        or value.get("schema_version")
+        != SETTLEMENT_WORKSPACE_REQUIREMENT_SCHEMA_VERSION
+        or value.get("settlement_binding_kind") != settlement_binding_kind
+        or value.get("requirement") not in DELIVERY_WORKSPACE_REQUIREMENTS
+        or not str(value.get("source") or "").strip()
+        or not str(value.get("reason") or "").strip()
+    ):
+        raise RuntimeError(
+            "TypeScript settlement workspace requirement result shape mismatch"
+        )
+    return {key: str(value[key]) for key in expected_keys}
 
 
 def completed_todo_workspace_causality(

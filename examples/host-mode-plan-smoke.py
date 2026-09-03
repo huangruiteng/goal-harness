@@ -219,14 +219,17 @@ def test_pi_alias_resolves_to_goal_loop_connector() -> None:
 
 
 def test_visible_mode_fails_closed_for_unknown_host_identity() -> None:
-    try:
-        build_workflow_identity_plan("watch_each_turn", host_identity="not-a-host")
-    except HostModePlanError as exc:
-        payload = exc.to_payload()
-    else:
-        raise AssertionError("unknown host identity should fail closed")
-    assert payload["ok"] is False, payload
-    assert payload["field"] == "host_identity", payload
+    for host_identity in ("not-a-host", "dsh"):
+        try:
+            build_workflow_identity_plan("watch_each_turn", host_identity=host_identity)
+        except HostModePlanError as exc:
+            payload = exc.to_payload()
+        else:
+            raise AssertionError(
+                f"unsupported visible host identity {host_identity!r} should fail closed"
+            )
+        assert payload["ok"] is False, payload
+        assert payload["field"] == "host_identity", payload
 
 
 def test_emitted_connector_ids_exist_in_catalog() -> None:

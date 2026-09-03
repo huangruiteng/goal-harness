@@ -139,7 +139,9 @@ def test_status_hints_backfill_to_target_without_weakening_hard_cap(
         "active_cases": 4,
         "current_cases": 0,
         "missing_cases": 4,
+        "excess_cases": 0,
         "underfilled": True,
+        "above_target": False,
         "utilization": 0.0,
     }
     assert initial["backfill_hint"]["preferred_arm_group"] == "test"
@@ -179,12 +181,23 @@ def test_status_hints_backfill_to_target_without_weakening_hard_cap(
         read_benchmark_concurrency_envelope(path)
     )
     assert at_target["target_occupancy"]["underfilled"] is False
-    assert at_target["remaining_capacity"]["total"] == 4
+    assert at_target["remaining_capacity"]["total"] == 0
     assert (
         at_target["runtime_reconciliation_hint"]["active_count_source"]
         == "admission_ledger"
     )
-    assert at_target["next_action"] == "admit_before_launch"
+    assert at_target["next_action"] == "hold_at_target"
+
+    blocked = admit_benchmark_case(
+        path,
+        run_id="run-above-target",
+        case_id="case-above-target",
+        arm_role="treatment",
+        execute=True,
+        admitted_at="2026-08-18T07:05:00Z",
+    )
+    assert blocked["admitted"] is False
+    assert blocked["reason_codes"] == ["target_capacity_exhausted"]
 
 
 def test_reserved_test_slot_prevents_baseline_starvation(tmp_path: Path) -> None:

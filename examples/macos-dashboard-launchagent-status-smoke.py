@@ -26,6 +26,7 @@ def run_script(fake_bin: Path, home: Path, args: list[str], *, schema_version: i
         "FAKE_STATUS_CONTRACT_SCHEMA_VERSION": str(schema_version),
         "FAKE_CONTROL_PLANE_WRITE_ENABLED": "true" if write_enabled else "false",
         "LOOPX_STATUS_CONTRACT_MIN_VERSION": "2",
+        "CODEX_HOME": "",
         **(extra_env or {}),
     }
     return subprocess.run(
@@ -69,6 +70,10 @@ def main() -> int:
         write_executable(
             fake_bin / "loopx",
             "#!/usr/bin/env bash\n"
+            "if [[ \"$*\" == *\"--format json doctor\"* ]]; then\n"
+            "  printf '%s\\n' '{\"release_manifest\":{\"manifest\":{\"release_id\":\"current-release\",\"package\":{\"version\":\"0.5.3\"},\"source\":{\"git_commit\":\"current-revision\"}}}}'\n"
+            "  exit 0\n"
+            "fi\n"
             "echo loopx \"$@\"\n",
         )
         write_executable(
@@ -79,6 +84,10 @@ def main() -> int:
         write_executable(
             fake_bin / "curl",
             "#!/usr/bin/env bash\n"
+            "if [[ \"$*\" == *\"/api/chat/capabilities\"* ]]; then\n"
+            "  printf '%s\\n' '{\"ok\":true,\"schema_version\":\"loopx_chat_capabilities_v1\",\"runtime_identity\":{\"schema_version\":\"loopx_runtime_identity_v1\",\"package_version\":\"0.5.3\",\"release_id\":\"current-release\",\"source_revision\":\"current-revision\"}}'\n"
+            "  exit 0\n"
+            "fi\n"
             "version=\"${FAKE_STATUS_CONTRACT_SCHEMA_VERSION:-0}\"\n"
             "write_enabled=\"${FAKE_CONTROL_PLANE_WRITE_ENABLED:-false}\"\n"
             "cat <<EOF\n"
@@ -112,7 +121,9 @@ def main() -> int:
         assert "--enable-control-plane-write-api" not in default_plist, default_plist
         assert " chat --global-registry " in default_chat_plist, default_chat_plist
         assert "--port 8767" in default_chat_plist, default_chat_plist
+        assert "--replace-existing-loopx-chat" in default_chat_plist, default_chat_plist
         assert "--no-open" in default_chat_plist, default_chat_plist
+        assert "export CODEX_HOME=" not in default_chat_plist, default_chat_plist
         assert "export LOOPX_PYTHON=" in default_plist, default_plist
         assert "export LOOPX_PYTHON=" in default_chat_plist, default_chat_plist
         assert "/loopx --registry" in default_plist, default_plist
@@ -124,9 +135,12 @@ def main() -> int:
             home,
             ["--enable-control-plane-write-api", "restart"],
             schema_version=2,
+            extra_env={"CODEX_HOME": str(home / "selected-codex-home")},
         )
         write_plist = status_plist.read_text(encoding="utf-8")
+        selected_chat_plist = chat_plist.read_text(encoding="utf-8")
         assert "--enable-control-plane-write-api" in write_plist, write_plist
+        assert f"export CODEX_HOME={home / 'selected-codex-home'};" in selected_chat_plist, selected_chat_plist
 
     print("macos-dashboard-launchagent-status-smoke ok")
     return 0

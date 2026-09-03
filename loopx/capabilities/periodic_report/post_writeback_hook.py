@@ -21,13 +21,12 @@ from .stage_completion import STAGE_COMPLETION_RECEIPT_SCHEMA
 from .stage_completion import derive_periodic_report_stage_completion_from_runs
 from .presets import build_periodic_report_preset_activation
 from .project_progress_snapshot import build_project_progress_snapshot_from_state
+from .incremental import read_periodic_report_publication_cursor
 from .triggers import build_periodic_report_trigger_decision
 
 
 PERIODIC_REPORT_POST_WRITEBACK_HOOK_ID = "periodic_report.runtime_trigger"
-PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT = (
-    "periodic_report.trigger_evaluation"
-)
+PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT = "periodic_report.trigger_evaluation"
 
 
 def _result(*, status: str, intent: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -236,6 +235,11 @@ def build_periodic_report_post_writeback_projection(
     if receipt is None:
         return {}
     result: dict[str, object] = {"stage_completion": receipt}
+    publication_cursor = read_periodic_report_publication_cursor(
+        runtime_root=runtime_root,
+        goal_id=goal_id,
+        agent_id=normalized_agent_id,
+    )
     project_progress = build_project_progress_snapshot_from_state(
         state_text=state_text,
         goal=goal,
@@ -243,7 +247,15 @@ def build_periodic_report_post_writeback_projection(
         goal_id=goal_id,
         agent_id=normalized_agent_id,
         completed_at=str(receipt["completed_at"]),
+        publication_cursor=publication_cursor,
     )
+    if publication_cursor is not None and project_progress is None:
+        return {}
+    if publication_cursor is not None:
+        result["last_report"] = {
+            "delivered_at": publication_cursor["delivered_at"],
+            "covered_trigger_ids": publication_cursor["covered_trigger_ids"],
+        }
     if project_progress is not None:
         result["project_progress"] = project_progress
     return result
@@ -281,6 +293,9 @@ def periodic_report_post_writeback_hook(
             if isinstance(projection, Mapping)
             else None
         )
+        last_report = (
+            projection.get("last_report") if isinstance(projection, Mapping) else None
+        )
         intent_payload: dict[str, Any] = {
             "schema_version": "periodic_report_trigger_evaluation_intent_v0",
             "stage_completion": dict(stage),
@@ -291,6 +306,8 @@ def periodic_report_post_writeback_hook(
         }
         if isinstance(project_progress, Mapping):
             intent_payload["project_progress"] = dict(project_progress)
+        if isinstance(last_report, Mapping):
+            intent_payload["last_report"] = dict(last_report)
         return _result(
             status="intent",
             intent={
@@ -329,8 +346,7 @@ def evaluate_periodic_report_trigger_evaluation_intent(
     if not isinstance(payload, Mapping):
         raise ValueError("periodic-report trigger intent payload is invalid")
     if (
-        payload.get("schema_version")
-        != "periodic_report_trigger_evaluation_intent_v0"
+        payload.get("schema_version") != "periodic_report_trigger_evaluation_intent_v0"
         or payload.get("generation_authorized") is not False
         or payload.get("external_delivery_authorized") is not False
     ):
@@ -338,7 +354,9 @@ def evaluate_periodic_report_trigger_evaluation_intent(
     stage = payload.get("stage_completion")
     profile_ref = payload.get("profile_ref")
     trigger_policy = payload.get("trigger_policy")
-    if not all(isinstance(value, Mapping) for value in (stage, profile_ref, trigger_policy)):
+    if not all(
+        isinstance(value, Mapping) for value in (stage, profile_ref, trigger_policy)
+    ):
         raise ValueError("periodic-report trigger intent is missing typed facts")
     required_stage_fields = (
         "stage_identity",
@@ -351,49 +369,55 @@ def evaluate_periodic_report_trigger_evaluation_intent(
         stage.get("schema_version") != STAGE_COMPLETION_RECEIPT_SCHEMA
         or stage.get("acceptance") != "validated"
         or stage.get("outcome_checkpoint_satisfied") is not True
-        or any(not str(stage.get(field) or "").strip() for field in required_stage_fields)
+        or any(
+            not str(stage.get(field) or "").strip() for field in required_stage_fields
+        )
     ):
         raise ValueError("periodic-report stage completion receipt is invalid")
     completed_at = str(stage["completed_at"])
     stage_identity = str(stage["stage_identity"])
-    evidence_digest = "sha256:" + hashlib.sha256(
-        json.dumps([stage_identity], separators=(",", ":")).encode()
-    ).hexdigest()
-    return build_periodic_report_trigger_decision(
-        {
-            "schema_version": "periodic_report_trigger_request_v0",
-            "evaluated_at": completed_at,
-            "profile": {
-                "profile_id": profile_ref.get("profile_id"),
-                "profile_version": profile_ref.get("profile_version"),
-            },
-            "trigger_policy": dict(trigger_policy),
-            "candidates": [
-                {
-                    "trigger_kind": "bounded_segment_milestone",
-                    "observed_at": completed_at,
-                    "source_ref": f"stage:{stage_identity}",
-                    "evidence_digest": evidence_digest,
-                    "facts": {
-                        "segment_ref": stage_identity,
-                        "transition": "segment_completed",
-                        "delivered_count": 0,
-                        "remaining_todo_count": 0,
-                        "durable_writeback": True,
-                        "acceptance": "validated",
-                        "completed_at": completed_at,
-                        "completion_receipt_ref": f"stage:{stage_identity}",
-                        "stage_identity": stage_identity,
-                        "closed_vision_revision": stage["closed_vision_revision"],
-                        "frontier_identity": stage["frontier_identity"],
-                        "stage_transition": stage["transition"],
-                        "outcome_checkpoint_satisfied": True,
-                        "status": "completed",
-                    },
-                }
-            ],
-        }
+    evidence_digest = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps([stage_identity], separators=(",", ":")).encode()
+        ).hexdigest()
     )
+    request = {
+        "schema_version": "periodic_report_trigger_request_v0",
+        "evaluated_at": completed_at,
+        "profile": {
+            "profile_id": profile_ref.get("profile_id"),
+            "profile_version": profile_ref.get("profile_version"),
+        },
+        "trigger_policy": dict(trigger_policy),
+        "candidates": [
+            {
+                "trigger_kind": "bounded_segment_milestone",
+                "observed_at": completed_at,
+                "source_ref": f"stage:{stage_identity}",
+                "evidence_digest": evidence_digest,
+                "facts": {
+                    "segment_ref": stage_identity,
+                    "transition": "segment_completed",
+                    "delivered_count": 0,
+                    "remaining_todo_count": 0,
+                    "durable_writeback": True,
+                    "acceptance": "validated",
+                    "completed_at": completed_at,
+                    "completion_receipt_ref": f"stage:{stage_identity}",
+                    "stage_identity": stage_identity,
+                    "closed_vision_revision": stage["closed_vision_revision"],
+                    "frontier_identity": stage["frontier_identity"],
+                    "stage_transition": stage["transition"],
+                    "outcome_checkpoint_satisfied": True,
+                    "status": "completed",
+                },
+            }
+        ],
+    }
+    if isinstance(payload.get("last_report"), Mapping):
+        request["last_report"] = dict(payload["last_report"])
+    return build_periodic_report_trigger_decision(request)
 
 
 __all__ = [

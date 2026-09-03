@@ -2,53 +2,24 @@ import {
   Activity,
   BarChart3,
   Bot,
-  CircleAlert,
-  Clock3,
   ExternalLink,
   GitBranch,
-  LayoutDashboard,
   ListChecks,
-  RefreshCw,
   Search,
   ShieldCheck,
   Users,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 
 import showcaseCatalog from "../../../../../docs/showcases/showcase-catalog.json";
 import rolloutProjectionFixture from "../../../../../examples/fixtures/frontstage-rollout-projections.public.json";
 import rolloutFixture from "../../../../../examples/fixtures/long-horizon-self-iteration-rollout.public.json";
-import { frontstageRoute } from "../router";
-import {
-  actionKindTone,
-  deriveOperatorStateSignals,
-  eventClassificationTone,
-  GoalChannelEvent,
-  GoalChannelLease,
-  GoalChannelProjection,
-  GoalChannelTodo,
-  leaseStatusTone,
-  sampleGoalChannelProjection,
-  type BadgeTone,
-} from "../data/goal-channel-frontstage";
-import { QueueItem, StatusPayload, formatStatusError } from "../data/status";
-import {
-  LocalDashboardApiCapabilities,
-  StatusContractFreshnessIssue,
-  fetchFrontstageStatusPayload,
-  localDashboardApiCapabilities,
-  resolveFrontstageOpsStatusUrl,
-  statusContractFreshnessIssue,
-} from "../data/local-status-query";
+import type { BadgeTone } from "../data/goal-channel-frontstage";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Select } from "../components/ui/select";
 import { cn } from "../lib/utils";
 
-type FrontstageSource = { kind: "demo"; label: string } | { kind: "url"; label: string };
-type FrontstageMode = "showcase" | "developer" | "ops";
-type TodoLaneFilter = "all" | "user" | "agent";
+type FrontstageMode = "showcase" | "developer";
 type NumberRange = { low?: number; high?: number };
 type ShowcaseFrontstageCase = {
   id: string;
@@ -346,103 +317,6 @@ type RolloutProjectionBundle = {
 const rolloutProjectionBundle = rolloutProjectionFixture as RolloutProjectionBundle;
 const overnightPrProjection = rolloutProjectionBundle.projections[0];
 
-type ProjectionOption = {
-  goalId: string;
-  projection: GoalChannelProjection;
-  queueItem: QueueItem;
-};
-
-function boolBadge(value: boolean, trueLabel: string, falseLabel: string) {
-  return (
-    <Badge variant={value ? "success" : "neutral"}>
-      {value ? trueLabel : falseLabel}
-    </Badge>
-  );
-}
-
-function statusTone(value?: string): BadgeTone {
-  if (!value) {
-    return "neutral";
-  }
-  const normalized = value.toLowerCase();
-  if (["done", "closed", "resolved"].includes(normalized)) {
-    return "success";
-  }
-  if (
-    ["blocked", "action_required", "waiting", "capability_wait", "workspace_repair"].includes(
-      normalized,
-    )
-  ) {
-    return "warning";
-  }
-  if (["failed", "error"].includes(normalized)) {
-    return "danger";
-  }
-  return "info";
-}
-
-function priorityTone(priority?: string): BadgeTone {
-  if (priority === "P0") {
-    return "danger";
-  }
-  if (priority === "P1") {
-    return "warning";
-  }
-  if (priority === "P2") {
-    return "info";
-  }
-  return "neutral";
-}
-
-function stringifyScalar(value: string | number | boolean | null | undefined) {
-  if (value === null || value === undefined) {
-    return "n/a";
-  }
-  return String(value);
-}
-
-function warningMessage(value: string | string[] | undefined) {
-  if (Array.isArray(value)) {
-    return value.join(", ");
-  }
-  return value ?? "compact source warning";
-}
-
-function artifactDisplayValue(value: string | number | boolean | null | undefined) {
-  const text = stringifyScalar(value);
-  return text.length > 96 ? `${text.slice(0, 93)}...` : text;
-}
-
-function countOpenTodos(todos: GoalChannelTodo[]) {
-  return todos.filter((todo) => todo.status === "open").length;
-}
-
-function countClaimedTodos(todos: GoalChannelTodo[]) {
-  return todos.filter((todo) => Boolean(todo.claimed_by)).length;
-}
-
-function todoSearchText(todo: GoalChannelTodo) {
-  return [
-    todo.todo_id,
-    todo.priority,
-    todo.status,
-    todo.title,
-    todo.claimed_by,
-    todo.task_class,
-    todo.action_kind,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-function filterTodosByQuery(todos: GoalChannelTodo[], normalizedQuery: string) {
-  if (!normalizedQuery) {
-    return todos;
-  }
-  return todos.filter((todo) => todoSearchText(todo).includes(normalizedQuery));
-}
-
 function countShowcaseStoryBeats() {
   return frontstageShowcases.reduce(
     (total, item) => total + (item.frontend_card?.story_beats?.length ?? 0),
@@ -486,17 +360,6 @@ function showcaseCaseHref(item?: ShowcaseFrontstageCase) {
     return `https://github.com/huangruiteng/loopx/blob/main/${item.case_page}`;
   }
   return undefined;
-}
-
-function uniqueClaimOwners(projection: GoalChannelProjection) {
-  return Array.from(
-    new Set(
-      [
-        ...projection.agent_todos.map((todo) => todo.claimed_by),
-        ...projection.active_leases.map((lease) => lease.owner_agent),
-      ].filter((value): value is string => Boolean(value)),
-    ),
-  );
 }
 
 function formatNumber(value: number | undefined, fallback = "n/a") {
@@ -1787,60 +1650,6 @@ function buildTrajectoryAnalysis(fixture: LongHorizonRolloutFixture) {
   };
 }
 
-function TodoRow({ todo }: { todo: GoalChannelTodo }) {
-  return (
-    <div className="grid gap-3 border-b border-slate-200 px-3 py-3 last:border-b-0 md:grid-cols-[96px_minmax(0,1fr)_156px]">
-      <div className="flex flex-wrap gap-1">
-        {todo.priority ? <Badge variant={priorityTone(todo.priority)}>{todo.priority}</Badge> : null}
-        <Badge variant={statusTone(todo.status)}>{todo.status}</Badge>
-      </div>
-      <div className="min-w-0">
-        <p className="break-words text-sm font-medium leading-6 text-slate-950">{todo.title}</p>
-        <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-medium text-slate-500">
-          {todo.todo_id ? <span>{todo.todo_id}</span> : null}
-          {todo.task_class ? <span>{todo.task_class}</span> : null}
-        </div>
-        {todo.action_kind ? (
-          <div className="mt-2">
-            <Badge variant={actionKindTone(todo.action_kind)}>{todo.action_kind}</Badge>
-          </div>
-        ) : null}
-      </div>
-      <div className="flex items-start justify-start md:justify-end">
-        {todo.claimed_by ? (
-          <Badge variant="info">
-            <Bot className="h-3 w-3" />
-            {todo.claimed_by}
-          </Badge>
-        ) : (
-          <Badge variant="neutral">unclaimed</Badge>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TodoLaneEmpty({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="px-4 py-4 text-sm font-medium leading-6 text-slate-500">
-      {children}
-    </div>
-  );
-}
-
-function projectionOptionsFromPayload(payload: StatusPayload): ProjectionOption[] {
-  return payload.attention_queue.items.flatMap((item) => {
-    if (!item.goal_channel_projection) {
-      return [];
-    }
-    return [{
-      goalId: item.goal_id,
-      projection: item.goal_channel_projection,
-      queueItem: item,
-    }];
-  });
-}
-
 function Panel({
   children,
   className,
@@ -1862,116 +1671,6 @@ function Panel({
       </div>
       {children}
     </section>
-  );
-}
-
-type ManagementSurfaceCard = {
-  body: string;
-  icon: React.ComponentType<{ className?: string }>;
-  id: string;
-  label: string;
-  source: string;
-  value: string;
-};
-
-function FrontstageManagementSurfaceMock({
-  claimOwners,
-  claimedAgentTodos,
-  openAgentTodos,
-  openUserTodos,
-  projection,
-  quotaUsed,
-}: {
-  claimOwners: string[];
-  claimedAgentTodos: number;
-  openAgentTodos: number;
-  openUserTodos: number;
-  projection: GoalChannelProjection;
-  quotaUsed: string;
-}) {
-  const firstGate = projection.open_gates[0];
-  const latestEvent = projection.recent_events[0];
-  const cards: ManagementSurfaceCard[] = [
-    {
-      body: projection.next_action,
-      icon: LayoutDashboard,
-      id: "mission",
-      label: "Mission Bar",
-      source: "goal_id + next_action",
-      value: projection.display_name,
-    },
-    {
-      body: claimOwners.length ? claimOwners.slice(0, 3).join(", ") : "No claimed owner projected.",
-      icon: Users,
-      id: "team",
-      label: "Team Roster",
-      source: "active_leases + claimed_by",
-      value: `${claimOwners.length} visible agents`,
-    },
-    {
-      body: `${openUserTodos} user todo, ${openAgentTodos} agent todo; ${claimedAgentTodos} claimed.`,
-      icon: ListChecks,
-      id: "tickets",
-      label: "Ticket Board",
-      source: "user_todos + agent_todos",
-      value: `${openUserTodos + openAgentTodos} open tickets`,
-    },
-    {
-      body: firstGate ? `${firstGate.kind} blocks ${(firstGate.blocks ?? []).join(", ") || "delivery"}.` : "No open gate in this projection.",
-      icon: CircleAlert,
-      id: "gates",
-      label: "Gate Inbox",
-      source: "decision_frame + open_gates",
-      value: projection.decision_frame.user_action_required ? "decision visible" : "clear",
-    },
-    {
-      body: `${artifactDisplayValue(projection.quota.spend_policy)}; state=${stringifyScalar(projection.quota.state)}.`,
-      icon: Clock3,
-      id: "cadence",
-      label: "Cadence / Budget",
-      source: "quota + scheduler hints",
-      value: quotaUsed,
-    },
-    {
-      body: latestEvent ? `${latestEvent.classification ?? "event"}: ${latestEvent.summary ?? latestEvent.generated_at ?? "recorded"}` : "No compact event projected.",
-      icon: ShieldCheck,
-      id: "evidence",
-      label: "Evidence Timeline",
-      source: "recent_events + artifacts",
-      value: `${projection.recent_events.length} events`,
-    },
-  ];
-
-  return (
-    <Panel icon={LayoutDashboard} title="Management Surface Mock">
-      <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3" data-testid="frontstage-management-surface-mock">
-        {cards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <section
-              className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-3"
-              data-testid={`frontstage-management-${card.id}`}
-              key={card.id}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600">
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-slate-950">{card.label}</div>
-                    <div className="truncate text-[11px] font-medium text-slate-500">{card.source}</div>
-                  </div>
-                </div>
-                <Badge variant="neutral">kernel</Badge>
-              </div>
-              <div className="mt-3 break-words text-lg font-semibold leading-7 text-slate-950">{card.value}</div>
-              <p className="mt-1 line-clamp-3 break-words text-xs font-medium leading-5 text-slate-600">{card.body}</p>
-            </section>
-          );
-        })}
-      </div>
-    </Panel>
   );
 }
 
@@ -3086,381 +2785,73 @@ function ShowcaseKineticCaseStrip() {
 }
 
 function FrontstageRoute({
-  goalOptions,
   hasIgnoredStatusUrl,
-  isLoading,
-  loadError,
   mode,
-  onGoalChange,
-  onLoadStatusUrl,
-  onResetDemo,
-  onTodoLaneChange,
-  onTodoQueryChange,
-  projection,
-  freshnessIssue,
-  localApiCapabilities,
-  queryStateLabel,
-  selectedGoalId,
-  source,
-  statusUrl,
-  setStatusUrl,
-  todoLane,
-  todoQuery,
 }: {
-  goalOptions: ProjectionOption[];
   hasIgnoredStatusUrl: boolean;
-  isLoading: boolean;
-  loadError: string | null;
   mode: FrontstageMode;
-  onGoalChange: (goalId: string) => void;
-  onLoadStatusUrl: () => void;
-  onResetDemo: () => void;
-  onTodoLaneChange: (value: TodoLaneFilter) => void;
-  onTodoQueryChange: (value: string) => void;
-  projection: GoalChannelProjection;
-  freshnessIssue: StatusContractFreshnessIssue | null;
-  localApiCapabilities: LocalDashboardApiCapabilities | null;
-  queryStateLabel: string;
-  selectedGoalId: string;
-  source: FrontstageSource;
-  statusUrl: string;
-  setStatusUrl: (value: string) => void;
-  todoLane: TodoLaneFilter;
-  todoQuery: string;
 }) {
-  const quotaUsed = `${stringifyScalar(projection.quota.spent_slots)} / ${stringifyScalar(projection.quota.allowed_slots ?? "?")}`;
-  const openUserTodos = countOpenTodos(projection.user_todos);
-  const openAgentTodos = countOpenTodos(projection.agent_todos);
-  const claimedAgentTodos = countClaimedTodos(projection.agent_todos);
-  const claimOwners = uniqueClaimOwners(projection);
-  const claimOwnerPreview = claimOwners.slice(0, 2).join(", ");
-  const isOpsMode = mode === "ops";
   const isDeveloperMode = mode === "developer";
   const isShowcaseMode = mode === "showcase";
   const publicModeLabel = isDeveloperMode ? "developer mode" : "showcase mode";
   const publicSourceLabel = isDeveloperMode ? "developer guide" : "docs/showcases";
   const storyBeatCount = countShowcaseStoryBeats();
-  const heroTitle = isOpsMode
-    ? projection.display_name
-    : isDeveloperMode
-      ? "Developer Onboarding Frontstage"
-      : "Loop engineering for long-running AI agents";
-  const heroSubtitle = isOpsMode
-    ? "Always-on agent operations, with human judgment kept in the control plane."
-    : isDeveloperMode
-      ? "Start the loop from one TUI message, then keep every gate visible."
-      : "Public cases first. Live registry state stays behind explicit ops mode.";
-  const heroBody = isOpsMode
-    ? projection.next_action
-    : isDeveloperMode
-      ? "A contributor-facing path for install, status health, todo claims, workspace repairs, local server checks, and safe writeback."
-      : "See how human gates, scoped agent lanes, and evidence writeback keep long-running work moving without leaking private status feeds.";
-  const heroStats = isOpsMode
+  const heroTitle = isDeveloperMode
+    ? "Developer Onboarding Frontstage"
+    : "Loop engineering for long-running AI agents";
+  const heroSubtitle = isDeveloperMode
+    ? "Start the loop from one TUI message, then keep every gate visible."
+    : "Public cases first. Live registry state stays behind the deprecated diagnostics route.";
+  const heroBody = isDeveloperMode
+    ? "A contributor-facing path for install, status health, todo claims, workspace repairs, local server checks, and safe writeback."
+    : "See how human gates, scoped agent lanes, and evidence writeback keep long-running work moving without exposing private status feeds.";
+  const heroStats = isDeveloperMode
     ? [
-        { label: "open user todos", value: String(openUserTodos) },
-        { label: "open agent todos", value: String(openAgentTodos) },
+        { label: "handoff steps", value: String(developerOnboardingSteps.length) },
+        { label: "browser writes", value: "0" },
       ]
-    : isDeveloperMode
-      ? [
-          { label: "handoff steps", value: String(developerOnboardingSteps.length) },
-          { label: "browser writes", value: "0" },
-        ]
     : [
         { label: "public cases", value: String(frontstageShowcases.length) },
         { label: "story beats", value: String(storyBeatCount) },
       ];
-  const operationSignals: Array<{ label: string; value: string; tone: BadgeTone }> = isOpsMode
+  const operationSignals: Array<{ label: string; value: string; tone: BadgeTone }> = isDeveloperMode
     ? [
-        {
-          label: "human gate",
-          value: projection.decision_frame.user_action_required ? "explicit" : "clear",
-          tone: projection.decision_frame.user_action_required ? "warning" : "success",
-        },
-        {
-          label: "agent work",
-          value: projection.decision_frame.agent_action_required ? "running" : "idle",
-          tone: projection.decision_frame.agent_action_required ? "info" : "neutral",
-        },
-        {
-          label: "claimed lanes",
-          value: `${claimedAgentTodos} / ${projection.agent_todos.length}`,
-          tone: claimedAgentTodos ? "info" : "neutral",
-        },
-        {
-          label: "evidence loop",
-          value: `${projection.recent_events.length} events`,
-          tone: projection.recent_events.length ? "success" : "neutral",
-        },
+        { label: "start path", value: "one message", tone: "info" },
+        { label: "workspace guard", value: "fail closed", tone: "success" },
+        { label: "status health", value: "projected", tone: "success" },
+        { label: "live feeds", value: "deprecated only", tone: "warning" },
       ]
-    : isDeveloperMode
-      ? [
-          { label: "start path", value: "one message", tone: "info" },
-          { label: "workspace guard", value: "fail closed", tone: "success" },
-          { label: "status health", value: "projected", tone: "success" },
-          { label: "live feeds", value: "ops only", tone: "warning" },
-        ]
     : [
         { label: "human judgment", value: "governed", tone: "success" },
         { label: "agent teams", value: "always-on", tone: "info" },
         { label: "public cases", value: String(frontstageShowcases.length), tone: "neutral" },
-        { label: "live status", value: "ops only", tone: "warning" },
-      ] satisfies Array<{ label: string; value: string; tone: BadgeTone }>;
-  const roleSignals = [
-    {
-      label: "owner",
-      value: projection.decision_frame.user_action_required ? "decision visible" : "no gate",
-      helper: `${openUserTodos} open user todo${openUserTodos === 1 ? "" : "s"}`,
-      tone: projection.decision_frame.user_action_required ? "warning" : "success",
-    },
-    {
-      label: "agent lane",
-      value: projection.decision_frame.agent_action_required ? "active" : "idle",
-      helper: `${openAgentTodos} open agent todo${openAgentTodos === 1 ? "" : "s"}`,
-      tone: projection.decision_frame.agent_action_required ? "info" : "neutral",
-    },
-    {
-      label: "claim owners",
-      value: claimOwners.length ? `${claimOwners.length} visible` : "none",
-      helper: claimOwnerPreview || "no active claim owner",
-      tone: claimOwners.length ? "info" : "neutral",
-    },
-  ] satisfies Array<{ label: string; value: string; helper: string; tone: BadgeTone }>;
-  const normalizedTodoQuery = todoQuery.trim().toLowerCase();
-  const filteredUserTodos = todoLane === "agent"
-    ? []
-    : filterTodosByQuery(projection.user_todos, normalizedTodoQuery);
-  const filteredAgentTodos = todoLane === "user"
-    ? []
-    : filterTodosByQuery(projection.agent_todos, normalizedTodoQuery);
-  const visibleTodoCount = filteredUserTodos.length + filteredAgentTodos.length;
-  const totalTodoCount = projection.user_todos.length + projection.agent_todos.length;
-  const budgetGovernanceRows = [
-    {
-      label: "budget",
-      value: quotaUsed,
-      helper: `quota state: ${stringifyScalar(projection.quota.state)}`,
-      tone: statusTone(stringifyScalar(projection.quota.state)),
-    },
-    {
-      label: "cadence",
-      value: stringifyScalar(projection.quota.scheduler_rrule ?? projection.quota.cadence_class ?? "scheduler hint"),
-      helper: `reset token: ${stringifyScalar(projection.quota.scheduler_reset_token ?? "not projected")}`,
-      tone: "info",
-    },
-    {
-      label: "spend rule",
-      value: stringifyScalar(projection.quota.spend_policy),
-      helper: "Watch lanes stay monitor state; cadence changes, final checks, and monitor-only polls are no-spend.",
-      tone: "success",
-    },
-    {
-      label: "controls",
-      value: stringifyScalar(projection.quota.override_policy ?? "preview gated"),
-      helper: stringifyScalar(projection.quota.pause_policy ?? "writes require CLI or loopback opt-in"),
-      tone: "warning",
-    },
-    {
-      label: "evidence",
-      value: stringifyScalar(projection.quota.latest_evidence_ref ?? projection.source_refs.latest_run_generated_at ?? "run history"),
-      helper: "Audit through todo ids, run history, and quota spend events.",
-      tone: "neutral",
-    },
-  ] satisfies Array<{ label: string; value: string; helper: string; tone: BadgeTone }>;
-  const operatorStateSignals = deriveOperatorStateSignals(projection);
+        { label: "live status", value: "deprecated only", tone: "warning" },
+      ];
 
   return (
     <main
-      className={cn(
-        "min-h-screen bg-[#f7f7f4] px-4 py-4 text-slate-950 sm:px-5",
-        isOpsMode ? "frontstage-ops-workspace" : "frontstage-showcase-workspace",
-      )}
-      data-frontstage-surface={isOpsMode ? "ops-control-plane" : "showcase-homepage"}
-      data-mode={projection.mode}
-      data-schema={projection.schema_version}
+      className="frontstage-showcase-workspace min-h-screen bg-[#f7f7f4] px-4 py-4 text-slate-950 sm:px-5"
+      data-frontstage-surface="showcase-homepage"
+      data-mode={mode}
+      data-schema="public-showcase-v1"
       data-testid="goal-channel-frontstage-route"
     >
       <div
-        className={cn(
-          "frontstage-workspace-shell mx-auto grid gap-4",
-          isOpsMode ? "max-w-[1500px] xl:grid-cols-[260px_minmax(0,1fr)_320px]" : "max-w-[1180px]",
-        )}
-        data-testid={isOpsMode ? "frontstage-ops-workspace-shell" : "frontstage-showcase-workspace-shell"}
+        className="frontstage-workspace-shell mx-auto grid max-w-[1180px] gap-4"
+        data-testid="frontstage-showcase-workspace-shell"
       >
-        {isOpsMode ? (
-        <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:self-start">
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-950 text-white">
-              <GitBranch className="h-4 w-4" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold">LoopX</div>
-              <div className="text-xs text-slate-500">Frontstage channel</div>
-            </div>
-          </div>
-          <div className="mt-4 grid gap-2">
-            <a className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-medium" href="/">
-              <LayoutDashboard className="h-4 w-4" />
-              Control home
-            </a>
-            <a className="flex items-center gap-2 rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white" href="/frontstage">
-              <Activity className="h-4 w-4" />
-              Channel board
-            </a>
-            <a className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-medium" href="/frontstage/developer">
-              <ExternalLink className="h-4 w-4" />
-              Developer cockpit
-            </a>
-          </div>
-          <div className="mt-5 space-y-2 text-xs leading-5 text-slate-500">
-            <p>Projection is read-only. The append-only LoopX ledger remains the source of truth.</p>
-            <p>Inspired by modern agent boards, but scoped to gates, todos, claims, quota, and evidence.</p>
-          </div>
-          <div className="mt-5 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid="frontstage-live-source-panel">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={isOpsMode ? "warning" : "success"}>
-                {isOpsMode ? "ops live" : publicModeLabel}
-              </Badge>
-              <Badge variant={isOpsMode && source.kind === "url" ? "info" : "neutral"}>
-                {isOpsMode && source.kind === "url" ? "live status feed" : "bundled fixture"}
-              </Badge>
-              <Badge variant={isOpsMode && source.kind === "url" ? "success" : "neutral"}>
-                {isOpsMode ? queryStateLabel : "static"}
-              </Badge>
-              <span className="break-words text-xs font-medium text-slate-500">
-                {isOpsMode ? source.label : publicSourceLabel}
-              </span>
-            </div>
-            {isOpsMode ? (
-              <>
-                <input
-                  aria-label="Status URL"
-                  className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400"
-                  data-testid="frontstage-status-url-input"
-                  onChange={(event) => setStatusUrl(event.target.value)}
-                  placeholder="/status.local.json or http://127.0.0.1:8766/status.json"
-                  value={statusUrl}
-                />
-                <div className="text-[11px] font-medium leading-5 text-slate-500">
-                  Ops statusUrl accepts only relative or loopback sources.
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    className="flex-1"
-                    data-testid="frontstage-load-status-url"
-                    disabled={isLoading}
-                    onClick={onLoadStatusUrl}
-                    size="sm"
-                    variant="primary"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    Load
-                  </Button>
-                  <Button data-testid="frontstage-reset-demo" disabled={isLoading} onClick={onResetDemo} size="sm">
-                    Demo
-                  </Button>
-                </div>
-                {goalOptions.length ? (
-                  <Select
-                    aria-label="Goal channel"
-                    className="w-full text-xs"
-                    data-testid="frontstage-goal-select"
-                    onChange={(event) => onGoalChange(event.target.value)}
-                    value={selectedGoalId}
-                  >
-                    {goalOptions.map((option) => (
-                      <option key={option.goalId} value={option.goalId}>
-                        {option.projection.display_name}
-                      </option>
-                    ))}
-                  </Select>
-                ) : null}
-              </>
-            ) : (
-              <div
-                className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-950"
-                data-testid="frontstage-public-boundary-note"
-              >
-                <p>
-                  {isDeveloperMode
-                    ? "Developer mode ignores statusUrl and renders the public onboarding path only. Use an explicit ops URL for local control-plane inspection."
-                    : "Showcase mode ignores statusUrl and renders docs/showcases only. Use an explicit ops URL for local control-plane inspection."}
-                </p>
-                {hasIgnoredStatusUrl ? <Badge variant="warning">statusUrl ignored</Badge> : null}
-                <div className="text-[11px] font-semibold text-emerald-800" data-testid="frontstage-ops-entry-hint">
-                  Use mode=ops with statusUrl.
-                </div>
-              </div>
-            )}
-            {loadError ? (
-              <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-xs leading-5 text-amber-950" data-testid="frontstage-load-error">
-                <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>{loadError}</span>
-              </div>
-            ) : null}
-            {freshnessIssue ? (
-              <div
-                className="rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-xs leading-5 text-amber-950"
-                data-testid="frontstage-stale-daemon-repair"
-              >
-                <div className="flex flex-wrap items-center gap-2 font-semibold">
-                  <CircleAlert className="h-3.5 w-3.5" />
-                  status service contract stale
-                  <Badge variant="warning">schema v{freshnessIssue.schemaVersion}</Badge>
-                </div>
-                <p className="mt-1">
-                  Restart the local status daemon with <span className="font-mono">{freshnessIssue.reloadHint}</span>, then reload this ops feed.
-                </p>
-              </div>
-            ) : null}
-            {isOpsMode && localApiCapabilities ? (
-              <div
-                className="grid gap-2 rounded-md border border-slate-200 bg-white px-2 py-2 text-xs leading-5 text-slate-600"
-                data-testid="frontstage-local-api-capabilities"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="info">TanStack Query</Badge>
-                  <Badge variant={localApiCapabilities.readOnlyDefault ? "success" : "warning"}>
-                    {localApiCapabilities.readOnlyDefault ? "read-only default" : "write opt-in active"}
-                  </Badge>
-                  <Badge variant={localApiCapabilities.loopbackOnly ? "success" : "neutral"}>
-                    {localApiCapabilities.loopbackOnly ? "loopback source" : "relative source"}
-                  </Badge>
-                </div>
-                <div className="break-words">
-                  <span className="font-semibold text-slate-950">local_dashboard_api:</span>{" "}
-                  {localApiCapabilities.source}
-                </div>
-                <div className="grid gap-1">
-                  <span>
-                    reward dry-run {localApiCapabilities.rewardDryRunUrl ? "advertised" : "not advertised"};
-                    append {localApiCapabilities.rewardWriteEnabled ? "enabled by loopback opt-in" : "disabled"}
-                  </span>
-                  <span>
-                    control-plane dry-run {localApiCapabilities.controlPlaneDryRunUrl ? "advertised" : "not advertised"};
-                    apply {localApiCapabilities.controlPlaneWriteEnabled ? "enabled by loopback opt-in" : "disabled"}
-                  </span>
-                  <span>Write affordances require explicit loopback opt-in and preview-locked APIs.</span>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </aside>
-        ) : null}
-
-        <section className={cn("space-y-4", isOpsMode ? "frontstage-ops-main-pane" : "frontstage-showcase-main-pane")}>
+        <section className="frontstage-showcase-main-pane space-y-4">
           <div className="rounded-lg border border-slate-200 bg-white px-5 py-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant={isOpsMode ? "success" : "info"}>
-                    {isOpsMode ? "goal_channel_projection_v0" : isDeveloperMode ? "developer frontstage" : "showcase catalog"}
+                  <Badge variant="info">
+                    {isDeveloperMode ? "developer frontstage" : "showcase catalog"}
                   </Badge>
-                  <Badge variant="neutral">{isOpsMode ? projection.mode : "public-safe"}</Badge>
-                  <Badge variant="info">{isOpsMode ? projection.waiting_on : publicSourceLabel}</Badge>
-                  <Badge variant={isOpsMode ? "warning" : "success"}>{isOpsMode ? "ops live" : publicModeLabel}</Badge>
-                  <Badge variant={isOpsMode && source.kind === "url" ? "success" : "neutral"}>
-                    {isOpsMode && source.kind === "url" ? "url" : "demo"}
-                  </Badge>
+                  <Badge variant="neutral">public-safe</Badge>
+                  <Badge variant="info">{publicSourceLabel}</Badge>
+                  <Badge variant="success">{publicModeLabel}</Badge>
+                  <Badge variant="neutral">demo</Badge>
                 </div>
                 <h1 className="mt-3 text-3xl font-semibold tracking-normal text-slate-950">
                   {heroTitle}
@@ -3492,22 +2883,20 @@ function FrontstageRoute({
                     </a>
                   </div>
                 ) : null}
-                {!isOpsMode ? (
-                  <div
-                    className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium leading-5 text-emerald-950"
-                    data-testid="frontstage-public-boundary-note"
-                  >
-                    <span>
-                      {isDeveloperMode
-                        ? "Developer mode ignores statusUrl and renders the public onboarding path only."
-                        : "Showcase mode ignores statusUrl by design and renders docs/showcases only."}
-                    </span>
-                    {hasIgnoredStatusUrl ? <Badge variant="warning">statusUrl ignored</Badge> : null}
-                    <span className="font-semibold text-emerald-800" data-testid="frontstage-ops-entry-hint">
-                      Use mode=ops with statusUrl.
-                    </span>
-                  </div>
-                ) : null}
+                <div
+                  className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium leading-5 text-emerald-950"
+                  data-testid="frontstage-public-boundary-note"
+                >
+                  <span>
+                    {isDeveloperMode
+                      ? "Developer mode ignores statusUrl and renders the public onboarding path only."
+                      : "Showcase mode ignores statusUrl by design and renders docs/showcases only."}
+                  </span>
+                  {hasIgnoredStatusUrl ? <Badge variant="warning">statusUrl ignored</Badge> : null}
+                  <span className="font-semibold text-emerald-800" data-testid="frontstage-ops-entry-hint">
+                    Deprecated diagnostics remain at /deprecated/frontstage/ops.
+                  </span>
+                </div>
               </div>
               <div className="hidden min-w-[220px] grid-cols-2 gap-2 text-center sm:grid">
                 {heroStats.map((stat) => (
@@ -3521,10 +2910,15 @@ function FrontstageRoute({
             {isShowcaseMode ? <ShowcaseGraphStories /> : null}
             {isShowcaseMode ? <ShowcaseStateFlowHero /> : null}
             {isShowcaseMode ? <ShowcaseKineticCaseStrip /> : null}
-            <div className="mt-5 grid gap-2 border-t border-slate-200 pt-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="frontstage-operations-strip">
+            <div
+              className="mt-5 grid gap-2 border-t border-slate-200 pt-4 sm:grid-cols-2 xl:grid-cols-4"
+              data-testid="frontstage-operations-strip"
+            >
               {operationSignals.map((signal) => (
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3" key={signal.label}>
-                  <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{signal.label}</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">
+                    {signal.label}
+                  </div>
                   <div className="mt-2">
                     <Badge variant={signal.tone}>{signal.value}</Badge>
                   </div>
@@ -3533,473 +2927,26 @@ function FrontstageRoute({
             </div>
           </div>
 
-          {isOpsMode ? (
-            <FrontstageManagementSurfaceMock
-              claimOwners={claimOwners}
-              claimedAgentTodos={claimedAgentTodos}
-              openAgentTodos={openAgentTodos}
-              openUserTodos={openUserTodos}
-              projection={projection}
-              quotaUsed={quotaUsed}
-            />
-          ) : null}
-
           {!isDeveloperMode ? <EfficiencyEvidencePanel /> : null}
-
           {isShowcaseMode ? <TrajectoryAnalysisPanel /> : null}
-
           {isShowcaseMode ? <SelfIterationTimelinePanel /> : null}
-
           {!isDeveloperMode ? <ShowcaseMotionBoard /> : null}
-
           {!isDeveloperMode ? <ExperimentalTodayValuePanel /> : null}
-
           {!isDeveloperMode ? <ShowcaseCasePackPanel /> : null}
-
           {isDeveloperMode ? <DeveloperOnboardingPanel /> : null}
-
-          {isOpsMode ? (
-            <>
-              <div className="grid gap-4 lg:grid-cols-3">
-                <Panel icon={Users} title="Decision Frame">
-                  <div className="grid gap-2 p-4">
-                    {boolBadge(projection.decision_frame.user_action_required, "user action", "no user action")}
-                    {boolBadge(projection.decision_frame.agent_action_required, "agent action", "no agent action")}
-                    {boolBadge(!projection.decision_frame.quiet_noop_allowed, "no quiet noop", "quiet noop ok")}
-                  </div>
-                </Panel>
-                <Panel icon={ShieldCheck} title="Quota Guard">
-                  <div className="space-y-2 p-4 text-sm leading-6">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-slate-500">state</span>
-                      <Badge variant={statusTone(stringifyScalar(projection.quota.state))}>{stringifyScalar(projection.quota.state)}</Badge>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-slate-500">slots</span>
-                      <span className="font-semibold">{quotaUsed}</span>
-                    </div>
-                    <p className="text-xs text-slate-500">{stringifyScalar(projection.quota.spend_policy)}</p>
-                  </div>
-                </Panel>
-                <Panel icon={Clock3} title="Source Freshness">
-                  <div className="space-y-2 p-4 text-xs leading-5 text-slate-600">
-                    {Object.entries(projection.source_refs).map(([key, value]) => (
-                      <div className="grid gap-1 rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5" key={key}>
-                        <span className="font-semibold text-slate-500">{key}</span>
-                        <span className="break-words font-medium text-slate-700">{stringifyScalar(value)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </Panel>
-              </div>
-
-              <Panel icon={BarChart3} title="Budget & Governance">
-                <div className="grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-5" data-testid="frontstage-budget-governance">
-                  {budgetGovernanceRows.map((row) => (
-                    <div className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-3" key={row.label}>
-                      <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{row.label}</div>
-                      <div className="mt-2 break-words text-sm font-semibold leading-6 text-slate-950">
-                        {row.value}
-                      </div>
-                      <div className="mt-2">
-                        <Badge variant={row.tone}>{row.helper}</Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Panel>
-
-              <Panel icon={ListChecks} title="Operator State Legibility">
-                <div className="grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="frontstage-operator-state-legibility">
-                  {operatorStateSignals.map((signal) => (
-                    <div
-                      className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-3"
-                      data-testid={`frontstage-state-${signal.label}`}
-                      key={signal.label}
-                    >
-                      <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">
-                        {signal.label}
-                      </div>
-                      <div className="mt-2 break-words text-sm font-semibold leading-6 text-slate-950">
-                        {signal.value}
-                      </div>
-                      <p className="mt-2 text-xs font-medium leading-5 text-slate-600">{signal.helper}</p>
-                      <div className="mt-2">
-                        <Badge variant={signal.tone}>{signal.label}</Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Panel>
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div
-                  className="frontstage-ops-command-strip rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2"
-                  data-testid="frontstage-ops-command-strip"
-                >
-                  <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_180px_auto]" data-testid="frontstage-todo-discovery">
-                    <label className="block">
-                      <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">Search todo projection</span>
-                      <span className="relative mt-1 block">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <input
-                          aria-label="Search projected todos"
-                          className="h-9 w-full rounded-md border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400"
-                          data-testid="frontstage-todo-search"
-                          onChange={(event) => onTodoQueryChange(event.target.value)}
-                          placeholder="Search title, claim, action kind..."
-                          value={todoQuery}
-                        />
-                      </span>
-                    </label>
-                    <label className="block">
-                      <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">Lane</span>
-                      <Select
-                        aria-label="Todo lane filter"
-                        className="mt-1 w-full text-sm"
-                        data-testid="frontstage-todo-lane-filter"
-                        onChange={(event) => onTodoLaneChange(event.target.value as TodoLaneFilter)}
-                        value={todoLane}
-                      >
-                        <option value="all">All lanes</option>
-                        <option value="user">User todos</option>
-                        <option value="agent">Agent todos</option>
-                      </Select>
-                    </label>
-                    <div
-                      className="flex min-h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-xs font-semibold leading-5 text-slate-600 lg:self-end"
-                      data-testid="frontstage-todo-result-count"
-                    >
-                      Showing {visibleTodoCount} of {totalTodoCount} projected todos
-                    </div>
-                  </div>
-                </div>
-                <Panel icon={Users} title="User Todo Lane">
-                  <div data-testid="frontstage-user-todos">
-                    {filteredUserTodos.map((todo) => (
-                      <TodoRow key={todo.todo_id ?? todo.title} todo={todo} />
-                    ))}
-                    {!filteredUserTodos.length ? (
-                      <TodoLaneEmpty>No user todos match the current filters.</TodoLaneEmpty>
-                    ) : null}
-                  </div>
-                </Panel>
-                <Panel icon={Bot} title="Agent Todo Lane">
-                  <div data-testid="frontstage-agent-todos">
-                    {filteredAgentTodos.map((todo) => (
-                      <TodoRow key={todo.todo_id ?? todo.title} todo={todo} />
-                    ))}
-                    {!filteredAgentTodos.length ? (
-                      <TodoLaneEmpty>No agent todos match the current filters.</TodoLaneEmpty>
-                    ) : null}
-                  </div>
-                </Panel>
-              </div>
-
-              <Panel icon={Activity} title="Run Timeline">
-                <div className="divide-y divide-slate-200" data-testid="frontstage-timeline">
-                  {projection.recent_events.map((event, index) => (
-                    <div className="grid gap-3 px-4 py-3 md:grid-cols-[190px_180px_minmax(0,1fr)]" key={`${event.generated_at ?? "event"}-${index}`}>
-                      <div className="font-mono text-xs text-slate-500">{event.generated_at ?? "n/a"}</div>
-                      <Badge variant={eventClassificationTone(event.classification)}>
-                        {event.classification ?? "event"}
-                      </Badge>
-                      <div className="text-sm leading-6 text-slate-700">{event.summary ?? "compact event"}</div>
-                    </div>
-                  ))}
-                </div>
-              </Panel>
-            </>
-          ) : (
-            <PublicShowcaseBoundaryPanel />
-          )}
+          <PublicShowcaseBoundaryPanel />
         </section>
-
-        {isOpsMode ? (
-        <aside className="space-y-4">
-          {isOpsMode ? (
-            <Panel icon={Users} title="Role Map">
-              <div className="space-y-3 p-4" data-testid="frontstage-role-map">
-                {roleSignals.map((signal) => (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2" key={signal.label}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-xs font-semibold uppercase tracking-normal text-slate-500">{signal.label}</span>
-                      <Badge variant={signal.tone}>{signal.value}</Badge>
-                    </div>
-                    <div className="mt-2 break-words text-xs font-medium leading-5 text-slate-600">{signal.helper}</div>
-                  </div>
-                ))}
-              </div>
-            </Panel>
-          ) : null}
-
-          {isOpsMode ? (
-            <Panel icon={ListChecks} title="Active Claims">
-              <div className="divide-y divide-slate-200" data-testid="frontstage-active-claims">
-                {projection.active_leases.map((lease, index) => (
-                  <div className="px-4 py-3" key={`${lease.todo_id ?? "claim"}-${index}`}>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="info">{lease.owner_agent ?? "unknown"}</Badge>
-                      <Badge variant={leaseStatusTone(lease.status)}>{lease.status ?? "claim"}</Badge>
-                    </div>
-                    <div className="mt-2 break-all text-xs font-medium text-slate-500">{lease.todo_id}</div>
-                    {lease.lease_until ? (
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-600">
-                        <Badge variant="neutral">until {lease.lease_until}</Badge>
-                      </div>
-                    ) : null}
-                    {lease.write_scope?.length ? (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {lease.write_scope.map((scope) => (
-                          <Badge key={scope} variant="warning">{scope}</Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </Panel>
-          ) : null}
-
-          {isOpsMode ? (
-            <Panel icon={CircleAlert} title="Open Gates">
-              <div className="divide-y divide-slate-200" data-testid="frontstage-open-gates">
-                {projection.open_gates.map((gate) => (
-                  <div className="px-4 py-3" key={gate.gate_id}>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={statusTone(gate.status)}>{gate.status}</Badge>
-                      <Badge variant="neutral">{gate.kind}</Badge>
-                    </div>
-                    <div className="mt-2 break-all text-xs font-semibold text-slate-600">{gate.gate_id}</div>
-                    {gate.blocks?.length ? (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {gate.blocks.map((blocker) => (
-                          <Badge key={blocker} variant="warning">{blocker}</Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-                {!projection.open_gates.length ? (
-                  <div className="px-4 py-4 text-sm font-medium leading-6 text-slate-500">No open gates in this projection.</div>
-                ) : null}
-              </div>
-            </Panel>
-          ) : null}
-
-          {isOpsMode ? (
-            <Panel icon={ExternalLink} title="Artifacts">
-              <div className="divide-y divide-slate-200" data-testid="frontstage-artifacts">
-                {projection.artifacts.map((artifact, index) => (
-                  <div className="space-y-2 px-4 py-3" key={`${artifact.kind ?? "artifact"}-${index}`}>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="info">{artifactDisplayValue(artifact.kind)}</Badge>
-                      {artifact.label ? <Badge variant="neutral">{artifactDisplayValue(artifact.label)}</Badge> : null}
-                    </div>
-                    {Object.entries(artifact)
-                      .filter(([key]) => !["kind", "label"].includes(key))
-                      .map(([key, value]) => (
-                        <div className="grid gap-1 rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5" key={key}>
-                          <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{key}</span>
-                          <span className="break-words text-xs font-medium leading-5 text-slate-700">
-                            {artifactDisplayValue(value)}
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                ))}
-                {!projection.artifacts.length ? (
-                  <div className="px-4 py-4 text-sm font-medium leading-6 text-slate-500">No compact artifacts projected.</div>
-                ) : null}
-              </div>
-            </Panel>
-          ) : null}
-
-          {isOpsMode ? (
-            <Panel icon={ShieldCheck} title="Truth Contract">
-              <div className="space-y-3 p-4 text-sm leading-6">
-                <div className="flex flex-wrap gap-2">
-                  {boolBadge(projection.truth_contract.event_ledger_is_source_of_truth, "ledger truth", "ledger missing")}
-                  {boolBadge(!projection.truth_contract.projection_is_writable, "read-only", "writeable")}
-                </div>
-                <p className="text-slate-600">{projection.truth_contract.recompute_rule}</p>
-                <p className="text-xs font-semibold text-slate-500">write authority: {projection.truth_contract.write_authority}</p>
-              </div>
-            </Panel>
-          ) : null}
-
-          <Panel icon={ShieldCheck} title="Boundary Warnings">
-            <div className="space-y-3 p-4" data-testid="frontstage-source-warnings">
-              {projection.source_warnings.map((warning, index) => (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-950" key={`${warning.kind}-${index}`}>
-                  <div className="font-semibold">{warning.kind}</div>
-                  <p className="mt-1">{warningMessage(warning.message)}</p>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        </aside>
-        ) : null}
       </div>
     </main>
   );
 }
 
-export function FrontstagePage() {
-  const search = frontstageRoute.useSearch();
-  const navigate = frontstageRoute.useNavigate();
-  const [statusUrl, setStatusUrl] = useState(search.statusUrl);
-  const [manualLoadError, setManualLoadError] = useState<string | null>(null);
-  const mode: FrontstageMode = search.mode === "ops"
-    ? "ops"
-    : search.mode === "developer"
-      ? "developer"
-      : "showcase";
-  const todoLane: TodoLaneFilter = search.todoLane === "user" || search.todoLane === "agent"
-    ? search.todoLane
-    : "all";
-  const todoQuery = search.todoQuery ?? "";
-  const liveMode = mode === "ops";
-  const hasIgnoredStatusUrl = !liveMode && Boolean(search.statusUrl);
-  const resolvedSearchStatusUrl = useMemo(
-    () => (liveMode && search.statusUrl
-      ? resolveFrontstageOpsStatusUrl(search.statusUrl, window.location.href)
-      : null),
-    [liveMode, search.statusUrl],
-  );
-  const statusQuery = useQuery({
-    enabled: Boolean(liveMode && resolvedSearchStatusUrl?.source),
-    queryFn: () => fetchFrontstageStatusPayload(resolvedSearchStatusUrl?.source?.url ?? ""),
-    queryKey: ["frontstage-ops-status", resolvedSearchStatusUrl?.source?.url ?? ""],
-  });
-  const payload: StatusPayload | null = liveMode ? statusQuery.data ?? null : null;
-  const source: FrontstageSource = liveMode && payload && resolvedSearchStatusUrl?.source
-    ? { kind: "url", label: resolvedSearchStatusUrl.source.url }
-    : { kind: "demo", label: "bundled fixture" };
+export type FrontstagePageSearch = {
+  mode: "showcase" | "developer" | "ops";
+  statusUrl: string;
+};
 
-  const rawGoalOptions = useMemo(
-    () => (payload ? projectionOptionsFromPayload(payload) : []),
-    [payload],
-  );
-  const goalOptions = liveMode ? rawGoalOptions : [];
-  const selectedGoalId = goalOptions.some((option) => option.goalId === search.goalId)
-    ? search.goalId
-    : goalOptions[0]?.goalId ?? sampleGoalChannelProjection.goal_id;
-  const selectedProjection = goalOptions.find((option) => option.goalId === selectedGoalId)?.projection
-    ?? sampleGoalChannelProjection;
-  const freshnessIssue = payload && resolvedSearchStatusUrl?.source
-    ? statusContractFreshnessIssue(payload, resolvedSearchStatusUrl.source)
-    : null;
-  const localApiCapabilities = payload && resolvedSearchStatusUrl?.source
-    ? localDashboardApiCapabilities(payload, resolvedSearchStatusUrl.source)
-    : null;
-  const queryError = statusQuery.error ? formatStatusError(statusQuery.error) : null;
-  const projectionError = liveMode && statusQuery.isSuccess && rawGoalOptions.length === 0
-    ? "status feed has no goal_channel_projection items; showing demo fixture"
-    : null;
-  const loadError = manualLoadError
-    ?? resolvedSearchStatusUrl?.error
-    ?? queryError
-    ?? projectionError;
-  const queryStateLabel = !liveMode
-    ? "static"
-    : !resolvedSearchStatusUrl?.source
-      ? "query idle"
-    : statusQuery.isFetching
-      ? "query fetching"
-      : statusQuery.isStale
-        ? "query stale"
-        : "query fresh";
-
-  async function updateSearch(next: {
-    goalId?: string;
-    mode?: FrontstageMode;
-    statusUrl?: string;
-    todoLane?: TodoLaneFilter;
-    todoQuery?: string;
-  }) {
-    await navigate({
-      search: (current) => ({
-        ...current,
-        ...next,
-      }),
-    });
-  }
-
-  async function loadSelectedStatusUrl() {
-    if (!liveMode) {
-      setManualLoadError("statusUrl is ignored in showcase mode; switch to Ops live for local status feeds");
-      return;
-    }
-    const resolvedStatusUrl = resolveFrontstageOpsStatusUrl(statusUrl, window.location.href);
-    if (resolvedStatusUrl.error || !resolvedStatusUrl.source) {
-      setManualLoadError(resolvedStatusUrl.error ?? "status URL is invalid");
-      return;
-    }
-    setManualLoadError(null);
-    setStatusUrl(resolvedStatusUrl.source.url);
-    if (search.statusUrl === resolvedStatusUrl.source.url) {
-      await statusQuery.refetch();
-      return;
-    }
-    await updateSearch({
-      goalId: "",
-      mode: "ops",
-      statusUrl: resolvedStatusUrl.source.url,
-    });
-  }
-
-  function resetToDemo() {
-    setStatusUrl("");
-    setManualLoadError(null);
-    void updateSearch({ goalId: "", mode: "showcase", statusUrl: "", todoLane: "all", todoQuery: "" });
-  }
-
-  function changeGoal(goalId: string) {
-    void updateSearch({ goalId });
-  }
-
-  function changeTodoLane(value: TodoLaneFilter) {
-    void updateSearch({ todoLane: value });
-  }
-
-  function changeTodoQuery(value: string) {
-    void updateSearch({ todoQuery: value });
-  }
-
-  useEffect(() => {
-    setStatusUrl(search.statusUrl);
-  }, [search.statusUrl]);
-
-  useEffect(() => {
-    if (!goalOptions.length || search.goalId === selectedGoalId) {
-      return;
-    }
-    void updateSearch({ goalId: selectedGoalId });
-  }, [goalOptions, search.goalId, selectedGoalId]);
-
-  return (
-    <FrontstageRoute
-      goalOptions={goalOptions}
-      hasIgnoredStatusUrl={hasIgnoredStatusUrl}
-      isLoading={statusQuery.isFetching}
-      loadError={loadError}
-      mode={mode}
-      onGoalChange={changeGoal}
-      onLoadStatusUrl={() => void loadSelectedStatusUrl()}
-      onResetDemo={resetToDemo}
-      onTodoLaneChange={changeTodoLane}
-      onTodoQueryChange={changeTodoQuery}
-      projection={selectedProjection}
-      freshnessIssue={freshnessIssue}
-      localApiCapabilities={localApiCapabilities}
-      queryStateLabel={queryStateLabel}
-      selectedGoalId={selectedGoalId}
-      setStatusUrl={setStatusUrl}
-      source={source}
-      statusUrl={statusUrl}
-      todoLane={todoLane}
-      todoQuery={todoQuery}
-    />
-  );
+export function FrontstagePage({ search }: { search: FrontstagePageSearch }) {
+  const mode: FrontstageMode = search.mode === "developer" ? "developer" : "showcase";
+  return <FrontstageRoute hasIgnoredStatusUrl={Boolean(search.statusUrl)} mode={mode} />;
 }

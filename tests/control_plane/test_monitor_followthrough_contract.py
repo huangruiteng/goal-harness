@@ -350,6 +350,16 @@ def test_material_poll_reloads_status_and_projects_declared_successor(
     assert successor["target_key"] == "release-head:huangruiteng/loopx#42@merged-42"
     assert result["successor_todo_ids"] == [successor["todo_id"]]
     assert result["after"]["selected_todo"]["todo_id"] == successor["todo_id"]
+    authoring = result["authoring_contract"]
+    assert authoring["schema_version"] == "monitor_advancement_authoring_v0"
+    assert authoring["monitor"] == {
+        "task_class": "continuous_monitor",
+        "execution": "observe_only",
+    }
+    assert authoring["waiting_todo"]["successor_todo_ids"] == [
+        successor["todo_id"]
+    ]
+    assert authoring["waiting_todo"]["status"] == "open"
     # This contract owns material writeback and successor selection. Whether
     # the current CLI turn can spend quota is evaluated by should-run tests.
     assert "Validate the exact merged release head." in state.read_text(encoding="utf-8")

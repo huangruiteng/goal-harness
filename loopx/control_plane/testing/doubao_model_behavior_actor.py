@@ -26,6 +26,7 @@ from .onboarding_model_behavior_qualification import (
 
 DOUBAO_2_1_PRO_MODEL = "doubao-seed-2-1-pro-260628"
 DOUBAO_2_1_TURBO_MODEL = "doubao-seed-2-1-turbo-260628"
+DOUBAO_SEED_EVOLVING_MODEL = "doubao-seed-evolving"
 DOUBAO_CHAT_COMPLETIONS_ENDPOINT = (
     "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 )
@@ -33,7 +34,13 @@ ARK_API_KEY_ENV = "ARK_API_KEY"
 DOUBAO_MODEL_ENV = "LOOPX_MODEL_BEHAVIOR_MODEL"
 MODEL_BEHAVIOR_PROVIDER_INPUT_SCHEMA_VERSION = "model_behavior_provider_input_v0"
 
-_ALLOWED_MODELS = {DOUBAO_2_1_PRO_MODEL, DOUBAO_2_1_TURBO_MODEL}
+ALLOWED_MODEL_BEHAVIOR_MODELS = frozenset(
+    {
+        DOUBAO_2_1_PRO_MODEL,
+        DOUBAO_2_1_TURBO_MODEL,
+        DOUBAO_SEED_EVOLVING_MODEL,
+    }
+)
 _MAX_PROVIDER_RESPONSE_BYTES = 1_048_576
 _MAX_DECISION_TOKENS = 4096
 
@@ -523,10 +530,8 @@ class DoubaoModelBehaviorActor(ModelBehaviorActor):
     ) -> None:
         if not api_key.strip():
             raise RuntimeError("Doubao actor requires a runtime-injected API key")
-        if model not in _ALLOWED_MODELS:
-            raise ValueError(
-                "Doubao actor model must be an allowlisted Doubao 2.1 model"
-            )
+        if model not in ALLOWED_MODEL_BEHAVIOR_MODELS:
+            raise ValueError("Doubao actor model must be explicitly allowlisted")
         if timeout_seconds <= 0 or timeout_seconds > 300:
             raise ValueError("Doubao actor timeout must be between 0 and 300 seconds")
         self._api_key = api_key
@@ -598,10 +603,8 @@ class DoubaoOnboardingModelBehaviorActor:
     ) -> None:
         if not api_key.strip():
             raise RuntimeError("Doubao actor requires a runtime-injected API key")
-        if model not in _ALLOWED_MODELS:
-            raise ValueError(
-                "Doubao actor model must be an allowlisted Doubao 2.1 model"
-            )
+        if model not in ALLOWED_MODEL_BEHAVIOR_MODELS:
+            raise ValueError("Doubao actor model must be explicitly allowlisted")
         if timeout_seconds <= 0 or timeout_seconds > 300:
             raise ValueError("Doubao actor timeout must be between 0 and 300 seconds")
         self._api_key = api_key

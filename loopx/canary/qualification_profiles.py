@@ -100,7 +100,7 @@ CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
             "loopx/control_plane/quota/stall_repair.py",
             "loopx/control_plane/scheduler/arbitration.py",
             "loopx/control_plane/scheduler/monitor_poll_writeback.py",
-            "loopx/control_plane/scheduler/monitor_target.py",
+            "loopx/control_plane/quota/monitor_poll_commit.ts",
             "loopx/control_plane/todos/decision_scope.py",
             "loopx/control_plane/testing/decision_replay.py",
             "loopx/control_plane/work_items/interaction_contract.py",

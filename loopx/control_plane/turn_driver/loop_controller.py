@@ -25,6 +25,10 @@ from typing import Any
 
 from ..effect_program import SettlementStepKind
 from .driver import LoopXTurnRoute, _typed_route, selected_turn_todo
+from .host_failure import (
+    host_failure_retry_available,
+    normalize_host_failure_record,
+)
 from .transaction import (
     LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
     LOOPX_TURN_RECEIPT_VALIDATION_SCHEMA_VERSION,
@@ -140,6 +144,7 @@ class ValidatedTurnReceipt:
 
     __slots__ = (
         "lineage",
+        "host_failure",
         "result_kind",
         "settlement_effect_id",
         "status",
@@ -154,6 +159,7 @@ class ValidatedTurnReceipt:
         status: str,
         lineage: Mapping[str, str],
         turn_key: str | None,
+        host_failure: Mapping[str, Any] | None = None,
         settlement_effect_id: str | None = None,
         todo_completion: Mapping[str, Any] | None = None,
     ) -> None:
@@ -165,6 +171,7 @@ class ValidatedTurnReceipt:
             "todo_id": str(lineage.get("todo_id") or ""),
         }
         self.turn_key = turn_key
+        self.host_failure = dict(host_failure or {}) or None
         self.settlement_effect_id = settlement_effect_id
         self.todo_completion = dict(todo_completion or {}) or None
 
@@ -213,6 +220,13 @@ class ValidatedTurnReceipt:
             raise ValueError("validated turn receipt is missing turn_key")
         settlement_effect_id = str(receipt.get("settlement_effect_id") or "") or None
         todo_completion = _mapping(execution.get("todo_completion"))
+        host_failure = None
+        if "host_failure" in execution:
+            if result_kind is not LoopXTurnResultKind.HOST_FAILURE:
+                raise ValueError(
+                    "only a host_failure receipt may carry host failure metadata"
+                )
+            host_failure = normalize_host_failure_record(execution.get("host_failure"))
         if result_kind in _MATERIAL_PROGRESS_KINDS:
             settlement_effect_id = _qualified_material_effect_id(
                 execution,
@@ -228,6 +242,7 @@ class ValidatedTurnReceipt:
             status=status,
             lineage=lineage,
             turn_key=turn_key,
+            host_failure=host_failure,
             settlement_effect_id=settlement_effect_id,
             todo_completion=todo_completion,
         )
@@ -240,6 +255,11 @@ class ValidatedTurnReceipt:
             "lineage": dict(self.lineage),
             "turn_key": self.turn_key,
             "settlement_effect_id": self.settlement_effect_id,
+            **(
+                {"host_failure": dict(self.host_failure)}
+                if self.host_failure
+                else {}
+            ),
             **(
                 {"todo_completion": dict(self.todo_completion)}
                 if self.todo_completion
@@ -620,6 +640,51 @@ def decide_loop_disposition(
             reason="turn receipt is a typed no-spend wait",
             lineage=effective_lineage,
         )
+
+    if result_kind is LoopXTurnResultKind.HOST_FAILURE and turn_receipt.host_failure:
+        if route is LoopXTurnRoute.REPLAN_REQUIRED:
+            return _replan_disposition(
+                reason="fresh decision requires replan after host failure",
+                decision_lineage=effective_lineage,
+            )
+        if route is LoopXTurnRoute.REPAIR_REQUIRED:
+            return _disposition(
+                LoopDisposition.REPAIR,
+                reason="fresh decision requires repair after host failure",
+                lineage=effective_lineage,
+            )
+        failure = turn_receipt.host_failure
+        if host_failure_retry_available(failure):
+            retry = _mapping(failure.get("retry"))
+            return _disposition(
+                LoopDisposition.WAIT,
+                reason=(
+                    f"retryable host failure {failure['kind']} requires bounded "
+                    "backoff before the same Turn is resumed"
+                ),
+                lineage=effective_lineage,
+                extra={
+                    "retry_continuation": {
+                        "same_turn": True,
+                        "retry_failed_turn": True,
+                        "strategy": retry["strategy"],
+                        "retry_after_seconds": retry["backoff_seconds"],
+                        "attempt": failure["attempt"],
+                        "max_attempts": retry["max_attempts"],
+                        "fresh_envelope_required": True,
+                        "model_fallback_allowed": False,
+                    }
+                },
+            )
+        if failure.get("retryable") is True:
+            return _disposition(
+                LoopDisposition.REPAIR,
+                reason=(
+                    f"retryable host failure {failure['kind']} exhausted its "
+                    "bounded attempt budget"
+                ),
+                lineage=effective_lineage,
+            )
 
     # host_failure, validation_failed, writeback_failed, quota_spend_failed:
     # the loop must not guess recovery on its own; hold for repair routing.

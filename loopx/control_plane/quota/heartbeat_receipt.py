@@ -95,6 +95,26 @@ def heartbeat_receipt_settlement_replan_obligation_id(
     return identity[1]
 
 
+def heartbeat_receipt_semantic_replan_obligation_id(
+    event: Mapping[str, object] | None,
+) -> str | None:
+    """Return the semantic replan target selected by the original guard.
+
+    This is deliberately separate from the settlement identity: a replan Turn
+    may settle through a concrete Todo while that same guard requires a typed
+    semantic delta for an autonomous replan obligation.
+    """
+
+    if not isinstance(event, Mapping):
+        return None
+    details = event.get("details")
+    if not isinstance(details, Mapping):
+        return None
+    return normalize_todo_replan_obligation_id(
+        details.get("semantic_replan_obligation_id")
+    )
+
+
 def _effective_heartbeat_receipt(
     events: list[dict[str, object]],
 ) -> dict[str, object] | None:
@@ -373,6 +393,13 @@ def heartbeat_receipt_view(
         )
         if workspace_causality:
             receipt["delivery_workspace_causality"] = workspace_causality
+    semantic_replan_obligation_id = (
+        heartbeat_receipt_semantic_replan_obligation_id(event)
+    )
+    if semantic_replan_obligation_id:
+        receipt["semantic_replan_obligation_id"] = (
+            semantic_replan_obligation_id
+        )
     return receipt
 
 

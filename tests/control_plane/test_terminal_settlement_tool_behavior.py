@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from loopx.control_plane.testing.model_tool_behavior import (
+    QUOTA_FIRST_TOOL_INSTRUCTION,
     ScriptedAssistantAction,
     ScriptedDoubaoExecTransport,
     ScriptedExecToolAction,
@@ -166,6 +167,10 @@ def test_real_tool_loop_settles_final_todo_after_spend(tmp_path: Path) -> None:
     assert "settlement-proof.json" not in json.dumps(receipt, sort_keys=True)
 
     first = transport.requests[0]
+    system_prompt = first["messages"][0]["content"]
+    assert QUOTA_FIRST_TOOL_INSTRUCTION in system_prompt
+    assert "the host validates that tool result" in system_prompt
+    assert "immediately after the proof read" in system_prompt
     assert first["messages"][1] == {"role": "user", "content": fixture.task_body}
     assert TERMINAL_SETTLEMENT_FIXTURE_TODO_ID not in fixture.task_body
     quota_result = _latest_quota_packet(transport.requests[2])

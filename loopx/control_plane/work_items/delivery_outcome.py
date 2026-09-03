@@ -63,12 +63,13 @@ def qualifies_turn_scoped_blocker_settlement(
     progress_observation: Mapping[str, Any] | None,
     *,
     work_item_id: str | None = None,
+    replan_obligation_id: str | None = None,
 ) -> bool:
     """Return whether an outcome gap is a typed, attributable blocker receipt.
 
     ``outcome_gap`` remains outside the progress outcomes: it can settle one
     exact Turn only when the same writeback carries a blocked observation with
-    a stable blocker, evidence, and matching work-item identity.
+    a stable blocker, evidence, and matching Todo or replan-obligation identity.
     """
 
     if (
@@ -77,11 +78,13 @@ def qualifies_turn_scoped_blocker_settlement(
         or progress_observation.get("schema_version")
         != PROGRESS_OBSERVATION_SCHEMA_VERSION
         or not isinstance(progress_observation.get("evidence_ids"), list)
-        or normalize_progress_identifier(work_item_id) is None
+        or bool(work_item_id) == bool(replan_obligation_id)
     ):
         return False
     observation = dict(progress_observation)
-    normalized_work_item_id = normalize_progress_identifier(work_item_id)
+    normalized_work_item_id = normalize_progress_identifier(
+        work_item_id or replan_obligation_id
+    )
     if (
         observation.get("result_class") != ProgressResultClass.BLOCKED.value
         or normalize_progress_identifier(observation.get("blocker_id")) is None
@@ -101,6 +104,7 @@ def qualifies_turn_scoped_settlement(
     progress_observation: Mapping[str, Any] | None,
     *,
     work_item_id: str | None = None,
+    replan_obligation_id: str | None = None,
 ) -> bool:
     """Return whether one delivery record may satisfy a Turn settlement."""
 
@@ -110,6 +114,7 @@ def qualifies_turn_scoped_settlement(
             normalized,
             progress_observation,
             work_item_id=work_item_id,
+            replan_obligation_id=replan_obligation_id,
         )
     )
 

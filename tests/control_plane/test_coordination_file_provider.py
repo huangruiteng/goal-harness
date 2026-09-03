@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -21,9 +22,10 @@ from loopx.control_plane.coordination.file_provider import (
 
 def head(revision: int = 0) -> dict:
     return {
-        "schema_version": "loopx_coordination_head_v0",
+        "schema_version": "loopx_coordination_head_v1",
         "goal_id": "goal-a",
         "handoff_mode": "hard_lease",
+        "store_binding": "test:store",
         "authority_revision": revision,
         "coordination": {"todos": {}, "leases": {}},
         "receipt_index": {},
@@ -38,6 +40,152 @@ def provider(tmp_path) -> FileCoordinationProvider:
 
 def test_load_uninitialized_returns_none_zero(provider) -> None:
     assert provider.load() == (None, 0)
+
+
+def test_store_identity_is_stable_and_strictly_formatted(provider) -> None:
+    identity = provider.store_identity()
+    assert identity.startswith("file:")
+    assert len(identity) == len("file:") + 32
+    assert set(identity.removeprefix("file:")) <= set("0123456789abcdef")
+    assert provider.store_identity() == identity
+
+
+@pytest.mark.parametrize(
+    "invalid_identity",
+    [
+        b"",
+        b"f",
+        b"file:0123456789abcdef0123456789abcde",
+        b"file:0123456789abcdef0123456789abcdef\n",
+        b"file:0123456789ABCDEF0123456789ABCDEF",
+        b"nokv:0123456789abcdef0123456789abcdef",
+        b"file:\xff",
+    ],
+)
+def test_store_identity_rejects_invalid_persisted_bytes(
+    tmp_path, invalid_identity
+) -> None:
+    directory = tmp_path / "coordination"
+    directory.mkdir()
+    (directory / "store-identity").write_bytes(invalid_identity)
+    provider = FileCoordinationProvider(directory, "goal-a")
+    with pytest.raises(ProviderProtocolError, match="32 lowercase hex"):
+        provider.store_identity()
+
+
+def test_concurrent_store_identity_creation_publishes_one_complete_value(
+    tmp_path, monkeypatch
+) -> None:
+    import loopx.control_plane.coordination.file_provider as module
+
+    directory = tmp_path / "coordination"
+    providers = [
+        FileCoordinationProvider(directory, "goal-a"),
+        FileCoordinationProvider(directory, "goal-b"),
+    ]
+    entered_replace = threading.Event()
+    allow_replace = threading.Event()
+    real_replace = module._replace_document
+
+    def blocked_identity_replace(source: Path, target: Path) -> None:
+        if target.name == "store-identity":
+            entered_replace.set()
+            assert allow_replace.wait(timeout=5)
+        real_replace(source, target)
+
+    monkeypatch.setattr(module, "_replace_document", blocked_identity_replace)
+    results: list[str] = []
+    failures: list[BaseException] = []
+
+    def create_identity(provider: FileCoordinationProvider) -> None:
+        try:
+            results.append(provider.store_identity())
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    first = threading.Thread(target=create_identity, args=(providers[0],))
+    second = threading.Thread(target=create_identity, args=(providers[1],))
+    first.start()
+    assert entered_replace.wait(timeout=5)
+    second.start()
+    assert second.is_alive()
+    allow_replace.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+    monkeypatch.undo()
+
+    assert not failures
+    assert len(results) == 2
+    assert results[0] == results[1]
+    assert len(results[0]) == len("file:") + 32
+
+
+def test_store_identity_short_writes_are_continued(tmp_path, monkeypatch) -> None:
+    import loopx.control_plane.coordination.file_provider as module
+
+    provider = FileCoordinationProvider(tmp_path / "coordination", "goal-a")
+    real_write = module.os.write
+    chunks: list[int] = []
+
+    def short_write(descriptor, view):
+        chunk = bytes(view)[:3]
+        chunks.append(len(chunk))
+        return real_write(descriptor, chunk)
+
+    monkeypatch.setattr(module.os, "write", short_write)
+    identity = provider.store_identity()
+    monkeypatch.undo()
+    assert len(chunks) > 1
+    assert provider.store_identity() == identity
+    assert (tmp_path / "coordination" / "store-identity").read_text() == identity
+
+
+def test_store_identity_crash_before_rename_retries_cleanly(
+    tmp_path, monkeypatch
+) -> None:
+    import loopx.control_plane.coordination.file_provider as module
+
+    directory = tmp_path / "coordination"
+    provider = FileCoordinationProvider(directory, "goal-a")
+
+    def crash_before_identity_rename(_source: Path, target: Path) -> None:
+        assert target.name == "store-identity"
+        raise OSError("simulated crash before identity rename")
+
+    monkeypatch.setattr(module, "_replace_document", crash_before_identity_rename)
+    with pytest.raises(ProviderProtocolError, match="store identity is unavailable"):
+        provider.store_identity()
+    assert not (directory / "store-identity").exists()
+    assert not list(directory.glob("store-identity.tmp-*"))
+
+    monkeypatch.undo()
+    identity = provider.store_identity()
+    assert provider.store_identity() == identity
+
+
+def test_store_identity_directory_fsync_failure_converges_on_retry(
+    tmp_path, monkeypatch
+) -> None:
+    import loopx.control_plane.coordination.file_provider as module
+
+    provider = FileCoordinationProvider(tmp_path / "coordination", "goal-a")
+    real_fsync_directory = module._fsync_directory
+    calls = 0
+
+    def fail_first_directory_fsync(directory: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("simulated identity directory fsync failure")
+        real_fsync_directory(directory)
+
+    monkeypatch.setattr(module, "_fsync_directory", fail_first_directory_fsync)
+    with pytest.raises(ProviderProtocolError, match="store identity is unavailable"):
+        provider.store_identity()
+    identity = provider.store_identity()
+    monkeypatch.undo()
+    assert calls == 2
+    assert provider.store_identity() == identity
 
 
 def test_create_replace_conflict_cycle(provider) -> None:

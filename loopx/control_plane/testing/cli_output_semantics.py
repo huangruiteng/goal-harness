@@ -7,6 +7,10 @@ from typing import Any
 
 
 _MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+.+$")
+_RUNTIME_ROOT_COMMAND_ROUTE = re.compile(
+    r"(?m)(?:^|[\"'`])[^\r\n\S]*loopx\s+--runtime-root\s+"
+    r"(?:\"[^\"\r\n]+\"|'[^'\r\n]+'|\S+)"
+)
 
 
 def json_shape_paths(value: Any, *, path: str = "$") -> list[str]:
@@ -120,3 +124,7 @@ def guided_todo_delta_schema_versions(value: Any) -> list[str]:
 
 def markdown_headings(text: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if _MARKDOWN_HEADING.match(line)]
+
+
+def runtime_root_command_route_count(text: str) -> int:
+    return len(_RUNTIME_ROOT_COMMAND_ROUTE.findall(text))

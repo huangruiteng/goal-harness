@@ -1,13 +1,21 @@
-import { StatusPayload, parseStatusPayload } from "./status";
+import {
+  PeriodicReportDetailRef,
+  StatusPayload,
+  parseStatusPayload,
+  periodicReportIndexResponseSchema,
+  periodicReportProjectionResponseSchema,
+} from "./status";
 
 export const expectedStatusContractSchemaVersion = 2;
 export const fallbackStatusContractReloadHint = "scripts/macos-dashboard-launchagent.sh restart";
 
-export type ResolvedFrontstageStatusUrl = {
+export type ResolvedLocalStatusUrl = {
   isLoopback: boolean;
   isRelative: boolean;
   url: string;
 };
+
+export type ResolvedFrontstageStatusUrl = ResolvedLocalStatusUrl;
 
 export type StatusContractFreshnessIssue = {
   reloadHint: string;
@@ -34,7 +42,7 @@ export function isLoopbackHostname(hostname: string) {
   return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname);
 }
 
-export function resolveFrontstageOpsStatusUrl(value: string, baseHref: string) {
+function resolveLoopbackStatusUrl(value: string, baseHref: string, errorPrefix: string) {
   const trimmed = value.trim();
   if (!trimmed) {
     return { error: "status URL is empty" };
@@ -51,7 +59,7 @@ export function resolveFrontstageOpsStatusUrl(value: string, baseHref: string) {
   const isLoopback = isLoopbackHostname(parsed.hostname);
   if (!isRelative && !isLoopback) {
     return {
-      error: "Ops statusUrl must be relative or loopback; use showcase mode for public links.",
+      error: `${errorPrefix} must be relative or loopback`,
     };
   }
 
@@ -60,8 +68,19 @@ export function resolveFrontstageOpsStatusUrl(value: string, baseHref: string) {
       isLoopback,
       isRelative,
       url: trimmed,
-    } satisfies ResolvedFrontstageStatusUrl,
+    } satisfies ResolvedLocalStatusUrl,
   };
+}
+
+export function resolveLocalStatusUrl(value: string, baseHref: string) {
+  return resolveLoopbackStatusUrl(value, baseHref, "statusUrl");
+}
+
+export function resolveFrontstageOpsStatusUrl(value: string, baseHref: string) {
+  const resolved = resolveLoopbackStatusUrl(value, baseHref, "Ops statusUrl");
+  return resolved.error
+    ? { error: `${resolved.error}; use showcase mode for public links.` }
+    : resolved;
 }
 
 export async function fetchFrontstageStatusPayload(statusUrl: string) {
@@ -89,7 +108,7 @@ export function statusContractFreshnessIssue(
   };
 }
 
-function localApiUrl(source: ResolvedFrontstageStatusUrl, path: string | null | undefined) {
+function localApiUrl(source: ResolvedLocalStatusUrl, path: string | null | undefined) {
   if (!path || !source.isLoopback) {
     return null;
   }
@@ -100,6 +119,39 @@ function localApiUrl(source: ResolvedFrontstageStatusUrl, path: string | null | 
   } catch {
     return null;
   }
+}
+
+export function periodicReportApiUrls(
+  payload: StatusPayload,
+  source: ResolvedLocalStatusUrl,
+) {
+  return {
+    detailUrl: localApiUrl(source, payload.local_dashboard_api?.periodic_report_detail_url),
+    indexUrl: localApiUrl(source, payload.local_dashboard_api?.periodic_report_index_url),
+  };
+}
+
+export async function fetchPeriodicReportIndex(indexUrl: string, goalId: string) {
+  const url = new URL(indexUrl);
+  url.searchParams.set("goal_id", goalId);
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} while loading published reports`);
+  }
+  return periodicReportIndexResponseSchema.parse(await response.json()).periodic_reports;
+}
+
+export async function fetchPeriodicReportProjection(
+  detailUrl: string,
+  ref: PeriodicReportDetailRef,
+) {
+  const url = new URL(detailUrl);
+  Object.entries(ref).forEach(([key, value]) => url.searchParams.set(key, value));
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} while loading published report detail`);
+  }
+  return periodicReportProjectionResponseSchema.parse(await response.json()).projection;
 }
 
 export function localDashboardApiCapabilities(

@@ -386,8 +386,8 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     ), work_lane_profiles["control-plane-refactor"]
 
     monitor_target_payload = build_catalog_canary_plan(
-        changed_files=["loopx/control_plane/scheduler/monitor_target.py"],
-        surfaces=["monitor_target scheduler_hint state-machine"],
+        changed_files=["loopx/control_plane/quota/monitor_poll_commit.ts"],
+        surfaces=["monitor_target monitor-poll scheduler_hint state-machine"],
         max_checks_per_profile=5,
     )
     monitor_target_profiles = {

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import loopx.history as history_module
 from loopx.history import collect_history
 
 
@@ -146,3 +147,41 @@ def test_collect_history_keeps_invalid_legacy_timestamps_below_valid_runs(
         "overflow",
         "missing",
     ]
+
+
+def test_load_index_reuses_artifact_existence_checks_for_duplicate_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    index_path = tmp_path / "index.jsonl"
+    row = {
+        "generated_at": "2026-01-01T00:00:00Z",
+        "json_path": "artifacts/run.json",
+        "markdown_path": "artifacts/run.md",
+    }
+    index_path.write_text(
+        "".join(json.dumps(row) + "\n" for _ in range(100)),
+        encoding="utf-8",
+    )
+    calls: list[tuple[Any, Path | None]] = []
+    original = history_module._indexed_artifact_exists
+
+    def count_exists(value: Any, *, artifact_root: Path | None) -> bool:
+        calls.append((value, artifact_root))
+        return original(value, artifact_root=artifact_root)
+
+    monkeypatch.setattr(history_module, "_indexed_artifact_exists", count_exists)
+
+    records, raw_count = history_module.load_index(
+        index_path,
+        artifact_root=tmp_path,
+    )
+
+    assert raw_count == 100
+    assert len(records) == 1
+    assert calls == [
+        ("artifacts/run.json", tmp_path),
+        ("artifacts/run.md", tmp_path),
+    ]
+    assert records[0]["json_exists"] is False
+    assert records[0]["markdown_exists"] is False

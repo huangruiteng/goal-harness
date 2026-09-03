@@ -7,7 +7,10 @@ from pathlib import Path
 from ..bootstrap import (
     DEFAULT_DOMAIN,
     DEFAULT_OBJECTIVE,
+    ONBOARDING_CONNECTION_VALIDATION_AGENT,
+    ONBOARDING_CONNECTION_VALIDATION_CHOICES,
     bootstrap_project,
+    derive_goal_display_name,
     render_bootstrap_markdown,
 )
 PrintPayload = Callable[
@@ -29,6 +32,13 @@ def register_bootstrap_connect_command(subparsers: argparse._SubParsersAction) -
         help="Create a new forked goal id instead of reusing an existing global goal route.",
     )
     bootstrap_parser.add_argument("--objective", default=DEFAULT_OBJECTIVE, help="Initial goal objective.")
+    bootstrap_parser.add_argument(
+        "--display-name",
+        help=(
+            "Public display title for the goal. When omitted, a public-safe title is "
+            "derived from the objective; the project name remains the fallback."
+        ),
+    )
     bootstrap_parser.add_argument("--domain", default=DEFAULT_DOMAIN, help="Goal domain label.")
     bootstrap_parser.add_argument("--role", choices=["controller", "subagent"], default="controller")
     bootstrap_parser.add_argument("--parent-goal-id", help="Parent goal id when --role subagent.")
@@ -116,6 +126,16 @@ def register_bootstrap_connect_command(subparsers: argparse._SubParsersAction) -
         help="Skip the fast first-connect repository scan and todo candidate proposal.",
     )
     bootstrap_parser.add_argument(
+        "--onboarding-connection-validation",
+        choices=sorted(ONBOARDING_CONNECTION_VALIDATION_CHOICES),
+        default=ONBOARDING_CONNECTION_VALIDATION_AGENT,
+        help=(
+            "Choose who validates the project connection. The default 'agent' may create "
+            "a loopx-check Todo; 'provider-prevalidated' records provider ownership and "
+            "omits that agent Todo."
+        ),
+    )
+    bootstrap_parser.add_argument(
         "--accept-onboarding-agent-todos",
         action="store_true",
         help="Write all proposed onboarding agent todos into the initial active state.",
@@ -195,6 +215,7 @@ def handle_bootstrap_connect_command(
             runtime_root=runtime_root,
             goal_id=goal_id,
             objective=args.objective,
+            display_name=args.display_name or derive_goal_display_name(args.objective),
             domain=args.domain,
             role=args.role,
             parent_goal_id=args.parent_goal_id,
@@ -216,6 +237,9 @@ def handle_bootstrap_connect_command(
             execution_outcome_must_advance=args.execution_outcome_must_advance or None,
             execution_turn_granularity=("fine" if bool(args.fine_grained) else None),
             onboarding_scan_enabled=not bool(args.no_onboarding_scan),
+            onboarding_connection_validation=str(
+                args.onboarding_connection_validation
+            ),
             accept_onboarding_agent_todos=bool(args.accept_onboarding_agent_todos),
             begin_autonomous_advance=bool(args.begin_autonomous_advance),
             codex_app_heartbeat=str(args.codex_app_heartbeat),

@@ -16,15 +16,19 @@ from .benchmark_concurrency import (
     handle_benchmark_concurrency_command,
     register_benchmark_concurrency_commands,
 )
+from .benchmark_experiment_board import (
+    BENCHMARK_EXPERIMENT_BOARD_COMMANDS,
+    handle_benchmark_experiment_board_command,
+    register_benchmark_experiment_board_commands,
+)
 from .benchmark_external_agent import (
     BENCHMARK_EXTERNAL_AGENT_COMMANDS,
     handle_benchmark_external_agent_command,
     register_benchmark_external_agent_commands,
 )
-from .benchmark_experiment_board import (
-    BENCHMARK_EXPERIMENT_BOARD_COMMANDS,
-    handle_benchmark_experiment_board_command,
-    register_benchmark_experiment_board_commands,
+from .benchmark_study import (
+    handle_benchmark_study_command,
+    register_benchmark_study_commands,
 )
 
 AddSubcommandFormat = Callable[[argparse.ArgumentParser], None]
@@ -103,6 +107,7 @@ def register_benchmark_command_group(
         benchmark_sub,
         add_subcommand_format,
     )
+    register_benchmark_study_commands(benchmark_sub, add_subcommand_format)
 
 
 def handle_benchmark_command(
@@ -126,6 +131,13 @@ def handle_benchmark_command(
     except (OSError, UnicodeError, ValueError) as exc:
         _benchmark_project_parser(args).error(str(exc))
     handled = handle_benchmark_boundary_command(
+        args,
+        print_payload=print_payload,
+        output_format=output_format,
+    )
+    if handled is not None:
+        return handled
+    handled = handle_benchmark_study_command(
         args,
         print_payload=print_payload,
         output_format=output_format,

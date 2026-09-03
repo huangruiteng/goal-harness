@@ -7,6 +7,7 @@ from typing import Any
 
 from ...control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from ...registry import find_registry_goal, read_json, resolve_state_file
+from .incremental import select_incremental_project_progress
 
 
 _META_ACTION_KINDS = frozenset(
@@ -19,7 +20,12 @@ _META_ACTION_KINDS = frozenset(
 
 
 def build_project_progress_snapshot(
-    *, registry_path: Path, goal_id: str, agent_id: str, completed_at: str
+    *,
+    registry_path: Path,
+    goal_id: str,
+    agent_id: str,
+    completed_at: str,
+    publication_cursor: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build a bounded public-safe progress snapshot at a stage boundary."""
 
@@ -38,6 +44,7 @@ def build_project_progress_snapshot(
         goal_id=goal_id,
         agent_id=agent_id,
         completed_at=completed_at,
+        publication_cursor=publication_cursor,
     )
 
 
@@ -49,6 +56,7 @@ def build_project_progress_snapshot_from_state(
     goal_id: str,
     agent_id: str,
     completed_at: str,
+    publication_cursor: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build a progress snapshot from one already-read authoritative state."""
 
@@ -82,7 +90,7 @@ def build_project_progress_snapshot_from_state(
     ]
     done.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
     progress_items: list[dict[str, Any]] = []
-    for index, item in enumerate(done[:6]):
+    for index, item in enumerate(done):
         summary = " ".join(
             str(
                 item.get("evidence") or item.get("note") or item.get("text") or ""
@@ -130,13 +138,29 @@ def build_project_progress_snapshot_from_state(
         )
     if not progress_items:
         return None
-    return {
+    snapshot: dict[str, Any] = {
         "schema_version": "periodic_report_project_progress_projection_v0",
         "goal_id": goal_id,
         "observed_at": completed_at,
         "language": "zh-CN",
         "items": progress_items,
     }
+    if publication_cursor is not None:
+        incremental = select_incremental_project_progress(
+            snapshot,
+            cursor=publication_cursor,
+        )
+        if incremental is None:
+            return None
+        snapshot = incremental
+    outcome_items = [
+        item for item in snapshot["items"] if item.get("content_kind") == "outcome"
+    ][:6]
+    next_items = [
+        item for item in snapshot["items"] if item.get("content_kind") == "next_action"
+    ][:1]
+    snapshot["items"] = outcome_items + next_items
+    return snapshot
 
 
 __all__ = [

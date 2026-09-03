@@ -50,6 +50,37 @@ consuming the result or starting a verifier, because the solver may exit while
 leaving detached descendants behind. A runner without that lifecycle must fail
 closed before invoking `agent-phase`.
 
+### Bounded continuation decision
+
+When a benchmark treatment deliberately adds LoopX-governed continuation, keep
+process launch and progress observation in the runner and ask LoopX only for the
+next disposition:
+
+```bash
+loopx benchmark continuation-decision \
+  --progress-json .local/private-run/public-progress.json \
+  --expected-first-prompt-sha256 "$EXPECTED_PROMPT_SHA256" \
+  --observed-first-prompt-sha256 "$OBSERVED_PROMPT_SHA256" \
+  --expected-total-unit-count 5 \
+  --previous-completed-unit-count 2 \
+  --completed-segment-count 1 \
+  --max-agent-segments 2 \
+  --elapsed-ms 300000 \
+  --total-budget-ms 7200000 \
+  --format json
+```
+
+The command is read-only. It accepts only aggregate public progress counts and
+returns `continue`, `stop_complete`, `stop_prompt_mismatch`,
+`stop_progress_regression`, `stop_task_shape_mismatch`, `stop_round_limit`, or
+`stop_time_budget`, plus a fair-share timeout for the next segment. The runner
+must give the first solver
+segment the complete original task prompt, freeze the initial unit count, and supply
+matching independently calculated digests. Later prompts may add
+only public progress; they must not disclose verifier output or hidden evaluation.
+The runner remains responsible for invoking the next agent segment, measuring the
+shared total budget, preserving containment, and collecting evidence.
+
 ## Source revision admission
 
 A long-running campaign can keep launching from an old installed checkout after
@@ -286,6 +317,38 @@ treatment gate. A study that preregisters a role-based factor owns that narrow
 adapter check; it must not promote the check into a default LoopX requirement.
 
 ## Integrity qualification
+
+### TraeX evidence capture
+
+TraeX `exec --json` emits an automation-facing stdout JSONL stream rather than a
+complete copy of its archived session. Convert that private stream into ATIF before
+integrity qualification, and optionally provide the matching private archived JSONL
+for an independently observed runtime model route:
+
+```bash
+loopx benchmark traex-evidence \
+  --source-jsonl .local/private-run/traex-stdout.jsonl \
+  --route-source-jsonl .local/private-run/traex-session.jsonl \
+  --atif-output .local/private-run/agent/trajectory.json \
+  --route-receipt-output .local/private-run/public/model-route.json \
+  --requested-model GPT-5.4 \
+  --require-runtime-route \
+  --execute --format json
+```
+
+Without `--execute`, the command validates and previews without writing. The private
+ATIF retains tool arguments and observations for local integrity analysis. The route
+receipt contains only compact requested and observed route labels and one of
+`runtime_route_verified`, `runtime_route_mismatch`, `runtime_route_ambiguous`, or
+`route_requested_not_runtime_audited`; it never contains prompts, raw tool content,
+or paths. Stdout JSONL normally has no runtime route event, so omitting
+`--route-source-jsonl` does not prove which model ran. When a separate archive is
+supplied, its session id must exactly match the stdout `thread.started` id. The
+converter covers the observed TraeX command and file-change stdout events plus
+archived function-call and custom-tool-call pairs; an unknown action-bearing stdout
+or archive item fails closed rather than producing a partial audit trajectory. This
+command does not launch TraeX, read
+verifier data, score a run, or publish either artifact.
 
 Run integrity qualification after the agent phase and after the runner has produced
 its isolation attestation. The trajectory and any sensitive values remain private
@@ -699,9 +762,12 @@ loopx benchmark concurrency-release \
 Configuration, admission, and release are project-local, locked, and atomic.
 `max-active-cases` is the hard ceiling; `target-active-cases` is desired occupancy.
 Below target, status reports the exact gap, a preferred arm group, and
-`next_action=backfill_to_target`. `active_counts` is an admission ledger, not
-runtime proof. On each launch, terminal or runner-invalid transition, and a bounded
-periodic cadence, pass exact-job receipt and runner-owner facts through
+`next_action=backfill_to_target`. At target, new admission fails closed with
+`target_capacity_exhausted`. When target is lowered below current occupancy, status
+reports `next_action=drain_to_target`; no active run is terminated, and replacement
+admission remains closed until occupancy falls below target. `active_counts` is an
+admission ledger, not runtime proof. On each launch, terminal or runner-invalid
+transition, and a bounded periodic cadence, pass exact-job receipt and runner-owner facts through
 `runtime-observation`. Apply its typed terminal or runner-invalid transition before
 releasing that reservation, then backfill the reported gap.
 
@@ -711,14 +777,67 @@ capacity, file descriptors, persistent storage, or provider capacity, enable
 fresh `benchmark_resource_headroom_receipt_v0`. The provider observes its own
 environment and supplies only typed `sufficient`, `insufficient`, or `unresolved`
 checks plus a validity window of at most 15 minutes. Missing, expired, future,
-unresolved, or
-insufficient receipts fail closed before the slot is reserved. LoopX never records
-raw metrics, paths, provider logs, or the receipt in the envelope, and the receipt
-does not grant launch authority.
+unresolved, or insufficient receipts fail closed before the slot is reserved. Each
+check must observe the runner-resolved resource actually consumed by the launch—for
+example its profile, cache, scratch, and artifact filesystems—not merely a generic
+host default such as `/tmp`; if that binding cannot be proven, report `unresolved`.
+LoopX never records raw metrics, paths, provider logs, or the receipt in the
+envelope, and the receipt does not grant launch authority.
 
 Read back the gate with `concurrency-status`. To disable it, rerun
 `concurrency-configure` with the same capacity values and omit
 `--require-resource-headroom-receipt`; existing active reservations are preserved.
+
+To ramp toward the hard ceiling without guessing a new occupancy on every monitor
+cycle, feed compact runner-owned health into the adaptive tuner. It uses additive
+increase after consecutive saturated healthy windows and subtractive decrease on
+launch, provider-capacity, runner-invalid, or typed resource-pressure evidence:
+
+```bash
+loopx benchmark concurrency-tune \
+  --goal-id <goal-id> \
+  --feedback-json concurrency-feedback.json \
+  --resource-headroom-json resource-headroom.json \
+  --saturated-healthy-windows-required 2 \
+  --increase-step 1 \
+  --decrease-step 1 \
+  --execute \
+  --format json
+```
+
+`concurrency-tune` changes only `target-active-cases`. The configured
+`max-active-cases`, baseline/test caps, and reserved test slots remain
+operator-owned. Lowering the target never terminates an active run; it only prevents
+replacement admissions until occupancy falls below the new target. Missing, stale,
+future, or unresolved feedback/headroom produces a hold; malformed input fails closed
+without a write. Feedback also carries the exact `updated_at` revision of the
+concurrency envelope it observed. Any configure, target change, admission, or release
+invalidates that receipt, so one healthy window cannot be replayed across target
+levels. A runner may preserve its healthy-window streak across ordinary campaign
+churn only when the transition is a qualified terminal run followed by a successful
+refill and the whole observation window has no launch failure, provider-capacity
+rejection, runner-invalid transition, or typed resource pressure. It must then issue
+new feedback bound to the post-refill envelope revision; the pre-transition receipt
+remains invalid. Reset the streak for any failed refill, unresolved terminal state,
+or pressure signal. Preview
+is the default; `--execute` atomically writes the selected target. The runner remains
+responsible for measuring resources, constructing `benchmark_concurrency_feedback_v0`,
+and launching admitted work; raw metrics and receipts are never persisted.
+
+```json
+{
+  "schema_version": "benchmark_concurrency_feedback_v0",
+  "observed_envelope_updated_at": "2026-09-01T03:49:30Z",
+  "window_started_at": "2026-09-01T03:50:00Z",
+  "observed_at": "2026-09-01T04:00:00Z",
+  "expires_at": "2026-09-01T04:05:00Z",
+  "saturated_healthy_window_streak": 2,
+  "launch_attempts": 1,
+  "launch_failures": 0,
+  "provider_capacity_rejections": 0,
+  "runner_invalid_transitions": 0
+}
+```
 
 ```json
 {
@@ -741,7 +860,9 @@ shared authority instead of configuring one envelope per host.
 At campaign startup, create the capability packet's
 `concurrency_occupancy.monitor_todo_template` as one goal-scoped
 `continuous_monitor` todo. This preserves the obligation to notice and fill safe
-capacity without granting launch authority. The runner still owns launch, liveness,
+capacity without granting launch authority. On material monitor windows, preview
+`concurrency-tune`; execute its target change only when the runner-authorized campaign
+has opted into adaptive occupancy. The runner still owns launch, liveness,
 termination, credentials, verifier ordering, scoring, upload, and submission.
 
 ## Experiment board
@@ -835,12 +956,67 @@ of the benchmark lifecycle, not an optional cleanup pass. The catalog entry is a
 guidance template rather than a scheduler: the benchmark startup provider creates
 the todo, and the registered monitor runtime owns its cadence.
 
+### Monitor-to-advancement handoff
+
+A benchmark `continuous_monitor` is an observation and control-plane lane. Do not
+put repository delivery, runner repair, experiment redesign, or PR work only in
+the monitor text and expect it to execute. When a monitor poll discovers material
+bounded work, record the transition and create an independent executable successor
+in one writeback:
+
+```bash
+loopx quota monitor-poll \
+  --goal-id <goal-id> \
+  --todo-id <monitor-todo-id> \
+  --agent-id <registered-agent> \
+  --result-hash <public-safe-hash> \
+  --material-change \
+  --next-agent-todo "<bounded public-safe work>" \
+  --next-action-kind <action-kind> \
+  --next-task-repository <git-repository> \
+  --next-required-capability <capability> \
+  --execute \
+  --format json
+```
+
+The monitor remains open, while the new `advancement_task` enters ordinary claim,
+lease, validation, and delivery lifecycle. The poll itself spends no delivery
+quota. An unchanged poll creates no successor.
+
+When the main campaign Todo must remain visible but cannot advance until a monitor
+generation changes—for example, target occupancy is full—keep that Todo `open` and
+pair the wait with an already-created independent runnable successor:
+
+```bash
+loopx todo update \
+  --goal-id <goal-id> \
+  --todo-id <waiting-advancement-todo-id> \
+  --agent-id <registered-agent> \
+  --status open \
+  --resume-when monitor_changed:<monitor-todo-id> \
+  --successor-todo-id <independent-runnable-successor-id> \
+  --reason "<public-safe external-wait rationale>" \
+  --format json
+```
+
+The resume condition removes the waiting Todo from runnable selection until the
+monitor records a newer material-change generation. Do not mark this typed external
+wait `blocked`, and do not use the monitor itself as the runnable successor.
+
 A material user update should include the current countable arm and pair coverage,
 aggregate primary metric by arm, binary outcomes when the benchmark exposes them,
-improved/flat/regressed pair counts, and the new causal insight or next probe. Derive
-these score fields from the experiment board or benchmark-owned scoring projection,
-not from raw private evidence. Do not send a repetitive update when no score,
-coverage, direction, insight, or material runner state changed.
+feature and preservation guardrail totals when the benchmark exposes them,
+improved/flat/regressed pair counts, and the new causal insight or next probe.
+When effort stratification is useful, preregister benchmark-appropriate fixed
+boundaries and assign every matched case from the baseline arm's
+`effort.duration_ms`. Reuse that same case bucket for every candidate arm; candidate
+duration must not define difficulty because it is itself a treatment outcome. Per
+bucket, report pair count, primary/binary/feature/preservation metrics, and
+improved/flat/regressed counts. Treat these strata as descriptive sensitivity
+analysis unless the study preregistered a causal subgroup claim. Derive score fields
+from the experiment board or benchmark-owned scoring projection, not from raw
+private evidence. Do not send a repetitive update when no score, coverage,
+direction, insight, or material runner state changed.
 Only public-safe conclusions from the private post-run insight may enter that user
 update; raw evaluation evidence remains private.
 
@@ -941,6 +1117,182 @@ Keep the artifact and its raw evidence in private benchmark storage. Publish onl
 redacted reusable conclusion. Do not feed case-specific hidden evidence into a
 later scored solver unless the experiment explicitly declares that feedback loop;
 use held-out cases before making a general product claim.
+
+### Treatment continuation receipt
+
+A qualified treatment startup and a countable score do not prove that the treatment
+control remained active after startup. After the terminal analyst has reviewed the
+authorized evidence, reduce only compact mechanism facts:
+
+```bash
+loopx benchmark treatment-continuation-receipt \
+  --observation-json <compact-post-run-observation.json> \
+  --format json
+```
+
+```json
+{
+  "schema_version": "benchmark_treatment_continuation_observation_v0",
+  "treatment_applicable": true,
+  "startup_state": "qualified",
+  "observation_complete": true,
+  "post_start_control_events": {
+    "todo_transition_count": 1,
+    "technical_replan_count": 0,
+    "control_closeout_count": 1
+  },
+  "terminal_control_state": "settled",
+  "precommit_validation_state": "observed"
+}
+```
+
+The observation names startup state, whether the review is complete, counts of
+post-start Todo transitions, technical replans, and control closeouts, terminal
+control settlement, and whether pre-commit validation was observed. Count a Todo
+transition only when it advances or revises task-facing technical work before the
+result is fixed. Count a technical replan only when it changes that technical
+course. Record terminal-only Todo settlement, replan bookkeeping, and final
+closeout under `control_closeout_count`; those events are visible but do not prove
+continued technical control. The observation contains no task text, trajectory
+content, paths, run identity, verifier output, or score.
+
+The receipt classifies the mechanism as `sustained`, `startup_only`, `unknown`, or
+`not_applicable`. Here, `sustained` means at least one qualifying task-facing Todo
+transition or technical replan was observed after qualified startup and before the
+result was fixed. Terminal-only control never establishes `sustained`, even when
+terminal settlement succeeds; the existing total and per-kind event counts still
+record that closeout activity. Absence becomes `startup_only` only when the
+authorized post-run observation is complete. This receipt is analysis-only: it
+never changes score countability, integrity qualification, treatment fidelity, or
+matched-pair eligibility.
+
+## Study manifest, local upload simulation, and dashboard packet
+
+Use `benchmark_study_manifest_v0` when a benchmark adapter needs to declare its
+case set, arms, factors, native metric meanings, and pinned source revisions once.
+The manifest describes the study; it does not score, launch, retry, or mutate a run.
+A simple baseline/treatment study normally declares one two-level factor. A
+factorized study declares each factor independently and assigns every arm to one
+level of every factor.
+
+Validate the public-safe manifest before producing upload records:
+
+```bash
+loopx benchmark study-validate \
+  --manifest-json <study-manifest.json> \
+  --format json
+```
+
+An adapter can then wrap one allowlisted record at a time: the manifest, an existing
+`benchmark_experiment_board_row_v0`, a redacted
+`benchmark_case_insight_projection_v0`, or an existing
+`benchmark_runtime_observation_v0`.
+
+```bash
+loopx benchmark upload-envelope \
+  --payload-json <public-safe-record.json> \
+  --record-kind experiment_board_row \
+  --producer-id <adapter-id> \
+  --producer-version <adapter-version> \
+  --benchmark-id <benchmark-id> \
+  --study-id <study-id> \
+  --idempotency-key <stable-key> \
+  --observed-at <iso-8601-timestamp> \
+  --source-revision <adapter-revision> \
+  --format json > <upload-envelope.json>
+```
+
+Before implementing a remote provider, exercise the transport lifecycle against
+the built-in local simulation. Preview is the default and performs no write;
+`--execute` appends to the explicitly named JSONL store under a file lock. Neither
+mode performs network access or grants upload/submission authority.
+
+```bash
+loopx benchmark upload-local \
+  --envelope-json <upload-envelope.json> \
+  --store <simulation.jsonl> \
+  --format json
+
+loopx benchmark upload-local \
+  --envelope-json <upload-envelope.json> \
+  --store <simulation.jsonl> \
+  --execute --format json
+
+loopx benchmark upload-readback \
+  --store <simulation.jsonl> \
+  --record-id <record-id> \
+  --format json
+```
+
+Retries using the same producer, benchmark, study, and idempotency key are accepted
+only when the payload digest is unchanged. A corrected record uses a new idempotency
+key and explicitly names `--supersedes-record-id`; experiment-board corrections must
+also obey existing legal run-state transitions. A study manifest is immutable
+comparison intent: change its design under a new `study_id` instead of superseding it.
+Supersession also stays within the producer that authored the prior record.
+
+### Upload a terminal case insight
+
+`benchmark_case_insight_projection_v0` is the public-safe child record for one
+exact run. Upload the run's terminal `benchmark_experiment_board_row_v0` first;
+its `insight.status` must be `complete`, and the projection's `case_id`, `run_id`,
+and `outcome_status` must match that active terminal row. The run identity already
+resolves its arm, so the insight cannot invent a second arm binding. Because the
+projection has no metric, countability, integrity, or treatment-fidelity fields,
+accepting it cannot change the run's score authority.
+
+This is an intentionally strict upload-ordering rule: orphan, pre-terminal, and
+outcome-mismatched insight records that older local simulations accepted are now
+rejected. Re-upload the terminal run row before uploading its insight; no existing
+score or experiment-board authority is rewritten.
+
+```json
+{
+  "schema_version": "benchmark_case_insight_projection_v0",
+  "benchmark_id": "example-benchmark@1",
+  "study_id": "example-study-v1",
+  "case_id": "case-1",
+  "run_id": "treatment-case-1-r1",
+  "outcome_status": "completed",
+  "failure_class": "none",
+  "causal_summary": "The implementation satisfied the declared contract after an independent boundary check.",
+  "expectedness": "expected",
+  "implication": "Retain the independent boundary check in this arm.",
+  "next_probe": "Repeat on a different public case family.",
+  "confidence": "high",
+  "evidence_refs": ["public-receipt:abc123"],
+  "privacy_classification": "public_safe",
+  "producer_redaction_attested": true
+}
+```
+
+Wrap it with the same `benchmark upload-envelope` command above using
+`--record-kind case_insight_projection`, then preview, execute, and read it back
+through the same local provider flow. The private analyst may use task text,
+trajectory, final workspace, hidden evaluation, and verifier details only after
+the run is terminal; those sources are reduced into the bounded fields and
+public-safe evidence handles above and are never uploaded themselves.
+
+Finally, derive a read-only `benchmark_study_dashboard_v0` packet. It exposes
+campaign, arm, case, and run projections with explicit denominators and provisional
+coverage, while delegating scores and matched comparisons to the experiment board.
+For a qualified Goal/LoopX four-arm study, pass the compact four-arm contract to
+reuse the existing factorial reducer.
+
+```bash
+loopx benchmark study-dashboard \
+  --manifest-json <study-manifest.json> \
+  --store <simulation.jsonl> \
+  [--four-arm-contract-json <compact-four-arm-contract.json>] \
+  --format json
+```
+
+Adapters preserve their benchmark's native metric names, units, directions, and
+totals. Core fields are not software-engineering specific, so the same flow applies
+to two-arm, four-arm, and other declared benchmark studies. Raw tasks, trajectories,
+logs, hidden evaluator material, verifier tails, credentials, and local paths have
+no upload schema slot; producers must reduce post-run analysis to the redacted
+insight contract.
 
 ## Related commands
 

@@ -47,6 +47,7 @@ TODO_DECISION_SCOPE_KEY_PATTERN = re.compile(r"^(?:\*|[a-z0-9][a-z0-9_.:@*/-]{0,
 TODO_WRITE_SCOPE_MAX_CHARS = 160
 TODO_MONITOR_METADATA_FIELDS = (
     "target_key",
+    "monitor_effect_id",
     "cadence",
     "next_due_at",
     "expires_at",
@@ -1252,6 +1253,7 @@ def format_todo_metadata_line(
     resume_monitor_generation: int | str | None = None,
     no_followup: bool | None = None,
     target_key: str | None = None,
+    monitor_effect_id: str | None = None,
     cadence: str | None = None,
     next_due_at: str | None = None,
     expires_at: str | None = None,

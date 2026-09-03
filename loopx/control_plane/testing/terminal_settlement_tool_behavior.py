@@ -22,6 +22,7 @@ from .doubao_model_behavior_actor import (
 )
 from .model_tool_behavior import (
     DoubaoExecToolClient,
+    QUOTA_FIRST_TOOL_INSTRUCTION,
     argument_value,
     digest_text,
     execute_loopx_cli,
@@ -829,14 +830,18 @@ class DoubaoTerminalSettlementToolBehaviorActor:
                     "content": (
                         "You are Codex running one LoopX heartbeat. Follow the "
                         "production heartbeat task and choose each next action "
-                        "from the latest tool result. The exec tool's current "
-                        "workspace is the connected goal project root, so task "
+                        "from the latest tool result. "
+                        f"{QUOTA_FIRST_TOOL_INSTRUCTION}"
+                        "The exec tool's current workspace is the connected goal "
+                        "project root, so task "
                         "paths are directly addressable. Read the exact proof target "
-                        "once with `cat`; do not rediscover, list, or re-read the "
-                        "workspace after it validates. Use one command per tool call. "
-                        "After validation, fill the quota-projected writeback "
-                        "placeholders from the proof's typed fields and follow the "
-                        "ordered settlement plan."
+                        "once with `cat`; the host validates that tool result. Do not "
+                        "run python, jq, test, echo, another validation command, or "
+                        "re-read the workspace afterward. Use one command per tool "
+                        "call. The tool call immediately after the proof read must "
+                        "fill and execute quota-projected next_cli_actions[0] from "
+                        "the proof's typed fields, then follow the ordered settlement "
+                        "plan."
                     ),
                 },
                 {"role": "user", "content": fixture.task_body},

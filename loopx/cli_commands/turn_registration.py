@@ -85,7 +85,7 @@ def register_turn_commands(
     _add_turn_decision_arguments(
         run_once,
         default_host="generic-cli",
-        host_choices=["codex-cli", "generic-cli"],
+        host_choices=["codex-cli", "dsh", "generic-cli"],
         execution_mode_choices=["isolated-headless"],
         default_execution_mode="isolated-headless",
     )
@@ -130,6 +130,35 @@ def register_turn_commands(
         choices=["read-only", "workspace-write"],
         default="read-only",
         help="Sandbox for a new Codex CLI session; resume preserves its original session policy.",
+    )
+    run_once.add_argument(
+        "--dsh-provider",
+        help="Provider for the built-in dsh host; defaults to DSH_PROVIDER.",
+    )
+    run_once.add_argument(
+        "--dsh-model",
+        help="Model for the built-in dsh host; defaults to DSH_MODEL.",
+    )
+    run_once.add_argument("--dsh-max-tokens", type=int)
+    run_once.add_argument(
+        "--dsh-home",
+        help=(
+            "Explicit DeepSeek Harness home; defaults to DSH_HOME or "
+            "<project>/.local/.dsh-sessions."
+        ),
+    )
+    run_once.add_argument(
+        "--dsh-cordis",
+        help="cordis.yml used by the built-in dsh host runtime.",
+    )
+    run_once.add_argument("--dsh-runtime-bin")
+    run_once.add_argument(
+        "--dsh-runner",
+        help=(
+            "Explicit runner hook intended for hermetic tests; this is not a "
+            "permission boundary. Path to a Python module exposing "
+            "run_dsh_turn(...) used instead of the DeepSeek Harness SDK."
+        ),
     )
     run_once.add_argument("--timeout-seconds", type=float, default=120.0)
     run_once.add_argument(

@@ -199,6 +199,6 @@ agent trajectories do not belong in that public record.
 
 This charter does not create a legal entity, employment relationship,
 copyright assignment, or trademark registration. See
-[`AUTHORS.md`](../AUTHORS.md) for attribution,
-[`TRADEMARKS.md`](../TRADEMARKS.md) for name and mark usage, and
+[Authors and Contributors](../docs/project/authors.md) for attribution,
+[Name and Marks](../docs/project/trademarks.md) for name and mark usage, and
 [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the contribution workflow.

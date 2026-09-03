@@ -11,13 +11,14 @@ from loopx.control_plane.heartbeat.rules import (
 from loopx.control_plane.quota.live_decision import (
     bind_scheduler_followup_cli_routes,
 )
-from loopx.control_plane.scheduler.ack import build_codex_app_scheduler_ack_event
+from loopx.control_plane.quota.scheduler_ack import (
+    record_quota_scheduler_ack_for_decision,
+)
 from loopx.control_plane.scheduler.execution_context import (
     scheduler_execution_context_for_runtime_profile,
 )
 from loopx.control_plane.scheduler.scheduler_hint import build_scheduler_hint
 from loopx.upgrade import resolve_codex_app_automation_rrule
-
 
 GOAL_ID = "fallback-hint-goal"
 AGENT_ID = "codex-fixture"
@@ -78,13 +79,23 @@ def _hint(
     )
 
 
-def _ack_state(hint: dict, *, applied_rrule: str, generated_at: datetime) -> dict:
-    event = build_codex_app_scheduler_ack_event(
+def _ack_state(
+    hint: dict,
+    *,
+    runtime_root: Path,
+    applied_rrule: str,
+    generated_at: datetime,
+) -> dict:
+    event = record_quota_scheduler_ack_for_decision(
         {"goal_id": GOAL_ID, "scheduler_hint": hint},
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
         agent_id=AGENT_ID,
+        execute=True,
         applied_rrule=applied_rrule,
         generated_at=generated_at.isoformat(),
     )
+    assert event["ok"] is True, event
     return event["scheduler_ack_event"]["scheduler_state"]
 
 
@@ -124,11 +135,16 @@ def test_apply_needed_without_automation_id_projects_deterministic_fallback() ->
     assert "automation_id_projected" in fallback["reason"]
 
 
-def test_settled_cadence_omits_fallback_hint() -> None:
+def test_settled_cadence_omits_fallback_hint(tmp_path: Path) -> None:
     now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     first = _hint(_active_decision(), automation_id="loopx")
     applied_rrule = first["codex_app"]["recommended_rrule"]
-    settled = _ack_state(first, applied_rrule=applied_rrule, generated_at=now)
+    settled = _ack_state(
+        first,
+        runtime_root=tmp_path,
+        applied_rrule=applied_rrule,
+        generated_at=now,
+    )
 
     second = _hint(
         _active_decision(),

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from loopx.control_plane.testing.model_tool_behavior import (
+    QUOTA_FIRST_TOOL_INSTRUCTION,
     scripted_assistant_response as _stop_response,
     scripted_exec_tool_response as _tool_response,
 )
@@ -99,9 +100,11 @@ def test_real_quota_notice_and_selected_successor_execute_in_one_tool_loop(
     ] is True
     assert "response_plan" not in quota_result["interaction_contract"]
     system_prompt = requests[0]["messages"][0]["content"]
+    assert QUOTA_FIRST_TOOL_INSTRUCTION in system_prompt
     assert "grants no authority to inspect or act on the user-gate target" in (
         system_prompt
     )
+    assert "next tool call must be `cat <that exact path>`" in system_prompt
     assert "After the selected Todo tool succeeds, call no more tools" in (
         system_prompt
     )

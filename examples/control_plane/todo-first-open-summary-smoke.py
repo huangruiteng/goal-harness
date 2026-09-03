@@ -90,6 +90,7 @@ def build_truncated_todo_group() -> dict:
     assert all(not item["done"] for item in group["items"][:4]), group
     assert all(item["done"] for item in group["items"][4:]), group
     assert group["open_count"] == 4, group
+    assert group["advancement_done_count"] == 13, group
     assert group["first_open_items"][0]["index"] == 17, group
     assert group["first_open_items"][0]["text"] == APPENDED_P0_TODO, group
     assert group["first_open_items"][0]["status"] == "open", group
@@ -161,6 +162,7 @@ def build_blocked_priority_fallback_status_payload() -> dict:
     assert agent_todos["first_executable_items"][0]["text"] == FALLBACK_TODO, agent_todos
     asset_summary = project_asset_todo_summary(agent_todos, role="agent")
     assert asset_summary is not None, agent_todos
+    assert asset_summary["advancement_done_count"] == 0, asset_summary
     direct_summary = direct_project_asset_todo_summary(agent_todos, role="agent")
     assert direct_summary == asset_summary, (direct_summary, asset_summary)
     attention_item = {

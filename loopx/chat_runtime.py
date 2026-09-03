@@ -13,14 +13,16 @@ from typing import Any, Callable, Protocol
 from .chat_acp import ACPStdioAdapter
 from .chat_agent import CodexChatAgentError, CodexChatAgentSession, CodexChatTimeoutError
 from .chat_endpoints import AgentEndpointRegistry
-from .chat_store import CHAT_SESSION_MODE_ATTACHED, ChatSessionStore, utc_now
+from .chat_store import (
+    CHAT_SESSION_MODE_ATTACHED,
+    TERMINAL_TURN_STATES,
+    ChatSessionStore,
+    utc_now,
+)
 from .chat_providers import ClaudeCodeAdapter, direct_model_from_environment
 
 
 EventSink = Callable[[str, dict[str, Any]], None]
-TERMINAL_TURN_STATES = {"completed", "interrupted", "timed_out", "failed"}
-
-
 class ChatRuntimeAdapter(Protocol):
     @property
     def upstream_thread_id(self) -> str: ...
@@ -275,6 +277,14 @@ class ChatRuntimeController:
         ]
         return [*builtins, *(endpoint.public_summary() for endpoint in self.endpoint_registry.list())]
 
+    @staticmethod
+    def _managed_upstream_mode(session: dict[str, Any]) -> str:
+        return (
+            "chat"
+            if session.get("agent_id") == "codex"
+            else str(session.get("upstream_mode") or "default")
+        )
+
     def _start_adapter(
         self,
         *,
@@ -485,19 +495,20 @@ class ChatRuntimeController:
             ) from exc
         with self.lock:
             self.adapters[session_id] = adapter
-        self.store.update_session(
-            session_id,
-            status="ready",
-            active_turn_id=None,
-            upstream_thread_id=adapter.upstream_thread_id,
-            upstream_mode=(
-                "chat"
-                if session.get("agent_id") == "codex"
-                else str(session.get("upstream_mode") or "default")
-            ),
-            last_activity_at=utc_now(),
-            last_error_code=None,
-        )
+        try:
+            self.store.restore_managed_session_if_idle(
+                session_id,
+                upstream_thread_id=adapter.upstream_thread_id,
+                upstream_mode=self._managed_upstream_mode(session),
+            )
+        except KeyError:
+            with self.lock:
+                owns_adapter = self.adapters.get(session_id) is adapter
+                if owns_adapter:
+                    self.adapters.pop(session_id, None)
+            if owns_adapter:
+                adapter.close_session()
+            raise
         return adapter
 
     def submit_turn(
@@ -979,6 +990,9 @@ class ChatRuntimeController:
             return False
         if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
             return self.store.close_attached_session(session_id)
+        closed = self.store.close_managed_session(session_id)
+        if not closed:
+            return False
         with self.lock:
             adapter = self.adapters.pop(session_id, None)
             event_buffers = [
@@ -990,7 +1004,6 @@ class ChatRuntimeController:
             event_buffer.close()
         if adapter is not None:
             adapter.close_session()
-        self.store.update_session(session_id, status="closed", active_turn_id=None)
         return True
 
     def resume_session(self, *, session_id: str, work_dir: Path, objective: str) -> dict[str, Any]:
@@ -1007,17 +1020,30 @@ class ChatRuntimeController:
                 last_error_code=None,
             )
             return restored
-        self.store.update_session(
+        with self.lock:
+            current = self.adapters.get(session_id)
+            adapter_healthy = current is not None and current.healthcheck()
+        session, active_turn_preserved = self.store.prepare_managed_session_resume(
             session_id,
-            status="stale",
-            active_turn_id=None,
-            last_error_code=None,
+            preserve_active_turn=adapter_healthy,
         )
-        self._ensure_adapter(session, work_dir=work_dir, objective=objective)
-        restored = self.store.load_session(session_id)
-        if restored is None:
-            raise KeyError("chat session was not found")
-        return restored
+        if active_turn_preserved:
+            return session
+        adapter = self._ensure_adapter(session, work_dir=work_dir, objective=objective)
+        try:
+            return self.store.restore_managed_session_if_idle(
+                session_id,
+                upstream_thread_id=adapter.upstream_thread_id,
+                upstream_mode=self._managed_upstream_mode(session),
+            )
+        except KeyError:
+            with self.lock:
+                owns_adapter = self.adapters.get(session_id) is adapter
+                if owns_adapter:
+                    self.adapters.pop(session_id, None)
+            if owns_adapter:
+                adapter.close_session()
+            raise
 
     def close(self) -> None:
         self.closed.set()

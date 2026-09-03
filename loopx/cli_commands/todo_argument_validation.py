@@ -165,7 +165,9 @@ def register_todo_linkage_arguments(
             "condition such as todo_done:todo_ab12cd34ef56, "
             "monitor_changed:todo_monitor123, pr_merged:#532, or "
             "capacity_available:short_pool. monitor_changed binds the monitor's "
-            "current material-change generation and resumes only after it advances."
+            "current material-change generation and resumes only after it advances; "
+            "the waiting advancement todo must remain status=open and pair with an "
+            "independent runnable --successor-todo-id."
         ),
     )
     todo_parser.add_argument(

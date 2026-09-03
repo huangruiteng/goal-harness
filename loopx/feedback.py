@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .history import load_index, load_registry
+from .history import _chronology_key, load_index, load_registry
 from .paths import resolve_runtime_root
 from .registry import registry_goals, resolve_state_file
 
@@ -213,7 +213,13 @@ def select_run(runs: list[dict[str, Any]], run_generated_at: str | None) -> dict
             if str(run.get("generated_at") or "") == run_generated_at:
                 return run
         raise ValueError(f"run not found for generated_at={run_generated_at}")
-    return sorted(runs, key=lambda item: str(item.get("generated_at") or ""), reverse=True)[0]
+    return max(
+        enumerate(runs),
+        key=lambda item: (
+            *_chronology_key(item[1].get("generated_at")),
+            item[0],
+        ),
+    )[1]
 
 
 def find_registry_goal(registry: dict[str, Any], goal_id: str) -> dict[str, Any] | None:

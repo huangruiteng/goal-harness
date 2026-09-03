@@ -250,6 +250,8 @@ next-action selection should prefer that repair-mode candidate over ordinary
 runnable work in the same claim/priority bucket so capability-building todos do
 not require fragile active-state reordering.
 
+### Machine-readable resume conditions
+
 Deferred todos may carry a machine-readable resume condition with
 `resume_when=<token>`. Supported conditions are:
 
@@ -270,6 +272,18 @@ Deferred todos may carry a machine-readable resume condition with
   material-change generation. The transition binds the monitor's current
   generation as a baseline, so unchanged polls, note edits, and replay of the
   same material result do not wake the todo.
+
+The monitor and the delivery it discovers are separate work items. A
+`continuous_monitor` is observe-only; it never becomes the runnable delivery.
+On a material observation, use `quota monitor-poll --material-change
+--next-agent-todo ... --next-action-kind ...` to emit an independent open
+`advancement_task`. A waiting advancement Todo stays `status=open` and pairs
+`resume_when=monitor_changed:<monitor_todo_id>` with that independent Todo via
+`--successor-todo-id`. The resume condition—not `status=blocked`—keeps the
+waiting Todo out of runnable selection until the monitor generation advances.
+Relevant command results expose the compact
+`monitor_advancement_authoring_v0` contract so an Agent can recover this
+sequence without parsing documentation prose.
 
 Open todos may also carry `resume_when` when they are visible but not yet
 executable. Until the parsed `resume_condition.satisfied` value is true, status
@@ -369,7 +383,10 @@ This succession decision is durable Todo state. A later progress observation,
 vision ACK, coverage-exhausted result, or rewritten rationale cannot substitute
 for it. Every new completion therefore retains an opaque completion identity.
 A quota-bound completion still permits only the receipt-backed same-turn
-`todo complete --no-follow-up` recovery. An ordinary unscoped completion gets a
+`todo complete` transition for agent advancement work. Complete the matching
+accountable `refresh-state` and `quota spend-slot` first; explicit
+`same_agent_non_delivery` work, monitors, user actions, and user gates keep
+their existing lifecycle paths. An ordinary unscoped completion gets a
 stable `local_completion_*` identity; if a later `refresh-state` discovers that
 the finished Goal has no real successor, its typed rejection may project
 `--completion-identity-key` for one direct lifecycle reentry. That command is
@@ -378,6 +395,12 @@ valid only for the exact already-completed Todo, its matching local identity,
 It cannot be supplied for an open Todo or used as a quota turn identity.
 Otherwise add/link a real successor. Do not create a user gate merely to
 silence a succession warning.
+
+Compatibility host adapters whose established transaction completes the Todo
+before writing the same-turn refresh and quota receipts must explicitly mark
+their non-repository work `same_agent_non_delivery`. Repository advancement
+through those adapters fails closed with a typed settlement blocker until the
+adapter adopts a writeback-and-spend-before-completion transaction.
 
 This keeps the active checklist honest without making LoopX a heavyweight
 project-management state machine.

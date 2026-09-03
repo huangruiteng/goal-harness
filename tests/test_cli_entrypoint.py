@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -14,14 +15,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_isolated_script(script: str) -> subprocess.CompletedProcess[str]:
-	return subprocess.run(
-		[sys.executable, "-c", script],
-		cwd=REPO_ROOT,
-		env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
-		text=True,
-		capture_output=True,
-		check=False,
-	)
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
 
 def run_cli_main(
@@ -139,7 +140,7 @@ updated_at: 2026-08-28T00:00:00+00:00
 
 
 def test_version_flag_skips_full_cli_import() -> None:
-	script = """
+    script = """
 import contextlib
 import io
 import sys
@@ -155,22 +156,22 @@ assert output.getvalue().startswith("loopx ")
 assert "loopx.cli_runtime" not in sys.modules
 assert "loopx.cli" not in sys.modules
 """
-	completed = run_isolated_script(script)
+    completed = run_isolated_script(script)
 
-	assert completed.returncode == 0, completed.stderr
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_other_arguments_delegate_to_full_cli() -> None:
-	script = """
+    script = """
 from loopx.entrypoint import main
 
 raise SystemExit(main(["--format", "json", "version"]))
 """
-	completed = run_isolated_script(script)
+    completed = run_isolated_script(script)
 
-	assert completed.returncode == 0, completed.stderr
-	payload = json.loads(completed.stdout)
-	assert payload["schema_version"] == "loopx_version_v0"
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["schema_version"] == "loopx_version_v0"
 
 
 def test_top_level_help_skips_full_cli_import() -> None:
@@ -313,7 +314,108 @@ def test_release_launchers_use_lightweight_entrypoint() -> None:
 	posix_launcher = (REPO_ROOT / "scripts" / "loopx").read_text(encoding="utf-8")
 	windows_entry = (REPO_ROOT / "scripts" / "loopx_entry.py").read_text(encoding="utf-8")
 
+	assert "LOOPX_MANAGED_RELEASE_LAUNCHER_V1" in posix_launcher
+	assert "LOOPX_MANAGED_RELEASE_LAUNCHER_V1" in windows_entry
 	assert '"loopx.entrypoint"' in posix_launcher
 	assert '"loopx.entrypoint"' in windows_entry
 	assert 'else "loopx.cli"' in posix_launcher
 	assert 'else "loopx.cli"' in windows_entry
+
+
+def test_console_entrypoint_selects_only_receipt_bound_native_scheduler_followup(
+    monkeypatch,
+) -> None:
+    from loopx import entrypoint
+
+    monkeypatch.setattr(
+        shutil, "which", lambda value: "/fixture/node" if value == "node" else None
+    )
+    args = [
+        "--format",
+        "json",
+        "--runtime-root",
+        "runtime",
+        "quota",
+        "scheduler-ack-current",
+        "--goal-id",
+        "goal",
+        "--agent-id",
+        "agent",
+        "--scheduler-host-facts-chunk",
+        "facts",
+        "--turn-instance-id",
+        "turn",
+        "--execute",
+    ]
+
+    native = entrypoint._native_scheduler_followup_argv(args)
+
+    assert native is not None
+    assert native[:3] == [
+        "/fixture/node",
+        "--no-warnings",
+        "--experimental-strip-types",
+    ]
+    assert native[-len(args) :] == args
+    assert (
+        entrypoint._native_scheduler_followup_argv(
+            [
+                value
+                for value in args
+                if value != "facts" and value != "--scheduler-host-facts-chunk"
+            ]
+        )
+        is None
+    )
+    assert (
+        entrypoint._native_scheduler_followup_argv(
+            [value for value in args if value not in {"turn", "--turn-instance-id"}]
+        )
+        is None
+    )
+
+
+def test_explicit_main_argv_remains_an_in_process_compatibility_call(
+    monkeypatch,
+) -> None:
+    from loopx import entrypoint
+
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        entrypoint,
+        "_native_scheduler_followup_argv",
+        lambda _args: (_ for _ in ()).throw(AssertionError("must not process-replace")),
+    )
+    monkeypatch.setattr(
+        "loopx.cli_runtime.main",
+        lambda args: seen.append(list(args)) or 0,
+    )
+
+    assert entrypoint.main(["--format", "json", "version"]) == 0
+    assert seen == [["--format", "json", "version"]]
+
+
+def test_console_native_scheduler_followup_fails_closed_without_node(
+    monkeypatch, capsys
+) -> None:
+    from loopx import entrypoint
+
+    monkeypatch.setattr(shutil, "which", lambda _value: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "loopx",
+            "--runtime-root",
+            "runtime",
+            "quota",
+            "scheduler-ack-current",
+            "--scheduler-host-facts-chunk",
+            "facts",
+            "--turn-instance-id",
+            "turn",
+        ],
+    )
+
+    assert entrypoint.main() == 2
+    assert "requires Node.js 22.6 or newer" in capsys.readouterr().err

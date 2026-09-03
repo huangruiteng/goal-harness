@@ -1,17 +1,19 @@
 # NoKV canonical-coordination provider reference
 
 This directory contains the small, reviewable NoKV reference for
-[RFC: shared-goal authority and pluggable state provider v0](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0.md).
+[RFC: LoopX shared control-plane authority and pluggable state providers v0](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0.md).
 It is a contract example, not a shipped LoopX runtime integration or a
 production deployment claim.
 
 ## Scope
 
-The claim-only proof stores one per-goal **canonical coordination aggregate**.
-The aggregate contains only the normalized facts needed to validate an
-explicitly bootstrapped `claim_work`, the current authority revision,
-claim/lease/fence state, and a replayable receipt index. It does not implement
-the complete production lease lifecycle or migrate the current LoopX runtime.
+The reference stores one per-goal **canonical coordination aggregate** and
+exercises the Stage 3 lifecycle: `claim_work`, `renew_work`, `release_work`,
+expired-lease `reclaim_work`, stale-fence rejection, and atomic completion with
+continuation/successors. The aggregate carries the current authority revision,
+claim/lease/fence state, store-lineage binding, and replayable receipt index.
+It remains a coverage-only reference and does not migrate the current LoopX
+runtime or promote this provider to the product source of truth.
 
 The following remain outside this head:
 
@@ -116,6 +118,18 @@ pinned baseline. `contract.nokv_adapter_exception_mapping` pins the
 classification offline with fake clients that raise the 0.11.0 exception
 classes and the real outage message shapes.
 
+A fresh coordination-provider handle must be admitted with
+`open_nokv_coordination_provider(...)`. NoKV performs route admission while
+constructing `Client`, before an ordinary provider constructor could classify
+the failure. The adapter-owned helper maps that eager failure to the same
+`ProviderUnavailableError`, performs no coordination write, and never falls
+back to the file provider. The live matrix uses this path for every fresh
+provider handle. Separate clients used only to provision test workspaces and
+snapshots are outside this provider contract and cannot execute authority
+commands. The
+`contract.nokv_fresh_client_failure_is_typed` guards both construction-time and
+post-construction outages.
+
 The mapping was exercised once by hand against a live NoKV stack at that
 pin (etcd, an S3-compatible object store, `nokv serve`, and `nokv-python`
 built from the same commit): the adapter verbs and the Section 10 checks
@@ -126,15 +140,16 @@ before NoKV 0.11.0 cannot decode a 0.11.0 control-plane routing record, so
 the earlier `90883d13539e31185f0d78131989fb51912dbd7e` audit baseline is no
 longer a usable pin.
 
-Since the Stage 2 slice, the live qualification is scripted and repeatable:
-`live_e2e.py` runs one eight-scenario invariant matrix (competition, replay,
-identity mismatch, stale revision, lost response, retention, revision
-advancement) through the production `CoordinationAuthorityExecutor` against
-the file-backed control provider and, when `NOKV_COORDINATION_LIVE=1` and the
-stack variables are set, against this NoKV provider, then prints a
-public-safe parity table. Without a reachable stack the NoKV rows report
-unverified and the script stays green, so it is evidence tooling, not a
-merge gate.
+The live qualification is scripted and repeatable: `live_e2e.py` runs twelve
+shared lifecycle scenarios (including renew, reclaim after grace, stale-fence
+rejection, atomic completion/successor, competition, replay, lost response,
+retention, and revision advancement) through the production
+`CoordinationAuthorityExecutor` against the file-backed control provider and,
+when `NOKV_COORDINATION_LIVE=1` and the stack variables are set, this NoKV
+provider. One NoKV-only row performs a real commit/snapshot/restore and proves
+the restored lineage fails closed as `store_lineage_mismatch`. Without a
+reachable stack the NoKV rows report unverified and the script stays green, so
+it is evidence tooling, not a merge gate.
 
 ```bash
 python3 examples/nokv-shadow-provider/live_e2e.py
@@ -174,9 +189,9 @@ It must prove all of the following:
   contradicts the recorded fields, and on a done record that omits its
   explicit continuation, with replay-stable projections.
 
-The durable-completion probes are the read-side comparison registered by the
-RFC's later runtime qualification slice. They do not implement or qualify the
-atomic `complete_todo_with_successor` write side.
+The durable-completion probes remain the offline read-side comparison. The
+Stage 3 focused tests and live matrix qualify the matching atomic completion
+write side at the reference boundary.
 
 The nine current result tags are
 `contract.bootstrap_and_preconditions`,
@@ -187,14 +202,10 @@ The nine current result tags are
 `contract.durable_completion_projection`, and
 `contract.durable_completion_fail_closed`.
 
-The probe has no live-stack mode in this candidate. A repeatable live
-exercise would require etcd, an S3-compatible object store, `nokv serve`, and
-the NoKV Python SDK, plus separately reviewed restart and recovery assertions. An
-earlier run against the superseded last-envelope adapter is not evidence that
-the revised receipt contract passes. Do not reuse its latency, restart, or
-promotion conclusions for this implementation.
-
-The reference does not establish lease renewal/release, multi-host wake
-delivery, automatic provider promotion, HA/failover, receipt compaction or GC,
-production performance, a dynamic eligibility-projection publisher, non-empty
-write-scope overlap enforcement, or a full LoopX state migration.
+`probes.py` deliberately remains offline; use `live_e2e.py` for the real stack.
+The reference still does not establish multi-host wake delivery, automatic
+provider promotion, HA/failover, receipt compaction or GC, production
+performance, a dynamic eligibility-projection publisher, non-empty write-scope
+overlap enforcement, or a full LoopX state migration. The NoKV storage-plane
+issues linked from the RFC remain production-canary holds; a green ordered
+single-node exercise does not erase them.

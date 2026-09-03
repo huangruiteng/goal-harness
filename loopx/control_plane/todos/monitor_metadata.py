@@ -24,6 +24,7 @@ class MonitorPollObservation:
     generated_at: str
     result_hash: str
     material_change: bool
+    monitor_effect_id: str | None = None
     target_key: str | None = None
     cadence: str | None = None
     next_due_at: str | None = None
@@ -71,6 +72,58 @@ def plan_monitor_poll_metadata(
             "parseable cadence such as 30m/2h/1d"
         )
 
+    monitor_effect_id = str(observation.monitor_effect_id or "").strip()
+    existing_effect_id = str(existing.get("monitor_effect_id") or "").strip()
+    if monitor_effect_id and monitor_effect_id == existing_effect_id:
+        replay_facts = {
+            "result_hash": result_hash,
+            "material_change": "true" if observation.material_change else "false",
+            "last_checked_at": observation.generated_at,
+            "target_key": target_key,
+            "cadence": cadence,
+            "next_due_at": next_due_at or "",
+        }
+        conflicts = [
+            key
+            for key, expected in replay_facts.items()
+            if str(existing.get(key) or "").strip() != str(expected or "").strip()
+        ]
+        if conflicts:
+            raise ValueError(
+                "monitor effect identity is already bound to different "
+                f"observation fields: {', '.join(conflicts)}"
+            )
+        existing_metadata = {
+            key: existing[key]
+            for key in TODO_MONITOR_METADATA_FIELDS
+            if existing.get(key) is not None
+        }
+        return existing_metadata, {
+            "monitor_effect_id": monitor_effect_id,
+            "provider_replayed": True,
+            "result_hash": result_hash,
+            "material_change": observation.material_change,
+            "material_change_applied": False,
+            "material_change_generation": parse_monitor_counter(
+                existing.get("material_change_generation")
+            ),
+            "consecutive_no_change": parse_monitor_counter(
+                existing.get("consecutive_no_change")
+            ),
+            "last_checked_at": observation.generated_at,
+            "target_key": target_key or None,
+            "cadence": cadence or None,
+            "next_due_at": next_due_at,
+        }
+
+    if monitor_effect_id and existing_effect_id:
+        persisted_at = parse_timestamp(existing.get("last_checked_at"))
+        observed_at = parse_timestamp(observation.generated_at)
+        if persisted_at is not None and observed_at is not None and observed_at <= persisted_at:
+            raise ValueError(
+                "monitor observation is older than the persisted monitor effect"
+            )
+
     previous_hash = str(existing.get("result_hash") or "").strip()
     previous_no_change = parse_monitor_counter(existing.get("consecutive_no_change"))
     previous_generation = parse_monitor_counter(
@@ -94,6 +147,8 @@ def plan_monitor_poll_metadata(
         "material_change": "true" if observation.material_change else "false",
         "material_change_generation": str(generation),
     }
+    if monitor_effect_id:
+        metadata["monitor_effect_id"] = monitor_effect_id
     if target_key:
         metadata["target_key"] = target_key
     if cadence:
@@ -101,6 +156,8 @@ def plan_monitor_poll_metadata(
     if next_due_at:
         metadata["next_due_at"] = next_due_at
     return metadata, {
+        "monitor_effect_id": monitor_effect_id or None,
+        "provider_replayed": False,
         "result_hash": result_hash,
         "material_change": observation.material_change,
         "material_change_applied": advances_generation,

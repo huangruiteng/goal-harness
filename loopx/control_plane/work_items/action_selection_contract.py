@@ -5,6 +5,14 @@ from collections.abc import Mapping
 from typing import Any
 
 
+def render_cli_command_prefix(*, runtime_root: str | None = None) -> str:
+    return (
+        f"loopx --runtime-root {shlex.quote(str(runtime_root))}"
+        if runtime_root
+        else "loopx"
+    )
+
+
 def action_portfolio_requires_explicit_selection(
     payload: Mapping[str, Any],
 ) -> bool:
@@ -24,6 +32,7 @@ def action_portfolio_selection_command_template(
     scoped_cli_args: str,
     scheduler_args: str,
     turn_instance_id: str | None,
+    runtime_root: str | None = None,
 ) -> str | None:
     if not action_portfolio_requires_explicit_selection(payload):
         return None
@@ -35,8 +44,11 @@ def action_portfolio_selection_command_template(
         if turn_instance_id
         else ""
     )
+    command_prefix = "loopx"
+    if runtime_root:
+        command_prefix += f" --runtime-root {shlex.quote(str(runtime_root))}"
     return (
-        "loopx --format json quota should-run"
+        f"{command_prefix} --format json quota should-run"
         f" --goal-id {shlex.quote(goal_id)}"
         " --todo-id {todo_id}"
         f"{scoped_cli_args}{scheduler_args}{turn_arg}"
@@ -88,13 +100,26 @@ def apply_action_selection_cli_gate(
     channel["next_cli_actions"] = []
     goal_id = str(payload.get("goal_id") or "").strip()
     command_args_template: str | None = None
+    route_prefix = "loopx --format json"
     if command_template:
         try:
             command_tokens = shlex.split(command_template)
         except ValueError:
             command_tokens = []
-        if command_tokens[:3] == ["loopx", "--format", "json"]:
-            command_args_template = shlex.join(command_tokens[3:])
+        try:
+            format_index = command_tokens.index("--format")
+        except ValueError:
+            format_index = -1
+        if (
+            format_index >= 1
+            and command_tokens[format_index : format_index + 2]
+            == ["--format", "json"]
+            and command_tokens[0] == "loopx"
+        ):
+            command_args_template = shlex.join(command_tokens[format_index + 2 :])
+            route_prefix = shlex.join(command_tokens[: format_index + 2])
+        else:
+            route_prefix = "loopx --format json"
     if command_args_template is None:
         raise RuntimeError(
             "explicit action selection requires one typed quota command template"
@@ -109,7 +134,7 @@ def apply_action_selection_cli_gate(
             ),
             "selection_command": {
                 "schema_version": "action_selection_cli_command_v1",
-                "route_prefix": "loopx --format json",
+                "route_prefix": route_prefix,
                 "command_args_template": command_args_template,
                 "candidate_discovery_args": (
                     "todo list"

@@ -722,6 +722,97 @@ def test_skill_slash_fallback_contract() -> None:
     assert "The five sections are output structure, while the execution contract is the evidence authority" in pr_review_normalized
 
 
+def test_start_goal_guided_derives_display_name_from_goal_text() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project = Path(tmp) / "display-name-project"
+        project.mkdir()
+        write_connected_goal_fixture(project, goal_id="display-goal", agent_id="codex-test-agent")
+
+        derived = run_json(
+            "start-goal",
+            "--guided",
+            "--project",
+            str(project),
+            "--goal-id",
+            "display-goal",
+            "--agent-id",
+            "codex-test-agent",
+            "--host-surface",
+            "codex-app",
+            "--goal-text",
+            "修复 scheduler state path 覆盖问题",
+            "--include-command-pack-detail",
+        )
+        connect_command = str(
+            derived["command_pack"]["commands"]["goal_start_connect_if_needed"]
+        )
+        assert "--display-name" not in connect_command, connect_command
+        assert derived["command_pack"].get("display_name") is None
+
+        run_json(
+            "bootstrap",
+            "--project",
+            str(project),
+            "--goal-id",
+            "derived-display-goal",
+            "--objective",
+            "修复 scheduler state path 覆盖问题",
+            "--no-onboarding-scan",
+            "--no-global-sync",
+        )
+        registry = json.loads(
+            (project / ".loopx" / "registry.json").read_text(encoding="utf-8")
+        )
+        registry_goal = next(
+            goal for goal in registry["goals"] if goal["id"] == "derived-display-goal"
+        )
+        assert registry_goal.get("display_name") == "修复 scheduler state path 覆盖问题"
+
+        explicit = run_json(
+            "start-goal",
+            "--guided",
+            "--project",
+            str(project),
+            "--goal-id",
+            "display-goal",
+            "--agent-id",
+            "codex-test-agent",
+            "--host-surface",
+            "codex-app",
+            "--goal-text",
+            "some objective",
+            "--display-name",
+            "Custom Title",
+            "--include-command-pack-detail",
+        )
+        explicit_command = str(
+            explicit["command_pack"]["commands"]["goal_start_connect_if_needed"]
+        )
+        assert "--display-name 'Custom Title'" in explicit_command, explicit_command
+        assert explicit["command_pack"].get("display_name") == "Custom Title"
+
+        rejected = run_json(
+            "start-goal",
+            "--guided",
+            "--project",
+            str(project),
+            "--goal-id",
+            "display-goal",
+            "--agent-id",
+            "codex-test-agent",
+            "--host-surface",
+            "codex-app",
+            "--goal-text",
+            "/private/secret/path should not leak",
+            "--include-command-pack-detail",
+        )
+        rejected_command = str(
+            rejected["command_pack"]["commands"]["goal_start_connect_if_needed"]
+        )
+        assert "--display-name" not in rejected_command, rejected_command
+        assert rejected["command_pack"].get("display_name") is None
+
+
 def main() -> int:
     test_missing_project_stops_before_mutation()
     test_goal_text_invocation_plans_ranked_todos_before_activation()
@@ -730,6 +821,7 @@ def main() -> int:
     test_connected_project_reuses_existing_state()
     test_linked_git_worktree_reuses_canonical_source_registry()
     test_skill_slash_fallback_contract()
+    test_start_goal_guided_derives_display_name_from_goal_text()
     print("bootstrap command pack smoke passed")
     return 0
 

@@ -317,8 +317,8 @@ def main() -> None:
         assert len(boundary) >= 5, f"expected >= 5 RFC entries, got {len(boundary)}"
         expected_shipped = {
             "3 -- State Classification": False,
-            "4 -- Coordination Ledger Shape": True,
-            "5.1 -- claim_work command": True,
+            "4 -- Coordination Ledger Shape": False,
+            "5.1 -- claim_work command": False,
             "7 -- Receipt Retention": True,
             "8 -- Local vs Shared Mode": False,
             "Appendix B -- handoff_mode": True,
@@ -333,16 +333,16 @@ def main() -> None:
             assert "gap" in entry
             assert entry["shipped"] is expect_shipped, (
                 f"{section}: shipped={entry['shipped']!r}, "
-                f"expected {expect_shipped} after Stage-2 claim_work refresh"
+                f"expected {expect_shipped} after the Stage-3 boundary refresh"
             )
         claim_work = by_section["5.1 -- claim_work command"]
         claim_text = (
             f"{claim_work['shipped_equivalent']} {claim_work['gap']}".lower()
         )
-        assert "additive" in claim_text, (
-            "claim_work must stay explicit as Stage-2 additive, not default"
+        assert "coverage-only" in claim_text, (
+            "claim_work must stay explicit as a reference path, not production"
         )
-        assert "not write authority" in claim_work["gap"].lower() or (
+        assert "rather than write authority" in claim_work["gap"].lower() or (
             "not write authority" in claim_work["shipped_equivalent"].lower()
         ), "claim_work gap must keep leases out of write authority"
         shipped_count = sum(1 for e in boundary if e["shipped"])
@@ -351,7 +351,7 @@ def main() -> None:
         ), f"unexpected shipped count: {shipped_count}"
         print(
             f"  [OK] Authority boundary: {len(boundary)} RFC sections, "
-            f"{shipped_count} Stage-2/handoff shipped, "
+            f"{shipped_count} retained/handoff shipped, "
             f"{len(boundary) - shipped_count} still proposal-only"
         )
 
@@ -368,8 +368,8 @@ def main() -> None:
             assert forbidden not in lease_blob, (
                 f"leases projection must not present '{forbidden}'"
             )
-        # Stage-2 claim_work shipped must not imply lease-as-authority
-        assert claim_work["shipped"] is True
+        # The coverage-only claim_work reference must not imply lease authority.
+        assert claim_work["shipped"] is False
         assert "optional runtime fence" in leases["nature"]
         print(
             "  [OK] Negative: active leases remain fence-only "

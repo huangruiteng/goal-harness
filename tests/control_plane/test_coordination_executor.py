@@ -60,6 +60,10 @@ class FakeProvider:
         self._lock = threading.Lock()
         self.fault = None
         self.unrelated_advances = 0
+        self.identity = "test:store"
+
+    def store_identity(self) -> str:
+        return self.identity
 
     def load(self):
         with self._lock:
@@ -94,7 +98,11 @@ class FakeProvider:
 
 
 def bootstrap(provider, todos=("todo-1", "todo-2")) -> dict:
-    head = bootstrap_head("goal-a", {todo_id: todo() for todo_id in todos})
+    head = bootstrap_head(
+        "goal-a",
+        {todo_id: todo() for todo_id in todos},
+        store_binding=provider.store_identity(),
+    )
     assert provider.compare_and_put(0, head)["result"] == "applied"
     return head
 
@@ -299,7 +307,9 @@ def test_rejections_and_stale_preconditions_change_nothing() -> None:
     assert mismatch["reason"] == "precondition_snapshot_mismatch"
 
     blocked = bootstrap_head(
-        "goal-a", {"todo-3": todo(eligibility=eligibility() | {"gates_open": False})}
+        "goal-a",
+        {"todo-3": todo(eligibility=eligibility() | {"gates_open": False})},
+        store_binding="test:store",
     )
     gated_provider = FakeProvider()
     assert gated_provider.compare_and_put(0, blocked)["result"] == "applied"
@@ -435,6 +445,9 @@ class MisreportingProvider:
 
     def __init__(self):
         self.inner = FakeProvider()
+
+    def store_identity(self):
+        return self.inner.store_identity()
 
     def load(self):
         return self.inner.load()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -39,6 +40,7 @@ from loopx.control_plane.work_items.interaction_contract import (
     build_interaction_contract,
     interaction_next_cli_actions,
 )
+from loopx.cli_commands.todo import _completion_settlement_error
 from loopx.rollout_event_log import rollout_event_log_path
 
 GOAL_ID = "settlement-goal"
@@ -269,6 +271,78 @@ def test_quota_settlement_readback_returns_the_complete_typed_chain(
         SettlementStepKind.QUOTA_SPEND,
     ]
     assert readback.spend_run is not None
+
+
+def test_advancement_completion_requires_the_complete_settlement_chain(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    identity = SettlementIdentity(GOAL_ID, AGENT_ID, TODO_ID, TURN_ID)
+    _append_guard_receipt(runtime_root, effect_id=identity.effect_id)
+
+    incomplete = read_heartbeat_settlement(
+        runtime_root,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        todo_id=TODO_ID,
+        turn_instance_id=TURN_ID,
+    )
+    assert incomplete is not None
+    error = _completion_settlement_error(
+        {
+            "role": "agent",
+            "task_class": "advancement_task",
+            "action_kind": "implement",
+            "text": "Ship the repository change.",
+        },
+        incomplete,
+        no_follow_up=False,
+    )
+    assert error is not None
+    assert error.startswith(
+        "turn-scoped advancement completion requires matching writeback and "
+        "quota spend receipts:"
+    )
+
+    settled = replace(
+        incomplete,
+        settlement=SettlementResult(
+            value={},
+            receipts=(
+                _receipt(SettlementStepKind.VALIDATION, "validation"),
+                _receipt(SettlementStepKind.DURABLE_WRITEBACK, "writeback"),
+                _receipt(SettlementStepKind.QUOTA_SPEND, "spend"),
+            ),
+            failure=None,
+        ),
+    )
+    assert (
+        _completion_settlement_error(
+            {
+                "role": "agent",
+                "task_class": "advancement_task",
+                "action_kind": "implement",
+                "text": "Ship the repository change.",
+            },
+            settled,
+            no_follow_up=False,
+        )
+        is None
+    )
+    assert (
+        _completion_settlement_error(
+            {
+                "role": "agent",
+                "task_class": "advancement_task",
+                "action_kind": "research",
+                "continuation_policy": "same_agent_non_delivery",
+                "text": "Analyze the evidence.",
+            },
+            incomplete,
+            no_follow_up=False,
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize(
@@ -841,6 +915,33 @@ def test_generic_cli_without_turn_identity_keeps_legacy_unbound_actions() -> Non
     channel = contract["cli_channel"]
     assert "settlement_plan" not in channel
     assert all("--turn-instance-id" not in action for action in channel["next_cli_actions"])
+
+
+def test_interaction_contract_cli_actions_keep_runtime_root() -> None:
+    runtime_root = "/tmp/loopx-runtime-root-fixture"
+    command_prefix = f"loopx --runtime-root {runtime_root}"
+
+    contract = build_interaction_contract(
+        _generic_cli_contract_payload(),
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP
+        ),
+        turn_instance_id=TURN_ID,
+        runtime_root=runtime_root,
+    )
+
+    channel = contract["cli_channel"]
+    assert channel["next_cli_actions"][0].startswith(
+        f"{command_prefix} refresh-state "
+    )
+    assert channel["next_cli_actions"][1].startswith(
+        f"{command_prefix} quota spend-slot "
+    )
+    plan = channel["settlement_plan"]
+    for step in plan["ordered_steps"]:
+        command = step.get("command_template")
+        if command:
+            assert command.startswith(command_prefix)
 
 
 def test_guard_receipt_resolves_stable_settlement_identity(tmp_path: Path) -> None:

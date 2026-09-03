@@ -17,6 +17,9 @@ from .execution_profile import (
 
 
 LONG_TASK_CADENCE_HINT_SCHEMA_VERSION = "cadence_hint_v0"
+FINAL_AGENT_SCOPED_CADENCE_AUTHORITY = (
+    "final_agent_scoped_interaction_and_scheduler"
+)
 
 BLOCKED_QUOTA_STATES = frozenset(
     {
@@ -187,6 +190,56 @@ def build_long_task_cadence_policy(**kwargs: Any) -> dict[str, Any]:
     """Compatibility wrapper for older callers while this projection rolls out."""
 
     return build_long_task_cadence_hint(**kwargs)
+
+
+def reconcile_long_task_cadence_hint(
+    value: Any,
+    *,
+    interaction_contract: Any,
+    scheduler_hint: Any,
+) -> dict[str, Any] | None:
+    """Align a legacy wait advisory with final agent-scoped run authority."""
+
+    if not isinstance(value, dict):
+        return None
+    hint = dict(value)
+    if hint.get("recommendation") != "wait":
+        return hint
+
+    contract = interaction_contract if isinstance(interaction_contract, dict) else {}
+    agent_channel = (
+        contract.get("agent_channel")
+        if isinstance(contract.get("agent_channel"), dict)
+        else {}
+    )
+    scheduler = scheduler_hint if isinstance(scheduler_hint, dict) else {}
+    final_authority_requires_work = (
+        agent_channel.get("must_attempt") is True
+        and agent_channel.get("quiet_noop_allowed") is False
+        and scheduler.get("action") == "run_now"
+        and scheduler.get("cadence_class") == "active_work"
+    )
+    if not final_authority_requires_work:
+        return hint
+
+    prior_reason_codes = hint.get("reason_codes")
+    superseded = {
+        "signal": hint.get("signal"),
+        "recommendation": hint.get("recommendation"),
+        "reason_codes": (
+            list(prior_reason_codes) if isinstance(prior_reason_codes, list) else []
+        ),
+    }
+    return {
+        "schema_version": hint.get(
+            "schema_version", LONG_TASK_CADENCE_HINT_SCHEMA_VERSION
+        ),
+        "signal": "active_work",
+        "recommendation": "keep",
+        "reason_codes": ["final_agent_scoped_active_work"],
+        "authority": FINAL_AGENT_SCOPED_CADENCE_AUTHORITY,
+        "superseded": superseded,
+    }
 
 
 def long_task_cadence_hint_summary(value: Any) -> str:

@@ -18,6 +18,7 @@ from loopx.control_plane.testing.cli_output_semantics import (
     guided_todo_delta_schema_versions,
     planning_horizon_schema_versions,
     planning_inventory_detail_schema_versions,
+    runtime_root_command_route_count,
 )
 
 
@@ -43,6 +44,7 @@ def _row(**overrides: object) -> dict[str, object]:
         "planning_horizon_schema_versions": [],
         "guided_todo_delta_schema_versions": [],
         "planning_inventory_detail_schema_versions": [],
+        "runtime_root_command_route_count": 0,
     }
     row.update(overrides)
     return row
@@ -510,6 +512,131 @@ def test_planning_inventory_detail_migration_is_bounded_and_fail_closed() -> Non
     assert unknown_result["rows"][0]["failures"] == [
         "planning inventory detail schema coverage changed"
     ]
+
+
+def test_runtime_root_route_growth_has_per_route_budget() -> None:
+    base = _row(
+        chars=1_000,
+        utf8_bytes=1_000,
+        lines=10,
+        compact_payload_chars=1_000,
+        action_signature_sha256=None,
+        action_signature_coverages=[],
+    )
+    candidate = _row(
+        chars=1_320,
+        utf8_bytes=1_320,
+        lines=10,
+        compact_payload_chars=1_320,
+        action_signature_sha256=None,
+        action_signature_coverages=[],
+        runtime_root_command_route_count=2,
+    )
+
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+
+    assert result["ok"] is True
+    assert result["review_required"] is True
+    assert result["rows"][0]["allowances"] == {
+        "chars": 320,
+        "utf8_bytes": 320,
+        "lines": 2,
+        "compact_payload_chars": 320,
+    }
+    assert result["rows"][0]["review_signals"] == [
+        "runtime-root command route coverage added: 2 executable route(s)"
+    ]
+
+
+def test_runtime_root_route_growth_still_fails_above_per_route_budget() -> None:
+    base = _row(
+        chars=1_000,
+        utf8_bytes=1_000,
+        lines=10,
+        compact_payload_chars=1_000,
+        action_signature_sha256=None,
+        action_signature_coverages=[],
+    )
+    candidate = _row(
+        chars=1_321,
+        utf8_bytes=1_321,
+        lines=10,
+        compact_payload_chars=1_321,
+        action_signature_sha256=None,
+        action_signature_coverages=[],
+        runtime_root_command_route_count=2,
+    )
+
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+
+    assert result["ok"] is False
+    assert "chars grew by 321; allowance is 320" in result["rows"][0]["failures"]
+
+
+def test_invalid_runtime_root_route_count_does_not_grant_budget() -> None:
+    base = _row(
+        chars=1_000,
+        utf8_bytes=1_000,
+        lines=10,
+        compact_payload_chars=1_000,
+    )
+    candidate = _row(
+        chars=1_097,
+        utf8_bytes=1_097,
+        lines=10,
+        compact_payload_chars=1_097,
+        runtime_root_command_route_count=True,
+    )
+
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+
+    assert result["ok"] is False
+    assert result["rows"][0]["allowances"] == {
+        "chars": 64,
+        "utf8_bytes": 128,
+        "lines": 2,
+        "compact_payload_chars": 64,
+    }
+
+
+def test_runtime_root_route_count_only_matches_executable_command_prefixes() -> None:
+    text = (
+        "  loopx --runtime-root /tmp/indented refresh-state\n"
+        "loopx --runtime-root /tmp/runtime refresh-state\n"
+        "{\"command\": \"loopx --runtime-root '/tmp/runtime root' quota spend-slot\"}\n"
+        "- expanded: `loopx --runtime-root /tmp/runtime heartbeat-prompt`\n"
+        "Use --runtime-root PATH to select a runtime.\n"
+        "The command is loopx --runtime-root /tmp/runtime.\n"
+        "loopx --runtime-root"
+    )
+
+    assert runtime_root_command_route_count(text) == 4
+
+
+def test_runtime_root_route_allowance_is_fail_closed_for_invalid_counts() -> None:
+    base = _row(
+        chars=1_000,
+        utf8_bytes=1_000,
+        lines=10,
+        compact_payload_chars=1_000,
+        runtime_root_command_route_count=0,
+    )
+    candidate = _row(
+        chars=1_000,
+        utf8_bytes=1_000,
+        lines=10,
+        compact_payload_chars=1_000,
+        runtime_root_command_route_count="2",
+    )
+
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+
+    assert result["rows"][0]["allowances"] == {
+        "chars": 64,
+        "utf8_bytes": 128,
+        "lines": 2,
+        "compact_payload_chars": 64,
+    }
 
 
 def test_observed_shape_removal_is_a_review_signal_not_a_permanent_red_light() -> None:

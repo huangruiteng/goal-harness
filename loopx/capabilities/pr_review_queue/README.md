@@ -172,7 +172,7 @@ table.
 
 ## Capability-Owned Review Execution
 
-`pull_request_review_execution_contract_v1` is shared once per packet to avoid
+`pull_request_review_execution_contract_v2` is shared once per packet to avoid
 duplicating a large prompt for every PR in a 100-item queue. It requires these
 typed evidence groups before a verdict:
 
@@ -187,12 +187,19 @@ typed evidence groups before a verdict:
 - strongest regression path, blast radius, recovery, minimum repair, and
   regression test;
 - code-volume necessity and the highest-value behavior-preserving
-  simplification.
+  simplification;
 - change proportionality: compare the verified frequency, severity, blast
   radius, and recovery cost of the original problem with the production
   mechanism, new state/contracts/CLI/callers, migration, and long-term
   maintenance surface. Correctness, green CI, and resolution of earlier
-  findings do not override a `disproportionate` or `not_yet_proven` blocker.
+  findings do not override a `disproportionate` or `not_yet_proven` blocker;
+- default-off isolation: for an opt-in change, trace every shared schema,
+  prompt, accepted-input, projection, scheduling, and effect surface, then run
+  a paired counterfactual proving that disabled behavior still matches the
+  pre-change contract;
+- authority semantics: make public protocol ids and symbols match the real
+  actor lifecycle and authority, distinguishing ephemeral sub-agents from
+  registered peers and durable multi-agent coordination.
 
 Every materially expanded re-review resets proportionality from the original
 problem and evaluates the full exact head. Reviewer-requested additions are not
@@ -510,7 +517,7 @@ A first implementation is acceptable when:
   `main_regression_analysis`, evidence commands, explicit
   `review_groups.unmerged` / `review_groups.merged`, and a blank five-block
   review template;
-- the shared `pull_request_review_execution_contract_v1` owns typed evidence,
+- the shared `pull_request_review_execution_contract_v2` owns typed evidence,
   completion, freshness, findings-first, and verdict policy, while every PR has
   a compact exact-head `pull_request_review_plan_v1` with an unverified result
   skeleton;

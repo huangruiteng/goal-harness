@@ -10,6 +10,9 @@ from ..todos.contract import (
     normalize_todo_id,
     normalize_todo_replan_obligation_id,
 )
+from ..work_items.autonomous_replan_obligation import (
+    replan_obligation_id_from_packet,
+)
 from .effect_program import SettlementIdentity
 from .error_codes import HeartbeatReceiptIdentityConflictError
 from .heartbeat_receipt import (
@@ -294,6 +297,9 @@ def quota_rollout_details(
         if isinstance(payload.get("selected_todo"), Mapping)
         else None
     )
+    semantic_replan_obligation_id = replan_obligation_id_from_packet(
+        payload.get("replan_action_packet")
+    )
     workspace_causality = build_delivery_workspace_causality(selected_todo)
     details: dict[str, object] = {
         "command": "quota",
@@ -305,6 +311,7 @@ def quota_rollout_details(
         "source": payload.get("source") or "",
         "todo_id": todo_id or "",
         "replan_obligation_id": replan_obligation_id or "",
+        "semantic_replan_obligation_id": semantic_replan_obligation_id or "",
         "target_key": payload.get("target_key") or "",
         "successor_todo_ids": ",".join(
             str(successor_id)

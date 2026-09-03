@@ -34,9 +34,10 @@ def main() -> int:
 
     for needle in [
         "Public showcase and homepage",
-        "Real ops control plane",
+        "Personal Workspace",
         "`/frontstage` without `mode=ops` belongs to the public showcase surface",
-        "`/frontstage?mode=ops&statusUrl=...` belongs to local ops inspection",
+        "`/deprecated/frontstage/ops?statusUrl=...` belongs to local ops inspection",
+        "`apps/presentation/dashboard/src/views/deprecated/`",
         "`docs/showcases/showcase-catalog.json`",
         "`loopx serve-status --global-registry`",
         "The public showcase surface must not read",
@@ -83,7 +84,7 @@ def main() -> int:
         assert_contains(compact_showcase_note, public_source_contract)
 
     route_row = "| Public showcase and homepage | Explain LoopX"
-    ops_row = "| Real ops control plane | Help the operator inspect"
+    ops_row = "| Personal Workspace | Help the operator inspect"
     assert_contains(compact_strategy, compact(route_row))
     assert_contains(compact_strategy, compact(ops_row))
     assert_contains(

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
+import zlib
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
+from ..quota.decision_summary import compact_quota_decision
 from ..runtime.time import now_utc, utc_isoformat
 from ..todos.frontier_deadline import build_frontier_recheck_plan
-from . import ack as scheduler_ack
 from .arbitration import (
     SchedulerArbitration,
     SchedulerDisposition,
@@ -53,6 +55,12 @@ CODEX_APP_SCHEDULER_FALLBACK_HINT_SCHEMA_VERSION = (
 USER_GATE_NOTIFICATION_COOLDOWN_SCHEMA_VERSION = "user_gate_notification_cooldown_v0"
 CODEX_APP_MAX_INTERVAL_MINUTES = 60
 DEFAULT_ACK_CAPABILITIES = {"shell", "filesystem_read", "filesystem_write"}
+SCHEDULER_HOST_FACTS_CHUNK_FLAG = "--scheduler-host-facts-chunk"
+SCHEDULER_HOST_FACTS_CHUNK_CHARS = 384
+SCHEDULER_HOST_FACTS_MAX_ENCODED_CHARS = 1_536
+SCHEDULER_EXECUTABLE_CLI_ARGS_MAX_ITEMS = 64
+SCHEDULER_EXECUTABLE_CLI_ARGS_MAX_TOTAL_CHARS = 8_192
+SCHEDULER_ACK_STALE_HINT_TOLERANCE_MINUTES = 2
 FALLBACK_AUTOMATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 SCHEDULER_BASE_IDENTITY_KEYS = (
     "goal_id",
@@ -103,10 +111,6 @@ MONITOR_WAIT_IDENTITY_KEYS = SCHEDULER_BASE_IDENTITY_KEYS
 CODEX_APP_SSH_GOAL_RUNTIME_KEY = SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE.value
 CODEX_NATIVE_GOAL_BLOCK_ACTION = "update_goal_blocked_keep_loopx_active"
 CODEX_NATIVE_GOAL_RESUME_TRIGGER = "explicit_codex_goal_resume"
-
-build_codex_app_scheduler_ack_event = scheduler_ack.build_codex_app_scheduler_ack_event
-build_scheduler_ack_plan = scheduler_ack.build_scheduler_ack_plan
-scheduler_backoff_packet = scheduler_ack.scheduler_backoff_packet
 
 
 def _stable_digest(value: Any, *, length: int) -> str:
@@ -243,6 +247,60 @@ def _user_gate_notification_cooldown(
     }
 
 
+def _scheduler_host_followup_transport_args(
+    scheduler_host_facts: Mapping[str, Any] | None,
+    *,
+    before: Mapping[str, Any] | None,
+    use_current_hint: bool,
+) -> list[str]:
+    """Encode a bounded, transport-only native scheduler follow-up hint."""
+
+    if not isinstance(scheduler_host_facts, Mapping):
+        return []
+    payload = {
+        "schema_version": "loopx_scheduler_host_followup_hint_v0",
+        "before": compact_quota_decision(dict(before or {})),
+        "use_current_hint": use_current_hint,
+        "host_facts": dict(scheduler_host_facts),
+    }
+    raw = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    encoded = base64.urlsafe_b64encode(zlib.compress(raw, level=9)).decode("ascii")
+    encoded = encoded.rstrip("=")
+    if len(encoded) > SCHEDULER_HOST_FACTS_MAX_ENCODED_CHARS:
+        raise ValueError("scheduler host facts exceed the native CLI transport bound")
+    result: list[str] = []
+    for index in range(0, len(encoded), SCHEDULER_HOST_FACTS_CHUNK_CHARS):
+        chunk = encoded[index : index + SCHEDULER_HOST_FACTS_CHUNK_CHARS]
+        if chunk.startswith("-"):
+            # argparse treats a separate value beginning with "-" as another
+            # option. Bind only that ambiguous chunk with ``=``; retain the
+            # established two-argument shape for ordinary chunks.
+            result.append(f"{SCHEDULER_HOST_FACTS_CHUNK_FLAG}={chunk}")
+        else:
+            result.extend([SCHEDULER_HOST_FACTS_CHUNK_FLAG, chunk])
+    return result
+
+
+def _bounded_scheduler_followup_cli_args(
+    cli_args: list[str],
+    *,
+    native_args: list[str],
+) -> list[str]:
+    if not native_args:
+        return cli_args
+    if (
+        len(cli_args) <= SCHEDULER_EXECUTABLE_CLI_ARGS_MAX_ITEMS
+        and sum(map(len, cli_args)) <= SCHEDULER_EXECUTABLE_CLI_ARGS_MAX_TOTAL_CHARS
+    ):
+        return cli_args
+    raise ValueError("native scheduler follow-up CLI arguments exceed the transport bound")
+
+
 def build_codex_app_scheduler_ack_hint(
     *,
     goal_id: Any,
@@ -255,6 +313,8 @@ def build_codex_app_scheduler_ack_hint(
     host_match_observed: bool = False,
     surface: str = CODEX_APP_SURFACE,
     state_key: str = CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
+    scheduler_host_facts: Mapping[str, Any] | None = None,
+    scheduler_before: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     safe_rrule = normalize_scheduler_rrule(applied_rrule)
     safe_goal_id = str(goal_id or "").strip()
@@ -284,6 +344,12 @@ def build_codex_app_scheduler_ack_hint(
     ]
     for capability in safe_available_capabilities:
         cli_args.extend(["--available-capability", capability])
+    native_args = _scheduler_host_followup_transport_args(
+        scheduler_host_facts,
+        before=scheduler_before,
+        use_current_hint=True,
+    )
+    cli_args.extend(native_args)
     if safe_surface != CODEX_APP_SURFACE:
         cli_args.extend(["--surface", safe_surface])
     if safe_state_key != CODEX_APP_STATEFUL_BACKOFF_STATE_KEY:
@@ -300,6 +366,7 @@ def build_codex_app_scheduler_ack_hint(
             ]
         )
     cli_args.append("--execute")
+    cli_args = _bounded_scheduler_followup_cli_args(cli_args, native_args=native_args)
     args = {
         "goal_id": safe_goal_id,
         "agent_id": safe_agent_id,
@@ -332,6 +399,8 @@ def build_codex_app_scheduler_failure_hint(
     failed_rrule: Any,
     observed_host_rrule: Any = None,
     available_capabilities: Any = None,
+    scheduler_host_facts: Mapping[str, Any] | None = None,
+    scheduler_before: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = str(goal_id or "").strip()
     safe_agent_id = str(agent_id or "").strip()
@@ -358,6 +427,12 @@ def build_codex_app_scheduler_failure_hint(
     ]
     for capability in safe_capabilities:
         cli_args.extend(["--available-capability", capability])
+    native_args = _scheduler_host_followup_transport_args(
+        scheduler_host_facts,
+        before=scheduler_before,
+        use_current_hint=False,
+    )
+    cli_args.extend(native_args)
     cli_args.extend(
         [
             "--failed-rrule",
@@ -367,6 +442,7 @@ def build_codex_app_scheduler_failure_hint(
     if safe_observed_rrule:
         cli_args.extend(["--codex-app-current-rrule", safe_observed_rrule])
     cli_args.append("--execute")
+    cli_args = _bounded_scheduler_followup_cli_args(cli_args, native_args=native_args)
     return {
         "schema_version": CODEX_APP_SCHEDULER_FAILURE_HINT_SCHEMA_VERSION,
         "cli_args": cli_args,
@@ -611,9 +687,7 @@ class _SchedulerHintBuilder:
             current_time=scheduler_now,
             observed_host_rrule=self.codex_app_current_rrule,
             cadence_class=cadence_class,
-            stale_tolerance_minutes=(
-                scheduler_ack.SCHEDULER_ACK_STALE_HINT_TOLERANCE_MINUTES
-            ),
+            stale_tolerance_minutes=SCHEDULER_ACK_STALE_HINT_TOLERANCE_MINUTES,
         )
         cadence_decision = backoff_decision.cadence
         host_decision = backoff_decision.host
@@ -721,6 +795,27 @@ class _SchedulerHintBuilder:
             }
         goal_id = self.payload.get("goal_id")
         agent_id = self._identity_value("agent_identity.agent_id")
+        scheduler_host_facts = (
+            {
+                "schema_version": "loopx_scheduler_heartbeat_host_facts_v0",
+                "goal_id": str(goal_id),
+                "agent_id": str(agent_id),
+                "surface": CODEX_APP_SURFACE,
+                "state_key": CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
+                "reset_token": reset_token,
+                "identity_signature": identity_signature,
+                "progression_index": current_index,
+                "progression_minutes": codex_cadence_progression,
+                "expected_rrule": current_rrule,
+                "cadence_class": cadence_class,
+                "stale_tolerance_minutes": SCHEDULER_ACK_STALE_HINT_TOLERANCE_MINUTES,
+                "generated_at": utc_isoformat(scheduler_now),
+                "ack_needed": ack_needed,
+                "apply_needed": apply_needed,
+            }
+            if goal_id and agent_id
+            else None
+        )
         if apply_needed:
             codex_app["recommended_rrule"] = current_rrule
             if goal_id and agent_id:
@@ -730,6 +825,16 @@ class _SchedulerHintBuilder:
                     failed_rrule=current_rrule,
                     observed_host_rrule=effective_host_rrule,
                     available_capabilities=self.scheduler_ack_capabilities,
+                    scheduler_host_facts={
+                        **(scheduler_host_facts or {}),
+                        "operation": "host_failure",
+                        "applied_rrule": effective_host_rrule,
+                        "observed_host_rrule": effective_host_rrule,
+                        "failure_kind": "host_tool_failure",
+                        "source": "quota_scheduler_host_update_failure",
+                        "host_match_observed": False,
+                    },
+                    scheduler_before=self.payload,
                 )
                 codex_app["fallback_hint"] = build_codex_app_scheduler_fallback_hint(
                     goal_id=goal_id,
@@ -751,6 +856,15 @@ class _SchedulerHintBuilder:
                 ),
                 # Bind the host proof to the originating identity.
                 host_match_observed=True,
+                scheduler_host_facts={
+                    **(scheduler_host_facts or {}),
+                    "operation": "ack",
+                    "applied_rrule": current_rrule,
+                    "observed_host_rrule": effective_host_rrule,
+                    "source": "quota_scheduler_ack",
+                    "host_match_observed": True,
+                },
+                scheduler_before=self.payload,
             )
         unchanged_poll_limits = {
             "local_scheduler": cli_limit,

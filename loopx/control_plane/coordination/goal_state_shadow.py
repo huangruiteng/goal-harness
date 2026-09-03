@@ -37,6 +37,7 @@ def bootstrap_head_from_goal_state(
     repository: str,
     code_revision: str,
     allowed_agent_ids: list[str],
+    store_binding: str,
     with_report: bool = False,
 ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
     """Shadow the current Markdown active state into a bootstrap head.
@@ -87,7 +88,7 @@ def bootstrap_head_from_goal_state(
             "code_revision": code_revision,
             "last_lease_epoch": 0,
         }
-    head = bootstrap_head(goal_id, todos)
+    head = bootstrap_head(goal_id, todos, store_binding=store_binding)
     if not with_report:
         return head
     report = {

@@ -1558,7 +1558,7 @@ LoopX 已经提供的通用机制包括：
 ## 代表性验证
 
 1. `examples/control_plane/goal-frontier-replan-rules-smoke.py`
-2. `examples/control_plane/monitor-poll-policy-smoke.py`
+2. `tests/control_plane_ts/quota_monitor_poll_commit.test.ts`
 3. `examples/control_plane/monitor-poll-writeback-smoke.py`
 4. `examples/project/goal-vision-refresh-state-budget-smoke.py`
 5. `examples/project/goal-vision-replan-contract-smoke.py`

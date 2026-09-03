@@ -1,16 +1,22 @@
-# RFC: Shared-Goal Online Authority and Pluggable Coordination Provider (v0)
+# RFC: LoopX Shared Control-Plane Authority and Pluggable State Providers (v0)
 
 - Status: Draft, under maintainer review
-- Proposed by: NoKV Lab
-- Date: 2026-08-05; revised 2026-08-18
-- Scope: a separate deployment contract for LoopX shared-goal coordination,
-  complementing
+- Initially proposed by: NoKV Lab
+- Widened by: LoopX maintainers
+- Date: 2026-08-05; revised 2026-09-02
+- Scope: one provider-neutral LoopX authority contract with built-in file,
+  optional NoKV, and optional PostgreSQL provider profiles, complementing
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
-- Source baseline: LoopX `c6a1da1eaa22962faaeb6d4050d867462e7665ff`
-- Provider API baseline: NoKV `3d75d96965` (0.11.0 line). The Python
-  `publish_bytes` generation-CAS mapping was exercised once by hand against a
-  live NoKV stack at that pin (see the example README); the run is evidence for
-  the mapping only, not part of any merge gate
+- Source baseline: LoopX `a0c20f1779d273e7aaa4bd3ea166d145d466e6d5`
+- Provider API baseline: NoKV `7bb3ffd6512fd57d9c0f193aa6d9c5b935d77f30`
+  (release 0.11.0, Python API 1, Holt pinned to 0.8.6). The Stage 2A executable
+  qualification admits only that SDK contract and this checkout's helper. It
+  remains candidate evidence, not a merge gate or authority promotion
+- PostgreSQL baseline: the TypeScript Stage 2B candidate implements the store
+  contract, transaction-local tenant context, forced row-level security, and
+  has passed a real PostgreSQL 16 transaction matrix. No shared authority
+  service, runtime caller, principal authentication/tenant authorization, or
+  authority promotion ships yet
 - Language note: the
   [Chinese version](./shared-goal-authority-state-provider-v0.zh-CN.md) and this
   English version are semantic mirrors. A difference between them is a defect.
@@ -56,26 +62,53 @@ the request passes, the claim, lease, and receipt are written together. If it
 fails, the requester gets an explicit reason.
 
 This time the bookkeeper gets one small ledger. We are not moving every LoopX
-file into a remote store:
+file into a remote store, and we are not creating three competing semantic
+authorities:
 
 1. one goal that explicitly opts into shared mode has one **canonical
    coordination aggregate**;
 2. each successful operation's state transition and original receipt land in
    the **same compare-and-set (CAS)**;
-3. the authority makes decisions, while a provider only stores deterministic
-   bytes reliably;
+3. the LoopX authority makes decisions, while file, NoKV, or PostgreSQL
+   providers only persist reviewed transactions reliably;
 4. run history, status, quota, scheduler state, host sessions, and evidence
    bodies stay with their existing owners instead of entering this ledger.
 
-NoKV is an optional provider behind the bookkeeper. Agents do not connect to
-NoKV directly for coordination writes, and NoKV does not become the LoopX
-control-plane authority.
+NoKV and PostgreSQL are optional providers behind the bookkeeper. Agents do not
+connect directly to either provider for controlled writes, and neither provider
+becomes the LoopX control-plane authority. The file provider is the first
+deterministic/parity backend; the current local file-based control plane remains
+the default authority path until a separately reviewed authority-source
+promotion.
 
-The first runnable example has only one command, `claim_work`. For an existing
-eligible todo, it records the soft claim, lease/fence, and receipt together. It
-answers the two questions most likely to cause an incident—who wins when two
-endpoints claim at once, and how a lost response recovers its original
-receipt—without pretending that the complete lease lifecycle already ships.
+```text
+Agent client
+    |
+    v
+LoopX authority API / embedded authority
+    |
+    v
+typed LoopX transactions
+    |
+    v
+provider-neutral store contract
+    |------------|-------------|
+    v            v             v
+   file         NoKV       PostgreSQL
+```
+
+The invariant is one semantic writer regardless of deployment. A shared
+service may host the LoopX authority together with authentication, tenancy,
+audit, and a PostgreSQL or NoKV provider. Those are deployment concerns: an
+Agent still calls LoopX APIs and cannot bypass the authority by writing tables,
+documents, or files directly.
+
+The first runnable slice began with one command, `claim_work`. For an existing
+eligible todo, it records the soft claim, lease/fence, and receipt together.
+Stage 3 extends that reference contract with renew, release, reclaim, and
+completion while keeping the modules coverage-only. The initial slice answers
+the two questions most likely to cause an incident—who wins when two endpoints
+claim at once, and how a lost response recovers its original receipt.
 
 The contention unit is `(goal_id, todo_id)` plus the preconditions actually
 referenced by that todo, not the whole goal. Two endpoints claiming the same
@@ -107,10 +140,11 @@ co-deployed while preserving different correctness contracts:
 | Semantic authority | Normalized commands, target-scoped preconditions, claims, lease epochs, fencing, revisions, and original receipts | Raw artifact bodies, provider placement, or background scheduling state |
 | Reconciliation layer | Observation, expired-lease recovery, wake-request emission, and continuous Supervisor decisions through the same command contract | Direct head mutation, provider bypass, or a second source of coordination truth |
 
-NoKV's workspace service is the candidate storage-plane implementation mapped
-by this RFC; it still requires the staged qualification below. The LoopX
-increment is the semantic authority that turns an opaque generation CAS into a
-trusted `claim_work` result and, later, into recoverable execution ownership.
+The built-in file backend is the first parity implementation; NoKV is the
+initial shared-store candidate; PostgreSQL is the planned service-provider
+profile. Each must pass the staged qualification below. The LoopX increment is
+the semantic authority that turns an opaque provider transaction into a trusted
+`claim_work` result and, later, into recoverable execution ownership.
 The reconciliation layer is a client of that authority, not another writer: a
 Supervisor observes projections and issues typed commands such as reclaim or
 requests a delivery-plane wake, while its scan cursor and scheduling state
@@ -133,8 +167,8 @@ retention or collection; it must not leave the head pointing at an object that
 was never durably published. Sharing a physical provider therefore does not
 merge the two ownership contracts or require a cross-domain transaction.
 
-Physical co-location is allowed. One deployment bundle may start a NoKV
-workspace service, a LoopX authority endpoint, and a Supervisor worker. Here,
+Physical co-location is allowed. One deployment bundle may start a NoKV or
+PostgreSQL provider, a LoopX authority endpoint, and a Supervisor worker. Here,
 "separate" means separately owned contracts and credentials; it does not
 require a separate repository, process, binary, or license in v0. An embedded
 authority is sufficient for trusted local qualification. A shared deployment
@@ -170,6 +204,60 @@ or provider-neutral core. This RFC neither requires a repository split nor
 selects separate license terms; the current policy remains
 [`LoopX Licensing`](../../project/licensing.md).
 
+### 1.3 Prospective license path by distribution boundary
+
+This subsection is non-normative and does not change the license of any current
+LoopX source or release. It records the boundary that a future license RFC
+should evaluate if the service-grade horizon becomes a separately shipped
+product.
+
+| Distribution boundary | Delivery horizon | Recommended path |
+| --- | --- | --- |
+| RFCs, schemas, typed commands, receipts, provider-neutral decisions, store contracts/codecs, client SDKs, conformance fixtures, and examples | Stages 1-4 | Remain in the Apache-2.0 open core so runtimes and providers can implement one coordination contract without adopting a server distribution |
+| Embedded/local authority, file parity backend, and shared-store adapters for NoKV or PostgreSQL | Stages 1-4 | Remain Apache-2.0; an adapter does not acquire LoopX semantic authority, and the underlying provider keeps its own license |
+| Test-only shadowing, canary, migration fixtures, and authority-source promotion proof | Stages 3-4 | Remain Apache-2.0 qualification material; evidence that a deployment is correct is not by itself a separately licensed product |
+| Independently versioned shared-authority server that owns authentication, tenant isolation, audit, durable receipt service, migration/promotion, capacity controls, recovery, and HA | Stage 5 | May be evaluated for AGPL-3.0 in a separate license RFC once this is more than a thin wrapper around the Apache core |
+| Persistent Supervisor/reconciliation worker shipped as part of that server distribution | Stage 5 | May follow the server's AGPL-3.0 candidate terms when it owns restart-safe observation, reclaim, remote-resume orchestration, and wake requests through authority commands |
+| Separately delivered managed operations or enterprise-only modules | After a service boundary exists | May use separate commercial terms when they are not included in the Apache or AGPL distribution and their dependency boundary is explicit |
+
+An illustrative package boundary, if these distributions are later created,
+is:
+
+```text
+loopx/control_plane/coordination/             Apache-2.0
+packages/loopx-authority-client/              Apache-2.0
+packages/loopx-authority-provider-*/          Apache-2.0
+packages/loopx-shared-authority-server/       AGPL-3.0 candidate
+packages/loopx-persistent-supervisor/         AGPL-3.0 candidate, or part of the server
+```
+
+The names are illustrative rather than a Stage 0 layout requirement. The
+dependency direction is the durable rule: an AGPL server distribution may
+consume Apache contracts, core logic, and providers; Apache artifacts must not
+import, bundle, or require the AGPL server. The NoKV or PostgreSQL server is
+not relicensed by a LoopX adapter, and an adapter must not be used as an
+artificial license boundary.
+
+Any Stage 5 license proposal must satisfy all of these gates before changing
+the current policy:
+
+1. identify one independently deployable and versioned server artifact;
+2. show that the artifact owns a real network trust and reconciliation
+   boundary rather than only forwarding Apache-core calls;
+3. preserve Apache client, protocol, embedded-mode, provider, and conformance
+   paths for interoperable adoption;
+4. define package metadata, nested license/NOTICE files, SPDX markings, and
+   build checks that prevent cross-license bundling;
+5. decide the inbound contribution policy before accepting contributions to
+   any AGPL component, especially if commercial dual licensing may be needed;
+6. apply any change prospectively through an explicit version boundary without
+   narrowing rights already granted by MIT or Apache releases.
+
+The current RFC therefore keeps Stages 1-4 under the repository's Apache-2.0
+policy. Stage 5 creates a decision point, not an automatic license transition.
+No source path becomes AGPL-3.0 merely because it implements a shared-authority
+contract or passes a remote-provider canary.
+
 ## 2. What We Will Do, and What We Will Not
 
 **What this version will do**
@@ -180,6 +268,8 @@ selects separate license terms; the current policy remains
 - bind each operation identity to one normalized request digest and reject the
   same id when it is reused with different semantics;
 - recover the original receipt after later operations advance the ledger;
+- define one semantic authority boundary and the file, NoKV, and PostgreSQL
+  provider profiles behind it;
 - keep LoopX's default local mode unchanged;
 - say how every existing durable state category joins—or stays outside—this
   boundary.
@@ -190,8 +280,8 @@ selects separate license terms; the current policy remains
 - support offline multi-writer merge or offline controlled writes;
 - mix message delivery, wake-up, presence, or an Agent IM protocol into the
   storage contract;
-- define multi-tenant public deployment, authentication, HA, or provider
-  failover;
+- ship production multi-tenant deployment, authentication, HA, or provider
+  failover in the Stage 0 reference slice;
 - move quota, scheduler state, run history, raw evidence, host sessions, or
   extension-owned ledgers into the coordination head;
 - automatically promote the current event projection or any provider;
@@ -253,12 +343,13 @@ and `loopx/pi_goal_mode/pi-goal-loop-runtime.mjs`.
 
 ## 4. What Goes Into This Coordination Ledger
 
-One provider key stores one goal's v0 aggregate. The illustrative shape is:
+One provider key stores one goal's aggregate (head schema v1). The illustrative shape is:
 
 ```json
 {
-  "schema_version": "loopx_coordination_head_v0",
+  "schema_version": "loopx_coordination_head_v1",
   "goal_id": "shared-rust-review",
+  "store_binding": "nokv:wb-goals:1f2e3d4c...",
   "authority_revision": 43,
   "coordination": {
     "todos": {
@@ -440,17 +531,92 @@ serially through `provider_generation`. A CAS loser decides whether to rebase
 from its target todo and named preconditions, rather than requiring a caller to
 mint a new operation merely because an independent todo committed first.
 
-Unknown command types fail closed. `renew_lease`, `release_lease`, expired-lease
-reclaim, stale-fence writeback validation, `complete_todo_with_successor`,
-transfer or delegated assignment, arbitrary todo/gate mutation, quota
-reservation, and external effects require later runtime contracts and
-qualification. Renew/release/reclaim and stale-fence validation are required
-before production shared-mode operation; their omission here is scope control,
-not a claim that a claim-only runtime is complete. Non-empty write scopes and
-cross-todo scope-overlap rejection likewise require a later command contract and
-qualification. Completion plus successor
-creation may join a later slice only when source completion, successor
-creation/assignment, evidence pointer, and receipt commit atomically.
+Unknown command types fail closed. Transfer or delegated assignment,
+arbitrary todo/gate mutation, quota reservation, and external effects still
+require later runtime contracts and qualification. Non-empty write scopes and
+cross-todo scope-overlap rejection likewise require a later command contract
+and qualification. The recoverable-execution verbs below are the Stage 3
+slice; steps 1 through 4 and 7 through 10 of Section 5 (identity, digest,
+replay, CAS, reload, rebase, budget) apply to every verb unchanged, and only
+the per-verb preconditions and transition (steps 5 and 6) differ.
+
+### 5.2 `renew_work`
+
+Required fields: `todo_id`, `expected_todo_revision`, `lease_id`,
+`expected_lease_epoch`, `lease_ttl_seconds`. The caller presents the fence it
+believes it holds; the authority rejects a missing lease, a fence whose
+lease id or epoch differs (typed `stale_lease_fence`), a caller that is not
+the recorded holder (typed `not_lease_holder`), and a lease the authority's
+own clock has already seen expire (typed `lease_not_active`; see Section
+6.4). An accepted renewal extends `expires_at` from the authority clock,
+keeps the lease id and epoch unchanged, and advances both
+`authority_revision` and the target `todo_revision`: the validity interval
+is a revision-covered fact, so a reclaim built on pre-renewal observations
+conflicts instead of surviving the internal rebase.
+
+### 5.3 `release_work`
+
+Required fields: `todo_id`, `expected_todo_revision`, `lease_id`,
+`expected_lease_epoch`. Release is the holder giving up early, so it is
+valid only while the lease is still active: the claim is cleared under the
+live holder gate and the lease is released in the same transition. The
+accepted transition clears `claimed_by`, deletes the lease entry, and
+advances both revisions, while the todo's `last_lease_epoch` watermark is
+retained unchanged - in the shared aggregate the watermark IS the terminal
+record, so the next claim mints strictly above it and release can never
+A/B/A. An expired lease is not releasable; its resolution belongs to
+reclaim.
+
+### 5.4 `reclaim_work`
+
+Required fields: `todo_id`, `expected_todo_revision`,
+`expected_preconditions`, `lease_ttl_seconds`. Reclaim is a standing
+delegation to eligible agents: when the authority's own clock has seen the
+recorded lease expired for at least the reclaim grace window (Section 6.4),
+any agent in the target's `allowed_agent_ids` may take the work over. The
+authority adjudicates expiry and synthesizes the delegation; the core then
+enforces everything else through the minimal privileged step - clear the
+stale claim under the delegation, then run the ordinary claim composition,
+so the new lease passes the same holder gate as any first claim. The
+accepted transition mints the next lease epoch, sets the reclaiming agent
+as claimant, advances both revisions and the watermark, and the receipt
+records the superseded owner and epoch. A lease inside its validity or
+grace window is typed `lease_not_reclaimable`; an unclaimed todo is typed
+`todo_not_claimed` (use `claim_work`).
+
+### 5.5 `complete_work`
+
+Required fields: `todo_id`, `expected_todo_revision`, `lease_id`,
+`expected_lease_epoch`, `no_followup`, `successor_todo_ids`, `evidence`.
+Completion requires the active lease fence: the core's terminal gate
+verifies the caller is the claimant and the holder of the presented fence,
+and an expired or superseded fence is typed exactly like every other
+stale write. One accepted transition records everything at once: the todo
+becomes durably `done` with an explicit `completion_continuation` derived
+from the recorded fields (`no_followup` | `successor` | `active_goal`,
+with both-set combinations refused exactly like the local write), the
+lease retires, declared successors are created as open, unclaimed,
+revision-zero todos inheriting the parent's execution context, and the
+optional evidence pointer lands on the completed record. Evidence is a
+portability boundary, not free text: the `pointer` must use the
+provider-neutral `artifact://<public|private>/<opaque-artifact-id>` URI
+shape (never a host filesystem path, provider URL, query, or credential),
+the URI privacy namespace must equal the sibling `privacy_class`, the
+`digest` must be a sha256 content digest, and `privacy_class` is the closed
+vocabulary `public | private` - per Section 1.1, never a body. The command
+boundary and head validation enforce this through one shared oracle. The
+persisted record satisfies the local durable-completion
+projection seam field for field, so both worlds read one truth.
+
+### 5.6 The stale-fence rule
+
+Every fence-carrying verb presents `(lease_id, expected_lease_epoch)`. A
+presented fence that does not match the recorded lease is a terminal typed
+rejection - `stale_lease_fence` - and is never retried past by the internal
+rebase: a superseded executor's writes stay rejected no matter how many
+unrelated commands advance the aggregate. This, plus epoch minting on every
+takeover, is the mechanism behind the Stage 3 horizon proof that a
+superseded executor cannot write back.
 
 ## 6. Who Decides and Who Stores
 
@@ -505,6 +671,102 @@ that never happened; publishing state first can lose the only proof after a
 crash. Splitting it later requires a provider-neutral multi-record transaction
 or commit-marker protocol and a new reviewed contract.
 
+#### 6.2.1 Three provider profiles, one authority
+
+| Provider profile | Role in this RFC | Promotion requirement |
+| --- | --- | --- |
+| file | Built-in deterministic and parity backend. Current Markdown, registry JSON, event JSONL, run files, and task-lease files remain canonical until their owning contracts are explicitly promoted. | Prove parity and crash recovery behind the same typed transaction boundary before any file aggregate becomes canonical. |
+| NoKV | Optional shared-store provider for online coordination. It contributes generation CAS and store-lineage primitives, not LoopX semantics. | Close recovery/availability blockers, qualify capacity and HA, then pass shadow parity and the bounded canary. |
+| PostgreSQL | Optional provider behind an authenticated LoopX authority service for multi-Agent or private deployments. PostgreSQL tables and roles are service implementation details. | Implement the same conformance contract, transaction isolation, fencing, idempotency, cursor, audit, and fail-closed network behavior; no direct Agent database access. |
+
+Physical database or cluster co-location does not merge ownership. A deployment
+should isolate LoopX control-plane records from application-domain records with
+separate schemas and roles, and relate them only through opaque identities or
+digests. Provider-specific payloads do not enter the provider-neutral LoopX
+schema.
+
+#### 6.2.2 Target store contract after the reference CAS slice
+
+The current Stage 2/3 reference implementation deliberately uses the smaller
+`load` / `compare_and_put` document seam above. It proves the lifecycle and
+receipt invariants needed before widening the persistence boundary; it does not
+claim to implement the future service-grade transaction API.
+
+The next LoopX-owned TypeScript boundary should express at least these logical
+operations (exact names and wire shapes remain implementation decisions):
+
+```text
+load_authority(goal_id)
+  -> head + provider_revision + cursor
+
+commit_authority(
+  expected_provider_revision,
+  operation_id,
+  events,
+  next_projection,
+  receipts
+)
+  -> applied | conflict | ambiguous | failed
+
+read_receipt(operation_id)
+scan_committed(after_cursor, limit)
+```
+
+This contract owns atomic event/projection/receipt persistence, opaque provider
+revisions, cursors, and durable readback. LoopX still owns operation identity,
+request normalization, legal transitions, claim/lease fencing, Turn admission,
+quota semantics, settlement idempotency, and receipt meaning. In particular,
+an adapter must not reinterpret a provider transaction result as a domain
+decision.
+
+The Stage 1 TypeScript contract makes read failure classes explicit. A proven
+`missing` head is different from `unavailable` storage, while corrupt bytes or
+an invalid lineage are `failed`; only proven absence may authorize bootstrap.
+Commit has the closed storage outcomes `applied | conflict | ambiguous |
+failed`. `ambiguous` means a publish was attempted but durability cannot be
+proved from the response, so the authority must reconcile through
+`read_receipt` and a fresh head read. A provider exception or human-readable
+error string is never itself commit proof.
+
+The three adapters implement those logical verbs through different native
+primitives; the contract does not pretend they are interchangeable databases:
+
+| Concern | File Stage 1 | NoKV Stage 2A | PostgreSQL Stage 2B |
+| --- | --- | --- | --- |
+| conditional revision | revision chain compared under the cross-process document lock | path `generation` passed to compare-and-publish | per-tenant/per-goal head-row revision, checked under a row lock or conditional update |
+| atomic event/projection/receipt commit | one complete journal document, file fsync, atomic rename, directory fsync | one generation-CAS envelope; receipt and scan data remain embedded until a qualified multi-record protocol exists | one SQL transaction updating the head and inserting ordered event/receipt rows |
+| operation uniqueness | retained journal rejects duplicate `operation_id` | authority receipt index in the CAS envelope | unique `(tenant_id, goal_id, operation_id)` constraint, used as storage fencing rather than a domain decision |
+| cursor | document-local monotonically increasing opaque string | embedded journal cursor, still subject to capacity qualification | per-goal sequence allocated in the same transaction; never a global ordering claim |
+| lineage | durable directory `store-identity` | workbench plus never-reused `workspace_incarnation_id` | service-managed database incarnation bound to the provider deployment |
+| trust boundary | trusted embedded LoopX process | LoopX-authority-owned NoKV credentials | authenticated tenant-scoped LoopX service role; Agents never receive table credentials |
+
+For PostgreSQL, `commit_authority` is one transaction, not a series of
+independent repository calls: lock or conditionally update the scoped head,
+verify the expected provider revision, allocate the next scoped cursor, insert
+the committed transaction/events/receipts, update the projection head, and
+commit. A connection failure before any write is a proved `failed` result; a
+connection loss after commit may have started is `ambiguous` and is reconciled
+by the unique operation row and receipt read. `READ COMMITTED` plus an explicit
+per-head row lock/conditional update can implement this contract; choosing
+`SERIALIZABLE` is an adapter decision, not a substitute for LoopX CAS,
+operation identity, or lease fencing. Authentication, tenant routing, audit,
+pool exhaustion, cancellation, timeout, and failover must all fail closed at
+the service boundary.
+
+For NoKV, the existing `load` / `compare_and_put` reference already maps
+missing, generation conflict, ambiguous publication, and workbench-incarnation
+lineage. It does **not** yet prove the widened event/receipt/cursor service
+contract. Until capacity, retention, restart/restore, availability, and HA are
+qualified, `read_receipt` and `scan_committed` can only be implemented by
+reading the retained journal inside the one CAS envelope; they must not be
+silently mapped to an eventually consistent listing API.
+
+The file provider is therefore conformance evidence, not a production-scale
+event store. Its retained journal intentionally makes atomicity and historical
+receipt replay easy to inspect, at the cost of whole-document growth. That
+tradeoff is acceptable for Stage 1 and is explicitly not inherited as the
+PostgreSQL physical schema or accepted as NoKV capacity proof.
+
 ### 6.3 The three version numbers are not the same thing
 
 | Domain | Owner | Meaning | Consumer |
@@ -517,9 +779,68 @@ A backend may often advance its generation once per accepted command, but
 numerical equality is never a contract. Migration, repair, or provider metadata
 may change provider generation without granting a new LoopX authority revision.
 
-For NoKV, its document generation implements `provider_generation` only. The
-LoopX authority remains responsible for the other two domains and for the
-receipt stored inside the document.
+A provider's document generation or database revision implements
+`provider_generation` only. The LoopX authority remains responsible for the
+other two domains and for the receipt stored inside the transaction.
+
+### 6.4 Expiry adjudication and the binding fence
+
+Wall-clock facts have exactly one judge: the authority that is applying a
+command, reading the loaded head's `expires_at` against its own clock. A
+caller's opinion of time is request motivation, never evidence; the core
+stays clockless and receives only the adjudicated active/expired verdict.
+Renewal, release, and completion require the lease to be active at
+adjudication time. Reclaim additionally requires the lease to have been
+expired for at least a configurable grace window whose lower bound is the
+maximum expected clock skew between endpoints in the deployment; the grace
+in force is the executor's declared parameter, and the configuration
+boundary is itself fail-closed: only a finite, non-negative number is
+accepted, because a NaN, negative, or boolean grace would advance a
+takeover instead of delaying it. Correctness never
+depends on the grace value - even a holder that believes itself alive is
+fenced by the epoch the reclaim minted, so skew can only delay a takeover,
+never corrupt one. Because renewal advances `todo_revision` (Section 5.2), the validity
+interval is also revision-covered, closing the rebase path a reclaim could
+otherwise ride across a concurrent renewal.
+
+The store-lineage binding fence closes the restore hazard measured in the
+Stage 2 status: `provider_generation` alone cannot carry lifecycle
+identity. The provider contract gains one read-only verb,
+`store_identity() -> str`, returning a stable identity for the store
+lineage: the NoKV adapter binds `workbench` plus the never-reused
+`workspace_incarnation_id` the service mints per workbench incarnation; the
+file provider serializes creation under its cross-process lock and publishes a
+strictly formatted identity through complete temp write, fsync, atomic rename,
+and parent-directory fsync.
+`bootstrap` embeds the identity in the head (`store_binding`), and the
+authority refuses every command - typed `store_lineage_mismatch` - whenever
+the loaded head's binding differs from the provider's identity, re-checking
+after every reload. A restore therefore preserves frozen bytes and lineage
+without granting live authority, exactly as the Stage 1 boundary requires;
+promoting restored state needs an explicit, reviewed re-bootstrap that
+mints a new binding. Known residual: a byte-for-byte copy of a file-backed
+store directory copies the identity file with it, so the file provider's
+fence detects relocation only when the identity file is excluded from the
+copy; the NoKV incarnation identity has no such gap and is the
+authoritative fence for shared deployments.
+
+Adding the binding is a schema change, not a reinterpretation: heads carry
+`loopx_coordination_head_v1`, and a legacy `loopx_coordination_head_v0`
+document (the Stage 2 shape without `store_binding`) is classified as
+`head_schema_migration_required` - a typed failure, never an unclassified
+validation crash, and never silently readable as current. The only upgrade
+path is the explicit `migrate_head_v0_to_v1` operation: an operator attests
+the reviewed store's own identity (`provider.store_identity()` on the store
+they have verified is the authoritative lineage) and writes the migrated
+head back through the same CAS. The binding is deliberately never inferred
+from whichever provider a head happens to be loaded through - an automatic
+binding would let any restored copy of a v0 store authorize itself, which
+is the exact capture this fence exists to prevent. Migration recognizes only
+the Stage 2 writer's actual output subset: `open` todo records and
+`claim_work` receipts with the exact v0 field sets. The old v0 validator did
+not close the todo status vocabulary; unknown status values and Stage 3-only
+fields under a v0 token are therefore treated as corruption requiring manual
+repair, not grandfathered into new authority.
 
 ## 7. Keep Every Receipt First; Compact Later
 
@@ -537,6 +858,46 @@ requires a later RFC that preserves atomic proof and defines behavior outside
 the window. Until then, compaction may rewrite bytes but must carry the complete
 receipt index forward.
 
+### 7.1 Proposed amendment: sealed receipt segments (owner decision, Q5)
+
+`retain_all_v0` in one CAS document cannot reach a multi-agent canary: the
+Stage 2 measurements showed ~750 bytes per receipt, a ~7x claim-latency
+growth across 120 receipts, and quadratic cumulative republish. Stage 3
+adds four more receipt-writing verbs, so the growth rate only worsens. The
+sentence above deliberately requires a reviewed amendment before receipts
+may leave the single document; this subsection is that amendment, proposed
+with evidence and NOT yet in force.
+
+Design (measured against two alternatives on a live NoKV stack, 150
+transitions each): the head keeps a bounded receipt window; when the window
+fills, the authority seals it into an immutable receipt-segment object at a
+sibling path (`goals/<goal>/receipts/segment-<seq>.json`), published
+create-only through the artifact path BEFORE the CAS that drops the sealed
+receipts from the head and appends `{path, sha256, count}` to a segment
+chain - the artifact-first order of Section 1.1, so the head never
+references bytes that were not durably published. Every committed receipt
+stays verifiable: replay looks in the window first, then dereferences the
+chain; a missing or digest-mismatched segment is a provider-protocol
+violation and fails closed, the segment-level form of the Section 7
+fail-closed rule. NoKV's publication semantics make sealing exactly-once
+for free: `operation_id` and `artifact_revision_id` are root-scoped-unique
+with immutable-input replay, so a seal retried after a crash between the
+segment publish and the head CAS replays idempotently (verified live) -
+but both ids MUST derive from workbench, path, and content, or a second
+lineage reusing the same derivation is rejected as id reuse.
+
+Measured verdict (debug stack, relative numbers): sealed segments keep the
+head 19x smaller (5.8 KiB vs 112 KiB at 150 receipts), publish 7.5x fewer
+cumulative bytes, and hold per-transition latency flat where retain_all
+grows, for +3% provider round trips; recovering an already-sealed receipt
+costs ~160 ms versus ~43 ms in-head. The receipt-per-object alternative is
+dominated: it pays an extra object publish on every transition (about 2x
+latency throughout) and still grows the head linearly through its pointer
+index. Window size is a deployment parameter; 16 was measured.
+
+Until the owner accepts this amendment (Section 12 Q5), `retain_all_v0`
+remains in force and the Stage 3 verbs ship on it unchanged.
+
 ## 8. Local Mode Stays the Default; Shared Mode Is an Explicit Migration
 
 ### Default local mode
@@ -546,6 +907,16 @@ receipt index forward.
 - Installing a provider does not enable shared authority.
 - The current event-store bridge still reports Markdown as source of truth and
   does not allow automatic promotion.
+
+Two deployment shapes share the same semantics:
+
+| Deployment | Authority boundary | Provider |
+| --- | --- | --- |
+| embedded/local | LoopX authority runs in the trusted local process; existing local writers remain canonical until promotion | file |
+| shared service | Agents call an authenticated LoopX authority API; the service owns provider credentials, tenancy, and audit | NoKV or PostgreSQL |
+
+An Agent is an API client in both shapes. Direct provider access never becomes
+an alternative shared mode.
 
 ### Shared-authority mode
 
@@ -640,6 +1011,74 @@ particular deployment topology are deliberately non-normative.
 
 ## 11. Staged Delivery
 
+The delivery program has one shared foundation and two provider-specific
+tracks. Workstream labels are responsibility boundaries, not authority grants:
+
+| Workstream | Primary responsibility |
+| --- | --- |
+| LoopX core owner | TypeScript-owned semantic transaction boundary; file-provider parity and promotion; migration, local-writer fencing, projection flip, rollback, and the single authority-source decision |
+| NoKV provider owner | NoKV adapter; live recovery, capacity, and HA qualification; feedback into the shared store contract without moving semantics into NoKV |
+| PostgreSQL provider owner | Generic PostgreSQL provider/service; transaction isolation, authentication, tenancy, audit, and operational deployment contract |
+| Joint qualification | Provider conformance matrix, one-way shadow parity, one-Goal/two-Agent TEST ONLY canary, and promotion evidence |
+
+The shared control plane is a composition of independently owned ledgers, not
+one large coordination aggregate. Stage 3/4 qualification must preserve these
+ownership and proof boundaries:
+
+| Ledger / decision | Authority and stable identity | Failure boundary | Stage 3/4 proof |
+| --- | --- | --- | --- |
+| Coordination head, Todo/claim, and lease fence | `AuthorityStore`; `(tenant_id, goal_id)`, `operation_id`, authority revision, and lease epoch | provider CAS/transaction plus operation-receipt readback | provider parity for projection, legal claim/lease transitions, fence, receipt, head, and cursor |
+| Turn admission and quota | independent Turn/quota ledgers; obligation, admission, debit, and void receipt identities | their own append/idempotency boundary; never absorbed into a coordination commit | end-to-end observation that admitted work references the accepted coordination head and accounts quota once |
+| Delivery, inbox, and external effects | independent delivery/inbox/provider ledgers; event cursor, effect identity, and provider receipt | connector/effect ambiguity is reconciled at its owning ledger | end-to-end observation that steering changes a later decision and an effect is not duplicated |
+| Settlement and run history | independent settlement journal and run ledger; settlement/phase receipt and run identity | ordered settlement checkpoints and idempotent replay | end-to-end observation of exactly-once settlement across restart, referenced from rather than stored inside coordination state |
+
+Only the first row qualifies an `AuthorityStore` implementation. The remaining
+rows qualify control-plane composition through typed references and receipts;
+passing them must not be reported as additional state owned or transacted by
+the coordination provider.
+
+The sequence is:
+
+1. **Stage 0 - merge the recoverable reference foundation.** Integrate #3669
+   with the native TypeScript task-lease acquire boundary, preserve TypeScript as
+   the acquire transaction owner, and close file store-identity publication.
+   #3806 completes the local lifecycle transaction cutover and makes renew,
+   transfer, and release consume one pure TypeScript decision in both the local
+   file executor and provider-neutral coordination; Python is a typed adapter,
+   not an alternate authority.
+2. **Stage 1 - define the provider-neutral transaction boundary.** Express the
+   service-grade contract in LoopX-owned TypeScript and make the file provider
+   its first conformance backend. Do not recreate a second Python semantic
+   authority.
+3. **Stage 2A/2B - implement providers in parallel.** The NoKV owner qualifies
+   the NoKV adapter and storage envelope; the PostgreSQL owner implements the
+   generic service/provider. Both reuse the same LoopX transition and receipt
+   semantics.
+4. **Stage 2C - promote the local canonical file aggregate.** First shadow the
+   current Markdown/task-lease writers into `FileAuthorityStore` without reading
+   it for decisions. Prove parity, crash recovery, migration, and one-command
+   rollback; then, in a separately reviewed promotion, make the file aggregate
+   the local coordination authority and fence the legacy writers. Markdown and
+   task-lease files become projections only after that promotion.
+5. **Stage 3 - one-way remote shadow parity.** The promoted local
+   `FileAuthorityStore` remains the only authority while committed observations
+   are projected to a NoKV or PostgreSQL candidate. Provider parity compares
+   Todo/claim, lease fence, operation
+   receipt, projection head, and cursor. Turn admission, quota, settlement,
+   inbox, and run history remain independent ledgers: the shadow records only
+   typed references needed to verify their end-to-end composition. Do not
+   perform bidirectional synchronization or provider-to-file writes.
+6. **Stage 4 - TEST ONLY canary.** One Goal and two Agents must show no duplicate
+   claim, correct expiry/fencing, restart resume, and fail-closed coordination
+   writes during network failure. The same canary separately observes that no
+   external effect is duplicated, inbox steering changes a later decision,
+   and settlement is idempotent and exactly-once; those are composition proofs
+   over their owning ledgers, not `AuthorityStore` conformance claims.
+7. **Stage 5 - flip one authority source.** Only after a reviewed promotion,
+   make the shared LoopX service the sole writer. Local `.loopx` state becomes
+   cache, offline projection, and diagnostic material. Never keep a long-lived
+   dual-write or dual-master mode.
+
 ### Implementation prerequisite: put local file mode behind the same coordination contract
 
 Before wiring a live NoKV or another remote provider, the runtime should first
@@ -657,6 +1096,7 @@ evidence; those ledgers retain the owners defined in Section 3.
 
 #### Stage 1 Part 2 boundary
 
+The provider-neutral pure authority core is merged on `main` through #3410.
 This slice is a behavior-preserving extraction of a pure decision core for the
 todo lifecycle, task-lease lifecycle, and `handoff_mode` rules that the current
 writers already enforce. Markdown goal state and task-lease files remain
@@ -666,16 +1106,17 @@ does not replace today's separate claim and lease verbs with the atomic
 `claim_work` command described above; that command belongs to the future shared
 aggregate.
 
-After the task-lease acquire TypeScript cutover, the acquire portion of this
-pure core is owned by `task_lease_acquire.ts`. The Python `authority_core`
-surface is a typed adapter for that command: it projects a normalized snapshot,
-invokes `task_lease.acquire.decide`, and reconstructs the provider-neutral
-`TransitionPlan`. Both the local lease-file transaction and the Stage 2
-coordination executor therefore consume the same acquire decision; locking,
+After the task-lease TypeScript cutovers, acquire is owned by
+`task_lease_acquire.ts`, while renew, transfer, and release are owned by the
+pure seam in `task_lease_lifecycle_decision.ts`. Python `authority_core`
+projects normalized snapshots, invokes those decisions, and reconstructs the
+provider-neutral `TransitionPlan`. The local lease-file transaction and the
+coordination executor therefore consume the same lease decisions; locking,
 source revalidation, file persistence, provider CAS, and receipt construction
-remain in their respective execution layers. The remaining todo, renew,
-transfer, release, fence, and handoff-mode decisions stay in the Python core
-until their own reviewed TypeScript cutovers.
+remain in their respective execution layers. Todo, terminal-fence, and
+handoff-mode decisions stay in the Python core until their own reviewed
+TypeScript cutovers; local holder/fence-close lock mechanics remain execution
+effects rather than provider contracts.
 
 Keep three layers distinct as the provider work proceeds:
 
@@ -696,8 +1137,204 @@ independent version domains. Likewise, a restore may preserve frozen bytes and
 lineage without granting current authority: promoting restored state to the
 live authority head requires an explicit lineage and binding fence.
 
-The file-backed provider shadow is Stage 2; its first slice and the evidence
-behind it are recorded in the Stage 2 status subsection below.
+#### Stage 2B PostgreSQL candidate status (2026-09-02)
+
+The first PostgreSQL candidate now implements the LoopX-owned TypeScript store
+contract instead of introducing a second semantic authority. A store handle is
+bound to `(tenant_id, goal_id)` and receives only a service-owned database
+pool. Its fixed `loopx_control_plane` schema separates the scoped head,
+committed operations, ordered events, and ordered receipts. One SQL transaction
+creates or locks the scoped head row, checks the opaque provider revision,
+fences `operation_id` with a unique constraint, allocates the per-goal cursor,
+inserts the commit/events/receipts, advances the projection head, and commits.
+An error before `COMMIT` is rolled back and typed `failed`; an error after the
+`COMMIT` attempt starts is typed `ambiguous` and can be reconciled only by
+receipt readback. Database-incarnation metadata is installed administratively
+and cannot be rebound implicitly.
+
+The database trust-boundary slice now gives each provider operation a
+transaction-local `loopx.tenant_id` context and enables plus forces PostgreSQL
+row-level security on every tenant-scoped table. Reads use a read-only
+transaction and roll it back before returning, so a pooled session cannot
+retain a previous tenant context. A missing context sees no scoped rows;
+`WITH CHECK` rejects a row for any tenant other than the active context. The
+qualified restricted-role profile receives only schema usage, metadata read,
+and the minimum scoped table privileges, so it cannot rebind
+database-incarnation metadata or install schema policy.
+
+This is defense in depth inside the service, not tenant authentication. The
+service still owns the database role and chooses the transaction context after
+authenticating a principal and authorizing its tenant. An Agent never receives
+that role, and RLS does not make a caller-supplied tenant id trustworthy.
+
+This slice also moves strict JSON validation and commit normalization out of
+the file implementation into one TypeScript authority-store codec. File and
+PostgreSQL now run the same provider-neutral conformance suite for atomic
+projection-plus-receipt commit, CAS contention, historical receipt replay,
+operation fencing, ordered cursor scans, isolation of returned values, and
+pre-write rejection of malformed JSON.
+
+Real PostgreSQL qualification starts here, not at shadow or canary. A
+PostgreSQL 16 instance passed the shared conformance matrix, same-head
+concurrent CAS, tenant-scoped reuse of the same goal and operation ids,
+transaction rollback with no visible head or receipt, receipt recovery after a
+committed transaction loses its response, database-incarnation rebind refusal,
+and a restricted-role two-tenant RLS matrix. The latter proves that missing
+transaction context exposes no scoped row, cross-context writes fail, and the
+runtime role cannot mutate administrative metadata. A fake can still exercise
+adapter branches, but it cannot prove row locking, unique constraints,
+rollback, commit visibility, privileges, or RLS; every later PostgreSQL
+provider slice must therefore retain a real-database gate.
+
+The candidate remains coverage-only. No production LoopX entry point constructs
+it, local mode remains unchanged, and Agents cannot receive the injected pool.
+The database runtime-role and RLS behavior within the service trust boundary is
+now implemented and qualified. Service API authentication,
+principal-to-tenant authorization, the production runtime caller,
+restore-incarnation rotation, pool
+exhaustion/cancellation/failover, one-way shadow parity, the TEST ONLY canary,
+and authority-source promotion remain explicit holds. The next PostgreSQL
+slice must qualify the authenticated service/deployment and failure boundary;
+it must not treat database RLS as that missing API authorization layer.
+
+The file-backed provider contract and executor are Stage 2; their first slice
+is merged on `main` through #3529, and the evidence behind it is recorded in
+the Stage 2 status subsection below. That slice proves the aggregate and
+provider boundary, but it is not the Stage 2C production runtime shadow: it
+does not hook the legacy Todo or task-lease writers.
+
+#### Stage 2C post-commit runtime-shadow status (2026-09-03)
+
+The first production-path shadow slice is implemented behind this exact,
+default-off goal configuration:
+
+```json
+{
+  "coordination": {
+    "runtime_shadow": {
+      "enabled": true,
+      "schema_version": "loopx_coordination_runtime_shadow_config_v0",
+      "provider": "file_v0"
+    }
+  }
+}
+```
+
+Activation requires all three values. An absent, disabled, malformed, or
+unsupported configuration preserves the legacy result and returns typed
+disabled evidence. When enabled, the runtime obeys the following boundary:
+
+- the legacy Markdown Todo writer or task-lease writer commits first and
+  remains canonical; only a successful primary mutation dispatches the
+  shadow;
+- the Python adapter reduces the committed Todo and lease read models to the
+  coordination-owned fields, sorts them by stable Todo identity, and sends one
+  post-commit projection through the existing TypeScript effect runtime;
+- the TypeScript owner writes that projection and its operation receipt in one
+  `AuthorityStore` transaction. It checks an existing receipt before writing,
+  rejects reuse of an operation id with different normalized content, retries
+  provider-revision contention only within a fixed bound, and reconciles an
+  ambiguous commit only by reading the exact durable receipt;
+- an applied result reads the receipt back and verifies the current provider
+  head when it has not already been superseded. Every result states
+  `decision_read_from_shadow=false`; a disabled, failed, conflicting, or
+  ambiguous shadow result cannot reject, roll back, or rewrite the committed
+  primary result.
+
+Cross-runtime tests exercise the real Python -> TypeScript ->
+`FileAuthorityStore` path from both Todo and task-lease hooks, including
+default-off behavior, stable replay, content-drift rejection, ambiguous-commit
+recovery, projection read-back, and shadow-failure isolation. This closes the
+first runtime-shadow slice. A follow-up typed inspection seam now compares the
+current compact legacy projection with the file head and reports `missing`,
+`matched`, or `drifted` plus both content digests. It is default-off,
+read-only, and always returns `decision_read_from_shadow=false`; this provides
+the reusable baseline/parity observation needed by migration without turning
+an observation into authority.
+
+The next migration primitive is now also present behind the same explicit
+opt-in. `coordination.runtime_shadow.bootstrap` installs one normalized legacy
+projection only when the file shadow is uninitialized. Its first committed
+event durably binds the source version, source projection digest, and
+`legacy_canonical_shadow` mode declaration; it deliberately carries an empty
+receipt payload because no agent operation has run. Exact replay is recovered
+from that first transaction, including an ambiguous lost response, while a
+different existing lineage fails closed. This is the provider-owned bootstrap
+effect needed by a later administrative migration command; it still cannot
+promote the shadow or make a coordination decision.
+
+The administrative caller is explicit and preview-first:
+
+```bash
+loopx coordination-shadow inspect --goal-id <goal-id>
+loopx coordination-shadow bootstrap --goal-id <goal-id>
+loopx coordination-shadow bootstrap --goal-id <goal-id> --execute
+loopx coordination-shadow qualify --goal-id <goal-id> \
+  --minimum-operations 3 \
+  --require-event-kind todo_claim \
+  --require-event-kind task_lease_acquire
+loopx coordination-shadow rollback --goal-id <goal-id> \
+  --provider-revision <revision-from-inspect> --execute
+```
+
+It derives the compact projection from the current canonical Todo and
+task-lease views, reports only counts and digests, and requires `--execute`
+before invoking bootstrap. A successful write is immediately read back through
+the typed parity inspection. The command remains unavailable unless the exact
+goal-level `file_v0` shadow opt-in is active.
+
+Pre-promotion rollback is revision-fenced and non-destructive. TypeScript moves
+the exact active file-shadow lineage into a durable quarantine archive; exact
+retries replay that archive receipt, revision drift fails closed, and the
+legacy Todo/task-lease source remains canonical throughout. A later bootstrap
+may therefore reconstruct a fresh shadow without restoring or trusting the
+retired lineage.
+
+The read-only `qualify` action turns one-point inspection into a typed sustained
+parity report. Its coverage-based policy requires a caller-selected number of
+distinct committed operations and any explicitly named Todo/lease mutation
+kinds. TypeScript scans the complete bounded lineage, verifies the bootstrap,
+every event/receipt/projection identity, the current legacy/file head digest,
+and reports `qualified`, `insufficient_evidence`, or `drifted`. Replays do not
+increase the operation count, missing coverage fails the gate, and every result
+continues to declare `decision_read_from_shadow=false`.
+
+The next read-only seam exercises the provider shape needed by the future
+read flip without granting it authority:
+
+```bash
+loopx coordination-shadow read-candidate \
+  --goal-id <goal-id> \
+  --todo-id <todo-id>
+```
+
+TypeScript loads the file head, requires its digest to match the complete
+current legacy coordination projection, validates unique Todo identities, and
+returns the exact compact Todo plus the provider revision and cursor. Missing,
+drifted, malformed, or duplicate state fails closed. The result deliberately
+keeps `decision_read_from_shadow=false`: it proves that a parity-matched
+provider can answer an exact Todo read, but no lifecycle or settlement caller
+uses that answer yet. Promotion still requires an atomic provider-first read
+flip together with legacy-writer fencing; a fallback to Markdown after that
+flip would recreate split authority and is forbidden.
+
+The provider-first read flip and fencing every legacy coordination writer
+remain mandatory evidence for the separately reviewed local canonical
+promotion. Remote NoKV/PostgreSQL shadowing therefore remains Stage 3 and
+cannot use this default-off hook as authority.
+
+The next Stage 2C implementation slice adds the TypeScript cutover kernel but
+does not yet change the default runtime. One pure reducer now derives the
+Todo/lease projection, event, and receipt from the same mutation. An explicit
+promotion operation requires a qualified shadow at one exact provider revision
+and digest, plus an independently persisted legacy-writer fence bound to that
+same revision. The fence has a shared fail-closed write-check hook; promotion
+is replayable through its operation receipt, and provider-first reads and
+mutations never fall back to Markdown. Until the Python Todo and task-lease
+entry points call that hook and select the promoted mode, these surfaces remain
+cutover machinery rather than a production authority flip. The follow-up must
+wire every legacy writer, make configuration and rollback explicit, and prove
+default legacy compatibility before the local promotion can be enabled.
 
 Durable completion continuation read-back
 (`durable_completion.py`: `read_persisted_todo_record` /
@@ -712,7 +1349,7 @@ flips to provider-first without changing the typed outcome contract below.
 
 #### Stage 2 slice status (2026-08-23)
 
-The first Stage 2 slice exists on this branch, additively:
+The first Stage 2 slice is merged on `main` through #3529, additively:
 
 - `loopx.control_plane.coordination.head`: the `loopx_coordination_head_v0`
   aggregate codec. Validation is closed-set and fail-closed for every field
@@ -801,6 +1438,81 @@ Measured boundaries Stage 3 must respect rather than rediscover:
   would be safe; whether v0 adopts that liveness amendment is an owner
   decision recorded here, not silently implemented.
 
+#### Stage 3 slice status (2026-08-26)
+
+The recoverable-execution horizon row exists on this branch, additively:
+the four verbs of Sections 5.2-5.5 with the stale-fence rule of 5.6, the
+expiry adjudication and store-lineage binding fence of 6.4, per-verb
+receipt schemas, conditional completion validation in the head codec
+(status vocabulary pinned to open|done, previously unvalidated), and the
+holder gate that refuses a correct fence in the wrong hands. Every domain
+decision remains delegated to the Stage 1 core; the reclaim composition
+was selected by a three-way battery against the real core (the naive
+acquire-first composition dies on owner_conflicts_with_claim; the chosen
+form does the minimal delegated unclaim and then the ordinary claim
+composition, so the new lease passes the true holder gate).
+
+Live qualification (single-node NoKV dev stack, 0.11.0 release wheel):
+twelve shared scenario rows identical across the file and NoKV providers,
+including renew, grace-window reclaim with the superseded owner recorded,
+the superseded executor's writes terminally fenced, and completion
+creating a claimable successor atomically; one NoKV-specific row proves
+the binding fence against a REAL commit/snapshot/restore - the restored
+workbench refuses every command with store_lineage_mismatch while the
+original keeps serving. A SIGKILL of the serving owner mid-lifecycle
+recovered in ~61 s (60 s session lease drain): the head byte-identical,
+the renewal receipt replayed exactly through a fresh executor, and the
+post-crash reclaim/fence/completion chain completed on the reopened
+store. Clock-boundary tests pin the grace window edge for edge.
+
+Measured gates, updated:
+
+- Concurrency envelope (grown from the Stage 2 numbers): K independent
+  claims all succeed through K=8 on this stack (p50 2.8 s / 10.2 s /
+  50.7 s at K=2/4/8); K=16 admits 8 and fails the rest typed on the
+  8-attempt budget with ~150 s tails. The supported envelope declaration
+  for a canary is K<=8 with the measured latency curve.
+- Retention: the Section 7.1 sealed-segment amendment is proposed with
+  live comparative evidence (19x smaller head, 7.5x less republish, flat
+  latency, +3% round trips, ~160 ms sealed-receipt recovery); the slice
+  itself ships on retain_all_v0 until the owner decides Q5.
+- Two NoKV storage-plane defects surfaced by the independent reruns and
+  are reported upstream rather than worked around silently: (a) reopen
+  thrash can wedge logical-shard recovery publication at a dead lease's
+  epoch, leaving every later takeover attempt rejected with "stale
+  lease" until operator intervention; (b) a SIGKILL landing inside the
+  metadata write window can corrupt the store manifest
+  (FileBlobStore duplicate slot) so no reopen ever succeeds - the
+  coordination layer above stays correct in both cases (no false
+  authority), but availability depends on these fixes before any
+  production canary.
+
+Review-driven hardening (2026-08-27): the reclaim grace configuration
+boundary is fail-closed (Section 6.4; a NaN or negative grace could
+previously take an active lease), evidence uses a privacy-bound
+`artifact://` URI with a closed vocabulary
+(Section 5.5; a host path or privacy mismatch could previously persist into
+the shared head), and the head schema is versioned as
+`loopx_coordination_head_v1` with the explicit v0 migration path
+(Section 6.4; a Stage 2 head previously failed unclassified).
+That migration now reconstructs the Stage 2 single-command history from its
+retain-all receipts: a live claim must match the retained actor, todo revision,
+lease id, epoch, expiry, and contiguous authority revision sequence. A partial
+or edited v0 head therefore fails as corruption instead of gaining a new store
+binding, reusing an epoch, or authorizing an unproved holder.
+
+Delivery boundary, stated explicitly and accepted by the owner on 2026-09-01:
+this slice is the RFC's reference implementation with deterministic and
+live-example evidence. No LoopX production entry point constructs the executor
+yet - the modules are coverage-only in the visible governance ledger. This
+acceptance allows the cohesive reference-contract slice to merge after its
+correctness, rebase, and review gates pass; it does not promote it to a shipped
+capability. A real caller requires the reviewed shared-mode migration,
+local-writer fence, authorization publisher, provider binding, projection
+flip, rollback, and retention decisions below - not a diagnostic CLI that
+creates a second writer. This status section claims proven contracts, not a
+shipped production capability.
+
 ### P0: contract and deterministic proof
 
 - this ownership matrix and explicit shared-mode boundary;
@@ -813,15 +1525,17 @@ Measured boundaries Stage 3 must respect rather than rediscover:
 - A/B/A, identity-mismatch, crash-window, eligibility, privacy, and no-GC
   checks within the stated evidence boundary.
 
-### Later runtime qualification and reviewed slices
+### Later runtime promotion and reviewed slices
 
-- lease renewal, explicit release, expired-lease reclaim, and stale-fence
-  writeback rejection, all required before production shared mode;
-- durable completion continuation projection
-  (`successor | no_followup | active_goal`) with fail-closed contradiction
-  rules (`no_followup` + successors, dangling declared successor), reproduced
-  by the provider with identical semantics;
-- atomic `complete_todo_with_successor` and accepted evidence pointers;
+- the LoopX-owned TypeScript transaction/store boundary and file-provider
+  conformance described in Section 6.2;
+- NoKV qualification and the remaining PostgreSQL service, failure, and
+  promotion holds behind that boundary;
+- one-way shadow parity, the one-Goal/two-Agent TEST ONLY canary, and a
+  single-source authority flip with no long-lived dual-write or dual-master;
+- an explicit shared-mode migration and rollback/export operation, local
+  writer fencing, provider binding, a production authorization-projection
+  publisher, and provider-first status/completion projections;
 - transfer and restricted delegated assignment;
 - delivery/wake integration through Agent IM;
 - independent run-history synchronization and artifact storage;
@@ -833,7 +1547,11 @@ Measured boundaries Stage 3 must respect rather than rediscover:
 
 1. Should the next runtime slice first close renew/release/reclaim and stale
    fencing, or qualify that lifecycle together with atomic
-   complete-with-successor?
+   complete-with-successor? *Proposed answer (Stage 3 slice): together,
+   sequenced internally - the lifecycle verbs land first in the command
+   surface and completion reuses their fence machinery unchanged; the
+   completed record must satisfy the local durable-completion projection
+   seam, which is already the reviewed contract on the local side.*
 2. Which compact project-registry authorization fields form the versioned
    authority input, and who may publish a new authorization projection?
 3. What is the reviewed rollback/export procedure after the first shared-mode
@@ -842,6 +1560,27 @@ Measured boundaries Stage 3 must respect rather than rediscover:
    canary? Provider selection does not change the authority contract.
 5. Before production use, what retention and capacity policy replaces or
    operationalizes `retain_all_v0` without losing historical proof?
+6. Does the Stage 4 canary require Host lease liveness before admission, or
+   is that a Stage 5 promotion hold? Section 11 asks the canary to observe
+   that no external effect is duplicated, but a Host whose runtime exceeds the
+   lease TTL can keep producing effects after another Agent reclaims the Todo,
+   and a settlement rejected afterwards cannot undo them. The review of #3820
+   treated this as a Stage 4 precondition; the RFC must say which mechanism
+   is required and where: renewing the lease while the Host runs plus
+   cancelling the Host when the fence is lost, an effect-owning fenced commit
+   inside the recoverable protocol, or a hard Host duration bound below the
+   TTL. *Proposed answer: any canary that runs a real Host must renew during
+   Host execution and cancel on fence loss, and its acceptance must include
+   the long-Host expiry/reclaim negative test; a bounded fake Host is not
+   evidence for this row.*
+7. How is the canary's authority provider bound to a Goal? A CLI argument
+   that names an arbitrary guard command is a test-harness convenience, not a
+   product authority selector. *Proposed answer: the binding is a
+   goal-level registry record published by the same owner as the
+   authorization projection in question 2, naming the provider kind, the
+   store identity or lineage, and an explicit TEST ONLY canary marker; a Goal
+   without that marker cannot be admitted by a shared-authority guard, and
+   the runtime resolves the provider from the record rather than from argv.*
 
 ---
 
@@ -851,17 +1590,44 @@ The reference provider and probes live in
 `examples/nokv-shadow-provider/`,
 with a companion
 [`evidence document`](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md).
-The deterministic candidate in this PR proves only the claim/receipt core:
-same-CAS state plus receipt, competing claims, A/B/A original-receipt replay,
-request-digest mismatch, crash-boundary recovery, and distinct version-domain
-examples. It does not implement or qualify lease renewal/release/reclaim,
-stale-fence writeback, a production authorization-projection publisher,
-receipt-preserving compaction, default-mode parity, shared-mode migration, or
-live NoKV restart/recovery. Passing
+The deterministic candidate in this PR proves the claim/receipt core plus the
+Stage 3 reference lifecycle: same-CAS state plus receipt, competing claims,
+A/B/A original-receipt replay, renew/release/expired reclaim, stale-fence
+writeback rejection, atomic completion/continuation, request-digest mismatch,
+clock boundaries, lineage binding, and distinct version domains. The stated
+single-node live scope additionally qualifies file/NoKV parity, restart receipt
+replay, and a real restore-lineage fence. It does not implement or qualify a
+production authorization-projection publisher, receipt-preserving compaction,
+default-mode parity, product shared-mode migration/promotion, service recovery,
+or HA. Passing
 `python3 examples/nokv-shadow-provider/probes.py contract` is therefore not a
 claim that the complete P0 acceptance gate above passes. Historical latency or
 fault results are informative only; they are not a durability, recovery, HA,
 or production qualification claim.
+
+The additional TEST ONLY Stage 2A probe in
+`examples/nokv-authority-store/` opens three independent SDK helper processes
+and checks fresh create, exact generation update, reconciliation after an
+applied CAS response is deliberately lost, a one-winner/two-contender CAS,
+winner/loser receipt behavior, and fresh-process receipt/history readback. Its
+executable fixes argv to one absolute Python executable, the interpreter
+isolation flag `-I`, and this checkout's reviewed helper, so `PYTHONPATH`
+cannot substitute the `nokv` module; the helper fails closed unless the SDK
+reports NoKV 0.11.0 and Python API 1, and the report repeats those two
+admission constants rather than server-observed values. It validates read metadata against the current workbench
+incarnation and validates publish responses against the requested workbench,
+path, operation, revision, and generation. The AuthorityStore accepts even a
+successful publish response only after a fresh read proves the exact persisted
+transaction under the current workbench incarnation. This closes false success
+at the LoopX boundary, but NoKV's current Python API does not atomically bind an
+expected workspace incarnation into `publish_bytes`; preventing a write after a
+concurrent remove/recreate remains an explicit provider-contract hold.
+Only a successful live JSON report is evidence for that single-node Stage 2A
+store-conformance run; deterministic tests are sequence tests only. This
+LoopX-only candidate changes neither NoKV source nor its workbench/artifact data
+model, and it does not prove runtime shadow parity, a multi-Agent canary,
+authority-source promotion, HA, restart recovery, capacity, or production
+routing.
 
 ## Appendix B: Handoff-Mode Decision Record (2026-08-10)
 
@@ -940,8 +1706,12 @@ as a follow-up. `legacy` remains the default and keeps the divergence hole by
 design. Two side doors found after the gate landed are closed alongside this
 revision: `supersede` crosses the same lease fence as `complete`, and a forced
 state rebuild (`bootstrap --force`) carries the declared mode instead of
-resetting it to `legacy`. The next stage, a file-backed provider shadow behind
-the coordination contract of Section 11, has not started.
+resetting it to `legacy`. The Stage 2 provider contract and file backend have
+since landed, and the first Stage 2C post-commit runtime shadow now exists
+behind an explicit default-off configuration. Local canonical promotion has
+not started: the runtime still never reads the shadow for decisions, and the
+migration, rollback, parity, read-flip, and legacy-writer fencing gates above
+remain open.
 
 ### Relation to Staged Delivery
 

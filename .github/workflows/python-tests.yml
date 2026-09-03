@@ -121,7 +121,6 @@ jobs:
           tests/test_file_lock_cross_process.py
           tests/control_plane/test_coordination_file_provider.py
           tests/control_plane/test_effect_runtime_integration.py
-          tests/control_plane/test_scheduler_heartbeat_commit_runtime.py
           tests/test_self_update_runtime_activation.py
           tests/test_windows_install.py
 

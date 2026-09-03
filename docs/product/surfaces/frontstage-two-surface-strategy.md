@@ -1,5 +1,13 @@
 # Frontstage Two-Surface Strategy
 
+> **Deprecated compatibility surface:** `/deprecated/frontstage/ops` remains
+> only for bounded diagnostics. The old `/frontstage?mode=ops` form redirects
+> there for bookmark compatibility. Personal Workspace (`/`) is the product
+> owner for operator workflows, Goal outputs, and milestone reports. New
+> product capabilities must not be added to the legacy Frontstage Ops board.
+> Remove the compatibility route in a dedicated cleanup after its remaining
+> fixture and smoke consumers migrate.
+
 LoopX frontstage work has two different products sharing some dashboard
 code. Treating them as one surface makes the next UI pass ambiguous: public
 showcase pages want visual storytelling, while the real operator control plane
@@ -8,12 +16,14 @@ contract to keep those jobs separate before more large UI changes.
 
 ## Decision
 
-The frontstage family has two first-class surfaces:
+The presentation family has two first-class product surfaces and one deprecated
+diagnostic compatibility route:
 
 | Surface | Job | Primary routes | Owner |
 | --- | --- | --- | --- |
 | Public showcase and homepage | Explain LoopX through public-safe cases, demos, animation, and product narrative. | `/frontstage`, hosted `/frontstage/`, future homepage entry points. | Product, outreach, and frontstage showcase work. |
-| Real ops control plane | Help the operator inspect current goals, gates, todos, claims, quota, run history, and safe local actions. | `/`, `?view=ops`, `/frontstage?mode=ops&statusUrl=<relative-or-loopback>`. | Runtime, status contract, dashboard, and control-plane work. |
+| Personal Workspace | Help the operator inspect and act on current Goals, Todos, runs, outputs, reports, and safe local actions. | `/` | Runtime, status contract, dashboard, and control-plane work. |
+| Legacy Ops diagnostics | Preserve bounded compatibility for old projection debugging while consumers migrate. | `/deprecated/frontstage/ops?statusUrl=<relative-or-loopback>` | Deprecated; no new product features. |
 
 The public surface is the default when a URL can be copied or hosted. The ops
 surface is explicit, local, and read-only unless a loopback server advertises a
@@ -25,10 +35,14 @@ separate capability such as reward dry-run or append preview.
 must ignore `statusUrl`, render bundled demo or showcase material, and remain
 safe for GitHub Pages, Lark shares, screenshots, and public demos.
 
-`/frontstage?mode=ops&statusUrl=...` belongs to local ops inspection. The
+`/deprecated/frontstage/ops?statusUrl=...` belongs to local ops inspection. The
 `statusUrl` must be relative or loopback. This route may read
 `goal_channel_projection_v0` from a local `loopx serve-status` feed, but
 it is not a public link and must not be used as hosted showcase material.
+Its implementation lives under
+`apps/presentation/dashboard/src/views/deprecated/`; the public
+`frontstage-page.tsx` must not import the live status query layer or retain Ops
+rendering branches.
 
 `/` is the operator home. It should answer the first-screen operational
 questions for the shared LoopX registry: current goal, concrete user

@@ -907,23 +907,27 @@ Dashboard status is an experimental operator preview. The CLI and
 `loopx status` remain the canonical daily workflow; the React dashboard
 is useful for demos, public-safe fixtures, and local inspection.
 
-Serve status JSON:
-
-```bash
-loopx serve-status --port 8765
-```
-
-Run the dashboard:
+Start the installed Personal Workspace with one command:
 
 ```bash
 loopx dashboard
 ```
 
-On first run, LoopX installs the dashboard's npm dependencies. The command then
-starts the UI, global status service, and Agent Chat service together. Open
-`http://127.0.0.1:5173/` after the readiness messages appear.
+The installed command serves the packaged UI, status projection, and Agent Chat
+from one process. It opens the browser by default; pass `--no-open` for a
+headless launch and use the URL printed by the command. With the default port,
+the workspace URL is `http://127.0.0.1:8767/chat/`. A separate
+`loopx serve-status` process is not required.
 
-For the shared multi-project view:
+For a minimum readback after starting with `--no-open`:
+
+```bash
+curl -fsS http://127.0.0.1:8767/chat/ >/dev/null
+curl -fsS http://127.0.0.1:8767/status.json
+```
+
+`serve-status` remains available when another client needs a standalone status
+feed, independently of the installed Personal Workspace:
 
 ```bash
 loopx serve-status --global-registry --port 8766 --limit 80

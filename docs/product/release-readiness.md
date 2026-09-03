@@ -33,8 +33,15 @@ loopx extension doctor --all-enabled --execute
 
 After `loopx update apply`, revalidate enabled extensions with
 `loopx extension doctor --all-enabled --execute`. Stale extension readiness
-recovers on the next apply or doctor cycle; use per-extension doctor output for
-repair details. See [Extension lifecycle](../reference/extensions.md#runtime-lifecycle).
+is already revalidated during a successful apply; the explicit command above
+is an independent readback and recovery entry point. A provider that still
+fails remains closed until its per-extension doctor result is repaired and the
+command passes. See [Extension lifecycle](../reference/extensions.md#runtime-lifecycle).
+
+Do not collapse package acquisition, host-material delivery, core runtime
+activation, and enabled-extension readiness into one "installed" claim. The
+[installation guide's active-layer checklist](../guides/installing-loopx.md#verify-the-active-layers)
+names the readback and recovery command for each layer.
 
 For a pip or pipx distribution, apply delegates to that owner. For an archive
 snapshot, apply uses the public `stable` ref by default and preserves atomic
@@ -123,9 +130,11 @@ option is read-only and accepted only by `update check`.
 
 ## Named Version Contract
 
-LoopX v0.x is distributed from GitHub, but each stable promotion still needs a
-package version name. The version source is `loopx.__version__`, mirrored by
-`pyproject.toml`; the expected public tag is `vX.Y.Z` for that version.
+LoopX v0.x releases are tagged and built from GitHub. The release workflow
+publishes artifacts to GitHub Releases and, when its Trusted Publisher gate
+passes, PyPI; each stable promotion still needs one package version name. The
+version source is `loopx.__version__`, mirrored by `pyproject.toml`; the
+expected public tag is `vX.Y.Z` for that version.
 
 Before moving `stable`, maintainers should:
 
@@ -516,6 +525,12 @@ path, and canary route rather than as a user-facing release baseline.
   Pi task-lease facade; it also strengthens Lark inbox routing and catch-up,
   typed Todo/quota/scheduler settlement, repository delivery admission, and
   runtime startup recovery.
+- `v0.5.4` on 2026-09-03: typed control-plane and governed-workflow release at
+  the matching `v0.5.4` tag. LoopX moves more Todo, task-lease, quota,
+  scheduler, Vision, and replan transactions behind TypeScript owners;
+  advances staged file, PostgreSQL, and NoKV shared-authority providers;
+  completes the periodic-report lifecycle; makes the DSH plugin one-step ready; and adds
+  public-safe benchmark study projection without granting upload authority.
 
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.

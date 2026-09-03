@@ -4,6 +4,7 @@ import { useWorkspaceI18n } from "./i18n";
 
 export function WorkspaceShell({
   drawer,
+  drawerMode = "panel",
   drawerOpen,
   main,
   mobileSidebarOpen = false,
@@ -12,6 +13,7 @@ export function WorkspaceShell({
   theme = "paper",
 }: {
   drawer?: ReactNode;
+  drawerMode?: "inspector" | "inspector-full" | "panel";
   drawerOpen: boolean;
   main: ReactNode;
   mobileSidebarOpen?: boolean;
@@ -54,7 +56,7 @@ export function WorkspaceShell({
   }, [mobileSidebarOpen]);
 
   return (
-    <section className={`personal-workspace-shell${drawerOpen ? " has-drawer" : ""}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}`} data-pw-theme={theme}>
+    <section className={`personal-workspace-shell${drawerOpen ? " has-drawer" : ""}${drawerOpen && drawerMode.startsWith("inspector") ? " has-task-inspector" : ""}${drawerMode === "inspector-full" ? " is-task-inspector-full" : ""}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}`} data-pw-theme={theme}>
       {mobileSidebarOpen ? <button aria-hidden className="personal-sidebar-backdrop" onClick={onCloseMobileSidebar} tabIndex={-1} type="button" /> : null}
       <aside
         aria-label={mobileSidebarOpen ? t("header.goalNavigation") : undefined}
@@ -70,7 +72,7 @@ export function WorkspaceShell({
         </div>
       </aside>
       <main aria-hidden={mobileSidebarOpen || undefined} className="personal-workspace-main" inert={mobileSidebarOpen || undefined}>{main}</main>
-      {drawerOpen ? <aside className="personal-workspace-drawer" data-context-drawer>{drawer}</aside> : null}
+      {drawerOpen ? <aside className="personal-workspace-drawer" data-context-drawer data-drawer-mode={drawerMode}>{drawer}</aside> : null}
     </section>
   );
 }

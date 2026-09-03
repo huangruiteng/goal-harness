@@ -266,6 +266,7 @@ def test_real_mcp_settlement_rejects_missing_writeback_then_commits_same_identit
         text="Deliver the bounded fixture change.",
         task_class="advancement_task",
         claimed_by=AGENT_ID,
+        continuation_policy="same_agent_non_delivery",
     )
     todo_id = str(added["todo_id"])
     request = HostTodoSettlementRequest(

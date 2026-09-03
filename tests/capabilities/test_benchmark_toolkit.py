@@ -146,9 +146,21 @@ def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:
         "matched_pair_count",
         "aggregate_primary_metric_by_arm",
         "binary_outcome_by_arm_when_available",
+        "feature_metric_by_arm_when_available",
+        "preservation_guardrail_by_arm_when_available",
         "improved_flat_regressed_pair_counts",
+        "baseline_effort_strata_when_available",
         "new_case_insights_and_next_probe",
     ]
+    effort_stratification = reporting["effort_stratification"]
+    assert effort_stratification["default_reference_arm"] == "baseline"
+    assert effort_stratification["default_reference_field"] == (
+        "effort.duration_ms"
+    )
+    assert effort_stratification["candidate_duration_affects_bucket"] is False
+    assert effort_stratification["interpretation"] == (
+        "descriptive_sensitivity_only"
+    )
     assert "Do not send a repetitive" in reporting["unchanged_policy"]
     active = analysis["active_progress_readback"]
     assert active["workspace_basis"] == [
@@ -259,6 +271,20 @@ def test_catalog_exposes_four_arm_factorial_start_contract() -> None:
     assert any(
         "four-arm-contract" in command["command"] for command in capability["commands"]
     )
+
+
+def test_catalog_exposes_study_simulation_workflow() -> None:
+    capability = build_capability_detail_packet("benchmark-toolkit")["capability"]
+
+    commands = [item["command"] for item in capability["commands"]]
+    assert any("study-validate" in command for command in commands)
+    assert any("upload-envelope" in command for command in commands)
+    assert any("upload-local" in command for command in commands)
+    assert any("upload-readback" in command for command in commands)
+    assert any("study-dashboard" in command for command in commands)
+    workflow = capability["agent_usage"]["study_projection_workflow"]
+    assert workflow["sequence"][0] == "validate_provider_neutral_study_manifest"
+    assert "separately activated provider" in workflow["external_provider_boundary"]
 
 
 def _attestation() -> dict[str, object]:

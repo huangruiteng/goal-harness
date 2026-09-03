@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from loopx.control_plane.testing.model_tool_behavior import (
+    QUOTA_FIRST_TOOL_INSTRUCTION,
     scripted_exec_tool_response as _tool_response,
 )
 from loopx.control_plane.testing.selected_todo_tool_behavior import (
@@ -73,8 +74,10 @@ def test_real_tool_loop_executes_action_selected_by_real_quota(
             "role": "system",
             "content": (
                 "You are Codex running one LoopX heartbeat. Follow the heartbeat "
-                "task and use the available shell tool when needed. The shell "
-                "working directory is the connected goal project root; resolve "
+                "task and use the available shell tool when needed. "
+                f"{QUOTA_FIRST_TOOL_INSTRUCTION}"
+                "The shell working directory is the connected goal project "
+                "root; resolve "
                 "relative paths from the selected Todo there. Choose each next "
                 "action from the latest tool result. If quota sets "
                 "selection_required, choose any currently eligible Todo; "

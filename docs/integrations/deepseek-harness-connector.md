@@ -28,8 +28,8 @@ LoopX quota should-run
   the model's final JSON result back into `loopx_turn_result_v0`.
 - A `deepseek-harness` agent type in LoopX onboarding so users can request the
   exact host instead of the generic `other-agent`.
-- Optional dependency `loopx[deepseek-harness]` for the
-  `deepseek-harness-sdk` Python client.
+- Optional dependency `loopx[deepseek-harness]` for the validated
+  `deepseek-harness-sdk==0.1.2a3` Python client.
 
 ## Install
 
@@ -40,14 +40,18 @@ python -m pip install 'loopx[deepseek-harness]'
 ```
 
 The DeepSeek Harness SDK spawns the bundled `dsh-jsonrpc-agent` runtime. It
-inherits normal dsh environment variables such as:
+uses the explicit adapter configuration plus normal provider environment
+variables:
 
 ```text
 DEEPSEEK_API_KEY
 DEEPSEEK_BASE_URL
-DSH_SESSION_ROOT
-DSH_CWD
+DSH_HOME
 ```
+
+The adapter resolves its SDK home in this order: explicit `--dsh-home`, then
+`DSH_HOME`, then `<workspace>/.local/.dsh-sessions`. It passes that path as the
+SDK's `dsh_home` field; the SDK does not implicitly select `~/.dsh`.
 
 Prepare a dsh `cordis.yml` when the default bundled composition is not
 appropriate. See the
@@ -79,14 +83,42 @@ loopx turn run-once \
   --host generic-cli \
   --execution-mode isolated-headless \
   --project "$PWD" \
-  --host-adapter-command-json '["python3", "-m", "loopx.dsh_goal_mode", "--cordis", "/path/to/cordis.yml", "--model", "deepseek-v4-flash"]' \
+  --host-adapter-command-json '["python3", "-m", "loopx.dsh_goal_mode", "--dsh-home", "/path/to/dsh-home", "--cordis", "/path/to/cordis.yml", "--model", "deepseek-v4-flash"]' \
   --validation-command-json '["python3", "/path/to/verify-postcondition.py"]' \
   --execute
 ```
 
-The adapter stores opaque dsh session data under
-`<workspace>/.local/.dsh-sessions/` by default. Override with
-`--session-root <path>` when a different local path is required.
+The adapter uses `<workspace>/.local/.dsh-sessions/` as its workspace-local
+SDK home by default. Override it with `--dsh-home <path>`; the historical
+`--session-root` spelling remains an adapter-command compatibility alias.
+Session persistence itself is owned by the selected dsh composition and is not
+implied by the home-directory name.
+
+## Run One Governed Turn In Process (`--host dsh`)
+
+The built-in host runs the same adapter inside the CLI process:
+
+```bash
+loopx turn run-once \
+  --goal-id <goal-id> \
+  --agent-id deepseek-worker \
+  --host dsh \
+  --execution-mode isolated-headless \
+  --project "$PWD" \
+  --dsh-home /path/to/dsh-home \
+  --dsh-cordis /path/to/cordis.yml \
+  --dsh-model deepseek-v4-flash \
+  --validation-command-json '["python3", "/path/to/verify-postcondition.py"]' \
+  --execute
+```
+
+Unlike the subprocess mode, provider failures reach the Turn journal as typed
+`loopx_turn_host_failure_v0` kinds (including the SDK's exception-free
+`RunResult.finish_reason == "error"` terminal report), so bounded same-Turn
+retry stays available. This mode does not promise cross-turn dsh session
+continuity or an outer wake/timer. See the adapter README for the home and
+classification precedence, plus the hermetic verification smoke
+(`examples/loopx-turn-dsh-builtin-host-e2e-smoke.py`).
 
 ## Boundaries
 
@@ -99,32 +131,41 @@ The adapter stores opaque dsh session data under
   completion. An independent validator is required before LoopX writeback.
 - The dsh Python SDK is an optional dependency. Core LoopX remains runtime
   dependency-free.
+- The adapter derives an owner-local session id, but LoopX does not project or
+  validate a DSH Host Session Binding. This surface therefore does not claim a
+  managed supervisor or cross-process resume guarantee.
 
 ## Hermetic Validation
 
-The repository includes three smokes. The first two do not require the
+The repository includes four validation paths. The first three do not require the
 DeepSeek Harness SDK or a real dsh runtime:
 
 ```bash
 python3 examples/dsh-turn-host-adapter-smoke.py
 python3 examples/loopx-turn-dsh-e2e-smoke.py
+python3 examples/loopx-turn-dsh-builtin-host-e2e-smoke.py
 ```
 
 The first guards adapter translation and result shaping. The second drives the
 full `loopx turn run-once -> adapter -> fake dsh -> validator -> writeback ->
-quota spend -> idempotent replay` chain.
+quota spend -> idempotent replay` chain. The third proves the built-in host's
+success path plus three bounded provider-capacity attempts, retry-budget
+exhaustion without a fourth Host invocation, zero failure spend/writeback, and
+provider-prose non-persistence.
 
-The third uses the real `deepseek-harness-sdk` and the bundled dsh JSON-RPC
+The fourth uses the real `deepseek-harness-sdk` and the bundled dsh JSON-RPC
 runtime. It still avoids a real model call by serving a local mock OpenAI-compatible
 SSE endpoint, so it is hermetic and does not require `DEEPSEEK_API_KEY`:
 
 ```bash
-python3 examples/loopx-turn-dsh-real-e2e-smoke.py
+python3 examples/loopx-turn-dsh-real-e2e-smoke.py --host generic-cli
+python3 examples/loopx-turn-dsh-real-e2e-smoke.py --host dsh
 ```
 
-The real-dsh smoke proves that the adapter can start the actual dsh runtime,
-run one bounded turn through the real JSON-RPC agent loop, parse a typed JSON
-final message, and complete LoopX validation/writeback/quota spend.
+The real-dsh smoke clears ambient DSH home variables and proves that both host
+paths can supply an explicit SDK home, start the actual dsh runtime, run one
+bounded turn through the real JSON-RPC agent loop, parse a typed JSON final
+message, and complete LoopX validation/writeback/quota spend.
 
 ## Related Contracts
 

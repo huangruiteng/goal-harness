@@ -1,0 +1,198 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import test from "node:test";
+
+import {
+  evaluateSchedulerHeartbeatFollowup,
+  SCHEDULER_HEARTBEAT_FOLLOWUP_REQUEST_SCHEMA,
+  SCHEDULER_HEARTBEAT_FOLLOWUP_RESULT_SCHEMA,
+} from "../../loopx/control_plane/scheduler/heartbeat_followup.ts";
+import { schedulerStatePath } from "../../loopx/control_plane/scheduler/state_store.ts";
+
+type CleanupContext = {
+  after(callback: () => void | Promise<void>): void;
+};
+
+const scope = {
+  goal_id: "goal-followup",
+  agent_id: "agent-followup",
+  surface: "codex_app",
+  state_key: "scheduler_hint.codex_app.stateful_backoff",
+};
+
+const before = {
+  should_run: true,
+  normal_delivery_allowed: true,
+  recovery_delivery_allowed: false,
+  effective_action: "normal_run",
+  self_repair_allowed: false,
+  capability_repair_allowed: false,
+  workspace_repair_allowed: false,
+  state: "eligible",
+  safe_bypass_allowed: false,
+  safe_bypass_kind: null,
+  blocked_action_scope: null,
+  compute: 1,
+  window_hours: 4,
+  slot_minutes: 15,
+  spent_slots: 0,
+  allowed_slots: 16,
+};
+
+async function tempRuntime(t: CleanupContext): Promise<string> {
+  const runtimeRoot = await mkdtemp(join(tmpdir(), "loopx-heartbeat-followup-"));
+  t.after(() => rm(runtimeRoot, { recursive: true, force: true }));
+  return runtimeRoot;
+}
+
+function receiptPath(runtimeRoot: string): string {
+  return join(runtimeRoot, "goals", scope.goal_id, "rollout-event-log.jsonl");
+}
+
+async function appendReceipt(runtimeRoot: string, turnId: string): Promise<void> {
+  const path = receiptPath(runtimeRoot);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify({
+    schema_version: "loopx_rollout_event_v0",
+    event_kind: "quota_should_run",
+    goal_id: scope.goal_id,
+    agent_id: scope.agent_id,
+    run_id: turnId,
+  })}\n`, { encoding: "utf8", flag: "a" });
+}
+
+function request(
+  runtimeRoot: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    schema_version: SCHEDULER_HEARTBEAT_FOLLOWUP_REQUEST_SCHEMA,
+    runtime_root: runtimeRoot,
+    turn_instance_id: "turn-followup-1",
+    require_heartbeat_receipt: true,
+    before,
+    use_current_hint: true,
+    host_facts: {
+      schema_version: "loopx_scheduler_heartbeat_host_facts_v0",
+      operation: "ack",
+      ...scope,
+      reset_token: "reset-followup",
+      identity_signature: "identity-followup",
+      progression_index: 0,
+      progression_minutes: [15, 30, 60],
+      expected_rrule: "FREQ=MINUTELY;INTERVAL=15",
+      applied_rrule: "FREQ=MINUTELY;INTERVAL=15",
+      cadence_class: "active_work",
+      generated_at: "2026-08-27T06:30:00Z",
+      execute: true,
+      ack_needed: true,
+      apply_needed: true,
+      source: "quota_scheduler_ack",
+      host_match_observed: true,
+    },
+    ...extra,
+  };
+}
+
+test("receipt-bound ACK returns the legacy public projection from one native transaction", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  await appendReceipt(runtimeRoot, "turn-followup-1");
+
+  const result = await evaluateSchedulerHeartbeatFollowup(request(runtimeRoot));
+
+  assert.equal(result.schema_version, SCHEDULER_HEARTBEAT_FOLLOWUP_RESULT_SCHEMA);
+  assert.equal(result.ok, true);
+  assert.equal(result.mode, "scheduler-ack");
+  assert.equal(result.scheduler_state_mutated, true);
+  assert.equal(result.already_applied, false);
+  assert.equal(result.used_current_hint, true);
+  assert.equal(result.current_hint_source, "quota.should-run.scheduler_hint");
+  assert.deepEqual(result.before, before);
+  const commit = result.scheduler_commit as Record<string, unknown>;
+  assert.equal(commit.status, "written");
+  const event = result.scheduler_ack_event as Record<string, unknown>;
+  const state = event.scheduler_state as Record<string, unknown>;
+  assert.equal(state.last_applied_rrule, "FREQ=MINUTELY;INTERVAL=15");
+  assert.equal("heartbeat_commit" in state, false);
+
+  const replay = await evaluateSchedulerHeartbeatFollowup(request(runtimeRoot, {
+    host_facts: {
+      ...(request(runtimeRoot).host_facts as Record<string, unknown>),
+      generated_at: "2026-08-27T06:31:00Z",
+    },
+  }));
+  assert.equal(replay.ok, true);
+  assert.equal((replay.scheduler_commit as Record<string, unknown>).status, "replayed");
+});
+
+test("host failure returns the legacy failure event and increments the native cache", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  await appendReceipt(runtimeRoot, "turn-followup-1");
+  const base = request(runtimeRoot);
+  const hostFacts = base.host_facts as Record<string, unknown>;
+
+  const result = await evaluateSchedulerHeartbeatFollowup({
+    ...base,
+    host_facts: {
+      ...hostFacts,
+      operation: "host_failure",
+      applied_rrule: "FREQ=MINUTELY;INTERVAL=3",
+      observed_host_rrule: "FREQ=MINUTELY;INTERVAL=3",
+      failure_kind: "timeout",
+      source: "quota_scheduler_host_update_failure",
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.mode, "scheduler-fail-current");
+  assert.equal(result.failed_rrule, "FREQ=MINUTELY;INTERVAL=15");
+  assert.equal(result.observed_host_rrule, "FREQ=MINUTELY;INTERVAL=3");
+  assert.equal(result.failure_kind, "timeout");
+  assert.equal(result.failure_count, 1);
+  const event = result.scheduler_failure_event as Record<string, unknown>;
+  const failure = event.host_update_failure as Record<string, unknown>;
+  assert.equal(failure.failure_count, 1);
+});
+
+test("missing or superseded heartbeat receipt rejects before scheduler mutation", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const path = schedulerStatePath(runtimeRoot, {
+    goalId: scope.goal_id,
+    agentId: scope.agent_id,
+    surface: scope.surface,
+    stateKey: scope.state_key,
+  });
+
+  const missing = await evaluateSchedulerHeartbeatFollowup(request(runtimeRoot));
+  assert.equal(missing.ok, false);
+  assert.equal(missing.status, "heartbeat_receipt_missing");
+  assert.equal(
+    missing.error_code,
+    "SCHEDULER_FOLLOWUP_HEARTBEAT_RECEIPT_MISSING",
+  );
+  await assert.rejects(readFile(path, "utf8"), { code: "ENOENT" });
+
+  await appendReceipt(runtimeRoot, "turn-followup-1");
+  await appendReceipt(runtimeRoot, "turn-followup-2");
+  const stale = await evaluateSchedulerHeartbeatFollowup(request(runtimeRoot));
+  assert.equal(stale.ok, false);
+  assert.equal(stale.status, "heartbeat_receipt_stale");
+  assert.equal(
+    stale.error_code,
+    "SCHEDULER_FOLLOWUP_HEARTBEAT_RECEIPT_STALE",
+  );
+  await assert.rejects(readFile(path, "utf8"), { code: "ENOENT" });
+});
+
+test("decision-free compatibility requests can omit a heartbeat receipt", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const result = await evaluateSchedulerHeartbeatFollowup(request(runtimeRoot, {
+    turn_instance_id: null,
+    require_heartbeat_receipt: false,
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal((result.scheduler_commit as Record<string, unknown>).status, "written");
+});

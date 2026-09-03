@@ -16,6 +16,7 @@ TODO_LIFECYCLE_REENTRY_SCHEMA = "todo_lifecycle_settlement_reentry_v0"
 def project_todo_lifecycle_settlement_reentry(
     *,
     goal_id: str,
+    runtime_root: str | None = None,
     triggers: list[dict[str, Any]],
     lifecycle_actor_args: list[str],
     quota_scoped_args: list[str],
@@ -23,15 +24,18 @@ def project_todo_lifecycle_settlement_reentry(
     """Return TS-owned exact actions for a terminal Todo succession gap."""
 
     try:
+        request = {
+            "schema_version": TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
+            "goal_id": goal_id,
+            "triggers": triggers,
+            "lifecycle_actor_args": lifecycle_actor_args,
+            "quota_scoped_args": quota_scoped_args,
+        }
+        if runtime_root is not None:
+            request["runtime_root"] = runtime_root
         result = effect_runtime_result(
             "work_item.replan_settlement.reentry",
-            {
-                "schema_version": TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
-                "goal_id": goal_id,
-                "triggers": triggers,
-                "lifecycle_actor_args": lifecycle_actor_args,
-                "quota_scoped_args": quota_scoped_args,
-            },
+            request,
         )
     except EffectRuntimeRejected as exc:
         raise ValueError(str(exc)) from None

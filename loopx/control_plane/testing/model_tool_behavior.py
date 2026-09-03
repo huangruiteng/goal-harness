@@ -12,8 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .doubao_model_behavior_actor import (
-    DOUBAO_2_1_PRO_MODEL,
-    DOUBAO_2_1_TURBO_MODEL,
+    ALLOWED_MODEL_BEHAVIOR_MODELS,
     DOUBAO_CHAT_COMPLETIONS_ENDPOINT,
     DoubaoActorTransport,
     DoubaoActorTransportError,
@@ -42,7 +41,14 @@ EXEC_COMMAND_TOOL = {
 
 MAX_TOOL_ARGUMENT_BYTES = 8_192
 MAX_PROVIDER_TOKENS = 2_048
-ALLOWED_MODELS = {DOUBAO_2_1_PRO_MODEL, DOUBAO_2_1_TURBO_MODEL}
+
+QUOTA_FIRST_TOOL_INSTRUCTION = (
+    "Before any workspace read, diagnostic, discovery, clock lookup, or state "
+    "inspection, the first tool call must execute the exact quota guard command "
+    "shown in the heartbeat task. It may set only LOOPX_TURN inline before that "
+    "guard; do not prepend export, echo, or any other shell command. Treat the "
+    "returned interaction_contract as the authority for every later action. "
+)
 
 
 @dataclass(frozen=True)
@@ -203,10 +209,8 @@ class DoubaoExecToolClient:
     ) -> None:
         if not api_key.strip():
             raise RuntimeError("Doubao actor requires a runtime-injected API key")
-        if model not in ALLOWED_MODELS:
-            raise ValueError(
-                "Doubao actor model must be an allowlisted Doubao 2.1 model"
-            )
+        if model not in ALLOWED_MODEL_BEHAVIOR_MODELS:
+            raise ValueError("Doubao actor model must be explicitly allowlisted")
         if timeout_seconds <= 0 or timeout_seconds > 300:
             raise ValueError("Doubao actor timeout must be between 0 and 300 seconds")
         self._api_key = api_key

@@ -21,6 +21,7 @@ from .doubao_model_behavior_actor import (
 )
 from .model_tool_behavior import (
     DoubaoExecToolClient,
+    QUOTA_FIRST_TOOL_INSTRUCTION,
     argument_value,
     digest_text,
     execute_loopx_cli,
@@ -1017,6 +1018,7 @@ class DoubaoSelectedTodoToolBehaviorActor:
                 "content": (
                     "You are Codex running one LoopX heartbeat. Follow the "
                     "heartbeat task and use the available shell tool when needed. "
+                    f"{QUOTA_FIRST_TOOL_INSTRUCTION}"
                     "The shell working directory is the connected goal project "
                     "root; resolve relative paths from the selected Todo there. "
                     "Choose each next action from the latest tool result. If quota "

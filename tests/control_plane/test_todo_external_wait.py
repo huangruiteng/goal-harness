@@ -9,8 +9,14 @@ import pytest
 from loopx.control_plane.scheduler.monitor_poll_writeback import (
     write_monitor_poll_todo_state,
 )
-from loopx.control_plane.testing.canary_harness import write_fixture_registry
+from loopx.control_plane.testing.canary_harness import (
+    run_json_cli_result,
+    write_fixture_registry,
+)
 from loopx.control_plane.todos.active_state_todo_parser import parse_active_state_todos
+from loopx.control_plane.todos.external_wait_contract import (
+    TodoExternalWaitAuthoringError,
+)
 from loopx.todos import complete_goal_todo, update_goal_todo
 
 
@@ -93,6 +99,7 @@ def test_monitor_change_wait_binds_generation_and_resumes_only_after_increment(
     receipt = transition["external_wait_transition"]
     assert receipt["baseline_generation"] == 2
     assert receipt["successor_todo_ids"] == [FALLBACK_ID]
+    assert receipt["authoring_contract"]["waiting_todo"]["status"] == "open"
     waiting = _todos(state_file)[WAITING_ID]
     assert waiting["resume_monitor_generation"] == 2
     assert waiting["resume_ready"] is False
@@ -152,6 +159,172 @@ def test_monitor_change_wait_binds_generation_and_resumes_only_after_increment(
             successor_todo_ids=[FALLBACK_ID],
             agent_id=AGENT_ID,
         )
+
+
+def test_monitor_wait_diagnoses_status_and_successor_faults_separately(
+    tmp_path: Path,
+) -> None:
+    registry, _ = _write_fixture(tmp_path)
+
+    with pytest.raises(TodoExternalWaitAuthoringError) as status_error:
+        update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=WAITING_ID,
+            status="blocked",
+            resume_when=f"monitor_changed:{MONITOR_ID}",
+            successor_todo_ids=[FALLBACK_ID],
+            agent_id=AGENT_ID,
+            dry_run=True,
+        )
+    assert status_error.value.code == "external_wait_todo_status_must_remain_open"
+    assert "must remain status=open" in str(status_error.value)
+    assert "successor" not in str(status_error.value)
+    assert status_error.value.authoring_contract["waiting_todo"] == {
+        "status": "open",
+        "task_class": "advancement_task",
+        "resume_when": f"monitor_changed:{MONITOR_ID}",
+        "successor_todo_ids": [FALLBACK_ID],
+        "successor_requirement": "independent_runnable_advancement_task",
+        "runnable_state": "excluded_until_resume_condition_satisfied",
+    }
+
+    with pytest.raises(TodoExternalWaitAuthoringError) as successor_error:
+        update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=WAITING_ID,
+            resume_when=f"monitor_changed:{MONITOR_ID}",
+            successor_todo_ids=[],
+            agent_id=AGENT_ID,
+            dry_run=True,
+        )
+    assert successor_error.value.code == "external_wait_successor_required"
+
+
+def test_todo_cli_projects_external_wait_repair_contract(tmp_path: Path) -> None:
+    registry, _ = _write_fixture(tmp_path)
+
+    returncode, payload = run_json_cli_result(
+        "todo",
+        "update",
+        "--goal-id",
+        GOAL_ID,
+        "--role",
+        "agent",
+        "--todo-id",
+        WAITING_ID,
+        "--status",
+        "blocked",
+        "--resume-when",
+        f"monitor_changed:{MONITOR_ID}",
+        "--successor-todo-id",
+        FALLBACK_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--dry-run",
+        registry_path=registry,
+    )
+
+    assert returncode == 1
+    assert payload["error_code"] == "external_wait_todo_status_must_remain_open"
+    assert "successor" not in payload["error"]
+    contract = payload["authoring_contract"]
+    assert contract["schema_version"] == "monitor_advancement_authoring_v0"
+    assert contract["monitor"]["execution"] == "observe_only"
+    assert contract["material_change"]["next_agent_todo_effect"] == (
+        "emit_independent_open_advancement_task"
+    )
+
+
+def test_monitor_provider_effect_replay_does_not_advance_counters(
+    tmp_path: Path,
+) -> None:
+    registry, state_file = _write_fixture(tmp_path)
+    kwargs = {
+        "registry_path": registry,
+        "goal_id": GOAL_ID,
+        "execute": True,
+        "generated_at": "2026-08-25T01:00:00Z",
+        "todo_id": MONITOR_ID,
+        "result_hash": "review-v2",
+        "material_change": False,
+        "next_due_at": "2026-08-25T02:00:00Z",
+        "agent_id": AGENT_ID,
+        "monitor_effect_id": "quota-monitor-poll:provider-reentry",
+    }
+
+    first = write_monitor_poll_todo_state(**kwargs)
+    replayed = write_monitor_poll_todo_state(**kwargs)
+
+    assert first is not None
+    assert replayed is not None
+    assert first["monitor_effect_id"] == "quota-monitor-poll:provider-reentry"
+    assert replayed["provider_replayed"] is True
+    assert replayed["consecutive_no_change"] == first["consecutive_no_change"]
+    monitor = _todos(state_file)[MONITOR_ID]
+    assert monitor["monitor_effect_id"] == "quota-monitor-poll:provider-reentry"
+    assert int(monitor["consecutive_no_change"]) == first["consecutive_no_change"]
+
+    with pytest.raises(ValueError, match="monitor effect identity is already bound"):
+        write_monitor_poll_todo_state(
+            **{
+                **kwargs,
+                "result_hash": "review-v3-conflict",
+            }
+        )
+
+    newer = write_monitor_poll_todo_state(
+        **{
+            **kwargs,
+            "generated_at": "2026-08-25T02:00:00Z",
+            "result_hash": "review-v3-newer",
+            "next_due_at": "2026-08-25T03:00:00Z",
+            "monitor_effect_id": "quota-monitor-poll:newer-effect",
+        }
+    )
+    assert newer is not None
+    with pytest.raises(ValueError, match="older than the persisted monitor effect"):
+        write_monitor_poll_todo_state(**kwargs)
+    monitor = _todos(state_file)[MONITOR_ID]
+    assert monitor["result_hash"] == "review-v3-newer"
+    assert monitor["monitor_effect_id"] == "quota-monitor-poll:newer-effect"
+
+
+def test_monitor_provider_effect_replay_reuses_material_successor(
+    tmp_path: Path,
+) -> None:
+    registry, state_file = _write_fixture(tmp_path)
+    successor_text = "Advance the material monitor transition."
+    kwargs = {
+        "registry_path": registry,
+        "goal_id": GOAL_ID,
+        "execute": True,
+        "generated_at": "2026-08-25T01:00:00Z",
+        "todo_id": MONITOR_ID,
+        "result_hash": "review-v3-approved",
+        "material_change": True,
+        "next_agent_todo": successor_text,
+        "next_action_kind": "advance_material_transition",
+        "next_required_capabilities": ["filesystem_write"],
+        "next_continuation_policy": "same_agent_non_delivery",
+        "next_claimed_by": AGENT_ID,
+        "agent_id": AGENT_ID,
+        "monitor_effect_id": "quota-monitor-poll:material-provider-reentry",
+    }
+
+    first = write_monitor_poll_todo_state(**kwargs)
+    replayed = write_monitor_poll_todo_state(**kwargs)
+
+    assert first is not None
+    assert replayed is not None
+    assert replayed["provider_replayed"] is True
+    assert replayed["material_change_generation"] == first[
+        "material_change_generation"
+    ]
+    assert replayed["successor_receipts"] == first["successor_receipts"]
+    assert len(first["successor_receipts"]) == 1
+    assert state_file.read_text(encoding="utf-8").count(successor_text) == 1
 
 
 def test_overlapping_material_polls_recompute_generation_after_wait_baseline(

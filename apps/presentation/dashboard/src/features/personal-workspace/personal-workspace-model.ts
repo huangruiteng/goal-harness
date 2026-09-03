@@ -122,6 +122,24 @@ export type WorkspaceOutput = {
   summary?: string;
   title: string;
   todoId?: string;
+  report?: {
+    addedCount: number;
+    changedCount: number;
+    deliveredAt: string;
+    generationId: string;
+    items: Array<{
+      changeKind: "added" | "changed";
+      previousStatus?: string;
+      sourceRef: string;
+      status: string;
+      summary: string;
+      title: string;
+    }>;
+    periodEndAt: string;
+    periodStartAt: string;
+    predecessorPublicationId?: string | null;
+    publicationId: string;
+  };
 };
 
 export type WorkspaceChannel = "manager" | "attention" | "running" | "outputs";
@@ -240,6 +258,10 @@ export type WorkspaceModel = {
   goalNotifications?: WorkspaceGoalNotification[];
   goals: WorkspaceGoal[];
   openUserTodoCount: number;
+  periodicReports?: {
+    error?: string | null;
+    loading: boolean;
+  };
   systemHealth?: WorkspaceSystemHealth;
   timeline?: WorkspaceTimelineItem[];
   userTodos: WorkspaceAttention[];
@@ -310,7 +332,12 @@ export type PersonalWorkspaceCallbacks = {
   onRetryResumeRun?: (run: WorkspaceRun) => void | Promise<void>;
   onStartNewRunSession?: (run: WorkspaceRun) => void | Promise<void>;
   onUpdateSchedule?: (schedule: WorkspaceSchedule, operation: "edit" | "pause" | "resume" | "run_now" | "stop") => void | Promise<void>;
-  onSendMessage?: (message: string, agentId: string, goalId: string | null, attachments?: WorkspaceImageAttachment[]) => void | Promise<void>;
+  onSendMessage?: (
+    message: string,
+    agentId: string,
+    goalId: string | null,
+    attachments?: WorkspaceImageAttachment[],
+  ) => void | WorkspaceActionPreviewRequest | Promise<void | WorkspaceActionPreviewRequest>;
   onSelectAgent?: (agentId: string) => void;
   onSelectChannel?: (channel: WorkspaceChannel) => void;
   onSelectGoal?: (goalId: string | null) => void;

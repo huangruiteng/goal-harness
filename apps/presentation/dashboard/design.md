@@ -48,8 +48,10 @@ The product must answer five questions with little interpretation:
    the contextual drawer.
 3. **One visible primary action.** A preview or gate exposes one emphasized
    transition. Secondary paths live in a compact overflow menu.
-4. **Natural language becomes typed intent.** LoopX classifies the request,
-   shows the target and impact, then applies a verified transition.
+4. **Natural language becomes a semantic proposal.** The selected Agent
+   interprets free text and may return one narrow proposal. LoopX validates
+   that untrusted proposal, shows the target and impact through a typed
+   preview, and keeps confirmation plus execution authority deterministic.
 5. **Correction preserves continuity.** A message sent from a running detail
    drawer continues the selected Goal × Agent Session whenever it is
    recoverable.

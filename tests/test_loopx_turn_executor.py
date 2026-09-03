@@ -384,6 +384,48 @@ def test_run_once_explicitly_retries_failed_host_without_duplicate_effects(
     assert calls == {"host": 2, "writeback": 1, "spend": 1, "scheduler": 1}
 
 
+def test_run_once_bounds_provider_capacity_retries_without_spending_quota(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    calls = {"host": 0, "writeback": 0, "spend": 0, "scheduler": 0}
+    writeback, spend, scheduler = _callbacks(calls)
+
+    def host(_request: dict[str, object]) -> dict[str, object]:
+        calls["host"] += 1
+        raise BuiltInHostError(
+            "codex_cli_provider_capacity",
+            failure_kind="provider_capacity",
+        )
+
+    common = {
+        "host_runner": host,
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "writeback": writeback,
+        "spend": spend,
+        "scheduler": scheduler,
+    }
+
+    first = run_loopx_turn_once(plan, **common)
+    second = run_loopx_turn_once(plan, retry_failed=True, **common)
+    third = run_loopx_turn_once(plan, retry_failed=True, **common)
+
+    assert first["host_failure"]["attempt"] == 1
+    assert first["host_failure"]["retry"]["backoff_seconds"] == 30
+    assert second["host_failure"]["attempt"] == 2
+    assert second["host_failure"]["retry"]["backoff_seconds"] == 60
+    assert third["host_failure"]["attempt"] == 3
+    assert third["host_failure"]["retry"]["max_attempts"] == 3
+    with pytest.raises(TurnRecoveryBlockedError) as exc_info:
+        run_loopx_turn_once(plan, retry_failed=True, **common)
+    assert exc_info.value.decision["reason"] == "host_retry_budget_exhausted"
+    assert calls == {"host": 3, "writeback": 0, "spend": 0, "scheduler": 0}
+
+
 def test_run_once_resumes_session_observed_by_recoverable_failed_turn(
     tmp_path: Path,
 ) -> None:

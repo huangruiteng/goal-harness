@@ -1,6 +1,5 @@
 export type WorkspaceRouterActionKind =
   | "goal.create"
-  | "goal.update"
   | "todo.create"
   | "todo.update"
   | "agent.bind"
@@ -131,11 +130,6 @@ export function routeWorkspaceInput(rawMessage: string, context: WorkspaceRouter
       });
     }
   }
-  const protectedSubject = /发布|上线|合并|部署|删除|付款/iu;
-  if (context.goalId && !negates(message, protectedSubject) && /(请|现在|开始|批准|执行).{0,8}(发布|上线|合并|部署|删除|付款)/u.test(message)) {
-    candidates.push({ actionKind: "goal.update", confidence: 0.98, normalizedParameters: { goal_id: context.goalId, status: "operator_gate_requested" } });
-  }
-
   const distinct = [...new Map(candidates.map((candidate) => [candidate.actionKind, candidate])).values()];
   if (distinct.length > 1) {
     return { actionKind: null, confidence: 0.4, missingFields: ["single_intent"], normalizedParameters: {}, route: "clarify" };

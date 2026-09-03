@@ -1,4 +1,4 @@
-import { Bot, ChevronDown, ChevronRight, Pause, Plus, RotateCcw, Settings2, Trash2 } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, LoaderCircle, Pause, Plus, RotateCcw, Settings2, Trash2 } from "lucide-react";
 
 import { localizedGoalState, useWorkspaceI18n } from "./i18n";
 import type { WorkspaceGoal } from "./personal-workspace-model";
@@ -17,6 +17,7 @@ const goalStateClass: Record<WorkspaceGoal["state"], string> = {
 export function GoalSidebar({
   attentionCount,
   goals,
+  lifecycleBusyGoalIds,
   onRequestGoalCreate,
   onOpenSettings,
   onRequestGoalLifecycle,
@@ -26,6 +27,7 @@ export function GoalSidebar({
 }: {
   attentionCount: number;
   goals: WorkspaceGoal[];
+  lifecycleBusyGoalIds?: ReadonlySet<string>;
   onRequestGoalCreate?: () => void;
   onOpenSettings?: () => void;
   onRequestGoalLifecycle?: (goal: WorkspaceGoal, operation: "stop" | "resume" | "delete") => void;
@@ -55,12 +57,16 @@ export function GoalSidebar({
         <>
           <button
             aria-label={`${stopped ? t("sidebar.resume") : t("sidebar.stop")} ${goal.title}`}
-            className="personal-goal-lifecycle"
+            aria-busy={lifecycleBusyGoalIds?.has(goal.goalId) || undefined}
+            className={`personal-goal-lifecycle${lifecycleBusyGoalIds?.has(goal.goalId) ? " is-pending" : ""}`}
+            disabled={lifecycleBusyGoalIds?.has(goal.goalId)}
             onClick={() => onRequestGoalLifecycle(goal, stopped ? "resume" : "stop")}
             title={stopped ? t("sidebar.resumeGoal") : t("sidebar.stopGoal")}
             type="button"
           >
-            {stopped ? <RotateCcw size={13} /> : <Pause size={13} />}
+            {lifecycleBusyGoalIds?.has(goal.goalId)
+              ? <LoaderCircle size={13} />
+              : stopped ? <RotateCcw size={13} /> : <Pause size={13} />}
           </button>
           {stopped ? (
             <button

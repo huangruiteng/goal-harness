@@ -80,10 +80,15 @@ loopx lark-inbox history-catch-up \
   --execute
 ```
 
-Retries resume the exact private page token, and a completed window replays
-without another provider read. A caller may extend one completed history
+Retries resume the exact private page token. A completed window replays
+without another provider read only while its upper coverage bound is current;
+a later invocation opens one bounded forward window from the previous end, so
+new messages in an existing group or topic are not stranded behind an old
+`history_complete` state. A caller may also extend one completed history
 window to an earlier start once; the provider covers only the missing earlier
-window and rejects later source/config drift. The returned link-evidence packet
+window and rejects later source/config drift. Legacy v0 cursors migrate
+conservatively: they may replay already ingested messages, but never advance a
+coverage bound that could skip unseen history. The returned link-evidence packet
 contains URL plus message and route lineage for the owner-local Agent, but not
 the surrounding message body, sender, chat id, profile, cursor, or raw provider
 payload. Inbox and cursor directories are restricted to the owner, and their
@@ -103,6 +108,44 @@ member of the group, the application to be published, and
 `im:message:readonly` plus `im:chat:read`. Permission error `230027` is returned
 as typed `group_history_permission_required`; it never advances the inbox or
 cursor.
+
+### Dynamic collector route reconcile
+
+An already provisioned inbox can be enrolled into a v1 multi-chat collector
+without rewriting the complete owner-local collector file by hand. Preview the
+route first, then apply it explicitly:
+
+```bash
+loopx lark-inbox collector-route-reconcile \
+  --project . \
+  --config .loopx/config/lark-collector.json \
+  --route-key project-feedback \
+  --chat-id oc_<local-private-chat-id> \
+  --event-inbox-config .loopx/config/lark/project-feedback.json
+
+loopx lark-inbox collector-route-reconcile \
+  --project . \
+  --config .loopx/config/lark-collector.json \
+  --route-key project-feedback \
+  --chat-id oc_<local-private-chat-id> \
+  --event-inbox-config .loopx/config/lark/project-feedback.json \
+  --execute
+```
+
+The operation validates unique route, chat, inbox-config, and inbox-path
+bindings; serializes concurrent writers; writes through an atomic replacement;
+and reads the exact binding and config digest back. Repeating the same request
+is a zero-write `already_applied` result, while any binding drift fails closed.
+Receipts return the public-safe `route_key` but never the chat id, inbox config,
+local path, profile, or credentials.
+
+Config readback does not prove that a running collector has reloaded the new
+route. Every successful plan/apply receipt therefore keeps
+`runtime_reload_required=true`, `runtime_reload_performed=false`, and
+`runtime_readback_verified=false`. The deployment owner must restart or
+reinstall the collector and independently verify its runtime before treating
+the route as live. Removing routes remains a separate owner-authorized
+lifecycle operation; this additive command never deletes or rebinds one.
 
 ## Lifecycle
 

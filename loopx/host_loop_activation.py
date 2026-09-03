@@ -1195,8 +1195,9 @@ def _deepseek_harness_activation(commands: dict[str, str]) -> dict[str, Any]:
     return {
         "host_surface": "deepseek_harness_automation_loop",
         "entry_command_hint": (
-            "loopx turn run-once with loopx.dsh_goal_mode "
-            "(python -m loopx.dsh_goal_mode; compat: scripts/dsh_turn_host_adapter.py)"
+            "loopx turn run-once --host dsh "
+            "(compat: --host generic-cli with python -m loopx.dsh_goal_mode or "
+            "scripts/dsh_turn_host_adapter.py)"
         ),
         "activation_method": "external_loop_driver",
         "activation_input_command": commands["heartbeat_prompt_json"],
@@ -1214,13 +1215,13 @@ def _deepseek_harness_activation(commands: dict[str, str]) -> dict[str, Any]:
             "Install the optional DeepSeek Harness SDK (`loopx[deepseek-harness]`).",
             "Prepare a dsh cordis.yml and any DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL settings.",
             "Run the heartbeat-prompt JSON command after project state and todos are written.",
-            "Wire `loopx turn run-once` with `--host generic-cli` and the "
-            "`loopx.dsh_goal_mode` host adapter (`python -m loopx.dsh_goal_mode`; "
-            "the legacy `scripts/dsh_turn_host_adapter.py` launcher still works).",
+            "Run `loopx turn run-once --host dsh`; use the generic-cli adapter "
+            "command only as a compatibility or rollback path.",
             "Start every automatic tick from quota should-run and stop when it says stop.",
         ],
         "success_criteria": [
             "The DeepSeek Harness adapter returns a typed loopx_turn_result_v0.",
+            "Structured dsh failures reach the Turn journal without provider prose.",
             "Independent validation passes before LoopX writes state or spends quota.",
             "Opaque dsh session roots stay outside public LoopX evidence.",
         ],

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import os
 from pathlib import Path
+import re
+import signal
 import subprocess
+import time
 from urllib.parse import quote
 import webbrowser
 
@@ -76,6 +80,110 @@ def _probe_existing_chat(host: str, port: int) -> str:
     if capabilities.get("runtime_identity") != expected_identity:
         return "stale"
     return "matching"
+
+
+def _listener_pids(port: int) -> list[int]:
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(
+            "cannot inspect the existing LoopX Chat listener; leave the port owner untouched"
+        ) from exc
+    if result.returncode not in {0, 1}:
+        raise RuntimeError(
+            "cannot inspect the existing LoopX Chat listener; leave the port owner untouched"
+        )
+    return sorted(
+        {
+            int(line)
+            for line in result.stdout.splitlines()
+            if line.strip().isdigit() and int(line) > 1
+        }
+    )
+
+
+def _is_same_user_loopx_chat_process(pid: int) -> bool:
+    try:
+        result = subprocess.run(
+            ["ps", "-ww", "-p", str(pid), "-o", "uid=", "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    fields = result.stdout.strip().split(maxsplit=1)
+    if len(fields) != 2 or not fields[0].isdigit():
+        return False
+    command = fields[1]
+    return (
+        int(fields[0]) == os.getuid()
+        and "loopx" in command.casefold()
+        and re.search(r"(?:^|\s)chat(?:\s|$)", command, re.IGNORECASE) is not None
+    )
+
+
+def replace_existing_loopx_chat(
+    host: str,
+    port: int,
+    *,
+    timeout_seconds: float = 5.0,
+) -> str:
+    """Replace one exact same-user LoopX Chat listener for managed restart.
+
+    This is deliberately narrower than generic port takeover: the public Chat
+    capabilities fingerprint, exact listener PID, process owner, and command
+    must all identify LoopX Chat before a bounded SIGTERM is sent. Foreign or
+    unverifiable listeners are left untouched.
+    """
+
+    normalized_host = host.strip().strip("[]")
+    try:
+        loopback = normalized_host.casefold() == "localhost" or ipaddress.ip_address(
+            normalized_host
+        ).is_loopback
+    except ValueError:
+        loopback = False
+    if not loopback:
+        raise ValueError("managed LoopX Chat replacement requires an explicit loopback host")
+    existing = _probe_existing_chat(host, port)
+    if existing == "unavailable":
+        return existing
+    if existing == "foreign":
+        raise RuntimeError(
+            f"port {port} is owned by an unverified service; leave it running and choose another port"
+        )
+    pids = _listener_pids(port)
+    if len(pids) != 1:
+        raise RuntimeError(
+            f"expected one verified LoopX Chat listener on port {port}; found {len(pids)} and stopped none"
+        )
+    pid = pids[0]
+    if pid == os.getpid() or not _is_same_user_loopx_chat_process(pid):
+        raise RuntimeError(
+            f"the listener on port {port} is not a verified same-user LoopX Chat process; stopped none"
+        )
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError as exc:
+        raise RuntimeError(
+            f"could not stop the verified LoopX Chat listener on port {port}"
+        ) from exc
+    deadline = time.monotonic() + max(0.1, timeout_seconds)
+    while time.monotonic() < deadline:
+        if pid not in _listener_pids(port):
+            return existing
+        time.sleep(0.1)
+    raise RuntimeError(
+        f"the verified LoopX Chat listener on port {port} did not stop after SIGTERM; no stronger signal was sent"
+    )
 
 
 def launch_dashboard(

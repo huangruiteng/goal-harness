@@ -2024,6 +2024,26 @@ def test_guided_takeover_with_only_open_blocker_todo_keeps_unconditional_authori
     assert "apply_todo_delta" not in step_ids
 
 
+def test_guided_takeover_with_only_open_monitor_todo_keeps_unconditional_authoring(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project_with_todos(
+        tmp_path,
+        todos_body=(
+            "- [ ] [P1] observe the upstream release window\n"
+            "  <!-- loopx:todo status=open task_class=continuous_monitor "
+            f"claimed_by={AGENT_ID} todo_id=todo_3586mon0001 -->"
+        ),
+    )
+    payload = _build(project, include_detail=False)
+    step_ids = [
+        step["id"] for step in payload["guided_transaction"]["ordered_steps"]
+    ]
+    assert "write_ordered_todos" in step_ids
+    assert "plan_ranked_todos" in step_ids
+    assert "apply_todo_delta" not in step_ids
+
+
 def test_guided_takeover_with_only_deferred_advancement_todo_keeps_unconditional_authoring(
     tmp_path: Path,
 ) -> None:

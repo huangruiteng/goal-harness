@@ -158,8 +158,13 @@ class TestSchedulerBindings:
 
 class TestTurnHostIdentities:
     def test_supported_hosts(self):
-        assert SUPPORTED_HOSTS == {"codex-cli", "claude-code", "generic-cli"}
-        assert set(SUPPORTED_TURN_HOST_IDENTITIES) == SUPPORTED_HOSTS
+        assert SUPPORTED_HOSTS == {"codex-cli", "claude-code", "dsh", "generic-cli"}
+        assert set(SUPPORTED_TURN_HOST_IDENTITIES) == {
+            "codex-cli",
+            "claude-code",
+            "generic-cli",
+        }
+        assert "dsh" not in SUPPORTED_TURN_HOST_IDENTITIES
 
     def test_execution_modes(self):
         assert SUPPORTED_EXECUTION_MODES == {"interactive-visible",

@@ -46,6 +46,7 @@ def _validate_recovery_check(value: Any) -> bool:
         value.get("kind")
         in {
             "journal_consistency",
+            "host_retry_policy",
             "host_session_binding",
             "prepared_effect_readback",
         }

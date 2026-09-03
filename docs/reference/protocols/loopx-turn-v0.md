@@ -92,6 +92,9 @@ A DeepSeek Harness adapter lives in the `loopx.dsh_goal_mode` subpackage
 `scripts/dsh_turn_host_adapter.py` launcher still works); it uses
 the optional `deepseek-harness-sdk` Python client to run one bounded dsh session
 and parses the final assistant JSON message into the same typed Turn result.
+Prefer the built-in `loopx turn run-once --host dsh` surface so structured SDK
+terminal failures reach the Turn Journal. The module/subprocess invocation with
+`--host generic-cli` remains the compatibility and rollback path.
 See [DeepSeek Harness connector](../../integrations/deepseek-harness-connector.md).
 
 ### Five Questions For Any Agent CLI
@@ -285,7 +288,12 @@ For example, an `in_progress` Journal with a saved Host Result has
 call. `scheduler_action_required` continues from `scheduler_apply` and does not
 repeat Host, writeback, or quota spend. A failed Host Session is evaluated only
 when `--retry-failed-turn` is explicit and must pass the current Session Binding
-check. A dangling prepared effect remains owned by the existing provider
+check. Retryable Host failures also carry a content-free
+`loopx_turn_host_failure_v0` record. The Journal persists the attempt before
+Host invocation, and the TypeScript recovery decision rejects another
+invocation after the declared bounded budget. Backoff is an outer-scheduler
+hint; `run-once` never sleeps in-process or silently changes the selected model.
+A dangling prepared effect remains owned by the existing provider
 readback protocol; the recovery decision only records that the readback is the
 next required check and does not claim general exactly-once execution.
 
@@ -459,10 +467,23 @@ state with a concrete projected action.
 | `capability_missing` | Re-run decision with observed capabilities and use capability repair routing, not a fabricated user gate. |
 | `workspace_guard_denied` | Repair or relocate the workspace before writes. |
 | `executor_timeout` or `transport_lost` | Return `host_failure` with bounded retry metadata; do not infer completion. |
+| `provider_capacity`, `provider_overloaded`, or `rate_limited` | Prefer an exact structured provider code, otherwise use a bounded adapter-local diagnostic fallback. Preserve only the typed class, exact attempt, same-configuration strategy, bounded exponential backoff, and maximum attempts. Never persist provider prose or silently select another model. |
+| `quota_exhausted` | Treat hard plan, billing, or included-usage exhaustion as non-retryable repair. Do not collapse it into a timed rate limit. |
 | `result_missing` | Return `validation_failed`; a process exit without typed result is inconclusive. |
 | `validation_failed` | Preserve compact negative evidence and choose repair or replan. |
 | `writeback_failed` | Retry idempotent writeback; never spend first. |
 | `scheduler_apply_failed` | Preserve completed writeback, record cadence failure, and retry scheduler control without a delivery spend. |
+
+Structured failure discrimination is fail-closed. A known `error.code` wins
+over HTTP status and prose. An unknown non-empty code becomes `unknown` and
+routes to repair; it must not be reinterpreted from its message. HTTP 429 is a
+bounded `rate_limited` signal only when no more-specific provider code exists,
+so an `insufficient_quota` response remains non-retryable even when transported
+as HTTP 429. Current `codex exec --json` releases expose message-only error
+events, so diagnostic matching remains the live compatibility path for that
+adapter; structured Responses, app-server, and JSON-RPC envelopes are accepted
+as forward-compatible inputs but are not claimed as fields emitted by the
+current exec JSONL contract.
 
 Session recovery is fail-closed:
 

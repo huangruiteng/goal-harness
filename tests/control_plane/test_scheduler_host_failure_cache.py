@@ -5,9 +5,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from loopx.control_plane.quota.scheduler_ack import (
+    record_quota_scheduler_ack_for_decision,
     record_quota_scheduler_failure_for_decision,
 )
-from loopx.control_plane.scheduler.ack import build_codex_app_scheduler_ack_event
 from loopx.control_plane.scheduler.execution_context import (
     scheduler_execution_context_for_runtime_profile,
 )
@@ -21,7 +21,6 @@ from loopx.control_plane.scheduler.state import (
     normalize_scheduler_state,
     retained_scheduler_host_update_failures,
 )
-
 
 GOAL_ID = "scheduler-failure-pair-cache-replay"
 AGENT_ID = "codex-main-control"
@@ -200,8 +199,10 @@ def test_matching_host_ack_clears_the_failure_cache(tmp_path: Path) -> None:
     assert backoff["apply_needed"] is False
     assert backoff["ack_needed"] is True
 
-    ack = build_codex_app_scheduler_ack_event(
+    ack = record_quota_scheduler_ack_for_decision(
         host_matched,
+        runtime_root=tmp_path,
+        goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         applied_rrule=ACTIVE_3,
         generated_at=(generated_at + timedelta(seconds=1)).isoformat(),
@@ -237,8 +238,10 @@ def test_fallback_ack_retains_other_failed_target_for_same_host(
     assert fallback_app["stateful_backoff"]["apply_needed"] is False
     assert fallback_app["stateful_backoff"]["ack_needed"] is True
 
-    fallback_ack = build_codex_app_scheduler_ack_event(
+    fallback_ack = record_quota_scheduler_ack_for_decision(
         fallback,
+        runtime_root=tmp_path,
+        goal_id=GOAL_ID,
         agent_id=AGENT_ID,
         applied_rrule=MONITOR_15,
         generated_at=(generated_at + timedelta(seconds=1)).isoformat(),

@@ -35,7 +35,13 @@ def register_quota_monitor_poll_request_arguments(
     quota_parser.add_argument("--material-change", action="store_true", help="Mark a monitor poll as a material transition instead of unchanged evidence.")
     quota_parser.add_argument("--cadence", help="Monitor cadence used to compute the next due timestamp, e.g. 30m, 2h, or 1d.")
     quota_parser.add_argument("--next-due-at", help="Explicit ISO timestamp for the next monitor poll.")
-    quota_parser.add_argument("--next-agent-todo", help="Agent follow-up todo to add when `--material-change` is set.")
+    quota_parser.add_argument(
+        "--next-agent-todo",
+        help=(
+            "Independent runnable advancement_task emitted when a monitor poll "
+            "uses --material-change; the continuous_monitor remains observe-only."
+        ),
+    )
     quota_parser.add_argument(
         "--next-action-kind",
         help="Explicit action kind for a material monitor's --next-agent-todo successor.",

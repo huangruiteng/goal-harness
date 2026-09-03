@@ -146,7 +146,11 @@ def capture_delivery_workspace(
     current_common = _git_common_dir(path)
     current_git_dir = _git_dir(path)
     task_repository = _git_repository_identity(path)
-    if not task_repository or current_common is None or current_git_dir is None:
+    if (
+        not task_repository
+        or current_common is None
+        or current_git_dir is None
+    ):
         return None
     workspace_kind = (
         "independent_git_worktree"

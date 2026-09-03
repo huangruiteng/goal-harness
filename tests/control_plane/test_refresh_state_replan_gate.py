@@ -166,6 +166,36 @@ def test_writeback_allowed_when_replan_not_due() -> None:
     _call_gate(runs=_durable_runs(5))
 
 
+def test_turn_guard_without_replan_target_defers_new_obligation() -> None:
+    runs = _durable_runs(AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD)
+
+    semantic_delta = enforce_open_replan_writeback(
+        newest_first_runs=runs,
+        state_text=STATE_TEXT,
+        agent_id=AGENT_ID,
+        goal_id=GOAL_ID,
+        guard_scoped=True,
+        guard_semantic_replan_obligation_id=None,
+    )
+
+    assert semantic_delta is None
+
+
+def test_turn_guard_keeps_its_exact_replan_target_strict() -> None:
+    runs = _durable_runs(AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD)
+    obligation_id = _current_obligation_id(runs)
+
+    with pytest.raises(ReplanWritebackRejected):
+        enforce_open_replan_writeback(
+            newest_first_runs=runs,
+            state_text=STATE_TEXT,
+            agent_id=AGENT_ID,
+            goal_id=GOAL_ID,
+            guard_scoped=True,
+            guard_semantic_replan_obligation_id=obligation_id,
+        )
+
+
 def _typed_repeat_runs() -> list[dict]:
     """Two consecutive identical blocked observations (external-wait stall).
 

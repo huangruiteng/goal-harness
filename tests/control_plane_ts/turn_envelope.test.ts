@@ -1,0 +1,278 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  ACTION_SIGNATURE_COVERAGE_V0,
+  ACTION_SIGNATURE_COVERAGE_V3,
+  buildTurnEnvelope,
+  evaluateTurnEnvelope,
+  quotaActionSignatureDocument,
+  turnEnvelopeActionSignatureDocument,
+} from "../../loopx/control_plane/quota/turn_envelope.ts";
+import { EffectRuntimeRequestError } from "../../loopx/control_plane/effect_runtime_errors.ts";
+
+function payload(): Record<string, unknown> {
+  return {
+    ok: true,
+    goal_id: "goal-turn-envelope",
+    agent_id: "agent-ts",
+    agent_identity: { agent_id: "agent-ts" },
+    decision: "run",
+    should_run: true,
+    effective_action: "normal_run",
+    state: "eligible",
+    reason: "one bounded segment is eligible",
+    action_required: false,
+    open_count: 0,
+    recommended_action: "advance one bounded segment",
+    selected_todo: {
+      todo_id: "todo-1",
+      status: "open",
+      text: "advance one bounded segment",
+      task_repository: "repo",
+    },
+    interaction_contract: {
+      schema_version: "loopx_interaction_contract_v0",
+      mode: "bounded_delivery",
+      user_channel: { action_required: false, notify: "DONT_NOTIFY" },
+      agent_channel: {
+        must_attempt: true,
+        delivery_allowed: true,
+        quiet_noop_allowed: false,
+        primary_action: "advance one bounded segment",
+      },
+      cli_channel: {
+        next_cli_actions: ["loopx refresh-state --goal-id goal-turn-envelope"],
+        spend_allowed_now: false,
+        spend_after_validation: true,
+        spend_policy: "spend once after validated writeback",
+      },
+    },
+    protocol_action_packet: {
+      schema_version: "protocol_action_packet_v0",
+      summary: "actor=agent user_action_required=false agent_action_required=true " +
+        "quiet_noop_allowed=false llm=no_api agent_action=advance one bounded segment",
+    },
+    work_lane_contract: {
+      schema_version: "work_lane_contract_v0",
+      must_attempt_work: true,
+    },
+    goal_boundary: { rule: "stay_in_scope_or_stop", write_scope: ["loopx/**"] },
+  };
+}
+
+const protocolActionFields = {
+  actor: "agent",
+  user_action_required: false,
+  agent_action_required: true,
+  quiet_noop_allowed: false,
+  llm: "no_api",
+  agent_action: "advance one bounded segment",
+};
+
+test("Turn envelope transaction owns compaction and signature construction", () => {
+  const source = payload();
+  const envelope = buildTurnEnvelope({
+    payload: source,
+    protocol_action_fields: protocolActionFields,
+    scheduler_execution_args: " --scheduler-runtime-profile codex_app",
+  });
+
+  assert.equal(envelope.schema_version, "loopx_turn_envelope_v0");
+  assert.equal(envelope.agent_id, "agent-ts");
+  assert.equal(
+    (envelope.detail_ref as Record<string, unknown>).full_decision,
+    "loopx --format json quota should-run --goal-id goal-turn-envelope " +
+      "--agent-id agent-ts --scheduler-runtime-profile codex_app",
+  );
+  const capsule = envelope.contract_capsule as Record<string, unknown>;
+  assert.deepEqual(capsule.protocol_action_packet, {
+    schema_version: "protocol_action_packet_v0",
+    present: true,
+    summary_hash: "sha256:b5b6cd58e32de45a909adc2e02d56d9bf358039fa442871b1a25c6d27ae4101c",
+    derivation_status: "verified",
+    reconstruction_verified: true,
+    llm_policy: "no_api",
+    candidate_derivation_inputs: [
+      "action",
+      "user",
+      "work_lane_contract",
+      "automation_liveness",
+      "scheduler",
+    ],
+  });
+  const signature = envelope.action_signature as Record<string, unknown>;
+  assert.equal(signature.coverage, ACTION_SIGNATURE_COVERAGE_V0);
+  assert.equal(signature.matches, true);
+  assert.equal(
+    signature.envelope_hash,
+    (signature.source_hash as string),
+  );
+  assert.equal(
+    (envelope.compaction as Record<string, unknown>).within_budget,
+    true,
+  );
+});
+
+test("planning detail stays cold while its action dimension remains signed", () => {
+  const source = payload();
+  source.planning_horizon = {
+    schema_version: "quota_planning_horizon_v0",
+    horizon: "near",
+    detail_refs: { candidate: "$.candidate" },
+  };
+  const interaction = source.interaction_contract as Record<string, unknown>;
+  const action = interaction.agent_channel as Record<string, unknown>;
+  action.primary_action = "advance the near horizon";
+
+  const signature = quotaActionSignatureDocument(source, protocolActionFields);
+  assert.equal(signature.coverage, ACTION_SIGNATURE_COVERAGE_V3);
+  const horizon = (signature.action as Record<string, unknown>)
+    .planning_horizon as Record<string, unknown>;
+  assert.equal(horizon.detail_refs, undefined);
+  assert.equal(horizon.detail_refs_ref, "$.detail_ref");
+});
+
+test("v0 compaction metric preserves Unicode code-point compatibility", () => {
+  const source = payload();
+  source.reason = "推进一段 🚀";
+  const envelope = buildTurnEnvelope({
+    payload: source,
+    protocol_action_fields: protocolActionFields,
+    scheduler_execution_args: "",
+  });
+  assert.equal(
+    (envelope.compaction as Record<string, unknown>).source_json_bytes,
+    [...JSON.stringify(source)].length,
+  );
+});
+
+test("signature key ordering preserves Python Unicode code-point compatibility", () => {
+  const source = {
+    goal_id: "g",
+    agent_identity: { agent_id: "a" },
+    interaction_contract: {
+      schema_version: "loopx_interaction_contract_v0",
+      mode: "quiet",
+      user_channel: { action_required: false, notify: "DONT_NOTIFY" },
+      agent_channel: {
+        must_attempt: false,
+        delivery_allowed: false,
+        quiet_noop_allowed: true,
+      },
+      cli_channel: {},
+    },
+    goal_boundary: {
+      execution_profile: { "𐀀": "astral", "": "bmp" },
+    },
+  };
+  const envelope = buildTurnEnvelope({
+    payload: source,
+    protocol_action_fields: {},
+    scheduler_execution_args: "",
+  });
+  assert.equal(
+    (envelope.action_signature as Record<string, unknown>).source_decision_hash,
+    "sha256:c68a197d600a6b89b6d2816a77e2de4c03e0cc6a7ac5821d039d9320ab341795",
+  );
+});
+
+test("selected Todo text references preserve Unicode casefold compatibility", () => {
+  const source = payload();
+  source.recommended_action = "STRASSE";
+  (source.selected_todo as Record<string, unknown>).text = "Straße";
+  const interaction = source.interaction_contract as Record<string, unknown>;
+  (interaction.agent_channel as Record<string, unknown>).primary_action = "STRASSE";
+  const envelope = buildTurnEnvelope({
+    payload: source,
+    protocol_action_fields: protocolActionFields,
+    scheduler_execution_args: "",
+  });
+  const selectedTodo = (envelope.action as Record<string, unknown>)
+    .selected_todo as Record<string, unknown>;
+  assert.equal(selectedTodo.text_ref, "action.recommended_action");
+  assert.equal(selectedTodo.text, undefined);
+});
+
+test("signature document fails closed to the canonical signed dimensions", () => {
+  const envelope = buildTurnEnvelope({
+    payload: payload(),
+    protocol_action_fields: protocolActionFields,
+    scheduler_execution_args: "",
+  });
+  const first = structuredClone(turnEnvelopeActionSignatureDocument(envelope));
+  envelope.detail_ref = { attacker_controlled: true };
+  envelope.compaction = { attacker_controlled: true };
+  const second = turnEnvelopeActionSignatureDocument(envelope);
+  assert.deepEqual(second, first);
+
+  (envelope.action as Record<string, unknown>).primary_action = "different action";
+  assert.notDeepEqual(turnEnvelopeActionSignatureDocument(envelope), first);
+});
+
+test("unsupported facade operation is rejected", () => {
+  assert.throws(
+    () => evaluateTurnEnvelope({ operation: "leaf_helper" }),
+    (error: unknown) =>
+      error instanceof EffectRuntimeRequestError &&
+      error.message === "turn envelope operation is unsupported",
+  );
+});
+
+test("transaction boundary rejects malformed prepared facts", () => {
+  assert.throws(
+    () => buildTurnEnvelope({
+      payload: payload(),
+      protocol_action_fields: [],
+      scheduler_execution_args: "",
+    }),
+    EffectRuntimeRequestError,
+  );
+  assert.throws(
+    () => buildTurnEnvelope({
+      payload: payload(),
+      protocol_action_fields: protocolActionFields,
+      scheduler_execution_args: [],
+    }),
+    EffectRuntimeRequestError,
+  );
+  const invalid = payload();
+  invalid.open_count = "not-an-integer";
+  assert.throws(
+    () => buildTurnEnvelope({
+      payload: invalid,
+      protocol_action_fields: protocolActionFields,
+      scheduler_execution_args: "",
+    }),
+    EffectRuntimeRequestError,
+  );
+
+  for (const [field, invalidValue] of [
+    ["goal_id", { injected: true }],
+    ["runtime_root", ["unexpected"]],
+  ] as const) {
+    const malformed = payload();
+    malformed[field] = invalidValue;
+    assert.throws(
+      () => buildTurnEnvelope({
+        payload: malformed,
+        protocol_action_fields: protocolActionFields,
+        scheduler_execution_args: "",
+      }),
+      EffectRuntimeRequestError,
+    );
+  }
+
+  const malformedMode = payload();
+  (malformedMode.interaction_contract as Record<string, unknown>).mode = {
+    injected: true,
+  };
+  assert.throws(
+    () => buildTurnEnvelope({
+      payload: malformedMode,
+      protocol_action_fields: protocolActionFields,
+      scheduler_execution_args: "",
+    }),
+    EffectRuntimeRequestError,
+  );
+});

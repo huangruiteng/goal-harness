@@ -10,6 +10,9 @@ CLI_COMMANDS = ROOT / "loopx" / "cli_commands"
 
 DEFAULT_MAX_LINES = 1000
 STARTER_MODULE_LIMITS = {
+    # Legacy command owners are frozen at their current baseline while each
+    # cohesive extraction lands; the default budget still catches new growth.
+    "todo.py": 1098,
     "starter.py": 180,
     "starter_bootstrap.py": 220,
     "starter_bootstrap_registration.py": 240,

@@ -80,6 +80,13 @@ assert.match(page, /routeWorkspaceInput\(message,/, "Every free-text send enters
 assert.match(router, /route: "projection" \| "typed_action" \| "agent_chat" \| "clarify"/, "Router exposes the constrained route contract");
 assert.match(router, /function executionIntent/, "Execution intent stays inside the Router implementation");
 assert.match(router, /function negates/, "Router can honor explicit negation");
+assert.doesNotMatch(router, /protectedActionIntent|protectedActionRules/, "Free-text protected operations are not interpreted by browser keyword rules");
+assert.doesNotMatch(router, /"goal\.update"/, "The browser Router type cannot emit a protected Goal action");
+assert.doesNotMatch(page, /intentRoute\.actionKind === "goal\.update"|workspace-protected-/, "Free-text send has no legacy protected-action preview branch");
+assert.match(chatData, /protected_action: protectedActionProposalSchema/, "Chat accepts one narrow semantic protected-action proposal");
+assert.match(dashboard, /response\.protected_action/, "Agent semantic protected intent is projected only after the Chat response");
+assert.match(dashboard, /normalizedMessage\.includes\(normalizedTarget\)/, "A model-invented protected target cannot reach typed preview");
+assert.match(page, /if \(semanticPreview\) await createPreview\(semanticPreview\)/, "Semantic intent still enters the typed preview boundary");
 for (const legacyClassifier of ["hasHeartbeatIntent", "hasMonitorIntent", "hasTodoCreationIntent", "isExecutionIntent"]) {
   assert.doesNotMatch(page, new RegExp(`function ${legacyClassifier}`), `${legacyClassifier} no longer bypasses the Router contract`);
 }
@@ -146,6 +153,11 @@ assert.match(dashboard, /onReconcileStatus=\{\(\) => loadFromUrl\([\s\S]*\{ back
 assert.match(dashboard, /statusRequestCanCommit\(statusRequestFenceRef\.current, request\)/, "A stale background response cannot overwrite a newer optimistic transition");
 assert.match(sidebar, /Trash2/, "Stopped Goals expose a delete icon");
 assert.match(sidebar, /onRequestGoalLifecycle\(goal, "delete"\)/, "Goal deletion stays behind the lifecycle request boundary");
+assert.match(page, /\{ select: operation !== "stop" \}/, "Goal stop suppresses the confirmation drawer while other lifecycle actions retain it");
+assert.match(page, /await applyProposal\(proposal, \{ presentation: "feedback" \}\)/, "Goal stop reuses the canonical apply state machine and surfaces its receipt as feedback");
+assert.match(page, /if \(proposal\.status === "ready"\)[\s\S]*setSelection\(\{ item: proposal, kind: "proposal" \}\)/, "A stop action only bypasses review when its typed preview is ready");
+assert.match(page, /A newly discovered authority gate always deserves review/, "A direct action escalates a newly discovered authority gate to the drawer");
+assert.match(sidebar, /disabled=\{lifecycleBusyGoalIds\?\.has\(goal\.goalId\)\}/, "An in-flight Goal stop cannot be submitted twice from the sidebar");
 assert.match(page, /lifecycleOperation === "delete"/, "Goal deletion has an explicit lifecycle operation");
 assert.match(page, /callbacks\.onGoalDeleted/, "Successful Goal deletion removes the optimistic sidebar projection");
 assert.match(status, /function withoutGoal/, "Status projection can remove a deleted Goal");

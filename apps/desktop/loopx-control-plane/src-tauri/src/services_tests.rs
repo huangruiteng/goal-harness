@@ -94,6 +94,18 @@ fn stale_listener_process_must_match_loopx_command_and_port() {
         8766,
         r#"/opt/loopx/bin/python -c import os\012import runpy\012release_root = os.environ["LOOPX_RELEASE_ROOT"]\012runpy.run_module("loopx.cli", run_name="__main__")\012 --registry /tmp/registry.json serve-status --global-registry --host 127.0.0.1 --port 8766 --limit 80"#,
     ));
+    assert!(is_expected_loopx_listener_command(
+        ServiceKind::Status,
+        executable,
+        8766,
+        r#"/opt/loopx/bin/python -c import os\012import runpy\012release_root = os.environ["LOOPX_RELEASE_ROOT"]\012sys.argv[0] = os.path.join(release_root, "scripts", "loopx")\012module = (\012    "loopx.entrypoint"\012    if os.path.isfile(os.path.join(release_root, "loopx", "entrypoint.py"))\012    else "loopx.cli"\012)\012runpy.run_module(module, run_name="__main__")\012 --registry /tmp/registry.json serve-status --global-registry --host 127.0.0.1 --port 8766 --limit 80"#,
+    ));
+    assert!(is_expected_loopx_listener_command(
+        ServiceKind::Chat,
+        executable,
+        8767,
+        r#"/opt/loopx/bin/python -c LOOPX_MANAGED_RELEASE_LAUNCHER_V1 = True\012release_root = os.environ["LOOPX_RELEASE_ROOT"]\012runpy.run_module(next_module, run_name="__main__")\012 --registry /tmp/registry.json chat --global-registry --host 127.0.0.1 --port 8767 --no-open"#,
+    ));
     assert!(!is_expected_loopx_listener_command(
         ServiceKind::Status,
         executable,
@@ -130,6 +142,21 @@ fn stale_listener_process_must_match_loopx_command_and_port() {
         8766,
         r#"/opt/loopx/bin/python -c runpy.run_module("other.cli", run_name="__main__") serve-status --port 8766"#,
     ));
+    assert!(!is_expected_loopx_listener_command(
+        ServiceKind::Status,
+        executable,
+        8766,
+        r#"/opt/loopx/bin/python -c release_root = os.environ["LOOPX_RELEASE_ROOT"]\012print("loopx.entrypoint")\012runpy.run_module(module, run_name="__main__") serve-status --port 8766"#,
+    ));
+}
+
+#[test]
+fn release_launchers_publish_the_stable_process_fingerprint() {
+    let posix_launcher = include_str!("../../../../../scripts/loopx");
+    let portable_entry = include_str!("../../../../../scripts/loopx_entry.py");
+
+    assert!(posix_launcher.contains(MANAGED_RELEASE_LAUNCHER_MARKER));
+    assert!(portable_entry.contains(MANAGED_RELEASE_LAUNCHER_MARKER));
 }
 
 #[test]

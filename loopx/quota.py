@@ -41,7 +41,6 @@ from .control_plane.quota.recent_runs import (
 )
 from .presentation.renderers.quota_event_markdown import (
     render_quota_monitor_poll_markdown as _render_quota_monitor_poll_markdown,
-    render_quota_slot_preview_markdown as _render_quota_slot_preview_markdown,
     render_quota_slot_preview_markdown as render_quota_slot_preview_markdown,
 )
 from .presentation.renderers.quota_markdown import (
@@ -62,13 +61,17 @@ from .control_plane.quota.slot_accounting import (
     QUOTA_SLOT_VOIDED_CLASSIFICATION,
     build_quota_slot_preview_for_decision,
     build_quota_slot_spend_event as _build_quota_slot_spend_event,
-    build_quota_slot_void_event as build_quota_slot_void_event,
-    build_quota_slot_void_preview_for_decision,
     load_quota_event_from_run,
     record_quota_slot_spend_from_preview,
-    record_quota_slot_void_from_preview,
 )
 from .control_plane.quota.spend_commit import replay_quota_spend_by_effect_ref
+from .control_plane.quota.void_commit import (
+    build_quota_slot_void_event as build_quota_slot_void_event,
+    build_quota_slot_void_preview_for_decision,
+    commit_quota_slot_void,
+    normalize_quota_void_goal_id as _normalize_quota_void_goal_id,
+    record_quota_slot_void_from_preview as record_quota_slot_void_from_preview,
+)
 from .control_plane.quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
     TURN_SCOPED_SLOT_SPEND_SOURCES,
@@ -116,7 +119,8 @@ _PUBLIC_COMPAT_REEXPORTS = {
     "render_quota_markdown": "loopx.presentation.renderers.quota_markdown",
     "render_quota_scheduler_ack_markdown": "loopx.presentation.renderers.quota_markdown",
     "render_quota_should_run_markdown": "loopx.presentation.renderers.quota_markdown",
-    "build_quota_slot_void_event": "loopx.control_plane.quota.slot_accounting",
+    "build_quota_slot_void_event": "loopx.control_plane.quota.void_commit",
+    "record_quota_slot_void_from_preview": "loopx.control_plane.quota.void_commit",
     "render_quota_slot_preview_markdown": "loopx.presentation.renderers.quota_event_markdown",
 }
 
@@ -872,6 +876,7 @@ def build_quota_should_run(
     receipt_bound_terminal_phase: ReceiptBoundTerminalPhase | None = None,
     receipt_bound_replan_obligation_id: str | None = None,
     turn_instance_id: str | None = None,
+    runtime_root: str | Path | None = None,
 ) -> dict[str, Any]:
     from .control_plane.quota.should_run import (
         build_quota_should_run as _build_quota_should_run,
@@ -895,6 +900,7 @@ def build_quota_should_run(
         receipt_bound_terminal_phase=receipt_bound_terminal_phase,
         receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
         turn_instance_id=turn_instance_id,
+        runtime_root=runtime_root,
     )
 
 
@@ -1142,7 +1148,7 @@ def build_quota_slot_void_preview(
     agent_id: str | None = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
+    safe_goal_id = _normalize_quota_void_goal_id(goal_id)
     before = build_quota_should_run(
         status_payload,
         goal_id=safe_goal_id,
@@ -1168,22 +1174,18 @@ def void_quota_slot(
     agent_id: str | None = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
-    preview = build_quota_slot_void_preview(
+    safe_goal_id = _normalize_quota_void_goal_id(goal_id)
+    before = build_quota_should_run(
         status_payload,
         goal_id=safe_goal_id,
-        voided_run_generated_at=voided_run_generated_at,
         agent_id=agent_id,
         operator_inbox_urgency_projector=operator_inbox_urgency_projector,
     )
-    if not preview.get("ok"):
-        return preview
-
-    return record_quota_slot_void_from_preview(
-        preview,
+    return commit_quota_slot_void(
         status_payload,
         goal_id=safe_goal_id,
-        render_markdown=_render_quota_slot_preview_markdown,
+        voided_run_generated_at=voided_run_generated_at,
+        before=before,
         execute=execute,
         source=source,
         reason_summary=reason_summary,

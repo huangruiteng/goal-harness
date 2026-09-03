@@ -729,7 +729,7 @@ bounded context；`docs/product/core-control-plane/bounded-context-layout.md` �
 - `examples/control_plane/capability-gate-projection-smoke.py`
 - `examples/control_plane/peer-agent-workspace-guard-smoke.py`
 - `examples/state-projection-gap-smoke.py`
-- `examples/control_plane/monitor-poll-policy-smoke.py`
+- `tests/control_plane_ts/quota_monitor_poll_commit.test.ts`
 
 ## 常见实现错误
 

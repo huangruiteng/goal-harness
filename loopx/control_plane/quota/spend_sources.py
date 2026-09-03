@@ -79,6 +79,7 @@ def visible_goal_turn_reentry_action(
 def build_quota_spend_action(
     goal_id: str,
     *,
+    command_prefix: str = "loopx",
     scoped_cli_args: str,
     payload: Mapping[str, Any],
     settlement_plan: Mapping[str, Any] | None,
@@ -107,7 +108,8 @@ def build_quota_spend_action(
         if todo_id and source == DEFAULT_SLOT_SPEND_SOURCE
         else ""
     )
+    cli_prefix = command_prefix.strip() or "loopx"
     return (
-        f"loopx quota spend-slot --goal-id {goal_id} --slots 1 "
+        f"{cli_prefix} quota spend-slot --goal-id {goal_id} --slots 1 "
         f"--source {source} --execute{todo_arg}{scoped_cli_args}"
     )

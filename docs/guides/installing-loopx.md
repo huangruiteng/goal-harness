@@ -171,6 +171,30 @@ host material from the previous version active. Conversely, `loopx update
 apply` does not replace pip as the owner of dependency resolution, environment
 policy, package indexes, or uninstall.
 
+### Verify The Active Layers
+
+An upgrade is not fully qualified just because the package-manager step exits
+successfully. Read back each layer that can remain stale independently:
+
+| Layer | Readback | What success proves | Recovery when it is not ready |
+| --- | --- | --- | --- |
+| Installation owner and package | `loopx update check` | The active executable, package owner, freshness, and next action are identified without mutation. | Follow the reported owner command; do not mix pip, pipx, archive, and source-checkout upgrade paths. |
+| Host material | `loopx --format json doctor` | `skill_delivery.status` describes the workflow-skill delivery used by the active host. | Run `loopx workflow-skills --install`; refresh `loopx slash-commands --install` when those facades are in use, then restart the host. |
+| Managed Effect runtime | `loopx doctor --deep` | The packaged TypeScript Effect runtime can start and answer the deep probe. An idle-exited `stopped` lifecycle remains healthy. | Apply the doctor recommendation or reinstall the selected package version; do not substitute a second Python rule path. |
+| Enabled extensions | `loopx extension doctor --all-enabled --execute --format json` | Every enabled extension has a current runtime identity and passes its readiness checks. | Repair the named provider or extension and rerun its doctor; a failed provider remains closed. |
+
+`loopx update apply` runs the host-material refresh, core doctor, and enabled
+extension doctor after the owning package or archive update succeeds. The
+standalone commands above are still useful as independent readbacks and
+recovery entry points; rerunning them does not change the installation owner.
+
+These checks also prevent a common release mistake: code merged to `main` is
+not necessarily active in an installed release. Archive maintainers may use
+`loopx update check --ref main` to inspect
+`runtime_activation_qualification`; ordinary pip and pipx users should stay on
+the tagged package channel and wait for the corresponding release instead of
+trying to switch an installed distribution to `main`.
+
 For an installation owned by another Python package manager, `update plan`
 reports that owner and its command; LoopX fails closed instead of guessing a
 pip mutation. For a live source checkout, it reports the contributor installer

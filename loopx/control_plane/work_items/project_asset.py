@@ -596,6 +596,8 @@ def build_project_asset_todo_summary(
         "total": total_count,
         **metadata,
     }
+    if todos.get("advancement_done_count") is not None:
+        summary["advancement_done_count"] = todos.get("advancement_done_count")
     open_items = open_todo_items(todos, limit=item_limit)
     claimed_open_count = todos.get("claimed_open_count")
     if claimed_open_count is None:

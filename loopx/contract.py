@@ -67,6 +67,8 @@ LEAK_PATTERNS = {
     "private_ip": re.compile(r"\b10\.\d+\.\d+\.\d+\b|\b172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+\b|\b192\.168\.\d+\.\d+\b"),
 }
 
+_PUBLIC_NPM_REGISTRY_PREFIX = "https://registry.npmjs.org/"
+
 # The Lark developer console is a public product surface, even though its
 # hostname shares the tenant-document marker used by private workspaces.
 # Keep this exception host-specific so tenant URLs on sibling hosts remain
@@ -789,6 +791,29 @@ def scan_public_boundary(
         except OSError as exc:
             unreadable_files.append(f"{rel_or_abs(path, root)}: {exc.strerror or exc}")
             continue
+        if path.name == "package-lock.json":
+            try:
+                lockfile = json.loads(text)
+            except json.JSONDecodeError:
+                lockfile = None
+            if isinstance(lockfile, dict):
+                packages = lockfile.get("packages")
+                if isinstance(packages, dict):
+                    for package_path, package in packages.items():
+                        if not isinstance(package, dict):
+                            continue
+                        resolved = package.get("resolved")
+                        if (
+                            isinstance(resolved, str)
+                            and resolved.startswith(("http://", "https://"))
+                            and not resolved.startswith(_PUBLIC_NPM_REGISTRY_PREFIX)
+                        ):
+                            display_package = package_path or "<root>"
+                            hits.append(
+                                f"{rel_or_abs(path, root)}: "
+                                "non_public_package_registry "
+                                f"({display_package})"
+                            )
         for line_no, line in enumerate(text.splitlines(), start=1):
             for name, pattern in LEAK_PATTERNS.items():
                 scan_line = line

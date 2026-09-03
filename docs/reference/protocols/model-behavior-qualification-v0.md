@@ -142,7 +142,8 @@ state and are never a public repository artifact.
 ## Direct Doubao Shadow Actor
 
 `DoubaoModelBehaviorActor` calls only the canonical Ark Chat Completions
-endpoint and allowlists the versioned Doubao 2.1 Pro and Turbo model ids. It
+endpoint and explicitly allowlists the versioned Doubao 2.1 Pro and Turbo
+model ids plus the rolling `doubao-seed-evolving` model id. It
 does not accept an arbitrary base URL, does not follow redirects, does not send
 tool definitions, and converts transport failures into bounded errors without
 provider response bodies.
@@ -166,8 +167,10 @@ closed when the candidate actually omits or changes selected work.
 Live use requires `ARK_API_KEY` to be injected into the process environment.
 The key is held only by the in-memory adapter and is never placed in a LoopX
 packet, receipt, error, command argument, fixture, or repository file. The
-optional `LOOPX_MODEL_BEHAVIOR_MODEL` selector can choose one of the two
-allowlisted Doubao 2.1 model ids. Missing credentials, unsupported models,
+optional `LOOPX_MODEL_BEHAVIOR_MODEL` selector can choose one of those
+explicitly allowlisted model ids. A `doubao-seed-evolving` receipt qualifies
+only the model alias observed at that release commit and run time; it does not
+claim an immutable provider revision. Missing credentials, unsupported models,
 malformed provider JSON, or non-conforming decisions fail closed. LoopX does
 not search credential stores and does not route these calls through a memory
 system or another agent service.

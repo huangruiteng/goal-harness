@@ -10,7 +10,18 @@ remote-management:
 
 request-retry: 10
 max-retry-credentials: 0
-max-retry-interval: 0
+# Permit one provider-declared minute window plus small scheduling jitter. This
+# is a ceiling, not a fixed sleep and not permission to invent a cooldown for a
+# generic 429 that has no Retry-After signal.
+max-retry-interval: 65
+
+# Credential-bearing fields are intentionally omitted. The OpenAI-compatible
+# text fallback uses one additional provider round so an explicit Retry-After,
+# or a provider error that explicitly identifies a TPM window, can be honored
+# once without multiplying a large request across the global retry budget.
+openai-compatibility:
+  - name: "<OPENAI_COMPATIBILITY_TEXT_FALLBACK>"
+    request-retry: 1
 
 routing:
   strategy: "fill-first"
@@ -20,3 +31,10 @@ routing:
 codex:
   stream-bootstrap-buffering: true
   optimize-multi-agent-v2: false
+
+# Adapter/plugin contract (not a native CPA YAML key): inspect the original
+# model selector before alias mapping. For `fast/<route>`, strip the prefix,
+# set the request service tier to `priority`, and admit only Fast-capable route
+# members. Preserve both model and service tier for ordinary selectors; if an
+# ordinary selector already carries `priority`, apply the same Fast-capable-only
+# admission so the native Fast entry cannot reach a non-Fast fallback.

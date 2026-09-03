@@ -195,6 +195,7 @@ def finalize_user_gate_notification_cooldown(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
     turn_instance_id: str | None = None,
+    runtime_root: str | None = None,
 ) -> None:
     scheduler_hint = payload.get("scheduler_hint")
     cooldown = (
@@ -215,6 +216,7 @@ def finalize_user_gate_notification_cooldown(
         available_capabilities=available_capabilities,
         scheduler_execution_context=scheduler_execution_context,
         turn_instance_id=turn_instance_id,
+        runtime_root=runtime_root,
     )
     attach_user_action_compat_fields(payload)
 
@@ -547,6 +549,7 @@ def _turn_scoped_cli_settlement_context(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ),
     turn_instance_id: str | None = None,
+    runtime_root: str | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if selection.action_portfolio_requires_explicit_selection(payload):
         return None, None
@@ -590,6 +593,7 @@ def _turn_scoped_cli_settlement_context(
         ),
         goal_id=goal_id,
         agent_id=agent_id,
+        command_prefix=selection.render_cli_command_prefix(runtime_root=runtime_root),
         todo_id=todo_id,
         replan_obligation_id=replan_obligation_id,
         scoped_cli_args=scoped_cli_args,
@@ -617,6 +621,7 @@ def _terminal_cli_actions(
     quota_spend_action: str,
     capability_resolution_actions: list[str],
     capability_reentry_actions: list[str],
+    command_prefix: str,
 ) -> list[str]:
     if mode == "capability_bridge_repair":
         return capability_reentry_actions or [
@@ -642,7 +647,7 @@ def _terminal_cli_actions(
         return [
             *resolution_actions,
             typed_writeback
-            or f"loopx refresh-state --goal-id {goal_id} --classification <validated_progress>{scoped_cli_args}",
+            or f"{command_prefix} refresh-state --goal-id {goal_id} --classification <validated_progress>{scoped_cli_args}",
             quota_spend_action,
         ]
     if mode in {"user_gate", "user_todo_blocker_push", "user_action_required"}:
@@ -664,8 +669,10 @@ def interaction_next_cli_actions(
     capability_reentry: dict[str, Any] | None = None,
     settlement_plan: Mapping[str, Any] | None = None,
     turn_instance_id: str | None = None,
+    runtime_root: str | None = None,
 ) -> list[str]:
     goal_id = str(payload.get("goal_id") or "<GOAL_ID>")
+    command_prefix = selection.render_cli_command_prefix(runtime_root=runtime_root)
     agent_identity = payload.get("agent_identity") if isinstance(payload.get("agent_identity"), dict) else {}
     scoped_cli_args = _scoped_cli_args(
         agent_identity,
@@ -677,13 +684,12 @@ def interaction_next_cli_actions(
         else ""
     )
     if settlement_plan is None:
-        settlement_plan, _replan_settlement_contract = (
-            _turn_scoped_cli_settlement_context(
-                payload,
-                available_capabilities=available_capabilities,
-                scheduler_execution_context=scheduler_execution_context,
-                turn_instance_id=turn_instance_id,
-            )
+        settlement_plan, _replan_settlement_contract = _turn_scoped_cli_settlement_context(
+            payload,
+            available_capabilities=available_capabilities,
+            scheduler_execution_context=scheduler_execution_context,
+            turn_instance_id=turn_instance_id,
+            runtime_root=runtime_root,
         )
     settlement_args = settlement_binding_args(settlement_plan)
     try:
@@ -697,11 +703,12 @@ def interaction_next_cli_actions(
         scoped_cli_args=scoped_cli_args,
         scheduler_args=scheduler_args,
         turn_instance_id=turn_instance_id,
+        runtime_root=runtime_root,
     )
     if selection_command_template:
         return [selection_command_template]
     typed_quota_guard = (
-        f"loopx --format json quota should-run --goal-id {goal_id}"
+        f"{command_prefix} --format json quota should-run --goal-id {goal_id}"
         f"{scoped_cli_args}{scheduler_args}"
         if scheduler_args
         else "rerun the typed quota_guard from the current host packet"
@@ -711,7 +718,7 @@ def interaction_next_cli_actions(
     ):
         return [turn_reentry_action]
     typed_monitor_poll = (
-        f"loopx quota monitor-poll --goal-id {goal_id}{scoped_cli_args}"
+        f"{command_prefix} quota monitor-poll --goal-id {goal_id}{scoped_cli_args}"
         f"{scheduler_args} --execute"
         if scheduler_args
         else "use the current host packet's typed monitor command"
@@ -745,6 +752,7 @@ def interaction_next_cli_actions(
         payload=payload,
         settlement_plan=settlement_plan,
         scheduler_execution_context=scheduler_execution_context,
+        command_prefix=command_prefix,
     )
     capability_resolution_actions = build_capability_resolution_writeback_actions(
         payload.get("capability_gate"),
@@ -761,6 +769,7 @@ def interaction_next_cli_actions(
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
             turn_instance_id=turn_instance_id,
+            runtime_root=runtime_root,
         )
     capability_reentry_actions = (
         [str(candidate["command"]) for candidate in capability_reentry["candidates"]]
@@ -790,7 +799,7 @@ def interaction_next_cli_actions(
         if completion_command:
             actions.append(completion_command)
         return [action for action in actions if action] or [
-            f"loopx heartbeat-prompt --thin --goal-id {goal_id} --agent-id <registered-agent> --agent-scope '<scope>'",
+            f"{command_prefix} heartbeat-prompt --thin --goal-id {goal_id} --agent-id <registered-agent> --agent-scope '<scope>'",
         ]
     if mode == "monitor_quiet_skip":
         if heartbeat_turn_receipt_enabled:
@@ -840,9 +849,9 @@ def interaction_next_cli_actions(
             )
             gated_todo_id = str(first_candidate.get("todo_id") or "<gated_todo_id>")
             return [
-                f"loopx todo complete --goal-id {goal_id} --todo-id {monitor_todo_id}{lifecycle_actor_args} --evidence '<validated gate evidence>'",
-                f"loopx todo update --goal-id {goal_id} --todo-id {gated_todo_id}{lifecycle_actor_args} --note '<public-safe gate repair reason>'",
-                f"loopx refresh-state --goal-id {goal_id} --classification standing_monitor_gate_repair_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{settlement_args}{scoped_cli_args}",
+                f"{command_prefix} todo complete --goal-id {goal_id} --todo-id {monitor_todo_id}{lifecycle_actor_args} --evidence '<validated gate evidence>'",
+                f"{command_prefix} todo update --goal-id {goal_id} --todo-id {gated_todo_id}{lifecycle_actor_args} --note '<public-safe gate repair reason>'",
+                f"{command_prefix} refresh-state --goal-id {goal_id} --classification standing_monitor_gate_repair_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{settlement_args}{scoped_cli_args}",
                 quota_spend_action,
             ]
         route_candidates = (
@@ -852,8 +861,8 @@ def interaction_next_cli_actions(
         )
         if route_candidates:
             return [
-                f"loopx todo add --goal-id {goal_id} --role agent --text '<public-safe route continuation advancement todo>'",
-                f"loopx refresh-state --goal-id {goal_id} --classification route_continuation_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{settlement_args}{scoped_cli_args}",
+                f"{command_prefix} todo add --goal-id {goal_id} --role agent --text '<public-safe route continuation advancement todo>'",
+                f"{command_prefix} refresh-state --goal-id {goal_id} --classification route_continuation_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{settlement_args}{scoped_cli_args}",
                 quota_spend_action,
             ]
         candidates = (
@@ -865,11 +874,11 @@ def interaction_next_cli_actions(
         todo_id = str(first_candidate.get("todo_id") or "<todo_id>")
         return [
             (
-            f"loopx todo update --goal-id {goal_id} --todo-id {todo_id}"
+            f"{command_prefix} todo update --goal-id {goal_id} --todo-id {todo_id}"
             f"{lifecycle_actor_args} --status open --clear-resume-when "
             "--note '<public-safe successor replan reason>'"
             ),
-            f"loopx refresh-state --goal-id {goal_id} --classification successor_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{settlement_args}{scoped_cli_args}",
+            f"{command_prefix} refresh-state --goal-id {goal_id} --classification successor_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{settlement_args}{scoped_cli_args}",
             quota_spend_action,
         ]
     if (
@@ -890,7 +899,7 @@ def interaction_next_cli_actions(
             "read approved controller/job/marker/writeback surfaces only",
             (
                 "on a substantive transition or blocker only: "
-                f"loopx refresh-state --goal-id {goal_id} "
+                f"{command_prefix} refresh-state --goal-id {goal_id} "
                 "--classification <compact_blocker_or_transition> "
                 "--delivery-batch-scale <scale> --delivery-outcome <outcome>"
                 f"{settlement_args}{scoped_cli_args}"
@@ -913,7 +922,9 @@ def interaction_next_cli_actions(
             scoped_cli_args=scoped_cli_args,
             quota_spend_action=quota_spend_action,
             settlement_chain_ready=settlement_plan is not None,
+            command_prefix=command_prefix,
             lifecycle_actor_args=lifecycle_actor_args,
+            runtime_root=runtime_root,
         )
     return _terminal_cli_actions(
         mode=mode,
@@ -923,6 +934,7 @@ def interaction_next_cli_actions(
         quota_spend_action=quota_spend_action,
         capability_resolution_actions=capability_resolution_actions,
         capability_reentry_actions=capability_reentry_actions,
+        command_prefix=command_prefix,
     )
 
 
@@ -1254,6 +1266,7 @@ def _build_interaction_cli_channel(
     ) = None,
     capability_reentry: dict[str, Any] | None = None,
     turn_instance_id: str | None = None,
+    runtime_root: str | None = None,
 ) -> dict[str, Any]:
     spend_after_selection = selection.delivery_spend_allowed(payload, spend_after_validation)
     if capability_reentry is None:
@@ -1262,6 +1275,7 @@ def _build_interaction_cli_channel(
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
             turn_instance_id=turn_instance_id,
+            runtime_root=runtime_root,
         )
     settlement_plan, replan_settlement_contract = (
         _turn_scoped_cli_settlement_context(
@@ -1269,6 +1283,7 @@ def _build_interaction_cli_channel(
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
             turn_instance_id=turn_instance_id,
+            runtime_root=runtime_root,
         )
     )
     channel = {
@@ -1280,6 +1295,7 @@ def _build_interaction_cli_channel(
             capability_reentry=capability_reentry,
             settlement_plan=settlement_plan,
             turn_instance_id=turn_instance_id,
+            runtime_root=runtime_root,
         ),
         "spend_allowed_now": False,
         "spend_after_validation": spend_after_selection,
@@ -1419,6 +1435,7 @@ def build_interaction_contract(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
     turn_instance_id: str | None = None,
+    runtime_root: str | None = None,
 ) -> InteractionContractPacket:
     execution_obligation = (
         payload.get("execution_obligation")
@@ -1469,6 +1486,7 @@ def build_interaction_contract(
         available_capabilities=available_capabilities,
         scheduler_execution_context=scheduler_execution_context,
         turn_instance_id=turn_instance_id,
+        runtime_root=runtime_root,
     )
 
     user_channel = _build_interaction_user_channel(
@@ -1505,6 +1523,7 @@ def build_interaction_contract(
             scheduler_execution_context=scheduler_execution_context,
             capability_reentry=capability_reentry,
             turn_instance_id=turn_instance_id,
+            runtime_root=runtime_root,
         ),
     }
     response_plan = _build_interaction_response_plan(

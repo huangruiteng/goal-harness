@@ -65,6 +65,40 @@ function request(status = "committed"): TurnJournalInspectionRequest {
   };
 }
 
+function failedHostRetryRequest({
+  attempt = 1,
+  kind = "provider_capacity",
+  backoffSeconds = 30,
+  failureFields = {},
+  retryFields = {},
+}: {
+  attempt?: number;
+  kind?: string;
+  backoffSeconds?: number;
+  failureFields?: Record<string, unknown>;
+  retryFields?: Record<string, unknown>;
+} = {}): TurnJournalInspectionRequest {
+  const input = request("failed");
+  input.retry_failed = true;
+  input.journal.completed_phases = [];
+  input.journal.receipt = { turn_key: turnKey, failed_phase: "host_execute" };
+  input.journal.host_attempt_count = attempt;
+  input.journal.host_failure = {
+    schema_version: "loopx_turn_host_failure_v0",
+    kind,
+    attempt,
+    retryable: true,
+    ...failureFields,
+    retry: {
+      strategy: "same_configuration",
+      max_attempts: 3,
+      backoff_seconds: backoffSeconds,
+      ...retryFields,
+    },
+  };
+  return input;
+}
+
 test("legal terminal replay is projected without effects or private fields", () => {
   const input = request();
   const before = structuredClone(input);
@@ -296,6 +330,62 @@ test("failed Host recovery uses only the supplied Session Binding check", () => 
       reason: "session_binding_identity_mismatch",
     },
   ]);
+});
+
+test("retryable Host failure may reinvoke only inside its attempt budget", () => {
+  for (const [kind, backoffSeconds] of [
+    ["provider_capacity", 30],
+    ["provider_overloaded", 30],
+    ["rate_limited", 60],
+  ] as const) {
+    const input = failedHostRetryRequest({ kind, backoffSeconds });
+    const result = interpretTurnJournal(input);
+
+    assert.equal(result.recovery_decision.action, "continue");
+    assert.equal(result.recovery_decision.reinvoke_host, true);
+    assert.deepEqual(result.recovery_decision.checks, [
+      { kind: "journal_consistency", outcome: "passed" },
+      { kind: "host_retry_policy", outcome: "passed" },
+    ]);
+  }
+});
+
+test("exhausted Host retry budget blocks another invocation", () => {
+  const input = failedHostRetryRequest({ attempt: 3, backoffSeconds: 120 });
+
+  const result = interpretTurnJournal(input);
+
+  assert.equal(result.recovery_decision.action, "blocked");
+  assert.equal(result.recovery_decision.reinvoke_host, false);
+  assert.equal(result.recovery_decision.reason, "host_retry_budget_exhausted");
+});
+
+test("caller-authored Host retryability fails closed", () => {
+  const input = failedHostRetryRequest({ kind: "auth_failed" });
+
+  const result = interpretTurnJournal(input);
+
+  assert.equal(result.recovery_decision.action, "blocked");
+  assert.equal(result.recovery_decision.reason, "host_retry_contract_invalid");
+});
+
+test("Host retry metadata with extra fields fails closed", () => {
+  let input = failedHostRetryRequest({
+    failureFields: {
+      provider_message: "must-not-cross-the-public-boundary",
+    },
+  });
+
+  let result = interpretTurnJournal(input);
+  assert.equal(result.recovery_decision.action, "blocked");
+  assert.equal(result.recovery_decision.reason, "host_retry_contract_invalid");
+
+  input = failedHostRetryRequest({
+    retryFields: { private_detail: "must-not-persist" },
+  });
+  result = interpretTurnJournal(input);
+  assert.equal(result.recovery_decision.action, "blocked");
+  assert.equal(result.recovery_decision.reason, "host_retry_contract_invalid");
 });
 
 test("prepared effects are delegated to the existing provider readback step", () => {

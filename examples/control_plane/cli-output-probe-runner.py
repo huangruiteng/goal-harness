@@ -99,6 +99,9 @@ def _receipt_row(
             if isinstance(payload, dict)
             else []
         ),
+        "runtime_root_command_route_count": (
+            semantics.runtime_root_command_route_count(text)
+        ),
         "guided_todo_delta_schema_versions": (
             semantics.guided_todo_delta_schema_versions(payload)
             if isinstance(payload, dict)

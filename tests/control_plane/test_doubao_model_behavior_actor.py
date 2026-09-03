@@ -11,6 +11,7 @@ import pytest
 from loopx.control_plane.testing.doubao_model_behavior_actor import (
     DOUBAO_2_1_PRO_MODEL,
     DOUBAO_CHAT_COMPLETIONS_ENDPOINT,
+    DOUBAO_SEED_EVOLVING_MODEL,
     MODEL_BEHAVIOR_PROVIDER_INPUT_SCHEMA_VERSION,
     DoubaoActorTransportError,
     DoubaoModelBehaviorActor,
@@ -247,13 +248,29 @@ def test_environment_factory_fails_closed_without_injected_key() -> None:
     with pytest.raises(RuntimeError, match="ARK_API_KEY is not injected"):
         DoubaoModelBehaviorActor.from_environment(environ={})
 
-    with pytest.raises(ValueError, match="allowlisted Doubao 2.1"):
+    with pytest.raises(ValueError, match="explicitly allowlisted"):
         DoubaoModelBehaviorActor.from_environment(
             environ={
                 "ARK_API_KEY": "fixture-key-not-a-secret",
                 "LOOPX_MODEL_BEHAVIOR_MODEL": "future-model-v9",
             }
         )
+
+
+def test_environment_factory_accepts_doubao_seed_evolving() -> None:
+    actor = DoubaoModelBehaviorActor.from_environment(
+        environ={
+            "ARK_API_KEY": "fixture-key-not-a-secret",
+            "LOOPX_MODEL_BEHAVIOR_MODEL": DOUBAO_SEED_EVOLVING_MODEL,
+        },
+        transport=lambda **_: {
+            "choices": [{"message": {"content": json.dumps(_decision())}}]
+        },
+    )
+
+    result = normalize_model_behavior_actor_result(actor(_request()))
+
+    assert result["actor_ref"] == f"ark:{DOUBAO_SEED_EVOLVING_MODEL}"
 
 
 @pytest.mark.parametrize(

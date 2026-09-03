@@ -568,6 +568,12 @@ def todo_item_task_class(item: dict[str, Any]) -> str:
     return projection_todo_item_task_class(item, task_text_keys=("text",))
 
 
+def count_advancement_todos(items: list[dict[str, Any]]) -> int:
+    return sum(
+        1 for item in items if todo_item_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
+    )
+
+
 def todo_item_is_actionable_open(item: dict[str, Any]) -> bool:
     return projection_todo_item_is_actionable_open(item)
 
@@ -1143,6 +1149,7 @@ def compact_todo_group(
         "total_count": len(items),
         "open_count": len(lanes.open_items),
         "done_count": len(lanes.terminal_items),
+        "advancement_done_count": count_advancement_todos(lanes.done_items),
         "deferred_count": len(lanes.deferred_items),
         "first_open_items": [
             compact_todo_item(item) for item in lanes.projected_open_items[:3]

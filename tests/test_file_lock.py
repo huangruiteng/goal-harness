@@ -219,6 +219,70 @@ def test_cross_runtime_lock_reclaims_a_dead_typescript_holder(tmp_path: Path) ->
     assert not effect_lock.exists()
 
 
+def test_cross_runtime_lock_reclaims_a_stale_malformed_holder(tmp_path: Path) -> None:
+    target = tmp_path / ".task-leases"
+    effect_lock = Path(f"{target}.ts-effect.lock")
+    effect_lock.write_text(
+        json.dumps({"pid": os.getpid(), "token": "   "}),
+        encoding="utf-8",
+    )
+    stale = effect_lock.stat().st_mtime - 60.0
+    os.utime(effect_lock, (stale, stale))
+
+    with exclusive_cross_runtime_file_lock(
+        target,
+        timeout_seconds=0.2,
+        operation="task-lease-release",
+    ):
+        owner = json.loads(effect_lock.read_text(encoding="utf-8"))
+        assert owner["pid"] == os.getpid()
+        assert owner["token"] != "   "
+
+    assert not effect_lock.exists()
+
+
+def test_cross_runtime_release_does_not_remove_a_replacement_token(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / ".task-leases"
+    effect_lock = Path(f"{target}.ts-effect.lock")
+    effect_lock.parent.mkdir(parents=True, exist_ok=True)
+    effect_lock.write_text(
+        json.dumps({"pid": os.getpid(), "token": "replacement-token"}),
+        encoding="utf-8",
+    )
+
+    assert file_lock._release_effect_mutation_lock(
+        effect_lock,
+        "old-token",
+    ) is False
+    assert effect_lock.exists()
+    assert json.loads(effect_lock.read_text(encoding="utf-8"))["token"] == (
+        "replacement-token"
+    )
+    effect_lock.unlink()
+
+
+def test_cross_runtime_recovery_releases_only_the_owned_token(tmp_path: Path) -> None:
+    target = tmp_path / ".task-leases"
+    effect_lock = Path(f"{target}.ts-effect.lock")
+    effect_lock.write_text(
+        json.dumps({"pid": os.getpid(), "token": "held-token"}),
+        encoding="utf-8",
+    )
+
+    assert not file_lock.release_cross_runtime_mutation_lock(
+        target,
+        **{"token": "replacement-token"},
+    )
+    assert effect_lock.exists()
+    assert file_lock.release_cross_runtime_mutation_lock(
+        target,
+        **{"token": "held-token"},
+    )
+    assert not effect_lock.exists()
+
+
 def test_cross_runtime_lock_cleans_up_a_failed_owner_publish(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -234,3 +298,53 @@ def test_cross_runtime_lock_cleans_up_a_failed_owner_publish(
         _acquire_and_release_cross_runtime_lock(target)
 
     assert not effect_lock.exists()
+
+
+def test_cross_runtime_identity_fails_closed_for_ambiguous_or_reused_files() -> None:
+    assert not file_lock._same_effect_file_identity(
+        (0, 0, 0, 0),
+        (0, 0, 0, 0),
+    )
+    assert not file_lock._same_effect_file_identity(
+        (7, 11, 100, 200),
+        (7, 11, 101, 200),
+    )
+    assert file_lock._same_effect_file_identity(
+        (7, 11, 100, 200),
+        (7, 11, 100, 999),
+    )
+    assert file_lock._same_effect_file_identity(
+        (7, 11, 0, 200),
+        (7, 11, 0, 201),
+    )
+
+
+def test_cross_runtime_claim_cleanup_removes_own_corrupted_claim(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / ".task-leases"
+    claim = file_lock._claim_effect_mutation_lock(target, "claim-token")
+    assert claim is not None
+    claim.path.write_text("not-json", encoding="utf-8")
+
+    file_lock._release_effect_mutation_claim(claim)
+
+    assert not claim.path.exists()
+
+
+def test_cross_runtime_cleanup_failure_cannot_replace_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / ".task-leases"
+    calls: list[bool] = []
+
+    def fake_release(*args: object, **kwargs: object) -> bool:
+        calls.append(kwargs.get("suppress_errors") is True)
+        return False
+
+    monkeypatch.setattr(file_lock, "_release_effect_mutation_lock", fake_release)
+    with exclusive_cross_runtime_file_lock(target, timeout_seconds=0.2):
+        pass
+
+    assert calls == [True]

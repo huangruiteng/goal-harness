@@ -10,10 +10,20 @@ import pytest
 
 from loopx.control_plane.turn_driver.codex_cli import (
     CODEX_CLI_SESSION_SCHEMA_VERSION,
+    _diagnostic_failure_category,
+    _event_failure_categories,
+    _event_failure_category,
+    _select_failure_category,
     codex_cli_result_schema,
     codex_cli_session_binding,
     load_codex_cli_session,
     run_codex_cli_host,
+)
+from loopx.control_plane.turn_driver.executor import BuiltInHostError
+
+
+FAILURE_ENVELOPE_FIXTURES = (
+    Path(__file__).parent / "fixtures" / "codex_failure_envelopes.json"
 )
 
 
@@ -57,6 +67,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import time
 
@@ -73,10 +84,35 @@ print(json.dumps({
     "private_material": "must-not-persist"
 }), flush=True)
 if os.environ.get("FAKE_CODEX_FAIL") == "1":
+    failure_event = os.environ.get("FAKE_CODEX_FAILURE_EVENT")
+    failure_stderr = os.environ.get("FAKE_CODEX_FAILURE_STDERR")
+    stderr_first = os.environ.get("FAKE_CODEX_FAILURE_STDERR_FIRST") == "1"
+    if failure_stderr and stderr_first:
+        print(failure_stderr, file=sys.stderr, flush=True)
+        time.sleep(0.05)
+    if failure_event:
+        print(failure_event, flush=True)
+    if failure_stderr and not stderr_first:
+        print(failure_stderr, file=sys.stderr, flush=True)
+    hold_pipe_seconds = os.environ.get("FAKE_CODEX_HOLD_PIPE_SECONDS")
+    if hold_pipe_seconds:
+        subprocess.Popen([
+            sys.executable,
+            "-c",
+            f"import time; time.sleep({float(hold_pipe_seconds)!r})",
+        ])
     if os.environ.get("FAKE_CODEX_FAILURE_CATEGORY") == "model":
         print("This model requires a newer version of Codex.", file=sys.stderr)
     if os.environ.get("FAKE_CODEX_FAILURE_CATEGORY") == "session":
         print("Session not found.", file=sys.stderr)
+    if os.environ.get("FAKE_CODEX_FAILURE_CATEGORY") == "capacity-stderr":
+        print("Selected model is at capacity. Please try a different model.", file=sys.stderr)
+    if os.environ.get("FAKE_CODEX_FAILURE_CATEGORY") == "capacity-event":
+        print(json.dumps({
+            "type": "error",
+            "message": "Selected model is at capacity. Please try a different model.",
+            "private_material": "must-not-persist"
+        }), flush=True)
     raise SystemExit(9)
 if os.environ.get("FAKE_CODEX_SLEEP"):
     time.sleep(float(os.environ["FAKE_CODEX_SLEEP"]))
@@ -99,6 +135,42 @@ output_path.write_text(json.dumps({
     )
     executable.chmod(0o755)
     return executable, log_path
+
+
+def _capture_fake_codex_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    failure_category: str | None = None,
+    failure_event: dict[str, object] | None = None,
+    failure_stderr: str | None = None,
+    stderr_first: bool = False,
+) -> tuple[BuiltInHostError, Path]:
+    executable, log_path = _fake_codex(tmp_path)
+    monkeypatch.setenv("FAKE_CODEX_LOG", str(log_path))
+    monkeypatch.setenv("FAKE_CODEX_FAIL", "1")
+    if failure_category is not None:
+        monkeypatch.setenv("FAKE_CODEX_FAILURE_CATEGORY", failure_category)
+    if failure_event is not None:
+        monkeypatch.setenv("FAKE_CODEX_FAILURE_EVENT", json.dumps(failure_event))
+    if failure_stderr is not None:
+        monkeypatch.setenv("FAKE_CODEX_FAILURE_STDERR", failure_stderr)
+    if stderr_first:
+        monkeypatch.setenv("FAKE_CODEX_FAILURE_STDERR_FIRST", "1")
+    runtime_root = tmp_path / "runtime"
+    project = tmp_path / "project"
+    project.mkdir()
+    request = _request()
+
+    with pytest.raises(BuiltInHostError) as exc_info:
+        run_codex_cli_host(
+            request,
+            runtime_root=runtime_root,
+            project=project,
+            codex_bin=str(executable),
+            timeout_seconds=5,
+        )
+    return exc_info.value, runtime_root
 
 
 def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None:
@@ -124,6 +196,109 @@ def test_codex_cli_result_schema_requires_only_bounded_contract_fields() -> None
         "vision_unchanged_reason": 240,
         "summary": 400,
     }
+
+
+@pytest.mark.parametrize(
+    ("diagnostic", "expected"),
+    [
+        (
+            "Selected model is at capacity. Please try a different model.",
+            "provider_capacity",
+        ),
+        ("Server overloaded; retry later.", "provider_overloaded"),
+        ("The service is overloaded.", "provider_overloaded"),
+        ("Too many requests; retry later.", "rate_limited"),
+        ("Quota exceeded. Check your plan and billing details.", "quota_exhausted"),
+    ],
+)
+def test_codex_cli_diagnostic_fallback_keeps_failure_classes_distinct(
+    diagnostic: str,
+    expected: str,
+) -> None:
+    assert _diagnostic_failure_category(diagnostic) == expected
+
+
+def test_codex_cli_failure_envelopes_match_real_protocol_shapes() -> None:
+    fixture = json.loads(FAILURE_ENVELOPE_FIXTURES.read_text(encoding="utf-8"))
+
+    assert fixture["schema_version"] == "loopx_codex_failure_envelopes_v1"
+    for case in fixture["cases"]:
+        assert case["source"]
+        assert _event_failure_category(case["event"]) == case["expected"], case[
+            "name"
+        ]
+
+
+def test_codex_cli_unknown_structured_code_blocks_message_fallback() -> None:
+    event = {
+        "type": "turn.failed",
+        "error": {
+            "code": "unknown_provider_code",
+            "message": "Selected model is at capacity.",
+        },
+    }
+
+    assert _event_failure_category(event) == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("outer_code", "inner_code"),
+    [
+        ("future_provider_failure", "rate_limit_exceeded"),
+        ("rate_limit_exceeded", "future_provider_failure"),
+    ],
+)
+def test_codex_cli_host_fails_closed_on_mixed_structured_codes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outer_code: str,
+    inner_code: str,
+) -> None:
+    failure_event: dict[str, object] = {
+        "type": "response.failed",
+        "code": outer_code,
+        "response": {"error": {"code": inner_code}},
+    }
+
+    assert _event_failure_categories(failure_event) == ("unknown", None)
+
+    error, _runtime_root = _capture_fake_codex_failure(
+        tmp_path,
+        monkeypatch,
+        failure_event=failure_event,
+    )
+
+    assert error.reason == "codex_cli_unknown"
+    assert error.failure_kind == "unknown"
+    assert error.recovery_kind is None
+
+
+@pytest.mark.parametrize(
+    "categories",
+    [
+        ["unknown", "rate_limited"],
+        ["rate_limited", "unknown"],
+    ],
+)
+def test_failure_category_reduction_is_order_independent(
+    categories: list[str],
+) -> None:
+    assert _select_failure_category(categories) == "unknown"
+
+
+def test_codex_cli_specific_quota_code_wins_over_http_429() -> None:
+    event = {
+        "type": "response.failed",
+        "response": {
+            "error": {
+                "code": "insufficient_quota",
+                "httpStatusCode": 429,
+                "message": "Rate limit reached.",
+            }
+        },
+    }
+
+    assert _event_failure_category(event) == "quota_exhausted"
 
 
 def test_codex_cli_host_starts_then_resumes_opaque_session(
@@ -335,6 +510,159 @@ def test_codex_cli_host_classifies_failure_without_persisting_stderr(
         json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()
     ]
     assert "resume" not in argv_rows[1]
+
+
+@pytest.mark.parametrize("source", ["capacity-stderr", "capacity-event"])
+def test_codex_cli_host_classifies_provider_capacity_as_retryable_without_prose(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    error, runtime_root = _capture_fake_codex_failure(
+        tmp_path,
+        monkeypatch,
+        failure_category=source,
+    )
+
+    assert error.reason == "codex_cli_provider_capacity"
+    assert error.failure_kind == "provider_capacity"
+    assert error.recovery_kind == "resume_session"
+    persisted = "\n".join(
+        path.read_text(encoding="utf-8") for path in runtime_root.rglob("*.json")
+    )
+    assert "at capacity" not in persisted
+    assert "private_material" not in persisted
+
+
+@pytest.mark.parametrize(
+    ("event", "expected_reason", "expected_kind", "expected_recovery"),
+    [
+        (
+            {
+                "type": "turn.failed",
+                "error": {"codexErrorInfo": "serverOverloaded"},
+            },
+            "codex_cli_provider_overloaded",
+            "provider_overloaded",
+            "resume_session",
+        ),
+        (
+            {
+                "type": "response.failed",
+                "response": {
+                    "error": {
+                        "code": "rate_limit_exceeded",
+                        "message": "Quota exceeded.",
+                    }
+                },
+            },
+            "codex_cli_rate_limited",
+            "rate_limited",
+            "resume_session",
+        ),
+        (
+            {
+                "type": "response.failed",
+                "response": {
+                    "error": {
+                        "code": "insufficient_quota",
+                        "message": "Rate limit reached.",
+                    }
+                },
+            },
+            "codex_cli_quota_exhausted",
+            "quota_exhausted",
+            None,
+        ),
+        (
+            {
+                "type": "error",
+                "error": {"httpStatusCode": 429, "message": "opaque"},
+            },
+            "codex_cli_rate_limited",
+            "rate_limited",
+            "resume_session",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {
+                    "code": "future_provider_failure",
+                    "message": "Selected model is at capacity.",
+                },
+            },
+            "codex_cli_unknown",
+            "unknown",
+            None,
+        ),
+    ],
+)
+def test_codex_cli_host_preserves_structured_failure_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event: dict[str, object],
+    expected_reason: str,
+    expected_kind: str,
+    expected_recovery: str | None,
+) -> None:
+    error, _runtime_root = _capture_fake_codex_failure(
+        tmp_path,
+        monkeypatch,
+        failure_event=event,
+    )
+
+    assert error.reason == expected_reason
+    assert error.failure_kind == expected_kind
+    assert error.recovery_kind == expected_recovery
+
+
+def test_codex_cli_host_prefers_structured_code_across_output_streams(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = {
+        "type": "response.failed",
+        "response": {
+            "error": {
+                "code": "insufficient_quota",
+                "message": "opaque structured failure",
+            }
+        },
+    }
+    error, _runtime_root = _capture_fake_codex_failure(
+        tmp_path,
+        monkeypatch,
+        failure_event=event,
+        failure_stderr="Too many requests; retry later.",
+        stderr_first=True,
+    )
+
+    assert error.reason == "codex_cli_quota_exhausted"
+    assert error.failure_kind == "quota_exhausted"
+    assert error.recovery_kind is None
+
+
+def test_codex_cli_host_fails_closed_when_output_observation_is_incomplete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "loopx.control_plane.turn_driver.codex_cli.OUTPUT_DRAIN_TIMEOUT_SECONDS",
+        0.01,
+    )
+    monkeypatch.setenv("FAKE_CODEX_HOLD_PIPE_SECONDS", "0.2")
+    error, _runtime_root = _capture_fake_codex_failure(
+        tmp_path,
+        monkeypatch,
+        failure_event={
+            "type": "response.failed",
+            "response": {"error": {"code": "rate_limit_exceeded"}},
+        },
+    )
+
+    assert error.reason == "codex_cli_unknown"
+    assert error.failure_kind == "unknown"
+    assert error.recovery_kind is None
 
 
 def test_codex_cli_host_discards_missing_resume_session(

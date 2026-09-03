@@ -383,6 +383,18 @@ def assert_contributor_task_board_is_current() -> None:
         "| GH-C84 |",
         "| GH-C92 |",
         "| GH-C93 |",
+        "| GH-C49 |",
+        "| GH-C60 |",
+        "| GH-C62 |",
+        "| GH-C64 |",
+        "| GH-C71 |",
+        "| GH-C74 |",
+        "| GH-C75 |",
+        "| GH-C76 |",
+        "| GH-C80 |",
+        "| GH-C85 |",
+        "| GH-C95 |",
+        "| GH-C97 |",
     ):
         assert stale not in tasks, stale
 
@@ -453,14 +465,15 @@ def assert_technical_direction_governance_is_current() -> None:
         assert required in direction_zh, required
 
     for required in (
-        "## Accepted Architecture",
-        "## Active Research Programs",
-        "## Drafts Under Review",
-        "## Draft Integration Proposals",
+        "## Control-Plane Kernel, State, And Migration",
+        "## Planning, Research, And Adaptive Intelligence",
+        "## Runtime, Capability, And Collaboration Integration",
+        "## Operator Experience And Observability",
+        "## Benchmark And Reliability Engineering",
         "Current Technical Directions",
     ):
         assert required in rfc_index, required
-    assert "## Active Drafts" not in rfc_index
+    assert "## Status matrix" not in rfc_index
 
     for required in (
         "Long-Horizon Benchmarks and Evidence",

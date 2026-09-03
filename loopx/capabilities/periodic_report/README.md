@@ -87,6 +87,17 @@ closure, blocker, and manual triggers may bypass that interval. Concurrent
 material facts are coalesced into one report and previously covered trigger
 ids are deduplicated.
 
+Incremental reports advance from an exact, readback-verified publication
+cursor rather than from generated prose. The cursor keeps cumulative trigger
+ids and semantic fingerprints keyed by each fact's stable `source_ref`. A
+later stage includes only new facts and facts whose fingerprint changed;
+changed facts carry their prior status and kind so the editorial step can
+render a transition instead of repeating the old item. If no supplied fact is
+new or changed, the post-writeback producer emits no report intent. Local
+generation, approval, and failed or partial delivery never advance this
+cursor. A successful Goal Channel delivery records the predecessor
+publication identity for the next report.
+
 An enabled custom profile may also declare `trigger_policy.aggregation` with a
 bounded `window_seconds` and `stage_completion_required=true`. Stage completion
 reuses the existing goal-vision, outcome-checkpoint, and frontier-replan facts:
@@ -499,3 +510,13 @@ artifact's primary/supporting visibility policy and validate direct section
 hashes after dynamic content is mounted.
 Project profiles still own language, layout policy, audience, cadence, and
 selection rules.
+
+## Personal Workspace readback
+
+After the Goal Channel sink has verified delivery and committed the publication cursor, the
+local status server can expose the latest report as a typed, content-addressed
+milestone projection. Its compact index deliberately omits report prose; the
+full projection is fetched over the loopback-only cold path and is accepted
+only when its generation id and digest match the current publication cursor.
+Pending approvals and generation-only artifacts remain invisible. The view is
+informational and has no browser write authority.

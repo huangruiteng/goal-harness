@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+from loopx.control_plane.quota.scheduler_ack import (
+    record_quota_scheduler_ack_for_decision,
+)
 from loopx.control_plane.quota.stall_repair import (
     build_runtime_capability_user_gate_repair_hint,
 )
 from loopx.control_plane.quota.turn_envelope import build_turn_envelope
 from loopx.control_plane.scheduler import scheduler_hint as scheduler_hint_module
-from loopx.control_plane.scheduler.ack import build_codex_app_scheduler_ack_event
 from loopx.control_plane.scheduler.execution_context import (
     scheduler_execution_context_for_runtime_profile,
 )
@@ -21,7 +24,6 @@ from loopx.control_plane.testing.quota_fixtures import (
     quota_todo_summary,
 )
 from loopx.quota import build_quota_should_run
-
 
 GOAL_ID = "user-gate-lane-progress-fixture"
 AGENT_ID = "codex-main-control"
@@ -72,6 +74,17 @@ def _status_payload(*, gate_action_kind: str) -> dict:
             "agent_model": "peer_v1",
             "registered_agents": [AGENT_ID],
         },
+        item_extra={
+            "long_task_cadence_hint": {
+                "schema_version": "cadence_hint_v0",
+                "signal": "blocked",
+                "recommendation": "wait",
+                "reason_codes": [
+                    "quota_state_operator_gate",
+                    "open_user_todos_visible",
+                ],
+            }
+        },
     )
 
 
@@ -117,6 +130,21 @@ def test_unrelated_user_gate_allows_ready_deferred_successor_replan() -> None:
         "agent_channel"
     ]["primary_action"]
     assert payload["scheduler_hint"]["cadence_class"] == "active_work"
+    assert payload["long_task_cadence_hint"] == {
+        "schema_version": "cadence_hint_v0",
+        "signal": "active_work",
+        "recommendation": "keep",
+        "reason_codes": ["final_agent_scoped_active_work"],
+        "authority": "final_agent_scoped_interaction_and_scheduler",
+        "superseded": {
+            "signal": "blocked",
+            "recommendation": "wait",
+            "reason_codes": [
+                "quota_state_operator_gate",
+                "open_user_todos_visible",
+            ],
+        },
+    }
 
 
 def test_consumed_review_gate_exposes_quality_vision_replan() -> None:
@@ -200,6 +228,15 @@ def test_blocking_user_gate_backs_off_instead_of_polling_as_active_work() -> Non
     )
     assert payload["scheduler_hint"]["cadence_class"] == "human_gate"
     assert payload["scheduler_hint"]["codex_app"]["recommended_interval_minutes"] == 30
+    assert payload["long_task_cadence_hint"] == {
+        "schema_version": "cadence_hint_v0",
+        "signal": "blocked",
+        "recommendation": "wait",
+        "reason_codes": [
+            "quota_state_operator_gate",
+            "open_user_todos_visible",
+        ],
+    }
 
     initial_backoff = payload["scheduler_hint"]["codex_app"]["stateful_backoff"]
     next_hint = build_scheduler_hint(
@@ -361,6 +398,7 @@ def test_runtime_recovery_gate_with_owner_capability_remains_owner_gate() -> Non
 
 def test_acked_human_gate_advances_despite_unrelated_historical_host_failure(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(scheduler_hint_module, "now_utc", lambda: now)
@@ -402,12 +440,20 @@ def test_acked_human_gate_advances_despite_unrelated_historical_host_failure(
     assert matched_app["stateful_backoff"]["ack_needed"] is True
     assert matched_app["ack_hint"]["after"] == "matching_host_rrule_observed"
 
-    fallback_ack = build_codex_app_scheduler_ack_event(
+    backoff = matched_app["stateful_backoff"]
+    fallback_ack = record_quota_scheduler_ack_for_decision(
         {"goal_id": GOAL_ID, "scheduler_hint": host_matched},
+        runtime_root=tmp_path,
+        goal_id=GOAL_ID,
         agent_id=AGENT_ID,
+        execute=True,
         applied_rrule=first_rrule,
+        reset_token=backoff["reset_token"],
+        identity_signature=backoff["identity_signature"],
+        host_match_observed=True,
         generated_at=now.isoformat(),
     )
+    assert fallback_ack["ok"] is True, fallback_ack
     settled_state = fallback_ack["scheduler_ack_event"]["scheduler_state"]
     assert settled_state["last_applied_rrule"] == first_rrule
     assert settled_state["host_update_failures"] == [historical_failure]

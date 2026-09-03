@@ -1,0 +1,58 @@
+{
+  "normalization": {
+    "catalog_source": {
+      "profiles": [
+        {
+          "id": "codex-a",
+          "input_modalities": ["text", "image"],
+          "priority": 300,
+          "provider": "codex",
+          "supports_fast": true
+        },
+        {
+          "id": "codex-b",
+          "input_modalities": ["text", "image"],
+          "priority": 200,
+          "provider": "codex",
+          "supports_fast": true
+        },
+        {
+          "id": "ark-text",
+          "input_modalities": ["text"],
+          "priority": 100,
+          "provider": "openai_compatibility",
+          "supports_fast": false
+        }
+      ],
+      "rings": [
+        {
+          "id": "codex-accounts",
+          "max_cycles": 1,
+          "members": ["codex-a", "codex-b"]
+        }
+      ],
+      "routes": [
+        {
+          "display_name": "Auto · Codex A → B → Ark",
+          "entrypoint": "affinity_then_first",
+          "fallback_tail": ["ark-text"],
+          "fast_selector": {
+            "display_name": "Auto · Fast · Codex A → B",
+            "fallback_policy": "fast_capable_only"
+          },
+          "input_modalities": ["text", "image"],
+          "mode": "auto",
+          "reasoning_levels": ["low", "medium", "high", "xhigh", "max"],
+          "ring": "codex-accounts",
+          "slug": "auto/gpt-5.6-sol",
+          "supports_fast": true,
+          "visible": true
+        }
+      ]
+    },
+    "model_selector": "fast/auto/gpt-5.6-sol",
+    "service_tier": "default"
+  },
+  "operation": "normalize_selector_request",
+  "schema_version": "loopx_codex_provider_routing_request_v0"
+}

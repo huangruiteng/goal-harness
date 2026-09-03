@@ -1,0 +1,100 @@
+{
+  "integration": {
+    "base_ref": "origin/dev",
+    "integration_branch": "codex/integrated-dev",
+    "last_sync": {
+      "base_sha": "1111111111111111111111111111111111111111",
+      "integration_sha": "6666666666666666666666666666666666666666",
+      "source_heads": {
+        "compat-stream-repair": "7777777777777777777777777777777777777777",
+        "history-normalization": "2222222222222222222222222222222222222222",
+        "modality-routing": "4444444444444444444444444444444444444444",
+        "rate-limit-wait": "8888888888888888888888888888888888888888",
+        "route-fallback": "5555555555555555555555555555555555555555",
+        "transport-pool": "3333333333333333333333333333333333333333"
+      }
+    },
+    "observed": {
+      "base_sha": "1111111111111111111111111111111111111111",
+      "integration_sha": "6666666666666666666666666666666666666666",
+      "source_heads": {
+        "compat-stream-repair": "7777777777777777777777777777777777777777",
+        "history-normalization": "2222222222222222222222222222222222222222",
+        "modality-routing": "4444444444444444444444444444444444444444",
+        "rate-limit-wait": "8888888888888888888888888888888888888888",
+        "route-fallback": "5555555555555555555555555555555555555555",
+        "transport-pool": "3333333333333333333333333333333333333333"
+      }
+    },
+    "required_seams": [
+      "history_projection",
+      "sse_lifecycle",
+      "transport_pool",
+      "modality_routing",
+      "request_normalizer",
+      "route_fallback",
+      "retry_policy"
+    ],
+    "sources": [
+      {
+        "changed_seams": [
+          "history_projection",
+          "sse_lifecycle"
+        ],
+        "head_sha": "2222222222222222222222222222222222222222",
+        "id": "history-normalization",
+        "kind": "pull_request",
+        "ref": "fork/provider-history-normalization"
+      },
+      {
+        "changed_seams": [
+          "transport_pool"
+        ],
+        "head_sha": "3333333333333333333333333333333333333333",
+        "id": "transport-pool",
+        "kind": "pull_request",
+        "ref": "fork/reusable-http2-transport"
+      },
+      {
+        "changed_seams": [
+          "modality_routing",
+          "request_normalizer"
+        ],
+        "head_sha": "4444444444444444444444444444444444444444",
+        "id": "modality-routing",
+        "kind": "public_safe_patch",
+        "ref": "operator/modality-routing"
+      },
+      {
+        "changed_seams": [
+          "route_fallback"
+        ],
+        "head_sha": "5555555555555555555555555555555555555555",
+        "id": "route-fallback",
+        "kind": "pull_request",
+        "ref": "fork/route-specific-fallback"
+      },
+      {
+        "changed_seams": [
+          "history_projection",
+          "sse_lifecycle"
+        ],
+        "head_sha": "7777777777777777777777777777777777777777",
+        "id": "compat-stream-repair",
+        "kind": "public_safe_patch",
+        "ref": "operator/compat-stream-repair"
+      },
+      {
+        "changed_seams": [
+          "retry_policy"
+        ],
+        "head_sha": "8888888888888888888888888888888888888888",
+        "id": "rate-limit-wait",
+        "kind": "pull_request",
+        "ref": "fork/openai-compat-bounded-rate-limit-waits"
+      }
+    ]
+  },
+  "operation": "reconcile_integration_candidate",
+  "schema_version": "loopx_codex_provider_routing_request_v0"
+}

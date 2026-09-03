@@ -20,6 +20,7 @@ from ..goals.goal_vision import normalize_goal_vision_packet
 from ..work_items.delivery_batch_scale import require_delivery_batch_scale
 from ..work_items.delivery_outcome import require_delivery_outcome
 from .driver import selected_turn_todo
+from .host_failure import BuiltInHostError, project_host_failure, record_host_failure
 from .journal_store import (
     LOOPX_TURN_JOURNAL_SCHEMA_VERSION,
     TURN_KEY_RE,
@@ -36,7 +37,6 @@ from .recovery import (
 from .session_recovery import (
     SessionBindingResolver,
     build_host_recovery_record,
-    require_host_recovery_kind,
 )
 from .settlement import (
     TurnEffectResolver,
@@ -110,17 +110,6 @@ TaskValidator = Callable[
     [Mapping[str, Any], Mapping[str, Any]],
     Mapping[str, Any],
 ]
-
-
-class BuiltInHostError(RuntimeError):
-    """A public-safe built-in host failure classification."""
-
-    def __init__(self, reason: str, *, recovery_kind: str | None = None) -> None:
-        if recovery_kind is not None:
-            require_host_recovery_kind(recovery_kind)
-        super().__init__(reason)
-        self.reason = reason
-        self.recovery_kind = recovery_kind
 
 
 def _normalize_argv(value: Sequence[str], *, label: str) -> list[str]:
@@ -743,6 +732,7 @@ def _run_host_runner(
             "ok": False,
             "reason": exc.reason,
             "returncode": None,
+            "failure_kind": exc.failure_kind,
             **(
                 {"recovery_kind": exc.recovery_kind}
                 if exc.recovery_kind is not None
@@ -832,6 +822,7 @@ def _execution_payload(
         ),
         **({"todo_completion": todo_completion} if todo_completion else {}),
         **({"reason": journal.get("reason")} if journal.get("reason") else {}),
+        **project_host_failure(journal),
         **({"recovery": dict(recovery)} if isinstance(recovery, Mapping) else {}),
     }
 
@@ -856,6 +847,8 @@ def _host_result_stage(
         else None
     )
     if "typed_result" not in completed_phases:
+        journal["host_attempt_count"] = int(journal.get("host_attempt_count") or 0) + 1
+        _write_journal(journal_path, journal)
         host_observation = (
             _run_host_runner(request, runner=host_runner)
             if host_runner is not None
@@ -881,6 +874,10 @@ def _host_result_stage(
                 receipt=failure["receipt"],
                 completed_phases=[],
                 result_kind=LoopXTurnResultKind.HOST_FAILURE.value,
+            )
+            record_host_failure(
+                journal,
+                kind=str(host_observation.get("failure_kind") or "unknown"),
             )
             recovery_kind = host_observation.get("recovery_kind")
             if recovery_kind is not None:
@@ -1413,6 +1410,7 @@ def run_loopx_turn_once(
             journal.pop("reason", None)
             journal.pop("receipt", None)
             journal.pop("host_recovery", None)
+            journal.pop("host_failure", None)
             journal["status"] = "in_progress"
             _write_journal(journal_path, journal)
         if journal is None:

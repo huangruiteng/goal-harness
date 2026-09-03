@@ -37,6 +37,32 @@ for arg in "$@"; do
   fi
 done
 
+native_scheduler_facts=0
+native_scheduler_turn=0
+for arg in "$@"; do
+  case "$arg" in
+    --scheduler-host-facts-chunk|--scheduler-host-facts-chunk=*)
+      native_scheduler_facts=1
+      ;;
+    --turn-instance-id|--turn-instance-id=*)
+      native_scheduler_turn=1
+      ;;
+  esac
+done
+
+if [[ "$loopx_command" == "quota" \
+  && ( "$loopx_subcommand" == "scheduler-ack-current" || "$loopx_subcommand" == "scheduler-fail-current" ) \
+  && "$native_scheduler_facts" == "1" \
+  && "$native_scheduler_turn" == "1" ]]; then
+  native_scheduler_entry="$repo_root/loopx/control_plane/scheduler/heartbeat_followup_cli.ts"
+  if ! command -v node >/dev/null 2>&1; then
+    echo "loopx runtime error: native scheduler follow-up requires Node.js 22.6 or newer" >&2
+    exit 2
+  fi
+  export LOOPX_RELEASE_ROOT="$repo_root"
+  exec node --no-warnings --experimental-strip-types "$native_scheduler_entry" "$@"
+fi
+
 python_bin="${LOOPX_PYTHON:-}"
 if [[ -z "$python_bin" && -f "$repo_root/.loopx-python" ]]; then
   IFS= read -r python_bin <"$repo_root/.loopx-python"
@@ -67,6 +93,10 @@ exec "$python_bin" -c '
 import os
 import runpy
 import sys
+
+# Stable process identity for LoopX Desktop stale-service recovery. Keep this
+# independent from the selected Python entry module.
+LOOPX_MANAGED_RELEASE_LAUNCHER_V1 = True
 
 if sys.version_info < (3, 11):
     print(

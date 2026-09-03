@@ -578,6 +578,7 @@ def handle_quota_command(
                 receipt_bound_replan_obligation_id=(receipt_bound_replan_obligation_id),
                 turn_instance_id=heartbeat_turn_id,
                 interaction_projection_hooks=interaction_projection_hooks,
+                turn_start_hook_dispatch=turn_start_hook_dispatch,
             )
             _attach_turn_start_hook_dispatch(payload, turn_start_hook_dispatch)
             _require_requested_quota_action_selection(

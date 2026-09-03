@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
+from .external_wait_contract import TodoExternalWaitAuthoringError
 
 
 TODO_RESUME_NORMALIZE_REQUEST_SCHEMA_VERSION = "todo_resume_normalize_request_v0"
@@ -32,9 +33,21 @@ _RESUME_WHEN_PATTERN = re.compile(
 _RESUME_PR_MERGED_PATTERN = re.compile(
     r"^pr_merged:(?:[a-z\d_.-]{1,80}/[a-z\d_.-]{1,100})?#[1-9]\d{0,8}$"
 )
+_PR_REF_NUMBER_PATTERN = re.compile(
+    r"(?:/pull/|#|pr[-_\s]*)([1-9]\d{0,8})(?:\b|/|#|\?|$)",
+    re.IGNORECASE,
+)
+_PR_MERGED_EVENT_KINDS = {
+    "pr_merge",
+    "pr_merged",
+    "pull_request_merge",
+    "pull_request_merged",
+}
+_MAX_RESUME_MERGE_EVENTS = 256
 
 _RESUME_ITEM_FIELDS = (
     "todo_id",
+    "role",
     "status",
     "task_class",
     "archive_state",
@@ -108,6 +121,87 @@ def _compact_item(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _pr_ref_number(value: Any) -> int | None:
+    if not isinstance(value, str):
+        return None
+    match = _PR_REF_NUMBER_PATTERN.search(value.strip())
+    return int(match.group(1)) if match else None
+
+
+def _resume_pr_numbers(items: list[dict[str, Any]]) -> set[int]:
+    numbers: set[int] = set()
+    for item in items:
+        resume_when = normalize_supported_todo_resume_when(item.get("resume_when"))
+        if not resume_when or not resume_when.startswith(
+            f"{TODO_RESUME_KIND_PR_MERGED}:"
+        ):
+            continue
+        number = _pr_ref_number(resume_when)
+        if number is not None:
+            numbers.add(number)
+    return numbers
+
+
+def _compact_merge_event(
+    event: Mapping[str, Any],
+    *,
+    target_numbers: set[int],
+) -> dict[str, Any] | None:
+    event_kind = str(event.get("event_kind") or "").strip().lower()
+    if event_kind not in _PR_MERGED_EVENT_KINDS:
+        return None
+    compact: dict[str, Any] = {"event_kind": event_kind}
+    for field in ("event_id", "recorded_at"):
+        value = event.get(field)
+        if isinstance(value, str) and value.strip():
+            compact[field] = value.strip()
+    refs: list[str] = []
+    direct_ref = event.get("pr_ref")
+    if isinstance(direct_ref, str):
+        refs.append(direct_ref)
+        compact["pr_ref"] = direct_ref
+    code_refs = event.get("code_refs")
+    if isinstance(code_refs, Mapping) and isinstance(code_refs.get("pr_ref"), str):
+        refs.append(code_refs["pr_ref"])
+        compact["code_refs"] = {"pr_ref": code_refs["pr_ref"]}
+    source_refs: list[dict[str, str]] = []
+    for source_ref in event.get("source_refs") or []:
+        if not isinstance(source_ref, Mapping):
+            continue
+        kind = str(source_ref.get("kind") or "").strip().lower()
+        ref = source_ref.get("ref")
+        if kind not in {"pull_request", "pr"} or not isinstance(ref, str):
+            continue
+        refs.append(ref)
+        source_refs.append({"kind": kind, "ref": ref})
+    if source_refs:
+        compact["source_refs"] = source_refs
+    if not any(_pr_ref_number(ref) in target_numbers for ref in refs):
+        return None
+    return compact
+
+
+def _compact_resume_rollout_events(
+    items: list[dict[str, Any]],
+    rollout_events: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    target_numbers = _resume_pr_numbers(items)
+    if not target_numbers:
+        return []
+    compacted: list[dict[str, Any]] = []
+    for event in reversed(rollout_events or []):
+        if not isinstance(event, Mapping):
+            continue
+        compact = _compact_merge_event(event, target_numbers=target_numbers)
+        if compact is None:
+            continue
+        compacted.append(compact)
+        if len(compacted) >= _MAX_RESUME_MERGE_EVENTS:
+            break
+    compacted.reverse()
+    return compacted
+
+
 def normalize_todo_resume_when_via_runtime(value: Any) -> str | None:
     """Normalize new resume authoring through the Todo-domain TS contract."""
 
@@ -144,11 +238,10 @@ def evaluate_todo_resume_conditions(
         "source_items": [
             _compact_item(item) for item in source_items if item.get("todo_id")
         ],
-        "rollout_events": [
-            dict(event)
-            for event in (rollout_events or [])
-            if isinstance(event, Mapping)
-        ],
+        # Resume evaluation needs only bounded PR-merge identity evidence.
+        # Sending complete rollout rows made long-lived Goals exceed the
+        # Effect-runtime transport budget even without a PR-waiting Todo.
+        "rollout_events": _compact_resume_rollout_events(items, rollout_events),
     }
     if available_capabilities is not None:
         request["available_capabilities"] = sorted(
@@ -201,7 +294,15 @@ def plan_todo_external_wait_transition(
             },
         )
     except EffectRuntimeRejected as exc:
-        raise ValueError(str(exc)) from None
+        resume_kind, _, target_todo_id = resume_when.partition(":")
+        raise TodoExternalWaitAuthoringError(
+            str(exc),
+            code=exc.diagnostic_code,
+            monitor_todo_id=(
+                target_todo_id if resume_kind == TODO_RESUME_KIND_MONITOR_CHANGED else None
+            ),
+            successor_todo_ids=successor_todo_ids,
+        ) from None
     if not isinstance(result, Mapping) or (
         result.get("schema_version") != TODO_EXTERNAL_WAIT_TRANSITION_SCHEMA_VERSION
     ):

@@ -534,6 +534,70 @@ test("prepared transaction repairs its own truncated final index row", async (t)
   );
 });
 
+test("shared receipt replay rejects a replaced spend index prefix", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const first = await evaluateQuotaSpendCommit(request(runtimeRoot));
+  const indexPath = String(first.payload.index_path);
+  const params = request(runtimeRoot, {
+    effect_id: "quota-spend-effect-prefix-fence",
+    generated_at: "2026-08-25T12:02:00+08:00",
+    expected_index_digest: await quotaSpendIndexDigest(indexPath),
+  });
+  await evaluateQuotaSpendCommit(params);
+  const replacement = `${JSON.stringify({
+    generated_at: "2026-08-25T12:03:00+08:00",
+    goal_id: "quota-spend-commit",
+    classification: "unrelated",
+  })}\n`;
+  await writeFile(indexPath, replacement, "utf8");
+
+  await assert.rejects(
+    () => evaluateQuotaSpendCommit(params),
+    /quota spend run index no longer retains its transaction prefix/,
+  );
+  assert.equal(await readFile(indexPath, "utf8"), replacement);
+});
+
+test("shared receipt replay tolerates a legal prefix rewrite that preserves its row", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const first = await evaluateQuotaSpendCommit(request(runtimeRoot));
+  const indexPath = String(first.payload.index_path);
+  const params = request(runtimeRoot, {
+    effect_id: "quota-spend-effect-preserved-after-repair",
+    generated_at: "2026-08-25T12:02:00+08:00",
+    expected_index_digest: await quotaSpendIndexDigest(indexPath),
+  });
+  await evaluateQuotaSpendCommit(params);
+  const rows = (await readFile(indexPath, "utf8")).trim().split("\n");
+  assert.equal(rows.length, 2);
+
+  await writeFile(indexPath, `${rows[1]}\n`, "utf8");
+
+  const replayed = await evaluateQuotaSpendCommit(params);
+  assert.equal(replayed.status, "replayed");
+  assert.equal(await readFile(indexPath, "utf8"), `${rows[1]}\n`);
+});
+
+test("shared receipt replay rejects a mutated matching spend index row", async (t) => {
+  const runtimeRoot = await tempRuntime(t);
+  const params = request(runtimeRoot);
+  const written = await evaluateQuotaSpendCommit(params);
+  const indexPath = String(written.payload.index_path);
+  const row = JSON.parse(await readFile(indexPath, "utf8")) as Record<string, unknown>;
+  const mutated = `${JSON.stringify({
+    ...row,
+    goal_id: "other-goal",
+    json_path: "bogus.json",
+  })}\n`;
+  await writeFile(indexPath, mutated, "utf8");
+
+  await assert.rejects(
+    () => evaluateQuotaSpendCommit(params),
+    /quota spend index record conflicts with its transaction receipt/,
+  );
+  assert.equal(await readFile(indexPath, "utf8"), mutated);
+});
+
 test("effect identity and index CAS reject drift and racing writers", async (t) => {
   const runtimeRoot = await tempRuntime(t);
   const params = request(runtimeRoot);

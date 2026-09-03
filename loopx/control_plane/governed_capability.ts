@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { JsonObject } from "./effect_program.ts";
 import { EffectRuntimeRequestError } from "./effect_runtime_errors.ts";
 import {
@@ -10,6 +12,14 @@ export const EXTERNAL_EFFECT_RECEIPT_SCHEMA_VERSION =
   "loopx_external_effect_receipt_v0";
 export const CONTINUOUS_MONITOR_PROPOSAL_SCHEMA_VERSION =
   "loopx_continuous_monitor_proposal_v0";
+export const GOVERNED_CAPABILITY_LIFECYCLE_PACKET_SCHEMA_VERSION =
+  "loopx_governed_capability_lifecycle_packet_v0";
+export const GOVERNED_CAPABILITY_LIFECYCLE_REDUCTION_SCHEMA_VERSION =
+  "loopx_governed_capability_lifecycle_reduction_v0";
+export const GOVERNED_CAPABILITY_RECEIPT_SCHEMA_VERSION =
+  "loopx_governed_capability_execution_receipt_v0";
+export const GOVERNED_CAPABILITY_RUN_SCHEMA_VERSION =
+  "loopx_governed_capability_run_v0";
 
 const RESULT_FIELDS = new Set([
   "schema_version",
@@ -79,6 +89,24 @@ type ValidatedTransitionProposal =
 const PROPOSAL_ID_RE = /^[a-z][a-z0-9_.:-]{2,95}$/;
 const MONITOR_KEY_RE = /^[a-z][a-z0-9_.-]{0,31}:[a-z][a-z0-9_.:-]{2,95}$/;
 const ACTION_KIND_RE = /^[a-z][a-z0-9_]{0,63}$/;
+const LIFECYCLE_PACKET_FIELDS = new Set([
+  "schema_version",
+  "phase",
+  "dry_run",
+  "canonical_request_digest",
+  "admission",
+  "journal",
+]);
+const LIFECYCLE_PHASES = ["inspect", "observe_result"] as const;
+const JOURNAL_STATUSES = [
+  "ready",
+  "starting",
+  "running",
+  "ready_to_settle",
+  "settlement_failed",
+  "committed",
+] as const;
+type GovernedCapabilityJournalStatus = typeof JOURNAL_STATUSES[number];
 
 function requiredObject(value: unknown, label: string): JsonObject {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -129,6 +157,40 @@ function requireExactFields(
   ) {
     throw new EffectRuntimeRequestError(`${label} fields are invalid`);
   }
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([key, child]) => [key, stableValue(child)]),
+  );
+}
+
+function canonicalDigest(value: unknown): string {
+  const encoded = JSON.stringify(stableValue(value));
+  if (encoded === undefined) {
+    throw new EffectRuntimeRequestError("governed capability value is not JSON-compatible");
+  }
+  return `sha256:${createHash("sha256").update(encoded, "utf8").digest("hex")}`;
+}
+
+function requiredCanonicalDigest(value: unknown, label: string): string {
+  const digest = requiredString(value, label);
+  if (!/^sha256:[0-9a-f]{64}$/.test(digest)) {
+    throw new EffectRuntimeRequestError(`${label} is invalid`);
+  }
+  return digest;
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return canonicalDigest(left) === canonicalDigest(right);
+}
+
+function requireCondition(condition: boolean, message: string): asserts condition {
+  if (!condition) throw new EffectRuntimeRequestError(message);
 }
 
 function externalEffectReceipt(
@@ -386,7 +448,7 @@ export function validateGovernedCapabilityAdmission(input: {
   return selectedTodo;
 }
 
-export function validateGovernedCapabilityResult(input: {
+function validateProviderResult(input: {
   value: unknown;
   invocation_id: string;
   effect_id: string;
@@ -475,6 +537,371 @@ export function validateGovernedCapabilityResult(input: {
   }
   result.effect_receipt = receipt;
   return { result, journal_status: "ready_to_settle" };
+}
+
+function lifecyclePublicReceipt(input: {
+  journal: JsonObject;
+  status: GovernedCapabilityJournalStatus;
+  result: JsonObject | null;
+  dry_run: boolean;
+}): JsonObject {
+  const transitionReceipts = boundedArray(
+    input.journal.transition_receipts,
+    "governed capability journal transition_receipts",
+  );
+  return {
+    ok: true,
+    schema_version: GOVERNED_CAPABILITY_RECEIPT_SCHEMA_VERSION,
+    status: input.status,
+    dry_run: input.dry_run,
+    executed: !input.dry_run,
+    invocation_id: input.journal.invocation_id,
+    request_digest: input.journal.request_digest,
+    goal_id: input.journal.goal_id,
+    agent_id: input.journal.agent_id,
+    todo_id: input.journal.todo_id,
+    turn_instance_id: input.journal.turn_instance_id,
+    effect_id: input.journal.effect_id,
+    provider_status: input.result?.status ?? null,
+    provider_result_digest: input.result === null
+      ? null
+      : canonicalDigest(input.result),
+    transition_receipts: transitionReceipts,
+    settlement_result: input.journal.settlement_result ?? null,
+    effects: {
+      provider_invoked: input.result !== null,
+      external_write_observed: input.result?.effect_receipt !== null &&
+        input.result?.effect_receipt !== undefined,
+      loopx_transitions_written: transitionReceipts.length > 0,
+      loopx_state_written: typeof input.journal.writeback === "object" &&
+        input.journal.writeback !== null,
+      quota_spent: typeof input.journal.quota_spend === "object" &&
+        input.journal.quota_spend !== null,
+    },
+  };
+}
+
+function validateStoredSettlementCallback(input: {
+  value: unknown;
+  label: string;
+  effect_id: string;
+  effect_receipt_digest: string;
+  require_receipt_digest: boolean;
+}): JsonObject | null {
+  if (input.value === null || input.value === undefined) return null;
+  const payload = requiredObject(input.value, input.label);
+  const checked = validateGovernedCapabilitySettlementCallback({
+    payload,
+    effect_id: input.effect_id,
+    effect_receipt_digest: input.effect_receipt_digest,
+    require_receipt_digest: input.require_receipt_digest,
+  });
+  if (!sameJson(checked, payload)) {
+    throw new EffectRuntimeRequestError(`${input.label} is invalid`);
+  }
+  return payload;
+}
+
+function reduceGovernedCapabilityLifecycle(input: {
+  packet: JsonObject;
+  invocation_id: string;
+  effect_id: string;
+  result_schema: string;
+  effect_class: string;
+  transition_contract?: unknown;
+}): JsonObject {
+  requireExactFields(
+    input.packet,
+    LIFECYCLE_PACKET_FIELDS,
+    "governed capability lifecycle packet",
+  );
+  const phase = requireStringLiteral(
+    input.packet.phase,
+    LIFECYCLE_PHASES,
+    "governed capability lifecycle phase",
+    "governed capability lifecycle phase is unsupported",
+  );
+  requireCondition(
+    typeof input.packet.dry_run === "boolean",
+    "governed capability lifecycle dry_run must be boolean",
+  );
+  const requestDigest = requiredCanonicalDigest(
+    input.packet.canonical_request_digest,
+    "governed capability lifecycle request digest",
+  );
+  const journal = requiredObject(input.packet.journal, "governed capability journal");
+  requireCondition(
+    journal.schema_version === GOVERNED_CAPABILITY_RUN_SCHEMA_VERSION,
+    "governed capability journal schema is invalid",
+  );
+  const currentStatus: GovernedCapabilityJournalStatus = requireStringLiteral(
+    journal.status,
+    JOURNAL_STATUSES,
+    "governed capability journal status",
+    "governed capability journal status is invalid",
+  );
+  requireCondition(
+    journal.invocation_id === input.invocation_id,
+    "governed capability journal invocation identity is invalid",
+  );
+
+  const transactionPlan = requiredObject(
+    journal.transaction_plan,
+    "governed capability transaction plan",
+  );
+  const settlementPlan = requiredObject(
+    transactionPlan.settlement_plan,
+    "governed capability settlement plan",
+  );
+  const identity = requiredObject(
+    settlementPlan.identity,
+    "governed capability settlement identity",
+  );
+  const identityFields = [
+    "goal_id",
+    "agent_id",
+    "todo_id",
+    "turn_instance_id",
+    "effect_id",
+  ];
+  requireCondition(
+    identity.effect_id === input.effect_id &&
+      identityFields.every((field) => journal[field] === identity[field]),
+    "governed capability journal settlement identity is invalid",
+  );
+
+  const request = requiredObject(
+    journal.request,
+    "governed capability provider request",
+  );
+  requireCondition(
+    request.invocation_id === input.invocation_id &&
+      sameJson(request.authority, identity),
+    "governed capability journal request authority is invalid",
+  );
+  const lifecycle = requiredObject(
+    request.lifecycle,
+    "governed capability provider request lifecycle",
+  );
+  requireExactFields(
+    lifecycle,
+    new Set(["phase", "idempotency_key"]),
+    "governed capability provider request lifecycle",
+  );
+  requireCondition(
+    lifecycle.phase === "start" && lifecycle.idempotency_key === input.effect_id,
+    "governed capability journal request start lifecycle is invalid",
+  );
+  requireCondition(
+    journal.request_digest === requestDigest,
+    "governed capability journal request digest is invalid",
+  );
+
+  const operationProfile = requiredObject(
+    journal.operation_profile,
+    "governed capability operation profile",
+  );
+  requireCondition(
+    input.effect_class === "external_write" &&
+      operationProfile.effect_class === input.effect_class &&
+      operationProfile.result_schema === input.result_schema,
+    "governed capability journal operation profile is invalid",
+  );
+  boundedStringArray(
+    journal.completed_phases,
+    "governed capability journal completed_phases",
+    16,
+  );
+  const transitionReceipts = boundedArray(
+    journal.transition_receipts,
+    "governed capability journal transition_receipts",
+  );
+
+  const rawResult = journal.provider_result;
+  if (rawResult === null || rawResult === undefined) {
+    requireCondition(
+      phase === "inspect" &&
+        currentStatus === (input.packet.dry_run ? "ready" : "starting"),
+      "governed capability journal provider state is invalid",
+    );
+    requireCondition(
+      [journal.writeback, journal.quota_spend, journal.settlement_result]
+        .every((value) => value === null) && transitionReceipts.length === 0,
+      "governed capability journal has settlement state before provider result",
+    );
+    if (input.packet.admission !== null) {
+      validateGovernedCapabilityAdmission({
+        admission: input.packet.admission,
+        todo_id: requiredString(
+          identity.todo_id,
+          "governed capability settlement identity todo_id",
+        ),
+        todo_contract: operationProfile.todo_contract,
+      });
+    }
+    return {
+      schema_version: GOVERNED_CAPABILITY_LIFECYCLE_REDUCTION_SCHEMA_VERSION,
+      journal_status: currentStatus,
+      provider_result: null,
+      public_receipt: lifecyclePublicReceipt({
+        journal,
+        status: currentStatus,
+        result: null,
+        dry_run: input.packet.dry_run,
+      }),
+    };
+  }
+
+  if (input.packet.admission !== null) {
+    requireCondition(
+      phase === "inspect",
+      "governed capability lifecycle admission is only valid while inspecting material authority",
+    );
+    validateGovernedCapabilityAdmission({
+      admission: input.packet.admission,
+      todo_id: requiredString(
+        identity.todo_id,
+        "governed capability settlement identity todo_id",
+      ),
+      todo_contract: operationProfile.todo_contract,
+    });
+  }
+
+  const validated = validateProviderResult({
+    value: rawResult,
+    invocation_id: input.invocation_id,
+    effect_id: input.effect_id,
+    result_schema: input.result_schema,
+    effect_class: input.effect_class,
+    transition_contract: operationProfile.transition_contract ??
+      input.transition_contract,
+  });
+  let journalStatus: GovernedCapabilityJournalStatus;
+  if (phase === "observe_result") {
+    requireCondition(
+      currentStatus === "starting" || currentStatus === "running",
+      "governed capability observed result has invalid prior status",
+    );
+    journalStatus = validated.journal_status;
+  } else {
+    const allowedStatuses = validated.journal_status === "running"
+      ? new Set<GovernedCapabilityJournalStatus>(["running"])
+      : new Set<GovernedCapabilityJournalStatus>([
+        "ready_to_settle",
+        "settlement_failed",
+        "committed",
+      ]);
+    requireCondition(
+      allowedStatuses.has(currentStatus),
+      "governed capability journal status is invalid for provider result",
+    );
+    journalStatus = currentStatus;
+  }
+
+  let writeback: JsonObject | null = null;
+  let quotaSpend: JsonObject | null = null;
+  if (validated.journal_status === "running") {
+    requireCondition(
+      [journal.writeback, journal.quota_spend, journal.settlement_result]
+        .every((value) => value === null),
+      "running governed capability has settlement receipts",
+    );
+  } else {
+    const effectReceipt = requiredObject(
+      validated.result.effect_receipt,
+      "governed capability effect receipt",
+    );
+    const effectReceiptDigest = canonicalDigest(effectReceipt);
+    writeback = validateStoredSettlementCallback({
+      value: journal.writeback,
+      label: "governed capability journal writeback",
+      effect_id: input.effect_id,
+      effect_receipt_digest: effectReceiptDigest,
+      require_receipt_digest: true,
+    });
+    quotaSpend = validateStoredSettlementCallback({
+      value: journal.quota_spend,
+      label: "governed capability journal quota_spend",
+      effect_id: input.effect_id,
+      effect_receipt_digest: effectReceiptDigest,
+      require_receipt_digest: false,
+    });
+    requireCondition(
+      quotaSpend === null || writeback !== null,
+      "governed capability journal quota_spend precedes writeback",
+    );
+    if (journalStatus === "committed") {
+      requireCondition(
+        writeback?.ok === true &&
+          writeback.appended === true &&
+          quotaSpend?.ok === true &&
+          quotaSpend.appended === true,
+        "committed governed capability is missing settlement receipts",
+      );
+      const settlementResult = requiredObject(
+        journal.settlement_result,
+        "governed capability settlement result",
+      );
+      requireCondition(
+        settlementResult.failure === null,
+        "committed governed capability has no successful settlement result",
+      );
+    } else if (journalStatus === "settlement_failed") {
+      const settlementResult = requiredObject(
+        journal.settlement_result,
+        "governed capability settlement result",
+      );
+      requiredObject(
+        settlementResult.failure,
+        "governed capability settlement failure",
+      );
+    }
+  }
+
+  const reducedJournal = {
+    ...journal,
+    status: journalStatus,
+    provider_result: validated.result,
+    writeback,
+    quota_spend: quotaSpend,
+  };
+  return {
+    schema_version: GOVERNED_CAPABILITY_LIFECYCLE_REDUCTION_SCHEMA_VERSION,
+    journal_status: journalStatus,
+    provider_result: validated.result,
+    public_receipt: lifecyclePublicReceipt({
+      journal: reducedJournal,
+      status: journalStatus,
+      result: validated.result,
+      dry_run: input.packet.dry_run,
+    }),
+  };
+}
+
+export function validateGovernedCapabilityResult(input: {
+  value: unknown;
+  invocation_id: string;
+  effect_id: string;
+  result_schema: string;
+  effect_class: string;
+  transition_contract?: unknown;
+}): JsonObject {
+  if (
+    typeof input.value === "object" &&
+    input.value !== null &&
+    !Array.isArray(input.value) &&
+    (input.value as JsonObject).schema_version ===
+      GOVERNED_CAPABILITY_LIFECYCLE_PACKET_SCHEMA_VERSION
+  ) {
+    return reduceGovernedCapabilityLifecycle({
+      ...input,
+      packet: requiredObject(
+        input.value,
+        "governed capability lifecycle packet",
+      ),
+    });
+  }
+  return validateProviderResult(input);
 }
 
 export function validateGovernedCapabilitySettlementCallback(input: {

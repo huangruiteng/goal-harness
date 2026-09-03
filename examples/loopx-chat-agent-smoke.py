@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import stat
 import sys
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -25,8 +27,26 @@ from loopx.chat_agent import (  # noqa: E402
 
 FAKE_CODEX = r'''#!/usr/bin/env python3
 import json
+import os
 import sys
 import time
+from pathlib import Path
+
+if sys.argv[1:3] == ["debug", "models"]:
+    marker = os.environ.get("LOOPX_FAKE_DEBUG_MODELS_MARKER")
+    if marker:
+        Path(marker).write_text("invoked", encoding="utf-8")
+    if os.environ.get("LOOPX_FAKE_DEBUG_MODELS_FAIL") == "1":
+        raise SystemExit(2)
+    print(json.dumps({"models": [{"slug": "fake-current", "base_instructions": "Current built-in instructions."}]}))
+    raise SystemExit(0)
+
+catalog_override = None
+for index, value in enumerate(sys.argv):
+    if value == "-c" and index + 1 < len(sys.argv):
+        key, separator, encoded = sys.argv[index + 1].partition("=")
+        if separator and key == "model_catalog_json":
+            catalog_override = Path(json.loads(encoded))
 
 turn_count = 0
 assert "goals" not in sys.argv, sys.argv
@@ -40,6 +60,29 @@ for line in sys.stdin:
         result = {"serverInfo": {"name": "fake-codex"}}
     elif method in {"thread/start", "thread/resume"}:
         params = message.get("params", {})
+        if os.environ.get("LOOPX_FAKE_OTHER_THREAD_ERROR") == "1":
+            print(json.dumps({
+                "id": request_id,
+                "error": {"code": -32602, "message": "unrelated thread configuration error"},
+            }), flush=True)
+            continue
+        if os.environ.get("LOOPX_FAKE_LEGACY_MODEL_CATALOG") == "1" and catalog_override is None:
+            print(json.dumps({
+                "id": request_id,
+                "error": {
+                    "code": -32600,
+                    "message": "failed to parse model_catalog_json: missing field `base_instructions`",
+                },
+            }), flush=True)
+            continue
+        if catalog_override is not None:
+            catalog = json.loads(catalog_override.read_text(encoding="utf-8"))
+            if not catalog.get("models") or not all(model.get("base_instructions") for model in catalog["models"]):
+                print(json.dumps({
+                    "id": request_id,
+                    "error": {"code": -32600, "message": "compatibility catalog is incomplete"},
+                }), flush=True)
+                continue
         if params.get("sandbox") not in {"read-only", "workspace-write"} or params.get("approvalPolicy") != "never":
             print(json.dumps({
                 "id": request_id,
@@ -59,6 +102,7 @@ for line in sys.stdin:
         prompt = params.get("input", [{}])[0].get("text", "")
         if (
             "<loopx-review-json>" not in prompt
+            or "protected_action" not in prompt
             or "user message" not in prompt
             or "loopx-chat-smoke: Keep the review loop bounded." not in prompt
         ):
@@ -104,7 +148,31 @@ for line in sys.stdin:
                     "method": "item/started",
                     "params": {"threadId": "thread-loopx-chat", "turnId": turn_id, "item": {"id": f"work-{index}"}},
                 }), flush=True)
+        if "retryable error" in prompt:
+            print(json.dumps({
+                "method": "error",
+                "params": {
+                    "threadId": "thread-loopx-chat",
+                    "turnId": turn_id,
+                    "willRetry": True,
+                    "error": {"message": "synthetic transient failure"},
+                },
+            }), flush=True)
+        if "ends in terminal failure" in prompt:
+            print(json.dumps({
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-loopx-chat",
+                    "turn": {"id": turn_id, "status": "failed"},
+                },
+            }), flush=True)
+            continue
         visible_answer = "Reviewed " + params.get("cwd", "") + ".\n"
+        protected_action = ({
+            "operation": "merge",
+            "target": "PR #123",
+            "summary": "Prepare the protected merge preview.",
+        } if "explicit protected action" in prompt else None)
         response = (
             visible_answer + '<loopx-review-json>'
             + json.dumps({
@@ -116,6 +184,7 @@ for line in sys.stdin:
                     "priority": "P1",
                     "rationale": "This is the smallest reviewable step.",
                 }],
+                "protected_action": protected_action,
                 "gate": None,
             })
             + '</loopx-review-json>'
@@ -213,6 +282,18 @@ def main() -> None:
                 "inspect attached image",
                 attachments=[{"data_url": "data:image/png;base64,aW1hZ2U="}],
             )
+            protected_result = session.send("explicit protected action")
+            retry_events = []
+            retry_result = session.send(
+                "recover after retryable error",
+                on_event=lambda kind, payload: retry_events.append((kind, payload)),
+            )
+            try:
+                session.send("retryable error ends in terminal failure")
+            except CodexChatAgentError as exc:
+                assert str(exc) == "Codex app-server reported a terminal turn failure.", exc
+            else:
+                raise AssertionError("terminal failed status should fail the Chat turn")
         finally:
             session.close()
 
@@ -226,7 +307,21 @@ def main() -> None:
             }
         ], result
         assert result["gate"] is None, result
+        assert result["protected_action"] is None, result
+        assert protected_result["protected_action"] == {
+            "operation": "merge",
+            "target": "PR #123",
+            "summary": "Prepare the protected merge preview.",
+        }, protected_result
         assert image_result["message"] == "Reviewed [project].", image_result
+        assert retry_result["message"] == "Reviewed [project].", retry_result
+        assert any(
+            kind == "agent.phase"
+            and payload.get("method") == "error"
+            and payload.get("label") == "Codex 正在重试"
+            for kind, payload in retry_events
+        ), retry_events
+        assert not any(kind == "turn.failed" for kind, _ in retry_events), retry_events
         assert str(root) not in json.dumps(result), result
         visible = "".join(
             str(payload.get("text") or "")
@@ -268,6 +363,65 @@ def main() -> None:
         finally:
             execution_session.close()
         assert execution_result["message"] == "Reviewed [project].", execution_result
+
+        with patch.dict(os.environ, {"LOOPX_FAKE_LEGACY_MODEL_CATALOG": "1"}):
+            compatibility_session = CodexChatAgentSession.start(
+                codex_bin=str(fake_codex),
+                work_dir=root,
+                goal_id="loopx-chat-smoke",
+                objective="Keep the review loop bounded.",
+                response_timeout_sec=3.0,
+            )
+            try:
+                compatibility_result = compatibility_session.send("user message after catalog repair")
+            finally:
+                compatibility_session.close()
+        assert compatibility_session.model_catalog_compatibility_applied is True
+        assert compatibility_result["message"] == "Reviewed [project].", compatibility_result
+
+        debug_models_marker = root / "debug-models-invoked"
+        with patch.dict(
+            os.environ,
+            {
+                "LOOPX_FAKE_DEBUG_MODELS_MARKER": str(debug_models_marker),
+                "LOOPX_FAKE_OTHER_THREAD_ERROR": "1",
+            },
+        ):
+            try:
+                CodexChatAgentSession.start(
+                    codex_bin=str(fake_codex),
+                    work_dir=root,
+                    goal_id="loopx-chat-smoke",
+                    objective="Keep the review loop bounded.",
+                    response_timeout_sec=3.0,
+                )
+            except CodexChatAgentError as exc:
+                assert "rejected thread/start" in str(exc), exc
+            else:
+                raise AssertionError("unrelated thread errors must fail without a catalog retry")
+        assert not debug_models_marker.exists(), debug_models_marker
+
+        with patch.dict(
+            os.environ,
+            {
+                "LOOPX_FAKE_DEBUG_MODELS_FAIL": "1",
+                "LOOPX_FAKE_LEGACY_MODEL_CATALOG": "1",
+            },
+        ):
+            try:
+                CodexChatAgentSession.start(
+                    codex_bin=str(fake_codex),
+                    work_dir=root,
+                    goal_id="loopx-chat-smoke",
+                    objective="Keep the review loop bounded.",
+                    response_timeout_sec=3.0,
+                )
+            except CodexChatAgentError as exc:
+                assert exc.gate["kind"] == "host_tool_gate", exc.gate
+                assert "compatible model catalog" in exc.gate["summary"], exc.gate
+                assert "legacy override" in exc.gate["next_action"], exc.gate
+            else:
+                raise AssertionError("catalog generation failures must surface a host-tool gate")
 
         active_session = CodexChatAgentSession.start(
             codex_bin=str(fake_codex),

@@ -338,7 +338,7 @@ def _counts(active_runs: list[dict[str, str]]) -> dict[str, int]:
 
 def _capacity(config: Mapping[str, Any], counts: Mapping[str, int]) -> dict[str, int]:
     return {
-        "total": max(0, config["max_active_cases"] - counts["total"]),
+        "total": max(0, config["target_active_cases"] - counts["total"]),
         "baseline": max(0, config["max_baseline_cases"] - counts["baseline"]),
         "test": max(0, config["max_test_cases"] - counts["test"]),
     }
@@ -367,6 +367,7 @@ def build_benchmark_concurrency_status(
     )
     target = config["target_active_cases"]
     target_gap = max(0, target - counts["total"])
+    target_excess = max(0, counts["total"] - target)
     underfilled = not overcommitted and target_gap > 0
     if (
         counts["test"] < config["reserved_test_cases"]
@@ -411,10 +412,12 @@ def build_benchmark_concurrency_status(
     }
     if overcommitted:
         next_action = "release_terminal_runs"
+    elif target_excess > 0:
+        next_action = "drain_to_target"
     elif underfilled:
         next_action = "backfill_to_target"
     else:
-        next_action = "admit_before_launch"
+        next_action = "hold_at_target"
     return {
         "ok": not overcommitted,
         "schema_version": BENCHMARK_CONCURRENCY_ENVELOPE_SCHEMA_VERSION,
@@ -428,7 +431,9 @@ def build_benchmark_concurrency_status(
             "active_cases": target,
             "current_cases": counts["total"],
             "missing_cases": target_gap,
+            "excess_cases": target_excess,
             "underfilled": underfilled,
+            "above_target": target_excess > 0,
             "utilization": counts["total"] / target,
         },
         "backfill_hint": backfill_hint,
@@ -502,6 +507,8 @@ def _admission_preview(
         admitted_at=admitted_at,
     )
     reasons.extend(resource_headroom["reason_codes"])
+    if counts["total"] >= config["target_active_cases"]:
+        reasons.append("target_capacity_exhausted")
     if counts["total"] >= config["max_active_cases"]:
         reasons.append("total_capacity_exhausted")
     if group == "baseline" and counts["baseline"] >= config["max_baseline_cases"]:
@@ -511,7 +518,7 @@ def _admission_preview(
     if group == "baseline":
         unfilled_test_reserve = max(0, config["reserved_test_cases"] - counts["test"])
         total_after = counts["total"] + 1
-        remaining_after = config["max_active_cases"] - total_after
+        remaining_after = config["target_active_cases"] - total_after
         if remaining_after < unfilled_test_reserve:
             reasons.append("reserved_test_capacity")
 
@@ -731,6 +738,17 @@ def render_benchmark_concurrency_markdown(payload: Mapping[str, Any]) -> str:
                 (
                     "- Resource headroom receipt required: "
                     f"`{config.get('require_resource_headroom_receipt', False)}`"
+                ),
+            ]
+        )
+    if payload.get("action"):
+        lines.extend(
+            [
+                f"- Adaptive action: `{payload.get('action')}`",
+                (
+                    "- Adaptive target: "
+                    f"`{payload.get('current_target_active_cases')}` -> "
+                    f"`{payload.get('next_target_active_cases')}`"
                 ),
             ]
         )

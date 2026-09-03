@@ -45,6 +45,12 @@ confirmed, startup fails closed without sending a termination signal. Unknown
 services remain a hard error. Windows currently keeps this owner-facing error
 path instead of terminating an existing process automatically.
 
+Release launchers publish a stable process fingerprint that is independent of
+their internal Python entry module. The shell also recognizes the historical
+fixed-CLI and lightweight-entrypoint launcher shapes, so upgrading LoopX can
+replace an already-running older service without asking the operator to find
+and stop it manually.
+
 The WebView is pinned to the loopback Chat origin served by the installed
 LoopX release. Dashboard requests to the status and Chat services remain
 restricted to loopback CORS and the existing preview/apply authority boundary.

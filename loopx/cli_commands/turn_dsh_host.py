@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+import argparse
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import Any
+
+from ..dsh_goal_mode.turn_host_adapter import DshHostConfig, run_dsh_host
+
+
+DshHostRunner = Callable[[Mapping[str, Any]], dict[str, Any]]
+
+
+def build_dsh_host_runner(
+    args: argparse.Namespace,
+    *,
+    workspace: Path,
+) -> DshHostRunner:
+    """Bind CLI-owned DSH options to the in-process Turn host adapter."""
+    config = DshHostConfig(
+        workspace=workspace,
+        **{
+            key: value
+            for key, value in {
+                "provider": args.dsh_provider,
+                "model": args.dsh_model,
+                "max_tokens": args.dsh_max_tokens,
+                "dsh_home": Path(args.dsh_home) if args.dsh_home else None,
+                "cordis": Path(args.dsh_cordis) if args.dsh_cordis else None,
+                "runtime_bin": args.dsh_runtime_bin,
+                "request_timeout_seconds": max(1.0, args.timeout_seconds - 5.0),
+                "dsh_runner": Path(args.dsh_runner) if args.dsh_runner else None,
+            }.items()
+            if value is not None
+        },
+    )
+
+    def run(request: Mapping[str, Any]) -> dict[str, Any]:
+        return run_dsh_host(request, config=config)
+
+    return run

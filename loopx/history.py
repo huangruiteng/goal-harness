@@ -181,7 +181,19 @@ def load_index(
 
     records: list[dict[str, Any]] = []
     positions: dict[tuple[str, str, str], int] = {}
+    artifact_exists: dict[tuple[str, str], bool] = {}
     raw_count = 0
+
+    def artifact_is_present(value: Any) -> bool:
+        text = str(value or "").strip()
+        cache_key = (text, str(artifact_root or ""))
+        if cache_key not in artifact_exists:
+            artifact_exists[cache_key] = _indexed_artifact_exists(
+                value,
+                artifact_root=artifact_root,
+            )
+        return artifact_exists[cache_key]
+
     with path.open(encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -200,14 +212,8 @@ def load_index(
                 str(item.get("markdown_path") or ""),
             )
             item = dict(item)
-            item["json_exists"] = _indexed_artifact_exists(
-                item.get("json_path"),
-                artifact_root=artifact_root,
-            )
-            item["markdown_exists"] = _indexed_artifact_exists(
-                item.get("markdown_path"),
-                artifact_root=artifact_root,
-            )
+            item["json_exists"] = artifact_is_present(item.get("json_path"))
+            item["markdown_exists"] = artifact_is_present(item.get("markdown_path"))
             if key in positions:
                 records[positions[key]].update(item)
             else:

@@ -34,6 +34,7 @@ QUOTA_SETTLEMENT_READBACK_REQUEST_SCHEMA = (
 QUOTA_SETTLEMENT_READBACK_RESULT_SCHEMA = (
     "loopx_quota_settlement_readback_result_v0"
 )
+SEMANTIC_REPLAN_GUARD_SCHEMA = "semantic_replan_guard_v0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +47,7 @@ class QuotaSettlementReadback:
     terminal_closeout: SettlementResult[dict[str, Any]]
     terminal_settlement: SettlementResult[dict[str, Any]]
     workspace_causality: dict[str, str] | None
+    semantic_replan_guard: dict[str, str | None] | None
     writeback_run: dict[str, Any] | None
     spend_run: dict[str, Any] | None
     heartbeat_receipt: dict[str, Any] | None
@@ -102,6 +104,33 @@ def _optional_readback_record(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, Mapping):
         raise RuntimeError("TypeScript quota settlement readback result shape mismatch")
     return dict(value)
+
+
+def _semantic_replan_guard(value: Any) -> dict[str, str | None] | None:
+    guard = _optional_readback_record(value)
+    if guard is None:
+        return None
+    scope = guard.get("scope")
+    selected_obligation_id = guard.get("selected_obligation_id")
+    selected_obligation_is_malformed = (
+        selected_obligation_id is not None
+        and not isinstance(selected_obligation_id, str)
+    )
+    legacy_guard_claims_selection = (
+        scope == "legacy_unscoped" and selected_obligation_id is not None
+    )
+    if (
+        guard.get("schema_version") != SEMANTIC_REPLAN_GUARD_SCHEMA
+        or scope not in {"legacy_unscoped", "turn_guard"}
+        or selected_obligation_is_malformed
+        or legacy_guard_claims_selection
+    ):
+        raise RuntimeError("TypeScript semantic replan guard shape mismatch")
+    return {
+        "schema_version": SEMANTIC_REPLAN_GUARD_SCHEMA,
+        "scope": str(scope),
+        "selected_obligation_id": selected_obligation_id,
+    }
 
 
 def read_heartbeat_settlement(
@@ -168,6 +197,9 @@ def read_heartbeat_settlement(
             {str(key): str(value) for key, value in workspace_causality.items()}
             if workspace_causality is not None
             else None
+        ),
+        semantic_replan_guard=_semantic_replan_guard(
+            payload.get("semantic_replan_guard")
         ),
         writeback_run=_optional_readback_record(payload.get("writeback_run")),
         spend_run=_optional_readback_record(payload.get("spend_run")),

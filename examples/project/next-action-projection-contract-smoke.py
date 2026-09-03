@@ -27,6 +27,7 @@ from loopx.status import collect_status
 
 GOAL_ID = "next-action-projection-goal"
 ACTIVE_NEXT_ACTION = "Keep the durable route on the broad public PoC lane."
+PRIMARY_AGENT_ACTION = "Validate the primary public PoC control-plane lane."
 RUN_RECOMMENDATION = "Inspect the vliw suite result before changing the durable route."
 UPDATED_NEXT_ACTION = "Promote the vliw repair slice as the durable next action."
 UPDATED_RUN_RECOMMENDATION = "Validate the vliw repair slice and then write compact evidence."
@@ -221,9 +222,13 @@ def main() -> None:
                 dry_run=True,
                 sync_global=False,
             )
-            assert implicit_payload["recommended_action"] == ACTIVE_NEXT_ACTION, implicit_payload
             assert (
-                implicit_payload["recommended_action_source"] == "active_state_next_action"
+                implicit_payload["recommended_action"]
+                == f"[P0] {PRIMARY_AGENT_ACTION}"
+            ), implicit_payload
+            assert (
+                implicit_payload["recommended_action_source"]
+                == "agent_lane_selected_todo"
             ), implicit_payload
             assert implicit_payload.get("active_state_next_action_update") is None, implicit_payload
 
@@ -425,10 +430,11 @@ def main() -> None:
             )
             assert (
                 fallback_payload["recommended_action"]
-                == "[P0] Validate the primary public PoC control-plane lane."
+                == f"[P0] {PRIMARY_AGENT_ACTION}"
             ), fallback_payload
             assert (
-                fallback_payload["recommended_action_source"] == "agent_todo_fallback"
+                fallback_payload["recommended_action_source"]
+                == "agent_lane_selected_todo"
             ), fallback_payload
     finally:
         state_refresh.now_local = original_now_local

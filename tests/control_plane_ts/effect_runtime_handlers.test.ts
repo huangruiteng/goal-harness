@@ -89,6 +89,46 @@ test("runtime exposes the canonical task-lease acquire decision", async () => {
   assert.equal(result.code, "lease_acquire");
 });
 
+test("runtime exposes the canonical task-lease lifecycle decision", async () => {
+  const result = await dispatchEffectRuntimeMethod(
+    handlers,
+    "task_lease.lifecycle.decide",
+    {
+      handoff_mode: "hard_lease",
+      registered_agents: ["agent-a"],
+      todo: {
+        todo_id: "todo-a",
+        status: "open",
+        claimed_by: null,
+        excluded_agents: [],
+      },
+      lease: {
+        present: true,
+        active: true,
+        status: "active",
+        owner: "agent-a",
+        idempotency_key: "lease-a",
+        version: 1,
+        lease_epoch: 1,
+        write_scopes: [],
+        acquire_ttl_seconds: 600,
+      },
+      command: {
+        operation: "renew",
+        owner: "agent-a",
+        idempotency_key: "lease-a",
+        expected_version: 1,
+        ttl_seconds: 600,
+        new_owner: null,
+        new_idempotency_key: null,
+      },
+    },
+  ) as Record<string, unknown>;
+
+  assert.equal(result.outcome, "apply");
+  assert.equal(result.code, "lease_renew");
+});
+
 test("runtime exposes the canonical task-lease write-scope rule", async () => {
   const result = await dispatchEffectRuntimeMethod(
     handlers,
@@ -97,4 +137,11 @@ test("runtime exposes the canonical task-lease write-scope rule", async () => {
   ) as Record<string, unknown>;
 
   assert.equal(result.overlap, true);
+});
+
+test("runtime boundary registers the quota monitor-poll transaction", async () => {
+  await assert.rejects(
+    dispatchEffectRuntimeMethod(handlers, "quota.monitor_poll.commit", {}),
+    /Quota monitor-poll commit request schema mismatch/,
+  );
 });

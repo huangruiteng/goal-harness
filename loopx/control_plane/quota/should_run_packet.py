@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ...long_task_cadence import reconcile_long_task_cadence_hint
 from ...state_projection import (
     next_action_projection_warning,
 )
@@ -139,6 +140,16 @@ from .settlement_precedence import (
     clear_quota_action_projections,
 )
 from .should_run_prepare import _QuotaDecisionPreparation
+
+
+def _interaction_runtime_root(
+    runtime_root: str | Path | None,
+    status_payload: Mapping[str, Any],
+) -> str | None:
+    if runtime_root:
+        return str(runtime_root)
+    raw_runtime_root = status_payload.get("runtime_root")
+    return str(raw_runtime_root) if raw_runtime_root else None
 
 
 def _compact_autonomous_candidate_context(
@@ -1116,6 +1127,7 @@ def _build_quota_should_run_payload(
     *,
     turn_instance_id: str | None = None,
     include_agent_todo_detail: bool = False,
+    runtime_root: str | Path | None = None,
 ) -> dict[str, Any]:
     agent_scope_action = _agent_scope_frontier_action(route.effective_action)
     execution_obligation = _execution_obligation(
@@ -1441,6 +1453,7 @@ def _build_quota_should_run_payload(
         available_capabilities=prepared.runtime_available_capabilities,
         scheduler_execution_context=prepared.resolved_scheduler_context,
         turn_instance_id=turn_instance_id,
+        runtime_root=_interaction_runtime_root(runtime_root, prepared.status_payload),
     )
     payload["scheduler_hint"] = _scheduler_hint(
         payload,
@@ -1467,6 +1480,12 @@ def _build_quota_should_run_payload(
         available_capabilities=prepared.runtime_available_capabilities,
         scheduler_execution_context=prepared.resolved_scheduler_context,
         turn_instance_id=turn_instance_id,
+        runtime_root=_interaction_runtime_root(runtime_root, prepared.status_payload),
+    )
+    payload["long_task_cadence_hint"] = reconcile_long_task_cadence_hint(
+        payload.get("long_task_cadence_hint"),
+        interaction_contract=payload.get("interaction_contract"),
+        scheduler_hint=payload.get("scheduler_hint"),
     )
     payload["protocol_action_packet"] = build_protocol_action_packet(payload)
     return payload

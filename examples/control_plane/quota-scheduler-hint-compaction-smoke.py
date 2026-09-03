@@ -33,6 +33,7 @@ RUNTIME_KEYS = (
 BASE_RUNTIME_KEYS = tuple(
     key for key in RUNTIME_KEYS if key != "codex_app_ssh_goal"
 )
+SCHEDULER_HOST_FACTS_CHUNK_FLAG = "--scheduler-host-facts-chunk"
 APP_SCHEDULER_CONTEXT = scheduler_execution_context_for_runtime_profile(
     SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
 )
@@ -86,6 +87,27 @@ def json_size(value: dict) -> int:
     return len(json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
 
 
+def scheduler_host_fact_chunks(args: list[str]) -> list[str]:
+    chunks: list[str] = []
+    index = 0
+    bound_prefix = f"{SCHEDULER_HOST_FACTS_CHUNK_FLAG}="
+    while index < len(args):
+        token = args[index]
+        if token.startswith(bound_prefix):
+            chunk = token[len(bound_prefix) :]
+            assert chunk, args
+            chunks.append(chunk)
+            index += 1
+            continue
+        assert token == SCHEDULER_HOST_FACTS_CHUNK_FLAG, args
+        assert index + 1 < len(args), args
+        chunk = args[index + 1]
+        assert chunk and not chunk.startswith("-"), args
+        chunks.append(chunk)
+        index += 2
+    return chunks
+
+
 def assert_compact_runtime_policy_complete(
     name: str,
     compact: dict,
@@ -134,7 +156,7 @@ def assert_compact_runtime_policy_complete(
     assert ack_args["reset_token"] == stateful_backoff["reset_token"], (name, compact)
     assert ack_args["identity_signature"] == stateful_backoff["identity_signature"], (name, compact)
     assert ack_args["host_match_observed"] is True, (name, compact)
-    expected_cli_args = [
+    expected_cli_prefix = [
         "quota",
         "scheduler-ack-current",
         "--goal-id",
@@ -142,6 +164,8 @@ def assert_compact_runtime_policy_complete(
         "--agent-id",
         ack_args["agent_id"],
         "-A",
+    ]
+    expected_cli_suffix = [
         "--applied-rrule",
         ack_args["applied_rrule"],
         "--host-match-observed",
@@ -152,12 +176,12 @@ def assert_compact_runtime_policy_complete(
         "--execute",
     ]
     if expected_registry_path is not None and expected_runtime_root is not None:
-        expected_cli_args = [
+        expected_cli_prefix = [
             "--registry",
             str(expected_registry_path.resolve()),
             "--runtime-root",
             str(expected_runtime_root.resolve()),
-            *expected_cli_args,
+            *expected_cli_prefix,
         ]
         assert ack_hint["route_binding"] == {
             "schema_version": "scheduler_ack_cli_route_v0",
@@ -168,7 +192,10 @@ def assert_compact_runtime_policy_complete(
         }, (name, compact)
     else:
         assert "route_binding" not in ack_hint, (name, compact)
-    assert ack_cli_args == expected_cli_args, (name, compact)
+    assert ack_cli_args[: len(expected_cli_prefix)] == expected_cli_prefix, (name, compact)
+    assert ack_cli_args[-len(expected_cli_suffix) :] == expected_cli_suffix, (name, compact)
+    host_fact_args = ack_cli_args[len(expected_cli_prefix) : -len(expected_cli_suffix)]
+    assert scheduler_host_fact_chunks(host_fact_args), (name, compact)
     failure_cli_args = failure_hint["cli_args"]
     assert failure_hint["schema_version"] == "codex_app_scheduler_failure_hint_v0", (
         name,
@@ -317,12 +344,10 @@ def assert_compact_scheduler(name: str, source_payload: dict) -> None:
     assert "automation_update" in reset_detail["codex_app_apply"], (name, detailed)
     assert len(reset_detail["profile_signature"]) == 12, (name, detailed)
     assert json_size(compact) < json_size(detailed), (name, json_size(compact), json_size(detailed))
-    # #3053-era scheduler-ack/failure route_binding and #3058's required
-    # codex_app.fallback_hint grew the shipped compact hot path. Measured at
-    # ec37e88f: active-work=4523, human-gate=4692, cli-default=5784 (local).
-    # Keep the budget tight but above the shipped-contract size with a small
-    # margin for runner path variance.
-    assert json_size(compact) <= 6_200, (name, json_size(compact))
+    # Native scheduler follow-up embeds bounded host-fact chunks in the ack and
+    # failure argv. Keep the compact packet bounded while allowing that signed
+    # transport payload and path variance.
+    assert json_size(compact) <= 16_000, (name, json_size(compact))
 
 
 def run_should_run_cli(

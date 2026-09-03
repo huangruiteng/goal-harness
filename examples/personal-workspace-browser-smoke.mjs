@@ -2,6 +2,7 @@
 // Focused browser smoke for the personal Agent workspace first screen and interactions.
 
 import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,44 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dashboardDir = resolve(repoRoot, "apps/presentation/dashboard");
 const outputDir = resolve(repoRoot, "output/playwright/personal-workspace");
 const port = Number(process.env.LOOPX_PERSONAL_WORKSPACE_PORT ?? "5196");
+const packaged = process.env.LOOPX_PERSONAL_WORKSPACE_PACKAGED === "1";
+
+const periodicReportProjection = {
+  schema_version: "periodic_report_workspace_projection_v0",
+  goal_id: "product-release",
+  agent_id: "codex",
+  generation_id: "generation-workspace-smoke",
+  generated_at: "2026-09-01T10:00:00Z",
+  title: "Product Release milestone report",
+  summary: "A verified incremental report shown with the Goal's other durable outputs.",
+  content_sha256: `sha256:${"7".repeat(64)}`,
+  period_window: { start_at: "2026-08-25T10:00:00Z", end_at: "2026-09-01T10:00:00Z" },
+  interaction: { attention_kind: "progress", interaction: "inform", delivery: "surface", form: "milestone_report", writable: false },
+  delta: {
+    added_count: 1,
+    changed_count: 1,
+    item_count: 2,
+    items: [
+      { fact_id: "fact-added", source_ref: "todo:release-ready", title: "Release candidate verified", summary: "The candidate passed the bounded verification suite.", status: "done", content_kind: "outcome", change_kind: "added" },
+      { fact_id: "fact-changed", source_ref: "todo:rollout", title: "Rollout plan updated", summary: "The next rollout step now carries an explicit readback gate.", status: "open", content_kind: "next_action", change_kind: "changed", previous_status: "blocked" },
+    ],
+  },
+  publication: { publication_id: "publication-workspace-smoke", delivered_at: "2026-09-01T10:05:00Z", predecessor_publication_id: "publication-workspace-previous", cursor_id: "cursor-workspace-smoke" },
+  truth_contract: { published_cursor_is_source_of_truth: true, generation_receipt_is_delivery_receipt: false, projection_is_writable: false, browser_write_api: false },
+};
+
+function startServer() {
+  if (packaged) {
+    return spawn(process.env.LOOPX_PYTHON_BIN || "python3", [
+      "-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", resolve(repoRoot, "loopx/web"),
+    ], {
+      cwd: repoRoot,
+      env: { ...process.env },
+      stdio: "ignore",
+    });
+  }
+  return startViteDashboardServer({ dashboardDir, port });
+}
 
 async function visibleElementCount(locator) {
   return locator.evaluateAll((elements) => elements.filter((element) => {
@@ -41,6 +80,7 @@ async function installApi(page) {
     durableResources: new Set(),
     durableWriteCount: 0,
     failNextLifecycleApply: false,
+    failNextLifecyclePreview: false,
     failNextStatusRequest: false,
     goalActivationStates: new Map([
       ["product-release", "active"],
@@ -53,6 +93,7 @@ async function installApi(page) {
     actionTransitions: [],
     allowNextHeartbeatApply: false,
     nextLifecycleApplyDelayMs: 0,
+    nextLifecyclePreviewDelayMs: 0,
     nextStatusDelayMs: 0,
     statusRequestCount: 0,
     turnRequests: [],
@@ -61,9 +102,15 @@ async function installApi(page) {
   await page.route(`http://127.0.0.1:${port}/status.json`, async (route) => {
     state.statusRequestCount += 1;
     const fixture = structuredClone(require(resolve(repoRoot, "examples/status.example.json")));
+    fixture.local_dashboard_api = {
+      ...(fixture.local_dashboard_api ?? {}),
+      periodic_report_index_url: "/periodic-report-workspace",
+      periodic_report_detail_url: "/periodic-report-workspace-projection",
+    };
     const directoryFixtures = [
       { id: "product-release", display_name: "Product Release" },
       { id: "research-monitor", display_name: "Research Monitor" },
+      { id: "progress-projection", display_name: "Progress Projection" },
       { id: "legacy-benchmark", display_name: "Legacy Benchmark" },
       { id: "archived-notes", display_name: "Archived Notes" },
     ];
@@ -100,6 +147,79 @@ async function installApi(page) {
         total_count: 1,
       };
     }
+    if (!fixture.attention_queue.items.some((item) => item.goal_id === "progress-projection")) {
+      const idlessLongTitle = `Idless long Todo ${"projection identity ".repeat(16)}keeps one card`;
+      const currentTodo = {
+        done: false,
+        index: 4,
+        role: "agent",
+        status: "open",
+        task_class: "advancement_task",
+        text: "Current Todo",
+        title: "Current Todo",
+        todo_id: "todo-progress-current",
+      };
+      fixture.attention_queue.items.push({
+        agent_todos: {
+          advancement_done_count: 42,
+          done_count: 4,
+          items: [
+            currentTodo,
+            { done: false, index: 5, role: "agent", status: "open", task_class: "advancement_task", text: idlessLongTitle, title: idlessLongTitle },
+            { done: true, index: 1, role: "agent", status: "done", task_class: "advancement_task", text: "Completed A", title: "Completed A", todo_id: "todo-progress-a" },
+            { done: true, index: 2, role: "agent", status: "done", task_class: "advancement_task", text: "Completed B", title: "Completed B", todo_id: "todo-progress-b" },
+            { done: true, index: 3, role: "agent", status: "done", task_class: "advancement_task", text: "Completed C", title: "Completed C", todo_id: "todo-progress-c" },
+            { done: true, index: 6, role: "agent", status: "done", task_class: "continuous_monitor", text: "Completed Monitor", title: "Completed Monitor", todo_id: "todo-progress-monitor" },
+          ],
+          open_count: 2,
+          source_section: "Agent Todo",
+          total_count: 6,
+        },
+        goal_id: "progress-projection",
+        project_asset: {
+          agent_todos: {
+            advancement_done_count: 42,
+            done: 4,
+            items: [
+              currentTodo,
+              { done: false, index: 5, role: "agent", status: "open", task_class: "advancement_task", text: idlessLongTitle.slice(0, 220), title: idlessLongTitle.slice(0, 220) },
+            ],
+            open: 2,
+            recent_completed_advancement_items: [
+              { done: true, index: 1, role: "agent", status: "done", task_class: "advancement_task", text: "Completed A", title: "Completed A", todo_id: "todo-progress-a" },
+              { done: true, index: 2, role: "agent", status: "done", task_class: "advancement_task", text: "Completed B", title: "Completed B", todo_id: "todo-progress-b" },
+              { done: true, index: 3, role: "agent", status: "done", task_class: "advancement_task", text: "Completed C", title: "Completed C", todo_id: "todo-progress-c" },
+            ],
+            total: 6,
+          },
+          gate: "none",
+          next_action: "Current Todo",
+          owner: "example-agent",
+          stop_condition: "All synthetic Todos complete",
+        },
+        recommended_action: "Older Todo",
+        severity: "info",
+        status: "active",
+        waiting_on: "codex",
+      });
+      fixture.agent_management_projection.agents.push({
+        agent_id: "example-agent",
+        current_todo: {
+          action_kind: "synthetic_progress_projection",
+          goal_id: "progress-projection",
+          priority: "P0",
+          role: "agent",
+          status: "open",
+          task_class: "advancement_task",
+          title: "Current Todo",
+          todo_id: "todo-progress-current",
+        },
+        goal_ids: ["progress-projection"],
+        last_activity_at: "2026-08-24T14:53:12+08:00",
+        next_action: "Continue projected todo todo-progress-current.",
+        state: "running",
+      });
+    }
     const delayMs = state.nextStatusDelayMs;
     state.nextStatusDelayMs = 0;
     if (delayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, delayMs));
@@ -109,6 +229,31 @@ async function installApi(page) {
       return;
     }
     await route.fulfill({ contentType: "application/json", json: fixture, status: 200 });
+  });
+  await page.route("**/periodic-report-workspace?*", async (route) => {
+    const goalId = new URL(route.request().url()).searchParams.get("goal_id");
+    const items = goalId === periodicReportProjection.goal_id ? [{
+      goal_id: periodicReportProjection.goal_id,
+      agent_id: periodicReportProjection.agent_id,
+      generation_id: periodicReportProjection.generation_id,
+      publication_id: periodicReportProjection.publication.publication_id,
+      delivered_at: periodicReportProjection.publication.delivered_at,
+      predecessor_publication_id: periodicReportProjection.publication.predecessor_publication_id,
+      detail_ref: {
+        goal_id: periodicReportProjection.goal_id,
+        agent_id: periodicReportProjection.agent_id,
+        generation_id: periodicReportProjection.generation_id,
+        content_sha256: periodicReportProjection.content_sha256,
+      },
+    }] : [];
+    await route.fulfill({
+      contentType: "application/json",
+      json: { ok: true, periodic_reports: { schema_version: "periodic_report_workspace_index_v0", count: items.length, items } },
+      status: 200,
+    });
+  });
+  await page.route("**/periodic-report-workspace-projection?*", async (route) => {
+    await route.fulfill({ contentType: "application/json", json: { ok: true, projection: periodicReportProjection }, status: 200 });
   });
   await page.route(`http://127.0.0.1:${port}/api/ssh-source/ensure`, async (route) => {
     await route.fulfill({
@@ -306,11 +451,27 @@ async function installApi(page) {
     await route.fulfill({ contentType: "application/json", json: { ok: true }, status: 200 });
   });
   await page.route("**/events/**", async (route) => {
-    const answer = "已沿用当前 Goal 与 Agent Session。接下来会先核对状态，再继续推进。";
     const parts = new URL(route.request().url()).pathname.split("/").filter(Boolean);
     const sessionId = parts[1];
     const turnId = parts[2];
-    await new Promise((resolveWait) => setTimeout(resolveWait, /(中断控制|刷新恢复)/u.test(turnMessages.get(turnId) ?? "") ? 5000 : 1200));
+    const operatorMessage = turnMessages.get(turnId) ?? "";
+    const protectedAction = operatorMessage === "请合并 PR #123"
+      ? { operation: "merge", target: "PR #123", summary: "准备 PR #123 的受保护合并预览。" }
+      : operatorMessage === "请合并我刚才说的那个"
+        ? { operation: "merge", target: "PR #999", summary: "模型错误补出了用户没有提供的目标。" }
+      : null;
+    const answer = operatorMessage === "请只回复：合并后真实回复已收到"
+      ? "合并后真实回复已收到"
+      : operatorMessage === "请分析：合并 PR #123 后会有什么风险"
+        ? "主要风险是检查未完成或目标分支发生变化；这里只做分析，不会创建合并预览。"
+          : operatorMessage === "请合并"
+            ? "请告诉我要合并的具体 PR 或 MR；在目标明确前不会创建执行预览。"
+          : operatorMessage === "请合并我刚才说的那个"
+            ? "这个指代不够明确，请提供具体 PR 或 MR。"
+          : protectedAction
+            ? "我识别到一个明确的合并请求。LoopX 会先展示受保护操作预览，不会直接执行。"
+            : "已沿用当前 Goal 与 Agent Session。接下来会先核对状态，再继续推进。";
+    await new Promise((resolveWait) => setTimeout(resolveWait, /(中断控制|刷新恢复)/u.test(operatorMessage) ? 5000 : 1200));
     const activeSession = sessions.get(sessionId);
     if (!activeSession || activeSession.active_turn_id !== turnId) {
       await route.fulfill({ contentType: "text/event-stream", body: "", status: 200 });
@@ -323,7 +484,7 @@ async function installApi(page) {
       }
     }
     const event = (id, kind, payload) => `id: ${id}\nevent: ${kind}\ndata: ${JSON.stringify({ event_id: id, sequence: Number(id), kind, created_at: "2026-08-13T01:00:02Z", payload })}\n\n`;
-    await route.fulfill({ contentType: "text/event-stream", body: event("1", "assistant.delta", { text: answer }) + event("2", "turn.completed", { response: { schema_version: "loopx_chat_agent_response_v0", message: answer, proposals: [], gate: null } }), status: 200 });
+    await route.fulfill({ contentType: "text/event-stream", body: event("1", "assistant.delta", { text: answer }) + event("2", "turn.completed", { response: { schema_version: "loopx_chat_agent_response_v0", message: answer, proposals: [], protected_action: protectedAction, gate: null } }), status: 200 });
     const current = sessions.get(sessionId);
     if (current?.active_turn_id === turnId) sessions.set(sessionId, { ...current, active_turn_id: null, status: "ready", updated_at: "2026-08-13T01:00:02Z" });
   });
@@ -343,6 +504,18 @@ async function installApi(page) {
     const url = new URL(request.url());
     if (url.pathname === "/api/actions/preview") {
       const body = request.postDataJSON();
+      const lifecycleDelayMs = body.action_kind === "goal.lifecycle" ? state.nextLifecyclePreviewDelayMs : 0;
+      state.nextLifecyclePreviewDelayMs = 0;
+      if (lifecycleDelayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, lifecycleDelayMs));
+      if (body.action_kind === "goal.lifecycle" && state.failNextLifecyclePreview) {
+        state.failNextLifecyclePreview = false;
+        await route.fulfill({
+          contentType: "application/json",
+          json: { error: "Lifecycle preview temporarily unavailable", error_code: "preview_unavailable", ok: false },
+          status: 503,
+        });
+        return;
+      }
       const proposal_id = `proposal-${body.idempotency_key}`;
       actionKinds.set(proposal_id, body.action_kind);
       state.actionPreviews.push({ ...body, proposalId: proposal_id });
@@ -480,10 +653,10 @@ async function main() {
   const observations = [];
   const pass = (criterion, note) => results.set(criterion, { status: "PASS", note });
   const fail = (criterion, note) => results.set(criterion, { status: "FAIL", note });
-  const server = startViteDashboardServer({ dashboardDir, port });
+  const server = startServer();
   let browser;
   try {
-    const url = `http://127.0.0.1:${port}/?statusUrl=/status.json`;
+    const url = `http://127.0.0.1:${port}/${packaged ? "chat/" : ""}?statusUrl=/status.json`;
     await waitForHttp(url);
     browser = await launchBrowser(chromium);
     const page = await browser.newPage({ viewport: { width: 1512, height: 982 } });
@@ -519,28 +692,31 @@ async function main() {
     if (await page.locator(".personal-digest-stats button").count()) throw new Error("Away digest still behaves like hidden channel navigation");
     if (body.includes("Agent 设置")) throw new Error("Sidebar still exposes the read-only Agent settings dead end");
     if (await page.locator(".personal-global-rail").count()) throw new Error("Old icon rail is visible");
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 3) throw new Error("Active Goal directory did not exclude stopped Goals");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("Active Goal directory did not exclude stopped Goals");
     const stoppedDirectory = page.locator(".personal-stopped-goals");
     if (!(await stoppedDirectory.isVisible()) || await stoppedDirectory.getAttribute("open") !== null) throw new Error("Stopped Goals are not available in a collapsed directory section");
     const writesBeforeLifecyclePreview = api.durableWriteCount;
-    await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
-    await page.getByText("确认执行", { exact: true }).waitFor({ state: "visible" });
-    const stopPreview = api.actionPreviews.findLast((preview) => preview.action_kind === "goal.lifecycle" && preview.normalized_parameters.operation === "stop");
-    if (!stopPreview || stopPreview.normalized_parameters.goal_id !== "product-release") throw new Error("Goal stop did not create the expected typed preview");
-    if (api.durableWriteCount !== writesBeforeLifecyclePreview) throw new Error("Goal stop preview wrote state before owner confirmation");
     const statusRequestsBeforeStop = api.statusRequestCount;
+    api.nextLifecyclePreviewDelayMs = 900;
     api.nextLifecycleApplyDelayMs = 900;
     api.nextStatusDelayMs = 900;
-    await page.getByRole("button", { name: "停止 Goal", exact: true }).click();
+    await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
     await page.waitForFunction(
-      () => document.querySelectorAll(".personal-goal-list:not(.is-stopped) .personal-goal-row").length === 2,
+      () => document.querySelectorAll(".personal-goal-list:not(.is-stopped) .personal-goal-row").length === 3,
       null,
       { timeout: 600 },
     );
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 2) throw new Error("Optimistic Goal stop did not update the active sidebar immediately");
+    const pendingStop = page.locator('.personal-stopped-goals .personal-goal-lifecycle[aria-label="恢复 Product Release"]');
+    if (await pendingStop.getAttribute("aria-busy") !== "true") throw new Error("Pending Goal stop does not expose accessible progress");
+    await page.waitForTimeout(1_000);
+    const stopPreview = api.actionPreviews.findLast((preview) => preview.action_kind === "goal.lifecycle" && preview.normalized_parameters.operation === "stop");
+    if (!stopPreview || stopPreview.normalized_parameters.goal_id !== "product-release") throw new Error("Goal stop did not create the expected typed preview");
+    if (api.durableWriteCount !== writesBeforeLifecyclePreview) throw new Error("Goal stop wrote durable state before its typed apply completed");
+    if (await page.getByText("确认执行", { exact: true }).count()) throw new Error("Goal stop still opened a redundant confirmation drawer");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 3) throw new Error("Optimistic Goal stop did not update the active sidebar immediately");
     await page.waitForTimeout(2_000);
     if (api.statusRequestCount <= statusRequestsBeforeStop) throw new Error("Successful Goal stop did not start background full-status reconciliation");
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 2) throw new Error("Full-status reconciliation reverted a successful Goal stop");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 3) throw new Error("Full-status reconciliation reverted a successful Goal stop");
     await stoppedDirectory.locator("summary").click();
     await page.getByRole("button", { name: "恢复 Product Release", exact: true }).click();
     await page.getByText("确认执行", { exact: true }).waitFor({ state: "visible" });
@@ -551,36 +727,37 @@ async function main() {
     await page.getByRole("button", { name: "恢复 Goal", exact: true }).click();
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).waitFor({ state: "attached", timeout: 600 });
     await page.waitForTimeout(1_100);
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 3) throw new Error("Full-status reconciliation reverted a successful Goal resume");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("Full-status reconciliation reverted a successful Goal resume");
 
-    await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
-    await page.getByText("确认执行", { exact: true }).waitFor({ state: "visible" });
     api.nextStatusDelayMs = 1_600;
-    await page.getByRole("button", { name: "停止 Goal", exact: true }).click();
+    await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
     await page.getByRole("button", { name: "恢复 Product Release", exact: true }).waitFor({ state: "attached" });
     await page.getByRole("button", { name: "恢复 Product Release", exact: true }).click();
     await page.getByText("确认执行", { exact: true }).waitFor({ state: "visible" });
     await page.getByRole("button", { name: "恢复 Goal", exact: true }).click();
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).waitFor({ state: "attached" });
     await page.waitForTimeout(1_800);
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 3) throw new Error("A stale background response overwrote a newer optimistic Goal transition");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("A stale background response overwrote a newer optimistic Goal transition");
 
+    api.failNextLifecyclePreview = true;
+    api.nextLifecyclePreviewDelayMs = 900;
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
-    await page.getByText("确认执行", { exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "恢复 Product Release", exact: true }).waitFor({ state: "attached", timeout: 600 });
+    await page.getByRole("button", { name: "停止 Product Release", exact: true }).waitFor({ state: "attached", timeout: 2_000 });
+    if (api.goalActivationStates.get("product-release") !== "active") throw new Error("Rejected Goal stop preview mutated the durable fixture state");
+
     api.failNextLifecycleApply = true;
     api.nextLifecycleApplyDelayMs = 900;
-    await page.getByRole("button", { name: "停止 Goal", exact: true }).click();
+    await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
     await page.getByRole("button", { name: "恢复 Product Release", exact: true }).waitFor({ state: "attached", timeout: 600 });
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).waitFor({ state: "attached", timeout: 2_000 });
     if (api.goalActivationStates.get("product-release") !== "active") throw new Error("Rejected Goal stop mutated the durable fixture state");
-    await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
-    await page.getByText("确认执行", { exact: true }).waitFor({ state: "visible" });
     api.failNextStatusRequest = true;
     api.nextStatusDelayMs = 400;
-    await page.getByRole("button", { name: "停止 Goal", exact: true }).click();
+    await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
     await page.waitForTimeout(900);
     if (await page.getByText("无法读取状态", { exact: false }).count()) throw new Error("Background lifecycle reconciliation replaced the workspace with a fatal status error");
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 2) throw new Error("Background reconciliation failure reverted the successful optimistic Goal state");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 3) throw new Error("Background reconciliation failure reverted the successful optimistic Goal state");
     const closeLifecycleDrawer = page.getByRole("button", { name: "关闭", exact: true });
     if (await closeLifecycleDrawer.count()) await closeLifecycleDrawer.click();
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -588,7 +765,7 @@ async function main() {
     if (stoppedChevronTransition !== "0s") throw new Error(`Stopped Goals disclosure ignores reduced motion: ${stoppedChevronTransition}`);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.screenshot({ path: resolve(outputDir, "goal-lifecycle-directory.png"), fullPage: false, animations: "disabled" });
-    pass(1, "Goal stop/resume updates the sidebar optimistically, rolls back a rejected apply, and still reconciles the full status payload in the background.");
+    pass(1, "Goal stop applies directly without a redundant confirmation, while resume stays reviewed; both update optimistically, roll back rejected applies, and reconcile status in the background.");
     if (await page.locator(".personal-timeline-row").filter({ hasText: /纠偏/u }).count()) throw new Error("Browse rows expose repeated correction actions");
     pass(2, "Browse rows are full-row click targets and Session rows state that they open execution progress and results.");
     await page.screenshot({ path: resolve(outputDir, "desktop-first-screen.png"), fullPage: false, animations: "disabled" });
@@ -837,6 +1014,17 @@ async function main() {
     const goalNavigation = page.getByRole("navigation", { name: "Goal 视图" });
     const defaultTasksTab = goalNavigation.getByRole("button", { name: "Tasks" });
     if (await defaultTasksTab.getAttribute("aria-current") !== "page") throw new Error("Selecting a Goal did not prioritize its Tasks view");
+    await page.locator(".personal-goal-link", { hasText: "Progress Projection" }).click();
+    await page.getByRole("heading", { name: "Progress Projection" }).waitFor({ state: "visible" });
+    const progressHeader = page.locator(".personal-channel-title p");
+    if (!(await progressHeader.innerText()).includes("Current Todo")) throw new Error(`Goal header did not prefer the current Todo: ${await progressHeader.innerText()}`);
+    const progressColumn = page.locator(".personal-object-list", { hasText: "待执行 / 进行中" });
+    if ((await progressColumn.locator(".personal-task-card").count()) !== 2) throw new Error("Id-less long Todo was duplicated across compact and full projections");
+    const completedColumn = page.locator(".personal-object-list", { hasText: "已完成" }).last();
+    await completedColumn.getByText("42", { exact: true }).waitFor({ state: "visible" });
+    await completedColumn.getByText("Completed A", { exact: true }).waitFor({ state: "visible" });
+    if (await completedColumn.getByText("Completed Monitor", { exact: true }).count()) throw new Error("Completed continuous monitor leaked into the completed Tasks column");
+    await goalButton.click();
     const readBoardGeometry = async () => {
       const kanban = page.locator(".personal-task-kanban");
       await kanban.waitFor({ state: "visible" });
@@ -968,12 +1156,41 @@ async function main() {
     await editDialog.getByRole("button", { name: "取消" }).click();
     await page.screenshot({ path: resolve(outputDir, "lark-goal-connections.png"), fullPage: false, animations: "disabled" });
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
+    await selectProductReleaseGoal();
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Tasks" }).click();
     await page.locator(".personal-object-list").first().waitFor({ state: "visible" });
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Files" }).click();
+    const reportOutput = page.getByTestId("personal-goal-outputs").getByRole("button", { name: /Product Release milestone report/ });
+    await reportOutput.waitFor({ state: "visible" });
+    await reportOutput.click();
+    await page.getByTestId("personal-periodic-report-detail").getByText("Release candidate verified", { exact: true }).waitFor({ state: "visible" });
+    await page.getByTestId("personal-periodic-report-detail").getByText("Rollout plan updated", { exact: true }).waitFor({ state: "visible" });
+    if (await page.locator('[data-testid="frontstage-milestone-reports"]').count()) throw new Error("Milestone report still rendered in the deprecated Ops Frontstage");
+    await page.getByRole("button", { name: /关闭详情/ }).click();
+    await selectFirstGoal();
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Chat" }).click();
 
     const composer = page.getByLabel("向 LoopX 发送消息");
+    const previewCountBeforeSemanticIntent = api.actionPreviews.length;
+    async function expectConversationalProtectedTurn(message, answer, previewError) {
+      await composer.fill(message);
+      await page.getByRole("button", { name: "发送", exact: true }).click();
+      await page.getByText(answer, { exact: true }).last().waitFor({ state: "visible", timeout: 10_000 });
+      if (api.actionPreviews.length !== previewCountBeforeSemanticIntent) throw new Error(previewError);
+    }
+    await expectConversationalProtectedTurn("请只回复：合并后真实回复已收到", "合并后真实回复已收到", "An exact-wording protected-action mention created a typed preview");
+    await expectConversationalProtectedTurn("请分析：合并 PR #123 后会有什么风险", "主要风险是检查未完成或目标分支发生变化；这里只做分析，不会创建合并预览。", "Protected-action analysis created a typed preview");
+    await expectConversationalProtectedTurn("请合并", "请告诉我要合并的具体 PR 或 MR；在目标明确前不会创建执行预览。", "A targetless protected action created an incomplete preview");
+    await expectConversationalProtectedTurn("请合并我刚才说的那个", "这个指代不够明确，请提供具体 PR 或 MR。", "A model-invented protected target created a typed preview");
+
+    await composer.fill("请合并 PR #123");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await page.getByText("确认执行").waitFor({ state: "visible", timeout: 10_000 });
+    const protectedMerge = api.actionPreviews.find((preview) => preview.action_kind === "goal.update" && preview.summary.includes("PR #123"));
+    if (!protectedMerge) throw new Error("A clear Agent semantic proposal did not create the protected typed preview");
+    await page.screenshot({ path: resolve(outputDir, "semantic-protected-action-preview.png"), fullPage: false, animations: "disabled" });
+    await page.getByRole("button", { name: "关闭", exact: true }).click();
+
     await composer.fill("添加一个「补充回归测试」普通 Todo，并交给 Codex。不要设置 Heartbeat，也不要创建定时检查");
     await page.getByRole("button", { name: "发送", exact: true }).click();
     await page.getByText("确认执行").waitFor({ state: "visible" });
@@ -1078,7 +1295,7 @@ async function main() {
     await page.getByRole("button", { name: "确认并应用", exact: true }).click();
     await page.getByText("需要宿主确认").waitFor({ state: "visible" });
     if (api.durableWriteCount !== writesBeforeHeartbeat) throw new Error("Protected heartbeat gate wrote durable state");
-    pass(8, "Preview and protected-gate paths performed zero durable writes before confirmation.");
+    pass(8, "Agent semantic protected intent creates only a typed preview, while discussion and targetless requests remain conversational and all protected-gate paths perform zero durable writes before confirmation.");
     pass(11, "Heartbeat apply surfaced an explicit host-activation gate.");
     const heartbeatPreview = api.actionPreviews.find((preview) => preview.action_kind === "heartbeat.bind");
     if (!heartbeatPreview) throw new Error("Continuation intent did not map to heartbeat.bind");
@@ -1086,30 +1303,51 @@ async function main() {
 
     await page.getByRole("button", { name: "Goal 详情" }).click();
     await page.getByRole("button", { name: "Tasks" }).click();
-    const taskRow = page.locator(".personal-object-list", { hasText: "进行中" }).locator("button").first();
+    const taskCards = page.locator(".personal-object-list", { hasText: "进行中" }).locator(".personal-task-card");
+    const taskRow = taskCards.first().locator(":scope > button");
     await taskRow.click();
-    await page.getByText("Todo 详情").waitFor({ state: "visible" });
-    await page.getByRole("button", { name: "查看处理方式" }).click();
+    const taskInspector = page.getByRole("dialog", { name: "Todo 详情" });
+    await taskInspector.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.querySelector('[data-context-drawer]')?.contains(document.activeElement));
+    const mainBox = await page.locator(".personal-workspace-main").boundingBox();
+    const inspectorBox = await page.locator('[data-context-drawer][data-drawer-mode="inspector"]').boundingBox();
+    if (!mainBox || !inspectorBox || mainBox.x + mainBox.width > inspectorBox.x + 1) throw new Error("Half-screen Todo inspector covered the task board instead of occupying its own layout column");
+    if (!(await page.locator(".personal-task-card.is-selected").isVisible())) throw new Error("Opening a Todo did not keep its selected card visible in the board viewport");
+    await page.getByRole("button", { name: "切换到全屏", exact: true }).click();
+    if (await page.locator(".personal-workspace-main").isVisible()) throw new Error("Full-screen Todo inspector left the board visible");
+    await page.getByRole("button", { name: "切换到半屏", exact: true }).click();
+    if (!(await page.locator(".personal-workspace-main").isVisible())) throw new Error("Half-screen Todo inspector did not restore the board");
+    if (await taskCards.count() < 2) throw new Error("Todo focus smoke requires two task cards");
+    const secondTaskRow = taskCards.nth(1).locator(":scope > button");
+    await secondTaskRow.click();
+    await page.waitForFunction(() => document.activeElement?.id === "personal-drawer-title");
+    await page.getByRole("button", { name: /关闭详情/ }).click();
+    await page.waitForFunction(() => document.activeElement?.closest(".personal-task-card") === document.querySelectorAll(".personal-task-card")[1]);
+    await taskRow.click();
+    let taskManagement = page.locator("details.personal-task-management");
+    await taskManagement.locator("summary").click();
+    await taskManagement.locator(".personal-inline-agent-select", { hasText: "改派给" }).getByRole("button", { name: "查看处理方式", exact: true }).click();
     await page.getByText("确认执行").waitFor({ state: "visible" });
     if (!api.actionPreviews.some((preview) => preview.action_kind === "todo.update" && preview.normalized_parameters.operation === "reassign")) throw new Error("Todo reassign did not create a typed preview");
     await page.getByRole("button", { name: "关闭", exact: true }).click();
     await taskRow.click();
+    taskManagement = page.locator("details.personal-task-management");
+    await taskManagement.locator("summary").click();
     await page.getByLabel("Todo 暂缓恢复条件").fill("pr_merged:huangruiteng/loopx#3399");
     await page.screenshot({ path: resolve(outputDir, "todo-defer-resume-condition.png"), fullPage: false, animations: "disabled" });
-    await page.getByRole("button", { name: "检查暂缓", exact: true }).click();
+    await taskManagement.locator(".personal-inline-resume-when").getByRole("button", { name: "检查暂缓" }).click();
     await page.getByText("确认执行").waitFor({ state: "visible" });
     const explicitDefer = api.actionPreviews.findLast((preview) => preview.action_kind === "todo.update" && preview.normalized_parameters.operation === "defer");
     if (explicitDefer?.normalized_parameters.resume_when !== "pr_merged:huangruiteng/loopx#3399") throw new Error(`Todo defer did not preserve its supported resume condition: ${JSON.stringify(explicitDefer)}`);
     if (JSON.stringify(api.actionPreviews).includes("owner_resume")) throw new Error("Personal Workspace emitted the unsupported owner_resume sentinel");
     await page.getByRole("button", { name: "关闭", exact: true }).click();
-    for (const [label, actionKind, operation] of [
-      ["标记阻塞", "todo.update", "block"],
-      ["标记完成", "todo.update", "complete"],
-      ["创建后续 Todo", "todo.create", null],
+    for (const [label, actionKind, operation, managementAction] of [
+      ["标记阻塞", "todo.update", "block", true],
+      ["标记完成", "todo.update", "complete", false],
+      ["创建后续 Todo", "todo.create", null, true],
     ]) {
       await taskRow.click();
-      const moreMenu = page.locator("details.personal-compact-menu", { hasText: "更多操作" });
-      if (!(await moreMenu.getAttribute("open"))) await moreMenu.locator("summary").click();
+      if (managementAction) await page.locator("details.personal-task-management").locator("summary").click();
       await page.getByRole("button", { name: label, exact: true }).click();
       await page.getByText("确认执行").waitFor({ state: "visible" });
       if (!api.actionPreviews.some((preview) => preview.action_kind === actionKind && (operation === null || preview.normalized_parameters.operation === operation))) throw new Error(`Todo ${label} did not create the expected typed preview`);
@@ -1199,6 +1437,11 @@ async function main() {
     const rowHandle = page.locator(".personal-run-row").first();
     await page.getByRole("button", { name: /关闭详情/ }).press("Escape");
     await rowHandle.waitFor({ state: "visible" });
+    await page.waitForFunction(
+      () => document.activeElement?.classList.contains("personal-run-row"),
+      null,
+      { timeout: 2_000 },
+    );
     if (!(await rowHandle.evaluate((element) => element === document.activeElement))) throw new Error("Drawer Escape did not restore focus to the selected row");
 
     await page.getByRole("button", { name: /LoopX 管家/ }).first().click();
@@ -1296,9 +1539,9 @@ async function main() {
     await remote.locator(".personal-goal-link").first().click();
     await remote.getByRole("button", { name: "Tasks", current: "page" }).waitFor({ state: "visible" });
     await remote.locator(".personal-object-list", { hasText: "进行中" }).locator("button").first().click();
-    await remote.getByText("Todo 详情").waitFor({ state: "visible" });
+    await remote.getByRole("dialog", { name: "Todo 详情" }).waitFor({ state: "visible" });
     const remoteTodoDrawer = remote.getByRole("dialog", { name: "Todo 详情" });
-    for (const label of ["标记完成", "检查变更", "检查暂缓"]) {
+    for (const label of ["标记完成", "管理任务"]) {
       const visibleMatches = await visibleElementCount(remoteTodoDrawer.getByRole("button", { name: label, exact: true }));
       if (visibleMatches) throw new Error(`Remote Todo drawer exposed ${label}`);
     }
@@ -1395,7 +1638,7 @@ async function main() {
     pass(20, "Empty and populated Tasks boards keep identical width and four equal columns at desktop and wide desktop viewports.");
     const report = { criteria: Object.fromEntries(results), observations };
     await writeFile(resolve(outputDir, "acceptance-results.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
-    console.log(`personal-workspace-browser-smoke: ok\npreview=${url}\nscreenshot=${resolve(outputDir, "desktop-first-screen.png")}`);
+    console.log(`personal-workspace-browser-smoke (${packaged ? "packaged" : "development"}): ok\npreview=${url}\nscreenshot=${resolve(outputDir, "desktop-first-screen.png")}`);
     const failures = [...results.entries()].filter(([, result]) => result.status !== "PASS");
     if (failures.length) throw new Error(`Acceptance failures: ${failures.map(([criterion, result]) => `${criterion} ${result.status}: ${result.note}`).join(" | ")}`);
   } finally {

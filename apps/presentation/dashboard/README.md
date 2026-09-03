@@ -35,34 +35,30 @@ project summaries.
 also starts the loopback status and Chat services and therefore requires a
 Python 3.11+ interpreter; see the development section below.
 
-The first read-only channel frontstage lives at `/frontstage`. It renders a
-public-safe `goal_channel_projection_v0` fixture as a dense channel board with
-decision, quota, user todo, agent todo, active-claim, open-gate, artifact,
-timeline, and truth contract lanes. Treat it as the product-path replacement for expanding the
-no-dependency static HTML renderer; the Python renderer remains the fallback
-demo/diagnostic surface.
+The public Frontstage lives at `/frontstage`. It renders only the public-safe
+showcase catalog and bundled presentation fixtures. The former dense
+`goal_channel_projection_v0` board is quarantined as a deprecated diagnostic
+surface; Personal Workspace is the product path for live operator workflows.
 The product interaction baseline lives in
 `docs/product/surfaces/frontstage-dashboard-interaction-baseline.md`: showcase mode is
 the public case-driven homepage surface, while `mode=ops` is the dense,
-read-only control-plane workspace.
+read-only legacy diagnostic workspace. Its canonical route is now
+`/deprecated/frontstage/ops`; the old `mode=ops` URL redirects there. Personal
+Workspace (`/`) owns Goal workflows, outputs, and milestone reports.
 
-The frontstage first screen is meant to teach the control-plane model before a
-developer reads raw status JSON. The top operations strip answers whether the
-human gate is explicit, whether agent work is active, how many lanes are
-claimed, and whether recent evidence exists. The `Role Map` then separates the
-owner, agent lane, and claim-owner responsibilities so a new contributor can
-tell which part of the system is waiting, running, or coordinating side work.
-In ops mode, the user/agent todo lanes also have URL-backed search and lane
-filters so a developer can reproduce the exact projected candidate slice during
-review without changing the underlying LoopX state.
+The public first screen teaches the control-plane model without reading status
+JSON: its signal strip summarizes human judgment, asynchronous agent teams,
+public cases, and the live-data boundary. The deprecated diagnostic route keeps
+the old `Role Map`, projected todo lanes, search, and lane filters only so a
+developer can reproduce an existing status slice during migration.
 The `Efficiency Evidence` panel pulls the public-safe self-iteration case from
 the showcase catalog so the hosted frontstage can show commit-backed baseline,
 actual-window, compression, and evidence-boundary signals without exposing raw
 sessions. The `Async Work Loop` and `Showcase Cases` panels render the same
 catalog as animated narrative lanes and compact case cards, linking back to
-public GitHub case pages for deeper reading. Operations lanes are derived from
-the read-only projection; showcase panels are derived only from public-safe
-showcase metadata. Neither surface is browser write authority.
+public GitHub case pages for deeper reading. Legacy diagnostic lanes are
+derived from the read-only projection; Showcase panels are derived only from
+public-safe showcase metadata. Neither surface is browser write authority.
 
 The default frontstage route is public showcase mode. It ignores `statusUrl`
 and renders only bundled showcase/demo material, so a copied or hosted URL does
@@ -70,7 +66,7 @@ not accidentally project local registry state.
 `examples/fixtures/frontstage-private-status-trap.public.json` is the synthetic
 negative fixture for that boundary: browser smokes prove its `GH_FAKE_*` live
 status markers stay out of showcase URLs and appear only after an explicit
-`mode=ops` load.
+deprecated diagnostics load.
 
 For contributor onboarding, use `/frontstage?mode=developer`. This is still a
 public-safe read-only view: it shows the agent-first start path, quota/status
@@ -86,8 +82,8 @@ so new projection work does not require reverse-engineering the large
 dashboard page. It uses static public contracts and fixtures only; live status
 feeds, registry files, and browser write APIs stay out of this route.
 
-For live local control-plane inspection, explicitly enter ops mode:
-`/frontstage?mode=ops&statusUrl=http://127.0.0.1:8766/status.json`. The route
+For legacy live local control-plane inspection, explicitly enter the deprecated route:
+`/deprecated/frontstage/ops?statusUrl=http://127.0.0.1:8766/status.json`. The route
 then reads `attention_queue.items[].goal_channel_projection` and stays
 read-only; if the feed is missing or has no projection, the bundled demo
 fixture remains visible. Ops-mode status sources are limited to relative or
@@ -97,7 +93,8 @@ with schema-version freshness checks, stale-daemon repair copy, and a
 `local_dashboard_api` capability projection. It remains read-only by default:
 reward or control-plane write affordances require explicit loopback opt-in,
 advertised capability URLs, and preview-locked local APIs. Do not use ops-mode
-URLs as public links.
+URLs as public links. Its implementation is isolated under
+`src/views/deprecated/`; `src/views/frontstage-page.tsx` remains Showcase-only.
 
 To create a public-safe static bundle for demos, Lark shares, or future GitHub
 Pages hosting, export the frontstage with the sanitized fixture:
@@ -126,9 +123,18 @@ From any directory after installing LoopX:
 loopx dashboard
 ```
 
-This command installs the dashboard's npm dependencies on first run, then
-starts the Vite UI together with the loopback status and Chat services. Open
-`http://127.0.0.1:5173/` after the readiness messages appear.
+This one command serves the packaged Personal Workspace, status projection, and
+Agent Chat from the same process. It opens the browser by default. For a
+headless launch, run `loopx dashboard --no-open` and open the URL printed by the
+command; the default is `http://127.0.0.1:8767/chat/`. Installed use does not
+require a separate `loopx serve-status` process or npm dependency installation.
+
+The packaged UI and status projection can be read back from that same process:
+
+```bash
+curl -fsS http://127.0.0.1:8767/chat/ >/dev/null
+curl -fsS http://127.0.0.1:8767/status.json
+```
 
 If a LoopX Chat service is already running on the default port (for example
 started by the Tauri desktop shell), `loopx dashboard` detects it by its exact
@@ -137,8 +143,7 @@ URL and opens the browser/PWA route, then exits without starting a second
 server. The desktop shell reuses the same services in the opposite order, so
 the browser/PWA and native entry points can be started in either order.
 
-The equivalent source-checkout command remains available for dashboard
-development:
+Source-checkout development is a separate mode:
 
 ```bash
 npm ci
@@ -189,9 +194,10 @@ It provides a unified, coherent experience for managing long-running agent Goals
   - **Context Drawer**: Goal diagnosis, repository bindings, Lark Topic connections, and session health.
 
 - **Action Safety & Control Plane**:
-  Durable modifications to Goals, Todos, Heartbeats, monitors, or settings follow the typed preview → explicit user confirmation → verified receipt protocol. The browser never performs unmediated direct writes to control-plane truth.
+  Durable modifications to Goals, Todos, Heartbeats, monitors, or settings follow the typed preview → governed apply → verified receipt protocol. Presentation follows risk and reversibility: protected or irreversible actions remain review-first, while the reversible Goal pause below applies a ready preview directly and escalates stale or newly gated results back to review. The browser never performs unmediated direct writes to control-plane truth.
   The Goal directory keeps only active Goals in its main list. Use the pause action
-  beside a Goal to preview and confirm a reversible stop; stopped Goals retain their
+  beside a Goal to apply a reversible stop in one click; persistent feedback reports
+  the result, and stopped Goals retain their
   Todos, history, and evidence in a collapsed **Stopped Goals** section and can be
   restored from the same section. Stopping a Goal pauses automatic Agent turns; it
   does not mark the Goal complete or delete state. A stopped Goal leaves active

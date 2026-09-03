@@ -15,6 +15,29 @@ const authority = {
   effect_class: "external_write",
 } as const;
 
+const settlementIdentity = {
+  schema_version: "quota_settlement_identity_v0",
+  goal_id: "fixture-goal",
+  agent_id: "fixture-agent",
+  todo_id: "todo_fixture",
+  turn_instance_id: "fixture-turn",
+  effect_id: authority.effect_id,
+};
+
+const providerRequest = {
+  invocation_id: authority.invocation_id,
+  authority: settlementIdentity,
+  lifecycle: {
+    phase: "start",
+    idempotency_key: authority.effect_id,
+  },
+};
+
+const providerRequestDigest =
+  "sha256:76b78b8c551187420d89b4525a86d06f92d0eb1b4a7aadc65eadc38c8ec03770";
+const effectReceiptDigest =
+  "sha256:8bb4405904cc29c96d4124430ec162409db148b856a57371801848b9bd4e8050";
+
 const transitionContract = {
   proposal_kinds: [
     "continuous_monitor_upsert",
@@ -72,6 +95,60 @@ function result(status: "running" | "succeeded" | "no_change") {
   };
 }
 
+function lifecycleJournal(
+  status: "starting" | "running" | "ready_to_settle" | "settlement_failed" | "committed",
+  providerResult: ReturnType<typeof result> | null,
+) {
+  return {
+    schema_version: "loopx_governed_capability_run_v0",
+    status,
+    invocation_id: authority.invocation_id,
+    request_digest: providerRequestDigest,
+    request: providerRequest,
+    operation_profile: {
+      effect_class: authority.effect_class,
+      result_schema: authority.result_schema,
+      todo_contract: {
+        action_kinds: ["publish_requirement"],
+        target_key_prefixes: ["requirement:"],
+      },
+      transition_contract: transitionContract,
+    },
+    transaction_plan: {
+      settlement_plan: { identity: settlementIdentity },
+    },
+    goal_id: settlementIdentity.goal_id,
+    agent_id: settlementIdentity.agent_id,
+    todo_id: settlementIdentity.todo_id,
+    turn_instance_id: settlementIdentity.turn_instance_id,
+    effect_id: settlementIdentity.effect_id,
+    completed_phases: [],
+    provider_result: providerResult,
+    transition_receipts: [],
+    writeback: null,
+    quota_spend: null,
+    settlement_result: null,
+  };
+}
+
+function reduceLifecycle(
+  journal: ReturnType<typeof lifecycleJournal>,
+  phase: "inspect" | "observe_result" = "inspect",
+) {
+  return validateGovernedCapabilityResult({
+    ...authority,
+    transition_contract: transitionContract,
+    value: {
+      schema_version: "loopx_governed_capability_lifecycle_packet_v0",
+      phase,
+      dry_run: false,
+      canonical_request_digest: providerRequestDigest,
+      admission: null,
+      journal,
+    },
+  });
+}
+
 test("material admission binds the exact Todo action to the operation", () => {
   const admission = {
     selected_todo: {
@@ -115,6 +192,43 @@ test("material admission binds the exact Todo action to the operation", () => {
       },
     }),
     /not authorized by selected_todo target_key/,
+  );
+});
+
+test("material journal inspection revalidates authority before recovery writes", () => {
+  const journal = lifecycleJournal("ready_to_settle", result("succeeded"));
+  const admission = {
+    selected_todo: {
+      todo_id: settlementIdentity.todo_id,
+      role: "agent",
+      status: "open",
+      action_kind: "publish_requirement",
+      target_key: "requirement:REQ-1",
+    },
+  };
+  const reduce = (selectedAdmission: unknown) =>
+    validateGovernedCapabilityResult({
+      ...authority,
+      transition_contract: transitionContract,
+      value: {
+        schema_version: "loopx_governed_capability_lifecycle_packet_v0",
+        phase: "inspect",
+        dry_run: false,
+        canonical_request_digest: providerRequestDigest,
+        admission: selectedAdmission,
+        journal,
+      },
+    });
+
+  assert.equal(reduce(admission).provider_result.status, "succeeded");
+  assert.throws(
+    () => reduce({
+      selected_todo: {
+        ...admission.selected_todo,
+        action_kind: "deploy_release",
+      },
+    }),
+    /not authorized by selected_todo action_kind/,
   );
 });
 
@@ -326,5 +440,84 @@ test("settlement terminal state is TS-owned", () => {
   assert.equal(
     governedCapabilitySettlementStatus({ kind: "quota_spend_rejected" }),
     "settlement_failed",
+  );
+});
+
+test("one lifecycle packet validates an observed provider result and projects its receipt", () => {
+  const journal = lifecycleJournal("starting", result("succeeded"));
+  const reduction = reduceLifecycle(journal, "observe_result");
+
+  assert.equal(
+    reduction.schema_version,
+    "loopx_governed_capability_lifecycle_reduction_v0",
+  );
+  assert.equal(reduction.journal_status, "ready_to_settle");
+  assert.equal(reduction.provider_result.status, "succeeded");
+  assert.deepEqual(reduction.public_receipt.effects, {
+    provider_invoked: true,
+    external_write_observed: true,
+    loopx_transitions_written: false,
+    loopx_state_written: false,
+    quota_spent: false,
+  });
+});
+
+test("committed lifecycle replay validates the whole journal in one reduction", () => {
+  const journal = lifecycleJournal("committed", result("succeeded"));
+  journal.completed_phases = [
+    "host_execute",
+    "typed_result",
+    "validation",
+    "durable_writeback",
+    "quota_spend",
+  ];
+  journal.writeback = {
+    ok: true,
+    appended: true,
+    settlement_identity: settlementIdentity,
+    effect_receipt_digest: effectReceiptDigest,
+  };
+  journal.quota_spend = {
+    ok: true,
+    appended: true,
+    settlement_identity: settlementIdentity,
+  };
+  journal.settlement_result = { failure: null };
+
+  const reduction = reduceLifecycle(journal);
+
+  assert.equal(reduction.journal_status, "committed");
+  assert.equal(reduction.public_receipt.status, "committed");
+  assert.equal(reduction.public_receipt.effects.loopx_state_written, true);
+  assert.equal(reduction.public_receipt.effects.quota_spent, true);
+});
+
+test("lifecycle packets reject tampered request and callback identity", () => {
+  const tamperedRequest = lifecycleJournal("running", result("running"));
+  tamperedRequest.request = {
+    ...providerRequest,
+    lifecycle: { ...providerRequest.lifecycle, idempotency_key: "different" },
+  };
+  assert.throws(
+    () => reduceLifecycle(tamperedRequest),
+    /request (start lifecycle|digest) is invalid/,
+  );
+
+  const tamperedCallback = lifecycleJournal("committed", result("succeeded"));
+  tamperedCallback.writeback = {
+    ok: true,
+    appended: true,
+    settlement_identity: { effect_id: "different" },
+    effect_receipt_digest: effectReceiptDigest,
+  };
+  tamperedCallback.quota_spend = {
+    ok: true,
+    appended: true,
+    settlement_identity: settlementIdentity,
+  };
+  tamperedCallback.settlement_result = { failure: null };
+  assert.throws(
+    () => reduceLifecycle(tamperedCallback),
+    /journal writeback is invalid/,
   );
 });

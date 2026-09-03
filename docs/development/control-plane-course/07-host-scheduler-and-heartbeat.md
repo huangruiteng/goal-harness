@@ -181,6 +181,14 @@ loopx quota scheduler-ack-current \
   --execute
 ```
 
+这段命令展示稳定的 public shape。持续运行的 host 应原样执行当前
+`ack_hint.cli_args`，不要自行拼参数。生成的命令还带有内部
+`--scheduler-host-facts-chunk` 与 `--turn-instance-id`。前者封装有版本且有大小上限的
+proposal/host facts，后者绑定产生该 hint 的 `quota should-run` receipt。Unix、Windows
+和 wheel console launcher 只有同时看到这两项绑定，才会把精确 ACK/failure command
+直接交给 native TypeScript transaction。手工输入且没有 receipt binding 的命令继续走
+Python compatibility path。
+
 ACK 绑定：
 
 - goal；
@@ -189,6 +197,7 @@ ACK 绑定：
 - scheduler state key；
 - proposal reset token 与 identity signature；
 - 实际 applied RRULE。
+- 生成这条 follow-up command 的 heartbeat Turn receipt。
 
 这样下一轮能够区分：
 
@@ -490,32 +499,39 @@ base_identity_keys = [
 
 只要工作身份发生 material 变化，backoff progression 就应 reset。否则“等待同一个外部结果的第 5 次 poll”和“刚切换到新 runnable todo 的第一次执行”会错误共享慢 cadence。
 
-### 3. ACK 同时校验 Proposal Identity 与 Host 回报
+### 3. 原生 Follow-up 同时校验 Turn、Proposal 与 Host 回报
 
-`scheduler/ack.py` 中的 `build_scheduler_ack_plan` 逐层比对 state identity：
+`scheduler/heartbeat_followup_cli.ts` 先解码有大小上限的 hint packet，再核对 command、
+goal、agent、operation、state key、proposal identity 与 host readback。随后
+`scheduler/heartbeat_followup.ts::evaluateSchedulerHeartbeatFollowup` 检查 receipt 是否仍是
+当前 goal/agent 的最新 Turn。缺失 receipt 或已经出现更新 Turn 时，transaction 在写
+scheduler state 前停止。
 
-```python
-if not agent_id:
-    return {"ok": False, "reason": "... requires --agent-id"}
-if not stateful_backoff:
-    return {"ok": False, "reason": "... no ... stateful scheduler packet"}
-if stateful_backoff.get("state_key") != state_key:
-    return {"ok": False, "reason": "--state-key does not match ..."}
-if reset_token and reset_token != stateful_backoff.get("reset_token"):
-    return {"ok": False, "reason": "--reset-token does not match ..."}
-if identity_signature and identity_signature != stateful_backoff.get("identity_signature"):
-    return {"ok": False, "reason": "--identity-signature does not match ..."}
-
-if not apply_needed and not ack_needed:
-    return {"ok": True, "already_applied": True, ...}
-if not applied_rrule:
-    return {"ok": False, "reason": "... requires --applied-rrule ..."}
+```typescript
+if (request.require_heartbeat_receipt) {
+  const status = await heartbeatReceiptStatus(
+    request.runtime_root,
+    String(facts.goal_id),
+    String(facts.agent_id),
+    String(request.turn_instance_id),
+  );
+  if (status !== "fresh") return receiptFailure(request, status);
+}
+const commit = await evaluateSchedulerHeartbeatHostFacts({
+  ...facts,
+  runtime_root: request.runtime_root,
+});
 ```
 
-这些检查拒绝把任意 host 值写成当前 proposal 的 receipt。端到端测试还必须把 apply 前
-生成的 token 原样带过 host effect；若只在 effect 后重新读取当前 hint，测试仍可能漏掉
-ACK obligation 丢失。ACK 不是 delivery，所以不 spend；但没有 durable ACK，下一轮也
-不能把“建议值”或“当前 host 恰好匹配”当成已结算状态。
+这组检查拒绝把任意 host 值或过期 Turn 写成当前 proposal 的 receipt。TypeScript 在同一
+进程内完成 ACK/host-failure validation、failure-cache transition、replay/CAS、atomic
+write 和兼容旧合同的 JSON/Markdown projection。持续运行的路径没有 Python 到 Node 的
+第二次 request/response。Python adapter 没有 scheduler 决策权，只给显式 in-process
+caller 与 unbound manual command 保留兼容入口。
+
+端到端测试仍需把 apply 前生成的 hint 原样带过 host effect。若 effect 后重新读取一份
+hint，测试仍可能漏掉 ACK obligation 丢失。ACK 不构成 delivery，也不会 spend。缺少
+durable ACK 时，下一轮不能把 proposal 或碰巧相同的 host 值当成已结算状态。
 
 ### 4. Monitor writeback 用 result hash 区分观察与推进
 
@@ -601,7 +617,7 @@ App tick
   -> heartbeat prompt 要求先 quota should-run
   -> quota 返回 interaction_contract + scheduler_hint
   -> 若 apply_needed: host 更新 RRULE
-  -> host 用 scheduler-ack-current 写回实际 RRULE
+  -> host 原样执行 hint 中 receipt-bound scheduler-ack-current 写回实际 RRULE
   -> 若 agent.must_attempt: 执行 bounded work
   -> refresh-state 写回 outcome
   -> validation 通过后 spend 一次
@@ -612,7 +628,8 @@ App tick
 ### 断点建议
 
 - `scheduler_hint.py:457`：观察非法 execution context 如何 fail closed；
-- `scheduler/ack.py:120`：依次改错 state key、reset token、identity signature；
+- `scheduler/heartbeat_followup_cli.ts`：依次改错 facts packet、Turn、state key、reset token、identity signature；
+- `scheduler/heartbeat_followup.ts`：观察 missing/stale receipt 如何在 state mutation 前停止；
 - `write_monitor_poll_todo_state:98`：比较 hash 相同、hash 变化、显式 material change；
 - `record_quota_monitor_poll`：确认 before/after 收到同一个 scheduler context；
 - host adapter：确认只有 host 层真正调用 automation update。

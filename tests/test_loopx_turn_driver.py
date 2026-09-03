@@ -124,6 +124,28 @@ def test_turn_plan_projects_ready_route_without_side_effects() -> None:
     assert payload["boundary"]["read_only"] is True
 
 
+def test_dsh_turn_plan_uses_the_headless_outer_controller_context() -> None:
+    payload = build_loopx_turn_plan(
+        _envelope(),
+        host="dsh",
+        execution_mode="isolated-headless",
+    )
+
+    assert payload["ok"] is True
+    assert payload["route"]["kind"] == LoopXTurnRoute.READY_FOR_HOST.value
+    assert payload["host"]["kind"] == "dsh"
+    assert payload["host"]["explicit_isolation"] is True
+    assert payload["scheduler_execution_context"] == {
+        "schema_version": "scheduler_execution_context_v0",
+        "host_surface": "generic_cli",
+        "scheduler_owner": "outer_controller",
+        "execution_mode": "isolated_headless",
+        "source": "loopx_turn",
+        "valid": True,
+        "codex_app_applicability": "not_applicable",
+    }
+
+
 def _adaptive_envelope() -> dict[str, object]:
     envelope = _envelope()
     envelope["task_orchestration_contract"] = {

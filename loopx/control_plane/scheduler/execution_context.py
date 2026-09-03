@@ -415,6 +415,9 @@ def scheduler_execution_context_for_turn(
         "generic-cli": HostSurface.GENERIC_CLI.value,
         "claude-code": HostSurface.CLAUDE_CODE.value,
         "pi": HostSurface.GENERIC_CLI.value,
+        # The built-in dsh host runs one bounded in-process attempt under the
+        # generic-cli scheduling surface, same as the pi visible alias.
+        "dsh": HostSurface.GENERIC_CLI.value,
     }.get(host, host)
     normalized_mode = {
         "interactive-visible": ExecutionMode.INTERACTIVE.value,

@@ -27,6 +27,7 @@ from .control_plane.quota.settlement import (
     read_heartbeat_settlement,
     settlement_result_payload,
 )
+from .control_plane.quota.settlement_workspace_causality import resolve_settlement_workspace_requirement
 from .control_plane.quota.codex_session_usage import (
     book_codex_session_usage,
     usage_booking_lock_target,
@@ -42,6 +43,18 @@ from .control_plane.work_items.progress_observation import (
 )
 from .control_plane.work_items.semantic_replan_writeback import (
     qualify_refresh_replan_writeback,
+)
+from .control_plane.work_items.refresh_recommendation import (
+    DEFAULT_REFRESH_ACTION as DEFAULT_REFRESH_ACTION,
+    RECOMMENDED_ACTION_SOURCE_ACTIVE_NEXT_ACTION as RECOMMENDED_ACTION_SOURCE_ACTIVE_NEXT_ACTION,
+    RECOMMENDED_ACTION_SOURCE_AGENT_LANE_SELECTED_TODO as RECOMMENDED_ACTION_SOURCE_AGENT_LANE_SELECTED_TODO,
+    RECOMMENDED_ACTION_SOURCE_AGENT_TODO_FALLBACK as RECOMMENDED_ACTION_SOURCE_AGENT_TODO_FALLBACK,
+    RECOMMENDED_ACTION_SOURCE_DEFAULT as RECOMMENDED_ACTION_SOURCE_DEFAULT,
+    RECOMMENDED_ACTION_SOURCE_EXPLICIT as RECOMMENDED_ACTION_SOURCE_EXPLICIT,
+    RECOMMENDED_ACTION_SOURCE_SETTLEMENT_BOUND_TODO as RECOMMENDED_ACTION_SOURCE_SETTLEMENT_BOUND_TODO,
+    derive_recommended_action as derive_recommended_action,
+    derive_recommended_action_with_source as derive_recommended_action_with_source,
+    resolve_refresh_recommendation,
 )
 from .control_plane.runtime.shared_runtime_refresh_projection import (
     build_shared_runtime_projection,
@@ -74,33 +87,22 @@ from .state_projection import (
     state_projection_gap_warning,
 )
 from .control_plane.todos.contract import (
-    TODO_TASK_CLASS_ADVANCEMENT,
-    TODO_TASK_CLASS_BLOCKER,
-    TODO_TASK_CLASS_MONITOR,
-    TODO_TASK_CLASS_USER_GATE,
     normalize_todo_claimed_by,
     normalize_todo_replan_obligation_id,
 )
 from .control_plane.todos.completion_validation_accountability import (
     require_accountable_completion_validation,
 )
+from .rollout_event_log import load_rollout_events, rollout_event_log_path
 
 DEFAULT_REFRESH_CLASSIFICATION = "state_refreshed"
-DEFAULT_REFRESH_ACTION = "inspect refreshed active goal state and continue the next bounded progress segment"
-RECOMMENDED_ACTION_SOURCE_EXPLICIT = "explicit_arg"
-RECOMMENDED_ACTION_SOURCE_ACTIVE_NEXT_ACTION = "active_state_next_action"
-RECOMMENDED_ACTION_SOURCE_AGENT_TODO_FALLBACK = "agent_todo_fallback"
-RECOMMENDED_ACTION_SOURCE_DEFAULT = "default_refresh_action"
 GOAL_PROGRESS_SCOPE = "goal"
 AGENT_LANE_PROGRESS_SCOPE = "agent_lane"
 PROGRESS_SCOPE_CHOICES = (GOAL_PROGRESS_SCOPE, AGENT_LANE_PROGRESS_SCOPE)
-RECOMMENDED_ACTION_SECTION_LINE_LIMIT = 16
 BULLET_PREFIX_RE = re.compile(r"^(?:[-*]\s+|\d+[.)]\s+)")
 CHECKBOX_PREFIX_RE = re.compile(r"^\[(?P<mark>[ xX])\]\s+")
 ACTIVE_STATE_NEXT_ACTION_UPDATE_SCHEMA_VERSION = "active_state_next_action_update_v0"
 REPAIR_NOOP_SCHEMA_VERSION = "repair_noop_v0"
-
-
 def _delivery_workspace_supplement_required(
     *,
     prior_writeback: dict[str, Any],
@@ -302,68 +304,6 @@ def first_action_item(lines: list[str], start: int) -> str:
     return " ".join(part for part in parts if part).strip()
 
 
-def checkbox_mark(line: str) -> str | None:
-    text = BULLET_PREFIX_RE.sub("", line.strip()).strip()
-    match = CHECKBOX_PREFIX_RE.match(text)
-    if not match:
-        return None
-    return match.group("mark")
-
-
-def todo_metadata(lines: list[str], start: int) -> dict[str, str]:
-    metadata: dict[str, str] = {}
-    for line in lines[start + 1 :]:
-        if is_bullet_line(line):
-            break
-        text = line.strip()
-        if not text.startswith("<!-- loopx:todo"):
-            continue
-        for key, value in re.findall(r"([A-Za-z_][A-Za-z0-9_]*)=([^ >]+)", text):
-            metadata[key] = value
-        break
-    return metadata
-
-
-def todo_priority_rank(action: str) -> int:
-    match = re.match(r"^\[P(?P<rank>\d+)\]\s+", action.strip(), flags=re.IGNORECASE)
-    if not match:
-        return 99
-    return int(match.group("rank"))
-
-
-def first_open_agent_todo_action(state_text: str) -> str | None:
-    lines = extract_section_lines(state_text, "Agent Todo", limit=512)
-    advancement_candidates: list[tuple[int, int, str]] = []
-    fallback_candidates: list[tuple[int, int, str]] = []
-    for index, line in enumerate(lines):
-        mark = checkbox_mark(line)
-        if mark is None or mark.lower() == "x":
-            continue
-        action = first_action_item(lines, index)
-        if not action:
-            continue
-        try:
-            validate_local_control_text("derived agent_todo recommended_action", action)
-        except ValueError:
-            continue
-        metadata = todo_metadata(lines, index)
-        if metadata.get("task_class") == TODO_TASK_CLASS_ADVANCEMENT:
-            advancement_candidates.append((todo_priority_rank(action), index, action))
-            continue
-        if metadata.get("task_class") in {
-            TODO_TASK_CLASS_MONITOR,
-            TODO_TASK_CLASS_USER_GATE,
-            TODO_TASK_CLASS_BLOCKER,
-        }:
-            continue
-        fallback_candidates.append((todo_priority_rank(action), index, action))
-    if advancement_candidates:
-        return sorted(advancement_candidates)[0][2]
-    if fallback_candidates:
-        return sorted(fallback_candidates)[0][2]
-    return None
-
-
 def section_list_items(lines: list[str]) -> list[str]:
     items: list[str] = []
     index = 0
@@ -382,27 +322,6 @@ def section_list_items(lines: list[str]) -> list[str]:
             items.append(cleaned)
         index += 1
     return items
-
-
-def derive_recommended_action_with_source(state_text: str) -> tuple[str, str]:
-    lines = extract_section_lines(state_text, "Next Action", limit=RECOMMENDED_ACTION_SECTION_LINE_LIMIT)
-    for index, line in enumerate(lines):
-        action = first_action_item(lines, index)
-        if not action:
-            continue
-        try:
-            validate_local_control_text("derived recommended_action", action)
-        except ValueError:
-            continue
-        return action, RECOMMENDED_ACTION_SOURCE_ACTIVE_NEXT_ACTION
-    agent_todo_action = first_open_agent_todo_action(state_text)
-    if agent_todo_action:
-        return agent_todo_action, RECOMMENDED_ACTION_SOURCE_AGENT_TODO_FALLBACK
-    return DEFAULT_REFRESH_ACTION, RECOMMENDED_ACTION_SOURCE_DEFAULT
-
-
-def derive_recommended_action(state_text: str) -> str:
-    return derive_recommended_action_with_source(state_text)[0]
 
 
 def resolve_goal_state(
@@ -453,6 +372,7 @@ def build_state_refresh_record(
     classification: str,
     recommended_action: str,
     recommended_action_source: str,
+    recommended_action_resolution: dict[str, Any] | None = None,
     generated_at: str,
     registry_goal: dict[str, Any] | None,
     delivery_batch_scale: str | None = None,
@@ -508,6 +428,8 @@ def build_state_refresh_record(
             "authority_source_count": len(authority_sources),
         },
     }
+    if recommended_action_resolution:
+        record["recommended_action_resolution"] = recommended_action_resolution
     projection_gap = state_projection_gap_warning(state_text)
     if projection_gap:
         record["state_projection_gap"] = projection_gap
@@ -590,6 +512,7 @@ def _build_state_refresh_output_projections(
         "runtime_projection_route": record["runtime_projection_route"],
     })
     for field in (
+        "recommended_action_resolution",
         "delivery_batch_scale",
         "delivery_outcome",
         "delivery_workspace",
@@ -824,9 +747,25 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
             "",
             "## Recommended Action",
             f"- source: `{payload.get('recommended_action_source')}`",
-            str(payload.get("recommended_action") or ""),
         ]
     )
+    recommendation_resolution = (
+        payload.get("recommended_action_resolution")
+        if isinstance(payload.get("recommended_action_resolution"), dict)
+        else {}
+    )
+    if recommendation_resolution:
+        lines.append(
+            "- authority: "
+            f"`{recommendation_resolution.get('authority')}`; "
+            "settlement_alignment: "
+            f"`{recommendation_resolution.get('settlement_alignment')}`"
+        )
+        if recommendation_resolution.get("todo_id"):
+            lines.append(
+                f"- todo_id: `{recommendation_resolution.get('todo_id')}`"
+            )
+    lines.append(str(payload.get("recommended_action") or ""))
     for heading, key in (
         ("Next Action", "next_action"),
         ("Recent Feedback", "recent_feedback"),
@@ -902,7 +841,7 @@ def refresh_state_run(
     normalized_progress_observation = (
         normalize_progress_observation(
             progress_observation,
-            work_item_id=todo_id,
+            work_item_id=todo_id or normalized_replan_obligation_id,
         )
         if progress_observation is not None
         else None
@@ -911,6 +850,7 @@ def refresh_state_run(
         normalized_delivery_outcome,
         normalized_progress_observation,
         work_item_id=todo_id,
+        replan_obligation_id=normalized_replan_obligation_id,
     )
     if delivery_workspace_path is not None and not turn_scoped_settlement_qualified:
         raise ValueError(
@@ -922,6 +862,8 @@ def refresh_state_run(
     settlement_identity = None
     settlement_result = None
     delivery_workspace_causality = None
+    settlement_workspace_requirement = None
+    settlement_readback = None
     if todo_id or normalized_replan_obligation_id or turn_instance_id:
         if not turn_scoped_settlement_qualified:
             raise ValueError(
@@ -945,6 +887,9 @@ def refresh_state_run(
         if settlement_identity is None:
             raise ValueError("turn-scoped refresh-state has no settlement identity")
         delivery_workspace_causality = settlement_readback.workspace_causality
+        settlement_workspace_requirement = resolve_settlement_workspace_requirement(
+            delivery_workspace_causality, settlement_binding_kind=settlement_identity.binding_kind.value
+        )
         if not dry_run:
             prior_writeback = settlement_readback.writeback
             if prior_writeback.failure is None and prior_writeback.value is not None:
@@ -1132,13 +1077,33 @@ def refresh_state_run(
             }
             state_text = updated_state_text if state_updated else locked_state_text
 
-    if recommended_action:
-        action = recommended_action
-        recommended_action_source = RECOMMENDED_ACTION_SOURCE_EXPLICIT
-    else:
-        action, recommended_action_source = derive_recommended_action_with_source(state_text)
-    validate_local_control_text("recommended_action", action)
+    recommendation_resolution = resolve_refresh_recommendation(
+        state_text,
+        explicit_action=recommended_action,
+        agent_id=normalized_agent_id or None,
+        settlement_identity=(
+            settlement_identity.as_dict() if settlement_identity is not None else None
+        ),
+        registry_goal=registry_goal,
+        state_path=resolved_state_file,
+        rollout_events=(
+            load_rollout_events(rollout_event_log_path(runtime_root, safe_goal_id))
+            if not recommended_action
+            and (normalized_agent_id or settlement_identity is not None)
+            else None
+        ),
+    )
+    action = str(recommendation_resolution["recommended_action"])
+    recommended_action_source = str(
+        recommendation_resolution["recommended_action_source"]
+    )
     requested_classification = classification
+    settlement_replan_guard = (
+        settlement_readback.semantic_replan_guard
+        if settlement_readback is not None
+        and settlement_readback.semantic_replan_guard is not None
+        else {}
+    )
     replan_qualification = qualify_refresh_replan_writeback(
         autonomous_replan_recorded=autonomous_replan_recorded,
         requested_delta_kinds=normalized_repair_delta_kinds,
@@ -1148,6 +1113,16 @@ def refresh_state_run(
         agent_id=normalized_agent_id,
         dry_run=dry_run,
         settlement_todo_id=(settlement_identity.todo_id if settlement_identity else None),
+        settlement_guard_scoped=(
+            settlement_replan_guard.get("scope") == "turn_guard"
+        ),
+        settlement_guard_semantic_replan_obligation_id=(
+            settlement_replan_guard.get("selected_obligation_id")
+            if isinstance(
+                settlement_replan_guard.get("selected_obligation_id"), str
+            )
+            else None
+        ),
         newest_first_runs=newest_first_runs,
         state_text=state_text,
         goal_id=safe_goal_id,
@@ -1180,7 +1155,7 @@ def refresh_state_run(
     )
     delivery_workspace = None
     workspace_requirement = str(
-        (delivery_workspace_causality or {}).get("requirement") or "unknown"
+        (settlement_workspace_requirement or {}).get("requirement") or "unknown"
     )
     if delivery_workspace_path is not None and workspace_requirement == "not_required":
         raise ValueError(
@@ -1240,6 +1215,7 @@ def refresh_state_run(
         classification=classification,
         recommended_action=action,
         recommended_action_source=recommended_action_source,
+        recommended_action_resolution=recommendation_resolution,
         generated_at=generated_at,
         registry_goal=registry_goal,
         delivery_batch_scale=normalized_delivery_batch_scale,
@@ -1258,6 +1234,10 @@ def refresh_state_run(
     )
     if delivery_workspace_causality:
         record["delivery_workspace_causality"] = delivery_workspace_causality
+    if settlement_workspace_requirement:
+        record["settlement_workspace_requirement"] = (
+            settlement_workspace_requirement
+        )
     if autonomous_replan_recorded:
         if "autonomous_replan_ack" not in record:
             record["autonomous_replan_ack"] = {

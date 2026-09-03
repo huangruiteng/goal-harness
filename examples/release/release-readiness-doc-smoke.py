@@ -15,6 +15,7 @@ TEMPLATE = ROOT / "docs" / "product" / "release-note-template.md"
 README = ROOT / "README.md"
 DOCS_INDEX = ROOT / "docs" / "README.md"
 PRODUCT_INDEX = ROOT / "docs" / "product" / "README.md"
+INSTALL_GUIDE = ROOT / "docs" / "guides" / "installing-loopx.md"
 
 FORBIDDEN_PUBLIC_STRINGS = [
     "/Users/",
@@ -364,7 +365,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    for path in [DOC, TEMPLATE, README, DOCS_INDEX, PRODUCT_INDEX]:
+    for path in [DOC, TEMPLATE, README, DOCS_INDEX, PRODUCT_INDEX, INSTALL_GUIDE]:
         validate_boundary(path)
 
     doc = compact(read(DOC))
@@ -374,6 +375,8 @@ def main() -> None:
         "loopx update check",
         "loopx update plan",
         "loopx update apply",
+        "package acquisition, host-material delivery, core runtime activation",
+        "installation guide's active-layer checklist",
         "## Atomic Local Promotion Failure Matrix",
         "examples/release/release-promotion-concurrency-smoke.py",
         "examples/release/local-install-promotion-boundary-smoke.py",
@@ -381,6 +384,8 @@ def main() -> None:
         "canary_only_untrusted_checkout",
         "explicit_override",
         "## Named Version Contract",
+        "LoopX v0.x releases are tagged and built from GitHub",
+        "when its Trusted Publisher gate passes, PyPI",
         "The version source is `loopx.__version__`, mirrored by `pyproject.toml`",
         "examples/release/release-version-contract-smoke.py",
         "## Compatibility Gate",
@@ -452,6 +457,18 @@ def main() -> None:
         "mirrors the English group structure and material claims",
     ]:
         assert_contains(doc, required, "release-readiness doc")
+
+    install_guide = compact(read(INSTALL_GUIDE))
+    for required in [
+        "### Verify The Active Layers",
+        "loopx update check",
+        "skill_delivery.status",
+        "loopx doctor --deep",
+        "loopx extension doctor --all-enabled --execute --format json",
+        "runtime_activation_qualification",
+        "ordinary pip and pipx users should stay on the tagged package channel",
+    ]:
+        assert_contains(install_guide, required, "installation guide")
 
     root_readme = read(README)
     docs_index = read(DOCS_INDEX)

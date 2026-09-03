@@ -116,6 +116,7 @@ def test_python_facade_projects_todo_lifecycle_reentry_request(monkeypatch) -> N
     monkeypatch.setattr(replan_settlement, "effect_runtime_result", call)
     result = replan_settlement.project_todo_lifecycle_settlement_reentry(
         goal_id="goal-example",
+        runtime_root="/tmp/loopx runtime",
         triggers=list(_reentry()["triggers"]),
         lifecycle_actor_args=["--agent-id", "current-agent"],
         quota_scoped_args=["--agent-id", "current-agent"],
@@ -127,6 +128,7 @@ def test_python_facade_projects_todo_lifecycle_reentry_request(monkeypatch) -> N
         "params": {
             "schema_version": replan_settlement.TODO_LIFECYCLE_REENTRY_REQUEST_SCHEMA,
             "goal_id": "goal-example",
+            "runtime_root": "/tmp/loopx runtime",
             "triggers": _reentry()["triggers"],
             "lifecycle_actor_args": ["--agent-id", "current-agent"],
             "quota_scoped_args": ["--agent-id", "current-agent"],
@@ -165,6 +167,7 @@ def test_python_facade_rejects_malformed_todo_lifecycle_reentry(
     with pytest.raises(RuntimeError, match="result (must be|shape mismatch)"):
         replan_settlement.project_todo_lifecycle_settlement_reentry(
             goal_id="goal-example",
+            runtime_root="/tmp/loopx runtime",
             triggers=list(_reentry()["triggers"]),
             lifecycle_actor_args=[],
             quota_scoped_args=[],

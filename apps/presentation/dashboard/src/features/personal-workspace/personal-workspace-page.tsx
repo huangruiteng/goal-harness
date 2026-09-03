@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from "react";
-import { AlertCircle, Bot, CalendarClock, ListPlus, MessageCircleQuestion, Paperclip, Plus, Send, X } from "lucide-react";
+import { AlertCircle, Bot, CalendarClock, FileText, ListPlus, MessageCircleQuestion, Paperclip, Plus, RefreshCw, Send, X } from "lucide-react";
 
 import {
   applyTypedAction,
@@ -154,6 +154,46 @@ function ManagerHomeBoard({
           <div>{stopped.map(goalCard)}</div>
         </details>
       ) : null}
+    </section>
+  );
+}
+
+function GoalOutputsView({
+  items,
+  onSelect,
+  reportState,
+}: {
+  items: Array<Extract<WorkspaceTimelineItem, { kind: "output" }>>;
+  onSelect: (selection: WorkspaceDrawerSelection) => void;
+  reportState?: WorkspaceModel["periodicReports"];
+}) {
+  const { locale, t } = useWorkspaceI18n();
+  return (
+    <section className="personal-object-list" data-testid="personal-goal-outputs">
+      <header><strong>{t("files.title")}</strong><span>{items.length}</span></header>
+      {reportState?.loading ? (
+        <p className="personal-object-list-state" role="status"><RefreshCw className="is-spinning" size={14} />{t("files.loadingReports")}</p>
+      ) : null}
+      {reportState?.error ? (
+        <p className="personal-object-list-state is-error" role="alert"><AlertCircle size={14} />{t("files.reportLoadFailed")}: {reportState.error}</p>
+      ) : null}
+      {!reportState?.loading && !reportState?.error && items.length === 0 ? (
+        <p className="personal-object-list-state"><FileText size={14} />{t("files.empty")}</p>
+      ) : null}
+      {items.map((item) => (
+        <button data-output-kind={item.output.kind} key={item.id} onClick={() => onSelect({ item: item.output, kind: "output" })} type="button">
+          <span>{item.output.kind === "report" ? "▤" : "↗"}</span>
+          <strong>{item.output.title}</strong>
+          {item.output.report ? <em>{t("files.reportDelta", { added: item.output.report.addedCount, changed: item.output.report.changedCount })}</em> : null}
+          <p>{item.output.summary ?? item.output.safePreview ?? item.output.kind ?? t("files.emptySummary")}</p>
+          <small title={item.output.createdAt}>{[
+            item.output.goalTitle,
+            item.output.kind === "report" ? t("files.verifiedReport") : null,
+            item.output.todoId ? `${t("common.task")} ${item.output.todoId}` : null,
+            activityTimeLabel(item.output.createdAt, locale, t),
+          ].filter(Boolean).join(" · ")}</small>
+        </button>
+      ))}
     </section>
   );
 }
@@ -430,6 +470,13 @@ function proposalFields(parameters: Record<string, unknown>, t: WorkspaceTransla
 
 type GoalLifecycleOperation = "stop" | "resume" | "delete";
 
+type GoalLifecycleProjection = {
+  goalId: string;
+  next: "active" | "stopped";
+  optimisticApplied: boolean;
+  previous: "active" | "stopped";
+};
+
 function lifecycleOperationFor(proposal: TypedActionProposal): GoalLifecycleOperation | undefined {
   if (proposal.action_kind !== "goal.lifecycle") return undefined;
   const operation = proposal.normalized_parameters.operation;
@@ -642,6 +689,7 @@ export function PersonalWorkspacePage({
   const [localGoalId, setLocalGoalId] = useState<string | null>(controlledGoalId ?? null);
   const [localAgentId, setLocalAgentId] = useState(controlledAgentId ?? agents.find((agent) => agent.available)?.agentId ?? "codex");
   const [selection, setSelection] = useState<WorkspaceDrawerSelection | null>(null);
+  const [taskInspectorExpanded, setTaskInspectorExpanded] = useState(false);
   const [activeSessionRun, setActiveSessionRun] = useState<WorkspaceRun | null>(null);
   const [proposals, setProposals] = useState<Record<string, WorkspaceActionPreview>>({});
   const [selectedGoalTab, setSelectedGoalTab] = useState<WorkspaceGoalTab>("chat");
@@ -663,6 +711,7 @@ export function PersonalWorkspacePage({
   const [imageAttachments, setImageAttachments] = useState<WorkspaceImageAttachment[]>([]);
   const [imageAttachmentError, setImageAttachmentError] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [lifecycleBusyGoalIds, setLifecycleBusyGoalIds] = useState<ReadonlySet<string>>(() => new Set());
   const [refreshState, setRefreshState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [sessionProposalIds, setSessionProposalIds] = useState<string[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -679,6 +728,7 @@ export function PersonalWorkspacePage({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const channelScrollRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const lifecyclePendingGoalIdsRef = useRef(new Set<string>());
   const [digest, setDigest] = useState<{ attention: number; done: number; failed: number } | null>(null);
   const selectedGoalId = controlledGoalId === undefined ? localGoalId : controlledGoalId;
   const selectedAgentId = controlledAgentId ?? localAgentId;
@@ -935,7 +985,10 @@ export function PersonalWorkspacePage({
     return () => { cancelled = true; };
   }, [readOnly, selectedGoalId, t]);
 
-  async function createPreview(request: WorkspaceActionPreviewRequest) {
+  async function createPreview(
+    request: WorkspaceActionPreviewRequest,
+    options: { select?: boolean } = {},
+  ) {
     if (readOnly) throw new Error(t("source.readOnlyWriteError"));
     let local: WorkspaceActionPreview;
     try {
@@ -982,7 +1035,7 @@ export function PersonalWorkspacePage({
     }
     setSessionProposalIds((current) => current.includes(local.previewId) ? current : [...current, local.previewId]);
     setProposals((current) => ({ ...current, [local.previewId]: local }));
-    setSelection({ item: local, kind: "proposal" });
+    if (options.select !== false) setSelection({ item: local, kind: "proposal" });
     return local;
   }
 
@@ -1003,8 +1056,24 @@ export function PersonalWorkspacePage({
       resume: t("proposal.summary.lifecycleResume", { title: goal.title }),
       stop: t("proposal.summary.lifecycleStop", { title: goal.title }),
     };
+    let stopProjection: GoalLifecycleProjection | null = null;
+    let projectionOwnedByApply = false;
     try {
-      await createPreview({
+      if (operation === "stop") {
+        if (lifecyclePendingGoalIdsRef.current.has(goal.goalId)) return;
+        lifecyclePendingGoalIdsRef.current.add(goal.goalId);
+        setLifecycleBusyGoalIds(new Set(lifecyclePendingGoalIdsRef.current));
+        setSelection(null);
+        stopProjection = {
+          goalId: goal.goalId,
+          next: "stopped",
+          optimisticApplied: true,
+          previous: goal.activationState,
+        };
+        setActionFeedback(t("feedback.applying", { title: summaryByOperation.stop }));
+        callbacks.onGoalActivationStateChange?.(goal.goalId, "stopped");
+      }
+      const proposal = await createPreview({
         actionKind: "goal.lifecycle",
         context: { kind: "goal_directory", goal_id: goal.goalId },
         idempotencyKey: `workspace-goal-${operation}-${goal.goalId}-${Date.now().toString(36)}`,
@@ -1014,11 +1083,36 @@ export function PersonalWorkspacePage({
           reason: reasonByOperation[operation],
         },
         summary: summaryByOperation[operation],
-      });
+      }, { select: operation !== "stop" });
+      if (operation === "stop") {
+        if (proposal.status === "ready") {
+          projectionOwnedByApply = true;
+          await applyProposal(proposal, {
+            lifecycleProjection: stopProjection ?? undefined,
+            presentation: "feedback",
+          });
+        } else {
+          if (stopProjection) {
+            callbacks.onGoalActivationStateChange?.(stopProjection.goalId, stopProjection.previous);
+          }
+          setActionFeedback(proposal.gate
+            ? t("feedback.gateRequired", { summary: proposal.gate.summary })
+            : t("feedback.notCompleted", { status: proposal.status }));
+          setSelection({ item: proposal, kind: "proposal" });
+        }
+      }
     } catch (error) {
+      if (stopProjection && !projectionOwnedByApply) {
+        callbacks.onGoalActivationStateChange?.(stopProjection.goalId, stopProjection.previous);
+      }
       setActionFeedback(t("feedback.executionFailed", {
         error: error instanceof Error ? error.message : String(error),
       }));
+    } finally {
+      if (operation === "stop") {
+        lifecyclePendingGoalIdsRef.current.delete(goal.goalId);
+        setLifecycleBusyGoalIds(new Set(lifecyclePendingGoalIdsRef.current));
+      }
     }
   }
 
@@ -1074,6 +1168,122 @@ export function PersonalWorkspacePage({
     });
   }
 
+  async function applyProposal(
+    proposal: WorkspaceActionPreview,
+    options: {
+      lifecycleProjection?: GoalLifecycleProjection;
+      presentation?: "drawer" | "feedback";
+    } = {},
+  ) {
+    const showDrawer = options.presentation !== "feedback";
+    const inferredLifecycleChange = proposal.actionKind === "goal.lifecycle"
+      && proposal.goalId
+      && (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "resume")
+      ? {
+          goalId: proposal.goalId,
+          next: proposal.lifecycleOperation === "stop" ? "stopped" as const : "active" as const,
+          optimisticApplied: false,
+          previous: model.goals.find((goal) => goal.goalId === proposal.goalId)?.activationState
+            ?? (proposal.lifecycleOperation === "stop" ? "active" as const : "stopped" as const),
+        }
+      : null;
+    const lifecycleChange = options.lifecycleProjection ?? inferredLifecycleChange;
+    setActionFeedback(t("feedback.applying", { title: proposal.title }));
+    const applying = { ...proposal, status: "applying" as const };
+    setProposals((current) => ({ ...current, [proposal.previewId]: applying }));
+    if (showDrawer) setSelection({ item: applying, kind: "proposal" });
+    if (lifecycleChange && !lifecycleChange.optimisticApplied) {
+      callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.next);
+    }
+    try {
+      if (callbacks.onApplyProposal) {
+        await callbacks.onApplyProposal(proposal);
+        const applied = { ...proposal, status: "applied" as const };
+        setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
+        if (showDrawer) setSelection({ item: applied, kind: "proposal" });
+        setActionFeedback(t("feedback.completed", { title: proposal.title }));
+        if (proposal.actionKind === "goal.lifecycle") {
+          if (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "delete") {
+            selectGoal(null);
+          }
+          if (proposal.lifecycleOperation === "delete" && proposal.goalId) {
+            callbacks.onGoalDeleted?.(proposal.goalId);
+          }
+          const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
+          void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
+        }
+        return;
+      }
+      const result = await applyTypedAction(proposal.previewId);
+      const applied = workspaceProposal(result.proposal, t);
+      setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
+      if (showDrawer) setSelection({ item: applied, kind: "proposal" });
+      if (result.proposal.status !== "applied" || result.proposal.receipt?.projection_verified !== true) {
+        if (lifecycleChange) {
+          callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
+        }
+        setActionFeedback(
+          result.proposal.status === "stale"
+            ? t("feedback.stale")
+            : t("feedback.notCompleted", { status: result.proposal.status }),
+        );
+        return;
+      }
+      setActionFeedback(t("feedback.completed", { title: applied.title }));
+      // Keep the success receipt visible for reviewed actions. Direct actions
+      // surface the same result through the persistent feedback receipt.
+      if (applied.actionKind === "todo.create") {
+        await callbacks.onRefresh?.();
+      }
+      if (applied.actionKind === "goal.lifecycle" && (applied.lifecycleOperation === "stop" || applied.lifecycleOperation === "delete")) {
+        selectGoal(null);
+      }
+      if (applied.actionKind === "goal.lifecycle" && applied.lifecycleOperation === "delete" && applied.goalId) {
+        callbacks.onGoalDeleted?.(applied.goalId);
+      }
+      if (applied.actionKind === "goal.lifecycle") {
+        const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
+        void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
+      }
+    } catch (error) {
+      if (lifecycleChange) {
+        callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
+      }
+      if (error instanceof ChatApiError && error.payload.error_code === "protected_action") {
+        const rawGate = error.payload.gate;
+        const gate = rawGate && typeof rawGate === "object" ? rawGate as Record<string, unknown> : {};
+        const gated = {
+          ...proposal,
+          gate: {
+            kind: String(gate.kind ?? "protected_action"),
+            nextAction: typeof gate.next_action === "string" ? gate.next_action : undefined,
+            summary: String(gate.summary ?? error.message),
+          },
+          status: "gated" as const,
+        };
+        setProposals((current) => ({ ...current, [proposal.previewId]: gated }));
+        // A newly discovered authority gate always deserves review, including
+        // when the action started on the direct path.
+        setSelection({ item: gated, kind: "proposal" });
+        setActionFeedback(t("feedback.gateRequired", { summary: gated.gate.summary }));
+        if (proposal.actionKind === "goal.create" && proposal.goalId) {
+          callbacks.onRefresh?.();
+          selectGoal(proposal.goalId);
+        }
+        return;
+      }
+      const stale = error instanceof Error && /stale|状态.*变化|conflict/i.test(error.message);
+      const failed = {
+        ...proposal,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        status: (stale ? "stale" : "error") as "stale" | "error",
+      };
+      setProposals((current) => ({ ...current, [proposal.previewId]: failed }));
+      if (showDrawer) setSelection({ item: failed, kind: "proposal" });
+      setActionFeedback(t("feedback.executionFailed", { error: failed.errorMessage }));
+    }
+  }
+
   const drawerCallbacks: PersonalWorkspaceCallbacks = {
     ...callbacks,
     onOpenRunSession: async (run) => {
@@ -1097,109 +1307,7 @@ export function PersonalWorkspacePage({
       setSelectedGoalTab("files");
       callbacks.onOpenOutput?.(output);
     },
-    onApplyProposal: async (proposal) => {
-      const lifecycleChange = proposal.actionKind === "goal.lifecycle"
-        && proposal.goalId
-        && (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "resume")
-        ? {
-            goalId: proposal.goalId,
-            next: proposal.lifecycleOperation === "stop" ? "stopped" as const : "active" as const,
-            previous: model.goals.find((goal) => goal.goalId === proposal.goalId)?.activationState
-              ?? (proposal.lifecycleOperation === "stop" ? "active" as const : "stopped" as const),
-          }
-        : null;
-      setActionFeedback(t("feedback.applying", { title: proposal.title }));
-      setProposals((current) => ({ ...current, [proposal.previewId]: { ...proposal, status: "applying" } }));
-      setSelection({ item: { ...proposal, status: "applying" }, kind: "proposal" });
-      if (lifecycleChange) {
-        callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.next);
-      }
-      try {
-        if (callbacks.onApplyProposal) {
-          await callbacks.onApplyProposal(proposal);
-          const applied = { ...proposal, status: "applied" as const };
-          setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
-          setSelection({ item: applied, kind: "proposal" });
-          setActionFeedback(t("feedback.completed", { title: proposal.title }));
-          if (proposal.actionKind === "goal.lifecycle") {
-            if (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "delete") {
-              selectGoal(null);
-            }
-            if (proposal.lifecycleOperation === "delete" && proposal.goalId) {
-              callbacks.onGoalDeleted?.(proposal.goalId);
-            }
-            const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
-            void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
-          }
-          return;
-        }
-        const result = await applyTypedAction(proposal.previewId);
-        const applied = workspaceProposal(result.proposal, t);
-        setProposals((current) => ({ ...current, [proposal.previewId]: applied }));
-        setSelection({ item: applied, kind: "proposal" });
-        if (result.proposal.status !== "applied" || result.proposal.receipt?.projection_verified !== true) {
-          if (lifecycleChange) {
-            callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
-          }
-          setActionFeedback(
-            result.proposal.status === "stale"
-              ? t("feedback.stale")
-              : t("feedback.notCompleted", { status: result.proposal.status }),
-          );
-          return;
-        }
-        setActionFeedback(t("feedback.completed", { title: applied.title }));
-        // Keep the success receipt visible. Refresh and navigation happen when
-        // the user chooses the explicit "进入 Goal" action in the drawer.
-        if (applied.actionKind === "todo.create") {
-          await callbacks.onRefresh?.();
-        }
-        if (applied.actionKind === "goal.lifecycle" && (applied.lifecycleOperation === "stop" || applied.lifecycleOperation === "delete")) {
-          selectGoal(null);
-        }
-        if (applied.actionKind === "goal.lifecycle" && applied.lifecycleOperation === "delete" && applied.goalId) {
-          callbacks.onGoalDeleted?.(applied.goalId);
-        }
-        if (applied.actionKind === "goal.lifecycle") {
-          const reconcile = callbacks.onReconcileStatus ?? callbacks.onRefresh;
-          void Promise.resolve().then(() => reconcile?.()).catch(() => undefined);
-        }
-      } catch (error) {
-        if (lifecycleChange) {
-          callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
-        }
-        if (error instanceof ChatApiError && error.payload.error_code === "protected_action") {
-          const rawGate = error.payload.gate;
-          const gate = rawGate && typeof rawGate === "object" ? rawGate as Record<string, unknown> : {};
-          const gated = {
-            ...proposal,
-            gate: {
-              kind: String(gate.kind ?? "protected_action"),
-              nextAction: typeof gate.next_action === "string" ? gate.next_action : undefined,
-              summary: String(gate.summary ?? error.message),
-            },
-            status: "gated" as const,
-          };
-          setProposals((current) => ({ ...current, [proposal.previewId]: gated }));
-          setSelection({ item: gated, kind: "proposal" });
-          setActionFeedback(t("feedback.gateRequired", { summary: gated.gate.summary }));
-          if (proposal.actionKind === "goal.create" && proposal.goalId) {
-            callbacks.onRefresh?.();
-            selectGoal(proposal.goalId);
-          }
-          return;
-        }
-        const stale = error instanceof Error && /stale|状态.*变化|conflict/i.test(error.message);
-        const failed = {
-          ...proposal,
-          errorMessage: error instanceof Error ? error.message : String(error),
-          status: (stale ? "stale" : "error") as "stale" | "error",
-        };
-        setProposals((current) => ({ ...current, [proposal.previewId]: failed }));
-        setSelection({ item: failed, kind: "proposal" });
-        setActionFeedback(t("feedback.executionFailed", { error: failed.errorMessage }));
-      }
-    },
+    onApplyProposal: applyProposal,
     onCancelProposal: async (proposal) => {
       setSelection(null);
       setProposals((current) => {
@@ -1311,7 +1419,8 @@ export function PersonalWorkspacePage({
       if (pendingImages.length) {
         if (!selectedGoalId) setManagerConversationReceiptVisible(true);
         else if (selectedGoalTab !== "chat") setGoalConversationReceiptVisible(true);
-        await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId, pendingImages);
+        const semanticPreview = await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId, pendingImages);
+        if (semanticPreview) await createPreview(semanticPreview);
         return;
       }
       const intentRoute = routeWorkspaceInput(message, {
@@ -1321,9 +1430,9 @@ export function PersonalWorkspacePage({
       });
       if (intentRoute.route === "clarify") {
         setComposer(message);
-        setActionFeedback(intentRoute.missingFields.includes("resume_when")
-          ? t("composer.clarifyDefer")
-          : t("composer.clarifySingleAction"));
+        let clarification = t("composer.clarifySingleAction");
+        if (intentRoute.missingFields.includes("resume_when")) clarification = t("composer.clarifyDefer");
+        setActionFeedback(clarification);
         return;
       }
       if (intentRoute.actionKind === "goal.create") {
@@ -1435,19 +1544,10 @@ export function PersonalWorkspacePage({
         });
         return;
       }
-      if (selectedGoalId && intentRoute.actionKind === "goal.update") {
-        await createPreview({
-          actionKind: "goal.update",
-          context: { kind: "goal", goal_id: selectedGoalId, natural_language: message },
-          idempotencyKey: `workspace-protected-${selectedGoalId}-${Date.now().toString(36)}`,
-          normalizedParameters: { goal_id: selectedGoalId, status: "operator_gate_requested" },
-          summary: `请求受保护操作：${message.slice(0, 160)}`,
-        });
-        return;
-      }
       if (!selectedGoalId) setManagerConversationReceiptVisible(true);
       else if (selectedGoalTab !== "chat") setGoalConversationReceiptVisible(true);
-      await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId);
+      const semanticPreview = await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId);
+      if (semanticPreview) await createPreview(semanticPreview);
     } catch (error) {
       if (!messageOverride) {
         setComposer(message);
@@ -1551,7 +1651,7 @@ export function PersonalWorkspacePage({
 
   return (
     <WorkspaceShell
-      drawer={drawerSelection ? <ContextDrawer agents={agents} callbacks={effectiveDrawerCallbacks} goalNotifications={model.goalNotifications ?? []} goals={workspaceGoals} larkConnections={readOnly ? [] : larkConnections} onClose={() => {
+      drawer={drawerSelection ? <ContextDrawer agents={agents} callbacks={effectiveDrawerCallbacks} goalNotifications={model.goalNotifications ?? []} goals={workspaceGoals} inspectorExpanded={taskInspectorExpanded} larkConnections={readOnly ? [] : larkConnections} onClose={() => {
         if (drawerSelection.kind === "proposal"
           && ["applied", "rejected"].includes(drawerSelection.item.status)
           && !(drawerSelection.item.actionKind === "heartbeat.bind" && drawerSelection.item.status === "applied")) {
@@ -1561,8 +1661,10 @@ export function PersonalWorkspacePage({
             return next;
           });
         }
+        setTaskInspectorExpanded(false);
         setSelection(null);
-      }} readOnly={readOnly} runs={items.flatMap((item) => item.kind === "run" ? [item.run] : [])} selection={drawerSelection} /> : null}
+      }} onToggleInspectorSize={() => setTaskInspectorExpanded((current) => !current)} readOnly={readOnly} runs={items.flatMap((item) => item.kind === "run" ? [item.run] : [])} selection={drawerSelection} /> : null}
+      drawerMode={drawerSelection?.kind === "todo" ? (taskInspectorExpanded ? "inspector-full" : "inspector") : "panel"}
       drawerOpen={drawerSelection !== null}
       mobileSidebarOpen={mobileSidebarOpen}
       onCloseMobileSidebar={() => setMobileSidebarOpen(false)}
@@ -1635,10 +1737,15 @@ export function PersonalWorkspacePage({
                   summary: `标记完成：${todo.text}`,
                 })}
                 onSelect={setSelection}
+                selectedTodoId={drawerSelection?.kind === "todo" ? drawerSelection.item.todoId : null}
                 userTodos={model.userTodos}
               />
             ) : selectedGoal && selectedGoalTab === "files" ? (
-              <section className="personal-object-list"><header><strong>{t("files.title")}</strong><span>{items.filter((item) => item.kind === "output").length}</span></header>{items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "output" }> => item.kind === "output").map((item) => <button key={item.id} onClick={() => setSelection({ item: item.output, kind: "output" })} type="button"><span>↗</span><strong>{item.output.title}</strong><p>{item.output.summary ?? item.output.safePreview ?? item.output.kind ?? t("files.emptySummary")}</p><small title={item.output.createdAt}>{[item.output.goalTitle, item.output.todoId ? `${t("common.task")} ${item.output.todoId}` : null, activityTimeLabel(item.output.createdAt, locale, t)].filter(Boolean).join(" · ")}</small></button>)}</section>
+              <GoalOutputsView
+                items={items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "output" }> => item.kind === "output")}
+                onSelect={setSelection}
+                reportState={model.periodicReports}
+              />
             ) : !selectedGoal && !managerChatOpen ? (
               <ManagerHomeBoard goals={workspaceGoals} onSelectGoal={selectGoal} systemHealth={model.systemHealth} />
             ) : !selectedGoal ? (
@@ -1772,6 +1879,7 @@ export function PersonalWorkspacePage({
         <GoalSidebar
           attentionCount={managerNeedsYouCount}
           goals={workspaceGoals}
+          lifecycleBusyGoalIds={lifecycleBusyGoalIds}
           onRequestGoalCreate={readOnly ? undefined : requestGoalCreate}
           onRequestGoalLifecycle={readOnly ? undefined : (goal, operation) => void requestGoalLifecycle(goal, operation)}
           onOpenSettings={readOnly ? undefined : () => setSelection({ kind: "settings" })}

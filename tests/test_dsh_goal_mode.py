@@ -6,12 +6,19 @@ import subprocess
 import sys
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from loopx import dsh_goal_mode
 from loopx.control_plane.quota.turn_envelope import (
     turn_envelope_action_signature_document,
 )
-from loopx.dsh_goal_mode import turn_host_adapter
+from loopx.control_plane.turn_driver.host_failure import (
+    BuiltInHostError,
+    build_host_failure_record,
+)
+from loopx.dsh_goal_mode import host_failure_map, turn_host_adapter
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMPAT_LAUNCHER = REPO_ROOT / "scripts" / "dsh_turn_host_adapter.py"
@@ -218,6 +225,342 @@ def test_adapter_runs_hermetically_through_the_module_entry() -> None:
     assert result["classification"] == "fake dsh typed result"
 
 
+def test_classify_dsh_failure_maps_each_known_signal() -> None:
+    class _StatusError(Exception):
+        def __init__(self, status_code: int) -> None:
+            super().__init__("provider rejected the request")
+            self.status_code = status_code
+
+    cases = [
+        (_StatusError(429), "rate_limited"),
+        (_StatusError(402), "quota_exhausted"),
+        (_StatusError(401), "auth_failed"),
+        (_StatusError(503), "provider_overloaded"),
+        (RuntimeError("selected model is at capacity"), "provider_capacity"),
+        (TimeoutError("request stalled"), "executor_timeout"),
+        (ConnectionResetError("peer went away"), "transport_lost"),
+        (RuntimeError("something else entirely"), "unknown"),
+    ]
+    for exc, expected in cases:
+        assert host_failure_map.classify_dsh_failure(exc) == expected, expected
+
+
+def test_classify_known_code_wins_over_http_status() -> None:
+    # loopx-turn-v0: a known error.code wins over HTTP status, so a quota
+    # exhaustion stays non-retryable even when transported as HTTP 429.
+    class _StatusFirst(Exception):
+        status_code = 429
+        code = "insufficient_balance"
+
+    class _CodeFirst(Exception):
+        code = "QUOTA_EXCEEDED"
+        status_code = 429
+
+    assert (
+        host_failure_map.classify_dsh_failure(_StatusFirst("x")) == "quota_exhausted"
+    )
+    assert (
+        host_failure_map.classify_dsh_failure(_CodeFirst("x")) == "quota_exhausted"
+    )
+
+
+def test_classify_server_code_is_a_stable_provider_overload_signal() -> None:
+    class _ServerError(Exception):
+        code = "SERVER"
+
+    assert (
+        host_failure_map.classify_dsh_failure(_ServerError("x"))
+        == "provider_overloaded"
+    )
+
+
+def test_classify_conflicting_known_codes_fold_closed() -> None:
+    class _TwoCodes(Exception):
+        code = "QUOTA_EXCEEDED"
+        error_code = "RATE_LIMIT"
+
+    assert host_failure_map.classify_dsh_failure(_TwoCodes("x")) == "unknown"
+
+
+def test_classify_transport_closed_exception_type() -> None:
+    class TransportClosedError(Exception):
+        pass
+
+    assert (
+        host_failure_map.classify_dsh_failure(TransportClosedError("gone"))
+        == "transport_lost"
+    )
+
+
+def test_classify_terminal_reason_uses_structured_error() -> None:
+    reason = {
+        "kind": "error",
+        "error": {"code": "RATE_LIMIT", "status": 429, "message": "slow down"},
+    }
+    assert host_failure_map.classify_dsh_terminal_reason(reason) == "rate_limited"
+    assert host_failure_map.classify_dsh_terminal_reason({"kind": "error"}) == (
+        "unknown"
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("TRANSPORT", "transport_lost"),
+        ("MISSING_CREDENTIAL", "auth_failed"),
+        ("INVALID_CREDENTIAL", "auth_failed"),
+        ("QUOTA", "quota_exhausted"),
+        ("TIMEOUT", "executor_timeout"),
+        ("EMPTY_RESPONSE", "transport_lost"),
+        ("INVALID_REQUEST", "contract_rejected"),
+        ("CONTEXT_WINDOW_EXCEEDED", "contract_rejected"),
+        ("UNSUPPORTED_CONTENT", "contract_rejected"),
+        ("UNSUPPORTED_REASONING_EFFORT", "contract_rejected"),
+        ("REQUEST_EXTENSION", "contract_rejected"),
+        ("STREAM_CLOSED", "contract_rejected"),
+        ("MALFORMED_RESPONSE", "contract_rejected"),
+        ("ABORTED", "unknown"),
+    ],
+)
+def test_classify_official_dsh_terminal_codes(code: str, expected: str) -> None:
+    reason = {
+        "kind": "error",
+        "error": {"code": code, "message": "provider-controlled detail"},
+    }
+    assert host_failure_map.classify_dsh_terminal_reason(reason) == expected
+
+
+def test_server_code_without_status_does_not_need_prose_fallback() -> None:
+    reason = {
+        "kind": "error",
+        "error": {
+            "code": "SERVER",
+            "message": "selected model is at capacity",
+        },
+    }
+    assert (
+        host_failure_map.classify_dsh_terminal_reason(reason)
+        == "provider_overloaded"
+    )
+
+
+def test_classify_unknown_structured_code_never_falls_back_to_prose() -> None:
+    class _UnknownCode(Exception):
+        code = "mystery_condition"
+
+    exc = _UnknownCode("rate limit exceeded while the model is at capacity")
+    assert host_failure_map.classify_dsh_failure(exc) == "unknown"
+
+
+def test_classify_dsh_failure_folds_conflicting_prose_closed() -> None:
+    exc = RuntimeError("rate limit reached while the model is at capacity")
+    assert host_failure_map.classify_dsh_failure(exc) == "unknown"
+
+
+def test_run_dsh_host_returns_the_typed_result_in_process(tmp_path: Path) -> None:
+    runner = Path(__file__).parent / "dsh_goal_mode_fake_runner.py"
+    config = turn_host_adapter.DshHostConfig(workspace=tmp_path, dsh_runner=runner)
+    result = turn_host_adapter.run_dsh_host(_signed_request(), config=config)
+    assert result["schema_version"] == dsh_goal_mode.LOOPX_TURN_RESULT_SCHEMA
+    assert result["result_kind"] == "validated_progress"
+    assert result["completed_phases"] == list(dsh_goal_mode.COMPLETED_PHASES)
+    assert (tmp_path / ".local" / ".dsh-sessions").is_dir()
+
+
+def test_run_dsh_host_maps_terminal_provider_failure_without_an_exception(
+    tmp_path: Path,
+) -> None:
+    # The SDK reports provider failures as RunResult(finish_reason="error"),
+    # not as a raised exception; the adapter must still surface a typed kind.
+    runner = Path(__file__).parent / "dsh_goal_mode_capacity_runner.py"
+    config = turn_host_adapter.DshHostConfig(workspace=tmp_path, dsh_runner=runner)
+    with pytest.raises(BuiltInHostError) as excinfo:
+        turn_host_adapter.run_dsh_host(_signed_request(), config=config)
+    assert excinfo.value.reason == "dsh_execution_failed"
+    assert excinfo.value.failure_kind == "provider_capacity"
+    record = build_host_failure_record(excinfo.value.failure_kind, attempt=1)
+    assert record["retryable"] is True
+    assert record["retry"]["backoff_seconds"] == 30
+    assert "selected model is at capacity" not in json.dumps(record)
+    assert "selected model is at capacity" not in str(excinfo.value)
+
+
+def test_run_dsh_host_maps_official_transport_terminal_failure(
+    tmp_path: Path,
+) -> None:
+    runner = Path(__file__).parent / "dsh_goal_mode_transport_runner.py"
+    config = turn_host_adapter.DshHostConfig(workspace=tmp_path, dsh_runner=runner)
+    with pytest.raises(BuiltInHostError) as excinfo:
+        turn_host_adapter.run_dsh_host(_signed_request(), config=config)
+    assert excinfo.value.failure_kind == "transport_lost"
+    record = build_host_failure_record(excinfo.value.failure_kind, attempt=1)
+    assert record["retryable"] is True
+    assert record["retry"]["backoff_seconds"] == 10
+
+
+def test_run_dsh_host_maps_raised_capacity_prose_to_a_typed_retryable_kind(
+    tmp_path: Path,
+) -> None:
+    runner = Path(__file__).parent / "dsh_goal_mode_raising_runner.py"
+    config = turn_host_adapter.DshHostConfig(workspace=tmp_path, dsh_runner=runner)
+    with pytest.raises(BuiltInHostError) as excinfo:
+        turn_host_adapter.run_dsh_host(_signed_request(), config=config)
+    assert excinfo.value.failure_kind == "provider_capacity"
+    assert (
+        build_host_failure_record("provider_capacity", attempt=1)["retryable"]
+        is True
+    )
+
+
+def test_build_sdk_config_targets_the_current_sdk_surface(tmp_path: Path) -> None:
+    dsh_home = tmp_path / "dsh-home"
+    cordis = tmp_path / "config" / ".." / "cordis.yml"
+    config = turn_host_adapter.build_sdk_config(
+        provider="deepseek-official",
+        model="deepseek-v4-flash",
+        workspace=tmp_path,
+        dsh_home=dsh_home,
+        max_tokens=1024,
+        cordis=cordis,
+        runtime_bin="/opt/dsh/bin/dsh",
+        request_timeout_seconds=90.0,
+    )
+    assert set(config) <= {
+        "provider",
+        "model",
+        "cwd",
+        "dsh_home",
+        "max_tokens",
+        "patches",
+        "dsh_bin",
+        "request_timeout_seconds",
+    }
+    assert config["dsh_home"] == str(dsh_home)
+    assert config["dsh_bin"] == "/opt/dsh/bin/dsh"
+    assert config["patches"] == (str(cordis.expanduser().resolve()),)
+    for legacy_field in ("session_root", "cordis", "runtime_bin"):
+        assert legacy_field not in config
+
+
+def test_dsh_home_resolution_prefers_config_then_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    configured = tmp_path / "configured-home"
+    environment = tmp_path / "environment-home"
+    monkeypatch.setenv("DSH_HOME", str(environment))
+
+    assert turn_host_adapter._resolve_dsh_home(workspace, configured) == configured
+    assert turn_host_adapter._resolve_dsh_home(workspace, None) == environment
+
+    monkeypatch.delenv("DSH_HOME")
+    assert turn_host_adapter._resolve_dsh_home(workspace, None) == (
+        workspace / ".local" / ".dsh-sessions"
+    )
+
+
+def test_terminal_error_reason_extraction() -> None:
+    success = {"final_response": "{}", "finish_reason": "stop", "events": []}
+    assert turn_host_adapter.terminal_error_reason(success) is None
+    bare_error = {"final_response": "", "finish_reason": "error", "events": []}
+    assert turn_host_adapter.terminal_error_reason(bare_error) == {"kind": "error"}
+    contradictory = {
+        "final_response": "",
+        "finish_reason": "error",
+        "events": [
+            {
+                "type": "turn/end",
+                "data": {"reason": {"kind": "stop", "status": 200}},
+            }
+        ],
+    }
+    with pytest.raises(turn_host_adapter.DshHostResultError):
+        turn_host_adapter.normalize_runner_outcome(contradictory)
+    assert turn_host_adapter.normalize_runner_outcome("just text") == {
+        "final_response": "just text",
+        "finish_reason": None,
+        "events": [],
+    }
+
+    sdk_result = SimpleNamespace(
+        final_response='{"result_kind":"wait"}',
+        finish_reason="completed",
+        events=[
+            {
+                "type": "turn/end",
+                "data": {"reason": {"kind": "completed"}},
+            }
+        ],
+    )
+    normalized = turn_host_adapter.normalize_runner_outcome(sdk_result)
+    assert normalized["finish_reason"] == "completed"
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        {},
+        {"final_response": 42, "finish_reason": "completed", "events": []},
+        {"final_response": "{}", "finish_reason": 42, "events": []},
+        {"final_response": "{}", "finish_reason": None, "events": "bad"},
+        {"final_response": "{}", "finish_reason": "error", "events": [None]},
+        {
+            "final_response": "{}",
+            "finish_reason": "error",
+            "events": [{"type": "turn/end", "data": {}}],
+        },
+        {
+            "final_response": "{}",
+            "finish_reason": "error",
+            "events": [
+                {"type": "turn/end", "data": {"reason": {"kind": 42}}}
+            ],
+        },
+    ],
+)
+def test_normalize_runner_outcome_rejects_invalid_shapes(outcome: object) -> None:
+    with pytest.raises(turn_host_adapter.DshHostResultError):
+        turn_host_adapter.normalize_runner_outcome(outcome)
+
+
+def test_run_dsh_host_rejects_untyped_requests_as_contract_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = turn_host_adapter.DshHostConfig(workspace=tmp_path)
+    with pytest.raises(BuiltInHostError) as excinfo:
+        turn_host_adapter.run_dsh_host({"schema_version": "nope"}, config=config)
+    assert excinfo.value.failure_kind == "contract_rejected"
+
+    tampered = _signed_request()
+    tampered["turn_envelope"]["action"]["primary_action"] = "tampered"
+    with pytest.raises(BuiltInHostError) as excinfo:
+        turn_host_adapter.run_dsh_host(tampered, config=config)
+    assert excinfo.value.failure_kind == "contract_rejected"
+
+    monkeypatch.setattr(turn_host_adapter, "run_dsh_turn", lambda **_kwargs: {})
+    with pytest.raises(BuiltInHostError) as excinfo:
+        turn_host_adapter.run_dsh_host(_signed_request(), config=config)
+    assert excinfo.value.reason == "dsh_host_result_rejected"
+    assert excinfo.value.failure_kind == "contract_rejected"
+
+    monkeypatch.setattr(
+        turn_host_adapter,
+        "run_dsh_turn",
+        lambda **_kwargs: '{"result_kind":"wait"}',
+    )
+
+    def _raise_result_shape_error(*_args: object, **_kwargs: object) -> dict:
+        raise RuntimeError("result shaping failed")
+
+    monkeypatch.setattr(turn_host_adapter, "build_result", _raise_result_shape_error)
+    with pytest.raises(BuiltInHostError) as excinfo:
+        turn_host_adapter.run_dsh_host(_signed_request(), config=config)
+    assert excinfo.value.reason == "dsh_host_result_rejected"
+    assert excinfo.value.failure_kind == "contract_rejected"
+
+
 def test_legacy_launcher_runs_the_same_contract() -> None:
     runner = Path(__file__).parent / "dsh_goal_mode_fake_runner.py"
     completed = subprocess.run(
@@ -237,3 +580,27 @@ def test_legacy_launcher_runs_the_same_contract() -> None:
     result = json.loads(completed.stdout)
     assert result["schema_version"] == dsh_goal_mode.LOOPX_TURN_RESULT_SCHEMA
     assert result["result_kind"] == "validated_progress"
+
+
+def test_subprocess_terminal_error_keeps_the_legacy_wait_contract() -> None:
+    runner = Path(__file__).parent / "dsh_goal_mode_capacity_runner.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "loopx.dsh_goal_mode",
+            "--dsh-runner",
+            str(runner),
+        ],
+        input=json.dumps(_signed_request()),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(REPO_ROOT),
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["result_kind"] == "wait"
+    assert result["classification"] == "no_typed_host_result"
+    assert "dsh execution failed" not in completed.stderr

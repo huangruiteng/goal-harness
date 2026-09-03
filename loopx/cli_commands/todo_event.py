@@ -4,7 +4,11 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
+from ..control_plane.todos.external_wait_contract import TodoExternalWaitAuthoringError
+from ..control_plane.todos.handoff_mode import HandoffModeError
 from ..control_plane.todos.contract import decision_scope_metadata_value
+from ..control_plane.work_items.task_lease import TaskLeaseError
+from ..file_lock import lock_timeout_error_fields
 
 
 RolloutEventAppender = Callable[..., dict[str, object]]
@@ -18,6 +22,32 @@ TODO_EVENT_KINDS = {
     "archive-completed": "todo_archive_completed",
     "capture-followups": "todo_capture_followups",
 }
+
+
+def todo_error_payload(args: argparse.Namespace, exc: Exception) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "ok": False,
+        "dry_run": True
+        if args.todo_command == "suggest"
+        else not bool(args.execute)
+        if args.todo_command == "archive-completed"
+        else bool(args.dry_run),
+        "added": False,
+        "already_exists": False,
+        "goal_id": args.goal_id,
+        "role": args.role,
+        "todo": args.text or "",
+        "error": str(exc),
+        **lock_timeout_error_fields(exc),
+    }
+    if isinstance(exc, (TaskLeaseError, HandoffModeError)):
+        payload["error_code"] = exc.code
+        payload.update(exc.payload)
+    elif isinstance(exc, TodoExternalWaitAuthoringError):
+        payload["error_code"] = exc.code
+        if exc.authoring_contract is not None:
+            payload["authoring_contract"] = exc.authoring_contract
+    return payload
 
 def append_todo_rollout_event(
     payload: dict[str, object],

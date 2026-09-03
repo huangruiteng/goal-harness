@@ -27,6 +27,143 @@ HostObservationResolver = Callable[..., Mapping[str, Any]]
 BoundedResearchFrontierProjector = Callable[..., Mapping[str, Any] | None]
 
 
+def _fresh_read_covers_all_pending_material(
+    dispatch: Mapping[str, Any] | None,
+    projector: Callable[..., dict[str, Any]] | None,
+) -> Callable[..., dict[str, Any]] | None:
+    if projector is None:
+        return None
+    fresh_count = _fresh_operator_inbox_observation_count(dispatch)
+
+    def project(**kwargs: Any) -> dict[str, Any]:
+        urgency = dict(projector(**kwargs))
+        pending_count = max(0, int(urgency.get("pending_count") or 0))
+        if pending_count <= fresh_count:
+            urgency["material_review_due"] = False
+        return urgency
+
+    return project
+
+
+def _turn_start_required_reads(
+    dispatch: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Read only the generic, kernel-validated pre-work projection."""
+
+    if not isinstance(dispatch, Mapping):
+        return []
+    reads = dispatch.get("required_reads")
+    if not isinstance(reads, list):
+        return []
+    projected: list[dict[str, Any]] = []
+    seen_commands: set[str] = set()
+    for read in reads:
+        if not isinstance(read, Mapping):
+            continue
+        command = read.get("command")
+        if not isinstance(command, str) or not command.strip():
+            continue
+        normalized = command.strip()
+        if normalized in seen_commands:
+            continue
+        projected.append(
+            {
+                key: read[key]
+                for key in ("kind", "command", "reason", "source", "ordering")
+                if key in read
+            }
+        )
+        seen_commands.add(normalized)
+    return projected
+
+
+def _project_turn_start_required_reads(
+    payload: dict[str, Any],
+    dispatch: Mapping[str, Any] | None,
+    *,
+    available_capabilities: list[str] | None,
+    scheduler_execution_context: (
+        Mapping[str, Any] | SchedulerExecutionContextResolution | None
+    ),
+    turn_instance_id: str | None,
+    runtime_root: Path,
+) -> None:
+    """Order fresh operator evidence before work without changing work selection."""
+
+    projected = _turn_start_required_reads(dispatch)
+    if not projected:
+        return
+    existing = payload.get("required_reads")
+    required_reads = (
+        [dict(item) for item in existing if isinstance(item, Mapping)]
+        if isinstance(existing, list)
+        else []
+    )
+    seen_commands = {
+        str(item.get("command") or "").strip()
+        for item in required_reads
+        if str(item.get("command") or "").strip()
+    }
+    for required_read in projected:
+        command = str(required_read.get("command") or "").strip()
+        if command in seen_commands:
+            continue
+        required_reads.append(required_read)
+        seen_commands.add(command)
+    payload["required_reads"] = required_reads
+    if _fresh_operator_inbox_read_required(dispatch):
+        recommendation = (
+            dict(payload.get("heartbeat_recommendation") or {})
+            if isinstance(payload.get("heartbeat_recommendation"), Mapping)
+            else {}
+        )
+        recommendation.update(
+            {
+                "notify": "NOTIFY",
+            }
+        )
+        payload["heartbeat_recommendation"] = recommendation
+    payload["interaction_contract"] = build_interaction_contract(
+        payload,
+        available_capabilities=available_capabilities,
+        scheduler_execution_context=scheduler_execution_context,
+        turn_instance_id=turn_instance_id,
+        runtime_root=str(runtime_root),
+    )
+    payload["protocol_action_packet"] = build_protocol_action_packet(payload)
+
+
+def _fresh_operator_inbox_observation_count(
+    dispatch: Mapping[str, Any] | None,
+) -> int:
+    if not isinstance(dispatch, Mapping):
+        return 0
+    required_reads = dispatch.get("required_reads")
+    results = dispatch.get("results")
+    if not isinstance(required_reads, list) or not isinstance(results, list):
+        return 0
+    operator_inbox_hook_ids = {
+        str(read.get("hook_id") or "")
+        for read in required_reads
+        if isinstance(read, Mapping)
+        and read.get("kind") == "operator_inbox"
+        and str(read.get("hook_id") or "")
+    }
+    return sum(
+        max(0, int(result.get("observation_count") or 0))
+        for result in results
+        if isinstance(result, Mapping)
+        and result.get("agent_read_required") is True
+        and result.get("hook_id") in operator_inbox_hook_ids
+    )
+
+
+def _fresh_operator_inbox_read_required(
+    dispatch: Mapping[str, Any] | None,
+) -> bool:
+    return _fresh_operator_inbox_observation_count(dispatch) > 0
+
+
 def _apply_pending_capability_intent_precedence(
     payload: dict[str, Any],
     projection: Mapping[str, Any] | None,
@@ -207,18 +344,22 @@ def bind_action_selection_cli_routes(
         tokens = shlex.split(route_prefix)
     except ValueError:
         return
-    if tokens == ["loopx", "--format", "json"]:
-        selection_command["route_prefix"] = shlex.join(
-            [
-                "loopx",
-                "--registry",
-                str(registry_path.expanduser().resolve()),
+    if len(tokens) >= 3 and tokens[0] == "loopx":
+        try:
+            format_index = tokens.index("--format")
+        except ValueError:
+            return
+        if tokens[format_index : format_index + 2] != ["--format", "json"]:
+            return
+        if "--registry" not in tokens:
+            tokens[1:1] = ["--registry", str(registry_path.expanduser().resolve())]
+        if "--runtime-root" not in tokens:
+            format_index = tokens.index("--format")
+            tokens[format_index:format_index] = [
                 "--runtime-root",
                 str(runtime_root.expanduser().resolve()),
-                "--format",
-                "json",
             ]
-        )
+        selection_command["route_prefix"] = shlex.join(tokens)
 
 
 def build_live_quota_should_run_decision(
@@ -245,6 +386,7 @@ def build_live_quota_should_run_decision(
     turn_instance_id: str | None = None,
     interaction_projection_hooks: Sequence[InteractionProjectionHookRegistration]
     | None = None,
+    turn_start_hook_dispatch: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one live CLI decision while keeping host observation injectable."""
 
@@ -265,7 +407,10 @@ def build_live_quota_should_run_decision(
         if observation.get("available") is True:
             observed_rrule = str(observation.get("rrule") or "")
             observed_automation_id = str(observation.get("automation_id") or "").strip()
-    decision_status_payload = status_payload
+    decision_status_payload = {
+        **status_payload,
+        "runtime_root": str(runtime_root),
+    }
     if bounded_research_frontier_projector is not None:
         frontier = bounded_research_frontier_projector(
             runtime_root=runtime_root,
@@ -275,7 +420,7 @@ def build_live_quota_should_run_decision(
         )
         if isinstance(frontier, Mapping):
             decision_status_payload = {
-                **status_payload,
+                **decision_status_payload,
                 "bounded_research_frontier": dict(frontier),
             }
     settlement_readback = read_heartbeat_settlement(
@@ -292,6 +437,9 @@ def build_live_quota_should_run_decision(
     receipt_bound_replay_phase = (
         settlement_readback.replay_phase if settlement_readback else None
     )
+    fresh_operator_inbox_read = _fresh_operator_inbox_read_required(
+        turn_start_hook_dispatch
+    )
     payload = build_quota_should_run(
         decision_status_payload,
         goal_id=goal_id,
@@ -302,13 +450,31 @@ def build_live_quota_should_run_decision(
         codex_app_current_rrule=observed_rrule,
         codex_app_automation_id=observed_automation_id or None,
         scheduler_execution_context=resolved_context,
-        operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+        operator_inbox_urgency_projector=(
+            _fresh_read_covers_all_pending_material(
+                turn_start_hook_dispatch,
+                operator_inbox_urgency_projector,
+            )
+            if fresh_operator_inbox_read
+            else operator_inbox_urgency_projector
+        ),
         receipt_bound_todo_id=receipt_bound_todo_id,
         requested_action_todo_id=requested_action_todo_id,
         receipt_bound_monitor_phase=receipt_bound_monitor_phase,
         receipt_bound_replay_phase=receipt_bound_replay_phase,
         receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
         turn_instance_id=turn_instance_id,
+        runtime_root=runtime_root,
+    )
+    if route_source.startswith("loopx_turn_"):
+        payload["runtime_root"] = str(runtime_root)
+    _project_turn_start_required_reads(
+        payload,
+        turn_start_hook_dispatch,
+        available_capabilities=available_capabilities,
+        scheduler_execution_context=resolved_context,
+        turn_instance_id=turn_instance_id,
+        runtime_root=runtime_root,
     )
     hook_dispatch = dispatch_interaction_projection_hooks(interaction_projection_hooks)
     projections = hook_dispatch["projections"]

@@ -847,9 +847,19 @@ def assert_slot_void_execute(
     assert forbidden.isdisjoint(record), record
     assert forbidden.isdisjoint(record["quota_event"]), record
     index_lines = index_path.read_text(encoding="utf-8").splitlines()
-    assert any('"classification": "quota_slot_spent"' in line for line in index_lines), index_lines
-    assert any('"classification": "quota_slot_voided"' in line for line in index_lines), index_lines
-    assert any(f'"agent_id": "{SCOPED_AGENT_ID}"' in line for line in index_lines), index_lines
+    index_records = [json.loads(line) for line in index_lines]
+    assert any(
+        item.get("classification") == "quota_slot_spent"
+        for item in index_records
+    ), index_records
+    assert any(
+        item.get("classification") == "quota_slot_voided"
+        for item in index_records
+    ), index_records
+    assert any(
+        item.get("agent_id") == SCOPED_AGENT_ID
+        for item in index_records
+    ), index_records
 
     assert next_should_run["goal_id"] == "near-limit-half", next_should_run
     assert next_should_run["should_run"] is True, next_should_run

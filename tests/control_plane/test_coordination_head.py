@@ -1,4 +1,4 @@
-"""The RFC ``loopx_coordination_head_v0`` aggregate: schema, canonical bytes, adapters.
+"""The RFC ``loopx_coordination_head_v1`` aggregate: schema, canonical bytes, adapters.
 
 Stage 2 slice: the head is the one CAS document a coordination provider stores.
 This file pins the aggregate contract before any executor logic exists.
@@ -56,7 +56,9 @@ def todo(**overrides) -> dict:
 
 
 def head() -> dict:
-    return bootstrap_head("goal-a", {"todo-1": todo(), "todo-2": todo()})
+    return bootstrap_head(
+        "goal-a", {"todo-1": todo(), "todo-2": todo()}, store_binding="test:store"
+    )
 
 
 # ---- bootstrap + validation -------------------------------------------------
@@ -64,9 +66,10 @@ def head() -> dict:
 
 def test_bootstrap_head_matches_rfc_shape() -> None:
     built = head()
-    assert built["schema_version"] == HEAD_SCHEMA_VERSION == "loopx_coordination_head_v0"
+    assert built["schema_version"] == HEAD_SCHEMA_VERSION == "loopx_coordination_head_v1"
     assert built["goal_id"] == "goal-a"
     assert built["handoff_mode"] == "hard_lease"
+    assert built["store_binding"] == "test:store"
     assert built["authority_revision"] == 0
     assert set(built["coordination"]) == {"todos", "leases"}
     assert built["coordination"]["leases"] == {}
@@ -99,13 +102,13 @@ def test_validated_head_fails_closed(mutate, match) -> None:
 
 def test_bootstrap_rejects_non_portable_todo() -> None:
     with pytest.raises(HeadValidationError, match="repository"):
-        bootstrap_head("goal-a", {"todo-1": todo(repository="/abs/path")})
+        bootstrap_head("goal-a", {"todo-1": todo(repository="/abs/path")}, store_binding="test:store")
     with pytest.raises(HeadValidationError, match="open and unclaimed"):
-        bootstrap_head("goal-a", {"todo-1": todo(claimed_by="agent-a")})
+        bootstrap_head("goal-a", {"todo-1": todo(claimed_by="agent-a")}, store_binding="test:store")
     with pytest.raises(HeadValidationError, match="fields"):
         bad = todo()
         bad.pop("last_lease_epoch")
-        bootstrap_head("goal-a", {"todo-1": bad})
+        bootstrap_head("goal-a", {"todo-1": bad}, store_binding="test:store")
 
 
 @pytest.mark.parametrize(
@@ -123,18 +126,22 @@ def test_bootstrap_rejects_bool_and_negative_counts(overrides) -> None:
     the local core's corrupt_lease."""
 
     with pytest.raises(HeadValidationError):
-        bootstrap_head("goal-a", {"todo-1": todo(**overrides)})
+        bootstrap_head("goal-a", {"todo-1": todo(**overrides)}, store_binding="test:store")
 
 
 def test_bootstrap_rejects_bool_eligibility_revision() -> None:
     poisoned = eligibility()
     poisoned["gate_revision"] = True
     with pytest.raises(HeadValidationError, match="eligibility revisions"):
-        bootstrap_head("goal-a", {"todo-1": todo(eligibility=poisoned)})
+        bootstrap_head("goal-a", {"todo-1": todo(eligibility=poisoned)}, store_binding="test:store")
 
 
 def leased_head() -> dict:
     built = head()
+    built["coordination"]["todos"]["todo-1"].update(
+        claimed_by="agent-a",
+        last_lease_epoch=7,
+    )
     built["coordination"]["leases"]["todo-1"] = {
         "lease_id": "lease_abc",
         "owner": "agent-a",
@@ -172,6 +179,35 @@ def test_validated_head_rejects_corrupt_lease_records(mutate, match) -> None:
         validated_head(broken, goal_id="goal-a")
 
 
+@pytest.mark.parametrize(
+    ("corruption", "match"),
+    [
+        ("missing_lease", "claimed todo.*active lease"),
+        ("unclaimed_with_lease", "unclaimed todo.*active lease"),
+        ("owner_mismatch", "owner.*claimed_by"),
+        ("epoch_mismatch", "lease_epoch.*watermark"),
+    ],
+)
+def test_validated_head_binds_claim_to_its_live_lease(
+    corruption: str,
+    match: str,
+) -> None:
+    broken = leased_head()
+    todo_record = broken["coordination"]["todos"]["todo-1"]
+    lease_record = broken["coordination"]["leases"]["todo-1"]
+    if corruption == "missing_lease":
+        del broken["coordination"]["leases"]["todo-1"]
+    elif corruption == "unclaimed_with_lease":
+        todo_record["claimed_by"] = None
+    elif corruption == "owner_mismatch":
+        lease_record["owner"] = "agent-b"
+    else:
+        todo_record["last_lease_epoch"] = 6
+
+    with pytest.raises(HeadValidationError, match=match):
+        validated_head(broken, goal_id="goal-a")
+
+
 _RECEIPT_DIGEST = "sha256:" + "0" * 64
 
 
@@ -200,7 +236,7 @@ def receipted_head() -> dict:
 @pytest.mark.parametrize(
     ("mutate", "match"),
     [
-        (lambda e: e.update(original_receipt={}), "fields do not match"),
+        (lambda e: e.update(original_receipt={}), "outside the v0 slice"),
         (lambda e: e.update(extra=True), "fields do not match"),
         (lambda e: e.update(request_digest="sha256:bootstrap"), "request_digest"),
         (
@@ -241,8 +277,12 @@ def receipted_head() -> dict:
             "actor identity",
         ),
         (
-            lambda e: e["original_receipt"].update(command="release_work"),
+            lambda e: e["original_receipt"].update(command="transfer_work"),
             "outside the v0 slice",
+        ),
+        (
+            lambda e: e["original_receipt"].update(command="release_work"),
+            "fields do not match",
         ),
     ],
 )
@@ -413,6 +453,7 @@ def test_bootstrap_from_goal_state_shadows_open_unclaimed_todos(tmp_path) -> Non
     built, report = bootstrap_head_from_goal_state(
         state.read_text(encoding="utf-8"),
         goal_id="shadow-goal",
+        store_binding="test:store",
         repository="git:example/repo",
         code_revision="0123456789abcdef",
         allowed_agent_ids=["agent-a", "agent-b"],
@@ -442,6 +483,7 @@ def test_bootstrap_from_goal_state_read_parity_with_the_projection(tmp_path) -> 
     built = bootstrap_head_from_goal_state(
         text,
         goal_id="shadow-goal",
+        store_binding="test:store",
         repository="git:example/repo",
         code_revision="0123456789abcdef",
         allowed_agent_ids=["agent-a"],
@@ -468,6 +510,7 @@ def test_bootstrap_from_soft_claim_goal_fails_closed() -> None:
         bootstrap_head_from_goal_state(
             state_text,
             goal_id="shadow-goal",
+            store_binding="test:store",
             repository="git:example/repo",
             code_revision="0123456789abcdef",
             allowed_agent_ids=["agent-a"],

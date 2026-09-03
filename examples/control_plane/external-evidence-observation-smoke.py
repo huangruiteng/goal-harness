@@ -19,9 +19,6 @@ from loopx.control_plane.scheduler.external_evidence_observation import (  # noq
 from loopx.control_plane.scheduler.execution_context import (  # noqa: E402
     GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
 )
-from loopx.control_plane.scheduler.monitor_poll_policy import (  # noqa: E402
-    allows_no_spend_external_monitor_poll,
-)
 from loopx.control_plane.testing.quota_fixtures import (  # noqa: E402
     quota_status_payload,
     quota_todo_item,
@@ -207,7 +204,12 @@ def assert_monitor_only_launched_poll_requires_observation() -> None:
     assert lane["monitor_kind"] == "external_evidence", guard
     assert guard["effective_action"] == "external_evidence_observe", guard
     assert guard["execution_obligation"]["kind"] == "external_evidence_observation_required", guard
-    assert allows_no_spend_external_monitor_poll(guard) is True, guard
+    assert lane["must_attempt_work"] is True, guard
+    assert lane["monitor_policy"] in {
+        "material_transition_only",
+        "read_only_observation_then_no_spend_if_unchanged",
+        "write_once_per_material_transition_else_no_spend",
+    }, guard
 
 
 def assert_recent_unchanged_observation_defers_to_capability_repair() -> None:

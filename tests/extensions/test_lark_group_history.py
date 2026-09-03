@@ -378,6 +378,312 @@ def test_cursor_resumes_then_replays_completed_history_without_provider_read(
     assert replay_runner.calls == []
 
 
+@pytest.mark.parametrize("legacy_cursor", [False, True])
+def test_completed_cursor_fetches_new_messages_from_a_later_provider_window(
+    tmp_path: Path, legacy_cursor: bool
+) -> None:
+    project, config = _project(tmp_path)
+    initial = PageRunner(
+        [
+            {
+                "messages": [_message("om_initial", "initial context")],
+                "total": 1,
+                "has_more": False,
+                "page_token": "",
+            }
+        ]
+    )
+    completed = _catch_up(project, config, initial, execute=True)
+    if legacy_cursor:
+        cursor_path = project / ".loopx" / "inbox" / ".history" / "requirements-a.json"
+        cursor = json.loads(cursor_path.read_text(encoding="utf-8"))
+        cursor["schema_version"] = "lark_group_history_cursor_v0"
+        cursor.pop("coverage_end")
+        cursor_path.write_text(json.dumps(cursor), encoding="utf-8")
+    later_now = datetime(2026, 8, 22, tzinfo=UTC)
+    later = PageRunner(
+        [
+            {
+                "messages": [
+                    _message(
+                        "om_later",
+                        "new follow-up in an existing topic",
+                        create_time="2026-08-21T12:00:00Z",
+                    )
+                ],
+                "total": 1,
+                "has_more": False,
+                "page_token": "",
+            }
+        ]
+    )
+
+    receipt = catch_up_lark_group_history(
+        project=project,
+        config_path=config,
+        route_key="requirements-a",
+        start=START,
+        execute=True,
+        runner=later,
+        now=later_now,
+    )
+
+    assert completed["status"] == "history_complete"
+    assert receipt["status"] == "history_complete"
+    assert receipt["cursor_transition"] == "forward_window_initialized"
+    assert receipt["external_read_performed"] is True
+    assert receipt["accepted_count"] == 1
+    argv = later.calls[0]
+    assert argv[argv.index("--start") + 1] == "2026-08-21T00:00:00Z"
+    assert argv[argv.index("--end") + 1] == "2026-08-22T00:00:00Z"
+    assert (project / ".loopx" / "inbox" / "requirements-a" / "om_later.json").is_file()
+
+    replay_runner = PageRunner([])
+    replayed = catch_up_lark_group_history(
+        project=project,
+        config_path=config,
+        route_key="requirements-a",
+        start=START,
+        execute=True,
+        runner=replay_runner,
+        now=later_now,
+    )
+    assert replayed["cursor_transition"] == "replayed"
+    assert replayed["external_read_performed"] is False
+    assert replay_runner.calls == []
+
+
+def test_completed_cursor_compares_fractional_timestamp_bounds_chronologically(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path)
+    initial_now = datetime(2026, 8, 21, tzinfo=UTC)
+    catch_up_lark_group_history(
+        project=project,
+        config_path=config,
+        route_key="requirements-a",
+        start=START,
+        execute=True,
+        runner=PageRunner(
+            [
+                {
+                    "messages": [_message("om_initial", "initial context")],
+                    "total": 1,
+                    "has_more": False,
+                    "page_token": "",
+                }
+            ]
+        ),
+        now=initial_now,
+    )
+    fractional_now = initial_now.replace(microsecond=500_000)
+    later = PageRunner(
+        [
+            {
+                "messages": [],
+                "total": 0,
+                "has_more": False,
+                "page_token": "",
+            }
+        ]
+    )
+
+    receipt = catch_up_lark_group_history(
+        project=project,
+        config_path=config,
+        route_key="requirements-a",
+        start=START,
+        execute=True,
+        runner=later,
+        now=fractional_now,
+    )
+
+    assert receipt["cursor_transition"] == "forward_window_initialized"
+    assert receipt["external_read_performed"] is True
+    argv = later.calls[0]
+    assert argv[argv.index("--start") + 1] == "2026-08-21T00:00:00Z"
+    assert argv[argv.index("--end") + 1] == "2026-08-21T00:00:00.500000Z"
+
+
+def test_forward_window_resumes_pagination_with_original_requested_start(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path)
+    _catch_up(
+        project,
+        config,
+        PageRunner(
+            [
+                {
+                    "messages": [_message("om_initial", "initial context")],
+                    "total": 1,
+                    "has_more": False,
+                    "page_token": "",
+                }
+            ]
+        ),
+        execute=True,
+    )
+    later_now = datetime(2026, 8, 22, tzinfo=UTC)
+    first_page = PageRunner(
+        [
+            {
+                "messages": [
+                    _message(
+                        "om_later_1",
+                        "first new page",
+                        create_time="2026-08-21T10:00:00Z",
+                    )
+                ],
+                "total": 2,
+                "has_more": True,
+                "page_token": "opaque-forward-page-2",
+            }
+        ]
+    )
+    first_receipt = catch_up_lark_group_history(
+        project=project,
+        config_path=config,
+        route_key="requirements-a",
+        start=START,
+        execute=True,
+        runner=first_page,
+        now=later_now,
+    )
+    second_page = PageRunner(
+        [
+            {
+                "messages": [
+                    _message(
+                        "om_later_2",
+                        "second new page",
+                        create_time="2026-08-21T11:00:00Z",
+                    )
+                ],
+                "total": 1,
+                "has_more": False,
+                "page_token": "",
+            }
+        ]
+    )
+
+    completed = catch_up_lark_group_history(
+        project=project,
+        config_path=config,
+        route_key="requirements-a",
+        start=START,
+        execute=True,
+        runner=second_page,
+        now=later_now,
+    )
+
+    assert first_receipt["status"] == "page_captured"
+    assert first_receipt["cursor_transition"] == "forward_window_initialized"
+    assert completed["status"] == "history_complete"
+    assert completed["cursor_transition"] == "resumed"
+    argv = second_page.calls[0]
+    assert argv[argv.index("--page-token") + 1] == "opaque-forward-page-2"
+    assert (
+        project / ".loopx" / "inbox" / "requirements-a" / "om_later_2.json"
+    ).is_file()
+
+
+def test_forward_window_after_earlier_backfill_resumes_from_covered_start(
+    tmp_path: Path,
+) -> None:
+    project, config = _project(tmp_path)
+    _catch_up(
+        project,
+        config,
+        PageRunner(
+            [
+                {
+                    "messages": [_message("om_initial", "initial context")],
+                    "total": 1,
+                    "has_more": False,
+                    "page_token": "",
+                }
+            ]
+        ),
+        execute=True,
+    )
+    _catch_up(
+        project,
+        config,
+        PageRunner(
+            [
+                {
+                    "messages": [_message("om_earlier", "earlier context")],
+                    "total": 1,
+                    "has_more": False,
+                    "page_token": "",
+                }
+            ]
+        ),
+        start="2026-08-19T00:00:00Z",
+        execute=True,
+    )
+    later_now = datetime(2026, 8, 22, tzinfo=UTC)
+    first_page = PageRunner(
+        [
+            {
+                "messages": [
+                    _message(
+                        "om_later_1",
+                        "first new page",
+                        create_time="2026-08-21T10:00:00Z",
+                    )
+                ],
+                "total": 2,
+                "has_more": True,
+                "page_token": "opaque-forward-page-2",
+            }
+        ]
+    )
+    catch_up_lark_group_history(
+        project=project,
+        config_path=config,
+        route_key="requirements-a",
+        start=START,
+        execute=True,
+        runner=first_page,
+        now=later_now,
+    )
+    second_page = PageRunner(
+        [
+            {
+                "messages": [
+                    _message(
+                        "om_later_2",
+                        "second new page",
+                        create_time="2026-08-21T11:00:00Z",
+                    )
+                ],
+                "total": 1,
+                "has_more": False,
+                "page_token": "",
+            }
+        ]
+    )
+
+    completed = catch_up_lark_group_history(
+        project=project,
+        config_path=config,
+        route_key="requirements-a",
+        start=START,
+        execute=True,
+        runner=second_page,
+        now=later_now,
+    )
+
+    assert completed["status"] == "history_complete"
+    assert completed["cursor_transition"] == "resumed"
+    assert (
+        second_page.calls[0][second_page.calls[0].index("--page-token") + 1]
+        == "opaque-forward-page-2"
+    )
+
+
 def test_completed_cursor_rejects_inbox_destination_drift(tmp_path: Path) -> None:
     project, config = _project(tmp_path)
     _catch_up(

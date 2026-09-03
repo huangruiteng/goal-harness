@@ -518,6 +518,30 @@ def test_turn_envelope_full_decision_preserves_codex_app_profile() -> None:
     )
 
 
+def test_turn_envelope_detail_refs_preserve_explicit_runtime_root() -> None:
+    payload = _full_decision()
+    payload["runtime_root"] = "/tmp/loopx custom runtime"
+
+    envelope = build_turn_envelope(
+        payload,
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_CLI_VISIBLE
+        ),
+    )
+
+    command_prefix = "loopx --runtime-root '/tmp/loopx custom runtime'"
+    detail_ref = envelope["detail_ref"]
+    assert detail_ref["full_decision"].startswith(
+        f"{command_prefix} --format json quota should-run"
+    )
+    assert detail_ref["todo_detail"] == (
+        f"{command_prefix} --format json todo list --goal-id fixture-goal"
+    )
+    assert detail_ref["status_detail"] == (
+        f"{command_prefix} --format json status --goal-id fixture-goal"
+    )
+
+
 @pytest.mark.parametrize(
     ("profile", "expected_arg"),
     (

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Real DeepSeek Harness end-to-end qualification for the LoopX Turn adapter.
+"""Real DeepSeek Harness end-to-end qualification for both LoopX DSH hosts.
 
 This smoke uses the actual ``deepseek-harness-sdk`` and the bundled dsh runtime
 binary. It does not call a real DeepSeek model endpoint: a local mock
 OpenAI-compatible SSE server stands in for the LLM, so the test is hermetic and
 does not require DEEPSEEK_API_KEY. It proves that the adapter can start a real
 dsh JSON-RPC runtime, run one bounded turn, receive a typed JSON final message,
-and let LoopX validate/writeback/spend through the normal Turn chain.
+and let LoopX validate/writeback/spend through the normal Turn chain. The
+smoke clears ambient DSH home variables and supplies one explicit local home,
+so a passing run proves the SDK launch prerequisite is wired by the adapter.
 """
 
 from __future__ import annotations
@@ -171,9 +173,9 @@ def _base_argv(
     registry: Path,
     runtime: Path,
     workspace: Path,
-    session_root: Path,
+    dsh_home: Path,
     cordis: Path,
-    base_url: str,
+    host: str,
     timeout_seconds: float,
 ) -> list[str]:
     host_command = json.dumps(
@@ -182,8 +184,8 @@ def _base_argv(
             str(ADAPTER),
             "--cordis",
             str(cordis),
-            "--session-root",
-            str(session_root),
+            "--dsh-home",
+            str(dsh_home),
             "--request-timeout-seconds",
             "30",
             "--workspace",
@@ -192,7 +194,7 @@ def _base_argv(
             "mock-model",
         ]
     )
-    return [
+    argv = [
         "--registry",
         str(registry),
         "--runtime-root",
@@ -208,23 +210,39 @@ def _base_argv(
         "--turn-instance-id",
         "real-dsh-qualification-turn-1",
         "--host",
-        "generic-cli",
+        host,
         "--execution-mode",
         "isolated-headless",
         "--project",
         str(workspace),
-        "--host-command-json",
-        host_command,
-        "--validation-command-json",
-        json.dumps(_validator_command()),
-        "--validation-failure-kind",
-        "repair_required",
-        "--scan-root",
-        str(registry.parent.parent),
-        "--no-global-sync",
-        "--timeout-seconds",
-        str(timeout_seconds),
     ]
+    if host == "generic-cli":
+        argv.extend(["--host-command-json", host_command])
+    else:
+        argv.extend(
+            [
+                "--dsh-home",
+                str(dsh_home),
+                "--dsh-cordis",
+                str(cordis),
+                "--dsh-model",
+                "mock-model",
+            ]
+        )
+    argv.extend(
+        [
+            "--validation-command-json",
+            json.dumps(_validator_command()),
+            "--validation-failure-kind",
+            "repair_required",
+            "--scan-root",
+            str(registry.parent.parent),
+            "--no-global-sync",
+            "--timeout-seconds",
+            str(timeout_seconds),
+        ]
+    )
+    return argv
 
 
 def _quota_spend_count(runtime: Path) -> int:
@@ -241,6 +259,12 @@ def _quota_spend_count(runtime: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
+    parser.add_argument(
+        "--host",
+        choices=["generic-cli", "dsh"],
+        default="generic-cli",
+        help="Exercise the subprocess adapter or the built-in in-process host.",
+    )
     args = parser.parse_args()
 
     try:
@@ -290,28 +314,35 @@ def main() -> int:
     base_url = f"http://127.0.0.1:{server.server_address[1]}"
     old_env = {
         key: os.environ.get(key)
-        for key in ("DEEPSEEK_BASE_URL", "DEEPSEEK_API_KEY", "DSH_CWD", "DSH_SESSION_ROOT")
+        for key in (
+            "DEEPSEEK_BASE_URL",
+            "DEEPSEEK_API_KEY",
+            "DSH_CWD",
+            "DSH_HOME",
+            "DSH_SESSION_ROOT",
+        )
     }
     try:
         os.environ["DEEPSEEK_BASE_URL"] = base_url
         os.environ["DEEPSEEK_API_KEY"] = "dsh-real-e2e-mock-key"
-        os.environ["DSH_CWD"] = "."
+        for key in ("DSH_CWD", "DSH_HOME", "DSH_SESSION_ROOT"):
+            os.environ.pop(key, None)
         with tempfile.TemporaryDirectory(prefix="loopx-turn-dsh-real-e2e-") as directory:
             root = Path(directory)
             project, runtime, workspace, registry = _write_fixture(root)
             session_root = root / "sessions"
             session_root.mkdir(parents=True)
+            dsh_home = root / "dsh-home"
             cordis = _write_minimal_cordis(session_root)
             marker_path = workspace / MARKER_NAME
-            os.environ["DSH_SESSION_ROOT"] = str(session_root)
 
             base = _base_argv(
                 registry=registry,
                 runtime=runtime,
                 workspace=workspace,
-                session_root=session_root,
+                dsh_home=dsh_home,
                 cordis=cordis,
-                base_url=base_url,
+                host=args.host,
                 timeout_seconds=args.timeout_seconds,
             )
             exit_code, payload = _run_cli([*base, "--execute"])
@@ -334,6 +365,9 @@ def main() -> int:
             summary = {
                 "schema_version": "loopx_turn_dsh_real_e2e_v1",
                 "real_dsh_invoked": True,
+                "host": args.host,
+                "ambient_dsh_home_cleared": True,
+                "configured_dsh_home_created": dsh_home.is_dir(),
                 "mock_llm_base_url": base_url,
                 "exit_code": exit_code,
                 "status": payload.get("status"),
@@ -375,6 +409,7 @@ def main() -> int:
     ok = (
         exit_code == 0
         and summary["status"] == "committed"
+        and summary["configured_dsh_home_created"] is True
         and summary["result_kind"] == "validated_progress"
         and (summary["validation"] or {}).get("status") == "passed"
         and effects == expected_effects

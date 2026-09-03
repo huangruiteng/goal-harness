@@ -936,12 +936,27 @@ def test_release_failure_after_commit_keeps_completion_ok(
         ttl_seconds=600,
     )
 
-    def _fail_release(_path: Path, _lease: dict) -> None:
-        raise OSError("simulated terminal write failure")
+    native_lifecycle = task_lease_module._execute_native_task_lease_lifecycle
+
+    def _fail_release(**kwargs: object) -> dict:
+        if (
+            kwargs.get("operation") == "fence_close"
+            and kwargs.get("committed") is True
+            and kwargs.get("release_lease") is True
+        ):
+            native_lifecycle(
+                **{
+                    **kwargs,
+                    "committed": False,
+                    "release_lease": False,
+                }
+            )
+            raise OSError("simulated terminal write failure")
+        return native_lifecycle(**kwargs)
 
     monkeypatch.setattr(
         task_lease_module,
-        "persist_released_lease",
+        "_execute_native_task_lease_lifecycle",
         _fail_release,
     )
     completed = complete_goal_todo(

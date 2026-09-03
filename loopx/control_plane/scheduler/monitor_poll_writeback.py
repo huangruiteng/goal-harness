@@ -171,6 +171,7 @@ def write_monitor_poll_todo_state(
     goal_id: str,
     generated_at: str,
     execute: bool,
+    monitor_effect_id: str | None = None,
     todo_id: str | None = None,
     target_key: str | None = None,
     result_hash: str | None = None,
@@ -240,6 +241,7 @@ def write_monitor_poll_todo_state(
             generated_at=generated_at,
             result_hash=safe_result_hash,
             material_change=material_change,
+            monitor_effect_id=monitor_effect_id,
             target_key=safe_target_key or None,
             cadence=cadence,
             next_due_at=next_due_at,
@@ -250,7 +252,7 @@ def write_monitor_poll_todo_state(
     )
     poll_transition = update_result.get("monitor_poll_transition")
     if not isinstance(poll_transition, dict):
-        raise RuntimeError("monitor poll Todo update returned no transition receipt")
+        raise TypeError("monitor poll Todo update returned no transition receipt")
     material_change_generation = int(
         poll_transition["material_change_generation"]
     )
@@ -318,7 +320,7 @@ def write_monitor_poll_todo_state(
         }
         for result in next_results
     ]
-    return {
+    result = {
         "schema_version": "monitor_poll_todo_writeback_v0",
         "dry_run": not execute,
         "goal_id": goal_id,
@@ -335,3 +337,9 @@ def write_monitor_poll_todo_state(
         "next_todos": next_results,
         "successor_receipts": successor_receipts,
     }
+    if monitor_effect_id:
+        result["monitor_effect_id"] = monitor_effect_id
+        result["provider_replayed"] = bool(
+            poll_transition.get("provider_replayed")
+        )
+    return result

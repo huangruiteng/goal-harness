@@ -20,6 +20,7 @@ from .doubao_model_behavior_actor import (
 )
 from .model_tool_behavior import (
     DoubaoExecToolClient,
+    QUOTA_FIRST_TOOL_INSTRUCTION,
     digest_text,
     execute_loopx_cli,
 )
@@ -353,14 +354,17 @@ class DoubaoScopedGateSuccessorToolBehaviorActor:
                 "content": (
                     "You are Codex running one LoopX heartbeat. Follow the "
                     "heartbeat task and use the available shell tool when needed. "
+                    f"{QUOTA_FIRST_TOOL_INSTRUCTION}"
                     "Choose each next action from the latest tool result. If quota "
                     "requires a user action but still selects runnable work, surface "
                     "the user notice as non-blocking in the final assistant response "
                     "after executing the selected Todo tool action; do not wait on "
                     "that notice. The quota user-action text is sufficient for the "
                     "notice and grants no authority to inspect or act on the user-gate "
-                    "target. After the selected Todo tool succeeds, call no more tools "
-                    "and return the final response."
+                    "target. When selected_todo.text names one relative file, the "
+                    "next tool call must be `cat <that exact path>`; do not run pwd, "
+                    "ls, find, rg, or inspect state first. After the selected Todo "
+                    "tool succeeds, call no more tools and return the final response."
                 ),
             },
             {"role": "user", "content": fixture.task_body},

@@ -7,6 +7,7 @@ import {
   RunGoal,
   RunRecord,
   StatusPayload,
+  type PeriodicReportProjection,
   AgentManagementProjection,
   TodoItem,
   TodoGroup,
@@ -18,6 +19,12 @@ import {
   withGoalActivationState,
   withoutGoal,
 } from "../data/status";
+import {
+  fetchPeriodicReportIndex,
+  fetchPeriodicReportProjection,
+  periodicReportApiUrls,
+  resolveLocalStatusUrl,
+} from "../data/local-status-query";
 import {
   ChatApiError,
   applyTypedAction,
@@ -42,6 +49,7 @@ import {
   type ChatSessionSnapshot,
   type ChatSessionSummary,
   type ChatImageAttachment,
+  type ProtectedActionProposal,
   type TodoProposal,
 } from "../data/chat";
 import { Button } from "../components/ui/button";
@@ -66,8 +74,42 @@ import {
   type WorkspaceWorker,
   type WorkspaceGoalNotification,
   type WorkspaceActionPreview,
+  type WorkspaceActionPreviewRequest,
 } from "../features/personal-workspace/personal-workspace-model";
 import { routeWorkspaceInput } from "../features/personal-workspace/personal-workspace-router";
+
+const protectedOperationLabels: Record<ProtectedActionProposal["operation"], string> = {
+  delete: "删除",
+  deploy: "部署",
+  merge: "合并",
+  payment: "付款",
+  release: "发布",
+};
+
+function semanticProtectedActionPreview(
+  goalId: string,
+  message: string,
+  proposal: ProtectedActionProposal,
+): WorkspaceActionPreviewRequest | null {
+  const normalizedMessage = message.replace(/\s+/gu, " ").trim().toLowerCase();
+  const normalizedTarget = proposal.target.replace(/\s+/gu, " ").trim().toLowerCase();
+  if (!normalizedTarget || !normalizedMessage.includes(normalizedTarget)) return null;
+  return {
+    actionKind: "goal.update",
+    context: {
+      goal_id: goalId,
+      kind: "goal",
+      natural_language: message,
+      semantic_proposal: {
+        operation: proposal.operation,
+        target: proposal.target,
+      },
+    },
+    idempotencyKey: `workspace-semantic-protected-${goalId}-${Date.now().toString(36)}`,
+    normalizedParameters: { goal_id: goalId, status: "operator_gate_requested" },
+    summary: `请求受保护操作：${protectedOperationLabels[proposal.operation]} · ${proposal.target}`,
+  };
+}
 import type { StatusSourceControl } from "../features/personal-workspace/status-source-switcher";
 import { ensureSshSource } from "../data/ssh-host-catalog";
 import {
@@ -347,12 +389,13 @@ function firstOpenTodo(todos?: TodoGroup | null) {
 }
 
 function todosFromProjectAssetSummary(
-  summary?: { items?: TodoItem[]; total?: number; open?: number; done?: number } | null,
+  summary?: { items?: TodoItem[]; total?: number; open?: number; done?: number; advancement_done_count?: number; source_section?: string | null } | null,
   fallback?: TodoGroup | null,
   _label = "todos",
 ): TodoGroup | null {
   if (summary?.items?.length) {
     return {
+      advancement_done_count: summary.advancement_done_count ?? fallback?.advancement_done_count,
       done_count: summary.done ?? summary.items.filter((item) => item.done).length,
       items: summary.items,
       open_count: summary.open ?? summary.items.filter((item) => !item.done).length,
@@ -573,15 +616,6 @@ const personalGoalStateVariant: Record<PersonalGoalState, BadgeVariant> = {
   "已完成": "neutral",
 };
 
-function personalOpsHref(goalId?: string) {
-  const params = new URLSearchParams();
-  params.set("view", "ops");
-  if (goalId) {
-    params.set("goalId", goalId);
-  }
-  return `/?${params.toString()}`;
-}
-
 function personalGoalTitle(goalId: string, displayName?: string | null) {
   const registeredDisplayName = cleanShareText(displayName);
   if (registeredDisplayName) {
@@ -735,7 +769,11 @@ function personalAgentTodoFacts(row: GoalDirectoryRow): {
   const assetTodos = row.queueItem?.project_asset?.agent_todos;
   const queueTodos = row.queueItem?.agent_todos;
   const items = assetTodos?.items?.length ? assetTodos.items : queueTodos?.items ?? [];
-  const doneFromCount = assetTodos?.done ?? queueTodos?.done_count ?? null;
+  const doneFromCount = assetTodos?.advancement_done_count
+    ?? queueTodos?.advancement_done_count
+    ?? assetTodos?.done
+    ?? queueTodos?.done_count
+    ?? null;
   const doneFromItems = items.filter((todo) => todo.done).length;
   const doneTodoCount = Math.max(doneFromCount ?? 0, doneFromItems);
   const seenTodoIds = new Set(
@@ -1268,6 +1306,9 @@ function PersonalGoalHome({
   }>>([]);
   const model = buildPersonalHomeModel(payload, rows);
   const selectedGoal = model.goals.find((goal) => goal.goalId === selectedGoalId) ?? null;
+  const [periodicReport, setPeriodicReport] = useState<PeriodicReportProjection | null>(null);
+  const [periodicReportError, setPeriodicReportError] = useState<string | null>(null);
+  const [periodicReportLoading, setPeriodicReportLoading] = useState(false);
   const sessionDiscoveryKey = model.goals.map((goal) => `${goal.goalId}:${goal.agentId}`).join("|");
   const contextId = selectedGoal?.goalId ?? "manager";
   const managerSummary = !payload.ok
@@ -1368,6 +1409,46 @@ function PersonalGoalHome({
         visibleUserTodos: goalUserTodos,
       }
     : model;
+
+  useEffect(() => {
+    const resolved = resolveLocalStatusUrl(
+      statusSourceControl.activeSource.statusUrl,
+      window.location.href,
+    );
+    const urls = resolved.source ? periodicReportApiUrls(payload, resolved.source) : null;
+    if (!selectedGoal || !urls?.indexUrl || !urls.detailUrl) {
+      setPeriodicReport(null);
+      setPeriodicReportError(null);
+      setPeriodicReportLoading(false);
+      return;
+    }
+    const { detailUrl, indexUrl } = urls;
+    let cancelled = false;
+    setPeriodicReport(null);
+    setPeriodicReportError(null);
+    setPeriodicReportLoading(true);
+    void fetchPeriodicReportIndex(indexUrl, selectedGoal.goalId)
+      .then(async (index) => {
+        const ref = index.items[0]?.detail_ref;
+        return ref ? fetchPeriodicReportProjection(detailUrl, ref) : null;
+      })
+      .then((report) => {
+        if (!cancelled) setPeriodicReport(report);
+      })
+      .catch((error) => {
+        if (!cancelled) setPeriodicReportError(formatStatusError(error));
+      })
+      .finally(() => {
+        if (!cancelled) setPeriodicReportLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    payload,
+    selectedGoal?.goalId,
+    statusSourceControl.activeSource.statusUrl,
+  ]);
 
   function recordRuntimeBinding(targetContextId: string, binding: PersonalRuntimeBinding | null) {
     setRuntimeBindings((current) => {
@@ -1908,6 +1989,14 @@ function PersonalGoalHome({
           [targetContextId]: [...(current[targetContextId] ?? []), ...cards],
         }));
       }
+      if (targetContextId !== "manager" && response.protected_action) {
+        const protectedPreview = semanticProtectedActionPreview(
+          targetContextId,
+          question,
+          response.protected_action,
+        );
+        if (protectedPreview) return protectedPreview;
+      }
     } catch (error) {
       const userInterrupted = interruptedContexts.current.delete(targetContextId);
       if (userInterrupted) {
@@ -2290,9 +2379,49 @@ function PersonalGoalHome({
         todoId: goal.runEvidence.todoId ?? undefined,
       },
     }] : []),
+    ...(selectedGoal && periodicReport ? [{
+      id: `output:${selectedGoal.goalId}:report:${periodicReport.publication.publication_id}`,
+      kind: "output" as const,
+      output: {
+        agentId: periodicReport.agent_id,
+        agentLabel: personalAgentLabel(periodicReport.agent_id),
+        createdAt: periodicReport.publication.delivered_at,
+        goalId: selectedGoal.goalId,
+        goalTitle: selectedGoal.title,
+        kind: "report" as const,
+        outputId: periodicReport.publication.publication_id,
+        report: {
+          addedCount: periodicReport.delta.added_count,
+          changedCount: periodicReport.delta.changed_count,
+          deliveredAt: periodicReport.publication.delivered_at,
+          generationId: periodicReport.generation_id,
+          items: periodicReport.delta.items.map((item) => ({
+            changeKind: item.change_kind,
+            previousStatus: item.previous_status,
+            sourceRef: item.source_ref,
+            status: item.status,
+            summary: item.summary,
+            title: item.title,
+          })),
+          periodEndAt: periodicReport.period_window.end_at,
+          periodStartAt: periodicReport.period_window.start_at,
+          predecessorPublicationId: periodicReport.publication.predecessor_publication_id,
+          publicationId: periodicReport.publication.publication_id,
+        },
+        safePreview: periodicReport.delta.items
+          .map((item) => `${item.change_kind === "added" ? "+" : "~"} ${item.title}\n${item.summary}`)
+          .join("\n\n"),
+        summary: periodicReport.summary,
+        title: periodicReport.title,
+      },
+    }] : []),
   ];
   const workspaceModel = {
     ...normalizePersonalHomeModel(model),
+    periodicReports: {
+      error: periodicReportError,
+      loading: periodicReportLoading,
+    },
     timeline: workspaceTimeline,
   };
   return (

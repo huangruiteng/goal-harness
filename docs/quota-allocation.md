@@ -523,7 +523,11 @@ When a poll sees a material transition, add `--material-change` and optionally
 follow-up instead of staying as an opaque watch. A user follow-up must declare
 `--next-user-task-class user_gate|user_action` explicitly: use `user_gate` for
 a blocking owner decision and `user_action` for a visible reminder that must
-not block the bound agent lane. Omitting the task class fails before writeback:
+not block the bound agent lane. Omitting the task class fails before writeback.
+The monitor remains an observe-only `continuous_monitor`; `--next-agent-todo`
+creates a separate runnable `advancement_task`. For the corresponding
+generation-fenced waiting-Todo recipe, see
+[Project Agent Todo Contract](project-agent-todo-contract.md#machine-readable-resume-conditions):
 
 ```bash
 loopx quota monitor-poll --goal-id <GOAL_ID> \
@@ -535,8 +539,16 @@ loopx quota monitor-poll --goal-id <GOAL_ID> \
 
 The command appends a `quota_monitor_poll` run record, does not mutate the
 registry, and does not append `quota_slot_spent`. The run includes
-`quota_monitor_target_v0`, a compact hash of the public monitor identity. Six
-consecutive unchanged executions of a concrete due/external monitor Todo or
+`quota_monitor_target_v0`, a compact hash of the public monitor identity.
+The versioned `quota.monitor_poll.commit` TypeScript transaction owns admission
+revalidation, that target/event construction, same-effect replay, index CAS,
+and the repairable JSON/Markdown/index write set. Polls without a Todo target
+cross the managed runtime once. A Todo target uses a fail-closed provider
+preflight followed by one final commit; the retained Todo writer persists the
+monitor effect identity so a crash retry cannot advance counters twice or let
+an older observation overwrite a newer one.
+
+Six consecutive unchanged executions of a concrete due/external monitor Todo or
 target with the same target feed
 `autonomous_replan_obligation` as
 `dead_monitor_repeat`, so the next independent `quota should-run` may flip to

@@ -24,6 +24,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,9 @@ from ...file_lock import LockAcquireTimeoutError, exclusive_file_lock
 
 class ProviderProtocolError(RuntimeError):
     """Persisted bytes or a provider outcome violated the storage contract."""
+
+
+_STORE_IDENTITY_PATTERN = re.compile(r"file:[0-9a-f]{32}\Z")
 
 
 def _canonical(envelope: dict[str, Any]) -> bytes:
@@ -85,6 +90,28 @@ def _fsync_directory(directory: Path) -> None:
         os.close(descriptor)
 
 
+def _durably_replace_bytes(target: Path, payload: bytes, temp_path: Path) -> None:
+    """Publish complete bytes atomically and make the directory entry durable."""
+
+    try:
+        descriptor = os.open(
+            temp_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
+        )
+        try:
+            _write_all(descriptor, payload)
+            _fsync_file(descriptor)
+        finally:
+            os.close(descriptor)
+        _replace_document(temp_path, target)
+        _fsync_directory(target.parent)
+    except OSError:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 class FileCoordinationProvider:
     """Map one goal's head document onto an atomically replaced JSON file."""
 
@@ -102,6 +129,69 @@ class FileCoordinationProvider:
         self._lock_timeout_seconds = lock_timeout_seconds
         digest = hashlib.sha256(goal_id.encode("utf-8")).hexdigest()[:16]
         self._document = self.directory / f"coordination-head-{digest}.json"
+        self._identity_path = self.directory / "store-identity"
+        self._store_identity: str | None = None
+
+    def store_identity(self) -> str:
+        """The stable identity of this store lineage (Stage 3 binding fence).
+
+        Minted once per directory under the provider's cross-process lock and
+        published only after a complete temp-file write, file fsync, atomic
+        rename, and parent-directory fsync. Every competing creator therefore
+        observes the same complete value. A copy of the documents into a fresh
+        directory yields a NEW identity, so a head bound to the original
+        lineage is detectable there.
+        """
+
+        if self._store_identity is not None:
+            return self._store_identity
+        try:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            with exclusive_file_lock(
+                self._identity_path,
+                timeout_seconds=self._lock_timeout_seconds,
+                operation="coordination_store_identity",
+            ):
+                try:
+                    raw_identity = self._identity_path.read_bytes()
+                except FileNotFoundError:
+                    identity = f"file:{uuid.uuid4().hex}"
+                    temp_path = self._identity_path.with_name(
+                        f"{self._identity_path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}"
+                    )
+                    _durably_replace_bytes(
+                        self._identity_path,
+                        identity.encode("ascii"),
+                        temp_path,
+                    )
+                    self._store_identity = identity
+                    return identity
+                try:
+                    identity = raw_identity.decode("ascii")
+                except UnicodeDecodeError as exc:
+                    raise ProviderProtocolError(
+                        "store identity does not match file:<32 lowercase hex>"
+                    ) from exc
+                if _STORE_IDENTITY_PATTERN.fullmatch(identity) is None:
+                    raise ProviderProtocolError(
+                        "store identity does not match file:<32 lowercase hex>"
+                    )
+                # A previous creator may have renamed successfully but failed
+                # while fsyncing the directory. Retrying the read completes
+                # that durability sequence before the identity is trusted.
+                _fsync_directory(self.directory)
+                self._store_identity = identity
+                return identity
+        except LockAcquireTimeoutError as exc:
+            raise ProviderProtocolError(
+                f"store identity lock is unavailable: {exc}"
+            ) from exc
+        except ProviderProtocolError:
+            raise
+        except OSError as exc:
+            raise ProviderProtocolError(
+                f"store identity is unavailable: {exc}"
+            ) from exc
 
     def _read_envelope(self) -> tuple[dict[str, Any] | None, int]:
         try:
@@ -205,28 +295,15 @@ class FileCoordinationProvider:
                 "error": f"head is not canonically serializable: {exc}",
             }
         temp_path = self._document.with_suffix(
-            f".tmp-{os.getpid()}-{next_generation}"
+            f".tmp-{os.getpid()}-{next_generation}-{uuid.uuid4().hex}"
         )
         try:
-            descriptor = os.open(
-                temp_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
-            )
-            try:
-                _write_all(descriptor, envelope)
-                _fsync_file(descriptor)
-            finally:
-                os.close(descriptor)
-            _replace_document(temp_path, self._document)
-            _fsync_directory(self.directory)
+            _durably_replace_bytes(self._document, envelope, temp_path)
         except OSError:
             # The commit sequence did not provably converge: the temp write
             # may or may not have been renamed, and a rename may or may not
             # be durable yet. Never parse error text as commit proof —
             # report ambiguous and let the authority reload its atomically
             # stored receipt index.
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
             return {"result": "ambiguous"}
         return {"result": "applied", "provider_generation": next_generation}

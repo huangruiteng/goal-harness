@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "loopx"
-version = "0.5.3"
+version = "0.5.4"
 description = "A lightweight Loop Engineering control plane for long-running agent goals."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,7 @@ Changelog = "https://github.com/huangruiteng/loopx/releases"
 
 [project.optional-dependencies]
 deepseek-harness = [
-  "deepseek-harness-sdk>=0.1.0rc5",
+  "deepseek-harness-sdk==0.1.2a3",
 ]
 test = [
   "jsonschema>=4.23,<5",
@@ -49,6 +49,7 @@ include = ["loopx*"]
 "loopx" = ["web/chat/*.html", "web/chat/assets/*", "web/chat/manifest.webmanifest", "web/chat/pwa/*"]
 "loopx.control_plane" = ["*.json", "*.ts"]
 "loopx.control_plane.agents" = ["*.ts"]
+"loopx.control_plane.coordination" = ["*.ts"]
 "loopx.control_plane.goals" = ["*.ts"]
 "loopx.control_plane.quota" = ["*.ts"]
 "loopx.control_plane.scheduler" = ["*.ts"]

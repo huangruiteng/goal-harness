@@ -65,6 +65,7 @@ def build_runtime_capability_reentry_packet(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ),
     turn_instance_id: str | None = None,
+    runtime_root: str | None = None,
 ) -> dict[str, Any] | None:
     """Project verified runtime-capability re-entry without persisting a grant."""
 
@@ -111,6 +112,11 @@ def build_runtime_capability_reentry_packet(
     agent_id = str(agent_identity.get("agent_id") or "").strip()
     base_args = [
         "loopx",
+        *(
+            ["--runtime-root", str(runtime_root)]
+            if str(runtime_root or "").strip()
+            else []
+        ),
         "--format",
         "json",
         "quota",

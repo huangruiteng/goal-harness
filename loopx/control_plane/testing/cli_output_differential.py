@@ -141,6 +141,17 @@ _PLANNING_INVENTORY_DETAIL_V0_MIGRATION_GROWTH_ALLOWANCE: dict[Metric, int] = {
     "compact_payload_chars": 1_024,
 }
 
+# Explicit runtime-root command routing repeats one bounded command prefix per
+# executable action. The allowance covers the prefix and its JSON projection;
+# it is per newly observed route, not per row, so unrelated output growth still
+# fails under the normal hot-path policy.
+_RUNTIME_ROOT_COMMAND_ROUTE_GROWTH_PER_ROUTE: dict[Metric, int] = {
+    "chars": 160,
+    "utf8_bytes": 160,
+    "lines": 0,
+    "compact_payload_chars": 160,
+}
+
 # loopx_guided_todo_delta_v0 adds the continuation-aware Todo authoring
 # decision contract (reuse/update/link_successor/add_new plus a bounded
 # runnable-frontier summary) to the guided start-goal packet when an
@@ -153,6 +164,22 @@ _GUIDED_TODO_DELTA_V0_MIGRATION_GROWTH_ALLOWANCE: dict[Metric, int] = {
     "lines": 16,
     "compact_payload_chars": 448,
 }
+
+
+def _runtime_root_route_growth_allowances(
+    base: dict[str, Any], candidate: dict[str, Any]
+) -> tuple[int, dict[Metric, int]]:
+    base_routes = base.get("runtime_root_command_route_count")
+    candidate_routes = candidate.get("runtime_root_command_route_count")
+    if type(base_routes) is not int or type(candidate_routes) is not int:
+        return 0, {}
+    added_routes = max(0, candidate_routes - base_routes)
+    if not added_routes:
+        return 0, {}
+    return added_routes, {
+        metric: added_routes * allowance
+        for metric, allowance in _RUNTIME_ROOT_COMMAND_ROUTE_GROWTH_PER_ROUTE.items()
+    }
 
 
 def _rows_by_id(receipt: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -290,17 +317,27 @@ def _planning_inventory_detail_schema_migration(
     return None
 
 
-def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
-    row_id = str(base["row_id"])
-    failures: list[str] = []
-    review_signals: list[str] = []
-    policy = str(base.get("qualification_policy") or "")
-    output_format = str(base.get("format") or "")
-    if candidate.get("qualification_policy") != policy:
-        failures.append("qualification_policy changed")
-    if candidate.get("format") != output_format:
-        failures.append("format changed")
+@dataclass(frozen=True)
+class _SchemaMigrationState:
+    signature_changed: bool
+    signature_migration: str | None
+    portfolio_schema_changed: bool
+    portfolio_schema_migration: str | None
+    horizon_schema_changed: bool
+    horizon_schema_migration: str | None
+    inventory_detail_schema_changed: bool
+    inventory_detail_schema_migration: str | None
+    guided_todo_delta_schema_changed: bool
+    guided_todo_delta_schema_migration: str | None
+    portfolio_growth_migration: bool
+    horizon_growth_migration: bool
+    inventory_detail_growth_migration: bool
+    guided_todo_delta_growth_migration: bool
 
+
+def _schema_migration_state(
+    base: dict[str, Any], candidate: dict[str, Any], *, output_format: str
+) -> _SchemaMigrationState:
     base_signature = base.get("action_signature_sha256")
     signature_changed = bool(
         base_signature
@@ -339,33 +376,6 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
         if inventory_detail_schema_changed
         else None
     )
-    portfolio_growth_migration = bool(
-        output_format == "json"
-        and (
-            portfolio_schema_migration
-            or (
-                signature_migration
-                and signature_migration.endswith(
-                    f" -> {ACTION_SIGNATURE_COVERAGE_V2}"
-                )
-            )
-        )
-    )
-    horizon_growth_migration = bool(
-        output_format == "json"
-        and (
-            horizon_schema_migration
-            or (
-                signature_migration
-                and signature_migration.endswith(
-                    f" -> {ACTION_SIGNATURE_COVERAGE_V3}"
-                )
-            )
-        )
-    )
-    inventory_detail_growth_migration = bool(
-        output_format == "json" and inventory_detail_schema_migration
-    )
     guided_todo_delta_schema_changed = (
         tuple(base.get("guided_todo_delta_schema_versions") or [])
         != tuple(candidate.get("guided_todo_delta_schema_versions") or [])
@@ -375,8 +385,68 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
         if guided_todo_delta_schema_changed
         else None
     )
-    guided_todo_delta_growth_migration = bool(
-        output_format == "json" and guided_todo_delta_schema_migration
+    return _SchemaMigrationState(
+        signature_changed=signature_changed,
+        signature_migration=signature_migration,
+        portfolio_schema_changed=portfolio_schema_changed,
+        portfolio_schema_migration=portfolio_schema_migration,
+        horizon_schema_changed=horizon_schema_changed,
+        horizon_schema_migration=horizon_schema_migration,
+        inventory_detail_schema_changed=inventory_detail_schema_changed,
+        inventory_detail_schema_migration=inventory_detail_schema_migration,
+        guided_todo_delta_schema_changed=guided_todo_delta_schema_changed,
+        guided_todo_delta_schema_migration=guided_todo_delta_schema_migration,
+        portfolio_growth_migration=bool(
+            output_format == "json"
+            and (
+                portfolio_schema_migration
+                or (
+                    signature_migration
+                    and signature_migration.endswith(
+                        f" -> {ACTION_SIGNATURE_COVERAGE_V2}"
+                    )
+                )
+            )
+        ),
+        horizon_growth_migration=bool(
+            output_format == "json"
+            and (
+                horizon_schema_migration
+                or (
+                    signature_migration
+                    and signature_migration.endswith(
+                        f" -> {ACTION_SIGNATURE_COVERAGE_V3}"
+                    )
+                )
+            )
+        ),
+        inventory_detail_growth_migration=bool(
+            output_format == "json" and inventory_detail_schema_migration
+        ),
+        guided_todo_delta_growth_migration=bool(
+            output_format == "json" and guided_todo_delta_schema_migration
+        ),
+    )
+
+
+def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    row_id = str(base["row_id"])
+    failures: list[str] = []
+    review_signals: list[str] = []
+    policy = str(base.get("qualification_policy") or "")
+    output_format = str(base.get("format") or "")
+    if candidate.get("qualification_policy") != policy:
+        failures.append("qualification_policy changed")
+    if candidate.get("format") != output_format:
+        failures.append("format changed")
+
+    migration = _schema_migration_state(
+        base,
+        candidate,
+        output_format=output_format,
+    )
+    added_runtime_root_routes, runtime_root_route_allowances = (
+        _runtime_root_route_growth_allowances(base, candidate)
     )
 
     deltas: dict[str, int | None] = {}
@@ -395,27 +465,32 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
             metric=metric,
             base=base_value,
         )
-        if portfolio_growth_migration:
+        if migration.portfolio_growth_migration:
             allowance = max(
                 allowance,
                 _ACTION_PORTFOLIO_V0_MIGRATION_GROWTH_ALLOWANCE[metric],
             )
-        if horizon_growth_migration:
+        if migration.horizon_growth_migration:
             allowance = max(
                 allowance,
                 _PLANNING_HORIZON_V0_MIGRATION_GROWTH_ALLOWANCE[metric],
             )
-        if inventory_detail_growth_migration:
+        if migration.inventory_detail_growth_migration:
             allowance = max(
                 allowance,
                 _PLANNING_INVENTORY_DETAIL_V0_MIGRATION_GROWTH_ALLOWANCE[
                     metric
                 ],
             )
-        if guided_todo_delta_growth_migration:
+        if migration.guided_todo_delta_growth_migration:
             allowance = max(
                 allowance,
                 _GUIDED_TODO_DELTA_V0_MIGRATION_GROWTH_ALLOWANCE[metric],
+            )
+        if runtime_root_route_allowances:
+            allowance = max(
+                allowance,
+                runtime_root_route_allowances[metric],
             )
         deltas[metric] = delta
         allowances[metric] = allowance
@@ -439,42 +514,49 @@ def _compare_row(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
     base_anchor = base.get("markdown_anchor")
     if base_anchor and candidate.get("markdown_anchor") != base_anchor:
         failures.append("markdown_anchor changed")
-    if signature_changed:
-        if signature_migration is None:
+    if migration.signature_changed:
+        if migration.signature_migration is None:
             failures.append("action_signature semantic digest changed")
         else:
             review_signals.append(
-                f"action_signature coverage migrated: {signature_migration}"
+                f"action_signature coverage migrated: {migration.signature_migration}"
             )
-    if portfolio_schema_changed:
-        if portfolio_schema_migration is None:
+    if migration.portfolio_schema_changed:
+        if migration.portfolio_schema_migration is None:
             failures.append("action_portfolio schema coverage changed")
         else:
             review_signals.append(
-                f"action_portfolio schema migrated: {portfolio_schema_migration}"
+                "action_portfolio schema migrated: "
+                f"{migration.portfolio_schema_migration}"
             )
-    if horizon_schema_changed:
-        if horizon_schema_migration is None:
+    if migration.horizon_schema_changed:
+        if migration.horizon_schema_migration is None:
             failures.append("planning_horizon schema coverage changed")
         else:
             review_signals.append(
-                f"planning_horizon schema migrated: {horizon_schema_migration}"
+                "planning_horizon schema migrated: "
+                f"{migration.horizon_schema_migration}"
             )
-    if inventory_detail_schema_changed:
-        if inventory_detail_schema_migration is None:
+    if migration.inventory_detail_schema_changed:
+        if migration.inventory_detail_schema_migration is None:
             failures.append("planning inventory detail schema coverage changed")
         else:
             review_signals.append(
                 "planning inventory detail schema migrated: "
-                f"{inventory_detail_schema_migration}"
+                f"{migration.inventory_detail_schema_migration}"
             )
-    if guided_todo_delta_schema_changed:
-        if guided_todo_delta_schema_migration is None:
+    if runtime_root_route_allowances:
+        review_signals.append(
+            "runtime-root command route coverage added: "
+            f"{added_runtime_root_routes} executable route(s)"
+        )
+    if migration.guided_todo_delta_schema_changed:
+        if migration.guided_todo_delta_schema_migration is None:
             failures.append("guided todo delta schema coverage changed")
         else:
             review_signals.append(
                 "guided todo delta schema migrated: "
-                f"{guided_todo_delta_schema_migration}"
+                f"{migration.guided_todo_delta_schema_migration}"
             )
 
     return {

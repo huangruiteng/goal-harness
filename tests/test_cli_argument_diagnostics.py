@@ -20,6 +20,7 @@ from loopx.cli_commands.todo_argument_validation import (
     validate_todo_supersede_options,
     validate_todo_update_options,
 )
+from loopx.control_plane.work_items.task_lease import TaskLeaseError
 
 
 def test_todo_handler_expands_shared_paths_and_keeps_suggest_project_only(
@@ -762,7 +763,7 @@ def test_todo_complete_preserves_typed_task_lease_error(
     tmp_path: Path,
 ) -> None:
     def reject_stale_instance(**_kwargs: object) -> dict[str, object]:
-        raise todo_command.TaskLeaseError(
+        raise TaskLeaseError(
             "todo has an active task lease",
             code="lease_fence_required",
             payload={"lease_version": 3},

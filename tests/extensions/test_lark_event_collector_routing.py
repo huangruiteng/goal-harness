@@ -3,16 +3,21 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from loopx.cli_commands import lark_inbox
+from loopx.extensions.lark import event_collector_routes
 from loopx.extensions.lark.event_collector import (
     _jq_projection,
     load_lark_event_collector_config,
     plan_lark_event_collector,
+)
+from loopx.extensions.lark.event_collector_routes import (
+    reconcile_lark_event_collector_route,
 )
 from loopx.extensions.lark.event_collector_runtime import (
     _is_profile_self_message,
@@ -27,6 +32,7 @@ from loopx.extensions.lark.routed_inbox import (
     resolve_routed_lark_inbox_config,
     resolve_routed_lark_inbox_route,
 )
+from loopx.file_lock import LockAcquireTimeoutError, exclusive_file_lock
 
 
 def _project(tmp_path: Path) -> Path:
@@ -129,6 +135,46 @@ def _two_route_config(tmp_path: Path) -> tuple[Path, Path, str, str]:
     return project, collector, first_chat, second_chat
 
 
+def test_non_git_project_accepts_private_collector_config(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    first_chat = "oc_public_fixture_alpha"
+    inbox = _write_inbox(project, name="requirements-alpha", chat_id=first_chat)
+    collector = _write_collector(
+        project,
+        routes=[
+            {
+                "route_key": "requirements-alpha",
+                "chat_id": first_chat,
+                "event_inbox_config": inbox,
+            }
+        ],
+    )
+
+    config = load_lark_event_collector_config(
+        project=project,
+        config_path=collector,
+    )
+
+    assert config["project"] == project.resolve()
+    assert config["config_path"] == collector.resolve()
+
+
+def test_non_git_project_rejects_collector_config_outside_private_root(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    collector = project / "collector.json"
+    collector.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="under .loopx/config"):
+        load_lark_event_collector_config(
+            project=project,
+            config_path=collector,
+        )
+
+
 def test_v1_plan_binds_one_profile_to_isolated_multi_chat_routes(
     tmp_path: Path,
 ) -> None:
@@ -158,6 +204,290 @@ def test_v1_plan_binds_one_profile_to_isolated_multi_chat_routes(
     assert first_chat not in serialized
     assert second_chat not in serialized
     assert "shared-context-bot" not in serialized
+    assert str(project) not in serialized
+
+
+def test_collector_route_reconcile_previews_applies_and_replays_with_readback(
+    tmp_path: Path,
+) -> None:
+    project, collector, first_chat, second_chat = _two_route_config(tmp_path)
+    third_chat = "oc_public_fixture_gamma"
+    third_inbox = _write_inbox(
+        project,
+        name="requirements-gamma",
+        chat_id=third_chat,
+    )
+    collector.chmod(0o600)
+
+    preview = reconcile_lark_event_collector_route(
+        project=project,
+        config_path=collector,
+        route_key="requirements-gamma",
+        chat_id=third_chat,
+        event_inbox_config=third_inbox,
+    )
+
+    assert preview["status"] == "preview_ready"
+    assert preview["route_count_before"] == 2
+    assert preview["route_count_after"] == 3
+    assert preview["write_performed"] is False
+    assert preview["runtime_reload_required"] is True
+    assert preview["readback"] == {"verified": False, "route_state": "planned"}
+    serialized = json.dumps(preview)
+    assert first_chat not in serialized
+    assert second_chat not in serialized
+    assert third_chat not in serialized
+    assert third_inbox not in serialized
+    assert str(project) not in serialized
+
+    applied = reconcile_lark_event_collector_route(
+        project=project,
+        config_path=collector,
+        route_key="requirements-gamma",
+        chat_id=third_chat,
+        event_inbox_config=third_inbox,
+        execute=True,
+    )
+    replayed = reconcile_lark_event_collector_route(
+        project=project,
+        config_path=collector,
+        route_key="requirements-gamma",
+        chat_id=third_chat,
+        event_inbox_config=third_inbox,
+        execute=True,
+    )
+
+    assert applied["status"] == "applied"
+    assert applied["write_performed"] is True
+    assert applied["runtime_reload_required"] is True
+    assert applied["runtime_reload_performed"] is False
+    assert applied["readback"] == {"verified": True, "route_state": "present"}
+    assert replayed["status"] == "already_applied"
+    assert replayed["write_performed"] is False
+    assert replayed["runtime_reload_required"] is True
+    assert replayed["runtime_readback_verified"] is False
+    assert replayed["readback"] == {"verified": True, "route_state": "present"}
+    assert collector.stat().st_mode & 0o777 == 0o600
+    assert not list(collector.parent.glob(f".{collector.name}.*.tmp"))
+    config = load_lark_event_collector_config(project=project, config_path=collector)
+    assert [route["route_key"] for route in config["routes"]] == [
+        "requirements-alpha",
+        "requirements-beta",
+        "requirements-gamma",
+    ]
+
+
+def test_collector_route_reconcile_rejects_binding_conflicts_without_writing(
+    tmp_path: Path,
+) -> None:
+    project, collector, first_chat, _ = _two_route_config(tmp_path)
+    before = collector.read_bytes()
+    conflicting_inbox = _write_inbox(
+        project,
+        name="requirements-conflict",
+        chat_id=first_chat,
+    )
+
+    with pytest.raises(ValueError, match="chat_id is already bound"):
+        reconcile_lark_event_collector_route(
+            project=project,
+            config_path=collector,
+            route_key="requirements-conflict",
+            chat_id=first_chat,
+            event_inbox_config=conflicting_inbox,
+            execute=True,
+        )
+
+    assert collector.read_bytes() == before
+
+
+def test_collector_route_reconcile_rejects_concurrent_writer_without_writing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+    before = collector.read_bytes()
+    chat_id = "oc_public_fixture_locked"
+    inbox = _write_inbox(project, name="requirements-locked", chat_id=chat_id)
+    original_lock = exclusive_file_lock
+
+    def fail_fast_lock(
+        path: Path, *, operation: str | None = None
+    ) -> AbstractContextManager[Path]:
+        return original_lock(path, timeout_seconds=0, operation=operation)
+
+    monkeypatch.setattr(
+        event_collector_routes,
+        "exclusive_file_lock",
+        fail_fast_lock,
+    )
+
+    with (
+        exclusive_file_lock(collector, operation="test_lark_route_holder"),
+        pytest.raises(LockAcquireTimeoutError),
+    ):
+        reconcile_lark_event_collector_route(
+            project=project,
+            config_path=collector,
+            route_key="requirements-locked",
+            chat_id=chat_id,
+            event_inbox_config=inbox,
+            execute=True,
+        )
+
+    assert collector.read_bytes() == before
+
+
+def test_collector_route_reconcile_ignores_released_lock_file(
+    tmp_path: Path,
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+    chat_id = "oc_public_fixture_released_lock"
+    inbox = _write_inbox(project, name="requirements-released-lock", chat_id=chat_id)
+    with exclusive_file_lock(collector, operation="test_released_lark_route_lock"):
+        pass
+
+    receipt = reconcile_lark_event_collector_route(
+        project=project,
+        config_path=collector,
+        route_key="requirements-released-lock",
+        chat_id=chat_id,
+        event_inbox_config=inbox,
+        execute=True,
+    )
+
+    assert receipt["status"] == "applied"
+    assert receipt["write_performed"] is True
+
+
+def test_cli_collector_route_reconcile_preserves_typed_lock_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+    chat_id = "oc_public_fixture_cli_locked"
+    inbox = _write_inbox(project, name="requirements-cli-locked", chat_id=chat_id)
+    monkeypatch.setattr(
+        lark_inbox,
+        "_resolve_lark_activation",
+        lambda *_args, **_kwargs: {"enabled": True},
+    )
+    original_lock = exclusive_file_lock
+
+    def fail_fast_lock(
+        path: Path, *, operation: str | None = None
+    ) -> AbstractContextManager[Path]:
+        return original_lock(path, timeout_seconds=0, operation=operation)
+
+    monkeypatch.setattr(
+        event_collector_routes,
+        "exclusive_file_lock",
+        fail_fast_lock,
+    )
+    rendered: list[dict[str, object]] = []
+    args = argparse.Namespace(
+        command="lark-inbox",
+        lark_inbox_command="collector-route-reconcile",
+        project=str(project),
+        config=str(collector),
+        route_key="requirements-cli-locked",
+        chat_id=chat_id,
+        event_inbox_config=inbox,
+        execute=True,
+    )
+
+    with exclusive_file_lock(collector, operation="test_lark_route_cli_holder"):
+        code = lark_inbox.handle_lark_inbox_command(
+            args,
+            registry_path=tmp_path / "registry.json",
+            runtime_root_arg=None,
+            output_format=lambda _args: "json",
+            print_payload=lambda payload, *_args: rendered.append(payload),
+        )
+
+    assert code == 1
+    assert rendered[0]["error_code"] == "lock_acquire_timeout"
+    assert rendered[0]["incident_recorded"] is True
+    serialized = json.dumps(rendered[0])
+    assert chat_id not in serialized
+    assert inbox not in serialized
+    assert str(project) not in serialized
+
+
+def test_collector_route_reconcile_rolls_back_unverified_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+    before = json.loads(collector.read_text(encoding="utf-8"))
+    chat_id = "oc_public_fixture_rollback"
+    inbox = _write_inbox(project, name="requirements-rollback", chat_id=chat_id)
+    original_load = event_collector_routes.load_lark_event_collector_config
+    calls = 0
+
+    def fail_apply_readback(**kwargs: object) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise ValueError("synthetic readback failure")
+        return original_load(**kwargs)
+
+    monkeypatch.setattr(
+        event_collector_routes,
+        "load_lark_event_collector_config",
+        fail_apply_readback,
+    )
+
+    with pytest.raises(ValueError, match="was rolled back"):
+        reconcile_lark_event_collector_route(
+            project=project,
+            config_path=collector,
+            route_key="requirements-rollback",
+            chat_id=chat_id,
+            event_inbox_config=inbox,
+            execute=True,
+        )
+
+    assert json.loads(collector.read_text(encoding="utf-8")) == before
+    assert not list(collector.parent.glob(f".{collector.name}.*.tmp"))
+
+
+def test_cli_collector_route_reconcile_returns_only_redacted_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, collector, _, _ = _two_route_config(tmp_path)
+    chat_id = "oc_public_fixture_cli"
+    inbox = _write_inbox(project, name="requirements-cli", chat_id=chat_id)
+    monkeypatch.setattr(
+        lark_inbox,
+        "_resolve_lark_activation",
+        lambda *_args, **_kwargs: {"enabled": True},
+    )
+    rendered: list[dict[str, object]] = []
+    args = argparse.Namespace(
+        command="lark-inbox",
+        lark_inbox_command="collector-route-reconcile",
+        project=str(project),
+        config=str(collector),
+        route_key="requirements-cli",
+        chat_id=chat_id,
+        event_inbox_config=inbox,
+        execute=False,
+    )
+
+    code = lark_inbox.handle_lark_inbox_command(
+        args,
+        registry_path=tmp_path / "registry.json",
+        runtime_root_arg=None,
+        output_format=lambda _args: "json",
+        print_payload=lambda payload, *_args: rendered.append(payload),
+    )
+
+    assert code == 0
+    assert rendered[0]["status"] == "preview_ready"
+    assert rendered[0]["extension_activation"] == {"enabled": True}
+    serialized = json.dumps(rendered[0])
+    assert chat_id not in serialized
+    assert inbox not in serialized
     assert str(project) not in serialized
 
 

@@ -21,10 +21,6 @@ from loopx.control_plane.scheduler.monitor_todo import (  # noqa: E402
     monitor_todo_next_due_at,
     parse_monitor_counter,
 )
-from loopx.control_plane.scheduler.monitor_target import (  # noqa: E402
-    build_quota_monitor_target,
-    monitor_target_summary,
-)
 from loopx.status import (  # noqa: E402
     todo_item_is_due_monitor,
     todo_item_is_expired_monitor,
@@ -111,20 +107,6 @@ def main() -> int:
         generated_at="ignored",
         explicit_next_due_at="2026-01-01T00:05:00+00:00",
     ) == "2026-01-01T00:05:00+00:00"
-    target_decision = {
-        "goal_id": "loopx-meta",
-        "agent_identity": {"agent_id": "codex-product-capability"},
-        "effective_action": "monitor_quiet_skip",
-        "recommended_action": " Observe due monitor without material transition. ",
-    }
-    assert monitor_target_summary("  Observe\n\nmonitor  ", limit=160) == "Observe monitor"
-    monitor_target = build_quota_monitor_target(
-        target_decision,
-        monitor_mode="due_monitor_observed_without_material_transition",
-    )
-    assert monitor_target["schema_version"] == "quota_monitor_target_v0", monitor_target
-    assert monitor_target["monitor_mode"] == "due_monitor_observed_without_material_transition", monitor_target
-    assert monitor_target["action_summary"] == "Observe due monitor without material transition.", monitor_target
     print("monitor-todo-policy-seam-smoke ok")
     return 0
 

@@ -10,6 +10,7 @@ from .contract import (
     normalize_todo_id,
     normalize_todo_id_list,
 )
+from .external_wait_contract import build_monitor_advancement_authoring_contract
 from .resume_condition import plan_todo_external_wait_transition
 
 
@@ -20,7 +21,11 @@ def _transition_items(lines: list[str]) -> list[dict[str, Any]]:
     archive_bounds = archive_section_bounds(lines)
     if archive_bounds:
         collected.extend(
-            todo_blocks(
+            {
+                **item,
+                "role": "agent",
+            }
+            for item in todo_blocks(
                 lines,
                 archive_bounds[0],
                 archive_bounds[1],
@@ -32,7 +37,11 @@ def _transition_items(lines: list[str]) -> list[dict[str, Any]]:
         bounds = section_bounds(lines, role)
         if bounds:
             collected.extend(
-                todo_blocks(
+                {
+                    **item,
+                    "role": role,
+                }
+                for item in todo_blocks(
                     lines,
                     bounds[0],
                     bounds[1],
@@ -60,24 +69,27 @@ def plan_todo_external_wait_update(
         ("todo_done:", "monitor_changed:")
     ):
         return None, None
-    eligible = (
+    uses_open_external_wait = (
         role == "agent"
         and status == TODO_STATUS_OPEN
         and task_class == TODO_TASK_CLASS_ADVANCEMENT
     )
-    if not eligible:
-        if resume_when.startswith("monitor_changed:"):
-            raise ValueError(
-                "monitor_changed requires todo update on an open agent "
-                "advancement_task with at least one --successor-todo-id"
-            )
+    # todo_done is also valid for ordinary deferred authoring. monitor_changed,
+    # however, always uses the typed open-wait protocol so invalid role/status/
+    # task-class combinations receive the exact TS-owned diagnostic.
+    if resume_when.startswith("todo_done:") and not uses_open_external_wait:
         return None, None
 
     items = _transition_items(lines)
     normalized_id = normalize_todo_id(todo_id)
     for index, item in enumerate(items):
         if normalize_todo_id(item.get("todo_id")) == normalized_id:
-            items[index] = {**item, "status": status, "task_class": task_class}
+            items[index] = {
+                **item,
+                "role": role,
+                "status": status,
+                "task_class": task_class,
+            }
     transition = plan_todo_external_wait_transition(
         todo_id=todo_id,
         resume_when=resume_when,
@@ -88,6 +100,13 @@ def plan_todo_external_wait_update(
         ),
         items=items,
     )
+    if resume_when.startswith("monitor_changed:"):
+        transition["authoring_contract"] = (
+            build_monitor_advancement_authoring_contract(
+                monitor_todo_id=resume_when.partition(":")[2],
+                successor_todo_ids=list(transition.get("successor_todo_ids") or []),
+            )
+        )
     updates = transition.get("metadata_updates")
     baseline = updates.get("resume_monitor_generation") if isinstance(updates, Mapping) else None
     return transition, int(baseline) if baseline is not None else None

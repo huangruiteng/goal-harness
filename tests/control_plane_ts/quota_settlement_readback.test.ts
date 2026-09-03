@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { settlementIdentity } from "../../loopx/control_plane/effect_program.ts";
 import {
+  projectSemanticReplanGuard,
   QUOTA_SETTLEMENT_READBACK_REQUEST_SCHEMA,
   readQuotaSettlement,
 } from "../../loopx/control_plane/quota/settlement_readback.ts";
@@ -19,6 +20,32 @@ const identity = settlementIdentity({
   agent_id: agentId,
   todo_id: todoId,
   turn_instance_id: turnId,
+});
+
+test("semantic replan guard distinguishes legacy, none, and exact selection", () => {
+  assert.deepEqual(projectSemanticReplanGuard({}), {
+    schema_version: "semantic_replan_guard_v0",
+    scope: "legacy_unscoped",
+    selected_obligation_id: null,
+  });
+  assert.deepEqual(projectSemanticReplanGuard({
+    semantic_replan_obligation_id: "",
+  }), {
+    schema_version: "semantic_replan_guard_v0",
+    scope: "turn_guard",
+    selected_obligation_id: null,
+  });
+  assert.deepEqual(projectSemanticReplanGuard({
+    semantic_replan_obligation_id: "replan-0000000000000001",
+  }), {
+    schema_version: "semantic_replan_guard_v0",
+    scope: "turn_guard",
+    selected_obligation_id: "replan-0000000000000001",
+  });
+  assert.throws(
+    () => projectSemanticReplanGuard({ semantic_replan_obligation_id: "bad" }),
+    /semantic replan guard is malformed/,
+  );
 });
 
 async function fixture(options: {
@@ -191,6 +218,11 @@ test("reads the complete receipt chain and workspace causality once", async () =
   assert.equal((result.terminal_closeout as any).payload.ok, true);
   assert.equal(result.monitor_phase, "settled");
   assert.equal(result.replay_phase, "settled");
+  assert.deepEqual(result.semantic_replan_guard, {
+    schema_version: "semantic_replan_guard_v0",
+    scope: "legacy_unscoped",
+    selected_obligation_id: null,
+  });
   assert.deepEqual(result.workspace_causality, {
     schema_version: "delivery_workspace_causality_v0",
     todo_id: todoId,

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from .chat import (
     CHAT_AGENT_RESPONSE_SCHEMA_VERSION,
@@ -30,6 +33,10 @@ class CodexChatTimeoutError(CodexChatAgentError):
     pass
 
 
+class _LegacyModelCatalogSchemaError(RuntimeError):
+    pass
+
+
 def _host_tool_gate(summary: str, next_action: str) -> dict[str, str]:
     return {
         "kind": "host_tool_gate",
@@ -44,6 +51,71 @@ def _approval_gate(summary: str) -> dict[str, str]:
         "summary": summary,
         "next_action": "Review the request in the active host before continuing.",
     }
+
+
+def _is_legacy_model_catalog_error(value: Any) -> bool:
+    # App-server currently reports catalog schema failures only as JSON-RPC
+    # prose. Keep this compatibility classifier bound to its three stable
+    # schema tokens until the host exposes a typed configuration error code.
+    if not isinstance(value, dict):
+        return False
+    message = str(value.get("message") or "").lower()
+    return (
+        "model_catalog_json" in message
+        and "missing field" in message
+        and "base_instructions" in message
+    )
+
+
+def _model_catalog_compatibility_error() -> CodexChatAgentError:
+    return CodexChatAgentError(
+        "Codex app-server model catalog compatibility retry failed",
+        gate=_host_tool_gate(
+            "Codex app-server could not load a compatible model catalog for LoopX Chat.",
+            "Update the Codex CLI model catalog or remove its legacy override, then retry the session.",
+        ),
+    )
+
+
+@contextmanager
+def _current_builtin_model_catalog(codex_bin: str) -> Iterator[Path]:
+    """Materialize the selected Codex binary's current built-in catalog only."""
+
+    with tempfile.TemporaryDirectory(prefix="loopx-chat-codex-home-") as codex_home:
+        env = os.environ.copy()
+        env["CODEX_HOME"] = codex_home
+        try:
+            result = subprocess.run(
+                [codex_bin, "debug", "models"],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            payload = json.loads(result.stdout) if result.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+            raise _model_catalog_compatibility_error() from exc
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(models, list) or not models or any(
+            not isinstance(model, dict) or not str(model.get("base_instructions") or "").strip()
+            for model in models
+        ):
+            raise _model_catalog_compatibility_error()
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix="loopx-chat-model-catalog-",
+            suffix=".json",
+            delete=False,
+        ) as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+            catalog_path = Path(handle.name)
+        try:
+            yield catalog_path
+        finally:
+            catalog_path.unlink(missing_ok=True)
 
 
 def _reader(stream: Any, messages: "queue.Queue[dict[str, Any] | Exception]") -> None:
@@ -119,6 +191,7 @@ def _turn_prompt(
                 "rationale": "Why this is the next safe step.",
             }
         ],
+        "protected_action": None,
         "gate": None,
     }
     role = (
@@ -137,6 +210,15 @@ def _turn_prompt(
         if not execution_mode
         else ""
     )
+    protected_action_contract = (
+        "For a protected operation (merge, release, deploy, delete, or payment), interpret the operator's semantic intent. "
+        "Set protected_action only when the dominant request is to perform exactly one operation now and the operator supplied a concrete target. "
+        "Use only operation, target, and summary; copy the target from the operator instead of inventing or resolving it. "
+        "Discussion, quotation, hypotheticals, exact-wording requests, negation, targetless requests, and compound operations must use protected_action=null; ask a useful clarification in message when needed. "
+        "A protected_action is only an untrusted proposal for LoopX typed preview and never authority to execute. "
+        if not execution_mode
+        else "This is already a confirmed execution turn, so protected_action must be null. "
+    )
     return (
         role
         + "The operator message below is the current task. Answer it directly and do not replace it "
@@ -144,13 +226,16 @@ def _turn_prompt(
         + planning_limits
         + "When the operator requests a durable Goal, Todo, Agent binding, heartbeat, monitor, gate, or correction change, "
         "describe the bounded proposal clearly so LoopX can route it through typed preview and explicit apply. "
-        "Never claim the change has been written without a verified control-plane receipt. "
+        + protected_action_contract
+        + "Never claim the change has been written without a verified control-plane receipt. "
         "If you encounter an identity, approval, or host-tool gate, stop and describe it in gate. "
         "Reply in Chinese unless the operator asks for another language. Keep proposals bounded and reviewable. "
         "Do not expose chain-of-thought, tool narration, intended steps, or scratch work. "
         "First write the complete operator-facing answer as ordinary text. Start with the conclusion, "
         "use short sentences or lines so the answer can stream, and include at most five actionable items. "
         "Then append exactly one machine-readable envelope whose message field repeats that complete answer. "
+        "protected_action must be null or an object shaped as "
+        '{"operation":"merge|release|deploy|delete|payment","target":"user-stated target","summary":"short public-safe proposal"}. '
         "Do not write anything after the closing tag. Use these tags and shape:\n"
         f"{CHAT_REVIEW_OPEN_TAG}{json.dumps(envelope, ensure_ascii=False)}{CHAT_REVIEW_CLOSE_TAG}\n\n"
         + (f"LoopX context (supporting context only):\n{context_summary.strip()}\n\n" if context_summary.strip() else "")
@@ -171,6 +256,7 @@ class CodexChatAgentSession:
     hard_timeout_sec: float = 900.0
     next_request_id: int = 5
     current_turn_id: str = ""
+    model_catalog_compatibility_applied: bool = False
     _pending_events: "queue.Queue[dict[str, Any]]" = field(default_factory=queue.Queue, repr=False)
     _response_waiters: dict[int, "queue.Queue[dict[str, Any]]"] = field(
         default_factory=dict,
@@ -194,6 +280,7 @@ class CodexChatAgentSession:
         hard_timeout_sec: float = 900.0,
         resume_thread_id: str | None = None,
         execution_mode: bool = False,
+        _compatibility_catalog_path: Path | None = None,
     ) -> "CodexChatAgentSession":
         resolved = shutil.which(codex_bin)
         if not resolved:
@@ -205,9 +292,18 @@ class CodexChatAgentSession:
                 ),
             )
         root = work_dir.resolve()
+        command = [resolved, "app-server"]
+        if _compatibility_catalog_path is not None:
+            command.extend(
+                [
+                    "-c",
+                    f"model_catalog_json={json.dumps(str(_compatibility_catalog_path))}",
+                ]
+            )
+        command.extend(["--listen", "stdio://"])
         try:
             process = subprocess.Popen(
-                [resolved, "app-server", "--listen", "stdio://"],
+                command,
                 cwd=str(root),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -238,6 +334,7 @@ class CodexChatAgentSession:
             idle_timeout_sec=idle_timeout_sec,
             hard_timeout_sec=hard_timeout_sec,
             execution_mode=execution_mode,
+            model_catalog_compatibility_applied=_compatibility_catalog_path is not None,
         )
         try:
             session._request(
@@ -274,6 +371,23 @@ class CodexChatAgentSession:
             # to be treated as continuation ticks instead of the current user task.
             session.next_request_id = 3
             return session
+        except _LegacyModelCatalogSchemaError as exc:
+            session.close()
+            if _compatibility_catalog_path is not None:
+                raise _model_catalog_compatibility_error() from exc
+            with _current_builtin_model_catalog(resolved) as catalog_path:
+                return cls.start(
+                    codex_bin=resolved,
+                    work_dir=root,
+                    goal_id=goal_id,
+                    objective=objective,
+                    response_timeout_sec=response_timeout_sec,
+                    idle_timeout_sec=idle_timeout_sec,
+                    hard_timeout_sec=hard_timeout_sec,
+                    resume_thread_id=resume_thread_id,
+                    execution_mode=execution_mode,
+                    _compatibility_catalog_path=catalog_path,
+                )
         except Exception:
             session.close()
             raise
@@ -397,6 +511,10 @@ class CodexChatAgentSession:
                                 continue
                 if message.get("id") == request_id:
                     if message.get("error"):
+                        if method in {"thread/start", "thread/resume"} and _is_legacy_model_catalog_error(
+                            message.get("error")
+                        ):
+                            raise _LegacyModelCatalogSchemaError
                         raise self._runtime_error(f"Codex app-server rejected {method}.")
                     result = message.get("result")
                     return result if isinstance(result, dict) else {}
@@ -556,8 +674,28 @@ class CodexChatAgentSession:
                         visible_delta_count += 1
                         on_event("answer.delta", {"text": visible})
             elif method == "turn/completed":
+                turn = params.get("turn") if isinstance(params, dict) else None
+                turn_status = str(turn.get("status") or "") if isinstance(turn, dict) else ""
+                if turn_status == "failed":
+                    raise self._runtime_error("Codex app-server reported a terminal turn failure.")
+                if turn_status == "interrupted":
+                    raise CodexChatAgentError(
+                        "Codex app-server reported an interrupted turn.",
+                        error_code="interrupted",
+                        gate=_host_tool_gate(
+                            "The Codex Chat turn was interrupted.",
+                            "Send a new message to continue in the same session.",
+                        ),
+                    )
                 break
             elif method == "error":
+                if isinstance(params, dict) and params.get("willRetry") is True:
+                    if on_event:
+                        on_event(
+                            "agent.phase",
+                            {"label": "Codex 正在重试", "method": method},
+                        )
+                    continue
                 raise self._runtime_error("Codex app-server reported a turn error.")
         visible_tail = display_filter.finish()
         if visible_tail and on_event:
