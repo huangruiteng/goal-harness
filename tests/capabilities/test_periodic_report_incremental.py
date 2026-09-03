@@ -751,6 +751,93 @@ def test_snapshot_next_action_requires_an_actionable_open_todo(
     assert snapshot is None
 
 
+def test_snapshot_next_action_selects_capacity_gated_todo_with_turn_capabilities(
+    tmp_path: Path,
+) -> None:
+    state = _agent_todo_state(
+        [
+            "\n".join(
+                [
+                    "- [ ] Resume the follow-up once network capacity returns.",
+                    "  <!-- loopx:todo todo_id=todo_capacity status=open "
+                    "task_class=advancement_task "
+                    f"claimed_by={AGENT_ID} action_kind=gated_work "
+                    "resume_when=capacity_available:network -->",
+                ]
+            ),
+        ]
+    )
+    common = {
+        "state_text": state,
+        "goal": {"id": GOAL_ID},
+        "state_path": tmp_path / "goal.md",
+        "goal_id": GOAL_ID,
+        "agent_id": AGENT_ID,
+        "completed_at": "2026-08-01T08:00:00Z",
+    }
+
+    satisfied = build_project_progress_snapshot_from_state(
+        **common,
+        available_capabilities=["network"],
+    )
+    assert satisfied is not None
+    assert [
+        item["source_ref"]
+        for item in satisfied["items"]
+        if item.get("content_kind") == "next_action"
+    ] == ["todo:todo_capacity"]
+
+    without_evidence = build_project_progress_snapshot_from_state(**common)
+    assert without_evidence is None
+
+
+def test_snapshot_next_action_selects_pr_merged_todo_with_rollout_evidence(
+    tmp_path: Path,
+) -> None:
+    state = _agent_todo_state(
+        [
+            "\n".join(
+                [
+                    "- [ ] Resume the follow-up once the pull request merges.",
+                    "  <!-- loopx:todo todo_id=todo_prwait status=open "
+                    "task_class=advancement_task "
+                    f"claimed_by={AGENT_ID} action_kind=pr_followup_work "
+                    "resume_when=pr_merged:owner/repo#42 -->",
+                ]
+            ),
+        ]
+    )
+    common = {
+        "state_text": state,
+        "goal": {"id": GOAL_ID},
+        "state_path": tmp_path / "goal.md",
+        "goal_id": GOAL_ID,
+        "agent_id": AGENT_ID,
+        "completed_at": "2026-08-01T08:00:00Z",
+    }
+
+    satisfied = build_project_progress_snapshot_from_state(
+        **common,
+        rollout_events=[
+            {
+                "event_id": "merge-42",
+                "event_kind": "pr_merged",
+                "recorded_at": "2026-08-01T07:00:00Z",
+                "code_refs": {"pr_ref": "owner/repo#42"},
+            }
+        ],
+    )
+    assert satisfied is not None
+    assert [
+        item["source_ref"]
+        for item in satisfied["items"]
+        if item.get("content_kind") == "next_action"
+    ] == ["todo:todo_prwait"]
+
+    without_evidence = build_project_progress_snapshot_from_state(**common)
+    assert without_evidence is None
+
+
 def test_snapshot_next_action_selects_a_resume_ready_gated_todo(
     tmp_path: Path,
 ) -> None:

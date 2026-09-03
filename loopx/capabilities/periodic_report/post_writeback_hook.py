@@ -16,9 +16,11 @@ from ...control_plane.goals.goal_frontier import (
 )
 from ...control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from ...control_plane.todos.quota_summary import summarize_user_todos_for_quota
+from ...control_plane.todos.todo_index import MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL
 from ...history import collect_history, load_registry
 from ...paths import resolve_runtime_root
 from ...registry import registry_goals
+from ...rollout_event_log import load_rollout_events, rollout_event_log_path
 from .stage_completion import STAGE_COMPLETION_RECEIPT_SCHEMA
 from .stage_completion import derive_periodic_report_stage_completion_from_runs
 from .presets import build_periodic_report_preset_activation
@@ -292,6 +294,10 @@ def build_periodic_report_post_writeback_projection(
         agent_id=normalized_agent_id,
         completed_at=str(receipt["completed_at"]),
         publication_cursor=publication_cursor,
+        rollout_events=load_rollout_events(
+            rollout_event_log_path(runtime_root, goal_id),
+            limit=MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
+        ),
     )
     if publication_cursor is not None and project_progress is None:
         return {}

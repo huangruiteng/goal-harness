@@ -776,6 +776,7 @@ def apply_resume_conditions(
     *,
     resume_source_items: list[dict[str, Any]] | None = None,
     rollout_events: list[dict[str, Any]] | None = None,
+    available_capabilities: Any = None,
 ) -> None:
     resume_items = [
         item
@@ -789,6 +790,7 @@ def apply_resume_conditions(
         resume_items,
         source_items=source_items,
         rollout_events=rollout_events,
+        available_capabilities=available_capabilities,
     )
     for item in items:
         resume_when = normalize_todo_resume_when(item.get("resume_when"))
@@ -1073,6 +1075,7 @@ def compact_todo_group(
     preferred_todo_ids: set[str] | None = None,
     resume_source_items: list[dict[str, Any]] | None = None,
     rollout_events: list[dict[str, Any]] | None = None,
+    available_capabilities: Any = None,
     item_limit: int | None = MAX_STATUS_TODOS_PER_ROLE,
     include_task_orchestration_authority: bool = False,
 ) -> dict[str, Any] | None:
@@ -1090,6 +1093,7 @@ def compact_todo_group(
             source_section=source_section,
         ),
         rollout_events=rollout_events,
+        available_capabilities=available_capabilities,
     )
     lanes = _todo_group_lanes(items, preferred_todo_ids=preferred_todo_ids)
     source_valid = role in {"user", "agent"} and bool(str(source_section or "").strip())

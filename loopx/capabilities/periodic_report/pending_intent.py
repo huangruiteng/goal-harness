@@ -428,13 +428,27 @@ def periodic_report_pending_intent_interaction_hook(
 
 
 def _progress_facts(
-    *, registry_path: Path, goal_id: str, agent_id: str, completed_at: str
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    goal_id: str,
+    agent_id: str,
+    completed_at: str,
 ) -> list[dict[str, Any]]:
+    from ...control_plane.todos.todo_index import (
+        MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
+    )
+    from ...rollout_event_log import load_rollout_events, rollout_event_log_path
+
     snapshot = build_project_progress_snapshot(
         registry_path=registry_path,
         goal_id=goal_id,
         agent_id=agent_id,
         completed_at=completed_at,
+        rollout_events=load_rollout_events(
+            rollout_event_log_path(runtime_root, goal_id),
+            limit=MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
+        ),
     )
     if not isinstance(snapshot, Mapping):
         raise ValueError("periodic-report has no public-safe progress items")
@@ -935,6 +949,7 @@ def consume_pending_periodic_report_intent(
         if isinstance(project_progress, Mapping)
         else _progress_facts(
             registry_path=registry_path,
+            runtime_root=runtime_root,
             goal_id=goal_id,
             agent_id=agent_id,
             completed_at=completed_at,
