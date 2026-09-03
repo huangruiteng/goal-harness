@@ -116,9 +116,12 @@ contract for local write affordances:
 }
 ```
 
-The dashboard frontstage ops route uses a TanStack Query-backed local status
-reader for `/frontstage?mode=ops&statusUrl=<relative-or-loopback>`. Showcase
-mode still ignores `statusUrl`; only explicit ops mode may fetch a status feed.
+The deprecated dashboard diagnostics route uses a TanStack Query-backed local
+status reader at
+`/deprecated/frontstage/ops?statusUrl=<relative-or-loopback>`. The old
+`/frontstage?mode=ops` form redirects to that namespace. Showcase mode still
+ignores `statusUrl`; only the explicit deprecated diagnostics route may fetch a
+status feed.
 The query layer validates `status_contract.schema_version` before trusting a
 loopback feed. If the feed is below the dashboard's expected schema version,
 the route shows stale-daemon repair copy using `status_contract.reload_hint`

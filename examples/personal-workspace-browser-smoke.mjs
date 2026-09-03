@@ -20,6 +20,30 @@ const outputDir = resolve(repoRoot, "output/playwright/personal-workspace");
 const port = Number(process.env.LOOPX_PERSONAL_WORKSPACE_PORT ?? "5196");
 const packaged = process.env.LOOPX_PERSONAL_WORKSPACE_PACKAGED === "1";
 
+const periodicReportProjection = {
+  schema_version: "periodic_report_workspace_projection_v0",
+  goal_id: "product-release",
+  agent_id: "codex",
+  generation_id: "generation-workspace-smoke",
+  generated_at: "2026-09-01T10:00:00Z",
+  title: "Product Release milestone report",
+  summary: "A verified incremental report shown with the Goal's other durable outputs.",
+  content_sha256: `sha256:${"7".repeat(64)}`,
+  period_window: { start_at: "2026-08-25T10:00:00Z", end_at: "2026-09-01T10:00:00Z" },
+  interaction: { attention_kind: "progress", interaction: "inform", delivery: "surface", form: "milestone_report", writable: false },
+  delta: {
+    added_count: 1,
+    changed_count: 1,
+    item_count: 2,
+    items: [
+      { fact_id: "fact-added", source_ref: "todo:release-ready", title: "Release candidate verified", summary: "The candidate passed the bounded verification suite.", status: "done", content_kind: "outcome", change_kind: "added" },
+      { fact_id: "fact-changed", source_ref: "todo:rollout", title: "Rollout plan updated", summary: "The next rollout step now carries an explicit readback gate.", status: "open", content_kind: "next_action", change_kind: "changed", previous_status: "blocked" },
+    ],
+  },
+  publication: { publication_id: "publication-workspace-smoke", delivered_at: "2026-09-01T10:05:00Z", predecessor_publication_id: "publication-workspace-previous", cursor_id: "cursor-workspace-smoke" },
+  truth_contract: { published_cursor_is_source_of_truth: true, generation_receipt_is_delivery_receipt: false, projection_is_writable: false, browser_write_api: false },
+};
+
 function startServer() {
   if (packaged) {
     return spawn(process.env.LOOPX_PYTHON_BIN || "python3", [
@@ -78,6 +102,11 @@ async function installApi(page) {
   await page.route(`http://127.0.0.1:${port}/status.json`, async (route) => {
     state.statusRequestCount += 1;
     const fixture = structuredClone(require(resolve(repoRoot, "examples/status.example.json")));
+    fixture.local_dashboard_api = {
+      ...(fixture.local_dashboard_api ?? {}),
+      periodic_report_index_url: "/periodic-report-workspace",
+      periodic_report_detail_url: "/periodic-report-workspace-projection",
+    };
     const directoryFixtures = [
       { id: "product-release", display_name: "Product Release" },
       { id: "research-monitor", display_name: "Research Monitor" },
@@ -191,6 +220,37 @@ async function installApi(page) {
         state: "running",
       });
     }
+    if (!fixture.run_history.goals.some((goal) => goal.id === "multi-agent-projection")) {
+      fixture.run_history.goals.push({
+        id: "multi-agent-projection", display_name: "Multi Agent Projection", activation_state: "active",
+        status: "active-read-only", registry_member: true, legacy_runtime_goal: false,
+        adapter_kind: "generic_project_goal_v0", adapter_status: "connected",
+        lifecycle_phase: "registered", lifecycle_flags: ["registered"],
+        quota: { compute: 1, window_hours: 24, slot_minutes: 1, allowed_slots: 1440, spent_slots: 0, state: "eligible" },
+        index_exists: false, raw_index_records: 0, unique_runs: 0, latest_runs: [],
+      });
+      fixture.attention_queue.items.push({
+        agent_todos: { items: [], open_count: 2, source_section: "Agent Todo", total_count: 2 },
+        goal_id: "multi-agent-projection",
+        project_asset: {
+          agent_todos: { items: [], open: 2, done: 0, total: 2 },
+          gate: "none", next_action: "Continue the latest work lane", owner: "LoopX", stop_condition: "Both lanes complete",
+        },
+        recommended_action: "Continue the latest work lane", severity: "info", status: "active", waiting_on: "codex",
+      });
+      fixture.agent_management_projection.agents.push(
+        {
+          agent_id: "codex-older-lane",
+          current_todo: { claimed_by: "codex-older-lane", goal_id: "multi-agent-projection", role: "agent", status: "open", task_class: "advancement_task", title: "Older lane work", todo_id: "todo-older-lane" },
+          goal_ids: ["multi-agent-projection"], last_activity_at: "2026-08-24T10:00:00+08:00", next_action: "Continue projected todo todo-older-lane.", state: "running",
+        },
+        {
+          agent_id: "codex-latest-lane",
+          current_todo: { claimed_by: "codex-latest-lane", goal_id: "multi-agent-projection", role: "agent", status: "open", task_class: "advancement_task", title: "Latest lane work", todo_id: "todo-latest-lane" },
+          goal_ids: ["multi-agent-projection"], last_activity_at: "2026-08-24T15:00:00+08:00", next_action: "Continue projected todo todo-latest-lane.", state: "running",
+        },
+      );
+    }
     const delayMs = state.nextStatusDelayMs;
     state.nextStatusDelayMs = 0;
     if (delayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, delayMs));
@@ -200,6 +260,31 @@ async function installApi(page) {
       return;
     }
     await route.fulfill({ contentType: "application/json", json: fixture, status: 200 });
+  });
+  await page.route("**/periodic-report-workspace?*", async (route) => {
+    const goalId = new URL(route.request().url()).searchParams.get("goal_id");
+    const items = goalId === periodicReportProjection.goal_id ? [{
+      goal_id: periodicReportProjection.goal_id,
+      agent_id: periodicReportProjection.agent_id,
+      generation_id: periodicReportProjection.generation_id,
+      publication_id: periodicReportProjection.publication.publication_id,
+      delivered_at: periodicReportProjection.publication.delivered_at,
+      predecessor_publication_id: periodicReportProjection.publication.predecessor_publication_id,
+      detail_ref: {
+        goal_id: periodicReportProjection.goal_id,
+        agent_id: periodicReportProjection.agent_id,
+        generation_id: periodicReportProjection.generation_id,
+        content_sha256: periodicReportProjection.content_sha256,
+      },
+    }] : [];
+    await route.fulfill({
+      contentType: "application/json",
+      json: { ok: true, periodic_reports: { schema_version: "periodic_report_workspace_index_v0", count: items.length, items } },
+      status: 200,
+    });
+  });
+  await page.route("**/periodic-report-workspace-projection?*", async (route) => {
+    await route.fulfill({ contentType: "application/json", json: { ok: true, projection: periodicReportProjection }, status: 200 });
   });
   await page.route(`http://127.0.0.1:${port}/api/ssh-source/ensure`, async (route) => {
     await route.fulfill({
@@ -638,7 +723,7 @@ async function main() {
     if (await page.locator(".personal-digest-stats button").count()) throw new Error("Away digest still behaves like hidden channel navigation");
     if (body.includes("Agent 设置")) throw new Error("Sidebar still exposes the read-only Agent settings dead end");
     if (await page.locator(".personal-global-rail").count()) throw new Error("Old icon rail is visible");
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("Active Goal directory did not exclude stopped Goals");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("Active Goal directory did not exclude stopped Goals");
     const stoppedDirectory = page.locator(".personal-stopped-goals");
     if (!(await stoppedDirectory.isVisible()) || await stoppedDirectory.getAttribute("open") !== null) throw new Error("Stopped Goals are not available in a collapsed directory section");
     const writesBeforeLifecyclePreview = api.durableWriteCount;
@@ -648,7 +733,7 @@ async function main() {
     api.nextStatusDelayMs = 900;
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
     await page.waitForFunction(
-      () => document.querySelectorAll(".personal-goal-list:not(.is-stopped) .personal-goal-row").length === 3,
+      () => document.querySelectorAll(".personal-goal-list:not(.is-stopped) .personal-goal-row").length === 4,
       null,
       { timeout: 600 },
     );
@@ -659,10 +744,10 @@ async function main() {
     if (!stopPreview || stopPreview.normalized_parameters.goal_id !== "product-release") throw new Error("Goal stop did not create the expected typed preview");
     if (api.durableWriteCount !== writesBeforeLifecyclePreview) throw new Error("Goal stop wrote durable state before its typed apply completed");
     if (await page.getByText("确认执行", { exact: true }).count()) throw new Error("Goal stop still opened a redundant confirmation drawer");
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 3) throw new Error("Optimistic Goal stop did not update the active sidebar immediately");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("Optimistic Goal stop did not update the active sidebar immediately");
     await page.waitForTimeout(2_000);
     if (api.statusRequestCount <= statusRequestsBeforeStop) throw new Error("Successful Goal stop did not start background full-status reconciliation");
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 3) throw new Error("Full-status reconciliation reverted a successful Goal stop");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("Full-status reconciliation reverted a successful Goal stop");
     await stoppedDirectory.locator("summary").click();
     await page.getByRole("button", { name: "恢复 Product Release", exact: true }).click();
     await page.getByText("确认执行", { exact: true }).waitFor({ state: "visible" });
@@ -673,7 +758,7 @@ async function main() {
     await page.getByRole("button", { name: "恢复 Goal", exact: true }).click();
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).waitFor({ state: "attached", timeout: 600 });
     await page.waitForTimeout(1_100);
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("Full-status reconciliation reverted a successful Goal resume");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("Full-status reconciliation reverted a successful Goal resume");
 
     api.nextStatusDelayMs = 1_600;
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
@@ -683,7 +768,7 @@ async function main() {
     await page.getByRole("button", { name: "恢复 Goal", exact: true }).click();
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).waitFor({ state: "attached" });
     await page.waitForTimeout(1_800);
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("A stale background response overwrote a newer optimistic Goal transition");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("A stale background response overwrote a newer optimistic Goal transition");
 
     api.failNextLifecyclePreview = true;
     api.nextLifecyclePreviewDelayMs = 900;
@@ -703,7 +788,7 @@ async function main() {
     await page.getByRole("button", { name: "停止 Product Release", exact: true }).click();
     await page.waitForTimeout(900);
     if (await page.getByText("无法读取状态", { exact: false }).count()) throw new Error("Background lifecycle reconciliation replaced the workspace with a fatal status error");
-    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 3) throw new Error("Background reconciliation failure reverted the successful optimistic Goal state");
+    if ((await page.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 4) throw new Error("Background reconciliation failure reverted the successful optimistic Goal state");
     const closeLifecycleDrawer = page.getByRole("button", { name: "关闭", exact: true });
     if (await closeLifecycleDrawer.count()) await closeLifecycleDrawer.click();
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -970,6 +1055,24 @@ async function main() {
     await completedColumn.getByText("42", { exact: true }).waitFor({ state: "visible" });
     await completedColumn.getByText("Completed A", { exact: true }).waitFor({ state: "visible" });
     if (await completedColumn.getByText("Completed Monitor", { exact: true }).count()) throw new Error("Completed continuous monitor leaked into the completed Tasks column");
+    await page.locator(".personal-goal-link", { hasText: "Multi Agent Projection" }).click();
+    const multiAgentHeader = await page.locator(".personal-channel-title p").innerText();
+    if (!multiAgentHeader.includes("2 个工作 Agent") || multiAgentHeader.includes("codex-older-lane ·")) {
+      throw new Error(`Multi-Agent Goal header still implies arbitrary single-lane ownership: ${multiAgentHeader}`);
+    }
+    if ((await page.locator(".personal-object-list", { hasText: "待执行 / 进行中" }).locator(".personal-task-card").count()) !== 2) {
+      throw new Error("All-Agent default did not preserve both projected work lanes");
+    }
+    const laneFilter = page.getByRole("combobox", { name: "按工作 Agent 筛选" });
+    if (await laneFilter.inputValue() !== "all") throw new Error("Multi-Agent Tasks view did not default to all work lanes");
+    await page.screenshot({ path: resolve(outputDir, "multi-agent-task-lanes.png"), fullPage: false, animations: "disabled" });
+    await laneFilter.selectOption("codex-latest-lane");
+    const filteredText = await page.locator(".personal-object-list", { hasText: "待执行 / 进行中" }).innerText();
+    if (!filteredText.includes("Latest lane work") || filteredText.includes("Older lane work")) {
+      throw new Error(`Work-Agent filter did not consistently filter task cards: ${filteredText}`);
+    }
+    const runtimeSelector = page.getByRole("combobox", { name: "选择聊天 Runtime" });
+    if (!await runtimeSelector.count()) throw new Error("Chat runtime selector is not explicitly labelled independently from work-Agent lanes");
     await goalButton.click();
     const readBoardGeometry = async () => {
       const kanban = page.locator(".personal-task-kanban");
@@ -1102,9 +1205,18 @@ async function main() {
     await editDialog.getByRole("button", { name: "取消" }).click();
     await page.screenshot({ path: resolve(outputDir, "lark-goal-connections.png"), fullPage: false, animations: "disabled" });
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
+    await selectProductReleaseGoal();
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Tasks" }).click();
     await page.locator(".personal-object-list").first().waitFor({ state: "visible" });
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Files" }).click();
+    const reportOutput = page.getByTestId("personal-goal-outputs").getByRole("button", { name: /Product Release milestone report/ });
+    await reportOutput.waitFor({ state: "visible" });
+    await reportOutput.click();
+    await page.getByTestId("personal-periodic-report-detail").getByText("Release candidate verified", { exact: true }).waitFor({ state: "visible" });
+    await page.getByTestId("personal-periodic-report-detail").getByText("Rollout plan updated", { exact: true }).waitFor({ state: "visible" });
+    if (await page.locator('[data-testid="frontstage-milestone-reports"]').count()) throw new Error("Milestone report still rendered in the deprecated Ops Frontstage");
+    await page.getByRole("button", { name: /关闭详情/ }).click();
+    await selectFirstGoal();
     await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: "Chat" }).click();
 
     const composer = page.getByLabel("向 LoopX 发送消息");
@@ -1333,7 +1445,7 @@ async function main() {
     }
     pass(10, "Continuation mapped to heartbeat.bind and bounded monitoring mapped to monitor.create/continuous_monitor UI.");
 
-    const agentSelect = page.getByLabel("选择 Agent");
+    const agentSelect = page.getByLabel("选择聊天 Runtime");
     const unavailableAgent = agentSelect.locator('option[value="offline-agent"]');
     if ((await unavailableAgent.count()) !== 1) throw new Error(`Unavailable Agent missing; options=${await agentSelect.locator("option").allTextContents()}`);
     const unavailableDisabled = (await unavailableAgent.getAttribute("disabled")) !== null;

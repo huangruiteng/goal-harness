@@ -35,34 +35,30 @@ project summaries.
 also starts the loopback status and Chat services and therefore requires a
 Python 3.11+ interpreter; see the development section below.
 
-The first read-only channel frontstage lives at `/frontstage`. It renders a
-public-safe `goal_channel_projection_v0` fixture as a dense channel board with
-decision, quota, user todo, agent todo, active-claim, open-gate, artifact,
-timeline, and truth contract lanes. Treat it as the product-path replacement for expanding the
-no-dependency static HTML renderer; the Python renderer remains the fallback
-demo/diagnostic surface.
+The public Frontstage lives at `/frontstage`. It renders only the public-safe
+showcase catalog and bundled presentation fixtures. The former dense
+`goal_channel_projection_v0` board is quarantined as a deprecated diagnostic
+surface; Personal Workspace is the product path for live operator workflows.
 The product interaction baseline lives in
 `docs/product/surfaces/frontstage-dashboard-interaction-baseline.md`: showcase mode is
 the public case-driven homepage surface, while `mode=ops` is the dense,
-read-only control-plane workspace.
+read-only legacy diagnostic workspace. Its canonical route is now
+`/deprecated/frontstage/ops`; the old `mode=ops` URL redirects there. Personal
+Workspace (`/`) owns Goal workflows, outputs, and milestone reports.
 
-The frontstage first screen is meant to teach the control-plane model before a
-developer reads raw status JSON. The top operations strip answers whether the
-human gate is explicit, whether agent work is active, how many lanes are
-claimed, and whether recent evidence exists. The `Role Map` then separates the
-owner, agent lane, and claim-owner responsibilities so a new contributor can
-tell which part of the system is waiting, running, or coordinating side work.
-In ops mode, the user/agent todo lanes also have URL-backed search and lane
-filters so a developer can reproduce the exact projected candidate slice during
-review without changing the underlying LoopX state.
+The public first screen teaches the control-plane model without reading status
+JSON: its signal strip summarizes human judgment, asynchronous agent teams,
+public cases, and the live-data boundary. The deprecated diagnostic route keeps
+the old `Role Map`, projected todo lanes, search, and lane filters only so a
+developer can reproduce an existing status slice during migration.
 The `Efficiency Evidence` panel pulls the public-safe self-iteration case from
 the showcase catalog so the hosted frontstage can show commit-backed baseline,
 actual-window, compression, and evidence-boundary signals without exposing raw
 sessions. The `Async Work Loop` and `Showcase Cases` panels render the same
 catalog as animated narrative lanes and compact case cards, linking back to
-public GitHub case pages for deeper reading. Operations lanes are derived from
-the read-only projection; showcase panels are derived only from public-safe
-showcase metadata. Neither surface is browser write authority.
+public GitHub case pages for deeper reading. Legacy diagnostic lanes are
+derived from the read-only projection; Showcase panels are derived only from
+public-safe showcase metadata. Neither surface is browser write authority.
 
 The default frontstage route is public showcase mode. It ignores `statusUrl`
 and renders only bundled showcase/demo material, so a copied or hosted URL does
@@ -70,7 +66,7 @@ not accidentally project local registry state.
 `examples/fixtures/frontstage-private-status-trap.public.json` is the synthetic
 negative fixture for that boundary: browser smokes prove its `GH_FAKE_*` live
 status markers stay out of showcase URLs and appear only after an explicit
-`mode=ops` load.
+deprecated diagnostics load.
 
 For contributor onboarding, use `/frontstage?mode=developer`. This is still a
 public-safe read-only view: it shows the agent-first start path, quota/status
@@ -86,8 +82,8 @@ so new projection work does not require reverse-engineering the large
 dashboard page. It uses static public contracts and fixtures only; live status
 feeds, registry files, and browser write APIs stay out of this route.
 
-For live local control-plane inspection, explicitly enter ops mode:
-`/frontstage?mode=ops&statusUrl=http://127.0.0.1:8766/status.json`. The route
+For legacy live local control-plane inspection, explicitly enter the deprecated route:
+`/deprecated/frontstage/ops?statusUrl=http://127.0.0.1:8766/status.json`. The route
 then reads `attention_queue.items[].goal_channel_projection` and stays
 read-only; if the feed is missing or has no projection, the bundled demo
 fixture remains visible. Ops-mode status sources are limited to relative or
@@ -97,7 +93,8 @@ with schema-version freshness checks, stale-daemon repair copy, and a
 `local_dashboard_api` capability projection. It remains read-only by default:
 reward or control-plane write affordances require explicit loopback opt-in,
 advertised capability URLs, and preview-locked local APIs. Do not use ops-mode
-URLs as public links.
+URLs as public links. Its implementation is isolated under
+`src/views/deprecated/`; `src/views/frontstage-page.tsx` remains Showcase-only.
 
 To create a public-safe static bundle for demos, Lark shares, or future GitHub
 Pages hosting, export the frontstage with the sanitized fixture:

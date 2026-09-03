@@ -905,6 +905,188 @@ export async function configureGoalChannelAutoNotify(options: { autoNotify: bool
   );
 }
 
+export const periodicReportMachineConfigurationSchema = z.object({
+  schema_version: z.literal("periodic_report_machine_defaults_v0"),
+  enabled: z.boolean(),
+  inheritance: z.literal("live_machine_default"),
+  profile_preset: z.string().optional(),
+  route_ref: z.string().optional(),
+  timezone: z.string(),
+});
+
+export const machineConfigurationSchema = z.object({
+  schema_version: z.literal("loopx_machine_configuration_v0"),
+  namespaces: z.record(z.string(), z.record(z.string(), z.unknown())),
+});
+
+export const machineConfigurationNamespaceDescriptorSchema = z.object({
+  namespace: z.string(),
+  title: z.string(),
+  description: z.string(),
+  schema_versions: z.array(z.string()).min(1),
+  configuration_template: z.record(z.string(), z.unknown()),
+  template_status: z.enum(["ready", "schema_only"]),
+});
+
+export const machineConfigurationCatalogSchema = z.object({
+  schema_version: z.literal("machine_configuration_catalog_v0"),
+  namespaces: z.array(machineConfigurationNamespaceDescriptorSchema),
+});
+
+const machineConfigurationBaseSchema = z.object({
+  ok: z.literal(true),
+  available_namespaces: z.array(z.string()),
+  namespace_catalog: machineConfigurationCatalogSchema.optional().default({
+    schema_version: "machine_configuration_catalog_v0",
+    namespaces: [],
+  }),
+  changed_namespaces: z.array(z.string()).optional().default([]),
+  machine_configuration: machineConfigurationSchema.nullable().optional(),
+});
+
+export const machineConfigurationInspectionSchema = machineConfigurationBaseSchema.extend({
+  schema_version: z.literal("machine_configuration_inspection_v0"),
+  status: z.enum(["configured", "absent"]),
+  revision: z.string(),
+});
+
+export const machineConfigurationPreviewSchema = machineConfigurationBaseSchema.extend({
+  schema_version: z.literal("machine_configuration_update_plan_v0"),
+  status: z.literal("preview"),
+  action: z.enum(["create", "update", "delete", "unchanged"]),
+  current_revision: z.string(),
+  desired_revision: z.string(),
+  plan_revision: z.string(),
+  writes_required: z.number().int().nonnegative(),
+  machine_configuration: machineConfigurationSchema.nullable(),
+});
+
+export const machineConfigurationTransactionSchema = machineConfigurationBaseSchema.extend({
+  schema_version: z.literal("machine_configuration_transaction_v0"),
+  status: z.enum(["applied", "unchanged"]),
+  plan_revision: z.string(),
+  transaction_id: z.string().nullable(),
+  readback_verified: z.literal(true),
+  rollback_available: z.boolean(),
+  applied_revision: z.string().optional(),
+  prior_revision: z.string().optional(),
+});
+
+export const machineConfigurationRollbackPlanSchema = machineConfigurationBaseSchema.extend({
+  schema_version: z.literal("machine_configuration_rollback_plan_v0"),
+  status: z.literal("preview"),
+  action: z.enum(["delete", "restore", "unchanged", "blocked"]),
+  reason: z.string(),
+  transaction_id: z.string(),
+  plan_revision: z.string(),
+  rollback_allowed: z.boolean(),
+  writes_required: z.number().int().nonnegative(),
+});
+
+export const machineConfigurationRollbackReceiptSchema = machineConfigurationBaseSchema.extend({
+  schema_version: z.literal("machine_configuration_rollback_receipt_v0"),
+  status: z.enum(["rolled_back", "unchanged"]),
+  transaction_id: z.string(),
+  plan_revision: z.string(),
+  rollback_id: z.string().nullable(),
+  readback_verified: z.literal(true),
+});
+
+export type MachineConfiguration = z.infer<typeof machineConfigurationSchema>;
+export type MachineConfigurationNamespaceDescriptor = z.infer<typeof machineConfigurationNamespaceDescriptorSchema>;
+export type MachineConfigurationInspection = z.infer<typeof machineConfigurationInspectionSchema>;
+export type MachineConfigurationPreview = z.infer<typeof machineConfigurationPreviewSchema>;
+export type MachineConfigurationTransaction = z.infer<typeof machineConfigurationTransactionSchema>;
+export type MachineConfigurationRollbackPlan = z.infer<typeof machineConfigurationRollbackPlanSchema>;
+
+export async function fetchMachineConfiguration() {
+  return machineConfigurationInspectionSchema.parse(
+    await requestJson<unknown>("/api/chat/machine-configuration"),
+  );
+}
+
+export async function previewMachineConfiguration(
+  namespace: string,
+  namespaceConfiguration: Record<string, unknown>,
+) {
+  return machineConfigurationPreviewSchema.parse(
+    await requestJson<unknown>("/api/chat/machine-configuration/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        namespace,
+        namespace_configuration: namespaceConfiguration,
+      }),
+    }),
+  );
+}
+
+export async function applyMachineConfiguration(
+  namespace: string,
+  namespaceConfiguration: Record<string, unknown>,
+  expectedPlanRevision: string,
+) {
+  return machineConfigurationTransactionSchema.parse(
+    await requestJson<unknown>("/api/chat/machine-configuration/apply", {
+      method: "POST",
+      body: JSON.stringify({
+        expected_plan_revision: expectedPlanRevision,
+        namespace,
+        namespace_configuration: namespaceConfiguration,
+      }),
+    }),
+  );
+}
+
+export async function previewMachineConfigurationRemoval(namespace: string) {
+  return machineConfigurationPreviewSchema.parse(
+    await requestJson<unknown>("/api/chat/machine-configuration/preview", {
+      method: "POST",
+      body: JSON.stringify({ namespace, operation: "remove" }),
+    }),
+  );
+}
+
+export async function applyMachineConfigurationRemoval(
+  namespace: string,
+  expectedPlanRevision: string,
+) {
+  return machineConfigurationTransactionSchema.parse(
+    await requestJson<unknown>("/api/chat/machine-configuration/apply", {
+      method: "POST",
+      body: JSON.stringify({
+        expected_plan_revision: expectedPlanRevision,
+        namespace,
+        operation: "remove",
+      }),
+    }),
+  );
+}
+
+export async function previewMachineConfigurationRollback(transactionId: string) {
+  return machineConfigurationRollbackPlanSchema.parse(
+    await requestJson<unknown>("/api/chat/machine-configuration/rollback", {
+      method: "POST",
+      body: JSON.stringify({ execute: false, transaction_id: transactionId }),
+    }),
+  );
+}
+
+export async function applyMachineConfigurationRollback(
+  transactionId: string,
+  expectedPlanRevision: string,
+) {
+  return machineConfigurationRollbackReceiptSchema.parse(
+    await requestJson<unknown>("/api/chat/machine-configuration/rollback", {
+      method: "POST",
+      body: JSON.stringify({
+        execute: true,
+        expected_plan_revision: expectedPlanRevision,
+        transaction_id: transactionId,
+      }),
+    }),
+  );
+}
+
 export type GoalRepositoryContext = {
   branch: string;
   identity: string;

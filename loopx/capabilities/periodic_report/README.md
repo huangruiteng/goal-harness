@@ -510,3 +510,13 @@ artifact's primary/supporting visibility policy and validate direct section
 hashes after dynamic content is mounted.
 Project profiles still own language, layout policy, audience, cadence, and
 selection rules.
+
+## Personal Workspace readback
+
+After the Goal Channel sink has verified delivery and committed the publication cursor, the
+local status server can expose the latest report as a typed, content-addressed
+milestone projection. Its compact index deliberately omits report prose; the
+full projection is fetched over the loopback-only cold path and is accepted
+only when its generation id and digest match the current publication cursor.
+Pending approvals and generation-only artifacts remain invisible. The view is
+informational and has no browser write authority.

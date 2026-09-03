@@ -44,9 +44,14 @@ def collect_status(
     goal_id: str | None = None,
     available_capabilities: Any = None,
     include_public_boundary_scan: bool = True,
+    recent_run_limit: int | None = None,
 ) -> dict[str, Any]:
     display_limit = max(0, limit)
-    control_plane_limit = max(display_limit, context.status_control_plane_context_limit)
+    control_plane_limit = max(
+        display_limit,
+        context.status_control_plane_context_limit,
+        max(0, recent_run_limit) if recent_run_limit is not None else 0,
+    )
     goal_filter = str(goal_id or "").strip() or None
     registry = context.load_registry(registry_path)
     runtime_root = context.resolve_runtime_root(
@@ -91,6 +96,7 @@ def collect_status(
         goal_id_filter=goal_filter,
         display_limit=display_limit,
         todo_index_limit=max(context.max_todo_index_items, display_limit),
+        recent_run_limit=recent_run_limit,
     )
     promotion_gate = context.build_promotion_gate(
         registry_path=registry_path,

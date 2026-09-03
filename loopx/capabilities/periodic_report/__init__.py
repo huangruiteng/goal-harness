@@ -24,6 +24,15 @@ from .bindings import (
     normalize_periodic_report_sink_bindings,
 )
 from .core import build_periodic_report_run
+from .machine_defaults import (
+    build_goal_periodic_report_delivery_identity,
+    build_goal_periodic_report_delivery_plan,
+    normalize_loopx_machine_defaults,
+    normalize_periodic_report_machine_defaults,
+    periodic_report_machine_configuration_namespace,
+    resolve_goal_periodic_report_subscription,
+    select_goal_periodic_report_executor,
+)
 from .presets import (
     PERIODIC_REPORT_PROFILE_PRESET_ALIASES,
     PERIODIC_REPORT_PROFILE_PRESET_IDS,
@@ -64,14 +73,21 @@ __all__ = [
     "build_periodic_report_preset_activation",
     "build_project_progress_periodic_report_source",
     "build_periodic_report_archive_bundle",
+    "build_goal_periodic_report_delivery_identity",
+    "build_goal_periodic_report_delivery_plan",
     "build_periodic_report_run",
     "build_periodic_report_source_result",
     "build_periodic_report_trigger_decision",
     "normalize_periodic_report_profile",
+    "normalize_loopx_machine_defaults",
+    "normalize_periodic_report_machine_defaults",
+    "periodic_report_machine_configuration_namespace",
     "normalize_periodic_report_audience_policy",
     "normalize_periodic_report_sink_bindings",
     "normalize_periodic_report_trigger_policy",
     "project_progress_periodic_report_source_adapter",
     "resolve_periodic_report_profile_preset",
+    "resolve_goal_periodic_report_subscription",
+    "select_goal_periodic_report_executor",
     "verify_periodic_report_archive_receipts",
 ]

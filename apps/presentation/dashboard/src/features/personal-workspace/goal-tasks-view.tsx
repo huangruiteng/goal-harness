@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { Check, ExternalLink, ListPlus, MessageSquareText, MoreHorizontal } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Bot, Check, ChevronDown, ExternalLink, ListPlus, MessageSquareText, MoreHorizontal } from "lucide-react";
 
 import type {
   WorkspaceDrawerSelection,
@@ -35,6 +35,7 @@ export function GoalTasksView({
   userTodos: WorkspaceModel["userTodos"];
 }) {
   const { t } = useWorkspaceI18n();
+  const [laneSelection, setLaneSelection] = useState({ goalId: "", laneId: "all" });
   const selectedTodoRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (!selectedTodoId) return;
@@ -46,13 +47,31 @@ export function GoalTasksView({
     .map((todo) => ({ ...todo, goalTitle: goal.title }));
   const priorityRank = (todo: WorkspaceGoal["agentTodos"][number]) =>
     todo.priority === "P0" ? 0 : todo.priority === "P1" ? 1 : todo.priority === "P2" ? 2 : 3;
+  const agentLanes = useMemo(() => {
+    const lanes = new Map((goal.agentLanes ?? []).map((lane) => [lane.agentId, lane]));
+    for (const todo of goal.agentTodos) {
+      if (todo.claimedBy && !lanes.has(todo.claimedBy)) {
+        lanes.set(todo.claimedBy, { agentId: todo.claimedBy, label: todo.claimedBy });
+      }
+    }
+    return [...lanes.values()];
+  }, [goal.agentLanes, goal.agentTodos]);
+  const selectedLaneId = laneSelection.goalId === goal.goalId
+    && agentLanes.some((lane) => lane.agentId === laneSelection.laneId)
+    ? laneSelection.laneId
+    : "all";
+  const laneMatches = (agentId?: string | null) => selectedLaneId === "all" || agentId === selectedLaneId;
   const openAgentTodos = goal.agentTodos
     .filter((todo) => todo.taskClass !== "continuous_monitor" && !todo.done)
+    .filter((todo) => laneMatches(todo.claimedBy))
     .sort((left, right) => priorityRank(left) - priorityRank(right));
-  const doneAgentTodos = goal.agentTodos.filter((todo) => todo.taskClass !== "continuous_monitor" && todo.done);
-  const scheduleItems = items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "schedule" }> => item.kind === "schedule");
+  const doneAgentTodos = goal.agentTodos
+    .filter((todo) => todo.taskClass !== "continuous_monitor" && todo.done)
+    .filter((todo) => laneMatches(todo.claimedBy));
+  const scheduleItems = items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "schedule" }> =>
+    item.kind === "schedule" && laneMatches(item.schedule.agentId));
   const executionRuns = items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "run" }> =>
-    item.kind === "run" && Boolean(item.run.todoId));
+    item.kind === "run" && Boolean(item.run.todoId) && laneMatches(item.run.agentId));
   const isEmpty = !attentionItems.length && !openAgentTodos.length && !doneAgentTodos.length && !scheduleItems.length;
   const conversation = items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "message" }> =>
     item.kind === "message" && (item.message.role === "user" || item.message.role === "assistant"));
@@ -66,6 +85,26 @@ export function GoalTasksView({
 
   return (
     <>
+      {agentLanes.length > 1 ? (
+        <section aria-label={t("tasks.agentLaneFilter")} className="personal-task-lane-filter">
+          <div>
+            <Bot size={15} />
+            <span><strong>{t("tasks.agentLane")}</strong><small>{t("tasks.agentLaneDescription")}</small></span>
+          </div>
+          <label>
+            <span className="sr-only">{t("tasks.agentLaneFilter")}</span>
+            <select
+              aria-label={t("tasks.agentLaneFilter")}
+              onChange={(event) => setLaneSelection({ goalId: goal.goalId, laneId: event.target.value })}
+              value={selectedLaneId}
+            >
+              <option value="all">{t("tasks.allAgentLanes", { count: agentLanes.length })}</option>
+              {agentLanes.map((lane) => <option key={lane.agentId} value={lane.agentId}>{lane.label}</option>)}
+            </select>
+            <ChevronDown aria-hidden size={14} />
+          </label>
+        </section>
+      ) : null}
       {latestUserMessage ? (
         <section aria-label={t("tasks.chatRecent")} className="personal-task-chat-receipt">
           <span className="personal-task-chat-icon"><MessageSquareText size={18} /></span>

@@ -7,8 +7,6 @@ from typing import Any
 from .control_plane.runtime.time import now_utc, now_utc_iso
 from .control_plane.todos.decision_scope import todo_gate_relation
 from .control_plane.todos.user_gate import open_user_gate_todo_items
-from .history import collect_history, load_registry
-from .paths import resolve_runtime_root
 from .presentation.markdown import as_dict as _as_dict
 from .presentation.markdown import as_list as _as_list
 from .presentation.public_safety import public_safe_boundary, redact_public_text
@@ -562,19 +560,13 @@ def build_summary_all(
     limit: int,
 ) -> dict[str, Any]:
     normalized_range, since = _parse_time_range(time_range)
+    recent_progress_limit = max(limit * 2, 5)
     status_payload = collect_status(
         registry_path=registry_path,
         runtime_root_override=runtime_root_override,
         scan_roots=scan_roots,
         limit=max(limit, 1),
-    )
-    registry = load_registry(registry_path)
-    runtime_root = resolve_runtime_root(registry, runtime_root_override)
-    history_payload = collect_history(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id=None,
-        limit=max(limit * 2, 5),
+        recent_run_limit=recent_progress_limit,
     )
 
     queue = _as_dict(status_payload.get("attention_queue"))
@@ -605,7 +597,12 @@ def build_summary_all(
 
     global_registry = _as_dict(status_payload.get("global_registry"))
     risks = [_risk_from_finding(item) for item in _as_list(global_registry.get("findings")) if isinstance(item, dict)]
-    recent_progress = _recent_progress(history_payload, since=since, limit=limit)
+    run_history = _as_dict(status_payload.get("run_history"))
+    recent_progress = _recent_progress(
+        {"runs": _as_list(run_history.get("recent_runs"))},
+        since=since,
+        limit=limit,
+    )
 
     runnable_count = sum(1 for lane in lanes if lane.get("status") in {"eligible", "run", "normal_run"})
     waiting_count = sum(1 for lane in lanes if str(lane.get("waiting_on") or "") in {"controller", "user", "external"})

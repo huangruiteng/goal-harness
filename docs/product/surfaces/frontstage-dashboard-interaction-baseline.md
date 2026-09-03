@@ -1,7 +1,8 @@
 # Frontstage Dashboard Interaction Baseline
 
-LoopX has two frontend jobs, and they should not collapse into one
-layout.
+LoopX historically had two Frontstage jobs. The public showcase remains a
+product surface; the old ops board is now a deprecated diagnostic route and
+Personal Workspace owns operator workflows.
 
 The showcase surface sells the product model. The ops surface lets real users
 work. They can share React components, icons, tokens, and public-safe fixtures,
@@ -12,10 +13,11 @@ but they should not share data defaults, information density, or motion rules.
 | Surface | Route posture | Primary job | Data source | Visual rule |
 | --- | --- | --- | --- | --- |
 | Showcase/homepage | Default `/frontstage` | Make the product feel obvious and compelling | `docs/showcases/showcase-catalog.json` plus sanitized share fixtures | Case-first, concise, animated, public-safe |
-| Ops/control-plane | Explicit `mode=ops` | Help an operator scan, decide, and review long-running agent work | Relative or loopback `goal_channel_projection_v0` status feeds | Dense, calm, read-only, repeatable |
+| Legacy Ops diagnostics | `/deprecated/frontstage/ops` (old `mode=ops` redirects) | Preserve bounded inspection while old consumers migrate | Relative or loopback `goal_channel_projection_v0` status feeds | Dense, calm, read-only, repeatable |
 
 The default hosted or copied link must open the showcase surface. Live registry
-state requires an explicit ops route and a loopback or relative status source.
+state requires the explicit deprecated diagnostics route and a loopback or
+relative status source. New operator features belong in Personal Workspace.
 
 ## Product Direction
 

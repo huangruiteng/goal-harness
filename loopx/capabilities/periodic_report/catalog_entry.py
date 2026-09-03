@@ -117,6 +117,16 @@ PERIODIC_REPORT_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "docs/reference/protocols/periodic-report-v0.md",
         },
         {
+            "schema_version": "periodic_report_workspace_projection_v0",
+            "module": "loopx.capabilities.periodic_report.workspace",
+            "doc": "docs/reference/protocols/periodic-report-v0.md",
+        },
+        {
+            "schema_version": "periodic_report_workspace_index_v0",
+            "module": "loopx.capabilities.periodic_report.workspace",
+            "doc": "docs/reference/protocols/periodic-report-v0.md",
+        },
+        {
             "schema_version": "periodic_report_sink_binding_v0",
             "module": "loopx.capabilities.periodic_report.bindings",
             "doc": "docs/reference/protocols/periodic-report-v0.md",

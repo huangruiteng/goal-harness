@@ -1197,9 +1197,144 @@ and authority-source promotion remain explicit holds. The next PostgreSQL
 slice must qualify the authenticated service/deployment and failure boundary;
 it must not treat database RLS as that missing API authorization layer.
 
-The file-backed provider shadow is Stage 2; its first slice is merged on
-`main` through #3529, and the evidence behind it is recorded in the Stage 2
-status subsection below.
+The file-backed provider contract and executor are Stage 2; their first slice
+is merged on `main` through #3529, and the evidence behind it is recorded in
+the Stage 2 status subsection below. That slice proves the aggregate and
+provider boundary, but it is not the Stage 2C production runtime shadow: it
+does not hook the legacy Todo or task-lease writers.
+
+#### Stage 2C post-commit runtime-shadow status (2026-09-03)
+
+The first production-path shadow slice is implemented behind this exact,
+default-off goal configuration:
+
+```json
+{
+  "coordination": {
+    "runtime_shadow": {
+      "enabled": true,
+      "schema_version": "loopx_coordination_runtime_shadow_config_v0",
+      "provider": "file_v0"
+    }
+  }
+}
+```
+
+Activation requires all three values. An absent, disabled, malformed, or
+unsupported configuration preserves the legacy result and returns typed
+disabled evidence. When enabled, the runtime obeys the following boundary:
+
+- the legacy Markdown Todo writer or task-lease writer commits first and
+  remains canonical; only a successful primary mutation dispatches the
+  shadow;
+- the Python adapter reduces the committed Todo and lease read models to the
+  coordination-owned fields, sorts them by stable Todo identity, and sends one
+  post-commit projection through the existing TypeScript effect runtime;
+- the TypeScript owner writes that projection and its operation receipt in one
+  `AuthorityStore` transaction. It checks an existing receipt before writing,
+  rejects reuse of an operation id with different normalized content, retries
+  provider-revision contention only within a fixed bound, and reconciles an
+  ambiguous commit only by reading the exact durable receipt;
+- an applied result reads the receipt back and verifies the current provider
+  head when it has not already been superseded. Every result states
+  `decision_read_from_shadow=false`; a disabled, failed, conflicting, or
+  ambiguous shadow result cannot reject, roll back, or rewrite the committed
+  primary result.
+
+Cross-runtime tests exercise the real Python -> TypeScript ->
+`FileAuthorityStore` path from both Todo and task-lease hooks, including
+default-off behavior, stable replay, content-drift rejection, ambiguous-commit
+recovery, projection read-back, and shadow-failure isolation. This closes the
+first runtime-shadow slice. A follow-up typed inspection seam now compares the
+current compact legacy projection with the file head and reports `missing`,
+`matched`, or `drifted` plus both content digests. It is default-off,
+read-only, and always returns `decision_read_from_shadow=false`; this provides
+the reusable baseline/parity observation needed by migration without turning
+an observation into authority.
+
+The next migration primitive is now also present behind the same explicit
+opt-in. `coordination.runtime_shadow.bootstrap` installs one normalized legacy
+projection only when the file shadow is uninitialized. Its first committed
+event durably binds the source version, source projection digest, and
+`legacy_canonical_shadow` mode declaration; it deliberately carries an empty
+receipt payload because no agent operation has run. Exact replay is recovered
+from that first transaction, including an ambiguous lost response, while a
+different existing lineage fails closed. This is the provider-owned bootstrap
+effect needed by a later administrative migration command; it still cannot
+promote the shadow or make a coordination decision.
+
+The administrative caller is explicit and preview-first:
+
+```bash
+loopx coordination-shadow inspect --goal-id <goal-id>
+loopx coordination-shadow bootstrap --goal-id <goal-id>
+loopx coordination-shadow bootstrap --goal-id <goal-id> --execute
+loopx coordination-shadow qualify --goal-id <goal-id> \
+  --minimum-operations 3 \
+  --require-event-kind todo_claim \
+  --require-event-kind task_lease_acquire
+loopx coordination-shadow rollback --goal-id <goal-id> \
+  --provider-revision <revision-from-inspect> --execute
+```
+
+It derives the compact projection from the current canonical Todo and
+task-lease views, reports only counts and digests, and requires `--execute`
+before invoking bootstrap. A successful write is immediately read back through
+the typed parity inspection. The command remains unavailable unless the exact
+goal-level `file_v0` shadow opt-in is active.
+
+Pre-promotion rollback is revision-fenced and non-destructive. TypeScript moves
+the exact active file-shadow lineage into a durable quarantine archive; exact
+retries replay that archive receipt, revision drift fails closed, and the
+legacy Todo/task-lease source remains canonical throughout. A later bootstrap
+may therefore reconstruct a fresh shadow without restoring or trusting the
+retired lineage.
+
+The read-only `qualify` action turns one-point inspection into a typed sustained
+parity report. Its coverage-based policy requires a caller-selected number of
+distinct committed operations and any explicitly named Todo/lease mutation
+kinds. TypeScript scans the complete bounded lineage, verifies the bootstrap,
+every event/receipt/projection identity, the current legacy/file head digest,
+and reports `qualified`, `insufficient_evidence`, or `drifted`. Replays do not
+increase the operation count, missing coverage fails the gate, and every result
+continues to declare `decision_read_from_shadow=false`.
+
+The next read-only seam exercises the provider shape needed by the future
+read flip without granting it authority:
+
+```bash
+loopx coordination-shadow read-candidate \
+  --goal-id <goal-id> \
+  --todo-id <todo-id>
+```
+
+TypeScript loads the file head, requires its digest to match the complete
+current legacy coordination projection, validates unique Todo identities, and
+returns the exact compact Todo plus the provider revision and cursor. Missing,
+drifted, malformed, or duplicate state fails closed. The result deliberately
+keeps `decision_read_from_shadow=false`: it proves that a parity-matched
+provider can answer an exact Todo read, but no lifecycle or settlement caller
+uses that answer yet. Promotion still requires an atomic provider-first read
+flip together with legacy-writer fencing; a fallback to Markdown after that
+flip would recreate split authority and is forbidden.
+
+The provider-first read flip and fencing every legacy coordination writer
+remain mandatory evidence for the separately reviewed local canonical
+promotion. Remote NoKV/PostgreSQL shadowing therefore remains Stage 3 and
+cannot use this default-off hook as authority.
+
+The next Stage 2C implementation slice adds the TypeScript cutover kernel but
+does not yet change the default runtime. One pure reducer now derives the
+Todo/lease projection, event, and receipt from the same mutation. An explicit
+promotion operation requires a qualified shadow at one exact provider revision
+and digest, plus an independently persisted legacy-writer fence bound to that
+same revision. The fence has a shared fail-closed write-check hook; promotion
+is replayable through its operation receipt, and provider-first reads and
+mutations never fall back to Markdown. Until the Python Todo and task-lease
+entry points call that hook and select the promoted mode, these surfaces remain
+cutover machinery rather than a production authority flip. The follow-up must
+wire every legacy writer, make configuration and rollback explicit, and prove
+default legacy compatibility before the local promotion can be enabled.
 
 Durable completion continuation read-back
 (`durable_completion.py`: `read_persisted_todo_record` /
@@ -1571,8 +1706,12 @@ as a follow-up. `legacy` remains the default and keeps the divergence hole by
 design. Two side doors found after the gate landed are closed alongside this
 revision: `supersede` crosses the same lease fence as `complete`, and a forced
 state rebuild (`bootstrap --force`) carries the declared mode instead of
-resetting it to `legacy`. The next stage, a file-backed provider shadow behind
-the coordination contract of Section 11, has not started.
+resetting it to `legacy`. The Stage 2 provider contract and file backend have
+since landed, and the first Stage 2C post-commit runtime shadow now exists
+behind an explicit default-off configuration. Local canonical promotion has
+not started: the runtime still never reads the shadow for decisions, and the
+migration, rollback, parity, read-flip, and legacy-writer fencing gates above
+remain open.
 
 ### Relation to Staged Delivery
 

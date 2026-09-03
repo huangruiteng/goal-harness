@@ -393,7 +393,7 @@ describe('/loopx-init implementation', () => {
     ))).toBe(true)
     const pipCall = calls.find(call => call.args.slice(0, 3).join(' ') === '-m pip install')
     expect(pipCall?.args).toContain('--target')
-    expect(pipCall?.args.at(-1)).toBe('loopx>=0.5.3')
+    expect(pipCall?.args.at(-1)).toBe('loopx>=0.5.4')
     expect(pipCall?.args[pipCall.args.indexOf('--target') + 1]).toBe(
       '/fixture/runtime/site-packages',
     )

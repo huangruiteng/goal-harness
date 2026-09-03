@@ -530,6 +530,28 @@ export function ContextDrawer({ agents, callbacks, goalNotifications = [], goals
                 <div><dt>Agent</dt><dd>{selection.item.agentLabel ?? selection.item.agentId ?? "LoopX"}</dd></div>
               </dl>
             </section>
+            {selection.item.report ? (
+              <section className="personal-report-detail" data-testid="personal-periodic-report-detail">
+                <header>
+                  <span><strong>+{selection.item.report.addedCount}</strong>{t("files.reportAdded")}</span>
+                  <span><strong>{selection.item.report.changedCount}</strong>{t("files.reportChanged")}</span>
+                </header>
+                <p>{selection.item.report.periodStartAt} → {selection.item.report.periodEndAt}</p>
+                <ol>
+                  {selection.item.report.items.map((item) => (
+                    <li data-change-kind={item.changeKind} key={item.sourceRef}>
+                      <small>{item.changeKind} · {item.status}</small>
+                      <strong>{item.title}</strong>
+                      <p>{item.summary}</p>
+                    </li>
+                  ))}
+                </ol>
+                <footer>
+                  <span>{t("files.reportPublication")}: {selection.item.report.publicationId}</span>
+                  <span>{t("files.reportGeneration")}: {selection.item.report.generationId}</span>
+                </footer>
+              </section>
+            ) : null}
             {selection.item.safePreview ? <pre aria-label={t("drawer.outputSafePreview")} className="personal-safe-preview">{selection.item.safePreview}</pre> : <p className="personal-preview-unavailable">{t("drawer.previewUnavailable")}</p>}
             <div className="personal-drawer-action-grid">
               <button className="personal-primary-action" onClick={() => { callbacks.onOpenOutput?.(selection.item); onClose(); }} type="button"><ExternalLink size={16} />{t("common.open")}</button>

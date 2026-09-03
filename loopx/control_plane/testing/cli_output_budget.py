@@ -676,6 +676,12 @@ CLI_OUTPUT_COMMAND_CLASSIFICATIONS: tuple[CliOutputCommandClassification, ...] =
         rationale="explicit per-todo lease lifecycle command family",
     ),
     CliOutputCommandClassification(
+        command_id="coordination-shadow",
+        qualification="explicit_cold_path_exception",
+        surface_id=None,
+        rationale="explicit Stage 2C administrative inspection and bootstrap command family",
+    ),
+    CliOutputCommandClassification(
         command_id="quota",
         qualification="qualified_default",
         surface_id="quota_should_run",

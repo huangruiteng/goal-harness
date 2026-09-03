@@ -733,6 +733,8 @@ export const localDashboardApiSchema = z.object({
   review_material_url: z.string().optional().nullable(),
   presentation_surfaces_url: z.string().optional().nullable(),
   presentation_detail_url: z.string().optional().nullable(),
+  periodic_report_index_url: z.string().optional().nullable(),
+  periodic_report_detail_url: z.string().optional().nullable(),
   ssh_hosts_url: z.string().optional().nullable(),
   reward_dry_run_url: z.string().optional().nullable(),
   reward_append_url: z.string().optional().nullable(),
@@ -817,6 +819,86 @@ const emptyPresentationSurfaceCollection = {
 export const presentationSurfaceCollectionResponseSchema = z.object({
   ok: z.literal(true),
   presentation_surfaces: presentationSurfaceCollectionSchema,
+}).strict();
+
+export const periodicReportDetailRefSchema = z.object({
+  goal_id: z.string().min(1),
+  agent_id: z.string().min(1),
+  generation_id: z.string().min(1),
+  content_sha256: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+}).strict();
+
+export const periodicReportIndexItemSchema = z.object({
+  goal_id: z.string().min(1),
+  agent_id: z.string().min(1),
+  generation_id: z.string().min(1),
+  publication_id: z.string().min(1),
+  delivered_at: z.string().min(1),
+  predecessor_publication_id: z.string().min(1).nullable().optional(),
+  detail_ref: periodicReportDetailRefSchema,
+}).strict();
+
+export const periodicReportIndexResponseSchema = z.object({
+  ok: z.literal(true),
+  periodic_reports: z.object({
+    schema_version: z.literal("periodic_report_workspace_index_v0"),
+    count: z.number().int().nonnegative(),
+    items: z.array(periodicReportIndexItemSchema),
+  }).strict(),
+}).strict();
+
+export const periodicReportProjectionSchema = z.object({
+  schema_version: z.literal("periodic_report_workspace_projection_v0"),
+  goal_id: z.string().min(1),
+  agent_id: z.string().min(1),
+  generation_id: z.string().min(1),
+  generated_at: z.string().min(1),
+  title: z.string().min(1),
+  summary: z.string().min(1),
+  content_sha256: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  period_window: z.object({
+    start_at: z.string().min(1),
+    end_at: z.string().min(1),
+  }).strict(),
+  interaction: z.object({
+    attention_kind: z.literal("progress"),
+    interaction: z.literal("inform"),
+    delivery: z.literal("surface"),
+    form: z.literal("milestone_report"),
+    writable: z.literal(false),
+  }).strict(),
+  delta: z.object({
+    added_count: z.number().int().nonnegative(),
+    changed_count: z.number().int().nonnegative(),
+    item_count: z.number().int().positive(),
+    items: z.array(z.object({
+      fact_id: z.string().min(1),
+      source_ref: z.string().min(1),
+      title: z.string().min(1),
+      summary: z.string().min(1),
+      status: z.string().min(1),
+      content_kind: z.string().min(1),
+      change_kind: z.enum(["added", "changed"]),
+      previous_status: z.string().min(1).optional(),
+    }).strict()),
+  }).strict(),
+  publication: z.object({
+    publication_id: z.string().min(1),
+    delivered_at: z.string().min(1),
+    predecessor_publication_id: z.string().min(1).nullable().optional(),
+    cursor_id: z.string().min(1),
+  }).strict(),
+  truth_contract: z.object({
+    published_cursor_is_source_of_truth: z.literal(true),
+    generation_receipt_is_delivery_receipt: z.literal(false),
+    projection_is_writable: z.literal(false),
+    browser_write_api: z.literal(false),
+  }).strict(),
+}).strict();
+
+export const periodicReportProjectionResponseSchema = z.object({
+  ok: z.literal(true),
+  projection: periodicReportProjectionSchema,
 }).strict();
 
 export const statusPayloadSchema = z.object({
@@ -913,6 +995,8 @@ export const rewardDryRunResponseSchema = z.object({
 });
 
 export type StatusPayload = z.infer<typeof statusPayloadSchema>;
+export type PeriodicReportDetailRef = z.infer<typeof periodicReportDetailRefSchema>;
+export type PeriodicReportProjection = z.infer<typeof periodicReportProjectionSchema>;
 export type GoalActivationState = "active" | "stopped";
 export type StatusContract = NonNullable<z.infer<typeof statusContractSchema>>;
 export type QueueItem = z.infer<typeof queueItemSchema>;

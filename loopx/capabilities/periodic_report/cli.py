@@ -13,6 +13,15 @@ from ...extensions.runtime import (
 )
 from ...rollout_event_log import iter_rollout_events
 from .core import build_periodic_report_run
+from .machine_defaults import (
+    build_goal_periodic_report_delivery_plan,
+)
+from .machine_store import (
+    configure_periodic_report_machine_defaults,
+    inspect_periodic_report_machine_defaults,
+    read_periodic_report_machine_defaults,
+    rollback_periodic_report_machine_defaults,
+)
 from .extension_envelope import build_openviking_archive_execution_envelope
 from .presets import (
     PERIODIC_REPORT_PROFILE_PRESET_ALIASES,
@@ -100,6 +109,50 @@ def register_periodic_report_commands(
     consume_pending.add_argument("--goal-id", required=True)
     consume_pending.add_argument("--agent-id", required=True)
     consume_pending.add_argument("--execute", action="store_true")
+    configure_machine_defaults = commands.add_parser(
+        "configure-machine-defaults",
+        help="Preview or apply the runtime-root machine periodic-report policy.",
+    )
+    add_subcommand_format(configure_machine_defaults)
+    configure_machine_defaults.add_argument(
+        "--config-json",
+        required=True,
+        help="Path to loopx_machine_configuration_v0 JSON; use '-' for stdin.",
+    )
+    configure_machine_defaults.add_argument("--execute", action="store_true")
+    configure_machine_defaults.add_argument(
+        "--expected-plan-revision",
+        help="Exact plan_revision returned by the preceding configuration preview.",
+    )
+    inspect_machine_defaults = commands.add_parser(
+        "inspect-machine-defaults",
+        help="Read back the runtime-root machine periodic-report policy.",
+    )
+    add_subcommand_format(inspect_machine_defaults)
+    rollback_machine_defaults = commands.add_parser(
+        "rollback-machine-defaults",
+        help="Preview or execute rollback of one exact machine-policy transaction.",
+    )
+    add_subcommand_format(rollback_machine_defaults)
+    rollback_machine_defaults.add_argument("--transaction-id", required=True)
+    rollback_machine_defaults.add_argument("--execute", action="store_true")
+    rollback_machine_defaults.add_argument(
+        "--expected-plan-revision",
+        help="Exact plan_revision returned by the preceding rollback preview.",
+    )
+    plan_goal_delivery = commands.add_parser(
+        "plan-goal-delivery",
+        help=(
+            "Preview delivery from a Goal override or the current machine default, "
+            "then select the preferred Agent executor."
+        ),
+    )
+    add_subcommand_format(plan_goal_delivery)
+    plan_goal_delivery.add_argument(
+        "--request-json",
+        required=True,
+        help="Path to periodic_report_goal_delivery_plan_request_v0 JSON.",
+    )
     evaluate_runtime.add_argument(
         "--rollout-events-jsonl",
         required=True,
@@ -276,6 +329,37 @@ def render_periodic_report_markdown(payload: dict[str, object]) -> str:
                 "",
             ]
         )
+    if payload.get("schema_version") in {
+        "machine_configuration_update_plan_v0",
+        "machine_configuration_transaction_v0",
+        "machine_configuration_inspection_v0",
+        "machine_configuration_rollback_plan_v0",
+        "machine_configuration_rollback_receipt_v0",
+        "periodic_report_goal_delivery_plan_v0",
+    }:
+        machine_configuration = str(payload.get("schema_version") or "").startswith(
+            "machine_configuration_"
+        )
+        return "\n".join(
+            [
+                (
+                    "# Machine Configuration"
+                    if machine_configuration
+                    else "# Periodic Report Goal Plan"
+                ),
+                "",
+                f"- schema: `{payload.get('schema_version')}`",
+                f"- status: `{payload.get('status', 'preview')}`",
+                f"- action: `{payload.get('action', 'none')}`",
+                f"- writes_required: `{payload.get('writes_required', 0)}`",
+                *(
+                    [f"- plan_revision: `{payload.get('plan_revision')}`"]
+                    if payload.get("plan_revision")
+                    else []
+                ),
+                "",
+            ]
+        )
     run_state = payload.get("run_state")
     retry = payload.get("retry")
     state = run_state if isinstance(run_state, dict) else {}
@@ -350,6 +434,40 @@ def handle_periodic_report_command(
                 goal_id=args.goal_id,
                 agent_id=args.agent_id,
                 execute=bool(args.execute),
+            )
+        elif args.periodic_report_command in {
+            "configure-machine-defaults",
+            "inspect-machine-defaults",
+            "rollback-machine-defaults",
+        }:
+            registry = read_json(registry_path)
+            runtime_root = resolve_runtime_root(
+                registry, runtime_root_arg, registry_path=registry_path
+            )
+            if args.periodic_report_command == "configure-machine-defaults":
+                payload = configure_periodic_report_machine_defaults(
+                    runtime_root=runtime_root,
+                    machine_defaults=_load_json_object(args.config_json),
+                    execute=bool(args.execute),
+                    expected_plan_revision=args.expected_plan_revision,
+                )
+            elif args.periodic_report_command == "inspect-machine-defaults":
+                payload = inspect_periodic_report_machine_defaults(runtime_root)
+            else:
+                payload = rollback_periodic_report_machine_defaults(
+                    runtime_root=runtime_root,
+                    transaction_id=args.transaction_id,
+                    execute=bool(args.execute),
+                    expected_plan_revision=args.expected_plan_revision,
+                )
+        elif args.periodic_report_command == "plan-goal-delivery":
+            registry = read_json(registry_path)
+            runtime_root = resolve_runtime_root(
+                registry, runtime_root_arg, registry_path=registry_path
+            )
+            payload = build_goal_periodic_report_delivery_plan(
+                _load_json_object(args.request_json),
+                machine_defaults=read_periodic_report_machine_defaults(runtime_root),
             )
         else:
             request = _load_json_object(args.request_json)
