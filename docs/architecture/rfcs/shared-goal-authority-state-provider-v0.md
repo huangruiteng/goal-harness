@@ -1269,6 +1269,8 @@ The administrative caller is explicit and preview-first:
 loopx coordination-shadow inspect --goal-id <goal-id>
 loopx coordination-shadow bootstrap --goal-id <goal-id>
 loopx coordination-shadow bootstrap --goal-id <goal-id> --execute
+loopx coordination-shadow rollback --goal-id <goal-id> \
+  --provider-revision <revision-from-inspect> --execute
 ```
 
 It derives the compact projection from the current canonical Todo and
@@ -1277,8 +1279,14 @@ before invoking bootstrap. A successful write is immediately read back through
 the typed parity inspection. The command remains unavailable unless the exact
 goal-level `file_v0` shadow opt-in is active.
 
-An explicit rollback command, sustained parity policy, the provider-first read
-flip, and fencing every
+Pre-promotion rollback is revision-fenced and non-destructive. TypeScript moves
+the exact active file-shadow lineage into a durable quarantine archive; exact
+retries replay that archive receipt, revision drift fails closed, and the
+legacy Todo/task-lease source remains canonical throughout. A later bootstrap
+may therefore reconstruct a fresh shadow without restoring or trusting the
+retired lineage.
+
+A sustained parity policy, the provider-first read flip, and fencing every
 legacy coordination writer remain mandatory evidence for the separately
 reviewed local canonical promotion. Remote NoKV/PostgreSQL shadowing therefore
 remains Stage 3 and cannot use this default-off hook as authority.

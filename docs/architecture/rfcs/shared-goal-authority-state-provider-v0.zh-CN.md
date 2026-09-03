@@ -1024,14 +1024,21 @@ promotion shadow，也不能参与协调决策。
 loopx coordination-shadow inspect --goal-id <goal-id>
 loopx coordination-shadow bootstrap --goal-id <goal-id>
 loopx coordination-shadow bootstrap --goal-id <goal-id> --execute
+loopx coordination-shadow rollback --goal-id <goal-id> \
+  --provider-revision <revision-from-inspect> --execute
 ```
 
 它从当前 canonical Todo 与 task-lease view 派生紧凑 projection，只报告计数与摘要，
 并要求 `--execute` 才调用 bootstrap。写入成功后会立即通过 typed parity inspection
 读回。除非目标开启精确的 goal-level `file_v0` shadow opt-in，否则该命令不可执行。
 
-后续仍需完成显式 rollback command、持续 parity policy、provider-first read flip，
-以及 fence 全部 legacy coordination writer，仍是独立评审的
+promotion 前 rollback 带精确 revision fence，且不删除数据。TypeScript 会把命中的
+file-shadow lineage 移入持久 quarantine archive；精确重试复用 archive receipt，revision
+漂移 fail closed，legacy Todo/task-lease source 全程保持 canonical。之后可以从 legacy
+source 重新 bootstrap 新 shadow，而无需恢复或信任退役 lineage。
+
+后续仍需完成持续 parity policy、provider-first read flip，以及 fence 全部 legacy
+coordination writer，仍是独立评审的
 本地 canonical promotion 的强制证据。因此 NoKV/PostgreSQL 远端 shadow 仍属于 Stage
 3，不能把这个默认关闭的 hook 当作 authority。
 
