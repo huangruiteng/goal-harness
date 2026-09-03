@@ -248,3 +248,228 @@ test("a todo both claimed and unclaimed-eligible is rejected", () => {
     /already claimed/,
   );
 });
+
+test("goal_revision boundary values are rejected per revision basis", () => {
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({
+          canonical_goal: {
+            goal_revision: 0,
+            intent_digest: DIGEST,
+            revision_basis: "state_event_log",
+            state_updated_at: null,
+          },
+        }),
+      ),
+    /must be a positive event append sequence/,
+  );
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({
+          canonical_goal: {
+            goal_revision: 1,
+            intent_digest: DIGEST,
+            revision_basis: "markdown_active_state",
+            state_updated_at: null,
+          },
+        }),
+      ),
+    /must be 0 when revision_basis is markdown_active_state/,
+  );
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({
+          canonical_goal: {
+            goal_revision: "3",
+            intent_digest: DIGEST,
+            revision_basis: "state_event_log",
+            state_updated_at: null,
+          },
+        }),
+      ),
+    /goal_revision must be an integer/,
+  );
+});
+
+test("an intent digest of the wrong length or case is rejected", () => {
+  const badDigests = [
+    "sha256:" + "a".repeat(63),
+    "sha256:" + "a".repeat(65),
+    "sha256:" + "A".repeat(64),
+  ];
+  for (const intent_digest of badDigests) {
+    assert.throws(
+      () =>
+        projectSharedGoalAlignment(
+          baseRequest({
+            canonical_goal: {
+              goal_revision: 42,
+              intent_digest,
+              revision_basis: "state_event_log",
+              state_updated_at: null,
+            },
+          }),
+        ),
+      /must be a sha256:<hex> digest/,
+    );
+  }
+});
+
+test("agent_id and goal_id must survive strict decoding", () => {
+  assert.throws(
+    () => projectSharedGoalAlignment(baseRequest({ agent_id: 123 })),
+    /agent_id must be a non-empty string/,
+  );
+  assert.throws(
+    () => projectSharedGoalAlignment(baseRequest({ agent_id: "1agent" })),
+    /agent_id must be a public-safe agent id/,
+  );
+  assert.throws(
+    () => projectSharedGoalAlignment(baseRequest({ goal_id: null })),
+    /goal_id must be a non-empty string/,
+  );
+});
+
+test("frontier counts must be non-negative integers", () => {
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({
+          frontier_counts: {
+            current_agent_claimed_advancement_count: -1,
+            unclaimed_advancement_count: 2,
+            other_agent_claimed_advancement_count: 0,
+          },
+        }),
+      ),
+    /current_agent_claimed_advancement_count must be non-negative/,
+  );
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({
+          frontier_counts: {
+            current_agent_claimed_advancement_count: 1,
+            unclaimed_advancement_count: "2",
+            other_agent_claimed_advancement_count: 0,
+          },
+        }),
+      ),
+    /unclaimed_advancement_count must be an integer/,
+  );
+});
+
+test("corrupt claim lease fields fail closed", () => {
+  const corruptLeases = [
+    { lease_epoch: "2", lease_owner: "agent-a" },
+    { lease_epoch: 0, lease_owner: "agent-a" },
+    { lease_epoch: 2, lease_owner: 7 },
+  ];
+  for (const lease of corruptLeases) {
+    assert.throws(
+      () =>
+        projectSharedGoalAlignment(
+          baseRequest({
+            claims: [
+              {
+                todo_id: "todo_lane_a",
+                claimed_by: "agent-a",
+                lease_epoch: lease.lease_epoch,
+                lease_owner: lease.lease_owner,
+              },
+            ],
+          }),
+      ),
+    );
+  }
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({
+          claims: [
+            {
+              todo_id: "todo_lane_a",
+              claimed_by: 42,
+              lease_epoch: 2,
+              lease_owner: "agent-a",
+            },
+          ],
+        }),
+      ),
+    /claimed_by must be a non-empty string/,
+  );
+});
+
+test("an unbound basis with a fabricated last event id is rejected", () => {
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({
+          frontier_basis: {
+            based_on_goal_revision: null,
+            basis_source: "unbound",
+            last_agent_event_id: "evt_fabricated",
+          },
+        }),
+      ),
+    /last_agent_event_id must be null when basis_source is unbound/,
+  );
+});
+
+test("duplicate todo ids and agent-claimed peer lanes are rejected", () => {
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({
+          claims: [
+            {
+              todo_id: "todo_lane_a",
+              claimed_by: "agent-a",
+              lease_epoch: 2,
+              lease_owner: "agent-a",
+            },
+            {
+              todo_id: "todo_lane_a",
+              claimed_by: "agent-a",
+              lease_epoch: 3,
+              lease_owner: "agent-a",
+            },
+          ],
+        }),
+      ),
+    /claims contains a duplicate todo_id/,
+  );
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({ peer_claimed_bound_todo_ids: ["todo_lane_a"] }),
+      ),
+    /cannot include a Todo already claimed/,
+  );
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({ peer_claimed_bound_todo_ids: ["peer-lane-9"] }),
+      ),
+    /peer_claimed_bound_todo_ids\[0\] must be a valid Todo id/,
+  );
+});
+
+test("repeated projection of identical facts is deterministic", () => {
+  const request = baseRequest({
+    peer_claimed_bound_todo_ids: ["todo_peer_claimed"],
+    open_lane_replan_obligation_required: true,
+  });
+  const first = projectSharedGoalAlignment(request);
+  const second = projectSharedGoalAlignment(request);
+
+  assert.deepEqual(first, second);
+  assert.equal(JSON.stringify(first), JSON.stringify(second));
+  assert.deepEqual(first.conflict_facts, [
+    "open_lane_replan_obligation",
+    "peer_claimed_lane_conflict",
+  ]);
+});

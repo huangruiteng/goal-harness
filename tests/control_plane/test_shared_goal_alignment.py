@@ -67,6 +67,7 @@ def _write_fixture(
     todo_specs: list[dict[str, str]],
     events: list[dict[str, str]] | None = None,
     leases: dict[str, dict[str, object]] | None = None,
+    agents: tuple[str, ...] = AGENTS,
 ) -> dict[str, Path]:
     project = root / "project"
     runtime = root / "runtime"
@@ -95,7 +96,7 @@ def _write_fixture(
                         "quota": {"compute": 1.0, "window_hours": 24},
                         "coordination": {
                             "agent_model": "peer_v1",
-                            "registered_agents": list(AGENTS),
+                            "registered_agents": list(agents),
                         },
                     }
                 ],
@@ -581,6 +582,120 @@ def test_unknown_goal_fails_closed(tmp_path: Path) -> None:
             agent_id="agent-a",
             project=paths["project"],
         )
+
+
+def test_registered_agent_without_any_events_projects_an_unbound_basis(
+    tmp_path: Path,
+) -> None:
+    paths = _write_fixture(
+        tmp_path,
+        todo_specs=_default_todo_specs(),
+        events=_default_events(),
+        agents=("agent-a", "agent-b", "agent-c"),
+    )
+
+    projection = project_shared_goal_alignment(
+        goal_id=GOAL_ID,
+        agent_id="agent-c",
+        project=paths["project"],
+    )
+
+    # The goal head stays verifiable (the log exists at revision 3), but an
+    # Agent with zero attributed events must not fabricate a frontier: the
+    # basis is unbound and reported as unverifiable instead of stale.
+    assert projection["canonical_goal"]["revision_basis"] == "state_event_log"
+    assert projection["canonical_goal"]["goal_revision"] == 3
+    assert projection["frontier_basis"] == {
+        "based_on_goal_revision": None,
+        "basis_source": "unbound",
+        "last_agent_event_id": None,
+    }
+    assert projection["drift_facts"] == []
+    assert projection["conflict_facts"] == ["frontier_basis_unverifiable"]
+
+
+def test_a_corrupt_event_log_falls_back_to_the_markdown_basis(
+    tmp_path: Path,
+) -> None:
+    paths = _write_fixture(
+        tmp_path,
+        todo_specs=_default_todo_specs(),
+        events=None,
+    )
+    event_log = paths["state_file"].with_name(EVENT_LOG_NAME)
+    event_log.write_text("{ this line is not jsonl\n", encoding="utf-8")
+
+    projection = project_shared_goal_alignment(
+        goal_id=GOAL_ID,
+        agent_id="agent-a",
+        project=paths["project"],
+    )
+
+    # A present-but-corrupt log must not fabricate revisions: the adapter
+    # falls back to the markdown active state and reports the frontier as
+    # unverifiable instead of trusting the head.
+    assert projection["canonical_goal"]["revision_basis"] == (
+        "markdown_active_state"
+    )
+    assert projection["canonical_goal"]["goal_revision"] == 0
+    assert projection["frontier_basis"]["basis_source"] == "unbound"
+    assert projection["drift_facts"] == []
+    assert projection["conflict_facts"] == ["frontier_basis_unverifiable"]
+
+
+def test_non_numeric_lease_epoch_fails_closed(
+    tmp_path: Path,
+) -> None:
+    paths = _write_fixture(
+        tmp_path,
+        todo_specs=_default_todo_specs(),
+        events=_default_events(),
+        leases={
+            "todo_lane_a": {
+                "schema_version": "task_lease_v0",
+                "owner": "agent-a",
+                "lease_epoch": "two",
+                "version": 1,
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="lease epoch"):
+        project_shared_goal_alignment(
+            goal_id=GOAL_ID,
+            agent_id="agent-a",
+            project=paths["project"],
+        )
+
+
+def test_projection_is_deterministic_across_repeated_calls(
+    tmp_path: Path,
+) -> None:
+    paths = _write_fixture(
+        tmp_path,
+        todo_specs=_default_todo_specs(),
+        events=_default_events(),
+    )
+
+    first = project_shared_goal_alignment(
+        goal_id=GOAL_ID,
+        agent_id="agent-a",
+        project=paths["project"],
+    )
+    second = project_shared_goal_alignment(
+        goal_id=GOAL_ID,
+        agent_id="agent-a",
+        project=paths["project"],
+    )
+
+    assert json.dumps(first, sort_keys=True) == json.dumps(
+        second, sort_keys=True
+    )
+    assert first["canonical_goal"]["intent_digest"] == (
+        second["canonical_goal"]["intent_digest"]
+    )
+    assert first["drift_facts"] == second["drift_facts"]
+    assert first["conflict_facts"] == second["conflict_facts"]
 
 
 def test_adapter_sends_typed_facts_only(monkeypatch, tmp_path: Path) -> None:
