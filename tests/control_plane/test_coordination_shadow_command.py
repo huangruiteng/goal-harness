@@ -26,6 +26,7 @@ def _run(
     *,
     action: str,
     execute: bool = False,
+    provider_revision: str | None = None,
 ) -> tuple[int, dict[str, object]]:
     monkeypatch.setattr(command, "load_registry", lambda _path: {"goals": [_goal()]})
     monkeypatch.setattr(command, "resolve_runtime_root", lambda *_args, **_kwargs: tmp_path)
@@ -56,6 +57,7 @@ def _run(
         project=None,
         state_file=None,
         execute=execute,
+        provider_revision=provider_revision,
         format="json",
     )
     result = command.handle_coordination_shadow_command(
@@ -168,6 +170,73 @@ def test_coordination_shadow_parser_exposes_explicit_execute_gate() -> None:
 
     assert preview.execute is False
     assert execute.execute is True
+
+    rollback = parser.parse_args(
+        [
+            "coordination-shadow",
+            "rollback",
+            "--goal-id",
+            "goal-a",
+            "--provider-revision",
+            "file:revision-1",
+            "--execute",
+        ]
+    )
+    assert rollback.provider_revision == "file:revision-1"
+    assert rollback.execute is True
+
+
+def test_coordination_shadow_rollback_is_revision_fenced_and_reads_back_missing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    inspections = iter(
+        [
+            {
+                "status": "matched",
+                "provider_revision": "file:revision-1",
+                "decision_read_from_shadow": False,
+            },
+            {
+                "status": "missing",
+                "bootstrap_required": True,
+                "decision_read_from_shadow": False,
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        command,
+        "inspect_coordination_runtime_shadow",
+        lambda **_kwargs: next(inspections),
+    )
+    rollback_request: dict[str, object] = {}
+
+    def rollback(**kwargs) -> dict[str, object]:
+        rollback_request.update(kwargs)
+        return {
+            "status": "applied",
+            "archive_retained": True,
+            "decision_read_from_shadow": False,
+        }
+
+    monkeypatch.setattr(command, "rollback_coordination_runtime_shadow", rollback)
+
+    result, payload = _run(
+        monkeypatch,
+        tmp_path,
+        action="rollback",
+        execute=True,
+        provider_revision="file:revision-1",
+    )
+
+    assert result == 0
+    assert payload["ok"] is True
+    assert payload["executed"] is True
+    assert payload["inspection"]["status"] == "missing"
+    assert rollback_request["expected_provider_revision"] == "file:revision-1"
+    assert rollback_request["operation_id"] == (
+        "shadow-rollback:goal-a:file:revision-1"
+    )
 
 
 def test_coordination_shadow_rejects_goal_without_exact_opt_in(

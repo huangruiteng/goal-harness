@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,14 +8,19 @@ import type {
   AuthorityStoreCommit,
   AuthorityStoreCommitResult,
 } from "../../loopx/control_plane/coordination/authority_store.ts";
-import { FileAuthorityStore } from "../../loopx/control_plane/coordination/file_authority_store.ts";
+import {
+  FileAuthorityStore,
+  type FileAuthorityArchiveResult,
+} from "../../loopx/control_plane/coordination/file_authority_store.ts";
 import {
   bootstrapCoordinationRuntimeShadow,
   commitCoordinationRuntimeShadow,
   inspectCoordinationRuntimeShadow,
+  rollbackCoordinationRuntimeShadow,
   COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_INSPECT_REQUEST_SCHEMA,
   COORDINATION_RUNTIME_SHADOW_REQUEST_SCHEMA,
+  COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
 } from "../../loopx/control_plane/coordination/runtime_shadow.ts";
 
 async function request(root: string, operationId = "todo:goal-a:todo_one:v1") {
@@ -122,6 +127,117 @@ test("runtime shadow bootstrap reconciles an applied commit whose response was l
   assert.equal(result.status, "recovered");
   assert.equal(result.cursor, "1");
   assert.equal(result.bootstrap_receipts_empty, true);
+});
+
+test("runtime shadow rollback quarantines and exactly replays one fenced lineage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-rollback-"));
+  const bootstrap = await bootstrapCoordinationRuntimeShadow(await bootstrapRequest(root));
+  assert.equal(bootstrap.status, "applied");
+  const rollbackRequest = {
+    schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    operation_id: `rollback:goal-a:${String(bootstrap.provider_revision)}`,
+    expected_provider_revision: bootstrap.provider_revision,
+  };
+
+  const applied = await rollbackCoordinationRuntimeShadow(rollbackRequest);
+  assert.equal(applied.status, "applied");
+  assert.equal(applied.active_shadow_removed, true);
+  assert.equal(applied.archive_retained, true);
+  assert.equal(applied.decision_read_from_shadow, false);
+
+  const store = new FileAuthorityStore(
+    join(root, "authority-shadow", "file-v0"),
+    "goal-a",
+  );
+  assert.equal((await store.loadAuthority()).status, "missing");
+  assert.equal(
+    (await readdir(join(root, "authority-shadow", "file-v0", "rollback"))).length,
+    1,
+  );
+
+  const replayed = await rollbackCoordinationRuntimeShadow(rollbackRequest);
+  assert.equal(replayed.status, "replayed");
+  assert.equal(replayed.archive_id, applied.archive_id);
+});
+
+test("runtime shadow rollback fences revision drift and operation reuse", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-rollback-fence-"));
+  const bootstrapInput = await bootstrapRequest(root);
+  const first = await bootstrapCoordinationRuntimeShadow(bootstrapInput);
+  assert.equal(first.status, "applied");
+  const rollbackRequest = {
+    schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    operation_id: `rollback:goal-a:${String(first.provider_revision)}`,
+    expected_provider_revision: first.provider_revision,
+  };
+  const stale = await rollbackCoordinationRuntimeShadow({
+    ...rollbackRequest,
+    expected_provider_revision: "file:stale-revision",
+  });
+  assert.equal(stale.status, "failed");
+  assert.equal(stale.reason_code, "provider_revision_mismatch");
+
+  assert.equal((await rollbackCoordinationRuntimeShadow(rollbackRequest)).status, "applied");
+  const second = await bootstrapCoordinationRuntimeShadow({
+    ...bootstrapInput,
+    operation_id: "bootstrap:goal-a:state-2",
+    source_version: "state:2",
+  });
+  assert.equal(second.status, "applied");
+
+  const reused = await rollbackCoordinationRuntimeShadow(rollbackRequest);
+  assert.equal(reused.status, "failed");
+  assert.equal(reused.reason_code, "archive_operation_reused_after_rebootstrap");
+  assert.equal(reused.primary_writeback_preserved, true);
+});
+
+test("runtime shadow rollback reconciles a quarantined lineage after response loss", async () => {
+  const root = await mkdtemp(join(tmpdir(), "loopx-runtime-shadow-rollback-ambiguous-"));
+  const bootstrap = await bootstrapCoordinationRuntimeShadow(await bootstrapRequest(root));
+  assert.equal(bootstrap.status, "applied");
+  const rollbackRequest = {
+    schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    operation_id: `rollback:goal-a:${String(bootstrap.provider_revision)}`,
+    expected_provider_revision: bootstrap.provider_revision,
+  };
+  class LostRollbackResponseStore extends FileAuthorityStore {
+    override async archiveAuthorityDocument(
+      expectedProviderRevision: string,
+      operationId: string,
+    ): Promise<FileAuthorityArchiveResult> {
+      const result = await super.archiveAuthorityDocument(
+        expectedProviderRevision,
+        operationId,
+      );
+      return result.status === "applied"
+        ? {
+          status: "ambiguous",
+          reason_code: "simulated_response_loss",
+          reason: "rollback response was lost",
+        }
+        : result;
+    }
+  }
+
+  const ambiguous = await rollbackCoordinationRuntimeShadow(
+    rollbackRequest,
+    {
+      createFileStore: (directory, goalId) =>
+        new LostRollbackResponseStore(directory, goalId),
+    },
+  );
+  assert.equal(ambiguous.status, "ambiguous");
+  assert.equal(ambiguous.reconciliation_required, true);
+
+  const recovered = await rollbackCoordinationRuntimeShadow(rollbackRequest);
+  assert.equal(recovered.status, "replayed");
+  assert.equal(recovered.archive_retained, true);
 });
 
 test("runtime shadow commits and exactly replays one legacy mutation", async () => {

@@ -28,6 +28,10 @@ export const COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA =
   "loopx_coordination_runtime_shadow_bootstrap_v0";
 export const COORDINATION_RUNTIME_SHADOW_BOOTSTRAP_RESULT_SCHEMA =
   "loopx_coordination_runtime_shadow_bootstrap_result_v0";
+export const COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA =
+  "loopx_coordination_runtime_shadow_rollback_v0";
+export const COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA =
+  "loopx_coordination_runtime_shadow_rollback_result_v0";
 
 interface RuntimeShadowRequest {
   runtime_root: string;
@@ -40,6 +44,7 @@ interface RuntimeShadowRequest {
 
 interface RuntimeShadowDependencies {
   createStore?: (directory: string, goalId: string) => AuthorityStore;
+  createFileStore?: (directory: string, goalId: string) => FileAuthorityStore;
 }
 
 interface RuntimeShadowInspectionRequest {
@@ -54,6 +59,13 @@ interface RuntimeShadowBootstrapRequest {
   operation_id: string;
   source_version: string;
   projection: JsonObject;
+}
+
+interface RuntimeShadowRollbackRequest {
+  runtime_root: string;
+  goal_id: string;
+  operation_id: string;
+  expected_provider_revision: string;
 }
 
 function requiredString(value: unknown, label: string): string {
@@ -113,6 +125,26 @@ function decodeBootstrapRequest(value: unknown): RuntimeShadowBootstrapRequest {
     operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
     source_version: requiredString(input.source_version, "source_version"),
     projection: canonicalAuthorityObject(input.projection, "projection"),
+  };
+}
+
+function decodeRollbackRequest(value: unknown): RuntimeShadowRollbackRequest {
+  const input = requireJsonObject(value, "coordination runtime shadow rollback request");
+  if (input.schema_version !== COORDINATION_RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA) {
+    throw new Error("coordination runtime shadow rollback request schema mismatch");
+  }
+  const runtimeRoot = requiredString(input.runtime_root, "runtime_root");
+  if (!isAbsolute(runtimeRoot)) {
+    throw new Error("runtime_root must be absolute");
+  }
+  return {
+    runtime_root: runtimeRoot,
+    goal_id: requireAuthorityStoreId(input.goal_id, "goal id"),
+    operation_id: requireAuthorityStoreId(input.operation_id, "operation id"),
+    expected_provider_revision: requireAuthorityStoreId(
+      input.expected_provider_revision,
+      "expected provider revision",
+    ),
   };
 }
 
@@ -316,6 +348,85 @@ export async function bootstrapCoordinationRuntimeShadow(
       decision_read_from_shadow: false,
     };
   }
+}
+
+/**
+ * Remove one exact file-shadow lineage from the active path while retaining a
+ * durable quarantine copy. Legacy Todo/task-lease state remains canonical, so
+ * this pre-promotion rollback never changes a runtime decision and may be
+ * followed by a fresh bootstrap from that legacy source.
+ */
+export async function rollbackCoordinationRuntimeShadow(
+  value: unknown,
+  dependencies: RuntimeShadowDependencies = {},
+): Promise<JsonObject> {
+  let request: RuntimeShadowRollbackRequest;
+  try {
+    request = decodeRollbackRequest(value);
+  } catch (error) {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_shadow_rollback_request",
+      reason: error instanceof Error ? error.message : "invalid rollback request",
+      primary_writeback_preserved: true,
+      decision_read_from_shadow: false,
+    };
+  }
+
+  const directory = join(request.runtime_root, "authority-shadow", "file-v0");
+  const store = dependencies.createFileStore?.(directory, request.goal_id) ??
+    new FileAuthorityStore(directory, request.goal_id);
+  const result = await store.archiveAuthorityDocument(
+    request.expected_provider_revision,
+    request.operation_id,
+  );
+  if (result.status === "applied" || result.status === "replayed") {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
+      ...result,
+      operation_id: request.operation_id,
+      expected_provider_revision: request.expected_provider_revision,
+      active_shadow_removed: true,
+      archive_retained: true,
+      primary_writeback_preserved: true,
+      decision_read_from_shadow: false,
+    };
+  }
+  if (result.status === "ambiguous") {
+    return {
+      schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
+      ...result,
+      operation_id: request.operation_id,
+      expected_provider_revision: request.expected_provider_revision,
+      reconciliation_required: true,
+      primary_writeback_preserved: true,
+      decision_read_from_shadow: false,
+    };
+  }
+  let reasonCode: string;
+  let reason: string;
+  if (result.status === "missing") {
+    reasonCode = "shadow_rollback_source_missing";
+    reason = "active shadow lineage is missing";
+  } else if (result.status === "conflict") {
+    reasonCode = result.conflict_kind;
+    reason = result.conflict_kind;
+  } else {
+    reasonCode = result.reason_code;
+    reason = result.reason;
+  }
+  return {
+    schema_version: COORDINATION_RUNTIME_SHADOW_ROLLBACK_RESULT_SCHEMA,
+    ...result,
+    status: "failed",
+    reason_code: reasonCode,
+    reason,
+    operation_id: request.operation_id,
+    expected_provider_revision: request.expected_provider_revision,
+    primary_writeback_preserved: true,
+    decision_read_from_shadow: false,
+  };
 }
 
 function expectedReceipt(request: RuntimeShadowRequest): JsonObject {

@@ -27,6 +27,10 @@ RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA_VERSION = (
     "loopx_coordination_runtime_shadow_bootstrap_v0"
 )
 RUNTIME_SHADOW_BOOTSTRAP_METHOD = "coordination.runtime_shadow.bootstrap"
+RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA_VERSION = (
+    "loopx_coordination_runtime_shadow_rollback_v0"
+)
+RUNTIME_SHADOW_ROLLBACK_METHOD = "coordination.runtime_shadow.rollback"
 
 
 @dataclass(frozen=True)
@@ -275,6 +279,55 @@ def bootstrap_coordination_runtime_shadow(
             "schema_version": "loopx_coordination_runtime_shadow_bootstrap_result_v0",
             "status": "failed",
             "reason_code": "shadow_bootstrap_runtime_result_invalid",
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    return dict(result)
+
+
+def rollback_coordination_runtime_shadow(
+    *,
+    goal: Mapping[str, Any] | None,
+    runtime_root: Path,
+    goal_id: str,
+    operation_id: str,
+    expected_provider_revision: str,
+    runtime_invoker: RuntimeInvoker = effect_runtime_result,
+) -> dict[str, object]:
+    """Quarantine one revision-fenced pre-promotion file shadow lineage."""
+
+    config = resolve_coordination_runtime_shadow_config(goal)
+    if not config.enabled:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_rollback_result_v0",
+            "status": "disabled",
+            "reason_code": config.reason_code,
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    request = {
+        "schema_version": RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA_VERSION,
+        "runtime_root": str(runtime_root.expanduser().resolve()),
+        "goal_id": goal_id,
+        "operation_id": operation_id,
+        "expected_provider_revision": expected_provider_revision,
+    }
+    try:
+        result = runtime_invoker(RUNTIME_SHADOW_ROLLBACK_METHOD, request)
+    except Exception as exc:
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_rollback_result_v0",
+            "status": "failed",
+            "reason_code": "shadow_rollback_runtime_unavailable",
+            "reason": str(exc),
+            "primary_writeback_preserved": True,
+            "decision_read_from_shadow": False,
+        }
+    if not isinstance(result, Mapping):
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_rollback_result_v0",
+            "status": "failed",
+            "reason_code": "shadow_rollback_runtime_result_invalid",
             "primary_writeback_preserved": True,
             "decision_read_from_shadow": False,
         }

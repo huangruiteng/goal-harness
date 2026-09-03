@@ -11,12 +11,15 @@ from loopx.control_plane.coordination.runtime_shadow import (
     RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA_VERSION,
     RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
     RUNTIME_SHADOW_METHOD,
+    RUNTIME_SHADOW_ROLLBACK_METHOD,
+    RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA_VERSION,
     bootstrap_coordination_runtime_shadow,
     build_todo_runtime_shadow_projection,
     dispatch_coordination_runtime_shadow,
     inspect_coordination_runtime_shadow,
     load_task_lease_runtime_shadow_records,
     resolve_coordination_runtime_shadow_config,
+    rollback_coordination_runtime_shadow,
 )
 
 
@@ -100,6 +103,58 @@ def test_runtime_shadow_bootstrap_is_explicit_default_off_and_typed(
     assert method == RUNTIME_SHADOW_BOOTSTRAP_METHOD
     assert params["schema_version"] == RUNTIME_SHADOW_BOOTSTRAP_REQUEST_SCHEMA_VERSION
     assert params["source_version"] == "state:1"
+
+
+def test_runtime_shadow_rollback_is_explicit_default_off_and_revision_fenced(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+    disabled = rollback_coordination_runtime_shadow(
+        goal={"id": "goal-a"},
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        operation_id="rollback:goal-a:file-revision-1",
+        expected_provider_revision="file:revision-1",
+        runtime_invoker=lambda *args: calls.append(args),
+    )
+    assert disabled["status"] == "disabled"
+    assert calls == []
+
+    goal = {
+        "id": "goal-a",
+        "coordination": {
+            "runtime_shadow": {
+                "enabled": True,
+                "schema_version": RUNTIME_SHADOW_CONFIG_SCHEMA_VERSION,
+                "provider": "file_v0",
+            }
+        },
+    }
+
+    def invoke(method: str, params: dict[str, object]) -> dict[str, object]:
+        calls.append((method, params))
+        return {
+            "schema_version": "loopx_coordination_runtime_shadow_rollback_result_v0",
+            "status": "applied",
+            "active_shadow_removed": True,
+            "archive_retained": True,
+            "decision_read_from_shadow": False,
+        }
+
+    applied = rollback_coordination_runtime_shadow(
+        goal=goal,
+        runtime_root=tmp_path,
+        goal_id="goal-a",
+        operation_id="rollback:goal-a:file-revision-1",
+        expected_provider_revision="file:revision-1",
+        runtime_invoker=invoke,
+    )
+
+    assert applied["status"] == "applied"
+    method, params = calls[-1]
+    assert method == RUNTIME_SHADOW_ROLLBACK_METHOD
+    assert params["schema_version"] == RUNTIME_SHADOW_ROLLBACK_REQUEST_SCHEMA_VERSION
+    assert params["expected_provider_revision"] == "file:revision-1"
 
 
 def test_runtime_shadow_requires_complete_explicit_file_opt_in(tmp_path: Path) -> None:

@@ -18,6 +18,7 @@ from loopx.control_plane.coordination.runtime_shadow import (
     bootstrap_coordination_runtime_shadow,
     dispatch_coordination_runtime_shadow,
     inspect_coordination_runtime_shadow,
+    rollback_coordination_runtime_shadow,
 )
 
 
@@ -245,6 +246,30 @@ def test_coordination_runtime_shadow_bootstrap_crosses_python_typescript_boundar
     assert replayed["status"] == "replayed"
     assert inspected["status"] == "matched"
     assert inspected["decision_read_from_shadow"] is False
+
+    rollback_request = {
+        "goal": goal,
+        "runtime_root": tmp_path / "state",
+        "goal_id": "shadow-bootstrap-goal",
+        "operation_id": (
+            "rollback:shadow-bootstrap-goal:"
+            f"{applied['provider_revision']}"
+        ),
+        "expected_provider_revision": str(applied["provider_revision"]),
+    }
+    rolled_back = rollback_coordination_runtime_shadow(**rollback_request)
+    rollback_replay = rollback_coordination_runtime_shadow(**rollback_request)
+    after_rollback = inspect_coordination_runtime_shadow(
+        goal=goal,
+        runtime_root=tmp_path / "state",
+        goal_id="shadow-bootstrap-goal",
+        projection=projection,
+    )
+
+    assert rolled_back["status"] == "applied"
+    assert rolled_back["archive_retained"] is True
+    assert rollback_replay["status"] == "replayed"
+    assert after_rollback["status"] == "missing"
 
     effect_runtime.effect_runtime_result("runtime.shutdown", {}, retry_safe=False)
 

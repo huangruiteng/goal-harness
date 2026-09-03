@@ -98,7 +98,7 @@ COMMAND_GROUPS: list[dict[str, object]] = [
             },
             {
                 "command": "loopx coordination-shadow --help",
-                "purpose": "Inspect or explicitly bootstrap the default-off Stage 2C file authority shadow.",
+                "purpose": "Inspect, bootstrap, or revision-fenced rollback the default-off Stage 2C file shadow.",
             },
             {"command": "loopx quota should-run", "purpose": "Decide whether the next agent turn should run."},
             {"command": "loopx history --goal-id <goal-id>", "purpose": "Read compact run history."},
@@ -415,7 +415,7 @@ def render_concise_help(program: str = "loopx") -> str:
             "  loopx todo --help              Add, claim, complete, update, or archive todos.",
             "  loopx task-lease --help        Manage a hard per-todo lease.",
             "  loopx coordination-shadow --help",
-            "                                  Inspect or bootstrap the default-off file shadow.",
+            "                                  Inspect, bootstrap, or roll back the default-off file shadow.",
             "  loopx quota should-run         Decide whether the next agent turn should run.",
             "",
             "Run the loop:",

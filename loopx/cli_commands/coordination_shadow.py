@@ -12,6 +12,7 @@ from ..control_plane.coordination.runtime_shadow import (
     inspect_coordination_runtime_shadow,
     load_task_lease_runtime_shadow_records,
     resolve_coordination_runtime_shadow_config,
+    rollback_coordination_runtime_shadow,
 )
 from ..history import load_registry
 from ..paths import resolve_runtime_root
@@ -38,16 +39,23 @@ def register_coordination_shadow_command(
     for name, help_text in (
         ("inspect", "Compare the current legacy projection with the file shadow."),
         ("bootstrap", "Import the current legacy projection into an empty file shadow."),
+        ("rollback", "Quarantine one exact pre-promotion file shadow lineage."),
     ):
         action = actions.add_parser(name, help=help_text)
         action.add_argument("--goal-id", required=True)
         action.add_argument("--project", type=Path)
         action.add_argument("--state-file", type=Path)
-        if name == "bootstrap":
+        if name in {"bootstrap", "rollback"}:
             action.add_argument(
                 "--execute",
                 action="store_true",
-                help="Commit the initial shadow transaction; otherwise preview only.",
+                help="Execute the administrative effect; otherwise preview only.",
+            )
+        if name == "rollback":
+            action.add_argument(
+                "--provider-revision",
+                required=True,
+                help="Exact file shadow revision observed by inspect.",
             )
 
 
@@ -84,6 +92,9 @@ def _render(payload: dict[str, object]) -> str:
     bootstrap = payload.get("bootstrap")
     if isinstance(bootstrap, dict):
         lines.append(f"- bootstrap: `{bootstrap.get('status')}`")
+    rollback = payload.get("rollback")
+    if isinstance(rollback, dict):
+        lines.append(f"- rollback: `{rollback.get('status')}`")
     error = payload.get("error")
     if error:
         lines.append(f"- error: `{error}`")
@@ -200,6 +211,42 @@ def handle_coordination_shadow_command(
                 and isinstance(final_inspection, dict)
                 and final_inspection.get("status") == "matched"
             )
+        if args.coordination_shadow_command == "rollback":
+            provider_revision = str(args.provider_revision).strip()
+            payload["expected_provider_revision"] = provider_revision
+            observed_revision = inspection.get("provider_revision")
+            if (
+                observed_revision is not None
+                and observed_revision != provider_revision
+            ):
+                payload["ok"] = False
+                payload["error"] = "provider revision does not match active shadow"
+                payload["error_code"] = "shadow_provider_revision_mismatch"
+            elif args.execute:
+                rollback = rollback_coordination_runtime_shadow(
+                    goal=goal,
+                    runtime_root=runtime_root,
+                    goal_id=args.goal_id,
+                    operation_id=(
+                        f"shadow-rollback:{args.goal_id}:{provider_revision}"
+                    ),
+                    expected_provider_revision=provider_revision,
+                )
+                payload["executed"] = True
+                payload["rollback"] = rollback
+                if rollback.get("status") in {"applied", "replayed"}:
+                    payload["inspection"] = inspect_coordination_runtime_shadow(
+                        goal=goal,
+                        runtime_root=runtime_root,
+                        goal_id=args.goal_id,
+                        projection=projection,
+                    )
+                final_inspection = payload["inspection"]
+                payload["ok"] = bool(
+                    rollback.get("status") in {"applied", "replayed"}
+                    and isinstance(final_inspection, dict)
+                    and final_inspection.get("status") == "missing"
+                )
     except Exception as exc:
         payload = {
             "ok": False,

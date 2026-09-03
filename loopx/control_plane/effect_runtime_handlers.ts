@@ -102,6 +102,7 @@ import {
   bootstrapCoordinationRuntimeShadow,
   commitCoordinationRuntimeShadow,
   inspectCoordinationRuntimeShadow,
+  rollbackCoordinationRuntimeShadow,
 } from "./coordination/runtime_shadow.ts";
 import {
   projectTodoPlanningInventory,
@@ -365,6 +366,7 @@ export function createEffectRuntimeHandlers(
     ["coordination.runtime_shadow.bootstrap", bootstrapCoordinationRuntimeShadow],
     ["coordination.runtime_shadow.commit", commitCoordinationRuntimeShadow],
     ["coordination.runtime_shadow.inspect", inspectCoordinationRuntimeShadow],
+    ["coordination.runtime_shadow.rollback", rollbackCoordinationRuntimeShadow],
     ["task_lease.write_scopes.overlap", evaluateTaskLeaseWriteScopesOverlap],
     ["quota.monitor_poll.commit", evaluateQuotaMonitorPollCommit],
     [
