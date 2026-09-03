@@ -473,3 +473,31 @@ test("repeated projection of identical facts is deterministic", () => {
     "peer_claimed_lane_conflict",
   ]);
 });
+
+test("a goal id outside the goal namespace is rejected", () => {
+  assert.throws(
+    () => projectSharedGoalAlignment(baseRequest({ goal_id: "Goal_X" })),
+    /goal id pattern/,
+  );
+  assert.throws(
+    () => projectSharedGoalAlignment(baseRequest({ goal_id: "goal-" })),
+    /goal id pattern/,
+  );
+});
+
+test("a non-boolean open lane replan flag is rejected", () => {
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({ open_lane_replan_obligation_required: "true" }),
+      ),
+    /open_lane_replan_obligation_required/,
+  );
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({ open_lane_replan_obligation_required: 1 }),
+      ),
+    /open_lane_replan_obligation_required/,
+  );
+});

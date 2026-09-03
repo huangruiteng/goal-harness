@@ -2,6 +2,7 @@ import type { JsonObject } from "../effect_program.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {
   optionalNonEmptyString,
+  requireBoolean,
   requireInteger,
   requireJsonObject,
   requireNonEmptyString,
@@ -49,6 +50,7 @@ const BASIS_SOURCE_VALUES = ["state_event_log", "unbound"] as const;
 
 const TODO_ID_PATTERN = /^todo_[a-z0-9_-]{3,64}$/;
 const AGENT_ID_PATTERN = /^[a-z][a-z0-9_.:@-]{0,79}$/;
+const GOAL_ID_PATTERN = /^goal-[a-z0-9][a-z0-9_.:-]{0,63}$/;
 const INTENT_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 export type RevisionBasis = (typeof REVISION_BASIS_VALUES)[number];
@@ -463,13 +465,20 @@ export function decodeSharedGoalAlignmentRequest(
     request.goal_id,
     "shared_goal_alignment.goal_id",
   );
+  if (!GOAL_ID_PATTERN.test(goalIdValue)) {
+    throw new EffectRuntimeRequestError(
+      "shared_goal_alignment.goal_id must match the goal id pattern",
+    );
+  }
   const agentIdValue = agentId(request.agent_id, "shared_goal_alignment.agent_id");
   const canonical = decodeCanonicalGoal(request.canonical_goal);
   const frontier = decodeFrontierBasis(request.frontier_basis, canonical);
   const claims = decodeClaims(request.claims, agentIdValue);
   const claimedTodoIds = new Set(claims.map((claim) => claim.todo_id));
-  const openLaneReplanObligationRequired =
-    request.open_lane_replan_obligation_required === true;
+  const openLaneReplanObligationRequired = requireBoolean(
+    request.open_lane_replan_obligation_required,
+    "shared_goal_alignment.open_lane_replan_obligation_required",
+  );
   return {
     schema_version: SHARED_GOAL_ALIGNMENT_REQUEST_SCHEMA_VERSION,
     goal_id: goalIdValue,
