@@ -701,8 +701,8 @@ export function shouldRunNow(decision) {
 export function waitPlan(decision, binding) {
   const hint = decision?.scheduler_hint || {}
   const unchanged = hint?.unchanged_poll || {}
-  const local = unchanged?.local_scheduler
-  if (!local || local === "stop") {
+  const local = hint?.cold_path_detail?.local_scheduler
+  if (!local || unchanged?.local_scheduler === "stop") {
     return {
       stop: true,
       minutes: DEFAULT_RETRY_MINUTES,
@@ -714,12 +714,23 @@ export function waitPlan(decision, binding) {
   const token = String(reset?.reset_token || "")
   const sameIdentity = Boolean(token) && token === binding.schedulerToken
   const unchangedPolls = sameIdentity ? Number(binding.unchangedPolls || 0) : 0
-  const limit = Number.isInteger(local.unchanged_poll_limit)
-    ? Number(local.unchanged_poll_limit)
+  const limit = Number.isInteger(unchanged?.limits?.local_scheduler)
+    ? Number(unchanged.limits.local_scheduler)
     : null
-  if (limit !== null && unchangedPolls >= limit) {
+  const afterLimit = String(unchanged?.after_limits?.local_scheduler || "")
+  const atLimit = (
+    limit !== null &&
+    unchangedPolls + 1 >= limit &&
+    afterLimit === "stop_tick_loop"
+  )
+  if (atLimit) {
+    const finalCheck = (
+      unchanged?.final_quota_replan_check_enabled === true &&
+      unchanged?.final_quota_replan_check_action === "rerun_quota_should_run_once"
+    )
     return {
       stop: true,
+      finalCheck,
       minutes: DEFAULT_RETRY_MINUTES,
       schedulerToken: token,
       unchangedPolls,
@@ -738,6 +749,24 @@ export function waitPlan(decision, binding) {
     schedulerToken: token,
     unchangedPolls: unchangedPolls + 1,
   }
+}
+
+function schedulerContractIdentity(decision) {
+  const hint = decision?.scheduler_hint || {}
+  return [
+    Boolean(decision?.should_run),
+    String(hint?.action || ""),
+    String(hint?.cadence_class || ""),
+    String(hint?.reset_policy?.reset_token || ""),
+    String(decision?.effective_action || ""),
+    String(decision?.selected_todo?.todo_id || ""),
+  ]
+}
+
+function sameSchedulerContract(left, right) {
+  const leftIdentity = schedulerContractIdentity(left)
+  const rightIdentity = schedulerContractIdentity(right)
+  return leftIdentity.every((value, index) => value === rightIdentity[index])
 }
 
 // The quota-gated auto-continuation loop for one extension instance.
@@ -855,66 +884,95 @@ export function createGoalLoop(options) {
       return
     }
 
-    if (isTerminalNoFollowup(decision)) {
-      // Commit through the store's compare-and-swap: if the same session
-      // activated a new goal while this write was in-flight, the commit is
-      // rejected and the new binding stays alive.
-      const committed = await store.write(key, { terminal: true, autoResume: false }, expected)
-      if (!committed) {
+    const applyDecision = async (nextDecision, allowFinalCheck = true) => {
+      if (isTerminalNoFollowup(nextDecision)) {
+        // Commit through the store's compare-and-swap: if the same session
+        // activated a new goal while this write was in-flight, the commit is
+        // rejected and the new binding stays alive.
+        const committed = await store.write(key, { terminal: true, autoResume: false }, expected)
+        if (!committed) {
+          cancelScheduled(key)
+          return
+        }
+        if (disposed || epoch !== instanceEpoch) return
         cancelScheduled(key)
+        services.notify(
+          `LoopX goal ${current.goalId} reached validated terminal no-follow-up; loop stopped.`,
+          "info",
+        )
         return
       }
-      if (disposed || epoch !== instanceEpoch) return
-      cancelScheduled(key)
-      services.notify(
-        `LoopX goal ${current.goalId} reached validated terminal no-follow-up; loop stopped.`,
-        "info",
-      )
-      return
-    }
 
-    if (shouldRunNow(decision)) {
-      cancelScheduled(key)
-      const schedulerCommit = await store.write(
+      if (shouldRunNow(nextDecision)) {
+        cancelScheduled(key)
+        const schedulerCommit = await store.write(
+          key,
+          { schedulerToken: "", unchangedPolls: 0 },
+          expected,
+        )
+        if (!schedulerCommit) {
+          cancelScheduled(key)
+          return
+        }
+        if (disposed || epoch !== instanceEpoch) return
+        const prompt = current.taskBody || current.goalId
+        const promptCommit = await store.write(key, { lastInjectedPrompt: prompt }, expected)
+        if (!promptCommit) {
+          cancelScheduled(key)
+          return
+        }
+        if (disposed || epoch !== instanceEpoch) return
+        sendMessage(prompt)
+        return
+      }
+
+      const wait = waitPlan(nextDecision, current)
+      if (wait.stop) {
+        cancelScheduled(key)
+        if (!(wait.finalCheck && allowFinalCheck)) return
+        let finalDecision
+        try {
+          finalDecision = await quotaProbe(current)
+        } catch {
+          if (disposed || epoch !== instanceEpoch) return
+          scheduleEvaluation(key, DEFAULT_RETRY_MINUTES)
+          return
+        }
+        if (disposed || epoch !== instanceEpoch) return
+        const latest = await store.read(key)
+        if (disposed || epoch !== instanceEpoch) return
+        if (
+          !latest ||
+          latest.terminal ||
+          latest.autoResume === false ||
+          latest.generation !== capturedGen ||
+          latest.goalId !== capturedGoalId
+        ) {
+          cancelScheduled(key)
+          return
+        }
+        if (sameSchedulerContract(nextDecision, finalDecision)) return
+        await applyDecision(finalDecision, false)
+        return
+      }
+
+      const waitCommit = await store.write(
         key,
-        { schedulerToken: "", unchangedPolls: 0 },
+        {
+          schedulerToken: wait.schedulerToken,
+          unchangedPolls: wait.unchangedPolls,
+        },
         expected,
       )
-      if (!schedulerCommit) {
+      if (!waitCommit) {
         cancelScheduled(key)
         return
       }
       if (disposed || epoch !== instanceEpoch) return
-      const prompt = current.taskBody || current.goalId
-      const promptCommit = await store.write(key, { lastInjectedPrompt: prompt }, expected)
-      if (!promptCommit) {
-        cancelScheduled(key)
-        return
-      }
-      if (disposed || epoch !== instanceEpoch) return
-      sendMessage(prompt)
-      return
+      scheduleEvaluation(key, wait.minutes)
     }
 
-    const wait = waitPlan(decision, current)
-    if (wait.stop) {
-      cancelScheduled(key)
-      return
-    }
-    const waitCommit = await store.write(
-      key,
-      {
-        schedulerToken: wait.schedulerToken,
-        unchangedPolls: wait.unchangedPolls,
-      },
-      expected,
-    )
-    if (!waitCommit) {
-      cancelScheduled(key)
-      return
-    }
-    if (disposed || epoch !== instanceEpoch) return
-    scheduleEvaluation(key, wait.minutes)
+    await applyDecision(decision)
     } catch {
       // Fail closed with bounded retry: any unhandled error (store write
       // failure, etc.) must not break the evaluation chain permanently.

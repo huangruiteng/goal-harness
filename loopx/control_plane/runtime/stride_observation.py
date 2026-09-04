@@ -18,11 +18,34 @@ from typing import Any
 STRIDE_OBSERVATION_SCHEMA_VERSION = "hierarchical_stride_observation_v0"
 STRIDE_EVALUATION_SCHEMA_VERSION = "hierarchical_stride_evaluation_v0"
 EVIDENCE_FRESH_WINDOW_HOURS = 6
-AUTHORITY_CHANGE_MARKERS = ("replan", "vision", "gate")
+AUTHORITY_CHANGE_CLASSIFICATIONS = frozenset(
+    {
+        # These are the complete values emitted by the current controlled
+        # authority/replan writers. Unknown classifications stay no-change.
+        "bounded_replan_progress",
+        "operator_gate_approved",
+        "operator_gate_rejected",
+        "operator_gate_deferred",
+    }
+)
 
 
 def _compact_text(value: Any, *, limit: int = 180) -> str:
     return " ".join(str(value or "").strip().split())[:limit]
+
+
+def _has_authority_change_marker(value: Any) -> bool:
+    """Return true only for an exact value from the controlled writer set.
+
+    ``classification`` remains a descriptive, caller-supplied field in M1.
+    It therefore cannot be parsed as semantic evidence: token, substring,
+    negation, and co-occurrence heuristics all admit false authority changes.
+    Until run receipts carry a typed authority-change field, this closed set is
+    the fail-closed compatibility boundary.
+    """
+
+    classification = _compact_text(value, limit=240).casefold()
+    return classification in AUTHORITY_CHANGE_CLASSIFICATIONS
 
 
 def read_run_index(runtime_root: Path, goal_id: str) -> list[dict[str, Any]]:
@@ -84,9 +107,7 @@ def build_stride_observation(
 
     authority_change_index: int | None = None
     for index, run in enumerate(agent_runs):
-        classification = _compact_text(run.get("classification"), limit=240)
-        lowered = classification.lower()
-        if any(marker in lowered for marker in AUTHORITY_CHANGE_MARKERS):
+        if _has_authority_change_marker(run.get("classification")):
             authority_change_index = index
     bounded_slices_since_change = (
         len(agent_runs) - authority_change_index - 1

@@ -9,6 +9,7 @@ import pytest
 
 from scripts.codex_app_apply_rrule import (
     _now_ms,
+    _parse_args,
     _scheduler_hint_turn_instance_id,
     _update_sqlite,
     _update_toml,
@@ -102,7 +103,7 @@ class _FakeCompleted:
         self.stderr = stderr
 
 
-def test_scheduler_hint_uses_stable_child_turn_identity(
+def test_scheduler_hint_replays_parent_turn_without_synthetic_capabilities(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -131,12 +132,41 @@ def test_scheduler_hint_uses_stable_child_turn_identity(
         == 0
     )
 
-    child_turn = calls[0][calls[0].index("--turn-instance-id") + 1]
-    assert child_turn == _scheduler_hint_turn_instance_id(parent_turn)
-    assert child_turn == _scheduler_hint_turn_instance_id(parent_turn)
-    assert child_turn != parent_turn
-    assert len(child_turn) <= 128
-    assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", child_turn)
+    replay_turn = calls[0][calls[0].index("--turn-instance-id") + 1]
+    assert replay_turn == _scheduler_hint_turn_instance_id(parent_turn)
+    assert replay_turn == parent_turn
+    assert len(replay_turn) <= 128
+    assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", replay_turn)
+    assert "--available-capability" not in calls[0]
+
+
+def test_default_app_stores_follow_codex_home_and_capabilities_are_explicit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    defaults = _parse_args([])
+    assert defaults.automations_root == codex_home / "automations"
+    assert defaults.db_path == codex_home / "sqlite/codex-dev.db"
+    assert defaults.capability == []
+
+    explicit = _parse_args(["--capability", "network"])
+    assert explicit.capability == ["network"]
+
+
+def test_heartbeat_guide_matches_parent_turn_replay_contract() -> None:
+    guide = (
+        Path(__file__).parents[1] / "docs/heartbeat-automation-prompt.md"
+    ).read_text(encoding="utf-8")
+
+    assert "reuses the provided parent Turn" in guide
+    assert "same-Turn replay preserves the committed" in guide
+    assert "bound Todo, observed capabilities, and settlement identity" in guide
+    assert "explicitly conflicting identity still fails closed" in guide
+    assert "derives a stable child receipt id" not in guide
+    assert "does not reuse the already-settled heartbeat receipt" not in guide
 
 
 def test_should_run_failure_reports_structured_stdout(
