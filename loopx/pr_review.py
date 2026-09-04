@@ -508,6 +508,7 @@ def _area_counts(files: list[dict[str, Any]]) -> dict[str, int]:
 
 AREA_LABELS = {
     "public_entry_or_policy": "README/政策入口",
+    "agent_instruction_surface": "Agent 指令/Skill",
     "public_docs": "公开文档",
     "test_or_example": "smoke/示例",
     "app_or_ui_surface": "前端/展示面",
@@ -564,7 +565,14 @@ def _metadata_risk_hint(pr: dict[str, Any], files: list[dict[str, Any]], checks:
     additions = int(pr.get("additions") or 0)
     deletions = int(pr.get("deletions") or 0)
     has_runtime = any(
-        str(item.get("area")) in {"product_runtime", "app_or_ui_surface", "ci_or_release", "build_or_config"}
+        str(item.get("area"))
+        in {
+            "product_runtime",
+            "app_or_ui_surface",
+            "ci_or_release",
+            "build_or_config",
+            "agent_instruction_surface",
+        }
         for item in files
     )
     if checks.get("failures") or changed >= 12 or additions + deletions >= 800:
@@ -623,6 +631,16 @@ def _main_regression_analysis(pr: dict[str, Any], files: list[dict[str, Any]]) -
         )
         bug_risks.append("A prominent docs change can authorize behavior that the runtime or repository policy does not actually support.")
         verification_focus.append("Compare the public entry text with current CLI help, AGENTS policy, and any first-screen review gate.")
+    if "agent_instruction_surface" in area_names:
+        potential_regressions.append(
+            "Automatically loaded agent instructions can change ordinary-user behavior before any runtime feature gate is evaluated."
+        )
+        bug_risks.append(
+            "A skill or prompt can make an opt-in capability effectively default-on for agents even when runtime configuration remains false."
+        )
+        verification_focus.append(
+            "Trace installation and automatic-loading paths, then compare pre-change, disabled, and enabled instruction surfaces for user-experience parity."
+        )
     if areas and area_names <= {"public_docs", "test_or_example"}:
         potential_regressions.append(
             "Runtime regression risk is low, but public guidance or smoke expectations can drift from shipped behavior."
@@ -646,7 +664,16 @@ def _main_regression_analysis(pr: dict[str, Any], files: list[dict[str, Any]]) -
         bug_risks.append("No status-check rollup was available, so validation coverage must be inferred from local evidence.")
         verification_focus.append("Run at least one focused local validation command before approving.")
 
-    has_sensitive_area = bool(area_names & {"product_runtime", "app_or_ui_surface", "ci_or_release", "build_or_config"})
+    has_sensitive_area = bool(
+        area_names
+        & {
+            "product_runtime",
+            "app_or_ui_surface",
+            "ci_or_release",
+            "build_or_config",
+            "agent_instruction_surface",
+        }
+    )
     if checks.get("failures") or changed >= 12 or churn >= 800 or (state == "MERGED" and has_sensitive_area):
         level = "high"
     elif has_sensitive_area or checks.get("pending") or not checks.get("total"):
@@ -749,6 +776,8 @@ def _review_depth(files: list[dict[str, Any]]) -> str:
     areas = {str(item.get("area") or "") for item in files}
     if "product_runtime" in areas:
         return "runtime_behavior_review"
+    if "agent_instruction_surface" in areas:
+        return "agent_behavior_review"
     if "app_or_ui_surface" in areas or "public_entry_or_policy" in areas:
         return "presentation_or_policy_review"
     if areas <= {"public_docs", "test_or_example"}:

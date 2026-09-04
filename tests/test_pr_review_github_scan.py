@@ -136,6 +136,32 @@ def test_agent_instruction_files_are_behavior_bearing_surfaces() -> None:
     assert pr_review_module._file_area("AGENTS.md") == "agent_instruction_surface"
 
 
+def test_agent_instruction_surface_gets_behavior_risk_and_review_depth() -> None:
+    files = [
+        {
+            "path": "skills/loopx-project/SKILL.md",
+            "area": "agent_instruction_surface",
+            "additions": 20,
+            "deletions": 2,
+        }
+    ]
+
+    hint = pr_review_module._metadata_risk_hint({}, files, {"total": 1})
+    analysis = pr_review_module._main_regression_analysis({}, files)
+
+    assert hint["level"] == "medium"
+    assert pr_review_module._review_depth(files) == "agent_behavior_review"
+    assert analysis["risk_level"] == "medium"
+    assert any(
+        "Automatically loaded agent instructions" in item
+        for item in analysis["potential_regressions"]
+    )
+    assert any(
+        "pre-change, disabled, and enabled instruction surfaces" in item
+        for item in analysis["verification_focus"]
+    )
+
+
 def _queue_pr(
     number: int,
     *,

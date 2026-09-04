@@ -156,17 +156,21 @@ def build_review_execution_contract() -> dict[str, Any]:
                 "fields": [
                     "shipped_behavior",
                     "active_call_sites",
+                    "instruction_install_or_load_path",
+                    "target_audience_and_scope",
                     "caller_path_or_none",
                     "coverage_only_declared",
                     "scope_fit_verdict",
                 ],
                 "rule": (
                     "For every added or moved production module, adapter, CLI "
-                    "command, or control-plane contract, verify a shipped "
-                    "behavior and at least one active production call site in "
-                    "the reviewed branch. Test-only coverage of an unused "
-                    "module is not a shipped behavior; name the gap and treat "
-                    "it as blocking unless an explicit, owner-accepted "
+                    "command, control-plane contract, or agent instruction surface, "
+                    "verify a shipped behavior and at least one active production "
+                    "call site or automatic installation/loading path in the reviewed "
+                    "branch. For instructions, verify the audience and activation "
+                    "scope reached by that path. Test-only coverage of an unused "
+                    "module or uninstalled instruction is not a shipped behavior; "
+                    "name the gap and treat it as blocking unless an explicit, owner-accepted "
                     "coverage-only boundary is recorded."
                 ),
             },
@@ -419,7 +423,7 @@ def build_review_execution_contract() -> dict[str, Any]:
             },
             {
                 "evidence_id": "behavior_change_disclosure",
-                "required_when": "runtime_behavior_change",
+                "required_when": "behavior_bearing_change",
                 "fields": [
                     "previous_default",
                     "new_default",
@@ -427,10 +431,11 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "disclosure_surface",
                 ],
                 "rule": (
-                    "Default behavior changes must be disclosed through renamed "
-                    "smokes, docs, or release notes. Flag silent behavior changes "
-                    "that alter existing automation without naming the old and new "
-                    "default."
+                    "Default behavior changes in runtime or automatically loaded "
+                    "instruction surfaces must be disclosed through renamed smokes, "
+                    "docs, or release notes. Flag silent changes that alter existing "
+                    "automation or ordinary agent behavior without naming the old and "
+                    "new default."
                 ),
             },
             {

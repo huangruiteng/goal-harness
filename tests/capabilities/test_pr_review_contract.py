@@ -64,9 +64,14 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert "negative_fields" in requirements["walkthroughs"]
     assert "regression_test" in requirements["failure_analysis"]["fields"]
     assert requirements["scope_fit"]["required_when"] == "behavior_bearing_change"
+    assert "instruction_install_or_load_path" in requirements["scope_fit"]["fields"]
+    assert "target_audience_and_scope" in requirements["scope_fit"]["fields"]
     assert requirements["typed_state_rule"]["required_when"] == "code_change"
     assert "substring denylists" in requirements["typed_state_rule"]["rule"]
     assert "domain-neutral" in requirements["domain_neutrality"]["rule"]
+    assert requirements["behavior_change_disclosure"]["required_when"] == (
+        "behavior_bearing_change"
+    )
     assert (
         "silent behavior changes" in requirements["behavior_change_disclosure"]["rule"]
     )
