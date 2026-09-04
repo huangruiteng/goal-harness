@@ -82,7 +82,7 @@ def _summary(record: Mapping[str, Any]) -> dict[str, Any]:
 
 def _register_declared_extension_providers(
     registry: CapabilityRegistry,
-    record: Mapping[str, Any],
+    record: Mapping[str, object],
 ) -> None:
     """Declare extension-delivered implementations named by a builtin entry.
 

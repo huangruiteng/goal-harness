@@ -61,6 +61,7 @@ const packedStaticEntries = new Set([
   'package/lib/types/index.d.ts',
   'package/lib/types/init-command.d.ts',
   'package/lib/types/managed-runtime.d.ts',
+  'package/lib/types/observer.d.ts',
   'package/package.json',
 ])
 const packedHashedEntries = [
