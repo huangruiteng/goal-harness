@@ -22,6 +22,7 @@ from .chat_agent import CodexChatAgentError
 from .chat_attachments import normalize_chat_image_attachments
 from .chat_actions import ChatActionService, ProtectedActionGate
 from .chat_action_store import ACTION_KINDS, ActionConflictError, ChatActionStore
+from . import chat_configuration_api as config_api
 from .chat_runtime import ChatRuntimeController, TERMINAL_TURN_STATES
 from .chat_ssh_source_api import SSH_SOURCE_ENSURE_PATH, SshSourceRequestMixin
 from .chat_store import ChatSessionStore
@@ -34,7 +35,6 @@ from .chat_lark_api import (
     build_goal_repository_contexts as build_goal_repository_contexts,
     build_lark_goal_topic_runtime_snapshot,
 )
-from . import chat_machine_configuration_api as machine_config_api
 from .extensions.lark import LARK_EXTENSION_ID, LARK_GOAL_CHANNEL_PERMISSION
 from .extensions.lark.app_setup import LarkAppSetupManager
 from .extensions.lark.cli_resolution import (
@@ -431,7 +431,7 @@ class ChatRequestHandler(
     AttachedSessionRequestMixin,
     SshSourceRequestMixin,
     LarkChatRequestMixin,
-    machine_config_api.MachineConfigurationRequestMixin,
+    config_api.ChatConfigurationRequestMixin,
     BaseHTTPRequestHandler,
 ):
     server: ChatHTTPServer
@@ -1321,7 +1321,7 @@ class ChatRequestHandler(
             CHAT_LARK_CHATS_PATH: self._lark_chats,
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connections,
             CHAT_GOAL_CHANNEL_TARGETS_PATH: self._goal_channel_targets,
-            machine_config_api.CHAT_MACHINE_CONFIGURATION_PATH: self._machine_configuration_inspect,
+            **self._configuration_get_routes(),
             DEFAULT_CHAT_STATUS_PATH: self._status,
             SSH_HOST_CATALOG_PATH: self._ssh_hosts,
         }
@@ -1361,9 +1361,7 @@ class ChatRequestHandler(
             CHAT_GOAL_CHANNEL_CONFIGURE_PATH: self._goal_channel_configure,
             CHAT_LARK_APP_SETUPS_PATH: self._lark_setup_start,
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connect,
-            machine_config_api.CHAT_MACHINE_CONFIGURATION_PREVIEW_PATH: lambda: self._machine_configuration_update(execute=False),
-            machine_config_api.CHAT_MACHINE_CONFIGURATION_APPLY_PATH: lambda: self._machine_configuration_update(execute=True),
-            machine_config_api.CHAT_MACHINE_CONFIGURATION_ROLLBACK_PATH: self._machine_configuration_rollback,
+            **self._configuration_post_routes(),
             SSH_SOURCE_ENSURE_PATH: self._ssh_source_ensure,
         }
         if path in post_dispatch:

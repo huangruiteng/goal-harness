@@ -8,6 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ...control_plane.todos.contract import normalize_todo_claimed_by
+from ..configuration_ui import resolve_capability_configuration
 from ..machine_configuration.contract import (
     MACHINE_CONFIGURATION_SCHEMA,
     MachineConfigurationNamespace,
@@ -265,34 +266,29 @@ def resolve_goal_periodic_report_subscription(
 
     goal_id = _text(goal.get("id"), "goal.id")
     existing = _goal_periodic_report(goal)
-    if existing is not None:
-        return _normalized_goal_subscription(
-            goal_id=goal_id,
-            config=existing,
-            source="goal_override",
-            source_revision=None,
-        )
-    if machine_defaults is None:
-        return _normalized_goal_subscription(
-            goal_id=goal_id,
-            config={"enabled": False, "timezone": "UTC"},
-            source="not_configured",
-            source_revision=None,
-        )
-    resolved_default = _periodic_report_defaults(machine_defaults)
-    if resolved_default is None:
-        return _normalized_goal_subscription(
-            goal_id=goal_id,
-            config={"enabled": False, "timezone": "UTC"},
-            source="not_configured",
-            source_revision=None,
-        )
-    periodic_defaults, source_revision = resolved_default
+    resolved_default = (
+        _periodic_report_defaults(machine_defaults)
+        if machine_defaults is not None
+        else None
+    )
+    periodic_defaults, source_revision = (
+        resolved_default if resolved_default is not None else (None, None)
+    )
+    resolution = resolve_capability_configuration(
+        "periodic_report",
+        goal_override=existing,
+        machine_default=periodic_defaults,
+        capability_default={"enabled": False, "timezone": "UTC"},
+    )
+    source = str(resolution["source"])
+    configuration = resolution["configuration"]
+    if not isinstance(configuration, Mapping):  # pragma: no cover - kernel contract
+        raise TypeError("resolved periodic report configuration must be an object")
     return _normalized_goal_subscription(
         goal_id=goal_id,
-        config=periodic_defaults,
-        source="machine_default",
-        source_revision=source_revision,
+        config=configuration,
+        source=("not_configured" if source == "capability_default" else source),
+        source_revision=(source_revision if source == "machine_default" else None),
     )
 
 

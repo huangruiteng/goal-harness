@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ...status import active_state_event_projection_fields
+from ..status.active_state_projection import active_state_event_projection_fields
 from .active_state_editing import TODO_SECTION_HEADINGS
 from .active_state_todo_parser import parse_active_state_todos
 from .list_projection import compact_explicit_limit_todo_summary

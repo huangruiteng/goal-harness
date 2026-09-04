@@ -4,6 +4,8 @@ import shlex
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .capabilities.configuration_ui import build_capability_configuration_catalog
+
 
 def _configure_command(
     goal_id: str,
@@ -58,9 +60,7 @@ def build_goal_configuration_catalog(
     )
     change_quality = (
         feature_summary.get("change_quality_qualification")
-        if isinstance(
-            feature_summary.get("change_quality_qualification"), Mapping
-        )
+        if isinstance(feature_summary.get("change_quality_qualification"), Mapping)
         else {}
     )
     inspect_command = _configure_command(goal_id)
@@ -89,7 +89,7 @@ def build_goal_configuration_catalog(
         "generic",
     )
 
-    return {
+    catalog = {
         "schema_version": "loopx_goal_configuration_catalog_v0",
         "scope": "default_off_optional_capabilities",
         "all_settings_help_command": "loopx configure-goal --help",
@@ -669,3 +669,36 @@ def build_goal_configuration_catalog(
             },
         ],
     }
+    periodic_report = settings.get("periodic_report")
+    catalog["features"].append(
+        {
+            "feature_id": "periodic_report",
+            "display_name": "Periodic reports",
+            "availability": "supported_explicit_override",
+            "default": {"enabled": False, "timezone": "UTC"},
+            **(
+                {"current": dict(periodic_report)}
+                if isinstance(periodic_report, Mapping)
+                else {}
+            ),
+            "consider_when": (
+                "This Goal needs a fixed report route that must not follow the live "
+                "machine default."
+            ),
+            "effect": (
+                "Stores one complete Goal-specific periodic-report override; no fields "
+                "are inherited while the override is present."
+            ),
+            "does_not": [
+                "merge individual Goal fields with machine defaults",
+                "replace credentials or provider bindings with public configuration",
+            ],
+            "commands": {"verify": [inspect_command]},
+            "documentation": {},
+        }
+    )
+    catalog["capability_catalog"] = build_capability_configuration_catalog(
+        goal_features=catalog["features"],
+        explore_harness_profiles=explore_harness_profiles,
+    )
+    return catalog

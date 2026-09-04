@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from .capabilities.configuration_ui import build_capability_configuration_catalog
 from .capabilities.machine_configuration.builtins import (
     build_builtin_machine_configuration_registry,
 )
@@ -58,8 +59,12 @@ def _public_payload(
         "machine_configuration",
     }
     projected = {key: value for key, value in payload.items() if key in allowed}
+    namespace_catalog = registry.public_catalog()
     projected["available_namespaces"] = list(registry.namespace_ids)
-    projected["namespace_catalog"] = registry.public_catalog()
+    projected["namespace_catalog"] = namespace_catalog
+    projected["capability_catalog"] = build_capability_configuration_catalog(
+        machine_namespaces=namespace_catalog["namespaces"]
+    )
     return projected
 
 

@@ -160,6 +160,31 @@ def test_inspection_lists_registered_namespaces_without_local_refs(
             }
         ],
     }
+    capability_catalog = response["capability_catalog"]
+    assert capability_catalog["schema_version"] == "capability_configuration_catalog_v0"
+    capability = capability_catalog["capabilities"][0]
+    assert capability["capability_id"] == "periodic_report"
+    assert capability["available_scopes"] == ["machine"]
+    assert capability["machine_namespace"] == "periodic_report"
+    assert capability["default"] == response["namespace_catalog"]["namespaces"][0][
+        "configuration_template"
+    ]
+    assert capability["configuration_editor"]["supported_scopes"] == [
+        "machine",
+        "goal",
+    ]
+    assert [field["key"] for field in capability["configuration_editor"]["fields"]] == [
+        "enabled",
+        "profile_preset",
+        "route_ref",
+        "timezone",
+    ]
+    effective = capability["effective_configuration"]
+    assert effective["source"] == "capability_default"
+    assert effective["configuration"] == capability["default"]
+    assert effective["goal_override_present"] is False
+    assert effective["machine_default_present"] is False
+    assert str(effective["effective_revision"]).startswith("sha256:")
     assert response["machine_configuration"] is None
     encoded = json.dumps(response)
     assert str(tmp_path) not in encoded
