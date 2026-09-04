@@ -131,34 +131,46 @@ never opens a browser or configures a model provider.
 
 ## Shadow observer (default off)
 
-`src/observer.ts` is the `dsh-session-events` provider for the LoopX
+`src/observer.ts`, exported as `dsh-loopx-plugin/observer`, is the
+`dsh-session-events` provider for the LoopX
 [Reliability Diagnostics](../../loopx/capabilities/reliability_diagnostics/README.md)
 capability: an L1 shadow observer that consumes read-only harness events and
 appends compact, public-safe envelopes plus an observer stats record to
 `<loopx-runtime-root>/reliability_diagnostics/<goal-id>.ndjson`. It is a
-separate module from the Driver with no shared send path: it never calls
-`agent.send`, touches the inbox, invokes the LoopX CLI, schedules, retries,
-stops, or resumes anything. Every hook body and every flush is isolated, so an
-observer failure is counted into the receipt instead of reaching DSH.
+separate Cordis row and bundle from the Driver, with no Driver or Agent
+injection and no shared send path. It never calls `agent.send`, touches the
+inbox, invokes the LoopX CLI, schedules, retries, stops, or resumes anything.
+Every hook body and every flush is isolated, so an observer failure is counted
+into the receipt instead of reaching DSH. This is module and hook isolation,
+not an OS-process-isolation claim.
 
-It is off unless one exact goal is declared before DSH starts:
+It is off unless one exact goal, DSH session, and complete run identity are
+declared before DSH starts:
 
 ```bash
 export LOOPX_DSH_SHADOW_OBSERVER_GOAL_ID=<goal-id>
+export LOOPX_DSH_SHADOW_OBSERVER_SESSION_ID=<session-id>
+export LOOPX_DSH_SHADOW_OBSERVER_RUN_IDENTITY_JSON='{"worker_id":"<worker>","model_id":"<model>","task_id":"<task>","environment_id":"<environment>","tools_id":"<tools>","budget_id":"<budget>","adapter_revision":"<adapter-revision>","observer_revision":"<observer-revision>"}'
 # optional: LOOPX_DSH_SHADOW_OBSERVER_LEDGER_DIR, LOOPX_DSH_SHADOW_OBSERVER_BUFFER_BOUND (default 256)
 loopx reliability-diagnostics receipt --goal-id <goal-id> --format json
 loopx reliability-diagnostics status  --goal-id <goal-id> --format json
 ```
 
-With the variable unset the Driver row registers no observer hook and writes no
-file. When set, the observer consumes `agent/session-start`, `agent/status`,
-`agent/error`, `agent/pre-step` (pass-through), `session/event`, and
-`session/disposed`; it skips `assistant/chunk` and records tool names, turn and
-step numbers, end reasons, and ids only, never arguments, outputs, prompts, or
-paths. Sequence gaps, bounded-buffer drops, declared clock uncertainty, and
-the always-empty outbound endpoint list make the run's admissibility as passive
-evidence auditable from the receipt. In this slice every session in the DSH
-process is attributed to the single declared goal.
+Unless all required variables are valid, the independent observer row
+registers no hook and writes no file. When enabled, it consumes only
+`session/created`, `session/event`, and `session/disposed`; it skips
+`assistant/chunk` and records tool names, turn and step numbers, typed end
+reasons, and ids only, never arguments, outputs, prompts, or paths. Events for
+any session other than the exact configured session are rejected as
+`identity_invalid`. The stats record pins worker/model/task/environment/tools/
+budget plus adapter and observer revisions, declares source coverage, and
+proves count conservation. Sequence gaps, bounded-buffer drops, flush attempts,
+declared clock uncertainty, and the empty outbound and influence fields make
+the run's admissibility auditable from the receipt.
+
+This is an experimental adapter implementing the RFC's P0 prototype
+components. It does not establish the RFC's P0 exit: C0 fidelity, a qualifying
+C1 run, and measured observer overhead remain separate evidence gates.
 
 ## GoalBar authority and privacy boundary
 
