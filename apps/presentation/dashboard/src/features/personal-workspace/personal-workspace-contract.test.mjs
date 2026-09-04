@@ -13,6 +13,8 @@ const timeline = source("./channel-timeline.tsx");
 const runRow = source("./cards/run-row.tsx");
 const larkSettings = source("./lark-settings-page.tsx");
 const machineSettings = source("./machine-configuration-settings.tsx");
+const goalCapabilitySettings = source("./goal-capability-settings.tsx");
+const capabilityFields = source("./capability-configuration-fields.tsx");
 const i18n = source("./i18n.tsx");
 const statusSourceSwitcher = source("./status-source-switcher.tsx");
 const workspaceSettings = source("./workspace-settings-page.tsx");
@@ -100,6 +102,20 @@ assert.match(tasks, /t\("tasks\.viewResult"\)/, "Tasks expose a direct result en
 assert.match(tasks, /t\("tasks\.pendingAndRunning"\)/, "Tasks do not imply that every uncompleted Todo already has an active Run");
 assert.match(tasks, /t\("tasks\.chatRecent"\)/, "Tasks surface the latest Goal conversation without forcing a tab switch");
 assert.match(tasks, /t\("tasks\.chatUnchangedDescription"\)/, "Tasks explain that ordinary Chat does not silently mutate Todo state");
+assert.doesNotMatch(tasks, /personal-task-capability-callout|tab: "capabilities"/, "Goal Tasks does not spend a full-width row on capability settings");
+assert.match(header, /personal-goal-tools-trigger/, "Goal details and capability settings share one compact header entry");
+assert.match(header, /onOpenGoalDetail[\s\S]*onOpenGoalCapabilities/, "The unified Goal entry preserves both existing details and capability settings");
+assert.match(page, /onOpenGoalCapabilities=.*tab: "capabilities"/, "The unified Goal entry opens the selected Goal capability settings directly");
+assert.match(goalCapabilitySettings, /fetchGoalConfiguration\(goalId\)/, "Goal capability settings inspect the selected Goal through the path-free API");
+assert.match(goalCapabilitySettings, /personal-capability-editor-status/, "Goal capability settings distinguish editable contracts from read-only capabilities");
+assert.match(goalCapabilitySettings, /previewGoalConfiguration\(goalId/, "Goal capability changes start with a typed preview");
+assert.match(goalCapabilitySettings, /preview\.plan_revision/, "Goal capability apply is locked to the reviewed plan revision");
+assert.match(goalCapabilitySettings, /applyGoalConfiguration\(/, "Goal capability settings apply only through the revision-locked API");
+assert.match(machineSettings, /<CapabilityConfigurationFields/, "Machine settings use the shared typed capability field renderer");
+assert.match(goalCapabilitySettings, /<CapabilityConfigurationFields/, "Goal settings use the shared typed capability field renderer");
+for (const inputKind of ["boolean", "number", "select", "string_list"]) {
+  assert.match(capabilityFields, new RegExp(`input_kind === "${inputKind}"`), `Shared capability fields render ${inputKind}`);
+}
 assert.match(tasks, /t\("tasks\.convertToTask"\)/, "Tasks offer an explicit preview-first bridge from a reply to task management");
 assert.match(page, /function todoTextFromMessage[\s\S]*标题[\s\S]*内容/, "Todo parsing preserves structured title and content fields");
 assert.match(page, /t\("home\.taskCount"/, "Home cards expose durable activity when a new Goal has Todos but no run timestamp yet");
@@ -329,6 +345,12 @@ assert.match(machineSettings, /configuredNamespaces\.has\(selectedNamespace\)/, 
 assert.doesNotMatch(machineSettings, /password|secret|credential/i, "Machine settings do not collect credentials");
 assert.match(chatData, /machineConfigurationSchema/, "Machine configuration uses a typed frontend contract");
 assert.match(chatData, /machineConfigurationCatalogSchema/, "The frontend validates the generic namespace catalog");
+assert.match(chatData, /capabilityConfigurationCatalogSchema/, "Machine and Goal configuration share one capability catalog contract");
+assert.match(chatData, /capability_catalog: capabilityConfigurationCatalogSchema/, "Machine inspection preserves the shared catalog for the settings UI");
+assert.match(chatData, /goalConfigurationInspectionSchema/, "Goal settings validate the shared capability catalog inspection");
+assert.match(chatData, /fetchGoalConfiguration\(goalId: string\)/, "Goal settings use a dedicated path-free configuration inspection endpoint");
+assert.match(goalCapabilitySettings, /restoreInheritance/, "Goal overrides expose an explicit path back to live machine defaults");
+assert.match(goalCapabilitySettings, /preview\.action === "delete" \? null : draft/, "Applying a delete preview clears the complete Goal override");
 assert.match(chatData, /namespace_configuration:\s*namespaceConfiguration/, "The browser patches one owned namespace without round-tripping private namespaces");
 assert.match(chatData, /operation:\s*"remove"/, "The browser uses an explicit typed removal operation");
 assert.match(chatData, /z\.enum\(\["create", "update", "delete", "unchanged"\]\)/, "Machine previews recognize deletion as a first-class action");

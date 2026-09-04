@@ -1710,6 +1710,7 @@ export function PersonalWorkspacePage({
             agents={agents}
             managerChatOpen={managerChatOpen}
             mobileNavigationOpen={mobileSidebarOpen}
+            onOpenGoalCapabilities={selectedGoal ? () => setSelection({ goalId: selectedGoal.goalId, kind: "settings", tab: "capabilities" }) : undefined}
             onOpenGoalDetail={selectedGoal ? () => setSelection({ item: selectedGoal, kind: "goal" }) : undefined}
             onRefresh={callbacks.onRefresh ? () => void refreshWorkspace() : undefined}
             onOpenNavigation={() => setMobileSidebarOpen(true)}

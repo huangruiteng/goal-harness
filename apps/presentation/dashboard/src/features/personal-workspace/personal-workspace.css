@@ -142,7 +142,7 @@
 .personal-owner-row { margin-top: 2px; color: var(--pw-muted); }
 
 .personal-channel { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; min-width: 0; }
-.personal-channel-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; padding: 12px 26px; border-bottom: 1px solid var(--pw-line); background: rgb(251 250 247 / 92%); backdrop-filter: blur(12px); overflow: clip; }
+.personal-channel-header { position: relative; z-index: 8; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; padding: 12px 26px; border-bottom: 1px solid var(--pw-line); background: rgb(251 250 247 / 92%); backdrop-filter: blur(12px); }
 .personal-goal-tabs { display: flex; align-items: center; align-self: center; gap: 2px; margin-left: auto; padding: 3px; border-radius: 10px; background: #f2f1ed; }
 .personal-goal-tabs button { min-height: 30px; padding: 0 13px; border: 0; border-radius: 8px; background: transparent; color: var(--pw-muted); cursor: pointer; font-size: 12.5px; font-weight: 600; }
 .personal-goal-tabs button:hover { color: var(--pw-text); }
@@ -151,6 +151,19 @@
 .personal-channel-title h1 { margin: 0; font-size: 17.5px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
 .personal-channel-title p { margin: 3px 0 0; color: var(--pw-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .personal-channel-actions { display: flex; align-items: center; gap: 9px; }
+.personal-goal-tools { position: relative; flex: 0 0 auto; }
+.personal-goal-tools-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 0 11px; border: 1px solid #b8c9f5; border-radius: 10px; background: var(--pw-blue-soft); color: var(--pw-blue-ink); cursor: pointer; font: inherit; font-size: 12px; font-weight: 720; white-space: nowrap; }
+.personal-goal-tools-trigger:hover, .personal-goal-tools-trigger[aria-expanded="true"] { border-color: #7f9fe9; background: #e5edff; color: #1948b5; }
+.personal-goal-tools-trigger:focus-visible { outline: 3px solid rgb(47 102 233 / 28%); outline-offset: 2px; }
+.personal-goal-tools-trigger > svg:last-child { transition: transform 160ms ease; }
+.personal-goal-tools-trigger[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
+.personal-goal-tools-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; display: grid; gap: 4px; width: min(300px, calc(100vw - 28px)); padding: 6px; border: 1px solid var(--pw-line-strong); border-radius: 12px; background: #fff; box-shadow: 0 16px 44px rgb(30 40 64 / 16%); }
+.personal-goal-tools-menu > button { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 9px; width: 100%; min-height: 52px; padding: 7px 9px; border: 0; border-radius: 9px; background: transparent; color: var(--pw-text); cursor: pointer; text-align: left; }
+.personal-goal-tools-menu > button:hover, .personal-goal-tools-menu > button:focus-visible { background: var(--pw-blue-soft); outline: none; }
+.personal-goal-tools-menu > button > svg { justify-self: center; color: var(--pw-blue); }
+.personal-goal-tools-menu > button > span { display: grid; gap: 2px; min-width: 0; }
+.personal-goal-tools-menu strong { font-size: 12.5px; }
+.personal-goal-tools-menu small { color: var(--pw-muted); font-size: 10.5px; line-height: 1.35; }
 .personal-mobile-menu { display: none; }
 .personal-agent-select { display: flex; align-items: center; gap: 7px; height: 38px; padding: 0 12px; border: 1px solid var(--pw-line-strong); border-radius: 10px; background: #fff; font-weight: 600; font-size: 13px; }
 .personal-agent-select:hover { border-color: var(--pw-faint); }
@@ -559,6 +572,62 @@
 
 /* Kanban layout for the goal Tasks tab: columns are task states. */
 .personal-task-lane-filter { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 50px; padding: 8px 12px; border: 1px solid var(--pw-line); border-radius: 10px; background: #fff; }
+.personal-capability-settings { display: grid; gap: 16px; max-width: 1050px; }
+.personal-capability-scope-note { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border: 1px solid #b8c9f5; border-radius: 12px; background: var(--pw-blue-soft); color: var(--pw-blue-ink); }
+.personal-capability-scope-note svg { flex: 0 0 auto; margin-top: 2px; }
+.personal-capability-scope-note p { margin: 0; font-size: 12px; line-height: 1.55; }
+.personal-capability-scope-note strong { display: block; color: var(--pw-text); }
+.personal-capability-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; }
+.personal-capability-list { display: grid; align-content: start; gap: 6px; }
+.personal-capability-list button { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 58px; padding: 9px 11px; border: 1px solid var(--pw-line); border-radius: 10px; background: #fff; color: var(--pw-text); cursor: pointer; text-align: left; }
+.personal-capability-list button:hover { border-color: #b8c9f5; }
+.personal-capability-list button[aria-current="page"] { border-color: #8cacf0; background: #f4f7ff; box-shadow: 0 0 0 3px rgb(47 102 233 / 8%); }
+.personal-capability-list button > span { display: grid; gap: 2px; min-width: 0; }
+.personal-capability-list strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.personal-capability-list small { overflow: hidden; color: var(--pw-faint); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.personal-capability-list em { flex: 0 0 auto; padding: 3px 6px; border-radius: 999px; background: var(--pw-blue-soft); color: var(--pw-blue-ink); font-size: 9px; font-style: normal; font-weight: 750; }
+.personal-capability-detail { overflow: hidden; border: 1px solid var(--pw-line); border-radius: 14px; background: #fff; }
+.personal-capability-detail > header { display: flex; align-items: flex-start; gap: 12px; padding: 18px; border-bottom: 1px solid var(--pw-line); }
+.personal-capability-detail > header small { color: var(--pw-blue); font-size: 10px; font-weight: 700; letter-spacing: .04em; }
+.personal-capability-detail h2 { margin: 2px 0 4px; font-size: 17px; }
+.personal-capability-detail p { margin: 0; color: var(--pw-muted); font-size: 12px; line-height: 1.55; }
+.personal-capability-value-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px 18px; }
+.personal-capability-value-grid section { min-width: 0; }
+.personal-capability-value-grid strong, .personal-capability-field-summary > strong { font-size: 11px; }
+.personal-capability-value-grid pre { overflow: auto; min-height: 72px; max-height: 220px; margin: 7px 0 0; padding: 11px; border: 1px solid var(--pw-line); border-radius: 9px; background: #faf9f6; color: var(--pw-text); font-size: 10.5px; line-height: 1.5; }
+.personal-capability-editor-status { display: flex; align-items: flex-start; gap: 10px; margin: 0 18px 16px; padding: 12px; border-radius: 10px; }
+.personal-capability-effective-source { display: flex; align-items: center; gap: 8px; margin: 0 18px 16px; padding: 9px 11px; border: 1px solid var(--pw-line); border-radius: 9px; background: #faf9f6; color: var(--pw-green); }
+.personal-capability-effective-source span { display: flex; gap: 6px; color: var(--pw-muted); font-size: 11px; }
+.personal-capability-effective-source strong { color: var(--pw-text); }
+.personal-capability-editor-status svg { flex: 0 0 auto; margin-top: 1px; }
+.personal-capability-editor-status strong { font-size: 12px; }
+.personal-capability-editor-status p { margin-top: 3px; }
+.personal-capability-editor-status.is-preview { background: var(--pw-blue-soft); color: var(--pw-blue-ink); }
+.personal-capability-editor-status.is-read-only { background: #fff5e8; color: #9a5a10; }
+.personal-capability-field-summary { padding: 0 18px 18px; }
+.personal-capability-field-summary .personal-capability-fields { margin-top: 8px; }
+.personal-capability-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; border: 0; }
+.personal-capability-fields label { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.personal-capability-fields label > span { font-size: 12px; font-weight: 650; }
+.personal-capability-fields label > small { color: var(--pw-muted); font-size: 10.5px; line-height: 1.45; }
+.personal-capability-fields input:not([type="checkbox"]), .personal-capability-fields select, .personal-capability-fields textarea { width: 100%; min-width: 0; min-height: 42px; padding: 8px 11px; border: 1px solid var(--pw-line-strong); border-radius: 9px; background: #fff; color: var(--pw-text); font: inherit; font-size: 13px; }
+.personal-capability-fields .is-boolean { grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-height: 44px; }
+.personal-capability-fields .is-boolean input { width: 42px; height: 24px; margin: 0; accent-color: var(--pw-blue); }
+.personal-capability-fields .is-boolean small { grid-column: 1 / -1; }
+.personal-capability-fields:disabled { opacity: .62; }
+.personal-capability-preview { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; margin: 0 18px 16px; padding: 12px; border: 1px solid #9fb9f4; border-radius: 10px; background: #f4f7ff; }
+.personal-capability-preview strong { font-size: 12px; }
+.personal-capability-preview span { color: var(--pw-blue-ink); font-size: 11px; font-weight: 700; }
+.personal-capability-preview small { grid-column: 1 / -1; color: var(--pw-muted); font-size: 10.5px; }
+.personal-capability-actions { display: flex; justify-content: flex-end; gap: 9px; padding: 14px 18px; border-top: 1px solid var(--pw-line); background: #faf9f6; }
+.personal-capability-actions button { min-height: 44px; padding: 0 14px; border: 1px solid var(--pw-line-strong); border-radius: 9px; background: #fff; color: var(--pw-text); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.personal-capability-actions button.is-primary { border-color: var(--pw-blue); background: var(--pw-blue); color: #fff; }
+.personal-capability-actions button:disabled { cursor: not-allowed; opacity: .5; }
+.personal-capability-empty, .personal-capability-error { display: flex; align-items: center; gap: 9px; max-width: 720px; min-height: 56px; margin: 0; padding: 14px; border: 1px solid var(--pw-line); border-radius: 11px; background: #fff; color: var(--pw-muted); font-size: 12px; }
+.personal-capability-error { border-color: #efc1ba; color: var(--pw-red); }
+.personal-capability-error span { display: grid; gap: 2px; }
+.personal-capability-error small { color: var(--pw-muted); }
+.personal-capability-error button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: auto; padding: 0 12px; border: 1px solid currentColor; border-radius: 9px; background: transparent; color: inherit; cursor: pointer; }
 .personal-task-lane-filter > div { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--pw-muted); }
 .personal-task-lane-filter > div > span { display: grid; gap: 1px; }
 .personal-task-lane-filter strong { color: var(--pw-text); font-size: 12px; }
@@ -929,6 +998,9 @@
   .personal-agent-select { max-width: 132px; min-width: 0; min-height: 40px; }
   .personal-agent-select select { max-width: 90px; text-overflow: ellipsis; }
   .personal-channel-actions > .personal-icon-button { display: none; }
+  .personal-goal-tools-trigger { width: 40px; height: 40px; padding: 0; }
+  .personal-goal-tools-trigger span, .personal-goal-tools-trigger > svg:last-child { display: none; }
+  .personal-goal-tools-menu { position: fixed; top: 60px; right: 14px; }
   .personal-goal-tabs { grid-column: 1 / -1; order: 4; margin-left: 0; overflow-x: auto; align-self: auto; }
   .personal-channel-actions .personal-live-indicator { display: none; }
   .personal-channel-scroll, .personal-composer-wrap { padding-left: 14px; padding-right: 14px; }
@@ -946,6 +1018,7 @@
   .personal-task-chat-receipt { grid-template-columns: 32px minmax(0, 1fr); padding: 11px; }
   .personal-task-lane-filter { align-items: stretch; flex-direction: column; gap: 8px; }
   .personal-task-lane-filter label, .personal-task-lane-filter select { width: 100%; max-width: none; }
+  .personal-capability-layout, .personal-capability-value-grid, .personal-capability-fields { grid-template-columns: 1fr; }
   .personal-task-chat-icon { width: 32px; height: 32px; }
   .personal-task-chat-receipt footer { grid-column: 1 / -1; justify-content: flex-end; }
   .personal-channel-composer > span { min-width: 0; font-size: 0; padding: 0; justify-content: center; }

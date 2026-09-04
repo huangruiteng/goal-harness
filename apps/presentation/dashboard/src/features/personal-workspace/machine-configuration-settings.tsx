@@ -17,6 +17,7 @@ import {
   type MachineConfigurationTransaction,
 } from "../../data/chat";
 import { useWorkspaceI18n } from "./i18n";
+import { CapabilityConfigurationFields } from "./capability-configuration-fields";
 
 type PeriodicReportDraft = {
   enabled: boolean;
@@ -90,9 +91,6 @@ function shortRevision(value: string | undefined) {
 export function MachineConfigurationSettings() {
   const { t } = useWorkspaceI18n();
   const enabledId = useId();
-  const profileId = useId();
-  const routeId = useId();
-  const timezoneId = useId();
   const [inspection, setInspection] = useState<MachineConfigurationInspection | null>(null);
   const [draft, setDraft] = useState<PeriodicReportDraft>(emptyPeriodicReportDraft);
   const [selectedNamespace, setSelectedNamespace] = useState(periodicReportNamespace);
@@ -154,6 +152,9 @@ export function MachineConfigurationSettings() {
   const namespaceDescriptors = inspection?.namespace_catalog.namespaces ?? [];
   const selectedDescriptor = namespaceDescriptors.find(
     (item) => item.namespace === selectedNamespace,
+  );
+  const selectedCapability = inspection?.capability_catalog.capabilities.find(
+    (item) => item.machine_namespace === selectedNamespace,
   );
   const parsedJsonDraft = useMemo(() => parseNamespaceDraft(jsonDraft), [jsonDraft]);
   const usesJsonEditor = selectedNamespace !== periodicReportNamespace || editorMode === "json";
@@ -481,38 +482,28 @@ export function MachineConfigurationSettings() {
               </div>
             </div>
 
-            <fieldset disabled={!draft.enabled || Boolean(busy)}>
-              <label htmlFor={profileId}>
-                <span>{t("machine.profilePreset")}</span>
-                <input
-                  id={profileId}
-                  onChange={(event) => updateDraft({ profilePreset: event.target.value })}
-                  placeholder="weekly-progress"
-                  value={draft.profilePreset}
-                />
-                <small>{t("machine.profilePresetHelp")}</small>
-              </label>
-              <label htmlFor={routeId}>
-                <span>{t("machine.routeRef")}</span>
-                <input
-                  id={routeId}
-                  onChange={(event) => updateDraft({ routeRef: event.target.value })}
-                  placeholder="loopx-manager"
-                  value={draft.routeRef}
-                />
-                <small>{t("machine.routeRefHelp")}</small>
-              </label>
-              <label htmlFor={timezoneId}>
-                <span>{t("machine.timezone")}</span>
-                <input
-                  id={timezoneId}
-                  onChange={(event) => updateDraft({ timezone: event.target.value })}
-                  placeholder="Asia/Shanghai"
-                  value={draft.timezone}
-                />
-                <small>{t("machine.timezoneHelp")}</small>
-              </label>
-            </fieldset>
+            {selectedCapability ? (
+              <CapabilityConfigurationFields
+                copy={{
+                  profile_preset: { description: t("machine.profilePresetHelp"), label: t("machine.profilePreset") },
+                  route_ref: { description: t("machine.routeRefHelp"), label: t("machine.routeRef") },
+                  timezone: { description: t("machine.timezoneHelp"), label: t("machine.timezone") },
+                }}
+                disabled={!draft.enabled || Boolean(busy)}
+                editor={selectedCapability.configuration_editor}
+                omitKeys={["enabled"]}
+                onChange={(key, value) => {
+                  if (key === "profile_preset" && typeof value === "string") updateDraft({ profilePreset: value });
+                  if (key === "route_ref" && typeof value === "string") updateDraft({ routeRef: value });
+                  if (key === "timezone" && typeof value === "string") updateDraft({ timezone: value });
+                }}
+                value={{
+                  profile_preset: draft.profilePreset,
+                  route_ref: draft.routeRef,
+                  timezone: draft.timezone,
+                }}
+              />
+            ) : null}
 
             {!draftValid ? <p className="personal-machine-validation" role="alert">{t("machine.requiredFields")}</p> : null}
             {workflow}
