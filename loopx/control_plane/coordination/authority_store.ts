@@ -78,6 +78,7 @@ export const AUTHORITY_STORE_PROVIDER_PROFILES = {
       "service_role_provisioning_and_audit_policy",
       "restore_incarnation_rotation",
       "failover_pool_exhaustion_and_cancellation",
+      "retention_partitioning_and_measured_capacity",
       "shadow_parity_and_authority_source_promotion",
     ],
   },

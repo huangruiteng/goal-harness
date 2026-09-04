@@ -4,6 +4,7 @@ import test from "node:test";
 import { Pool, type PoolClient } from "pg";
 
 import {
+  DEFAULT_POSTGRESQL_MAX_COMMIT_BYTES,
   installPostgreSqlAuthorityStoreSchema,
   POSTGRESQL_AUTHORITY_STORE_SCHEMA_SQL,
   PostgreSqlAuthorityStore,
@@ -359,6 +360,52 @@ test("PostgreSQL schema declares fail-closed tenant RLS on every scoped table", 
   assert.match(
     POSTGRESQL_AUTHORITY_STORE_SCHEMA_SQL,
     /current_setting\('loopx\.tenant_id', TRUE\)/,
+  );
+});
+
+test("PostgreSQL provider rejects an oversized commit before opening a connection", async () => {
+  let connectionAttempts = 0;
+  const disconnectedDatabase: PostgreSqlAuthorityDatabase = {
+    connect: async () => {
+      connectionAttempts += 1;
+      throw new Error("capacity admission must run before connect");
+    },
+  };
+  const store = new PostgreSqlAuthorityStore(disconnectedDatabase, {
+    tenant_id: "tenant-capacity",
+    goal_id: "goal-capacity",
+    max_commit_bytes: 256,
+  });
+  const oversized = commit(null, "operation-oversized", 1, 1);
+  oversized.next_projection.payload = "x".repeat(1024);
+
+  const result = await store.commitAuthority(oversized);
+  assert.equal(result.status, "failed");
+  if (result.status === "failed") {
+    assert.equal(result.reason_code, "store_capacity_exhausted");
+    assert.match(result.reason, /configured maximum is 256/);
+  }
+  assert.equal(connectionAttempts, 0);
+});
+
+test("PostgreSQL provider validates its commit capacity envelope", () => {
+  const disconnectedDatabase: PostgreSqlAuthorityDatabase = {
+    connect: async () => {
+      throw new Error("not reached");
+    },
+  };
+  const defaultStore = new PostgreSqlAuthorityStore(disconnectedDatabase, {
+    tenant_id: "tenant-capacity",
+    goal_id: "goal-capacity",
+  });
+  assert.equal(defaultStore.maxCommitBytes, DEFAULT_POSTGRESQL_MAX_COMMIT_BYTES);
+  assert.throws(
+    () => new PostgreSqlAuthorityStore(disconnectedDatabase, {
+      tenant_id: "tenant-capacity",
+      goal_id: "goal-capacity",
+      max_commit_bytes: 0,
+    }),
+    /max commit bytes must be a positive safe integer/,
   );
 });
 
