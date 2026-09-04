@@ -43,7 +43,10 @@ from .incremental import (
     build_periodic_report_publication_candidate,
     write_periodic_report_publication_candidate,
 )
-from .machine_defaults import resolve_goal_periodic_report_subscription
+from .machine_defaults import (
+    build_periodic_report_delivery_authority,
+    resolve_goal_periodic_report_subscription,
+)
 from .machine_store import read_periodic_report_machine_defaults
 from .workspace import (
     build_periodic_report_workspace_projection,
@@ -89,11 +92,16 @@ def _intent_key(intent: Mapping[str, Any]) -> str:
     ).hexdigest()[:24]
 
 
-def _periodic_report_delivery_binding_ref(generation_id: object) -> str:
+def _periodic_report_delivery_binding_ref(
+    generation_id: object, authority: Mapping[str, Any]
+) -> str:
     digest_suffix = str(generation_id).split("_")[-1][:16]
+    authority_suffix = str(authority.get("effective_revision") or "").split(":")[-1][
+        :12
+    ]
     # Todo capability binding refs require the namespaced value to start with
     # a letter. Generation digests are hexadecimal and may start with a digit.
-    return f"periodic-report:g{digest_suffix}"
+    return f"periodic-report:g{digest_suffix}-a{authority_suffix}"
 
 
 def _attempt_dir(
@@ -1071,6 +1079,7 @@ def consume_pending_periodic_report_intent(
         document=document, artifacts=[markdown, html]
     )
     generation = bundle["generation_receipt"]
+    delivery_authority = build_periodic_report_delivery_authority(subscription)
     result: dict[str, Any] = {
         "ok": True,
         "schema_version": CONSUMPTION_RECEIPT_SCHEMA,
@@ -1093,12 +1102,7 @@ def consume_pending_periodic_report_intent(
             "external_writes_performed": False,
         },
         "external_delivery_authorized": True,
-        "delivery_authority": {
-            "kind": "enabled_periodic_report_subscription",
-            "source": subscription["source"],
-            "effective_revision": subscription["effective_revision"],
-            "route_ref": subscription["route_ref"],
-        },
+        "delivery_authority": delivery_authority,
         "external_writes_performed": False,
     }
     if not execute:
@@ -1170,7 +1174,7 @@ def consume_pending_periodic_report_intent(
         action_kind="deliver_periodic_report_goal_channel",
         task_domain="provider_delivery",
         capability_binding_ref=_periodic_report_delivery_binding_ref(
-            generation["generation_id"]
+            generation["generation_id"], delivery_authority
         ),
         required_write_scopes=["goal_channel/lark/messages"],
         required_capabilities=["network", "lark_bot_message_write"],

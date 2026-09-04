@@ -164,7 +164,9 @@ no-follow-up projection and returns one TypeScript-validated governed command.
 That command may render provider-free local HTML and Markdown, run content
 checks, persist the normalized generation bundle, and create one runnable
 delivery successor bound to the frozen generation digest and current effective
-subscription. Exact replay does not rerender or duplicate the Todo. Normal
+subscription. Exact replay does not rerender or duplicate the Todo. The delivery
+request carries that subscription's Goal, source, effective revision, and route;
+the Lark provider revalidates it immediately before each message write. Normal
 Todo/quota selection can therefore continue into Miaoda publication, Lark
 document creation, and Goal Channel delivery without another per-report owner
 gate. Disabling the subscription revokes pending automatic delivery; route,
@@ -209,8 +211,11 @@ identity. The intent instead supplies exactly two ordered HTTPS entries—the
 hosted report and the Lark document. Execution sends two independent messages,
 verifies the bound Bot and chat before send, then requires exact
 interactive-card, chat, and Bot-identity readback for both. Missing or drifted
-identity, either missing message, or a partial readback fails closed without a
-user/default-Bot fallback.
+identity or subscription authority, either missing message, or a partial readback
+fails closed without a user/default-Bot fallback. Retries first scan the complete
+Goal Channel history from the frozen generation time and reuse only an exact card,
+chat, and Bot-sender match. Incomplete history fails closed instead of risking a
+duplicate; the stable provider idempotency key closes the concurrent-send race.
 
 This is a built-in capability, not an extension: callers need the trigger,
 idempotency, retry, and receipt contract even when no provider is installed.

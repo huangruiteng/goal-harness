@@ -69,8 +69,12 @@ contract and provider identity on the extension side.
 The shipped execution path is `loopx periodic-report deliver-goal-channel`.
 Its delivery intent must contain exactly two ordered HTTPS announcements: the
 hosted report entry, then the Lark document entry. They are sent as two
-independently idempotent messages and each one must pass exact readback. The
-command does not accept a chat, profile, App identity, or sender override. Instead,
+independently idempotent messages and each one must pass exact readback. Before
+each write, the provider scans the complete Goal Channel history from the frozen
+generation time and reuses an exact card, chat, and Bot-sender match. An incomplete
+history read fails closed; the provider's stable one-hour idempotency key covers
+the remaining concurrent-send race. The command does not accept a chat, profile,
+App identity, or sender override. Instead,
 the Lark extension resolves the current Goal's local-private Goal Channel
 binding and requires `mode=project_bot`, Bot sender identity, a non-default
 profile, exact Bot App id and display name, and an enabled Lark channel.
@@ -86,7 +90,11 @@ The governed pending-intent consumer persists the normalized generation bundle
 and writes one runnable, agent-owned delivery successor. The current effective
 `periodic_report` subscription is re-read before consumption; `enabled: true`
 with an explicit `route_ref` is the standing authority for this automatic
-stage-boundary delivery. Disabling the subscription suppresses the action.
+stage-boundary delivery. Its Goal, source, effective revision, and route are
+frozen into `periodic_report_delivery_authority_v0` and must still match before
+each external message write. Disabling the subscription or changing its effective
+revision/route suppresses the queued action even when a separate explicit Goal
+Channel binding still exists.
 The successor remains bound to the frozen generation digest, current Goal,
 required provider capabilities, configured Goal Channel, project Bot identity,
 and exact readback. This makes the external action visible to quota without a

@@ -326,7 +326,12 @@ def periodic_report_lark_sink_adapter(
             "readback_verified": verified,
             "goal_channel_verified": verified,
             "sender_identity_verified": verified,
-            "external_writes_performed": True,
+            "semantic_dedupe_status": str(
+                sent.get("semantic_dedupe_status") or "provider_write_performed"
+            ),
+            "external_writes_performed": (
+                sent.get("external_write_performed") is not False
+            ),
         }
 
     adapter = PeriodicReportSinkAdapter(

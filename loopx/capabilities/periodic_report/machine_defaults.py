@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
@@ -22,10 +23,12 @@ MACHINE_DEFAULTS_SCHEMA = MACHINE_CONFIGURATION_SCHEMA
 PERIODIC_REPORT_MACHINE_DEFAULTS_SCHEMA = "periodic_report_machine_defaults_v0"
 GOAL_SUBSCRIPTION_SCHEMA = "periodic_report_goal_subscription_v0"
 DELIVERY_IDENTITY_SCHEMA = "periodic_report_goal_delivery_identity_v0"
+DELIVERY_AUTHORITY_SCHEMA = "periodic_report_delivery_authority_v0"
 DELIVERY_PLAN_REQUEST_SCHEMA = "periodic_report_goal_delivery_plan_request_v0"
 DELIVERY_PLAN_SCHEMA = "periodic_report_goal_delivery_plan_v0"
 
 _INHERITANCE_MODE = "live_machine_default"
+_REVISION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
@@ -240,9 +243,7 @@ def _normalized_goal_subscription(
     profile_preset = str(config.get("profile_preset") or "").strip() or None
     route_ref = str(config.get("route_ref") or "").strip() or None
     if enabled:
-        profile_preset = _text(
-            profile_preset, "goal periodic_report.profile_preset"
-        )
+        profile_preset = _text(profile_preset, "goal periodic_report.profile_preset")
         route_ref = _text(route_ref, "goal periodic_report.route_ref")
     subscription: dict[str, Any] = {
         "schema_version": GOAL_SUBSCRIPTION_SCHEMA,
@@ -289,6 +290,70 @@ def resolve_goal_periodic_report_subscription(
         config=configuration,
         source=("not_configured" if source == "capability_default" else source),
         source_revision=(source_revision if source == "machine_default" else None),
+    )
+
+
+def normalize_periodic_report_delivery_authority(raw: object) -> dict[str, Any]:
+    """Validate the frozen standing authority carried to an external delivery."""
+
+    authority = _mapping(raw, "delivery_authority")
+    _reject_unknown(
+        authority,
+        allowed={
+            "schema_version",
+            "kind",
+            "goal_id",
+            "source",
+            "effective_revision",
+            "route_ref",
+        },
+        label="delivery_authority",
+    )
+    if authority.get("schema_version") != DELIVERY_AUTHORITY_SCHEMA:
+        raise ValueError(f"delivery_authority must use {DELIVERY_AUTHORITY_SCHEMA}")
+    if authority.get("kind") != "enabled_periodic_report_subscription":
+        raise ValueError("delivery_authority.kind is invalid")
+    source = _text(authority.get("source"), "delivery_authority.source")
+    if source not in {"goal_override", "machine_default"}:
+        raise ValueError("delivery_authority.source is invalid")
+    effective_revision = _text(
+        authority.get("effective_revision"),
+        "delivery_authority.effective_revision",
+    )
+    if not _REVISION_RE.fullmatch(effective_revision):
+        raise ValueError("delivery_authority.effective_revision is invalid")
+    return {
+        "schema_version": DELIVERY_AUTHORITY_SCHEMA,
+        "kind": "enabled_periodic_report_subscription",
+        "goal_id": _text(authority.get("goal_id"), "delivery_authority.goal_id"),
+        "source": source,
+        "effective_revision": effective_revision,
+        "route_ref": _text(
+            authority.get("route_ref"),
+            "delivery_authority.route_ref",
+        ),
+    }
+
+
+def build_periodic_report_delivery_authority(
+    subscription: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Freeze one enabled effective subscription for later effect-time revalidation."""
+
+    if (
+        subscription.get("schema_version") != GOAL_SUBSCRIPTION_SCHEMA
+        or subscription.get("enabled") is not True
+    ):
+        raise ValueError("periodic report delivery requires an enabled subscription")
+    return normalize_periodic_report_delivery_authority(
+        {
+            "schema_version": DELIVERY_AUTHORITY_SCHEMA,
+            "kind": "enabled_periodic_report_subscription",
+            "goal_id": subscription.get("goal_id"),
+            "source": subscription.get("source"),
+            "effective_revision": subscription.get("effective_revision"),
+            "route_ref": subscription.get("route_ref"),
+        }
     )
 
 
@@ -419,6 +484,7 @@ def build_goal_periodic_report_delivery_plan(
 
 
 __all__ = [
+    "DELIVERY_AUTHORITY_SCHEMA",
     "DELIVERY_IDENTITY_SCHEMA",
     "DELIVERY_PLAN_REQUEST_SCHEMA",
     "DELIVERY_PLAN_SCHEMA",
@@ -426,9 +492,11 @@ __all__ = [
     "MACHINE_DEFAULTS_SCHEMA",
     "PERIODIC_REPORT_MACHINE_DEFAULTS_SCHEMA",
     "build_goal_periodic_report_delivery_identity",
+    "build_periodic_report_delivery_authority",
     "build_goal_periodic_report_delivery_plan",
     "loopx_machine_defaults_revision",
     "normalize_loopx_machine_defaults",
+    "normalize_periodic_report_delivery_authority",
     "normalize_periodic_report_machine_defaults",
     "periodic_report_machine_configuration_namespace",
     "resolve_goal_periodic_report_subscription",

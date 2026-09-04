@@ -39,9 +39,10 @@ def test_delivery_binding_ref_is_valid_when_generation_digest_starts_with_digit(
 ):
     assert (
         _periodic_report_delivery_binding_ref(
-            "report_generation_53429b77872cbe1130a3e2f3"
+            "report_generation_53429b77872cbe1130a3e2f3",
+            {"effective_revision": "sha256:" + "a" * 64},
         )
-        == "periodic-report:g53429b77872cbe11"
+        == "periodic-report:g53429b77872cbe11-aaaaaaaaaaaaa"
     )
 
 
@@ -391,7 +392,9 @@ def test_consumption_queues_authorized_delivery_and_exact_replay_does_not_duplic
     assert first["status"] == "delivery_ready"
     assert first["external_delivery_authorized"] is True
     assert first["delivery_authority"] == {
+        "schema_version": "periodic_report_delivery_authority_v0",
         "kind": "enabled_periodic_report_subscription",
+        "goal_id": GOAL_ID,
         "source": "goal_override",
         "effective_revision": first["delivery_authority"]["effective_revision"],
         "route_ref": "report-route",

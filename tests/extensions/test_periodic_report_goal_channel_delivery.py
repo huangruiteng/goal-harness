@@ -18,6 +18,11 @@ from loopx.extensions.lark.goal_channel_contracts import (
 from loopx.extensions.lark.goal_channel_targets import add_lark_goal_channel_target
 from loopx.capabilities.periodic_report.machine_store import (
     configure_periodic_report_machine_defaults,
+    read_periodic_report_machine_defaults,
+)
+from loopx.capabilities.periodic_report.machine_defaults import (
+    build_periodic_report_delivery_authority,
+    resolve_goal_periodic_report_subscription,
 )
 from loopx.extensions.lark.periodic_report_delivery import (
     DELIVERY_INTENT_SCHEMA,
@@ -65,10 +70,38 @@ def _generation_bundle() -> dict[str, Any]:
     )
 
 
-def _request() -> dict[str, Any]:
+def _goal(*, route_ref: str = "loopx-concierge") -> dict[str, Any]:
+    return {
+        "id": GOAL_ID,
+        "control_plane": {
+            "periodic_report": {
+                "enabled": True,
+                "profile_preset": "weekly-progress",
+                "route_ref": route_ref,
+                "timezone": "Asia/Shanghai",
+            }
+        },
+    }
+
+
+def _authority(
+    *,
+    goal: dict[str, Any] | None = None,
+    machine_defaults: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return build_periodic_report_delivery_authority(
+        resolve_goal_periodic_report_subscription(
+            goal or _goal(),
+            machine_defaults,
+        )
+    )
+
+
+def _request(*, delivery_authority: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "schema_version": GOAL_CHANNEL_DELIVERY_REQUEST_SCHEMA,
         "generation_bundle": _generation_bundle(),
+        "delivery_authority": delivery_authority or _authority(),
         "delivery_intent": {
             "schema_version": DELIVERY_INTENT_SCHEMA,
             "kind": "goal_channel",
@@ -89,6 +122,19 @@ def _request() -> dict[str, Any]:
             ],
         },
     }
+
+
+def _write_registry(
+    registry_path: Path,
+    *,
+    goal: dict[str, Any] | None = None,
+    runtime_root: Path | None = None,
+) -> None:
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {"goals": [goal or _goal()]}
+    if runtime_root is not None:
+        payload["common_runtime_root"] = str(runtime_root)
+    registry_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def _extension_activation() -> dict[str, Any]:
@@ -137,8 +183,7 @@ def test_goal_channel_readback_advances_publication_cursor_only_on_success(
     tmp_path: Path,
 ) -> None:
     registry_path = tmp_path / ".loopx" / "registry.json"
-    registry_path.parent.mkdir()
-    registry_path.write_text("{}", encoding="utf-8")
+    _write_registry(registry_path)
     runtime_root = tmp_path / "runtime"
     _write_binding(registry_path)
     request = _request()
@@ -183,7 +228,23 @@ def _write_binding(
     *,
     mode: str = "project_bot",
     app_id: str = APP_ID,
+    target_ref: str = "loopx-concierge",
 ) -> None:
+    add_lark_goal_channel_target(
+        target_path=registry_path.parent.parent
+        / "runtime"
+        / "goal-channel-targets.json",
+        target_name=target_ref,
+        chat_id=CHAT_ID,
+        chat_name="LoopX Concierge",
+        identity_mode=mode,
+        sender_profile="project-reporter",
+        sender_identity="bot",
+        bot_app_id=app_id,
+        bot_display_name="Project Reporter",
+        cli_bin="lark-cli",
+        execute=True,
+    )
     write_goal_channel_binding(
         registry_path.parent / "goal-channel.json",
         {
@@ -193,6 +254,7 @@ def _write_binding(
                     "goal_id": GOAL_ID,
                     "provider": "lark",
                     "enabled": True,
+                    "target_ref": target_ref,
                     "channel": {"chat_id": CHAT_ID},
                     "identity": {
                         "mode": mode,
@@ -208,11 +270,13 @@ def _write_binding(
     )
 
 
-def _write_machine_default_route(runtime_root: Path) -> None:
+def _write_machine_default_route(
+    runtime_root: Path, *, route_ref: str = "loopx-concierge"
+) -> None:
     target_path = runtime_root / "goal-channel-targets.json"
     add_lark_goal_channel_target(
         target_path=target_path,
-        target_name="loopx-concierge",
+        target_name=route_ref,
         chat_id=CHAT_ID,
         chat_name="LoopX Concierge",
         identity_mode="project_bot",
@@ -231,7 +295,7 @@ def _write_machine_default_route(runtime_root: Path) -> None:
                 "enabled": True,
                 "inheritance": "live_machine_default",
                 "profile_preset": "weekly-progress",
-                "route_ref": "loopx-concierge",
+                "route_ref": route_ref,
                 "timezone": "Asia/Shanghai",
             }
         },
@@ -251,13 +315,18 @@ def _write_machine_default_route(runtime_root: Path) -> None:
 def test_unbound_goal_uses_live_machine_default_shared_target(tmp_path: Path) -> None:
     registry_path = tmp_path / ".loopx" / "registry.json"
     runtime_root = tmp_path / "runtime"
-    registry_path.parent.mkdir()
-    registry_path.write_text(json.dumps({"goals": [{"id": GOAL_ID}]}), encoding="utf-8")
+    _write_registry(registry_path, goal={"id": GOAL_ID})
     _write_machine_default_route(runtime_root)
+    request = _request(
+        delivery_authority=_authority(
+            goal={"id": GOAL_ID},
+            machine_defaults=read_periodic_report_machine_defaults(runtime_root),
+        )
+    )
     calls: list[list[str]] = []
 
     result = deliver_periodic_report_to_goal_channel(
-        _request(),
+        request,
         registry_path=registry_path,
         runtime_root=runtime_root,
         goal_id=GOAL_ID,
@@ -271,21 +340,14 @@ def test_unbound_goal_uses_live_machine_default_shared_target(tmp_path: Path) ->
     assert not (registry_path.parent / "goal-channel.json").exists()
 
 
-def test_explicit_goal_channel_binding_wins_over_machine_default_route(
+def test_explicit_goal_channel_binding_uses_the_authorized_route(
     tmp_path: Path,
 ) -> None:
     registry_path = tmp_path / ".loopx" / "registry.json"
     runtime_root = tmp_path / "runtime"
-    registry_path.parent.mkdir()
-    registry_path.write_text(json.dumps({"goals": [{"id": GOAL_ID}]}), encoding="utf-8")
+    _write_registry(registry_path)
     _write_binding(registry_path)
     _write_machine_default_route(runtime_root)
-    targets_path = runtime_root / "goal-channel-targets.json"
-    targets = json.loads(targets_path.read_text(encoding="utf-8"))
-    targets["targets"]["loopx-concierge"]["identity"]["sender_profile"] = (
-        "must-not-be-used"
-    )
-    targets_path.write_text(json.dumps(targets), encoding="utf-8")
     calls: list[list[str]] = []
 
     result = deliver_periodic_report_to_goal_channel(
@@ -299,7 +361,29 @@ def test_explicit_goal_channel_binding_wins_over_machine_default_route(
     )
 
     assert result["status"] == "satisfied"
-    assert all("must-not-be-used" not in args for args in calls)
+    assert all("project-reporter" in args for args in calls)
+
+
+def test_explicit_goal_channel_binding_cannot_redirect_authorized_route(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    _write_registry(registry_path)
+    _write_binding(registry_path, target_ref="different-route")
+    calls: list[list[str]] = []
+
+    with pytest.raises(ValueError, match="does not match the authorized route"):
+        deliver_periodic_report_to_goal_channel(
+            _request(),
+            registry_path=registry_path,
+            runtime_root=tmp_path / "runtime",
+            goal_id=GOAL_ID,
+            extension_activation=_extension_activation(),
+            execute=True,
+            runner=_runner(calls),
+        )
+
+    assert calls == []
 
 
 def _runner(calls: list[list[str]], *, normalized_readback: bool = False):
@@ -330,6 +414,22 @@ def _runner(calls: list[list[str]], *, normalized_readback: bool = False):
             payload = {
                 "ok": True,
                 "data": {"bots": [{"app_id": APP_ID}]},
+            }
+        elif "+chat-messages-list" in args:
+            payload = {
+                "ok": True,
+                "messages": [
+                    {
+                        "message_id": message_id,
+                        "chat_id": CHAT_ID,
+                        "sender": {"sender_type": "app", "id": APP_ID},
+                        "msg_type": "interactive",
+                        "deleted": False,
+                        "body": {"content": json.dumps(card)},
+                    }
+                    for message_id, card in sent_cards.items()
+                ],
+                "has_more": False,
             }
         elif "+messages-send" in args:
             message_id = f"{MESSAGE_ID}_{len(sent_cards) + 1}"
@@ -386,8 +486,7 @@ def test_goal_channel_delivery_accepts_normalized_cli_card_readback(
 ) -> None:
     registry_path = tmp_path / ".loopx" / "registry.json"
     runtime_root = tmp_path / "runtime"
-    registry_path.parent.mkdir()
-    registry_path.write_text("{}", encoding="utf-8")
+    _write_registry(registry_path)
     _write_binding(registry_path)
     calls: list[list[str]] = []
 
@@ -411,8 +510,7 @@ def test_goal_channel_delivery_uses_only_the_bound_project_bot(
     tmp_path: Path,
 ) -> None:
     registry_path = tmp_path / ".loopx" / "registry.json"
-    registry_path.parent.mkdir()
-    registry_path.write_text("{}", encoding="utf-8")
+    _write_registry(registry_path)
     _write_binding(registry_path)
     calls: list[list[str]] = []
 
@@ -451,12 +549,242 @@ def test_goal_channel_delivery_uses_only_the_bound_project_bot(
         assert "project-reporter" in send
 
 
+def test_goal_channel_delivery_reuses_exact_messages_after_interrupted_readback(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    _write_registry(registry_path)
+    _write_binding(registry_path)
+    calls: list[list[str]] = []
+    base_runner = _runner(calls)
+    interrupt_next_readback = True
+
+    def runner(
+        args: list[str],
+        cwd: Path | None,
+        timeout: float | None,
+    ) -> dict[str, Any]:
+        nonlocal interrupt_next_readback
+        result = base_runner(args, cwd, timeout)
+        if "+messages-mget" in args and interrupt_next_readback:
+            interrupt_next_readback = False
+            raise RuntimeError("simulated process interruption after provider send")
+        return result
+
+    with pytest.raises(RuntimeError, match="simulated process interruption"):
+        deliver_periodic_report_to_goal_channel(
+            _request(),
+            registry_path=registry_path,
+            runtime_root=tmp_path / "runtime",
+            goal_id=GOAL_ID,
+            extension_activation=_extension_activation(),
+            execute=True,
+            runner=runner,
+        )
+
+    recovered = deliver_periodic_report_to_goal_channel(
+        _request(),
+        registry_path=registry_path,
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        extension_activation=_extension_activation(),
+        execute=True,
+        runner=runner,
+    )
+
+    sends = [args for args in calls if "+messages-send" in args]
+    assert len(sends) == 2
+    assert recovered["status"] == "satisfied"
+    assert [
+        item["semantic_dedupe_status"]
+        for item in recovered["sink_result"]["message_results"]
+    ] == ["existing_exact_message", "no_existing_exact_message"]
+
+
+def test_goal_channel_delivery_exact_replay_performs_no_external_write(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    _write_registry(registry_path)
+    _write_binding(registry_path)
+    calls: list[list[str]] = []
+    runner = _runner(calls)
+
+    first = deliver_periodic_report_to_goal_channel(
+        _request(),
+        registry_path=registry_path,
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        extension_activation=_extension_activation(),
+        execute=True,
+        runner=runner,
+    )
+    replay = deliver_periodic_report_to_goal_channel(
+        _request(),
+        registry_path=registry_path,
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        extension_activation=_extension_activation(),
+        execute=True,
+        runner=runner,
+    )
+
+    assert first["sink_result"]["external_writes_performed"] is True
+    assert replay["sink_result"]["external_writes_performed"] is False
+    assert len([args for args in calls if "+messages-send" in args]) == 2
+    assert {
+        item["semantic_dedupe_status"]
+        for item in replay["sink_result"]["message_results"]
+    } == {"existing_exact_message"}
+
+
+def test_goal_channel_delivery_fails_closed_when_dedupe_history_is_incomplete(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    _write_registry(registry_path)
+    _write_binding(registry_path)
+    calls: list[list[str]] = []
+    base_runner = _runner(calls)
+
+    def runner(
+        args: list[str],
+        cwd: Path | None,
+        timeout: float | None,
+    ) -> dict[str, Any]:
+        if "+chat-messages-list" in args:
+            calls.append(args)
+            return {
+                "returncode": 0,
+                "stdout": json.dumps({"ok": True, "messages": [], "has_more": True}),
+                "stderr": "",
+            }
+        return base_runner(args, cwd, timeout)
+
+    with pytest.raises(ValueError, match="dedupe history is incomplete"):
+        deliver_periodic_report_to_goal_channel(
+            _request(),
+            registry_path=registry_path,
+            runtime_root=tmp_path / "runtime",
+            goal_id=GOAL_ID,
+            extension_activation=_extension_activation(),
+            execute=True,
+            runner=runner,
+        )
+    assert not any("+messages-send" in args for args in calls)
+
+
+def test_goal_channel_delivery_revalidates_subscription_before_explicit_binding_send(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    _write_registry(registry_path)
+    _write_binding(registry_path)
+    request = _request()
+    calls: list[list[str]] = []
+
+    disabled = _goal()
+    disabled["control_plane"]["periodic_report"]["enabled"] = False
+    _write_registry(registry_path, goal=disabled)
+    with pytest.raises(ValueError, match="subscription is disabled"):
+        deliver_periodic_report_to_goal_channel(
+            request,
+            registry_path=registry_path,
+            runtime_root=tmp_path / "runtime",
+            goal_id=GOAL_ID,
+            extension_activation=_extension_activation(),
+            execute=True,
+            runner=_runner(calls),
+        )
+
+    _write_registry(registry_path, goal=_goal(route_ref="different-route"))
+    with pytest.raises(ValueError, match="subscription authority drifted"):
+        deliver_periodic_report_to_goal_channel(
+            request,
+            registry_path=registry_path,
+            runtime_root=tmp_path / "runtime",
+            goal_id=GOAL_ID,
+            extension_activation=_extension_activation(),
+            execute=True,
+            runner=_runner(calls),
+        )
+    assert calls == []
+
+
+def test_goal_channel_delivery_revalidates_live_machine_default_before_send(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    runtime_root = tmp_path / "runtime"
+    inherited_goal = {"id": GOAL_ID}
+    _write_registry(registry_path, goal=inherited_goal)
+    _write_machine_default_route(runtime_root)
+    request = _request(
+        delivery_authority=_authority(
+            goal=inherited_goal,
+            machine_defaults=read_periodic_report_machine_defaults(runtime_root),
+        )
+    )
+    _write_machine_default_route(runtime_root, route_ref="different-route")
+    calls: list[list[str]] = []
+
+    with pytest.raises(ValueError, match="subscription authority drifted"):
+        deliver_periodic_report_to_goal_channel(
+            request,
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=GOAL_ID,
+            extension_activation=_extension_activation(),
+            execute=True,
+            runner=_runner(calls),
+        )
+
+    assert calls == []
+
+
+def test_goal_channel_delivery_revalidates_authority_between_message_writes(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    _write_registry(registry_path)
+    _write_binding(registry_path)
+    calls: list[list[str]] = []
+    base_runner = _runner(calls)
+    revoked = False
+
+    def runner(
+        args: list[str],
+        cwd: Path | None,
+        timeout: float | None,
+    ) -> dict[str, Any]:
+        nonlocal revoked
+        result = base_runner(args, cwd, timeout)
+        if "+messages-send" in args and not revoked:
+            revoked = True
+            disabled = _goal()
+            disabled["control_plane"]["periodic_report"]["enabled"] = False
+            _write_registry(registry_path, goal=disabled)
+        return result
+
+    with pytest.raises(ValueError, match="subscription is disabled"):
+        deliver_periodic_report_to_goal_channel(
+            _request(),
+            registry_path=registry_path,
+            runtime_root=tmp_path / "runtime",
+            goal_id=GOAL_ID,
+            extension_activation=_extension_activation(),
+            execute=True,
+            runner=runner,
+        )
+
+    assert len([args for args in calls if "+messages-send" in args]) == 1
+
+
 def test_goal_channel_delivery_requires_native_message_sender_readback(
     tmp_path: Path,
 ) -> None:
     registry_path = tmp_path / ".loopx" / "registry.json"
-    registry_path.parent.mkdir()
-    registry_path.write_text("{}", encoding="utf-8")
+    _write_registry(registry_path)
     _write_binding(registry_path)
     calls: list[list[str]] = []
     base_runner = _runner(calls)
@@ -492,8 +820,7 @@ def test_goal_channel_delivery_requires_two_distinct_message_receipts(
     tmp_path: Path,
 ) -> None:
     registry_path = tmp_path / ".loopx" / "registry.json"
-    registry_path.parent.mkdir()
-    registry_path.write_text("{}", encoding="utf-8")
+    _write_registry(registry_path)
     _write_binding(registry_path)
     calls: list[list[str]] = []
     base_runner = _runner(calls)
@@ -537,8 +864,7 @@ def test_goal_channel_delivery_fails_closed_before_send_on_identity_drift(
     tmp_path: Path,
 ) -> None:
     registry_path = tmp_path / ".loopx" / "registry.json"
-    registry_path.parent.mkdir()
-    registry_path.write_text("{}", encoding="utf-8")
+    _write_registry(registry_path)
     calls: list[list[str]] = []
 
     _write_binding(registry_path, mode="local_user")
@@ -570,8 +896,7 @@ def test_goal_channel_delivery_fails_closed_before_send_on_identity_drift(
 
 def test_goal_channel_delivery_rejects_caller_route_overrides(tmp_path: Path) -> None:
     registry_path = tmp_path / ".loopx" / "registry.json"
-    registry_path.parent.mkdir()
-    registry_path.write_text("{}", encoding="utf-8")
+    _write_registry(registry_path)
     _write_binding(registry_path)
     request = _request()
     request["delivery_intent"]["sender_profile"] = "environment-default"
@@ -590,8 +915,7 @@ def test_goal_channel_delivery_requires_two_ordered_https_announcements(
     tmp_path: Path,
 ) -> None:
     registry_path = tmp_path / ".loopx" / "registry.json"
-    registry_path.parent.mkdir()
-    registry_path.write_text("{}", encoding="utf-8")
+    _write_registry(registry_path)
     _write_binding(registry_path)
     request = _request()
     request["delivery_intent"]["announcements"] = request["delivery_intent"][
@@ -625,11 +949,7 @@ def test_goal_channel_delivery_cli_forwards_registry_and_runtime(
     registry_path = tmp_path / ".loopx" / "registry.json"
     runtime_root = tmp_path / "runtime"
     request_path = tmp_path / "request.json"
-    registry_path.parent.mkdir()
-    registry_path.write_text(
-        json.dumps({"common_runtime_root": str(runtime_root)}),
-        encoding="utf-8",
-    )
+    _write_registry(registry_path, runtime_root=runtime_root)
     request_path.write_text(json.dumps(_request()), encoding="utf-8")
     captured: dict[str, Any] = {}
 
