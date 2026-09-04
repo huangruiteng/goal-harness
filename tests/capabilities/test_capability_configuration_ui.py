@@ -109,6 +109,16 @@ def test_goal_configuration_uses_the_shared_capability_catalog() -> None:
         item["feature_id"] for item in catalog["features"]
     }
     assert all(item["available_scopes"] == ["goal"] for item in shared["capabilities"])
+    multi_subagent = next(
+        item
+        for item in shared["capabilities"]
+        if item["capability_id"] == "multi_subagent"
+    )
+    assert multi_subagent["default"] == {
+        "enabled": False,
+        "max_children": 3,
+        "allowed_domains": [],
+    }
 
 
 def test_goal_override_wins_atomically_without_rebinding_machine_fields() -> None:

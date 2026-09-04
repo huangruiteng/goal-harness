@@ -48,4 +48,14 @@ assert.deepEqual(
   "editor defaults fill absent writable fields without granting authority to hidden keys",
 );
 
+assert.deepEqual(
+  projectEditableCapabilityConfiguration(
+    { fields: [{ key: "enabled" }, { key: "max_children" }, { key: "allowed_domains" }] },
+    { enabled: false, max_children: null, allowed_domains: [] },
+    { enabled: false, max_children: 4, allowed_domains: [] },
+  ),
+  { enabled: false, max_children: 4, allowed_domains: [] },
+  "typed editors must replace non-editable null projections with capability defaults",
+);
+
 console.log("capability configuration projection smoke: ok");

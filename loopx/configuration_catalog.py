@@ -156,7 +156,11 @@ def build_goal_configuration_catalog(
                 "feature_id": "multi_subagent",
                 "display_name": "Adaptive child capacity",
                 "availability": "supported_opt_in",
-                "default": {"enabled": False},
+                "default": {
+                    "enabled": False,
+                    "max_children": default_multi_subagent_max_children,
+                    "allowed_domains": [],
+                },
                 "current": {
                     "enabled": feature_summary.get("multi_subagent") == "enabled",
                     "max_children": orchestration.get("max_children"),

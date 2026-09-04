@@ -50,6 +50,7 @@ function periodicReportCapability({ effectiveConfiguration, machineCurrent } = {
     display_name: "Periodic reports",
     description: "Turn validated Goal progress into a reviewable report draft.",
     available_scopes: ["machine", "goal"],
+    availability: "supported_explicit_override",
     machine_namespace: "periodic_report",
     goal_feature_id: "periodic_report",
     effective_value_policy: "goal_override_over_live_machine_default",
@@ -74,6 +75,119 @@ function periodicReportCapability({ effectiveConfiguration, machineCurrent } = {
       ],
     },
   };
+}
+
+function multiSubagentCapability({ current } = {}) {
+  const fallback = {
+    enabled: false,
+    max_children: 4,
+    allowed_domains: [],
+  };
+  const effective = current ?? fallback;
+  return {
+    capability_id: "multi_subagent",
+    display_name: "Adaptive child capacity",
+    description: "Bound child-agent capacity and eligible responsibility domains.",
+    available_scopes: ["goal"],
+    availability: "supported_opt_in",
+    goal_feature_id: "multi_subagent",
+    default: fallback,
+    ...(current ? { current } : {}),
+    effective_configuration: {
+      schema_version: "capability_configuration_resolution_v0",
+      capability_id: "multi_subagent",
+      source: current ? "goal_override" : "capability_default",
+      configuration: effective,
+      inherited: false,
+      goal_override_present: Boolean(current),
+      machine_default_present: false,
+      effective_revision: current ? "sha256:subagent-current" : "sha256:subagent-default",
+    },
+    configuration_editor: {
+      schema_version: "capability_configuration_editor_v0",
+      editable: true,
+      supported_scopes: ["goal"],
+      writable_scopes: ["goal"],
+      fields: [
+        { key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false },
+        { key: "max_children", label: "Maximum children", description: "", input_kind: "number", required: false, minimum: 1, maximum: 32 },
+        { key: "allowed_domains", label: "Allowed responsibility domains", description: "", input_kind: "string_list", required: false },
+      ],
+    },
+  };
+}
+
+function goalCapability({
+  availability = "supported_opt_in",
+  capabilityId,
+  displayName,
+  fields = [{ key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false }],
+  readOnlyReason,
+}) {
+  const editable = fields.length > 0;
+  return {
+    capability_id: capabilityId,
+    display_name: displayName,
+    description: `${displayName} Goal policy.`,
+    available_scopes: ["goal"],
+    goal_feature_id: capabilityId,
+    availability,
+    default: editable ? Object.fromEntries(fields.flatMap((field) => field.key === "enabled" ? [[field.key, false]] : [])) : {},
+    configuration_editor: {
+      schema_version: "capability_configuration_editor_v0",
+      editable,
+      supported_scopes: ["goal"],
+      writable_scopes: editable ? ["goal"] : [],
+      fields,
+      ...(readOnlyReason ? { read_only_reason: readOnlyReason } : {}),
+    },
+  };
+}
+
+function goalCapabilityCatalog(multiSubagentConfiguration) {
+  return [
+    periodicReportCapability(),
+    goalCapability({
+      capabilityId: "change_quality_qualification",
+      displayName: "Change quality qualification",
+      fields: [
+        { key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false },
+        { key: "safe_fix", label: "Allow one bounded safe-fix pass", description: "", input_kind: "boolean", required: false },
+        { key: "strict_receipt", label: "Require an exact-diff receipt", description: "", input_kind: "boolean", required: false },
+      ],
+    }),
+    goalCapability({ capabilityId: "explore_graph", displayName: "Explore Graph" }),
+    goalCapability({
+      capabilityId: "explore_harness",
+      displayName: "Explore Harness",
+      fields: [
+        { key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false },
+        { key: "profile", label: "Planner profile", description: "", input_kind: "select", required: false, options: ["generic"] },
+      ],
+    }),
+    goalCapability({ capabilityId: "lark_kanban_heartbeat_sync", displayName: "Lark Kanban heartbeat sync" }),
+    goalCapability({
+      capabilityId: "lark_event_inbox",
+      displayName: "Lark event inbox",
+      fields: [],
+      readOnlyReason: "Requires a local-private provider binding.",
+    }),
+    goalCapability({
+      availability: "supported_explicit_opt_in",
+      capabilityId: "peer_task_coordination",
+      displayName: "Registered-peer task coordination",
+      fields: [{ key: "coordinator_agent_id", label: "Coordinator Agent", description: "", input_kind: "text", required: false }],
+    }),
+    multiSubagentCapability({ current: multiSubagentConfiguration }),
+    goalCapability({ availability: "experimental_opt_in", capabilityId: "local_authority_shadow", displayName: "Local authority shadow" }),
+    goalCapability({
+      availability: "experimental_opt_in",
+      capabilityId: "reward_memory",
+      displayName: "Reward Memory experiment",
+      fields: [],
+      readOnlyReason: "Requires a reviewed local-private provider binding.",
+    }),
+  ];
 }
 
 function startServer() {
@@ -595,28 +709,45 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
     }
     if (url.pathname === "/api/chat/goal-configuration" && request.method() === "GET") {
       const goalId = url.searchParams.get("goal_id");
+      const spawnPolicy = runtime.goalSubagentConfigurations.get(goalId);
+      const multiSubagentConfiguration = spawnPolicy ? {
+        enabled: spawnPolicy.mode === "multi_subagent" && spawnPolicy.spawn_allowed === true,
+        max_children: spawnPolicy.max_children || null,
+        allowed_domains: spawnPolicy.allowed_domains ?? [],
+      } : undefined;
       await route.fulfill({ contentType: "application/json", json: {
         ok: true,
         schema_version: "goal_configuration_inspection_v0",
         status: "configured",
         goal_id: goalId,
         revision: "sha256:goal-current",
-        available_capabilities: ["periodic_report"],
+        available_capabilities: [
+          "periodic_report",
+          "change_quality_qualification",
+          "explore_graph",
+          "explore_harness",
+          "lark_kanban_heartbeat_sync",
+          "lark_event_inbox",
+          "peer_task_coordination",
+          "multi_subagent",
+          "local_authority_shadow",
+          "reward_memory",
+        ],
         capability_catalog: {
           schema_version: "capability_configuration_catalog_v0",
-          capabilities: [periodicReportCapability({
-            machineCurrent: periodicConfiguration,
-            effectiveConfiguration: {
-              schema_version: "capability_configuration_resolution_v0",
-              capability_id: "periodic_report",
-              source: "machine_default",
-              configuration: periodicConfiguration,
-              inherited: true,
-              goal_override_present: false,
-              machine_default_present: true,
-              effective_revision: "sha256:periodic-effective",
-            },
-          })],
+          capabilities: goalCapabilityCatalog(multiSubagentConfiguration).map((capability) => capability.capability_id === "periodic_report" ? periodicReportCapability({
+              machineCurrent: periodicConfiguration,
+              effectiveConfiguration: {
+                schema_version: "capability_configuration_resolution_v0",
+                capability_id: "periodic_report",
+                source: "machine_default",
+                configuration: periodicConfiguration,
+                inherited: true,
+                goal_override_present: false,
+                machine_default_present: true,
+                effective_revision: "sha256:periodic-effective",
+              },
+            }) : capability),
         },
       }, status: 200 });
       return;
@@ -626,10 +757,10 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
       state.goalConfigurationRequests.push({ phase: "preview", ...body });
       await route.fulfill({ contentType: "application/json", json: {
         ok: true, schema_version: "goal_configuration_update_plan_v0", status: "preview",
-        action: "create", current_revision: "absent", desired_revision: "sha256:desired",
-        base_revision: "sha256:goal-current", plan_revision: "sha256:goal-plan", writes_required: 1,
+        action: body.capability_id === "multi_subagent" && runtime.goalSubagentConfigurations.has(body.goal_id) ? "update" : "create", current_revision: "absent", desired_revision: "sha256:desired",
+        base_revision: "sha256:goal-current", plan_revision: `sha256:goal-plan-${body.capability_id}`, writes_required: 1,
         goal_id: body.goal_id, capability_id: body.capability_id,
-        changed_fields: ["periodic_report"], goal_configuration: body.configuration,
+        changed_fields: [body.capability_id], goal_configuration: body.configuration,
         capability_catalog: { schema_version: "capability_configuration_catalog_v0", capabilities: [] },
       }, status: 201 });
       return;
@@ -637,6 +768,27 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
     if (url.pathname === "/api/chat/goal-configuration/apply" && request.method() === "POST") {
       const body = request.postDataJSON();
       state.goalConfigurationRequests.push({ phase: "apply", ...body });
+      if (body.capability_id === "multi_subagent") {
+        runtime.goalSubagentConfigurations.set(body.goal_id, body.configuration.enabled ? {
+          mode: "multi_subagent",
+          spawn_allowed: true,
+          max_children: body.configuration.max_children,
+          allowed_domains: body.configuration.allowed_domains,
+        } : {
+          mode: "default",
+          spawn_allowed: false,
+          max_children: 0,
+          allowed_domains: [],
+        });
+        await route.fulfill({ contentType: "application/json", json: {
+          ok: true, schema_version: "goal_configuration_transaction_v0", status: "applied",
+          goal_id: body.goal_id, capability_id: body.capability_id,
+          plan_revision: body.expected_plan_revision, applied_revision: "sha256:goal-applied",
+          readback_verified: true, changed_fields: [body.capability_id], goal_configuration: body.configuration,
+          capability_catalog: { schema_version: "capability_configuration_catalog_v0", capabilities: [] },
+        }, status: 200 });
+        return;
+      }
       await route.fulfill({ contentType: "application/json", json: {
         ok: false, schema_version: "goal_configuration_transaction_v0", status: "partial_write",
         goal_id: body.goal_id, capability_id: body.capability_id,
@@ -1775,6 +1927,22 @@ async function main() {
     await page.getByRole("heading", { level: 1, name: "Goal 能力", exact: true }).waitFor({ state: "visible" });
     if (await page.locator(".personal-workspace-shell").count()) throw new Error("Unified Goal capability action did not open the Settings surface");
     await page.getByRole("heading", { level: 2, name: "周期报告", exact: true }).waitFor({ state: "visible" });
+    const goalCapabilityOrder = await page.locator(".personal-capability-list button small").allTextContents();
+    const expectedGoalCapabilities = [
+      "change_quality_qualification", "explore_graph", "explore_harness", "lark_event_inbox",
+      "lark_kanban_heartbeat_sync", "local_authority_shadow", "multi_subagent",
+      "peer_task_coordination", "periodic_report", "reward_memory",
+    ];
+    if (JSON.stringify([...goalCapabilityOrder].sort()) !== JSON.stringify(expectedGoalCapabilities)) {
+      throw new Error(`Goal capability workbench did not render the complete catalog: ${JSON.stringify(goalCapabilityOrder)}`);
+    }
+    const capabilityIndex = (capabilityId) => goalCapabilityOrder.indexOf(capabilityId);
+    if (capabilityIndex("periodic_report") >= capabilityIndex("explore_harness")
+      || capabilityIndex("multi_subagent") <= capabilityIndex("explore_harness")
+      || capabilityIndex("multi_subagent") >= capabilityIndex("local_authority_shadow")
+      || capabilityIndex("multi_subagent") >= capabilityIndex("reward_memory")) {
+      throw new Error(`Goal capability maturity ordering drifted: ${JSON.stringify(goalCapabilityOrder)}`);
+    }
     for (const label of [/^启用$/u, /^报告 Profile/u, /^Goal Channel 路由/u, /^时区/u]) {
       await page.getByLabel(label).waitFor({ state: "visible" });
     }
@@ -1790,7 +1958,35 @@ async function main() {
     await page.getByText("Goal 值已保存；共享投影仍需修复", { exact: true }).waitFor({ state: "visible" });
     if (!(await page.getByText(/loopx sync-global --goal-id/u).isVisible())) throw new Error("Partial Goal write did not expose its reconciliation action");
     const goalConfigurationApply = api.goalConfigurationRequests.find((item) => item.phase === "apply");
-    if (goalConfigurationApply?.expected_plan_revision !== "sha256:goal-plan") throw new Error("Goal configuration apply lost its reviewed plan revision");
+    if (goalConfigurationApply?.expected_plan_revision !== "sha256:goal-plan-periodic_report") throw new Error("Goal configuration apply lost its reviewed plan revision");
+
+    await page.getByRole("button", { name: /自适应子 Agent 容量/u }).click();
+    await page.getByRole("heading", { level: 2, name: "自适应子 Agent 容量", exact: true }).waitFor({ state: "visible" });
+    const multiSubagentEnabled = page.getByLabel(/^启用$/u);
+    const multiSubagentMaxChildren = page.getByLabel(/^最大子 Agent 数/u);
+    const multiSubagentDomains = page.getByLabel(/^允许的职责域/u);
+    await multiSubagentEnabled.waitFor({ state: "visible" });
+    await waitForInputValue(multiSubagentMaxChildren, "4");
+    await multiSubagentEnabled.check();
+    await multiSubagentMaxChildren.fill("3");
+    await multiSubagentDomains.fill("code\nvalidation");
+    await page.screenshot({ path: resolve(outputDir, "goal-subagent-capability-zh-cn.png"), fullPage: false, animations: "disabled" });
+    await page.getByRole("button", { name: "预览变更", exact: true }).click();
+    await page.getByText("锁定 revision 的变更预览", { exact: true }).waitFor({ state: "visible" });
+    const multiSubagentPreview = api.goalConfigurationRequests.findLast((item) => item.phase === "preview" && item.capability_id === "multi_subagent");
+    if (JSON.stringify(multiSubagentPreview?.configuration) !== JSON.stringify({
+      enabled: true,
+      max_children: 3,
+      allowed_domains: ["code", "validation"],
+    })) {
+      throw new Error(`Unified Goal capability preview lost the sub-agent boundary: ${JSON.stringify(multiSubagentPreview)}`);
+    }
+    await page.getByRole("button", { name: "应用此预览", exact: true }).click();
+    const multiSubagentApply = api.goalConfigurationRequests.findLast((item) => item.phase === "apply" && item.capability_id === "multi_subagent");
+    if (multiSubagentApply?.expected_plan_revision !== "sha256:goal-plan-multi_subagent") {
+      throw new Error(`Unified Goal capability apply lost its reviewed sub-agent revision: ${JSON.stringify(multiSubagentApply)}`);
+    }
+    await page.locator(".personal-capability-value-grid section").first().getByText(/validation/u).waitFor({ state: "visible" });
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
     await page.getByRole("button", { name: "Tasks", current: "page" }).waitFor({ state: "visible" });
     await page.getByRole("button", { name: "打开 Goal 详情或能力配置" }).click();
@@ -1838,6 +2034,13 @@ async function main() {
     }
     await page.getByText("Enabled means automatic delivery at validated stage boundaries", { exact: true }).waitFor({ state: "visible" });
     await page.screenshot({ path: resolve(outputDir, "machine-capability-en.png"), fullPage: false, animations: "disabled" });
+    await page.getByRole("button", { name: /Goal capabilities/ }).click();
+    await page.getByRole("button", { name: /Adaptive child capacity/ }).click();
+    await page.getByRole("heading", { level: 2, name: "Adaptive child capacity", exact: true }).waitFor({ state: "visible" });
+    for (const label of [/^Enabled$/u, /^Maximum children/u, /^Allowed responsibility domains/u]) {
+      await page.getByLabel(label).waitFor({ state: "visible" });
+    }
+    await page.screenshot({ path: resolve(outputDir, "goal-subagent-capability-en.png"), fullPage: false, animations: "disabled" });
     await page.getByRole("button", { name: /Language/ }).click();
     await page.getByRole("radio", { name: /Simplified Chinese/ }).click();
     await page.getByRole("button", { name: /机器配置/ }).click();

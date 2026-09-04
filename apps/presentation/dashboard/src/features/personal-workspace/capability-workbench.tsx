@@ -6,6 +6,29 @@ import { localizeCapability } from "./capability-localization";
 
 type CapabilityDescriptor = CapabilityConfigurationCatalog["capabilities"][number];
 
+function capabilityPresentationTier(capability: CapabilityDescriptor) {
+  if (capability.availability?.includes("experimental")) return 4;
+  if (capability.capability_id === "multi_subagent") return 3;
+  if (capability.configuration_editor.writable_scopes.length === 0) return 2;
+  if (capability.availability === "supported_explicit_opt_in") return 2;
+  if (capability.availability === "supported_explicit_override") return 0;
+  return 1;
+}
+
+export function orderCapabilitiesForPresentation(
+  capabilities: CapabilityDescriptor[],
+  locale: WorkspaceLocale,
+) {
+  return [...capabilities].sort((left, right) => {
+    const tierDifference = capabilityPresentationTier(left) - capabilityPresentationTier(right);
+    if (tierDifference !== 0) return tierDifference;
+    const localizedLeft = localizeCapability(left, locale);
+    const localizedRight = localizeCapability(right, locale);
+    return localizedLeft.display_name.localeCompare(localizedRight.display_name, locale)
+      || left.capability_id.localeCompare(right.capability_id);
+  });
+}
+
 export function CapabilityCatalogNavigation({
   capabilities,
   locale,
@@ -23,7 +46,7 @@ export function CapabilityCatalogNavigation({
 }>) {
   return (
     <nav aria-label={t(scope === "goal" ? "capabilities.catalog" : "machine.capabilityCatalog")} className="personal-capability-list">
-      {capabilities.map((rawCapability) => {
+      {orderCapabilitiesForPresentation(capabilities, locale).map((rawCapability) => {
         const capability = localizeCapability(rawCapability, locale);
         return (
           <button
