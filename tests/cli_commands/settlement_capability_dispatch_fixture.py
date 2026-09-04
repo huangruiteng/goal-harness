@@ -43,6 +43,7 @@ def write_periodic_report_registry(project: Path, runtime: Path) -> Path:
                             "periodic_report": {
                                 "enabled": True,
                                 "profile_preset": "weekly",
+                                "route_ref": "loopx-concierge",
                             }
                         },
                     }
