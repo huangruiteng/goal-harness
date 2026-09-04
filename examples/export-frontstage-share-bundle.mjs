@@ -108,6 +108,15 @@ async function copyHomepage(siteDir, base) {
   await copyFile(resolve(repoRoot, installerScriptPath), resolve(siteDir, "install.sh"));
 }
 
+async function copyPublicSiteRoutes(siteDir) {
+  const homepage = resolve(siteDir, "index.html");
+  for (const route of ["benchmarks/swe-marathon"]) {
+    const routeDir = resolve(siteDir, route);
+    await mkdir(routeDir, { recursive: true });
+    await copyFile(homepage, resolve(routeDir, "index.html"));
+  }
+}
+
 function validateShowcaseHtmlPath(path) {
   if (typeof path !== "string") {
     throw new Error(`showcase page must be a string: ${JSON.stringify(path)}`);
@@ -213,6 +222,7 @@ async function writeShareReadme(outDir, base, interactivePages) {
   const siteDir = resolve(outDir, "site");
   const homepageUrl = base;
   const frontstageUrl = `${base}frontstage/`;
+  const sweMarathonBriefUrl = `${base}benchmarks/swe-marathon/`;
   const previewBlock = base === "/"
     ? `## Try It Locally
 
@@ -226,6 +236,7 @@ Then open the homepage or showcase:
 \`\`\`text
 http://127.0.0.1:8080${homepageUrl}
 http://127.0.0.1:8080${frontstageUrl}
+http://127.0.0.1:8080${sweMarathonBriefUrl}
 \`\`\`
 `
     : `## Try It Locally
@@ -239,6 +250,7 @@ Hosted entries:
 \`\`\`text
 ${homepageUrl}
 ${frontstageUrl}
+${sweMarathonBriefUrl}
 \`\`\`
 `;
   const readme = `# LoopX Public Website Bundle
@@ -261,6 +273,7 @@ ${previewBlock}
   \`${statusFileName}\`, direct \`/frontstage/\` static route support, and
   catalog-declared interactive case pages.
 - Homepage source: \`apps/presentation/site\`.
+- SWE-Marathon research brief: \`${sweMarathonBriefUrl}\`, built from the pinned public-safe aggregate and case-insight projection under \`benchmark/swe-marathon/\`.
 - Homepage evidence assets: ${homepageEvidenceAssets.map((path) => `\`${path}\``).join(", ")}.
 - Primary case source: \`${showcaseCatalogPath}\`.
 - Interactive case pages: ${interactivePages.length ? interactivePages.map((path) => `\`${path}\``).join(", ") : "none"}.
@@ -278,10 +291,12 @@ async function writeManifest(outDir, base, interactivePages) {
     site_dir: "site",
     status_fixture: `site/${statusFileName}`,
     homepage_entry: "site/index.html",
+    swe_marathon_brief_entry: "site/benchmarks/swe-marathon/index.html",
     installer_entry: "site/install.sh",
     frontstage_entry: "site/frontstage/index.html",
     content_sources: {
       public_homepage: "apps/presentation/site",
+      swe_marathon_brief: "benchmark/swe-marathon",
       installer_script: installerScriptPath,
       homepage_evidence_assets: homepageEvidenceAssets,
       primary_public_story: showcaseCatalogPath,
@@ -374,6 +389,7 @@ async function main() {
   await removeCopiedLiveStatusFiles(siteDir);
   await copyIndexForFrontstage(siteDir);
   await copyHomepage(siteDir, args.base);
+  await copyPublicSiteRoutes(siteDir);
   const interactivePages = await copyInteractiveCasePages(siteDir);
 
   const projectionOutput = run("python3", [resolve(repoRoot, "examples/goal-channel-frontstage-fixture.py"), "--format", "json"], {
@@ -392,6 +408,7 @@ async function main() {
     out_dir: outDir,
     site_dir: siteDir,
     homepage_url: args.base,
+    swe_marathon_brief_url: `${args.base}benchmarks/swe-marathon/`,
     frontstage_url: `${args.base}frontstage/`,
     status_fixture: `site/${statusFileName}`,
   }, null, 2));

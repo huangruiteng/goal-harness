@@ -1106,6 +1106,7 @@ export function App() {
         <p>{copy.footer}</p>
         <nav>
           <a href="https://github.com/huangruiteng/loopx">GitHub</a>
+          <a href={`${basePath}benchmarks/swe-marathon/${language === "zh" ? "?lang=zh" : ""}`}>Research</a>
           <a href={`${basePath}frontstage/`}>Frontstage</a>
           <a href={`${basePath}docs/`}>Docs</a>
         </nav>
