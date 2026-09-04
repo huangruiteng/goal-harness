@@ -177,31 +177,39 @@ export function validateCoordinationTodoReadModel(
   }
   const allowedFields = new Set<string>(TODO_CANONICAL_READ_RECORD_FIELDS);
   for (const [recordIndex, record] of records.entries()) {
-    const unknownField = Object.keys(record).find((field) => !allowedFields.has(field));
-    if (unknownField !== undefined) {
+    validateCoordinationTodoReadRecord(record, recordIndex, allowedFields);
+  }
+  return readModel;
+}
+
+function validateCoordinationTodoReadRecord(
+  record: JsonObject,
+  recordIndex: number,
+  allowedFields: ReadonlySet<string>,
+): void {
+  const unknownField = Object.keys(record).find((field) => !allowedFields.has(field));
+  if (unknownField !== undefined) {
+    throw new AuthorityStoreProtocolError(
+      `coordination Todo read record ${recordIndex} has an unversioned field`,
+    );
+  }
+  for (const field of TODO_CANONICAL_REQUIRED_READ_FIELDS) {
+    if (!(field in record)) {
       throw new AuthorityStoreProtocolError(
-        `coordination Todo read record ${recordIndex} has an unversioned field`,
-      );
-    }
-    for (const field of TODO_CANONICAL_REQUIRED_READ_FIELDS) {
-      if (!(field in record)) {
-        throw new AuthorityStoreProtocolError(
-          `coordination Todo read record ${recordIndex} omits required ${field}`,
-        );
-      }
-    }
-    if (record.schema_version !== "todo_item_v0" ||
-        (record.role !== "user" && record.role !== "agent") ||
-        typeof record.status !== "string" || record.status.length === 0 ||
-        typeof record.done !== "boolean" || typeof record.text !== "string" ||
-        typeof record.archive_state !== "string" || record.archive_state.length === 0 ||
-        typeof record.source_section !== "string" || record.source_section.length === 0) {
-      throw new AuthorityStoreProtocolError(
-        `coordination Todo read record ${recordIndex} has invalid required semantics`,
+        `coordination Todo read record ${recordIndex} omits required ${field}`,
       );
     }
   }
-  return readModel;
+  if (record.schema_version !== "todo_item_v0" ||
+      (record.role !== "user" && record.role !== "agent") ||
+      typeof record.status !== "string" || record.status.length === 0 ||
+      typeof record.done !== "boolean" || typeof record.text !== "string" ||
+      typeof record.archive_state !== "string" || record.archive_state.length === 0 ||
+      typeof record.source_section !== "string" || record.source_section.length === 0) {
+    throw new AuthorityStoreProtocolError(
+      `coordination Todo read record ${recordIndex} has invalid required semantics`,
+    );
+  }
 }
 
 function todoReadModel(records: readonly JsonObject[]): JsonObject {
@@ -221,11 +229,68 @@ function requireCompleteTodoReplacement(
   if (previous === undefined) return;
   const omittedFields = Object.keys(previous)
     .filter((field) => !(field in replacement))
-    .sort();
+    .sort(authorityUnicodeCompare);
   if (omittedFields.length > 0) {
     throw new AuthorityStoreProtocolError(
       `coordination Todo replacement ${index} omits existing fields: ${omittedFields.join(", ")}`,
     );
+  }
+}
+
+function applyCoordinationMutation(
+  mutation: CoordinationProjectionMutation,
+  index: number,
+  todos: Map<string, JsonObject>,
+  leases: Map<string, JsonObject>,
+  claimMutationTarget: (kind: "todo" | "lease", todoId: string) => void,
+  requireCompleteReplacement: boolean,
+): void {
+  switch (mutation.kind) {
+    case "todo_upsert": {
+      const todo = canonicalAuthorityObject(mutation.todo, `mutations[${index}].todo`);
+      const todoId = requireAuthorityStoreId(todo.todo_id, `mutations[${index}].todo_id`);
+      claimMutationTarget("todo", todoId);
+      if (requireCompleteReplacement) {
+        requireCompleteTodoReplacement(todos.get(todoId), todo, index);
+      }
+      todos.set(todoId, todo);
+      return;
+    }
+    case "todo_remove": {
+      const todoId = requireAuthorityStoreId(
+        mutation.todo_id,
+        `mutations[${index}].todo_id`,
+      );
+      claimMutationTarget("todo", todoId);
+      if (!todos.delete(todoId)) {
+        throw new AuthorityStoreProtocolError("coordination projection todo remove target missing");
+      }
+      return;
+    }
+    case "lease_upsert": {
+      const lease = canonicalAuthorityObject(mutation.lease, `mutations[${index}].lease`);
+      const todoId = requireAuthorityStoreId(lease.todo_id, `mutations[${index}].todo_id`);
+      claimMutationTarget("lease", todoId);
+      leases.set(todoId, lease);
+      return;
+    }
+    case "lease_remove": {
+      const todoId = requireAuthorityStoreId(
+        mutation.todo_id,
+        `mutations[${index}].todo_id`,
+      );
+      claimMutationTarget("lease", todoId);
+      if (!leases.delete(todoId)) {
+        throw new AuthorityStoreProtocolError("coordination projection lease remove target missing");
+      }
+      return;
+    }
+    default: {
+      const unreachable: never = mutation;
+      throw new AuthorityStoreProtocolError(
+        `unsupported coordination projection mutation: ${String(unreachable)}`,
+      );
+    }
   }
 }
 
@@ -280,53 +345,14 @@ export function reduceCoordinationProjection(
   };
 
   for (const [index, mutation] of mutations.entries()) {
-    switch (mutation.kind) {
-      case "todo_upsert": {
-        const todo = canonicalAuthorityObject(mutation.todo, `mutations[${index}].todo`);
-        const todoId = requireAuthorityStoreId(todo.todo_id, `mutations[${index}].todo_id`);
-        claimMutationTarget("todo", todoId);
-        if (value.todo_read_model !== undefined) {
-          requireCompleteTodoReplacement(todos.get(todoId), todo, index);
-        }
-        todos.set(todoId, todo);
-        break;
-      }
-      case "todo_remove": {
-        const todoId = requireAuthorityStoreId(
-          mutation.todo_id,
-          `mutations[${index}].todo_id`,
-        );
-        claimMutationTarget("todo", todoId);
-        if (!todos.delete(todoId)) {
-          throw new AuthorityStoreProtocolError("coordination projection todo remove target missing");
-        }
-        break;
-      }
-      case "lease_upsert": {
-        const lease = canonicalAuthorityObject(mutation.lease, `mutations[${index}].lease`);
-        const todoId = requireAuthorityStoreId(lease.todo_id, `mutations[${index}].todo_id`);
-        claimMutationTarget("lease", todoId);
-        leases.set(todoId, lease);
-        break;
-      }
-      case "lease_remove": {
-        const todoId = requireAuthorityStoreId(
-          mutation.todo_id,
-          `mutations[${index}].todo_id`,
-        );
-        claimMutationTarget("lease", todoId);
-        if (!leases.delete(todoId)) {
-          throw new AuthorityStoreProtocolError("coordination projection lease remove target missing");
-        }
-        break;
-      }
-      default: {
-        const unreachable: never = mutation;
-        throw new AuthorityStoreProtocolError(
-          `unsupported coordination projection mutation: ${String(unreachable)}`,
-        );
-      }
-    }
+    applyCoordinationMutation(
+      mutation,
+      index,
+      todos,
+      leases,
+      claimMutationTarget,
+      value.todo_read_model !== undefined,
+    );
   }
 
   for (const todoId of leases.keys()) {
