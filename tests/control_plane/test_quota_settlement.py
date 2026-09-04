@@ -40,7 +40,7 @@ from loopx.control_plane.work_items.interaction_contract import (
     build_interaction_contract,
     interaction_next_cli_actions,
 )
-from loopx.cli_commands.todo import _completion_settlement_error
+from loopx.cli_commands.todo_complete import completion_settlement_error
 from loopx.rollout_event_log import rollout_event_log_path
 
 GOAL_ID = "settlement-goal"
@@ -288,7 +288,7 @@ def test_advancement_completion_requires_the_complete_settlement_chain(
         turn_instance_id=TURN_ID,
     )
     assert incomplete is not None
-    error = _completion_settlement_error(
+    error = completion_settlement_error(
         {
             "role": "agent",
             "task_class": "advancement_task",
@@ -317,7 +317,7 @@ def test_advancement_completion_requires_the_complete_settlement_chain(
         ),
     )
     assert (
-        _completion_settlement_error(
+        completion_settlement_error(
             {
                 "role": "agent",
                 "task_class": "advancement_task",
@@ -330,7 +330,7 @@ def test_advancement_completion_requires_the_complete_settlement_chain(
         is None
     )
     assert (
-        _completion_settlement_error(
+        completion_settlement_error(
             {
                 "role": "agent",
                 "task_class": "advancement_task",

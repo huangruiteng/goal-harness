@@ -8,6 +8,7 @@ import pytest
 from loopx.cli import build_parser, main, output_format, resolve_global_output_format
 from loopx.cli_commands import doctor as doctor_command
 from loopx.cli_commands import todo as todo_command
+from loopx.cli_commands import todo_complete as todo_complete_command
 from loopx.cli_commands.quota_request import validate_quota_command_request
 from loopx.cli_commands.todo_argument_validation import (
     validate_todo_add_options,
@@ -770,7 +771,9 @@ def test_todo_complete_preserves_typed_task_lease_error(
         )
 
     captured: dict[str, object] = {}
-    monkeypatch.setattr(todo_command, "complete_goal_todo", reject_stale_instance)
+    monkeypatch.setattr(
+        todo_complete_command, "complete_goal_todo", reject_stale_instance
+    )
     args = build_parser().parse_args(
         [
             "todo",
