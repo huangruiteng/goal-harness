@@ -40,7 +40,7 @@ class ChatStatusRequestMixin:
                     protected_paths=[self.server.registry_path, *self.server.scan_roots],
                 )
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - do not expose local projection failures.
             self._send_error(
                 "LoopX status could not be projected for the workspace.",
                 status=500,
