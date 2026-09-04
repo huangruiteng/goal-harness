@@ -164,12 +164,13 @@ never as substrings. Every key lands in one of three states:
 | State | Effect | Examples |
 | --- | --- | --- |
 | compact | allowed | keys the projection reads (`status`, `summary`, `next_action`), timestamps, pointers ending in `_id`/`_count`/`_at` (`trace_id`, `catalog_id`), usage metrics (`token_count`, `max_tokens`) |
-| raw material | `raw_material_detected`, `agent_can_continue=false`, category recorded in `raw_material_categories` | `credential` (`api_key`, `access_token`, `password`), `transcript` (`raw_transcript`, `messages`, `prompt`, `body`), `log` (`log_path`, `stack_trace`), `local_path` (`file_path`), `raw_output` (`stdout_tail`, `diff`) |
+| raw material | `raw_material_detected`, `agent_can_continue=false`, category recorded in `raw_material_categories`; its value is never copied | `credential` (`api_key`, `access_token`, `password`), `transcript` (`message`, `raw_transcript`, `messages`, `prompt`, `body`), `log` (`log_path`, `stack_trace`), `local_path` (`file_path`), `raw_output` (`stdout_tail`, `diff`) |
 | unclassified | reported in `unclassified_key_names` (bounded), never blocks | `backlog`, `changelog`, `logical_clock` |
 
 The word `token` is a credential only in auth forms (`token`, `access_token`,
 `auth_token`, `api_token`, `bearer_token`, `refresh_token`, `id_token`); count
-forms such as `tokens_used` are compact. `trace_id` is a pointer; `trace`,
+forms such as `tokens_used` are compact, but a raw-material word in the same
+key takes precedence (`tokens_password` and `raw_tokens` are raw). `trace_id` is a pointer; `trace`,
 `stack_trace`, and `trace_path` are logs. `log` matches only as a whole word,
 so `catalog_id`, `login_at`, and `changelog` are not flagged.
 

@@ -78,7 +78,6 @@ COMPACT_KEYS = frozenset(
         "requested_decision",
         "title",
         "summary",
-        "message",
         "next_action",
         "recommended_action",
         "agent_next_action",
@@ -120,6 +119,7 @@ RAW_MATERIAL_KEYS: Mapping[str, RawMaterialCategory] = {
     "body": RawMaterialCategory.TRANSCRIPT,
     "request_body": RawMaterialCategory.TRANSCRIPT,
     "response_body": RawMaterialCategory.TRANSCRIPT,
+    "message": RawMaterialCategory.TRANSCRIPT,
     "output": RawMaterialCategory.RAW_OUTPUT,
     "output_text": RawMaterialCategory.RAW_OUTPUT,
     "tool_output": RawMaterialCategory.RAW_OUTPUT,
@@ -305,11 +305,13 @@ def classify_session_runtime_key(key: str) -> KeyClassification:
     category = RAW_MATERIAL_KEYS.get(normalized)
     if category is not None:
         return KeyClassification(KeyState.RAW_MATERIAL, category)
-    if words[-1] in COMPACT_SUFFIX_WORDS or COMPACT_METRIC_WORDS.intersection(words):
+    if words[-1] in COMPACT_SUFFIX_WORDS:
         return KeyClassification(KeyState.COMPACT)
     for category, raw_words in RAW_MATERIAL_WORDS:
         if raw_words.intersection(words):
             return KeyClassification(KeyState.RAW_MATERIAL, category)
+    if COMPACT_METRIC_WORDS.intersection(words):
+        return KeyClassification(KeyState.COMPACT)
     return KeyClassification(KeyState.UNCLASSIFIED)
 
 
@@ -344,7 +346,6 @@ def _first_user_todo(gate: Mapping[str, Any] | None) -> str | None:
             "requested_decision",
             "title",
             "summary",
-            "message",
             "next_action",
         ),
     )
@@ -388,7 +389,7 @@ def _latest_validation(
         return None
     return _first_text(
         latest,
-        ("validation_summary", "validated", "result", "summary", "message"),
+        ("validation_summary", "validated", "result", "summary"),
     )
 
 
@@ -407,7 +408,7 @@ def _latest_blocker(
         return None
     return _first_text(
         latest,
-        ("blocker", "blocker_summary", "summary", "message", "title"),
+        ("blocker", "blocker_summary", "summary", "title"),
     )
 
 

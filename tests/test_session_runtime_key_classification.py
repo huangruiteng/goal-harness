@@ -19,7 +19,7 @@ from loopx.session_runtime import (
     "key",
     [
         # projection inputs
-        "kind", "status", "actor", "summary", "message", "recommended_action",
+        "kind", "status", "actor", "summary", "recommended_action",
         "created_at", "session_id", "artifact_id",
         # pointers and counts that merely contain a raw-looking word
         "trace_id", "catalog_id", "dialog_id", "login_at", "log_count",
@@ -57,6 +57,7 @@ def test_unclassified_keys_are_neither_compact_nor_raw(key: str) -> None:
         ("prompt", RawMaterialCategory.TRANSCRIPT),
         ("content", RawMaterialCategory.TRANSCRIPT),
         ("body", RawMaterialCategory.TRANSCRIPT),
+        ("message", RawMaterialCategory.TRANSCRIPT),
         ("log", RawMaterialCategory.LOG),
         ("logs", RawMaterialCategory.LOG),
         ("log_path", RawMaterialCategory.LOG),
@@ -83,6 +84,41 @@ def test_substrings_never_match() -> None:
     # Every hint of the retired substring denylist embedded in a longer word.
     for key in ("catalog", "dialogue", "backlog", "tokenizer", "tracer", "drawn", "rawhide"):
         assert classify_session_runtime_key(key).state is not KeyState.RAW_MATERIAL, key
+
+
+@pytest.mark.parametrize(
+    ("key", "category"),
+    [
+        ("tokens_password", RawMaterialCategory.CREDENTIAL),
+        ("tokens_transcript", RawMaterialCategory.TRANSCRIPT),
+        ("raw_tokens", RawMaterialCategory.RAW_OUTPUT),
+    ],
+)
+def test_raw_words_outrank_the_tokens_metric_rule(
+    key: str,
+    category: RawMaterialCategory,
+) -> None:
+    assert classify_session_runtime_key(key) == (KeyState.RAW_MATERIAL, category)
+
+
+def test_message_material_is_flagged_and_never_copied_to_first_screen() -> None:
+    marker = "RAW_TRANSCRIPT_MARKER full conversation material"
+    payload = build_session_runtime_readonly_projection(
+        goal_id="g",
+        events=[
+            {
+                "event_id": "e1",
+                "kind": "blocker",
+                "status": "blocked",
+                "message": marker,
+            }
+        ],
+    )
+    assert payload["boundary"]["raw_material_detected"] is True
+    assert payload["boundary"]["raw_material_key_names"] == ["message"]
+    assert payload["boundary"]["raw_material_categories"] == ["transcript"]
+    assert marker not in repr(payload)
+    assert payload["first_screen"]["latest_blocker"] is None
 
 
 def test_unclassified_keys_are_reported_but_do_not_block() -> None:

@@ -68,11 +68,13 @@ can continue:
 
 The `boundary` block reports how input keys were classified, using a typed
 word-level rule (exact keys or whole words after splitting on `_`, `-`, and
-camelCase; never substrings). Values are never inspected or copied.
+camelCase; never substrings). Values from raw-material and unclassified keys
+are never copied; values from the explicit compact field contract may be used
+to build the bounded projection.
 
 - **compact**: keys the projection reads, timestamps, pointers (`*_id`,
   `*_count`, `*_at`), and usage metrics (`*_tokens`). Allowed.
-- **raw material**: credentials, transcripts, logs, local paths, and raw tool
+- **raw material**: credentials, messages/transcripts, logs, local paths, and raw tool
   output. Sets `raw_material_detected`, lists `raw_material_key_names` and
   `raw_material_categories`, and turns `agent_can_continue` off.
 - **unclassified**: any other key. Listed in `unclassified_key_names` (bounded)
@@ -143,4 +145,3 @@ A session-runtime projection is acceptable when:
 4. The projection is read-only unless a separate writeback contract is enabled.
 5. Public fixtures contain no raw transcripts, credentials, private links,
    local paths, or internal project names.
-
