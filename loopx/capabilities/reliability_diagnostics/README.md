@@ -80,8 +80,10 @@ Any other field is rejected with a typed reason: `control_field_rejected`
 `tool_call`, `worker_state`, ...), `raw_material_field_rejected`
 (`transcript`, `messages`, `content`, `text`, `arguments`, `output`,
 `stdout`, `stderr`, `log`, `cwd`, `token`, ...), or
-`unsupported_field_rejected`. Values also pass the shared public-safe check,
-so absolute local paths and credential-like tokens fail closed.
+`unsupported_field_rejected`. Every provider applies the equivalent recursive
+public-safe value contract **before its first append**, and LoopX ingest applies
+it again. Absolute local paths and credential-like tokens fail closed without
+reaching ledger bytes; the producer counts them as `public_safety_violation`.
 
 ### Observer stats (`reliability_observer_stats_v0`)
 
@@ -117,9 +119,9 @@ Status rules: `invalid` when there are no observations, stats are absent or do
 not link exactly to persisted envelopes, an identity was rejected, the ledger
 contains invalid input, any outbound endpoint exists, or observation entered
 worker context or scheduler inputs. Otherwise `quarantined` covers observer
-failure or control-shaped input. Event gaps, drops, duplicates, raw or
-unsupported fields, and excess clock uncertainty are `degraded`; otherwise the
-receipt is `valid`.
+failure, control-shaped input, or a producer-side `public_safety_violation`.
+Event gaps, drops, duplicates, raw or unsupported fields, and excess clock
+uncertainty are `degraded`; otherwise the receipt is `valid`.
 
 ### Diagnostic projection (`reliability_diagnostic_projection_v0`)
 

@@ -42,6 +42,7 @@ class ReceiptReason(StrEnum):
     OBSERVATION_ENTERED_WORKER_CONTEXT = "observation_entered_worker_context"
     OBSERVER_FAILURE = "observer_failure"
     CONTROL_FIELD_REJECTED = "control_field_rejected"
+    PUBLIC_SAFETY_VIOLATION = "public_safety_violation"
     LEDGER_RECORD_INVALID = "ledger_record_invalid"
     OBSERVER_STATS_MISSING = "observer_stats_missing"
     OBSERVER_STATS_MISMATCH = "observer_stats_mismatch"
@@ -71,6 +72,7 @@ _QUARANTINE_REASONS = frozenset(
     {
         ReceiptReason.OBSERVER_FAILURE,
         ReceiptReason.CONTROL_FIELD_REJECTED,
+        ReceiptReason.PUBLIC_SAFETY_VIOLATION,
     }
 )
 
@@ -272,6 +274,10 @@ def _receipt_reasons(
         (
             bool(rejected.get(EnvelopeRejection.CONTROL_FIELD_REJECTED.value)),
             ReceiptReason.CONTROL_FIELD_REJECTED,
+        ),
+        (
+            bool(rejected.get(EnvelopeRejection.PUBLIC_SAFETY_VIOLATION.value)),
+            ReceiptReason.PUBLIC_SAFETY_VIOLATION,
         ),
         (bool(reading.invalid_record_count), ReceiptReason.LEDGER_RECORD_INVALID),
         (missing_stats, ReceiptReason.OBSERVER_STATS_MISSING),

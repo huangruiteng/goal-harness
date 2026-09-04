@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from loopx.capabilities.catalog import (
     build_capability_catalog_packet,
     build_capability_detail_packet,
@@ -16,7 +18,11 @@ from loopx.capabilities.reliability_diagnostics import (
     ENVELOPE_FIELDS,
     OBSERVER_ENVELOPE_SCHEMA_VERSION,
     OBSERVER_STATS_SCHEMA_VERSION,
+    EnvelopeRejection,
+    ObserverEnvelopeError,
     ObserverEventKind,
+    dsh_fixture_records,
+    normalize_observer_envelope,
 )
 from loopx.capabilities.reliability_diagnostics.intake import STATS_FIELDS
 
@@ -26,14 +32,22 @@ DRIVER_TS = ROOT / "packages/dsh-loopx-plugin/src/driver.ts"
 CORDIS_PATCH = ROOT / "packages/dsh-loopx-plugin/cordis.patch.yml"
 PACKAGE_JSON = ROOT / "packages/dsh-loopx-plugin/package.json"
 TSDOWN_CONFIG = ROOT / "packages/dsh-loopx-plugin/tsdown.config.ts"
+PUBLIC_SAFETY_FIXTURE = ROOT / (
+    "tests/fixtures/control_plane/reliability_diagnostics_public_safety_v0.json"
+)
+PUBLIC_SAFETY_CASES = json.loads(PUBLIC_SAFETY_FIXTURE.read_text(encoding="utf-8"))
 
 
 def test_catalog_declares_dsh_provider_without_claiming_readiness() -> None:
     packet = build_capability_catalog_packet()
-    summary = next(item for item in packet["capabilities"] if item["id"] == CAPABILITY_ID)
+    summary = next(
+        item for item in packet["capabilities"] if item["id"] == CAPABILITY_ID
+    )
     assert summary["provider_id"] == "loopx-core"
     assert summary["implementation_provider_count"] == 1
-    provider = next(item for item in packet["providers"] if item["id"] == DSH_PROVIDER_ID)
+    provider = next(
+        item for item in packet["providers"] if item["id"] == DSH_PROVIDER_ID
+    )
     assert provider == {
         "id": DSH_PROVIDER_ID,
         "origin": "extension",
@@ -78,6 +92,72 @@ def test_typescript_observer_shares_field_names_and_has_no_control_path() -> Non
     assert "outbound_endpoints: []" in source
     assert "observation_entered_worker_context: false" in source
     assert "observation_entered_scheduler_inputs: false" in source
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        (field, value)
+        for field in ("tool_name", "error_class")
+        for value in PUBLIC_SAFETY_CASES["unsafe_summary_tokens"]
+    ],
+)
+def test_shared_counterfactual_rejects_unsafe_summary_token(
+    field: str,
+    value: str,
+) -> None:
+    record = {
+        **dsh_fixture_records()[5],
+        "summary": {"turn": 1, "step": 1, field: value},
+        "source_refs": {"event_seq": "5", "tool_call_id": "call-safe"},
+    }
+    with pytest.raises(ObserverEnvelopeError) as excinfo:
+        normalize_observer_envelope(record)
+    assert excinfo.value.reason is EnvelopeRejection.PUBLIC_SAFETY_VIOLATION
+
+
+@pytest.mark.parametrize("value", PUBLIC_SAFETY_CASES["unsafe_identity_tokens"])
+def test_shared_counterfactual_rejects_unsafe_source_ref(value: str) -> None:
+    record = {
+        **dsh_fixture_records()[5],
+        "summary": {"turn": 1, "step": 1, "tool_name": "bash"},
+        "source_refs": {"event_seq": "5", "tool_call_id": value},
+    }
+    with pytest.raises(ObserverEnvelopeError) as excinfo:
+        normalize_observer_envelope(record)
+    assert excinfo.value.reason is EnvelopeRejection.PUBLIC_SAFETY_VIOLATION
+
+
+@pytest.mark.parametrize("value", PUBLIC_SAFETY_CASES["invalid_source_ref_tokens"])
+def test_shared_counterfactual_rejects_local_path_source_ref_shape(value: str) -> None:
+    record = {
+        **dsh_fixture_records()[5],
+        "summary": {"turn": 1, "step": 1, "tool_name": "bash"},
+        "source_refs": {"event_seq": "5", "tool_call_id": value},
+    }
+    with pytest.raises(ObserverEnvelopeError) as excinfo:
+        normalize_observer_envelope(record)
+    assert excinfo.value.reason is EnvelopeRejection.SOURCE_REF_INVALID
+
+
+@pytest.mark.parametrize("value", PUBLIC_SAFETY_CASES["safe_summary_tokens"])
+def test_shared_counterfactual_allows_safe_summary_token(value: str) -> None:
+    record = {
+        **dsh_fixture_records()[5],
+        "summary": {"turn": 1, "step": 1, "tool_name": value},
+        "source_refs": {"event_seq": "5", "tool_call_id": "call-safe"},
+    }
+    assert normalize_observer_envelope(record).summary["tool_name"] == value
+
+
+@pytest.mark.parametrize("value", PUBLIC_SAFETY_CASES["safe_identity_tokens"])
+def test_shared_counterfactual_allows_safe_source_ref(value: str) -> None:
+    record = {
+        **dsh_fixture_records()[5],
+        "summary": {"turn": 1, "step": 1, "tool_name": "bash"},
+        "source_refs": {"event_seq": "5", "tool_call_id": value},
+    }
+    assert normalize_observer_envelope(record).source_refs["tool_call_id"] == value
 
 
 def test_observer_is_a_separate_default_off_plugin_row() -> None:

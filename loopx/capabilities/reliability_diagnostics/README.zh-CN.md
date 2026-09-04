@@ -66,7 +66,9 @@ Driver 或 Agent，只消费 session log 的发布事件，并且不进入 Drive
 `prompt`、`schedule`、`retry`、`stop`、`resume`、`gate`、`tool_call`、`worker_state` 等）、
 `raw_material_field_rejected`（`transcript`、`messages`、`content`、`text`、`arguments`、
 `output`、`stdout`、`stderr`、`log`、`cwd`、`token` 等）或 `unsupported_field_rejected`。
-值还要通过共享的 public-safe 检查，绝对本地路径与凭据样式 token 会 fail closed。
+每个 provider 都必须在**首次 append 前**执行等价的递归 public-safe 值契约，LoopX ingest
+还会再次校验。绝对本地路径与凭据样式 token 会 fail closed，不会进入 ledger bytes；
+producer 会把它们计为 `public_safety_violation`。
 
 ### Observer stats（`reliability_observer_stats_v0`）
 
@@ -97,8 +99,9 @@ provider/observer stats 精确关联。stats 按 observer 实例累计；receipt
 
 状态规则：无观测、stats 缺失或不能与持久化 envelope 精确关联、身份被拒绝、ledger
 存在无效输入、任一 outbound endpoint，或观测进入 worker context / scheduler inputs 时
-为 `invalid`。否则 observer 故障或控制形态输入为 `quarantined`；事件缺口、丢弃、重复、
-原始/不支持字段或时钟不确定度超阈值为 `degraded`；其它情况才是 `valid`。
+为 `invalid`。否则 observer 故障、控制形态输入或 producer 侧
+`public_safety_violation` 为 `quarantined`；事件缺口、丢弃、重复、原始/不支持字段或时钟
+不确定度超阈值为 `degraded`；其它情况才是 `valid`。
 
 ### Diagnostic projection（`reliability_diagnostic_projection_v0`）
 

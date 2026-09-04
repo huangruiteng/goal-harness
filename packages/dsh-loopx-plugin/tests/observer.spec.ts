@@ -39,6 +39,19 @@ const config: ShadowObserverConfig = {
   ledgerDir: '/ledger',
   bufferBound: 4,
 }
+interface PublicSafetyFixture {
+  readonly schema_version: string
+  readonly unsafe_summary_tokens: readonly string[]
+  readonly unsafe_identity_tokens: readonly string[]
+  readonly invalid_source_ref_tokens: readonly string[]
+  readonly safe_summary_tokens: readonly string[]
+  readonly safe_identity_tokens: readonly string[]
+}
+const TEST_DIR = dirname(fileURLToPath(import.meta.url))
+const publicSafetyFixture = JSON.parse(readFileSync(join(
+  TEST_DIR,
+  '../../../tests/fixtures/control_plane/reliability_diagnostics_public_safety_v0.json',
+), 'utf8')) as PublicSafetyFixture
 const ENVELOPE_FIELDS = [
   'schema_version', 'capability_id', 'provider_id', 'observer_id', 'goal_id', 'session_id',
   'sequence', 'observed_at', 'clock', 'event_kind', 'summary', 'source_refs',
@@ -117,11 +130,18 @@ describe('shadow observer configuration', () => {
       [ENV_SESSION_ID]: sessionId,
       [ENV_RUN_IDENTITY]: JSON.stringify({ ...runIdentity, extra: 'not-pinned' }),
     })).toBeUndefined()
+    expect(resolveShadowObserverConfig({
+      [ENV_GOAL_ID]: goalId,
+      [ENV_SESSION_ID]: sessionId,
+      [ENV_RUN_IDENTITY]: JSON.stringify({
+        ...runIdentity,
+        worker_id: publicSafetyFixture.unsafe_identity_tokens[0],
+      }),
+    })).toBeUndefined()
   })
 
   it('imports nothing from the driver and owns no send path', () => {
-    const here = dirname(fileURLToPath(import.meta.url))
-    const source = readFileSync(join(here, '../src/observer.ts'), 'utf8')
+    const source = readFileSync(join(TEST_DIR, '../src/observer.ts'), 'utf8')
     expect(source).not.toMatch(/from '\.\/driver/u)
     expect(source).not.toMatch(/from '\.\/cli/u)
     expect(source).not.toMatch(/from '\.\/managed-runtime/u)
@@ -190,6 +210,94 @@ describe('shadow observer envelopes', () => {
     expect(stats.observed_event_count).toBe(
       stats.accepted_event_count + stats.rejected_event_count + stats.backpressure_drop_count,
     )
+  })
+
+  it('enforces shared public-safety counterfactuals before the first append', async () => {
+    expect(publicSafetyFixture.schema_version).toBe(
+      'reliability_diagnostics_public_safety_counterfactuals_v0',
+    )
+    const { appended, observer } = observerWithCapture({ bufferBound: 32 })
+    const session = fakeSession()
+    let sequence = 1
+    for (const value of publicSafetyFixture.unsafe_summary_tokens) {
+      observer.observeSessionEvent(
+        session,
+        sessionEvent('tool/call', sequence, 1_756_728_001_000 + sequence, {
+          turn: 1, step: sequence, callId: `call-${sequence}`, name: value,
+        }),
+      )
+      sequence += 1
+    }
+    for (const value of publicSafetyFixture.unsafe_summary_tokens) {
+      observer.observeSessionEvent(
+        session,
+        sessionEvent('tool/result', sequence, 1_756_728_001_000 + sequence, {
+          turn: 1,
+          step: sequence,
+          error: { code: value },
+          message: { source: { callId: `call-${sequence}` } },
+        }),
+      )
+      sequence += 1
+    }
+    for (const value of publicSafetyFixture.unsafe_identity_tokens) {
+      observer.observeSessionEvent(
+        session,
+        sessionEvent('tool/call', sequence, 1_756_728_001_000 + sequence, {
+          turn: 1, step: sequence, callId: value, name: 'bash',
+        }),
+      )
+      sequence += 1
+    }
+    for (const value of publicSafetyFixture.invalid_source_ref_tokens) {
+      observer.observeSessionEvent(
+        session,
+        sessionEvent('tool/call', sequence, 1_756_728_001_000 + sequence, {
+          turn: 1, step: sequence, callId: value, name: 'bash',
+        }),
+      )
+      sequence += 1
+    }
+    for (const value of publicSafetyFixture.safe_summary_tokens) {
+      observer.observeSessionEvent(
+        session,
+        sessionEvent('tool/call', sequence, 1_756_728_001_000 + sequence, {
+          turn: 1, step: sequence, callId: `call-${sequence}`, name: value,
+        }),
+      )
+      sequence += 1
+    }
+    for (const value of publicSafetyFixture.safe_identity_tokens) {
+      observer.observeSessionEvent(
+        session,
+        sessionEvent('tool/call', sequence, 1_756_728_001_000 + sequence, {
+          turn: 1, step: sequence, callId: value, name: 'bash',
+        }),
+      )
+      sequence += 1
+    }
+    await observer.flush()
+
+    const ledgerBytes = appended.flat().join('\n')
+    for (const value of [
+      ...publicSafetyFixture.unsafe_summary_tokens,
+      ...publicSafetyFixture.unsafe_identity_tokens,
+      ...publicSafetyFixture.invalid_source_ref_tokens,
+    ]) expect(ledgerBytes).not.toContain(value)
+    const records = parsed(appended)
+    const envelopes = records.filter(
+      (record): record is ObserverEnvelope => record.schema_version === OBSERVER_ENVELOPE_SCHEMA_VERSION,
+    )
+    expect(envelopes).toHaveLength(
+      publicSafetyFixture.invalid_source_ref_tokens.length
+        + publicSafetyFixture.safe_summary_tokens.length
+        + publicSafetyFixture.safe_identity_tokens.length,
+    )
+    const stats = records.at(-1) as ObserverStats
+    const unsafeCount = (publicSafetyFixture.unsafe_summary_tokens.length * 2)
+      + publicSafetyFixture.unsafe_identity_tokens.length
+    expect(stats.rejected_by_reason).toEqual({ public_safety_violation: unsafeCount })
+    expect(stats.observed_event_count).toBe(envelopes.length + unsafeCount)
   })
 
   it('drops with a count while a flush is in flight and the buffer is full', async () => {

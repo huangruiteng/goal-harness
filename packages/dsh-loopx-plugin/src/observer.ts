@@ -69,6 +69,17 @@ export const RUN_IDENTITY_FIELDS = [
 
 const IDENTITY_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$/u
 const SUMMARY_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_./:-]{0,79}$/u
+const LOCAL_PATH_SURFACE = /(?<![:/A-Za-z0-9])(?:\/(?:Users|home|Volumes|private|tmp|var|etc|opt|srv|mnt|root|workspace|workspaces)\/[^\s`'"<>]+|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/][^\s`'"<>]+)/iu
+const SECRET_LIKE_SURFACE = /(?:\bbearer\s+[a-z0-9._~+\/=-]{16,}|\b(?:access|secret)[_-]?key\s*[=:]\s*[^\s`'"<>]+|\b(?:ak|sk)\s*[=:]\s*[^\s`'"<>]+|(?<![a-z0-9_])(?:ak|sk)[-_=:][a-z0-9_=-]{10,}|\bgh[pousr]_[a-z0-9]{20,}\b|\beyj[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\b|\btoken\s*[=:]\s*[^\s`'"<>]{12,})/iu
+const CREDENTIAL_FIELD_FAMILIES = new Set([
+  'accesskey', 'accesstoken', 'apikey', 'authtoken', 'authorization',
+  'clientsecret', 'cookie', 'credential', 'credentials', 'password',
+  'privatekey', 'refreshtoken', 'secret', 'sessiontoken', 'token',
+])
+const CREDENTIAL_FIELD_SUFFIXES = [
+  '_token', '_secret', '_password', '_credential', '_credentials',
+] as const
+const UNBOUNDED_PAYLOAD_FIELD_FAMILIES = new Set(['requestbody', 'responsebody'])
 
 export type ObserverEventKind =
   | 'session_started'
@@ -86,6 +97,12 @@ export type ObserverEventKind =
   | 'unsupported'
 
 export type ClockSource = 'harness_event_time' | 'observer_wall_clock' | 'fixture'
+
+export type ObserverRejectionReason =
+  | 'identity_invalid'
+  | 'clock_invalid'
+  | 'public_safety_violation'
+  | 'observer_internal_failure'
 
 export interface ObserverEnvelope {
   readonly schema_version: typeof OBSERVER_ENVELOPE_SCHEMA_VERSION
@@ -158,6 +175,35 @@ export interface ShadowObserverOptions {
   readonly observerId?: string | undefined
 }
 
+function normalizePublicSafeFieldName(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/gu, '$1_$2')
+    .replace(/[^A-Za-z0-9]+/gu, '_')
+    .replace(/^_+|_+$/gu, '')
+    .toLowerCase()
+}
+
+function isPublicSafeText(value: string): boolean {
+  return !LOCAL_PATH_SURFACE.test(value) && !SECRET_LIKE_SURFACE.test(value)
+}
+
+/** Keep the producer boundary equivalent to LoopX's recursive Python guard. */
+function isPublicSafeValue(value: unknown): boolean {
+  if (typeof value === 'string') return isPublicSafeText(value)
+  if (Array.isArray(value)) return value.every(item => isPublicSafeValue(item))
+  if (typeof value !== 'object' || value === null) return true
+  return Object.entries(value).every(([key, item]) => {
+    if (!isPublicSafeText(key)) return false
+    const normalized = normalizePublicSafeFieldName(key)
+    const flattened = normalized.replaceAll('_', '')
+    if (CREDENTIAL_FIELD_FAMILIES.has(flattened)
+      || CREDENTIAL_FIELD_SUFFIXES.some(suffix => normalized.endsWith(suffix))) return false
+    if (UNBOUNDED_PAYLOAD_FIELD_FAMILIES.has(flattened)) return false
+    if (normalized === 'raw' || normalized.startsWith('raw_')) return false
+    return isPublicSafeValue(item)
+  })
+}
+
 export function defaultLedgerDir(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env[ENV_LEDGER_DIR]
   return resolve(configured?.trim()
@@ -177,7 +223,9 @@ export function resolveShadowObserverConfig(
   const sessionId = env[ENV_SESSION_ID]?.trim()
   const runIdentity = parseRunIdentity(env[ENV_RUN_IDENTITY])
   if (!goalId || !IDENTITY_TOKEN.test(goalId)
+    || !isPublicSafeText(goalId)
     || !sessionId || !IDENTITY_TOKEN.test(sessionId)
+    || !isPublicSafeText(sessionId)
     || runIdentity === undefined) return undefined
   const rawBound = Number.parseInt(env[ENV_BUFFER_BOUND] ?? '', 10)
   const bufferBound = Number.isInteger(rawBound) && rawBound >= 1 && rawBound <= MAX_BUFFER_BOUND
@@ -195,7 +243,7 @@ function validRunIdentity(value: unknown): value is ObserverRunIdentity {
     && expected.every((field, index) => actual[index] === field)
     && RUN_IDENTITY_FIELDS.every((field) => {
       const item = record[field]
-      return typeof item === 'string' && IDENTITY_TOKEN.test(item)
+      return typeof item === 'string' && IDENTITY_TOKEN.test(item) && isPublicSafeText(item)
     })
 }
 
@@ -315,8 +363,12 @@ export class ShadowObserver {
   private flushAttemptCount = 0
 
   constructor(options: ShadowObserverOptions) {
-    if (!IDENTITY_TOKEN.test(options.config.goalId)) throw new Error('goal id must be an identity token')
-    if (!IDENTITY_TOKEN.test(options.config.sessionId)) throw new Error('session id must be an identity token')
+    if (!IDENTITY_TOKEN.test(options.config.goalId) || !isPublicSafeText(options.config.goalId)) {
+      throw new Error('goal id must be a public-safe identity token')
+    }
+    if (!IDENTITY_TOKEN.test(options.config.sessionId) || !isPublicSafeText(options.config.sessionId)) {
+      throw new Error('session id must be a public-safe identity token')
+    }
     if (!validRunIdentity(options.config.runIdentity)) throw new Error('run identity must be fully pinned')
     if (!Number.isInteger(options.config.bufferBound)
       || options.config.bufferBound < 1
@@ -324,7 +376,9 @@ export class ShadowObserver {
       throw new Error(`buffer bound must be within 1..${MAX_BUFFER_BOUND}`)
     }
     const observerId = options.observerId ?? `${PROVIDER_ID}-${randomUUID()}`
-    if (!IDENTITY_TOKEN.test(observerId)) throw new Error('observer id must be an identity token')
+    if (!IDENTITY_TOKEN.test(observerId) || !isPublicSafeText(observerId)) {
+      throw new Error('observer id must be a public-safe identity token')
+    }
     this.config = {
       ...options.config,
       runIdentity: { ...options.config.runIdentity },
@@ -417,7 +471,11 @@ export class ShadowObserver {
     this.buffer = []
     this.flushAttemptCount += 1
     try {
-      const lines = [...taken, this.stats()].map(record => JSON.stringify(record))
+      const records = [...taken, this.stats()]
+      if (!records.every(record => isPublicSafeValue(record))) {
+        throw new Error('observer public-safety invariant failed before append')
+      }
+      const lines = records.map(record => JSON.stringify(record))
       await this.appendLines(this.path, lines)
     } catch (error: unknown) {
       this.observerFailureCount += 1
@@ -492,13 +550,17 @@ export class ShadowObserver {
       summary,
       source_refs: sourceRefs,
     }
+    if (!isPublicSafeValue(envelope)) {
+      this.reject('public_safety_violation')
+      return
+    }
     this.buffer.push(envelope)
     this.acceptedEventCount += 1
     this.peakBufferedEventCount = Math.max(this.peakBufferedEventCount, this.buffer.length)
     if (this.buffer.length >= this.config.bufferBound) this.requestFlush()
   }
 
-  private reject(reason: string): void {
+  private reject(reason: ObserverRejectionReason): void {
     this.rejectedEventCount += 1
     this.rejectedByReason.set(reason, (this.rejectedByReason.get(reason) ?? 0) + 1)
   }

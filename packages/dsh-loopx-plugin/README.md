@@ -144,6 +144,11 @@ Every hook body and every flush is isolated, so an observer failure is counted
 into the receipt instead of reaching DSH. This is module and hook isolation,
 not an OS-process-isolation claim.
 
+Before its first append, the producer applies the same recursive local-path,
+credential-like value, and credential-field guard as the Python contract.
+Unsafe event tokens or ids are counted as `public_safety_violation` and never
+reach ledger bytes; CLI ingest independently re-validates persisted records.
+
 It is off unless one exact goal, DSH session, and complete run identity are
 declared before DSH starts:
 

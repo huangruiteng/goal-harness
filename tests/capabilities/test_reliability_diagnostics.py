@@ -475,6 +475,18 @@ def test_receipt_invalidates_any_outbound_or_worker_context_path(
     assert ReceiptReason.OBSERVER_FAILURE.value in receipt["reason_codes"]
 
 
+def test_receipt_quarantines_a_trailing_public_safety_rejection() -> None:
+    receipt = receipt_for(
+        envelope(0),
+        stats(
+            rejected_event_count=1,
+            rejected_by_reason={EnvelopeRejection.PUBLIC_SAFETY_VIOLATION.value: 1},
+        ),
+    )
+    assert receipt["status"] == ReceiptStatus.QUARANTINED.value
+    assert receipt["reason_codes"] == [ReceiptReason.PUBLIC_SAFETY_VIOLATION.value]
+
+
 @pytest.mark.parametrize(
     ("records", "reason"),
     [
