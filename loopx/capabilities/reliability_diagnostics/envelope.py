@@ -71,6 +71,7 @@ class EnvelopeRejection(StrEnum):
     SUMMARY_INVALID = "summary_invalid"
     SOURCE_REF_INVALID = "source_ref_invalid"
     PUBLIC_SAFETY_VIOLATION = "public_safety_violation"
+    OBSERVER_INTERNAL_FAILURE = "observer_internal_failure"
 
 
 ENVELOPE_FIELDS = frozenset(
@@ -78,6 +79,7 @@ ENVELOPE_FIELDS = frozenset(
         "schema_version",
         "capability_id",
         "provider_id",
+        "observer_id",
         "goal_id",
         "session_id",
         "agent_id",
@@ -176,6 +178,7 @@ class ObserverClock:
 @dataclass(frozen=True)
 class ObserverEnvelope:
     provider_id: str
+    observer_id: str
     goal_id: str
     session_id: str
     sequence: int
@@ -191,6 +194,7 @@ class ObserverEnvelope:
             "schema_version": OBSERVER_ENVELOPE_SCHEMA_VERSION,
             "capability_id": CAPABILITY_ID,
             "provider_id": self.provider_id,
+            "observer_id": self.observer_id,
             "goal_id": self.goal_id,
             "session_id": self.session_id,
             "sequence": self.sequence,
@@ -372,6 +376,7 @@ def normalize_observer_envelope(record: Mapping[str, Any]) -> ObserverEnvelope:
         )
     envelope = ObserverEnvelope(
         provider_id=_identity(record.get("provider_id"), name="provider_id") or "",
+        observer_id=_identity(record.get("observer_id"), name="observer_id") or "",
         goal_id=_identity(record.get("goal_id"), name="goal_id") or "",
         session_id=_identity(record.get("session_id"), name="session_id") or "",
         agent_id=_identity(record.get("agent_id"), name="agent_id", optional=True),

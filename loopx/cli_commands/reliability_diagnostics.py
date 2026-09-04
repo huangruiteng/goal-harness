@@ -11,14 +11,16 @@ from typing import Any
 
 from ..capabilities.reliability_diagnostics import (
     CAPABILITY_ID,
+    OBSERVER_ENVELOPE_SCHEMA_VERSION,
     OBSERVER_STATS_SCHEMA_VERSION,
-    ClockSource,
-    ShadowObserverIntake,
+    EnvelopeRejection,
+    ObserverEnvelopeError,
     append_ledger_records,
     build_diagnostic_projection,
     build_integrity_receipt,
     ledger_path,
     ledger_ref,
+    normalize_observer_envelope,
     normalize_observer_stats,
     parse_ndjson_lines,
     read_ledger,
@@ -31,8 +33,7 @@ PrintPayload = Callable[[dict[str, Any], str, Callable[[dict[str, Any]], str]], 
 FormatSelector = Callable[..., str]
 AddFormat = Callable[[argparse.ArgumentParser], None]
 
-INGEST_OBSERVER_ID = "loopx-cli-ingest"
-INGEST_BUFFER_BOUND = 4096
+INGEST_VIOLATION_SCHEMA_VERSION = "reliability_ingest_violation_v0"
 
 
 def register_reliability_diagnostics_commands(
@@ -81,55 +82,80 @@ def _ingest(path: Path, goal_id: str, source: str) -> dict[str, Any]:
     else:
         lines = Path(source).expanduser().read_text(encoding="utf-8").splitlines()
     parsed, malformed = parse_ndjson_lines(lines)
-    intake = ShadowObserverIntake(
-        provider_id="loopx-core",
-        observer_id=INGEST_OBSERVER_ID,
-        goal_id=goal_id,
-        clock_source=ClockSource.OBSERVER_WALL_CLOCK,
-        buffer_bound=INGEST_BUFFER_BOUND,
-    )
-    appended = 0
+    accepted_records: list[dict[str, Any]] = []
+    accepted_envelopes = 0
     passthrough_stats = 0
+    rejected_by_reason: dict[str, int] = {}
+
+    def reject(reason: EnvelopeRejection) -> None:
+        rejected_by_reason[reason.value] = rejected_by_reason.get(reason.value, 0) + 1
+
     for record in parsed:
-        if isinstance(record, dict) and record.get("schema_version") == OBSERVER_STATS_SCHEMA_VERSION:
+        if not isinstance(record, dict):
+            reject(EnvelopeRejection.SCHEMA_MISMATCH)
+            continue
+        schema = record.get("schema_version")
+        if schema == OBSERVER_STATS_SCHEMA_VERSION:
             try:
                 stats = normalize_observer_stats(record)
             except ValueError:
-                malformed += 1
+                reject(EnvelopeRejection.SCHEMA_MISMATCH)
                 continue
             if stats.goal_id != goal_id:
-                malformed += 1
+                reject(EnvelopeRejection.IDENTITY_INVALID)
                 continue
-            appended += append_ledger_records(path, [stats.as_dict()])
+            accepted_records.append(stats.as_dict())
             passthrough_stats += 1
             continue
-        intake.observe(record)
-        if intake.buffered_count >= INGEST_BUFFER_BOUND:
-            appended += len(intake.flush(lambda records: append_ledger_records(path, records[:-1]), emitted_at=_now()))
-    appended += len(intake.flush(lambda records: append_ledger_records(path, records[:-1]), emitted_at=_now()))
-    stats_record = intake.stats(emitted_at=_now())
-    # A clean ingest is a transparent copy of the observer output. The ingest
-    # gate records itself only when it refused, dropped, or failed something,
-    # so that violation stays durable and visible in the receipt.
-    gate_recorded = bool(
-        stats_record.rejected_event_count
-        or stats_record.backpressure_drop_count
-        or stats_record.observer_failure_count
-    )
+        if schema != OBSERVER_ENVELOPE_SCHEMA_VERSION:
+            reject(EnvelopeRejection.SCHEMA_MISMATCH)
+            continue
+        try:
+            envelope = normalize_observer_envelope(record)
+        except ObserverEnvelopeError as exc:
+            reject(exc.reason)
+            continue
+        if envelope.goal_id != goal_id:
+            reject(EnvelopeRejection.IDENTITY_INVALID)
+            continue
+        accepted_records.append(envelope.as_dict())
+        accepted_envelopes += 1
+
+    for _ in range(malformed):
+        reject(EnvelopeRejection.SCHEMA_MISMATCH)
+    appended = append_ledger_records(path, accepted_records)
+    rejected_event_count = sum(rejected_by_reason.values())
+    gate_recorded = rejected_event_count > 0
     if gate_recorded:
-        appended += append_ledger_records(path, [stats_record.as_dict()])
+        # The gate record is intentionally not an observer schema. The ledger
+        # reader retains it as a durable invalid-record reason instead of
+        # silently forgetting input that the ingest boundary refused.
+        appended += append_ledger_records(
+            path,
+            [
+                {
+                    "schema_version": INGEST_VIOLATION_SCHEMA_VERSION,
+                    "capability_id": CAPABILITY_ID,
+                    "goal_id": goal_id,
+                    "emitted_at": _now(),
+                    "malformed_line_count": malformed,
+                    "rejected_event_count": rejected_event_count,
+                    "rejected_by_reason": dict(sorted(rejected_by_reason.items())),
+                }
+            ],
+        )
     return {
         "ok": True,
         "command": "ingest",
         "goal_id": goal_id,
         "ledger_ref": ledger_ref(goal_id),
         "appended_record_count": appended,
-        "accepted_envelope_count": stats_record.accepted_event_count,
+        "accepted_envelope_count": accepted_envelopes,
         "passthrough_stats_count": passthrough_stats,
-        "rejected_event_count": stats_record.rejected_event_count,
-        "rejected_by_reason": dict(stats_record.rejected_by_reason),
+        "rejected_event_count": rejected_event_count,
+        "rejected_by_reason": dict(sorted(rejected_by_reason.items())),
         "malformed_line_count": malformed,
-        "observer_failure_count": stats_record.observer_failure_count,
+        "observer_failure_count": 0,
         "ingest_gate_recorded": gate_recorded,
     }
 

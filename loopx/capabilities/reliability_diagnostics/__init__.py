@@ -20,8 +20,11 @@ from .envelope import (
 from .fixture import FIXTURE_GOAL_ID, dsh_fixture_records, run_dsh_fixture
 from .intake import (
     DEFAULT_BUFFER_BOUND,
+    RUN_IDENTITY_FIELDS,
+    ObserverRunIdentity,
     ObserverStats,
     ShadowObserverIntake,
+    normalize_observer_run_identity,
     normalize_observer_stats,
 )
 from .ledger import (
@@ -60,6 +63,7 @@ __all__ = [
     "OBSERVER_ENVELOPE_SCHEMA_VERSION",
     "OBSERVER_STATS_SCHEMA_VERSION",
     "RAW_MATERIAL_FIELD_FAMILIES",
+    "RUN_IDENTITY_FIELDS",
     "SOURCE_REF_FIELDS",
     "SUMMARY_FIELDS",
     "ClockSource",
@@ -70,6 +74,7 @@ __all__ = [
     "ObserverEnvelope",
     "ObserverEnvelopeError",
     "ObserverEventKind",
+    "ObserverRunIdentity",
     "ObserverStats",
     "ReceiptReason",
     "ReceiptStatus",
@@ -81,6 +86,7 @@ __all__ = [
     "ledger_path",
     "ledger_ref",
     "normalize_observer_envelope",
+    "normalize_observer_run_identity",
     "normalize_observer_stats",
     "parse_ndjson_lines",
     "read_ledger",

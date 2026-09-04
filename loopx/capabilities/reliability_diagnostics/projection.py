@@ -48,7 +48,11 @@ def _stage_after(envelope: ObserverEnvelope) -> DiagnosticStage:
         return DiagnosticStage.ERRORED
     if kind is ObserverEventKind.TOOL_CALLED:
         return DiagnosticStage.TOOL_RUNNING
-    if kind in {ObserverEventKind.TURN_ENDED, ObserverEventKind.SESSION_STARTED}:
+    if kind is ObserverEventKind.TURN_ENDED:
+        if str(envelope.summary.get("reason", "")) in _TERMINAL_ERROR_REASONS:
+            return DiagnosticStage.ERRORED
+        return DiagnosticStage.IDLE
+    if kind is ObserverEventKind.SESSION_STARTED:
         return DiagnosticStage.IDLE
     if kind is ObserverEventKind.AGENT_STATUS:
         return DiagnosticStage.RUNNING if envelope.summary.get("status") == "running" else DiagnosticStage.IDLE
@@ -89,7 +93,13 @@ def build_diagnostic_projection(
             counts["turns_started"] += 1
         elif kind is ObserverEventKind.TURN_ENDED:
             counts["turns_ended"] += 1
-            if unrecovered_errors and str(envelope.summary.get("reason", "")) not in _TERMINAL_ERROR_REASONS:
+            terminal_error = (
+                str(envelope.summary.get("reason", "")) in _TERMINAL_ERROR_REASONS
+            )
+            if terminal_error and not unrecovered_errors:
+                counts["errors"] += 1
+                unrecovered_errors = 1
+            elif unrecovered_errors and not terminal_error:
                 recovered_errors += unrecovered_errors
                 unrecovered_errors = 0
         elif kind is ObserverEventKind.STEP_ENDED:

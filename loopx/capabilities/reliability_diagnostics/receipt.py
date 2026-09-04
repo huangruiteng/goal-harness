@@ -44,6 +44,9 @@ class ReceiptReason(StrEnum):
     CONTROL_FIELD_REJECTED = "control_field_rejected"
     LEDGER_RECORD_INVALID = "ledger_record_invalid"
     OBSERVER_STATS_MISSING = "observer_stats_missing"
+    OBSERVER_STATS_MISMATCH = "observer_stats_mismatch"
+    IDENTITY_REJECTED = "identity_rejected"
+    OBSERVATION_ENTERED_SCHEDULER_INPUTS = "observation_entered_scheduler_inputs"
     SEQUENCE_GAP = "sequence_gap"
     SEQUENCE_DUPLICATE = "sequence_duplicate"
     BACKPRESSURE_DROP = "backpressure_drop"
@@ -57,13 +60,17 @@ _INVALID_REASONS = frozenset(
         ReceiptReason.NO_OBSERVATIONS,
         ReceiptReason.OUTBOUND_ENDPOINT_CONFIGURED,
         ReceiptReason.OBSERVATION_ENTERED_WORKER_CONTEXT,
+        ReceiptReason.OBSERVATION_ENTERED_SCHEDULER_INPUTS,
+        ReceiptReason.LEDGER_RECORD_INVALID,
+        ReceiptReason.OBSERVER_STATS_MISSING,
+        ReceiptReason.OBSERVER_STATS_MISMATCH,
+        ReceiptReason.IDENTITY_REJECTED,
     }
 )
 _QUARANTINE_REASONS = frozenset(
     {
         ReceiptReason.OBSERVER_FAILURE,
         ReceiptReason.CONTROL_FIELD_REJECTED,
-        ReceiptReason.LEDGER_RECORD_INVALID,
     }
 )
 
@@ -101,7 +108,14 @@ def read_ledger(records: Iterable[Any], *, goal_id: str, malformed_line_count: i
                 stats = normalize_observer_stats(record)
                 if stats.goal_id != goal_id:
                     raise ValueError("goal_id does not match ledger")
-                # Stats are cumulative per observer instance; the latest wins.
+                # Stats are cumulative per observer instance; the latest wins,
+                # but one observer id may never change its identity mid-ledger.
+                previous = reading.stats.get(stats.observer_id)
+                if previous is not None and (
+                    previous.provider_id != stats.provider_id
+                    or previous.run_identity != stats.run_identity
+                ):
+                    raise ValueError("observer stats identity changed within one ledger")
                 reading.stats[stats.observer_id] = stats
             else:
                 raise ValueError("unknown ledger record schema")
@@ -111,9 +125,11 @@ def read_ledger(records: Iterable[Any], *, goal_id: str, malformed_line_count: i
 
 
 def _sequence_accounting(envelopes: Iterable[ObserverEnvelope]) -> tuple[int, int]:
-    by_session: dict[str, list[int]] = defaultdict(list)
+    by_session: dict[tuple[str, str, str], list[int]] = defaultdict(list)
     for envelope in envelopes:
-        by_session[envelope.session_id].append(envelope.sequence)
+        by_session[
+            (envelope.provider_id, envelope.observer_id, envelope.session_id)
+        ].append(envelope.sequence)
     lost = 0
     duplicates = 0
     for sequences in by_session.values():
@@ -140,10 +156,33 @@ def build_integrity_receipt(
             rejected_by_reason[reason] += count
     outbound_endpoints = sorted({endpoint for item in stats for endpoint in item.outbound_endpoints})
     entered_worker_context = any(item.observation_entered_worker_context for item in stats)
+    entered_scheduler_inputs = any(
+        item.observation_entered_scheduler_inputs for item in stats
+    )
     observer_failures = sum(item.observer_failure_count for item in stats)
     backpressure_drops = sum(item.backpressure_drop_count for item in stats)
     max_uncertainty = max((item.clock.uncertainty_ms for item in envelopes), default=0)
     clock_sources = sorted({item.clock.source.value for item in envelopes} | {item.clock_source.value for item in stats})
+
+    envelopes_by_observer: dict[str, list[ObserverEnvelope]] = defaultdict(list)
+    for envelope in envelopes:
+        envelopes_by_observer[envelope.observer_id].append(envelope)
+    stats_mismatch = False
+    for observer_id, observer_envelopes in envelopes_by_observer.items():
+        observer_stats = reading.stats.get(observer_id)
+        if observer_stats is None:
+            continue
+        if (
+            {item.provider_id for item in observer_envelopes}
+            != {observer_stats.provider_id}
+            or observer_stats.accepted_event_count != len(observer_envelopes)
+        ):
+            stats_mismatch = True
+    if any(
+        item.accepted_event_count and observer_id not in envelopes_by_observer
+        for observer_id, item in reading.stats.items()
+    ):
+        stats_mismatch = True
 
     reasons: set[ReceiptReason] = set()
     if not envelopes:
@@ -152,14 +191,20 @@ def build_integrity_receipt(
         reasons.add(ReceiptReason.OUTBOUND_ENDPOINT_CONFIGURED)
     if entered_worker_context:
         reasons.add(ReceiptReason.OBSERVATION_ENTERED_WORKER_CONTEXT)
+    if entered_scheduler_inputs:
+        reasons.add(ReceiptReason.OBSERVATION_ENTERED_SCHEDULER_INPUTS)
     if observer_failures:
         reasons.add(ReceiptReason.OBSERVER_FAILURE)
     if rejected_by_reason.get(EnvelopeRejection.CONTROL_FIELD_REJECTED.value):
         reasons.add(ReceiptReason.CONTROL_FIELD_REJECTED)
     if reading.invalid_record_count:
         reasons.add(ReceiptReason.LEDGER_RECORD_INVALID)
-    if envelopes and not stats:
+    if envelopes and any(
+        observer_id not in reading.stats for observer_id in envelopes_by_observer
+    ):
         reasons.add(ReceiptReason.OBSERVER_STATS_MISSING)
+    if stats_mismatch:
+        reasons.add(ReceiptReason.OBSERVER_STATS_MISMATCH)
     if lost:
         reasons.add(ReceiptReason.SEQUENCE_GAP)
     if duplicates:
@@ -170,6 +215,8 @@ def build_integrity_receipt(
         reasons.add(ReceiptReason.RAW_MATERIAL_REJECTED)
     if rejected_by_reason.get(EnvelopeRejection.UNSUPPORTED_FIELD_REJECTED.value):
         reasons.add(ReceiptReason.UNSUPPORTED_FIELD_REJECTED)
+    if rejected_by_reason.get(EnvelopeRejection.IDENTITY_INVALID.value):
+        reasons.add(ReceiptReason.IDENTITY_REJECTED)
     if max_uncertainty > clock_uncertainty_degraded_ms:
         reasons.add(ReceiptReason.CLOCK_UNCERTAINTY_EXCEEDED)
 
@@ -189,9 +236,11 @@ def build_integrity_receipt(
         "status": status.value,
         "reason_codes": sorted(reason.value for reason in reasons),
         "provider_ids": sorted({item.provider_id for item in envelopes} | {item.provider_id for item in stats}),
-        "observer_ids": sorted(reading.stats),
+        "observer_ids": sorted(set(reading.stats) | set(envelopes_by_observer)),
         "session_count": len({item.session_id for item in envelopes}),
-        "observed_event_count": len(envelopes),
+        "observed_event_count": sum(item.observed_event_count for item in stats),
+        "accepted_event_count": sum(item.accepted_event_count for item in stats),
+        "persisted_event_count": len(envelopes),
         "lost_event_count": lost,
         "duplicate_sequence_count": duplicates,
         "ledger_invalid_record_count": reading.invalid_record_count,
@@ -200,9 +249,24 @@ def build_integrity_receipt(
         "buffer_bound": max((item.buffer_bound for item in stats), default=None),
         "backpressure_drop_count": backpressure_drops,
         "observer_failure_count": observer_failures,
+        "peak_buffered_event_count": max(
+            (item.peak_buffered_event_count for item in stats), default=0
+        ),
+        "flush_attempt_count": sum(item.flush_attempt_count for item in stats),
         "clock": {"sources": clock_sources, "max_uncertainty_ms": max_uncertainty},
         "outbound_endpoints": outbound_endpoints,
         "observation_entered_worker_context": entered_worker_context,
+        "observation_entered_scheduler_inputs": entered_scheduler_inputs,
+        "run_identities": [
+            item.run_identity.as_dict()
+            for item in sorted(stats, key=lambda candidate: candidate.observer_id)
+        ],
+        "event_sources": sorted(
+            {source for item in stats for source in item.event_sources}
+        ),
+        "source_fields_consumed": sorted(
+            {field for item in stats for field in item.source_fields_consumed}
+        ),
         "event_kinds_consumed": sorted({item.event_kind.value for item in envelopes}),
         "summary_fields_consumed": sorted({key for item in envelopes for key in item.summary}),
         "observed_from": envelopes[0].observed_at if envelopes else None,
