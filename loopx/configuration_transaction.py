@@ -90,15 +90,14 @@ def build_configuration_update_plan(
     if desired_present == (desired == CONFIGURATION_REVISION_MISSING):
         raise ValueError("desired presence does not match desired_revision")
 
-    action = (
-        "create"
-        if not current_present and desired_present
-        else "unchanged"
-        if current == desired
-        else "delete"
-        if not desired_present
-        else "update"
-    )
+    if not current_present and desired_present:
+        action = "create"
+    elif current == desired:
+        action = "unchanged"
+    elif not desired_present:
+        action = "delete"
+    else:
+        action = "update"
     identity = {
         "current_revision": current,
         "desired_revision": desired,

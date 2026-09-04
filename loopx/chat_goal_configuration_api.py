@@ -30,6 +30,76 @@ GoalConfigurationReader = Callable[..., dict[str, Any]]
 GoalConfigurationWriter = Callable[..., dict[str, Any]]
 
 
+def _boolean_configuration(
+    capability_id: str,
+    configuration: Mapping[str, Any],
+    key: str,
+    *,
+    default: bool | None = None,
+) -> bool:
+    value = configuration.get(key, default)
+    if not isinstance(value, bool):
+        raise TypeError(f"{capability_id}.{key} must be a boolean")
+    return value
+
+
+def _multi_subagent_options(config: Mapping[str, Any]) -> dict[str, Any]:
+    if not _boolean_configuration("multi_subagent", config, "enabled"):
+        return {"multi_subagent_feature": "off"}
+    max_children = config.get("max_children", 4)
+    if not isinstance(max_children, int) or isinstance(max_children, bool):
+        raise TypeError("multi_subagent.max_children must be an integer")
+    domains = config.get("allowed_domains", [])
+    if not isinstance(domains, list) or any(
+        not isinstance(item, str) for item in domains
+    ):
+        raise TypeError("multi_subagent.allowed_domains must be a string list")
+    return {
+        "multi_subagent_feature": "enabled",
+        "max_children": max_children,
+        "allowed_domains": domains,
+    }
+
+
+def _peer_task_coordination_options(config: Mapping[str, Any]) -> dict[str, Any]:
+    coordinator = str(config.get("coordinator_agent_id") or "").strip()
+    if coordinator:
+        return {"peer_task_coordinator": coordinator}
+    return {"clear_peer_task_coordinator": True}
+
+
+def _explore_harness_options(config: Mapping[str, Any]) -> dict[str, Any]:
+    profile = str(config.get("profile") or "").strip() or None
+    return {
+        "explore_harness_enabled": _boolean_configuration(
+            "explore_harness", config, "enabled"
+        ),
+        "explore_harness_profile": profile,
+        "clear_explore_harness_profile": profile is None,
+    }
+
+
+def _change_quality_options(config: Mapping[str, Any]) -> dict[str, Any]:
+    capability_id = "change_quality_qualification"
+    return {
+        "change_quality_enabled": _boolean_configuration(
+            capability_id, config, "enabled"
+        ),
+        "change_quality_safe_fix": _boolean_configuration(
+            capability_id, config, "safe_fix", default=False
+        ),
+        "change_quality_strict_receipt": _boolean_configuration(
+            capability_id, config, "strict_receipt", default=False
+        ),
+    }
+
+
+def _local_authority_shadow_options(config: Mapping[str, Any]) -> dict[str, Any]:
+    if _boolean_configuration("local_authority_shadow", config, "enabled"):
+        return {"local_authority_shadow_file": True}
+    return {"clear_local_authority_shadow": True}
+
+
 def _goal_capability_options(
     capability_id: str,
     configuration: Mapping[str, Any] | None,
@@ -59,62 +129,29 @@ def _goal_capability_options(
             f"unknown {capability_id} configuration field(s): {', '.join(unknown)}"
         )
 
-    def boolean(key: str, *, default: bool | None = None) -> bool:
-        value = config.get(key, default)
-        if not isinstance(value, bool):
-            raise TypeError(f"{capability_id}.{key} must be a boolean")
-        return value
-
     if capability_id == "multi_subagent":
-        enabled = boolean("enabled")
-        if not enabled:
-            return {"multi_subagent_feature": "off"}
-        max_children = config.get("max_children", 4)
-        if not isinstance(max_children, int) or isinstance(max_children, bool):
-            raise TypeError("multi_subagent.max_children must be an integer")
-        domains = config.get("allowed_domains", [])
-        if not isinstance(domains, list) or any(
-            not isinstance(item, str) for item in domains
-        ):
-            raise TypeError("multi_subagent.allowed_domains must be a string list")
-        return {
-            "multi_subagent_feature": "enabled",
-            "max_children": max_children,
-            "allowed_domains": domains,
-        }
+        return _multi_subagent_options(config)
     if capability_id == "periodic_report":
         return {"periodic_report_configuration": config}
     if capability_id == "peer_task_coordination":
-        coordinator = str(config.get("coordinator_agent_id") or "").strip()
-        return (
-            {"peer_task_coordinator": coordinator}
-            if coordinator
-            else {"clear_peer_task_coordinator": True}
-        )
+        return _peer_task_coordination_options(config)
     if capability_id == "explore_graph":
-        return {"explore_graph_enabled": boolean("enabled")}
+        return {
+            "explore_graph_enabled": _boolean_configuration(
+                capability_id, config, "enabled"
+            )
+        }
     if capability_id == "explore_harness":
-        profile = str(config.get("profile") or "").strip() or None
-        return {
-            "explore_harness_enabled": boolean("enabled"),
-            "explore_harness_profile": profile,
-            "clear_explore_harness_profile": profile is None,
-        }
+        return _explore_harness_options(config)
     if capability_id == "change_quality_qualification":
-        return {
-            "change_quality_enabled": boolean("enabled"),
-            "change_quality_safe_fix": boolean("safe_fix", default=False),
-            "change_quality_strict_receipt": boolean(
-                "strict_receipt", default=False
-            ),
-        }
+        return _change_quality_options(config)
     if capability_id == "local_authority_shadow":
-        return (
-            {"local_authority_shadow_file": True}
-            if boolean("enabled")
-            else {"clear_local_authority_shadow": True}
+        return _local_authority_shadow_options(config)
+    return {
+        "lark_kanban_heartbeat_sync": _boolean_configuration(
+            capability_id, config, "enabled"
         )
-    return {"lark_kanban_heartbeat_sync": boolean("enabled")}
+    }
 
 
 class _GoalConfigurationServer(Protocol):
@@ -128,6 +165,128 @@ def _mapping(value: object, label: str) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
 
 
+def _goal_features_with_machine_context(
+    payload: Mapping[str, Any],
+    catalog: Mapping[str, Any],
+    machine_namespaces: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    features = catalog.get("features")
+    if not isinstance(features, list) or any(
+        not isinstance(item, Mapping) for item in features
+    ):
+        raise ValueError("Goal feature catalog is invalid")
+    goal_features = [dict(item) for item in features]
+    machine_has_periodic_report = any(
+        str(item.get("namespace") or "") == "periodic_report"
+        for item in machine_namespaces
+    )
+    goal_has_periodic_report = any(
+        str(item.get("feature_id") or "") == "periodic_report" for item in goal_features
+    )
+    if machine_has_periodic_report and not goal_has_periodic_report:
+        after = payload.get("after")
+        control_plane = (
+            after.get("control_plane")
+            if isinstance(after, Mapping)
+            and isinstance(after.get("control_plane"), Mapping)
+            else {}
+        )
+        current = control_plane.get("periodic_report")
+        periodic_report = {
+            "feature_id": "periodic_report",
+            "display_name": "Periodic report",
+            "availability": "supported_explicit_override",
+            "default": {"enabled": False, "timezone": "UTC"},
+            "effect": "Use a complete Goal-specific report route instead of the live machine default.",
+        }
+        if isinstance(current, Mapping):
+            periodic_report["current"] = dict(current)
+        goal_features.append(periodic_report)
+    return goal_features
+
+
+def _validated_capability_ids(capability_catalog: Mapping[str, Any]) -> list[str]:
+    capabilities = capability_catalog.get("capabilities")
+    if not isinstance(capabilities, list) or any(
+        not isinstance(item, Mapping) for item in capabilities
+    ):
+        raise ValueError("capability catalog is invalid")
+    capability_ids = [
+        str(item.get("capability_id") or "").strip() for item in capabilities
+    ]
+    if not all(capability_ids) or len(set(capability_ids)) != len(capability_ids):
+        raise ValueError("capability catalog contains an invalid identity")
+    return capability_ids
+
+
+def _parse_goal_configuration_update(
+    body: Mapping[str, Any], *, execute: bool
+) -> tuple[str, str, Mapping[str, Any] | None, str]:
+    allowed = {"goal_id", "capability_id", "configuration"}
+    if execute:
+        allowed.add("expected_plan_revision")
+    unknown = sorted(set(body) - allowed)
+    if unknown:
+        raise ValueError(
+            "goal configuration request contains unknown fields: " + ", ".join(unknown)
+        )
+    goal_id = str(body.get("goal_id") or "").strip()
+    capability_id = str(body.get("capability_id") or "").strip()
+    if "configuration" not in body:
+        raise ValueError("configuration is required")
+    configuration = body.get("configuration")
+    if not goal_id or not capability_id:
+        raise ValueError("goal_id and capability_id are required")
+    if configuration is not None and not isinstance(configuration, Mapping):
+        raise TypeError("configuration must be an object or null")
+    expected_revision = str(body.get("expected_plan_revision") or "")
+    return goal_id, capability_id, configuration, expected_revision
+
+
+def _configuration_revision(value: object) -> str:
+    if isinstance(value, Mapping):
+        return configuration_payload_revision(value)
+    return "absent"
+
+
+def _goal_configuration_update_plan(
+    *,
+    goal_id: str,
+    capability_id: str,
+    current_public: Mapping[str, Any],
+    desired_public: Mapping[str, Any],
+    desired_result: Mapping[str, Any],
+) -> tuple[dict[str, Any], object]:
+    current_configuration = _capability_entry(current_public, capability_id).get(
+        "current"
+    )
+    desired_configuration = _capability_entry(desired_public, capability_id).get(
+        "current"
+    )
+    plan = build_configuration_update_plan(
+        schema_version="goal_configuration_update_plan_v0",
+        current_present=isinstance(current_configuration, Mapping),
+        desired_present=isinstance(desired_configuration, Mapping),
+        current_revision=_configuration_revision(current_configuration),
+        desired_revision=_configuration_revision(desired_configuration),
+        target_identity={
+            "goal_id": goal_id,
+            "capability_id": capability_id,
+            "base_revision": current_public["revision"],
+        },
+        changed_units={
+            "changed_fields": list(desired_result.get("changed_fields") or [])
+        },
+        projected_configuration=(
+            dict(desired_configuration)
+            if isinstance(desired_configuration, Mapping)
+            else None
+        ),
+        projection_field="goal_configuration",
+    )
+    return plan, desired_configuration
+
+
 def _public_goal_configuration(
     payload: Mapping[str, Any],
     *,
@@ -137,51 +296,18 @@ def _public_goal_configuration(
     if not goal_id:
         raise ValueError("Goal configuration result is missing goal_id")
     catalog = _mapping(payload.get("configuration_catalog"), "configuration catalog")
-    capability_catalog = _mapping(catalog.get("capability_catalog"), "capability catalog")
+    capability_catalog = _mapping(
+        catalog.get("capability_catalog"), "capability catalog"
+    )
     if machine_namespaces is not None:
-        features = catalog.get("features")
-        if not isinstance(features, list) or any(
-            not isinstance(item, Mapping) for item in features
-        ):
-            raise ValueError("Goal feature catalog is invalid")
-        goal_features = [dict(item) for item in features]
-        if any(str(item.get("namespace") or "") == "periodic_report" for item in machine_namespaces) \
-                and not any(str(item.get("feature_id") or "") == "periodic_report" for item in goal_features):
-            after = payload.get("after")
-            control_plane = (
-                after.get("control_plane")
-                if isinstance(after, Mapping)
-                and isinstance(after.get("control_plane"), Mapping)
-                else {}
-            )
-            current = control_plane.get("periodic_report")
-            goal_features.append(
-                {
-                    "feature_id": "periodic_report",
-                    "display_name": "Periodic report",
-                    "availability": "supported_explicit_override",
-                    "default": {"enabled": False, "timezone": "UTC"},
-                    **({"current": dict(current)} if isinstance(current, Mapping) else {}),
-                    "effect": "Use a complete Goal-specific report route instead of the live machine default.",
-                }
-            )
+        goal_features = _goal_features_with_machine_context(
+            payload, catalog, machine_namespaces
+        )
         capability_catalog = build_capability_configuration_catalog(
             machine_namespaces=machine_namespaces,
             goal_features=goal_features,
         )
-    capabilities = capability_catalog.get("capabilities")
-    if not isinstance(capabilities, list) or any(
-        not isinstance(item, Mapping) for item in capabilities
-    ):
-        raise ValueError("capability catalog is invalid")
-    capability_ids: list[str] = []
-    seen_capability_ids: set[str] = set()
-    for item in capabilities:
-        capability_id = str(item.get("capability_id") or "").strip()
-        if not capability_id or capability_id in seen_capability_ids:
-            raise ValueError("capability catalog contains an invalid identity")
-        capability_ids.append(capability_id)
-        seen_capability_ids.add(capability_id)
+    capability_ids = _validated_capability_ids(capability_catalog)
     return {
         "ok": True,
         "schema_version": GOAL_CONFIGURATION_INSPECTION_SCHEMA,
@@ -275,90 +401,158 @@ class GoalConfigurationRequestMixin:
             return
         self._send_json(response)
 
+    def _read_public_goal_configuration(
+        self,
+        goal_id: str,
+        machine_namespaces: list[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        result = self._goal_configuration_reader()(
+            registry_path=self.server.registry_path,
+            goal_id=goal_id,
+            execute=False,
+        )
+        return _public_goal_configuration(
+            result,
+            machine_namespaces=(
+                self._goal_configuration_machine_namespaces()
+                if machine_namespaces is None
+                else machine_namespaces
+            ),
+        )
+
+    def _prepare_goal_configuration_plan(
+        self,
+        *,
+        goal_id: str,
+        capability_id: str,
+        machine_namespaces: list[Mapping[str, Any]] | None,
+        options: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], object]:
+        current_public = self._read_public_goal_configuration(
+            goal_id, machine_namespaces
+        )
+        desired_result = self._goal_configuration_writer()(
+            registry_path=self.server.registry_path,
+            goal_id=goal_id,
+            runtime_root_override=getattr(self.server, "runtime_root_override", None),
+            execute=False,
+            **options,
+        )
+        desired_public = _public_goal_configuration(
+            desired_result,
+            machine_namespaces=machine_namespaces,
+        )
+        plan, desired_configuration = _goal_configuration_update_plan(
+            goal_id=goal_id,
+            capability_id=capability_id,
+            current_public=current_public,
+            desired_public=desired_public,
+            desired_result=desired_result,
+        )
+        return current_public, desired_public, plan, desired_configuration
+
+    def _send_partial_write_receipt(
+        self,
+        *,
+        applied: Mapping[str, Any],
+        capability_id: str,
+        desired_configuration: object,
+        desired_public: Mapping[str, Any],
+        goal_id: str,
+        plan: Mapping[str, Any],
+    ) -> None:
+        try:
+            readback_public = self._read_public_goal_configuration(goal_id)
+            readback_configuration = _capability_entry(
+                readback_public, capability_id
+            ).get("current")
+            readback_verified = readback_configuration == desired_configuration
+        except Exception:  # noqa: BLE001 - retain the partial-write fact.
+            readback_public = dict(desired_public)
+            readback_configuration = None
+            readback_verified = False
+        self._send_json(
+            {
+                "ok": False,
+                "schema_version": "goal_configuration_transaction_v0",
+                "status": "partial_write",
+                "goal_id": goal_id,
+                "capability_id": capability_id,
+                "plan_revision": plan["plan_revision"],
+                "applied_revision": (
+                    readback_public["revision"] if readback_verified else None
+                ),
+                "source_written": True,
+                "shared_sync_pending": True,
+                "readback_verified": readback_verified,
+                "changed_fields": list(applied.get("changed_fields") or []),
+                "goal_configuration": readback_configuration,
+                "capability_catalog": readback_public["capability_catalog"],
+                "error": str(
+                    applied.get("error")
+                    or "Goal configuration shared projection did not synchronize"
+                ),
+                "recommended_action": str(
+                    applied.get("recommended_action")
+                    or f"rerun loopx sync-global --goal-id {goal_id}"
+                ),
+            },
+            status=207,
+        )
+
+    def _send_applied_goal_configuration(
+        self,
+        *,
+        applied: Mapping[str, Any],
+        capability_id: str,
+        desired_configuration: object,
+        goal_id: str,
+        plan: Mapping[str, Any],
+    ) -> None:
+        readback_public = self._read_public_goal_configuration(goal_id)
+        readback_configuration = _capability_entry(readback_public, capability_id).get(
+            "current"
+        )
+        if readback_configuration != desired_configuration:
+            raise RuntimeError("Goal configuration readback did not verify")
+        self._send_json(
+            {
+                "ok": True,
+                "schema_version": "goal_configuration_transaction_v0",
+                "status": "applied" if plan["writes_required"] else "unchanged",
+                "goal_id": goal_id,
+                "capability_id": capability_id,
+                "plan_revision": plan["plan_revision"],
+                "applied_revision": readback_public["revision"],
+                "readback_verified": True,
+                "changed_fields": list(applied.get("changed_fields") or []),
+                "goal_configuration": readback_configuration,
+                "capability_catalog": readback_public["capability_catalog"],
+            }
+        )
+
     def _goal_configuration_update(self, *, execute: bool) -> None:
         try:
             body = self._read_json()
-            allowed = {"goal_id", "capability_id", "configuration"}
-            if execute:
-                allowed.add("expected_plan_revision")
-            unknown = sorted(set(body) - allowed)
-            if unknown:
-                raise ValueError(
-                    "goal configuration request contains unknown fields: "
-                    + ", ".join(unknown)
-                )
-            goal_id = str(body.get("goal_id") or "").strip()
-            capability_id = str(body.get("capability_id") or "").strip()
-            if "configuration" not in body:
-                raise ValueError("configuration is required")
-            configuration = body.get("configuration")
-            if not goal_id or not capability_id:
-                raise ValueError("goal_id and capability_id are required")
-            if configuration is not None and not isinstance(configuration, Mapping):
-                raise TypeError("configuration must be an object or null")
+            goal_id, capability_id, configuration, expected_revision = (
+                _parse_goal_configuration_update(body, execute=execute)
+            )
             options = _goal_capability_options(capability_id, configuration)
             machine_namespaces = self._goal_configuration_machine_namespaces()
-            current_result = self._goal_configuration_reader()(
-                registry_path=self.server.registry_path,
-                goal_id=goal_id,
-                execute=False,
-            )
-            current_public = _public_goal_configuration(
-                current_result,
-                machine_namespaces=machine_namespaces,
-            )
-            desired_result = self._goal_configuration_writer()(
-                registry_path=self.server.registry_path,
-                goal_id=goal_id,
-                runtime_root_override=getattr(
-                    self.server, "runtime_root_override", None
-                ),
-                execute=False,
-                **options,
-            )
-            desired_public = _public_goal_configuration(
-                desired_result,
-                machine_namespaces=machine_namespaces,
-            )
-            current_capability = _capability_entry(current_public, capability_id)
-            desired_capability = _capability_entry(desired_public, capability_id)
-            current_configuration = current_capability.get("current")
-            desired_configuration = desired_capability.get("current")
-            plan = build_configuration_update_plan(
-                schema_version="goal_configuration_update_plan_v0",
-                current_present=isinstance(current_configuration, Mapping),
-                desired_present=isinstance(desired_configuration, Mapping),
-                current_revision=(
-                    configuration_payload_revision(current_configuration)
-                    if isinstance(current_configuration, Mapping)
-                    else "absent"
-                ),
-                desired_revision=(
-                    configuration_payload_revision(desired_configuration)
-                    if isinstance(desired_configuration, Mapping)
-                    else "absent"
-                ),
-                target_identity={
-                    "goal_id": goal_id,
-                    "capability_id": capability_id,
-                    "base_revision": current_public["revision"],
-                },
-                changed_units={
-                    "changed_fields": list(desired_result.get("changed_fields") or [])
-                },
-                projected_configuration=(
-                    dict(desired_configuration)
-                    if isinstance(desired_configuration, Mapping)
-                    else None
-                ),
-                projection_field="goal_configuration",
+            current_public, desired_public, plan, desired_configuration = (
+                self._prepare_goal_configuration_plan(
+                    goal_id=goal_id,
+                    capability_id=capability_id,
+                    machine_namespaces=machine_namespaces,
+                    options=options,
+                )
             )
             if not execute:
                 plan["capability_catalog"] = desired_public["capability_catalog"]
                 self._send_json(plan, status=201)
                 return
             require_expected_configuration_plan_revision(
-                expected_plan_revision=str(body.get("expected_plan_revision") or ""),
+                expected_plan_revision=expected_revision,
                 actual_plan_revision=str(plan["plan_revision"]),
                 subject="Goal configuration",
             )
@@ -373,95 +567,23 @@ class GoalConfigurationRequestMixin:
                 **options,
             )
             if not applied.get("ok"):
-                if not (
-                    applied.get("written") and applied.get("partial_write")
-                ):
+                if not (applied.get("written") and applied.get("partial_write")):
                     raise RuntimeError("Goal configuration apply did not verify")
-                try:
-                    readback = self._goal_configuration_reader()(
-                        registry_path=self.server.registry_path,
-                        goal_id=goal_id,
-                        execute=False,
-                    )
-                    readback_public = _public_goal_configuration(
-                        readback,
-                        machine_namespaces=(
-                            self._goal_configuration_machine_namespaces()
-                        ),
-                    )
-                    readback_configuration = _capability_entry(
-                        readback_public, capability_id
-                    ).get("current")
-                    source_readback_verified = (
-                        readback_configuration == desired_configuration
-                    )
-                except Exception:  # noqa: BLE001 - retain the partial-write fact.
-                    readback_public = desired_public
-                    readback_configuration = None
-                    source_readback_verified = False
-                self._send_json(
-                    {
-                        "ok": False,
-                        "schema_version": "goal_configuration_transaction_v0",
-                        "status": "partial_write",
-                        "goal_id": goal_id,
-                        "capability_id": capability_id,
-                        "plan_revision": plan["plan_revision"],
-                        "applied_revision": (
-                            readback_public["revision"]
-                            if source_readback_verified
-                            else None
-                        ),
-                        "source_written": True,
-                        "shared_sync_pending": True,
-                        "readback_verified": source_readback_verified,
-                        "changed_fields": list(
-                            applied.get("changed_fields") or []
-                        ),
-                        "goal_configuration": readback_configuration,
-                        "capability_catalog": readback_public[
-                            "capability_catalog"
-                        ],
-                        "error": str(
-                            applied.get("error")
-                            or "Goal configuration shared projection did not synchronize"
-                        ),
-                        "recommended_action": str(
-                            applied.get("recommended_action")
-                            or f"rerun loopx sync-global --goal-id {goal_id}"
-                        ),
-                    },
-                    status=207,
+                self._send_partial_write_receipt(
+                    applied=applied,
+                    capability_id=capability_id,
+                    desired_configuration=desired_configuration,
+                    desired_public=desired_public,
+                    goal_id=goal_id,
+                    plan=plan,
                 )
                 return
-            readback = self._goal_configuration_reader()(
-                registry_path=self.server.registry_path,
+            self._send_applied_goal_configuration(
+                applied=applied,
+                capability_id=capability_id,
+                desired_configuration=desired_configuration,
                 goal_id=goal_id,
-                execute=False,
-            )
-            readback_public = _public_goal_configuration(
-                readback,
-                machine_namespaces=self._goal_configuration_machine_namespaces(),
-            )
-            readback_configuration = _capability_entry(
-                readback_public, capability_id
-            ).get("current")
-            if readback_configuration != desired_configuration:
-                raise RuntimeError("Goal configuration readback did not verify")
-            self._send_json(
-                {
-                    "ok": True,
-                    "schema_version": "goal_configuration_transaction_v0",
-                    "status": "applied" if plan["writes_required"] else "unchanged",
-                    "goal_id": goal_id,
-                    "capability_id": capability_id,
-                    "plan_revision": plan["plan_revision"],
-                    "applied_revision": readback_public["revision"],
-                    "readback_verified": True,
-                    "changed_fields": list(applied.get("changed_fields") or []),
-                    "goal_configuration": readback_configuration,
-                    "capability_catalog": readback_public["capability_catalog"],
-                }
+                plan=plan,
             )
         except (TypeError, ValueError) as exc:
             stale = "preview again" in str(exc)
@@ -482,9 +604,7 @@ class GoalConfigurationRequestMixin:
             )
 
 
-def _capability_entry(
-    payload: Mapping[str, Any], capability_id: str
-) -> dict[str, Any]:
+def _capability_entry(payload: Mapping[str, Any], capability_id: str) -> dict[str, Any]:
     catalog = _mapping(payload.get("capability_catalog"), "capability catalog")
     capabilities = catalog.get("capabilities")
     if not isinstance(capabilities, list):

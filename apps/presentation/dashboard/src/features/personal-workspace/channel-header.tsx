@@ -112,7 +112,7 @@ export function ChannelHeader({
               <ChevronDown aria-hidden size={13} />
             </button>
             {goalToolsOpen ? (
-              <div aria-label={t("header.goalSettings")} className="personal-goal-tools-menu" role="group">
+              <fieldset aria-label={t("header.goalSettings")} className="personal-goal-tools-menu">
                 <button onClick={() => runGoalTool(onOpenGoalDetail)} type="button">
                   <Info aria-hidden size={17} />
                   <span><strong>{t("header.goalDetails")}</strong><small>{t("header.goalDetailsDescription")}</small></span>
@@ -121,7 +121,7 @@ export function ChannelHeader({
                   <SlidersHorizontal aria-hidden size={17} />
                   <span><strong>{t("header.goalCapabilities")}</strong><small>{t("header.goalCapabilitiesDescription")}</small></span>
                 </button>
-              </div>
+              </fieldset>
             ) : null}
           </div>
         ) : null}

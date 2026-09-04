@@ -1354,7 +1354,7 @@ async function main() {
     await page.getByRole("button", { name: "预览变更", exact: true }).click();
     await page.getByText("锁定 revision 的变更预览", { exact: true }).waitFor({ state: "visible" });
     const goalConfigurationPreview = api.goalConfigurationRequests.find((item) => item.phase === "preview");
-    const projectedKeys = Object.keys(goalConfigurationPreview?.configuration ?? {}).sort();
+    const projectedKeys = Object.keys(goalConfigurationPreview?.configuration ?? {}).sort((left, right) => left.localeCompare(right));
     if (JSON.stringify(projectedKeys) !== JSON.stringify(["enabled", "profile_preset", "route_ref", "timezone"])) {
       throw new Error(`Goal configuration preview leaked hidden machine fields: ${JSON.stringify(goalConfigurationPreview)}`);
     }

@@ -18,11 +18,138 @@ function formattedValue(value: Record<string, unknown> | undefined) {
   return value ? JSON.stringify(value, null, 2) : "—";
 }
 
-function CapabilityCatalog({ catalog, goalId, onApplied }: {
+type CapabilityCatalogProps = Readonly<{
   catalog: CapabilityConfigurationCatalog;
   goalId: string;
   onApplied: () => void;
-}) {
+}>;
+
+type CapabilityMutationState = Readonly<{
+  busy: "preview" | "apply" | null;
+  draft: Record<string, unknown>;
+  partialWrite: GoalConfigurationPartialWrite | null;
+  preview: GoalConfigurationPreview | null;
+}>;
+
+function useCapabilityMutation({ goalId, onApplied, selected, t }: Readonly<{
+  goalId: string;
+  onApplied: () => void;
+  selected: CapabilityConfigurationCatalog["capabilities"][number] | undefined;
+  t: ReturnType<typeof useWorkspaceI18n>["t"];
+}>) {
+  const [mutation, setMutation] = useState<CapabilityMutationState>({
+    busy: null,
+    draft: {},
+    partialWrite: null,
+    preview: null,
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMutation({
+      busy: null,
+      draft: projectEditableCapabilityConfiguration(
+        selected?.configuration_editor ?? { fields: [] },
+        selected?.current
+        ?? selected?.effective_configuration?.configuration
+        ?? selected?.default,
+        selected?.default,
+      ),
+      partialWrite: null,
+      preview: null,
+    });
+    setError(null);
+  }, [selected]);
+
+  async function preview(configuration: Record<string, unknown> | null) {
+    if (!selected || mutation.busy) return;
+    setMutation((current) => ({ ...current, busy: "preview", partialWrite: null }));
+    setError(null);
+    try {
+      const nextPreview = await previewGoalConfiguration(goalId, selected.capability_id, configuration);
+      setMutation((current) => ({ ...current, preview: nextPreview }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t("capabilities.previewFailed"));
+    } finally {
+      setMutation((current) => ({ ...current, busy: null }));
+    }
+  }
+
+  async function apply() {
+    if (!selected || !mutation.preview || mutation.busy) return;
+    setMutation((current) => ({ ...current, busy: "apply" }));
+    setError(null);
+    try {
+      const writableDraft = projectEditableCapabilityConfiguration(
+        selected.configuration_editor,
+        mutation.draft,
+        selected.default,
+      );
+      const result = await applyGoalConfiguration(
+        goalId,
+        selected.capability_id,
+        mutation.preview.action === "delete" ? null : writableDraft,
+        mutation.preview.plan_revision,
+      );
+      setMutation((current) => ({
+        ...current,
+        partialWrite: result.status === "partial_write" ? result : null,
+        preview: null,
+      }));
+      if (result.status !== "partial_write") onApplied();
+    } catch (reason) {
+      setMutation((current) => ({ ...current, preview: null }));
+      setError(reason instanceof Error ? reason.message : t("capabilities.applyFailed"));
+    } finally {
+      setMutation((current) => ({ ...current, busy: null }));
+    }
+  }
+
+  function changeDraft(key: string, value: boolean | number | string | string[]) {
+    setMutation((current) => ({
+      ...current,
+      draft: { ...current.draft, [key]: value },
+      preview: null,
+    }));
+    setError(null);
+  }
+
+  return { apply, changeDraft, error, mutation, preview };
+}
+
+function CapabilityMutationFeedback({ mutationError, onApplied, partialWrite, preview }: Readonly<{
+  mutationError: string | null;
+  onApplied: () => void;
+  partialWrite: GoalConfigurationPartialWrite | null;
+  preview: GoalConfigurationPreview | null;
+}>) {
+  const { t } = useWorkspaceI18n();
+  return (
+    <>
+      {mutationError ? <p className="personal-machine-error" role="alert">{mutationError}</p> : null}
+      {partialWrite ? (
+        <section aria-live="polite" className="personal-capability-recovery">
+          <AlertTriangle aria-hidden size={18} />
+          <div>
+            <strong>{t("capabilities.partialWrite")}</strong>
+            <p>{t("capabilities.partialWriteDescription")}</p>
+            <small>{partialWrite.recommended_action}</small>
+          </div>
+          <button onClick={onApplied} type="button"><RefreshCw aria-hidden size={15} />{t("capabilities.refreshSource")}</button>
+        </section>
+      ) : null}
+      {preview ? (
+        <section className="personal-capability-preview" aria-label={t("capabilities.preview") }>
+          <strong>{t("capabilities.preview")}</strong>
+          <span>{t(`machine.action.${preview.action}`)}</span>
+          <small>{t("capabilities.previewLocked")}</small>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
+function CapabilityCatalog({ catalog, goalId, onApplied }: CapabilityCatalogProps) {
   const { t } = useWorkspaceI18n();
   const [selectedCapabilityId, setSelectedCapabilityId] = useState(
     catalog.capabilities[0]?.capability_id ?? "",
@@ -32,24 +159,9 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: {
       ?? catalog.capabilities[0],
     [catalog.capabilities, selectedCapabilityId],
   );
-  const [draft, setDraft] = useState<Record<string, unknown>>({});
-  const [preview, setPreview] = useState<GoalConfigurationPreview | null>(null);
-  const [busy, setBusy] = useState<"preview" | "apply" | null>(null);
-  const [mutationError, setMutationError] = useState<string | null>(null);
-  const [partialWrite, setPartialWrite] = useState<GoalConfigurationPartialWrite | null>(null);
-
-  useEffect(() => {
-    setDraft(projectEditableCapabilityConfiguration(
-      selected?.configuration_editor ?? { fields: [] },
-      selected?.current
-      ?? selected?.effective_configuration?.configuration
-      ?? selected?.default,
-      selected?.default,
-    ));
-    setPreview(null);
-    setMutationError(null);
-    setPartialWrite(null);
-  }, [selected]);
+  const capabilityMutation = useCapabilityMutation({ goalId, onApplied, selected, t });
+  const { apply, changeDraft, error: mutationError, mutation, preview: requestPreview } = capabilityMutation;
+  const { busy, draft, partialWrite, preview } = mutation;
 
   if (!selected) {
     return <p className="personal-capability-empty">{t("capabilities.empty")}</p>;
@@ -64,65 +176,17 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: {
 
   async function createPreview() {
     if (!editorAvailable || busy) return;
-    setBusy("preview");
-    setMutationError(null);
-    setPartialWrite(null);
-    try {
-      const writableDraft = projectEditableCapabilityConfiguration(
-        selected.configuration_editor,
-        draft,
-        selected.default,
-      );
-      setPreview(await previewGoalConfiguration(goalId, selected.capability_id, writableDraft));
-    } catch (reason) {
-      setMutationError(reason instanceof Error ? reason.message : t("capabilities.previewFailed"));
-    } finally {
-      setBusy(null);
-    }
+    const writableDraft = projectEditableCapabilityConfiguration(
+      selected.configuration_editor,
+      draft,
+      selected.default,
+    );
+    await requestPreview(writableDraft);
   }
 
   async function createClearPreview() {
     if (!editorAvailable || busy) return;
-    setBusy("preview");
-    setMutationError(null);
-    setPartialWrite(null);
-    try {
-      setPreview(await previewGoalConfiguration(goalId, selected.capability_id, null));
-    } catch (reason) {
-      setMutationError(reason instanceof Error ? reason.message : t("capabilities.previewFailed"));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function applyPreview() {
-    if (!preview || busy) return;
-    setBusy("apply");
-    setMutationError(null);
-    try {
-      const writableDraft = projectEditableCapabilityConfiguration(
-        selected.configuration_editor,
-        draft,
-        selected.default,
-      );
-      const result = await applyGoalConfiguration(
-        goalId,
-        selected.capability_id,
-        preview.action === "delete" ? null : writableDraft,
-        preview.plan_revision,
-      );
-      setPreview(null);
-      if (result.status === "partial_write") {
-        setPartialWrite(result);
-      } else {
-        onApplied();
-      }
-    } catch (reason) {
-      setPreview(null);
-      setMutationError(reason instanceof Error ? reason.message : t("capabilities.applyFailed"));
-    } finally {
-      setBusy(null);
-    }
+    await requestPreview(null);
   }
 
   return (
@@ -186,34 +250,12 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: {
             <CapabilityConfigurationFields
               disabled={Boolean(busy)}
               editor={selected.configuration_editor}
-              onChange={(key, value) => {
-                setDraft((current) => ({ ...current, [key]: value }));
-                setPreview(null);
-                setMutationError(null);
-              }}
+              onChange={changeDraft}
               value={draft}
             />
           </section>
         ) : null}
-        {mutationError ? <p className="personal-machine-error" role="alert">{mutationError}</p> : null}
-        {partialWrite ? (
-          <section className="personal-capability-recovery" role="status">
-            <AlertTriangle aria-hidden size={18} />
-            <div>
-              <strong>{t("capabilities.partialWrite")}</strong>
-              <p>{t("capabilities.partialWriteDescription")}</p>
-              <small>{partialWrite.recommended_action}</small>
-            </div>
-            <button onClick={onApplied} type="button"><RefreshCw aria-hidden size={15} />{t("capabilities.refreshSource")}</button>
-          </section>
-        ) : null}
-        {preview ? (
-          <section className="personal-capability-preview" aria-label={t("capabilities.preview") }>
-            <strong>{t("capabilities.preview")}</strong>
-            <span>{t(`machine.action.${preview.action}`)}</span>
-            <small>{t("capabilities.previewLocked")}</small>
-          </section>
-        ) : null}
+        <CapabilityMutationFeedback mutationError={mutationError} onApplied={onApplied} partialWrite={partialWrite} preview={preview} />
         {editorAvailable ? (
           <footer className="personal-capability-actions">
             {selected.current && selected.available_scopes.includes("machine") ? (
@@ -224,7 +266,7 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: {
             <button disabled={Boolean(busy)} onClick={() => void createPreview()} type="button">
               {busy === "preview" ? t("common.loading") : t("capabilities.previewChanges")}
             </button>
-            <button className="is-primary" disabled={Boolean(busy) || !preview} onClick={() => void applyPreview()} type="button">
+            <button className="is-primary" disabled={Boolean(busy) || !preview} onClick={() => void apply()} type="button">
               {busy === "apply" ? t("common.loading") : t("capabilities.applyPreview")}
             </button>
           </footer>
@@ -234,7 +276,7 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: {
   );
 }
 
-export function GoalCapabilitySettings({ goalId }: { goalId?: string | null }) {
+export function GoalCapabilitySettings({ goalId }: Readonly<{ goalId?: string | null }>) {
   const { t } = useWorkspaceI18n();
   const [inspection, setInspection] = useState<GoalConfigurationInspection | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -256,7 +298,7 @@ export function GoalCapabilitySettings({ goalId }: { goalId?: string | null }) {
     return <p className="personal-capability-empty">{t("capabilities.chooseGoal")}</p>;
   }
   if (loading && !inspection) {
-    return <p className="personal-capability-empty" role="status"><LoaderCircle className="personal-spin" size={18} />{t("capabilities.loading")}</p>;
+    return <p aria-live="polite" className="personal-capability-empty"><LoaderCircle className="personal-spin" size={18} />{t("capabilities.loading")}</p>;
   }
   if (error) {
     return (

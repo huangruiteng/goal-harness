@@ -8,9 +8,7 @@ from ..configuration_transaction import configuration_payload_revision
 
 CAPABILITY_CONFIGURATION_CATALOG_SCHEMA = "capability_configuration_catalog_v0"
 CAPABILITY_CONFIGURATION_EDITOR_SCHEMA = "capability_configuration_editor_v0"
-CAPABILITY_CONFIGURATION_RESOLUTION_SCHEMA = (
-    "capability_configuration_resolution_v0"
-)
+CAPABILITY_CONFIGURATION_RESOLUTION_SCHEMA = "capability_configuration_resolution_v0"
 
 
 def _configuration_value(
@@ -259,6 +257,93 @@ def resolve_capability_configuration(
     }
 
 
+def _machine_catalog_entry(
+    namespace: Mapping[str, Any],
+    *,
+    explore_harness_profiles: Sequence[str],
+) -> tuple[str, dict[str, Any]]:
+    capability_id = str(
+        namespace.get("capability_id") or namespace.get("namespace") or ""
+    ).strip()
+    if not capability_id:
+        raise ValueError("machine capability descriptor requires a namespace")
+    entry: dict[str, Any] = {
+        "capability_id": capability_id,
+        "display_name": str(namespace.get("title") or capability_id),
+        "description": str(namespace.get("description") or ""),
+        "available_scopes": ["machine"],
+        "machine_namespace": str(namespace.get("namespace") or capability_id),
+        "configuration_editor": capability_configuration_editor(
+            capability_id,
+            explore_harness_profiles=explore_harness_profiles,
+        ),
+    }
+    if isinstance(namespace.get("current"), Mapping):
+        entry["machine_current"] = deepcopy(namespace["current"])
+    if isinstance(namespace.get("configuration_template"), Mapping):
+        entry["default"] = deepcopy(namespace["configuration_template"])
+    return capability_id, entry
+
+
+def _merge_goal_feature(
+    entries: dict[str, dict[str, Any]],
+    feature: Mapping[str, Any],
+    *,
+    explore_harness_profiles: Sequence[str],
+) -> None:
+    capability_id = str(feature.get("feature_id") or "").strip()
+    if not capability_id:
+        raise ValueError("Goal capability descriptor requires a feature_id")
+    entry = entries.setdefault(
+        capability_id,
+        {
+            "capability_id": capability_id,
+            "display_name": str(feature.get("display_name") or capability_id),
+            "description": str(
+                feature.get("effect") or feature.get("consider_when") or ""
+            ),
+            "available_scopes": [],
+        },
+    )
+    if "goal_feature_id" in entry:
+        raise ValueError(f"duplicate Goal capability descriptor: {capability_id}")
+    entry["available_scopes"] = [*entry["available_scopes"], "goal"]
+    entry["goal_feature_id"] = capability_id
+    entry["availability"] = feature.get("availability")
+    for field in ("default", "current", "documentation"):
+        if isinstance(feature.get(field), Mapping):
+            entry[field] = deepcopy(feature[field])
+    entry["configuration_editor"] = capability_configuration_editor(
+        capability_id,
+        explore_harness_profiles=explore_harness_profiles,
+    )
+    if "machine" in entry["available_scopes"]:
+        entry["effective_value_policy"] = "goal_override_over_live_machine_default"
+
+
+def _attach_effective_configuration(entry: dict[str, Any]) -> None:
+    available_scopes = entry["available_scopes"]
+    goal_override = (
+        entry.get("current")
+        if "goal" in available_scopes and isinstance(entry.get("current"), Mapping)
+        else None
+    )
+    machine_default = (
+        entry.get("machine_current")
+        if isinstance(entry.get("machine_current"), Mapping)
+        else None
+    )
+    capability_default = (
+        entry.get("default") if isinstance(entry.get("default"), Mapping) else None
+    )
+    entry["effective_configuration"] = resolve_capability_configuration(
+        str(entry["capability_id"]),
+        goal_override=goal_override,
+        machine_default=machine_default,
+        capability_default=capability_default,
+    )
+
+
 def build_capability_configuration_catalog(
     *,
     machine_namespaces: Sequence[Mapping[str, Any]] = (),
@@ -269,89 +354,23 @@ def build_capability_configuration_catalog(
 
     entries: dict[str, dict[str, Any]] = {}
     for namespace in machine_namespaces:
-        capability_id = str(
-            namespace.get("capability_id") or namespace.get("namespace") or ""
-        ).strip()
-        if not capability_id:
-            raise ValueError("machine capability descriptor requires a namespace")
+        capability_id, entry = _machine_catalog_entry(
+            namespace,
+            explore_harness_profiles=explore_harness_profiles,
+        )
         if capability_id in entries:
             raise ValueError(
                 f"duplicate machine capability descriptor: {capability_id}"
             )
-        entries[capability_id] = {
-            "capability_id": capability_id,
-            "display_name": str(namespace.get("title") or capability_id),
-            "description": str(namespace.get("description") or ""),
-            "available_scopes": ["machine"],
-            "machine_namespace": str(namespace.get("namespace") or capability_id),
-            **(
-                {"machine_current": deepcopy(namespace.get("current"))}
-                if isinstance(namespace.get("current"), Mapping)
-                else {}
-            ),
-            **(
-                {"default": deepcopy(namespace.get("configuration_template"))}
-                if isinstance(namespace.get("configuration_template"), Mapping)
-                else {}
-            ),
-            "configuration_editor": capability_configuration_editor(
-                capability_id,
-                explore_harness_profiles=explore_harness_profiles,
-            ),
-        }
+        entries[capability_id] = entry
     for feature in goal_features:
-        capability_id = str(feature.get("feature_id") or "").strip()
-        if not capability_id:
-            raise ValueError("Goal capability descriptor requires a feature_id")
-        entry = entries.setdefault(
-            capability_id,
-            {
-                "capability_id": capability_id,
-                "display_name": str(feature.get("display_name") or capability_id),
-                "description": str(
-                    feature.get("effect") or feature.get("consider_when") or ""
-                ),
-                "available_scopes": [],
-            },
-        )
-        if "goal_feature_id" in entry:
-            raise ValueError(f"duplicate Goal capability descriptor: {capability_id}")
-        entry["available_scopes"] = [*entry["available_scopes"], "goal"]
-        entry["goal_feature_id"] = capability_id
-        entry["availability"] = feature.get("availability")
-        if isinstance(feature.get("default"), Mapping):
-            entry["default"] = deepcopy(feature["default"])
-        if isinstance(feature.get("current"), Mapping):
-            entry["current"] = deepcopy(feature["current"])
-        if isinstance(feature.get("documentation"), Mapping):
-            entry["documentation"] = deepcopy(feature["documentation"])
-        entry["configuration_editor"] = capability_configuration_editor(
-            capability_id,
+        _merge_goal_feature(
+            entries,
+            feature,
             explore_harness_profiles=explore_harness_profiles,
         )
-        if "machine" in entry["available_scopes"]:
-            entry["effective_value_policy"] = "goal_override_over_live_machine_default"
     for entry in entries.values():
-        goal_override = (
-            entry.get("current")
-            if "goal" in entry["available_scopes"]
-            and isinstance(entry.get("current"), Mapping)
-            else None
-        )
-        machine_default = (
-            entry.get("machine_current")
-            if isinstance(entry.get("machine_current"), Mapping)
-            else None
-        )
-        capability_default = (
-            entry.get("default") if isinstance(entry.get("default"), Mapping) else None
-        )
-        entry["effective_configuration"] = resolve_capability_configuration(
-            str(entry["capability_id"]),
-            goal_override=goal_override,
-            machine_default=machine_default,
-            capability_default=capability_default,
-        )
+        _attach_effective_configuration(entry)
     return {
         "schema_version": CAPABILITY_CONFIGURATION_CATALOG_SCHEMA,
         "capabilities": [entries[key] for key in sorted(entries)],
