@@ -230,8 +230,9 @@ live NoKV 测试。确定性 fake 的通过结果与这项静态 API 核对必�
    `authority-shadow/` 目录且响应字段与 observed goal 一致；候选目录被占用时
    `outcome=failed` / `reason_code=shadow_observation_failed` 但主写已提交；
    迁移后的候选序列化中不含旧 store identity、legacy revision、源路径与私有
-   字节；报告隐私扫描把注入的临时路径改写为 `fail/privacy_violation`，且
-   live 变量清空时 ladder 退出码为 1（均由 pytest 钉住）。
+   字节；报告隐私扫描把注入的临时路径改写为 `fail/privacy_violation`，仅泄露到
+   bindings 块时 `summary.privacy_violations=1` 且退出码为 1，且 live 变量清空时
+   ladder 退出码为 1（均由 pytest 钉住）。
 5. **未执行与限定**：`s2b.postgresql_conformance_live`（`postgres_url_missing`）
    本轮 unverified；在没有 NoKV 与 PostgreSQL 栈的 CI 环境里三个 live 行都报告
    `unverified`。9 个 `s2c2.*` 行以 pending 声明，未宣称；选中任一 pending 行而不传

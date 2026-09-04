@@ -8,6 +8,7 @@ separately so the standalone runner cannot report green while unverified.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 from collections.abc import Iterator
@@ -37,13 +38,28 @@ FULL_LADDER_VARIABLE = "LOOPX_LADDER_FULL"
 # product path. The pytest job runs close to its time budget, so the default CI
 # projection keeps the rows that only the ladder exercises and defers these to
 # the example runner (or LOOPX_LADDER_FULL=1).
-CLI_E2E_COVERED_ROW_IDS = (
-    "s2c1.configure_enable_disable_roundtrip",
-    "s2c1.default_off_isolation",
-    "s2c1.candidate_failure_preserves_primary",
-    "s2c1.crash_gap_loses_observation",
-    "s2c1.dual_runtime_root_consistency",
-)
+# Rows the default CI projection skips, each named with the product-CLI E2E
+# test that pins the same assertions; a guard below fails when a twin is
+# renamed or deleted so the skip cannot outlive its coverage.
+CLI_E2E_TWIN_FILE = Path(__file__).with_name("test_local_authority_shadow_cli_e2e.py")
+CLI_E2E_COVERAGE = {
+    "s2c1.configure_enable_disable_roundtrip": (
+        "test_product_cli_configure_capture_readback_disable_and_default_off_lifecycle_isolation"
+    ),
+    "s2c1.default_off_isolation": (
+        "test_product_cli_configure_capture_readback_disable_and_default_off_lifecycle_isolation"
+    ),
+    "s2c1.candidate_failure_preserves_primary": (
+        "test_product_cli_candidate_failure_preserves_the_primary_lifecycle_commit"
+    ),
+    "s2c1.crash_gap_loses_observation": (
+        "test_product_cli_loses_capture_between_commit_and_observer_then_refreshes_snapshot"
+    ),
+    "s2c1.dual_runtime_root_consistency": (
+        "test_product_cli_runtime_root_override_keeps_one_candidate_lineage"
+    ),
+}
+CLI_E2E_COVERED_ROW_IDS = tuple(CLI_E2E_COVERAGE)
 CLI_E2E_COVERAGE_REASON = (
     "pinned by tests/control_plane/test_local_authority_shadow_cli_e2e.py; "
     "run examples/shared-goal-authority-e2e/ladder.py or set LOOPX_LADDER_FULL=1"
@@ -91,7 +107,7 @@ def test_ladder_row_passes_or_is_declared_unverified(
     )
     reported = report["rows"][0]
     assert reported["status"] == "pass", (reported["reason_code"], reported["evidence"])
-    assert report["summary"] == {"pass": 1, "fail": 0, "unverified": 0, "pending": 0, "executed": 1}
+    assert report["summary"] == {"pass": 1, "fail": 0, "unverified": 0, "pending": 0, "executed": 1, "privacy_violations": 0}
     assert report["exit_policy"]["exit_code"] == 0
 
 
@@ -140,6 +156,7 @@ def test_main_never_reports_green_while_unverified(
         "unverified": 3,
         "pending": 0,
         "executed": 3,
+        "privacy_violations": 0,
     }
     assert {row["status"] for row in report["rows"]} == {"unverified"}
     assert {row["reason_code"] for row in report["rows"]} == {
@@ -226,7 +243,7 @@ def test_pending_rows_never_exit_green_without_allow_pending(
     # Pending-only selection: zero executions must not read as success.
     assert ladder.main(["--row", PENDING_ONLY_ROW_ID, "--report-json", str(report_path)]) == 1
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["summary"] == {"pass": 0, "fail": 0, "unverified": 0, "pending": 1, "executed": 0}
+    assert report["summary"] == {"pass": 0, "fail": 0, "unverified": 0, "pending": 1, "executed": 0, "privacy_violations": 0}
     assert report["rows"] == []
     assert report["pending"][0]["id"] == PENDING_ONLY_ROW_ID
     assert report["pending"][0]["status"] == "pending"
@@ -252,7 +269,7 @@ def test_pending_rows_never_exit_green_without_allow_pending(
     mixed = ["--row", CHEAP_DETERMINISTIC_ROW_ID, "--row", PENDING_ONLY_ROW_ID, "--report-json", str(report_path)]
     assert ladder.main(mixed) == 1
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["summary"] == {"pass": 1, "fail": 0, "unverified": 0, "pending": 1, "executed": 1}
+    assert report["summary"] == {"pass": 1, "fail": 0, "unverified": 0, "pending": 1, "executed": 1, "privacy_violations": 0}
     capsys.readouterr()
     assert ladder.main([*mixed, "--allow-pending"]) == 0
     capsys.readouterr()
@@ -302,9 +319,52 @@ def test_privacy_scan_turns_leaks_into_failures(tmp_path: Path) -> None:
         "unverified": 0,
         "pending": len(ladder.PENDING_ROWS),
         "executed": 2,
+        "privacy_violations": 1,
     }
     assert report["exit_policy"]["exit_code"] == 1
     assert {row["status"] for row in report["pending"]} == {"pending"}
+
+
+def test_privacy_leak_confined_to_bindings_still_fails_the_run() -> None:
+    row = ladder.row_by_id("s1.cli_document_decodes_through_ts_store")
+    clean = ladder.RowResult(row=row, status="pass", reason_code=None, evidence={"cursor": "3"}, duration_ms=1)
+    # The probe manifest names this module, so the token can only leak through
+    # the bindings; the row itself stays clean.
+    token = "authority_e2e_ladder.py"
+    assert token not in json.dumps(clean.as_dict())
+
+    report = ladder.build_report(
+        [clean],
+        pending=(),
+        allow_unverified=True,
+        allow_pending=True,
+        environ=os.environ,
+        forbidden=[token],
+    )
+
+    assert report["rows"][0]["status"] == "pass"
+    assert report["bindings"]["privacy_violation"] is True
+    assert all(value is None for key, value in report["bindings"].items() if key != "privacy_violation")
+    assert token not in json.dumps(report)
+    assert report["summary"] == {
+        "pass": 1,
+        "fail": 0,
+        "unverified": 0,
+        "pending": 0,
+        "executed": 1,
+        "privacy_violations": 1,
+    }
+    assert report["exit_policy"]["exit_code"] == 1
+    # No relaxation flag reaches a privacy violation.
+    assert ladder.exit_code_for(report["summary"], allow_unverified=True, allow_pending=True) == 1
+
+
+def test_ci_projection_skips_only_rows_whose_cli_e2e_twin_still_exists() -> None:
+    tree = ast.parse(CLI_E2E_TWIN_FILE.read_text(encoding="utf-8"))
+    defined = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    for row_id, twin in CLI_E2E_COVERAGE.items():
+        ladder.row_by_id(row_id)
+        assert twin in defined, f"{row_id} is skipped by default but its twin {twin} no longer exists"
 
 
 def test_list_prints_rows_and_pending_declarations(

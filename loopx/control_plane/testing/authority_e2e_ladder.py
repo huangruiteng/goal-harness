@@ -76,8 +76,8 @@ GATES: tuple[str, ...] = (
 )
 ROW_STATUSES: tuple[str, ...] = ("pass", "fail", "unverified")
 EXIT_POLICY_RULE = (
-    "exit 0 iff fail == 0 and (unverified == 0 or allow_unverified) "
-    "and (pending == 0 or allow_pending)"
+    "exit 0 iff fail == 0 and privacy_violations == 0 "
+    "and (unverified == 0 or allow_unverified) and (pending == 0 or allow_pending)"
 )
 
 POSTGRES_URL_VARIABLE = "LOOPX_TEST_POSTGRES_URL"
@@ -879,10 +879,14 @@ def exit_code_for(
 
     A pending row is a selected obligation with no executable evidence, so it
     blocks a green exit exactly like an unverified row unless the caller
-    explicitly allows it.
+    explicitly allows it. A privacy violation anywhere in the report, in a row
+    or confined to the bindings, is a failed evidence run even after the leak
+    was redacted; no flag relaxes it.
     """
 
     if summary["fail"] != 0:
+        return 1
+    if summary.get("privacy_violations", 0) != 0:
         return 1
     if summary["unverified"] != 0 and not allow_unverified:
         return 1
@@ -903,6 +907,11 @@ def _finalize_report(
     summary = {status: sum(1 for row in rows if row["status"] == status) for status in ROW_STATUSES}
     summary["pending"] = len(pending)
     summary["executed"] = len(rows)
+    # Row leaks are already failures; a leak confined to the bindings has no
+    # row to fail, so the count is what the exit policy consumes.
+    summary["privacy_violations"] = sum(
+        1 for row in rows if row.get("reason_code") == "privacy_violation"
+    ) + (1 if bindings.get("privacy_violation") else 0)
     return {
         "schema_version": REPORT_SCHEMA,
         "generated_at": generated_at,
@@ -929,7 +938,11 @@ def _leaked_tokens(value: object, forbidden: Sequence[str]) -> list[str]:
 
 
 def assert_public_safe(report: JsonObject, *, forbidden: Sequence[str]) -> JsonObject:
-    """Turn any leak of a forbidden substring into ``fail/privacy_violation``."""
+    """Turn any leak of a forbidden substring into ``fail/privacy_violation``.
+
+    A leak confined to the bindings nulls every binding and still fails the
+    run through ``summary.privacy_violations``.
+    """
 
     rows: list[JsonObject] = []
     for row in report["rows"]:
@@ -1045,6 +1058,8 @@ def _print_summary(report: JsonObject) -> None:
     pending_ids = [f"{row['id']} ({row['pending_until']})" for row in report["pending"]]
     if pending_ids:
         print(f"pending rows (not verified): {', '.join(pending_ids)}", file=sys.stderr)
+    if report["bindings"].get("privacy_violation"):
+        print("privacy violation confined to report bindings: redacted, the run fails", file=sys.stderr)
     print(
         "summary: " + ", ".join(f"{key}={value}" for key, value in sorted(report["summary"].items()))
         + f"; exit_code={report['exit_policy']['exit_code']}",

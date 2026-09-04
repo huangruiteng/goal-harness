@@ -1300,7 +1300,8 @@ Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1`
 `--allow-pending` 就非零退出，所以一份零执行的报告不可能显示为 green。
 报告绑定 LoopX commit、工作树是否 dirty、探针 digest 与经哈希的连接事实；其隐私
 扫描会把任何临时根目录、home 目录、连接 URL 或配置路径的泄露改写为
-`fail/privacy_violation`。
+`fail/privacy_violation`；仅出现在 bindings 块的泄露会被抹除并同样判定为失败，
+`summary.privacy_violations` 阻止 green 退出，任何开关都不能放宽。
 
 交付边界：test-only。没有任何生产入口构造任何 store；ladder 不新增产品路径，
 只经保留的 TypeScript store 读取候选。Stage 2C parity 后半段

@@ -65,20 +65,24 @@ POSIX-only rows report `unverified/posix_only` on Windows.
 The report schema is `loopx_shared_goal_authority_e2e_report_v0`:
 `rows[]` (`status in {pass, fail, unverified}`, `reason_code`, public-safe
 `evidence`, `duration_ms`), `pending[]`, `summary{pass, fail, unverified,
-pending}`, `bindings{loopx_commit, loopx_tree_dirty, probe_sha256[],
+pending, executed, privacy_violations}`, `bindings{loopx_commit, loopx_tree_dirty, probe_sha256[],
 nokv_client_config_sha256, nokv_sdk_version, postgres_url_sha256_prefix,
 pg_package_version}` (`null` when unknown), and `exit_policy`.
 
-Exit code is `0` iff `fail == 0` and (`unverified == 0` or
-`--allow-unverified`) and (`pending == 0` or `--allow-pending`): a selected
+Exit code is `0` iff `fail == 0` and `privacy_violations == 0` and
+(`unverified == 0` or `--allow-unverified`) and (`pending == 0` or
+`--allow-pending`): a selected
 row that never executed, whether gated or declared pending, is an unmet
 obligation, so `--row s2c2.parity_equal` exits 1 with zero executions, and a
 mixed selection exits 1 even when its executable rows pass. `--list` only
 prints the registry and never claims verification. A privacy scan runs over
 the finished report: any occurrence of a temporary root, the home directory,
 the repository path, the PostgreSQL URL, a NoKV configuration value, or a NoKV
-authority input path rewrites that row to `fail/privacy_violation`. Evidence
-therefore carries counters, cursors, outcome tokens, and sha256 prefixes only.
+authority input path rewrites that row to `fail/privacy_violation`; a leak
+confined to the `bindings` block nulls every binding, marks
+`bindings.privacy_violation`, and still exits `1` through
+`summary.privacy_violations`, which no flag relaxes. Evidence therefore
+carries counters, cursors, outcome tokens, and sha256 prefixes only.
 
 ## Test seams later PRs must provide
 

@@ -1623,7 +1623,9 @@ executed nothing.
 The report binds the LoopX commit, tree dirtiness, probe digests, and hashed
 connection facts, and its privacy scan turns any leak of a temporary root,
 home directory, connection URL, or configuration path into
-`fail/privacy_violation`.
+`fail/privacy_violation`; a leak confined to the bindings block is redacted
+and still fails the run through `summary.privacy_violations`, which no flag
+relaxes.
 
 Delivery boundary: test-only. No production entry point constructs any store;
 the ladder adds no product path and reads the candidate only through the
