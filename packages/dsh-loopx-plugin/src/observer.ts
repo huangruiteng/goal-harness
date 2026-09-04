@@ -69,8 +69,19 @@ export const RUN_IDENTITY_FIELDS = [
 
 const IDENTITY_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$/u
 const SUMMARY_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_./:-]{0,79}$/u
-const LOCAL_PATH_SURFACE = /(?<![:/A-Za-z0-9])(?:\/(?:Users|home|Volumes|private|tmp|var|etc|opt|srv|mnt|root|workspace|workspaces)\/[^\s`'"<>]+|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/][^\s`'"<>]+)/iu
-const SECRET_LIKE_SURFACE = /(?:\bbearer\s+[a-z0-9._~+\/=-]{16,}|\b(?:access|secret)[_-]?key\s*[=:]\s*[^\s`'"<>]+|\b(?:ak|sk)\s*[=:]\s*[^\s`'"<>]+|(?<![a-z0-9_])(?:ak|sk)[-_=:][a-z0-9_=-]{10,}|\bgh[pousr]_[a-z0-9]{20,}\b|\beyj[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\b|\btoken\s*[=:]\s*[^\s`'"<>]{12,})/iu
+const LOCAL_PATH_SURFACES = [
+  /(?<![:/a-z0-9])\/(?:users|home|volumes|private|tmp|var|etc|opt|srv|mnt|root|workspace|workspaces)\/[^\s`'"<>]+/iu,
+  /(?<![:/a-z0-9])[a-z]:[/\\](?:users|documents and settings)[/\\][^\s`'"<>]+/iu,
+] as const
+const SECRET_LIKE_SURFACES = [
+  /\bbearer\s+[a-z0-9._~+/=-]{16,}/iu,
+  /\b(?:access|secret)[_-]?key\s*[=:]\s*[^\s`'"<>]+/iu,
+  /\b(?:ak|sk)\s*[=:]\s*[^\s`'"<>]+/iu,
+  /(?<![a-z0-9_])(?:ak|sk)[-_=:][a-z0-9_=-]{10,}/iu,
+  /\bgh[pousr]_[a-z0-9]{20,}\b/iu,
+  /\beyj[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\b/iu,
+  /\btoken\s*[=:]\s*[^\s`'"<>]{12,}/iu,
+] as const
 const CREDENTIAL_FIELD_FAMILIES = new Set([
   'accesskey', 'accesstoken', 'apikey', 'authtoken', 'authorization',
   'clientsecret', 'cookie', 'credential', 'credentials', 'password',
@@ -176,15 +187,17 @@ export interface ShadowObserverOptions {
 }
 
 function normalizePublicSafeFieldName(value: string): string {
-  return value
+  const normalized = value
     .replace(/([a-z0-9])([A-Z])/gu, '$1_$2')
-    .replace(/[^A-Za-z0-9]+/gu, '_')
-    .replace(/^_+|_+$/gu, '')
+    .replace(/[^a-z0-9]+/giu, '_')
     .toLowerCase()
+  const withoutLeading = normalized.startsWith('_') ? normalized.slice(1) : normalized
+  return withoutLeading.endsWith('_') ? withoutLeading.slice(0, -1) : withoutLeading
 }
 
 function isPublicSafeText(value: string): boolean {
-  return !LOCAL_PATH_SURFACE.test(value) && !SECRET_LIKE_SURFACE.test(value)
+  return !LOCAL_PATH_SURFACES.some(pattern => pattern.test(value))
+    && !SECRET_LIKE_SURFACES.some(pattern => pattern.test(value))
 }
 
 /** Keep the producer boundary equivalent to LoopX's recursive Python guard. */
