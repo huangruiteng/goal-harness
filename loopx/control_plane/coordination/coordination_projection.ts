@@ -213,6 +213,22 @@ function todoReadModel(records: readonly JsonObject[]): JsonObject {
   };
 }
 
+function requireCompleteTodoReplacement(
+  previous: JsonObject | undefined,
+  replacement: JsonObject,
+  index: number,
+): void {
+  if (previous === undefined) return;
+  const omittedFields = Object.keys(previous)
+    .filter((field) => !(field in replacement))
+    .sort();
+  if (omittedFields.length > 0) {
+    throw new AuthorityStoreProtocolError(
+      `coordination Todo replacement ${index} omits existing fields: ${omittedFields.join(", ")}`,
+    );
+  }
+}
+
 /** Validate the complete Todo/lease identity graph of one coordination head. */
 export function indexCoordinationProjection(
   value: JsonObject,
@@ -269,6 +285,9 @@ export function reduceCoordinationProjection(
         const todo = canonicalAuthorityObject(mutation.todo, `mutations[${index}].todo`);
         const todoId = requireAuthorityStoreId(todo.todo_id, `mutations[${index}].todo_id`);
         claimMutationTarget("todo", todoId);
+        if (value.todo_read_model !== undefined) {
+          requireCompleteTodoReplacement(todos.get(todoId), todo, index);
+        }
         todos.set(todoId, todo);
         break;
       }

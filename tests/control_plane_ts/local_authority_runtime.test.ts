@@ -196,6 +196,39 @@ test("explicit local promotion requires qualified shadow and creates replayable 
   });
   assert.equal(advanced.status, "applied");
 
+  const partialReplacement = await mutateLocalCoordinationAuthority({
+    schema_version: LOCAL_COORDINATION_MUTATION_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    operation_id: "todo:goal-a:todo_a:partial-after-promotion",
+    expected_provider_revision: advanced.provider_revision,
+    mutations: [{
+      kind: "todo_upsert",
+      todo: {
+        schema_version: "todo_item_v0",
+        todo_id: "todo_a",
+        role: "agent",
+        status: "done",
+        done: true,
+        text: "Qualify canonical Todo semantics",
+        archive_state: "active",
+        source_section: "Agent Todo",
+      },
+    }],
+  });
+  assert.equal(partialReplacement.status, "failed");
+  assert.equal(partialReplacement.reason_code, "invalid_coordination_mutation");
+  assert.match(String(partialReplacement.reason ?? ""), /omits existing fields: claimed_by/);
+  const unchanged = await readLocalCoordinationTodo({
+    schema_version: LOCAL_COORDINATION_TODO_READ_REQUEST_SCHEMA,
+    runtime_root: root,
+    goal_id: "goal-a",
+    todo_id: "todo_a",
+  });
+  assert.equal(unchanged.status, "found");
+  assert.equal((unchanged.todo as Record<string, unknown>).claimed_by, "agent-a");
+  assert.equal((unchanged.todo as Record<string, unknown>).status, "in_progress");
+
   const replayed = await promoteLocalCoordinationAuthority(request);
   assert.equal(replayed.status, "replayed");
   assert.equal(replayed.provider_revision, applied.provider_revision);
