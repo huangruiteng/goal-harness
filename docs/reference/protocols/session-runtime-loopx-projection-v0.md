@@ -67,18 +67,25 @@ can continue:
 ### Boundary Key States
 
 The `boundary` block reports how input keys were classified, using a typed
-word-level rule (exact keys or whole words after splitting on `_`, `-`, and
-camelCase; never substrings). Values from raw-material and unclassified keys
+word-level rule (exact keys, whole words, or exact word sequences after
+splitting on `_`, `-`, and camelCase; never substrings). Values from
+raw-material and unclassified keys
 are never copied; values from the explicit compact field contract may be used
 to build the bounded projection.
 
-- **compact**: keys the projection reads, timestamps, pointers (`*_id`,
-  `*_count`, `*_at`), and usage metrics (`*_tokens`). Allowed.
+- **compact**: keys the projection reads, timestamps, usage metrics
+  (`*_tokens`), and pointers/counts (`*_id`, `*_ref`, `*_count`, `*_at`) only
+  when no raw-material word or phrase is present. Known collisions such as
+  `trace_id`, `message_id`, and `log_count` are explicit safe exceptions.
 - **raw material**: credentials, messages/transcripts, logs, local paths, and raw tool
   output. Sets `raw_material_detected`, lists `raw_material_key_names` and
   `raw_material_categories`, and turns `agent_can_continue` off.
 - **unclassified**: any other key. Listed in `unclassified_key_names` (bounded)
   so producers can see contract drift; it never blocks continuation.
+
+Raw-material evidence takes precedence over a generic pointer suffix. For
+example, `secret_id`, `transcript_id`, `raw_id`, and `api_key_id` are raw
+material, not compact pointers.
 
 The projection should be useful even when no session is currently attached. In
 that case, `runtime_id` may be `none`, `session_id` may be `null`, and

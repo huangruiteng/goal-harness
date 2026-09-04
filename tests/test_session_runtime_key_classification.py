@@ -22,7 +22,7 @@ from loopx.session_runtime import (
         "kind", "status", "actor", "summary", "recommended_action",
         "created_at", "session_id", "artifact_id",
         # pointers and counts that merely contain a raw-looking word
-        "trace_id", "catalog_id", "dialog_id", "login_at", "log_count",
+        "trace_id", "message_id", "catalog_id", "dialog_id", "login_at", "log_count",
         # usage metrics
         "token_count", "tokens_used", "max_tokens", "input_tokens", "output_tokens",
     ],
@@ -99,6 +99,59 @@ def test_raw_words_outrank_the_tokens_metric_rule(
     category: RawMaterialCategory,
 ) -> None:
     assert classify_session_runtime_key(key) == (KeyState.RAW_MATERIAL, category)
+
+
+@pytest.mark.parametrize(
+    ("key", "category"),
+    [
+        ("secret_id", RawMaterialCategory.CREDENTIAL),
+        ("password_id", RawMaterialCategory.CREDENTIAL),
+        ("transcript_id", RawMaterialCategory.TRANSCRIPT),
+        ("raw_id", RawMaterialCategory.RAW_OUTPUT),
+        ("stdout_id", RawMaterialCategory.RAW_OUTPUT),
+        ("api_key_id", RawMaterialCategory.CREDENTIAL),
+        ("access_token_ref", RawMaterialCategory.CREDENTIAL),
+        ("tool_result_ref", RawMaterialCategory.RAW_OUTPUT),
+    ],
+)
+def test_raw_evidence_outranks_generic_pointer_suffix(
+    key: str,
+    category: RawMaterialCategory,
+) -> None:
+    assert classify_session_runtime_key(key) == (KeyState.RAW_MATERIAL, category)
+
+
+@pytest.mark.parametrize(
+    ("key", "category"),
+    [
+        ("secret_id", RawMaterialCategory.CREDENTIAL),
+        ("api_key_id", RawMaterialCategory.CREDENTIAL),
+        ("transcript_id", RawMaterialCategory.TRANSCRIPT),
+        ("raw_id", RawMaterialCategory.RAW_OUTPUT),
+    ],
+)
+def test_pointer_shaped_raw_key_blocks_projection_without_copying_value(
+    key: str,
+    category: RawMaterialCategory,
+) -> None:
+    marker = f"RAW_POINTER_MARKER_{key}"
+    payload = build_session_runtime_readonly_projection(
+        goal_id="g",
+        sessions=[
+            {
+                "session_id": "s",
+                "next_action": "advance",
+                key: marker,
+            }
+        ],
+    )
+
+    assert payload["boundary"]["raw_material_detected"] is True
+    assert payload["boundary"]["raw_material_key_names"] == [key]
+    assert payload["boundary"]["raw_material_categories"] == [category.value]
+    assert payload["first_screen"]["agent_can_continue"] is False
+    assert payload["work_lane_contract"]["must_attempt_work"] is False
+    assert marker not in repr(payload)
 
 
 def test_message_material_is_flagged_and_never_copied_to_first_screen() -> None:

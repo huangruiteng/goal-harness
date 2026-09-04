@@ -209,6 +209,16 @@ RAW_MATERIAL_KEYS = (
     "transcript_path",
     "access_token",
     "auth_token",
+    # Raw evidence outranks pointer-like suffixes unless the full key is an
+    # explicit public-safe collision such as ``trace_id``.
+    "secret_id",
+    "password_id",
+    "transcript_id",
+    "raw_id",
+    "stdout_id",
+    "api_key_id",
+    "access_token_ref",
+    "tool_result_ref",
 )
 
 

@@ -158,21 +158,25 @@ summaries, then returns:
 
 The builder never reads input values to decide whether they are raw material;
 it classifies input key names with a typed, word-level rule. Keys are split
-into words on `_`, `-`, and camelCase and matched as exact keys or whole words,
-never as substrings. Every key lands in one of three states:
+into words on `_`, `-`, and camelCase and matched as exact keys, whole words,
+or exact word sequences, never as substrings. Every key lands in one of three
+states:
 
 | State | Effect | Examples |
 | --- | --- | --- |
-| compact | allowed | keys the projection reads (`status`, `summary`, `next_action`), timestamps, pointers ending in `_id`/`_count`/`_at` (`trace_id`, `catalog_id`), usage metrics (`token_count`, `max_tokens`) |
-| raw material | `raw_material_detected`, `agent_can_continue=false`, category recorded in `raw_material_categories`; its value is never copied | `credential` (`api_key`, `access_token`, `password`), `transcript` (`message`, `raw_transcript`, `messages`, `prompt`, `body`), `log` (`log_path`, `stack_trace`), `local_path` (`file_path`), `raw_output` (`stdout_tail`, `diff`) |
+| compact | allowed | keys the projection reads (`status`, `summary`, `next_action`), timestamps, pointer/count suffixes only when no raw evidence is present (`catalog_id`, `login_at`), explicit safe collisions (`trace_id`, `message_id`, `log_count`), usage metrics (`token_count`, `max_tokens`) |
+| raw material | `raw_material_detected`, `agent_can_continue=false`, category recorded in `raw_material_categories`; its value is never copied | `credential` (`api_key`, `access_token`, `password`, `secret_id`, `api_key_id`), `transcript` (`message`, `raw_transcript`, `messages`, `prompt`, `body`, `transcript_id`), `log` (`log_path`, `stack_trace`), `local_path` (`file_path`), `raw_output` (`stdout_tail`, `diff`, `raw_id`) |
 | unclassified | reported in `unclassified_key_names` (bounded), never blocks | `backlog`, `changelog`, `logical_clock` |
 
 The word `token` is a credential only in auth forms (`token`, `access_token`,
 `auth_token`, `api_token`, `bearer_token`, `refresh_token`, `id_token`); count
-forms such as `tokens_used` are compact, but a raw-material word in the same
-key takes precedence (`tokens_password` and `raw_tokens` are raw). `trace_id` is a pointer; `trace`,
-`stack_trace`, and `trace_path` are logs. `log` matches only as a whole word,
-so `catalog_id`, `login_at`, and `changelog` are not flagged.
+forms such as `tokens_used` are compact, but a raw-material word or phrase in
+the same key takes precedence over both metric and pointer shortcuts
+(`tokens_password`, `raw_tokens`, `secret_id`, and `api_key_id` are raw).
+`trace_id` is an explicitly safe pointer; `trace`, `stack_trace`, and
+`trace_path` are logs. `log_count` is an explicitly safe aggregate. `log`
+matches only as a whole word, so `catalog_id`, `login_at`, and `changelog` are
+not flagged.
 
 Run:
 

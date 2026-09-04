@@ -1,9 +1,10 @@
 """Read-only session-runtime projection for the LoopX first screen.
 
 Raw-material classification is typed and word-level. Input keys are split into
-words on ``_``, ``-``, and camelCase, then matched against exact keys or whole
-words, never arbitrary substrings. The earlier substring denylist flagged
-``token_count`` and ``catalog_id`` while missing ``messages`` and ``api_key``.
+words on ``_``, ``-``, and camelCase, then matched against exact keys, whole
+words, or exact word sequences, never arbitrary substrings. The earlier
+substring denylist flagged ``token_count`` and ``catalog_id`` while missing
+``messages`` and ``api_key``.
 Every key lands in one of three states: known compact keys are allowed, known
 raw-material keys are flagged with a :class:`RawMaterialCategory`, and
 unrecognized keys are reported as ``unclassified_key_names`` so producers can
@@ -57,11 +58,22 @@ SOURCE_ID_KEYS = (
 
 TIMESTAMP_KEYS = ("created_at", "event_at", "updated_at", "timestamp")
 
+# Public-safe pointers and aggregate counters whose leading word otherwise
+# carries raw-material meaning. Keep these exceptions explicit and reviewable.
+EXPLICIT_COMPACT_COLLISION_KEYS = frozenset(
+    {
+        "log_count",
+        "message_id",
+        "trace_id",
+    }
+)
+
 # Exact keys the projection itself reads, plus its input booleans.
 COMPACT_KEYS = frozenset(
     {
         *SOURCE_ID_KEYS,
         *TIMESTAMP_KEYS,
+        *EXPLICIT_COMPACT_COLLISION_KEYS,
         "kind",
         "type",
         "status",
@@ -90,8 +102,8 @@ COMPACT_KEYS = frozenset(
     }
 )
 
-# A key whose last word is a pointer or a count is never the material itself:
-# ``trace_id``, ``catalog_id``, ``token_count``, ``login_at``.
+# A generic pointer/count suffix is compact only when no exact or word-level
+# raw-material evidence matched first.
 COMPACT_SUFFIX_WORDS = frozenset({"id", "ids", "ref", "refs", "count", "at"})
 # Usage metrics: ``tokens_used``, ``max_tokens``, ``input_tokens``.
 COMPACT_METRIC_WORDS = frozenset({"tokens"})
@@ -150,6 +162,18 @@ RAW_MATERIAL_WORDS: tuple[tuple[RawMaterialCategory, frozenset[str]], ...] = (
         frozenset({"raw", "stdout", "stderr", "diff", "patch", "dump"}),
     ),
 )
+
+# Multi-word exact raw keys also remain raw when embedded in a larger key. This
+# catches forms such as ``api_key_id`` without treating the ambiguous word
+# ``key`` (or a harmless key such as ``monkey_id``) as raw material.
+RAW_MATERIAL_KEY_PHRASES: Mapping[RawMaterialCategory, tuple[tuple[str, ...], ...]] = {
+    category: tuple(
+        tuple(key.split("_"))
+        for key, key_category in RAW_MATERIAL_KEYS.items()
+        if key_category is category and "_" in key
+    )
+    for category, _raw_words in RAW_MATERIAL_WORDS
+}
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _WORD_SEPARATOR = re.compile(r"[^a-z0-9]+")
@@ -290,10 +314,19 @@ def _key_words(key: str) -> list[str]:
     return [word for word in _WORD_SEPARATOR.split(snake) if word]
 
 
+def _contains_word_sequence(words: Sequence[str], phrase: tuple[str, ...]) -> bool:
+    width = len(phrase)
+    return any(
+        tuple(words[index : index + width]) == phrase
+        for index in range(len(words) - width + 1)
+    )
+
+
 def classify_session_runtime_key(key: str) -> KeyClassification:
     """Classify one input key as compact, raw material, or unclassified.
 
-    Matching is exact-key or whole-word only; substrings never match.
+    Matching is exact-key, whole-word, or exact word-sequence only; substrings
+    never match. Raw evidence outranks generic pointer and metric shortcuts.
     """
 
     words = _key_words(key)
@@ -305,11 +338,14 @@ def classify_session_runtime_key(key: str) -> KeyClassification:
     category = RAW_MATERIAL_KEYS.get(normalized)
     if category is not None:
         return KeyClassification(KeyState.RAW_MATERIAL, category)
+    for category, raw_words in RAW_MATERIAL_WORDS:
+        if raw_words.intersection(words) or any(
+            _contains_word_sequence(words, phrase)
+            for phrase in RAW_MATERIAL_KEY_PHRASES[category]
+        ):
+            return KeyClassification(KeyState.RAW_MATERIAL, category)
     if words[-1] in COMPACT_SUFFIX_WORDS:
         return KeyClassification(KeyState.COMPACT)
-    for category, raw_words in RAW_MATERIAL_WORDS:
-        if raw_words.intersection(words):
-            return KeyClassification(KeyState.RAW_MATERIAL, category)
     if COMPACT_METRIC_WORDS.intersection(words):
         return KeyClassification(KeyState.COMPACT)
     return KeyClassification(KeyState.UNCLASSIFIED)
