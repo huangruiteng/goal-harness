@@ -560,7 +560,9 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
     behavioral_policy_change = bool(areas & BEHAVIORAL_POLICY_AREAS)
     behavior_bearing_change = code_change or behavioral_policy_change
     docs_only = bool(areas) and areas <= {"public_docs", "public_entry_or_policy"}
-    smoke_or_example_only = bool(areas & EXAMPLE_OR_SMOKE_AREAS) and not code_change
+    smoke_or_example_only = bool(areas & EXAMPLE_OR_SMOKE_AREAS) and not (
+        code_change or behavioral_policy_change
+    )
     required_evidence = [
         "problem_context",
         "architecture_flow",

@@ -213,6 +213,8 @@ def test_agent_instruction_plan_requires_default_off_user_experience_evidence() 
     assert plan["applicability"]["code_change"] is False
     assert plan["applicability"]["behavioral_policy_change"] is True
     assert plan["applicability"]["behavior_bearing_change"] is True
+    assert plan["applicability"]["smoke_or_example_only"] is False
+    assert plan["applicability"]["durable_smoke_value_required"] is False
     assert plan["applicability"]["scope_fit_required"] is True
     assert plan["applicability"]["default_off_isolation_required"] is True
     assert plan["applicability"]["negative_walkthrough_required"] is True
