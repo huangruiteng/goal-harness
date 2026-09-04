@@ -13,6 +13,7 @@ import {
 } from './cli.ts'
 import type { FileRunner, LoopXCommand } from './cli.ts'
 import { resolvePluginLoopXCommand } from './managed-runtime.ts'
+import { applyObserver, resolveShadowObserverConfig } from './observer.ts'
 import { goalBarCoordinator } from './goalbar/events.ts'
 import type {
   GoalBarDriverActionReceipt,
@@ -1159,6 +1160,11 @@ export class LoopXContinuationDriver {
 }
 
 export function apply(ctx: Context): void {
+  // L1 shadow observer: separate module, separate effect, no shared send path.
+  // Feature-off parity: with no declared goal nothing below registers a hook.
+  const observerConfig = resolveShadowObserverConfig()
+  if (observerConfig !== undefined) applyObserver(ctx, observerConfig)
+
   const driver = new LoopXContinuationDriver({
     isLiveAgent: agent => ctx.agents.get(agent.id) === agent,
     resolveCommand: signal => resolvePluginLoopXCommand({ signal }),

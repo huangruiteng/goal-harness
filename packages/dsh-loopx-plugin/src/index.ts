@@ -70,4 +70,14 @@ export type {
   LoopXInitSummary,
 } from './init-command.ts'
 export { resolvePluginLoopXCommand } from './managed-runtime.ts'
+export {
+  applyObserver,
+  resolveShadowObserverConfig,
+  ShadowObserver,
+} from './observer.ts'
+export type {
+  ObserverEnvelope,
+  ObserverStats,
+  ShadowObserverConfig,
+} from './observer.ts'
 export type { LoopXRuntimeOptions } from './managed-runtime.ts'
