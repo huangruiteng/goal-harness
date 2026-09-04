@@ -217,6 +217,12 @@ def ensure_replan_novelty_policy(
                 "monitor_target_id",
                 "progress_fingerprint",
                 "agent_id",
+                *(
+                    ("latest_generated_at", "oldest_counted_generated_at")
+                    if trigger.get("kind")
+                    in {"periodic_review", "periodic_review_due"}
+                    else ()
+                ),
             )
             if trigger.get(key) is not None
         }
