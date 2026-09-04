@@ -259,6 +259,30 @@ def test_probe_existing_chat_rejects_stale_runtime_identity() -> None:
         thread.join(timeout=2)
 
 
+def test_probe_existing_chat_defers_timeout_to_server_bind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from loopx import dashboard_launcher
+
+    class _TimingOutConnection:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def request(self, *_args: object, **_kwargs: object) -> None:
+            raise TimeoutError("timed out")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        dashboard_launcher.http.client,
+        "HTTPConnection",
+        _TimingOutConnection,
+    )
+
+    assert dashboard_launcher._probe_existing_chat("127.0.0.1", 8767) == "unavailable"
+
+
 def test_replace_existing_loopx_chat_stops_one_verified_listener(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
