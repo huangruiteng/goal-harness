@@ -194,9 +194,16 @@ typed evidence groups before a verdict:
   maintenance surface. Correctness, green CI, and resolution of earlier
   findings do not override a `disproportionate` or `not_yet_proven` blocker;
 - default-off isolation: for an opt-in change, trace every shared schema,
-  prompt, accepted-input, projection, scheduling, and effect surface, then run
-  a paired counterfactual proving that disabled behavior still matches the
-  pre-change contract;
+  prompt, accepted-input, projection, scheduling, and effect surface. Include
+  installed or automatically loaded skills, agent instructions, prompt
+  templates, help, schemas, install bundles, and provider setup guidance:
+  runtime `default=false` is insufficient when one of those baseline surfaces
+  already changes model or user behavior. Separate availability signals such
+  as installation, discovery, provider readiness, accepted input, and resolver
+  success from activation authority. For scoped capabilities, prove that the
+  intended scope and every required subject are enabled before projecting
+  capability-specific guidance or effects, then run a paired counterfactual
+  proving that disabled behavior still matches the pre-change contract;
 - authority semantics: make public protocol ids and symbols match the real
   actor lifecycle and authority, distinguishing ephemeral sub-agents from
   registered peers and durable multi-agent coordination.

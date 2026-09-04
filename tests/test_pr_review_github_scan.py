@@ -126,6 +126,16 @@ def test_security_policy_keeps_public_entry_classification_after_move() -> None:
     )
 
 
+def test_agent_instruction_files_are_behavior_bearing_surfaces() -> None:
+    assert pr_review_module._file_area("skills/loopx-project/SKILL.md") == (
+        "agent_instruction_surface"
+    )
+    assert pr_review_module._file_area(".github/copilot.instructions.md") == (
+        "agent_instruction_surface"
+    )
+    assert pr_review_module._file_area("AGENTS.md") == "agent_instruction_surface"
+
+
 def _queue_pr(
     number: int,
     *,

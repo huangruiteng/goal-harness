@@ -59,8 +59,16 @@ selected PR:
    repository-native validation when applicable.
 2. Fill `review_plan.result_template` from the shared execution contract;
    preserve missing evidence as `unverified`. For `default_off_isolation`, run
-   its paired counterfactual across all shared surfaces; for `authority_semantics`,
-   match names to actor authority. Never infer `verified` from metadata or CI.
+   its paired counterfactual across every shared and automatically loaded
+   surface, including skills, agent instructions, prompt templates, help,
+   schemas, install bundles, and provider guidance. Treat installation,
+   discovery, provider readiness, accepted input, and resolver success as
+   availability rather than activation; a runtime default-off flag cannot
+   compensate for capability behavior already projected through a baseline
+   instruction surface. For scoped activation, verify the intended scope and
+   every required subject before capability-specific guidance or effects. For
+   `authority_semantics`, match names to actor authority. Never infer
+   `verified` from metadata or CI.
 3. Apply `completion_gate` literally. If an applicable requirement is missing,
    do not manufacture a detailed verdict; name the evidence gap.
 4. Render the verified result through `review_template`. The five sections are

@@ -20,7 +20,9 @@ CODE_AREAS = {
 
 EXAMPLE_OR_SMOKE_AREAS = {"test_or_example"}
 
-NEGATIVE_PATH_AREAS = CODE_AREAS | {"public_entry_or_policy"}
+BEHAVIORAL_POLICY_AREAS = {"public_entry_or_policy", "agent_instruction_surface"}
+
+NEGATIVE_PATH_AREAS = CODE_AREAS | BEHAVIORAL_POLICY_AREAS
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:
@@ -150,7 +152,7 @@ def build_review_execution_contract() -> dict[str, Any]:
             },
             {
                 "evidence_id": "scope_fit",
-                "required_when": "code_change",
+                "required_when": "behavior_bearing_change",
                 "fields": [
                     "shipped_behavior",
                     "active_call_sites",
@@ -293,7 +295,7 @@ def build_review_execution_contract() -> dict[str, Any]:
             },
             {
                 "evidence_id": "default_off_isolation",
-                "required_when": "code_change",
+                "required_when": "behavior_bearing_change",
                 "verdict_values": [
                     "isolated",
                     "not_isolated",
@@ -303,15 +305,20 @@ def build_review_execution_contract() -> dict[str, Any]:
                 "fields": [
                     "opt_in_or_default_off_claim",
                     "authoritative_gate",
+                    "declared_activation_scope",
+                    "enabled_subjects",
                     "default_state",
+                    "availability_signals_that_do_not_activate",
                     "disabled_entry_path",
                     "enabled_entry_path",
                     "shared_changed_surfaces",
+                    "installed_or_auto_loaded_instruction_surfaces",
                     "disabled_schema_or_required_fields",
                     "disabled_prompt_or_guidance",
                     "disabled_accepted_inputs",
                     "disabled_state_or_projection",
                     "disabled_scheduling_quota_or_side_effects",
+                    "disabled_user_experience_parity",
                     "paired_counterfactual_validation",
                     "verdict",
                 ],
@@ -322,7 +329,19 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "preserve the previous observable contract: schema and required "
                     "fields, prompts and guidance, accepted host inputs, persisted "
                     "or journal projections, scheduling and quota decisions, and "
-                    "external effects. The absence of a topology, operation list, "
+                    "external effects. Treat installed or automatically loaded "
+                    "skills, system or agent instructions, prompt templates, help "
+                    "text, schemas, and provider setup guidance as production "
+                    "surfaces when they can change model or user behavior. A runtime "
+                    "default of false does not isolate guidance that is already "
+                    "present on one of those baseline surfaces. Distinguish "
+                    "availability from activation: installation, discovery, provider "
+                    "readiness, accepted input, locator resolution, or CLI presence "
+                    "does not enable a capability. For goal-, project-, tenant-, "
+                    "user-, or agent-scoped activation, prove that the authoritative "
+                    "gate binds the intended scope and every required subject before "
+                    "any capability-specific instruction, action, state mutation, or "
+                    "user-facing concept is projected. The absence of a topology, operation list, "
                     "or feature object proves only that one enabled path did not run; "
                     "it does not prove isolation of shared builders or serializers. "
                     "Run a paired counterfactual using otherwise identical inputs "
@@ -533,6 +552,8 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
         str(area) for area, count in _as_mapping(item.get("areas")).items() if count
     }
     code_change = bool(areas & CODE_AREAS)
+    behavioral_policy_change = bool(areas & BEHAVIORAL_POLICY_AREAS)
+    behavior_bearing_change = code_change or behavioral_policy_change
     docs_only = bool(areas) and areas <= {"public_docs", "public_entry_or_policy"}
     smoke_or_example_only = bool(areas & EXAMPLE_OR_SMOKE_AREAS) and not code_change
     required_evidence = [
@@ -548,11 +569,14 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
         required_evidence.insert(3, "symbol_map")
         required_evidence.append("scope_fit")
         required_evidence.append("change_proportionality")
-        required_evidence.append("default_off_isolation")
         required_evidence.append("authority_semantics")
         required_evidence.append("typed_state_rule")
+    if behavior_bearing_change:
+        if "scope_fit" not in required_evidence:
+            required_evidence.append("scope_fit")
+        required_evidence.append("default_off_isolation")
         required_evidence.append("behavior_change_disclosure")
-    if areas & {"product_runtime", "public_entry_or_policy"}:
+    if areas & {"product_runtime", "public_entry_or_policy", "agent_instruction_surface"}:
         required_evidence.append("domain_neutrality")
         required_evidence.append("guidance_vs_obligation")
     if smoke_or_example_only:
@@ -572,20 +596,24 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
         "applicability": {
             "areas": sorted(areas),
             "code_change": code_change,
+            "behavioral_policy_change": behavioral_policy_change,
+            "behavior_bearing_change": behavior_bearing_change,
             "docs_only": docs_only,
             "symbol_map_required": code_change,
-            "scope_fit_required": code_change,
+            "scope_fit_required": behavior_bearing_change,
             "change_proportionality_required": code_change,
-            "default_off_isolation_required": code_change,
+            "default_off_isolation_required": behavior_bearing_change,
             "authority_semantics_required": code_change,
             "negative_walkthrough_required": bool(areas & NEGATIVE_PATH_AREAS),
             "typed_state_rule_required": code_change,
-            "behavior_change_disclosure_required": code_change,
+            "behavior_change_disclosure_required": behavior_bearing_change,
             "domain_neutrality_required": bool(
-                areas & {"product_runtime", "public_entry_or_policy"}
+                areas
+                & {"product_runtime", "public_entry_or_policy", "agent_instruction_surface"}
             ),
             "guidance_vs_obligation_required": bool(
-                areas & {"product_runtime", "public_entry_or_policy"}
+                areas
+                & {"product_runtime", "public_entry_or_policy", "agent_instruction_surface"}
             ),
             "smoke_or_example_only": smoke_or_example_only,
             "durable_smoke_value_required": smoke_or_example_only,

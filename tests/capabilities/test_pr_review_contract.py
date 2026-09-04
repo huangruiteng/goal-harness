@@ -63,6 +63,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert "caller_evidence" in requirements["symbol_map"]["item_fields"]
     assert "negative_fields" in requirements["walkthroughs"]
     assert "regression_test" in requirements["failure_analysis"]["fields"]
+    assert requirements["scope_fit"]["required_when"] == "behavior_bearing_change"
     assert requirements["typed_state_rule"]["required_when"] == "code_change"
     assert "substring denylists" in requirements["typed_state_rule"]["rule"]
     assert "domain-neutral" in requirements["domain_neutrality"]["rule"]
@@ -82,7 +83,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert "green CI" in proportionality["rule"]
     assert "original problem" in proportionality["rule"]
     isolation = requirements["default_off_isolation"]
-    assert isolation["required_when"] == "code_change"
+    assert isolation["required_when"] == "behavior_bearing_change"
     assert isolation["verdict_values"] == [
         "isolated",
         "not_isolated",
@@ -90,8 +91,15 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
         "not_yet_proven",
     ]
     assert "disabled_prompt_or_guidance" in isolation["fields"]
+    assert "declared_activation_scope" in isolation["fields"]
+    assert "availability_signals_that_do_not_activate" in isolation["fields"]
+    assert "installed_or_auto_loaded_instruction_surfaces" in isolation["fields"]
+    assert "disabled_user_experience_parity" in isolation["fields"]
     assert "paired_counterfactual_validation" in isolation["fields"]
     assert "absence of a topology" in isolation["rule"]
+    assert "automatically loaded" in isolation["rule"]
+    assert "availability from activation" in isolation["rule"]
+    assert "runtime default of false" in isolation["rule"]
     authority = requirements["authority_semantics"]
     assert authority["verdict_values"] == [
         "aligned",
@@ -187,6 +195,29 @@ def test_docs_plan_does_not_invent_code_symbols() -> None:
     )
     assert "### 关键内容讲解" in concrete["agent_instruction"]
     assert template["review_order"] == ["docs/design.md"]
+
+
+def test_agent_instruction_plan_requires_default_off_user_experience_evidence() -> None:
+    item = _item(areas={"agent_instruction_surface": 1})
+    item["key_files"] = [
+        {"path": "skills/project/SKILL.md", "additions": 20, "deletions": 2}
+    ]
+
+    plan = build_review_plan(item)
+
+    assert plan["applicability"]["code_change"] is False
+    assert plan["applicability"]["behavioral_policy_change"] is True
+    assert plan["applicability"]["behavior_bearing_change"] is True
+    assert plan["applicability"]["scope_fit_required"] is True
+    assert plan["applicability"]["default_off_isolation_required"] is True
+    assert plan["applicability"]["negative_walkthrough_required"] is True
+    assert plan["applicability"]["behavior_change_disclosure_required"] is True
+    assert plan["applicability"]["guidance_vs_obligation_required"] is True
+    assert "scope_fit" in plan["required_evidence_ids"]
+    assert "default_off_isolation" in plan["required_evidence_ids"]
+    assert "behavior_change_disclosure" in plan["required_evidence_ids"]
+    assert "guidance_vs_obligation" in plan["required_evidence_ids"]
+    assert "symbol_map" not in plan["required_evidence_ids"]
 
 
 def test_smoke_only_plan_requires_durable_value_evidence() -> None:

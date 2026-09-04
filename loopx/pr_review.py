@@ -430,6 +430,12 @@ def _commit_headlines(pr: dict[str, Any], *, limit: int = 5) -> list[str]:
 def _file_area(path: str) -> str:
     name = path.rsplit("/", 1)[-1]
     lowered = path.lower()
+    if (
+        path.startswith(("skills/", ".codex/", ".agents/"))
+        or name in {"AGENTS.md", "SKILL.md", "CLAUDE.md"}
+        or lowered.endswith((".prompt.md", ".instructions.md"))
+    ):
+        return "agent_instruction_surface"
     if path in {
         "README.md",
         "README.zh-CN.md",
