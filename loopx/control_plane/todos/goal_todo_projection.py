@@ -294,6 +294,35 @@ def goal_todo_summaries(
         fields = markdown_fields
         source = "markdown_active_state"
 
+    return todo_summaries_from_fields(
+        fields=fields,
+        source=source,
+        projection_fields=projection_fields,
+        projection_overlay=projection_overlay,
+        rollout_events=rollout_events,
+        roles=roles,
+        status=status,
+        todo_id=todo_id,
+        agent_id=agent_id,
+        limit=limit,
+    )
+
+
+def todo_summaries_from_fields(
+    *,
+    fields: dict[str, Any],
+    source: str,
+    projection_fields: dict[str, Any] | None,
+    projection_overlay: dict[str, Any] | None,
+    rollout_events: list[dict[str, Any]],
+    roles: list[str],
+    status: str | None,
+    todo_id: str | None,
+    agent_id: str | None,
+    limit: int | None,
+) -> GoalTodoSummaries:
+    """Apply the shared Todo consumer semantics to an authority read model."""
+
     resume_source_items = [
         *summary_items(fields, "user"),
         *summary_items(fields, "agent"),
@@ -327,7 +356,7 @@ def goal_todo_summaries(
         uncapped_todo_count += int(summary.get("total_count") or 0)
     return GoalTodoSummaries(
         source=source,
-        projection_fields=projection_fields,
+        projection_fields=projection_fields or {},
         projection_overlay=projection_overlay,
         summaries=summaries,
         todos=todos,
@@ -342,4 +371,5 @@ __all__ = [
     "goal_todo_summaries",
     "merge_todo_projection_fields",
     "summary_items",
+    "todo_summaries_from_fields",
 ]

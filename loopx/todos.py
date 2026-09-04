@@ -91,7 +91,10 @@ from .control_plane.todos.list_projection import (
     todo_item_relations,
     todo_list_projection_contract,
 )
-from .control_plane.todos.goal_todo_projection import goal_todo_summaries
+from .control_plane.todos.goal_todo_projection import (
+    goal_todo_summaries,
+    todo_summaries_from_fields,
+)
 from .control_plane.todos import monitor_metadata as todo_monitor_metadata
 from .control_plane.todos.external_wait_writeback import plan_todo_external_wait_update
 from .control_plane.todos.mutation_authority import authorize_todo_lifecycle_mutation, todo_update_authority_action
@@ -116,6 +119,10 @@ from .control_plane.todos.write_policy import (
     resolve_user_gate_global_gate_update,
 )
 from .control_plane.coordination.legacy_writer_fence import legacy_todo_write_transaction
+from .control_plane.coordination.local_authority import (
+    canonical_todo_summary_fields,
+    read_canonical_todos_if_promoted,
+)
 from .control_plane.todos.handoff_mode import (
     enter_added_todo_ownership_handoff_gate,
     enter_todo_ownership_handoff_gate,
@@ -205,8 +212,6 @@ def list_goal_todos(
     )
     if goal is None:
         raise ValueError(f"goal {goal_id!r} is not present in the registry")
-    if not resolved_state_file.exists():
-        raise ValueError(f"active state file does not exist: {resolved_state_file}")
 
     runtime_root = resolve_runtime_root(registry, runtime_root_arg)
     rollout_events = load_rollout_events(
@@ -215,17 +220,40 @@ def list_goal_todos(
     )
 
     roles = [role] if role else ["user", "agent"]
-    projected = goal_todo_summaries(
-        goal,
-        state_text=resolved_state_file.read_text(encoding="utf-8"),
-        state_path=resolved_state_file,
-        rollout_events=rollout_events,
-        roles=roles,
-        status=status,
-        todo_id=normalized_todo_id,
-        agent_id=normalized_agent_id,
-        limit=limit,
+    canonical_read = read_canonical_todos_if_promoted(
+        runtime_root=runtime_root,
+        goal_id=goal_id,
     )
+    if canonical_read is not None:
+        projected = todo_summaries_from_fields(
+            fields=canonical_todo_summary_fields(
+                canonical_read["todos"],
+                rollout_events=rollout_events,
+            ),
+            source="file_authority",
+            projection_fields={},
+            projection_overlay=None,
+            rollout_events=rollout_events,
+            roles=roles,
+            status=status,
+            todo_id=normalized_todo_id,
+            agent_id=normalized_agent_id,
+            limit=limit,
+        )
+    else:
+        if not resolved_state_file.exists():
+            raise ValueError(f"active state file does not exist: {resolved_state_file}")
+        projected = goal_todo_summaries(
+            goal,
+            state_text=resolved_state_file.read_text(encoding="utf-8"),
+            state_path=resolved_state_file,
+            rollout_events=rollout_events,
+            roles=roles,
+            status=status,
+            todo_id=normalized_todo_id,
+            agent_id=normalized_agent_id,
+            limit=limit,
+        )
     source = projected.source
     projection_fields = projected.projection_fields
     projection_overlay = projected.projection_overlay
@@ -271,6 +299,15 @@ def list_goal_todos(
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
     }
+    if canonical_read is not None:
+        payload["authority_read"] = {
+            "source_authority": canonical_read["source_authority"],
+            "provider_revision": canonical_read.get("provider_revision"),
+            "cursor": canonical_read.get("cursor"),
+            "todo_read_model": canonical_read.get("todo_read_model"),
+            "decision_read_from_provider": True,
+            "legacy_fallback_used": False,
+        }
     if normalized_agent_id:
         payload["agent_id_filter"] = normalized_agent_id
         payload["unfiltered_todo_count"] = unfiltered_count

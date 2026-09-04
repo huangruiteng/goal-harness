@@ -22,11 +22,15 @@ def _context(
     tmp_path: Path,
     *,
     notification_projection: dict[str, Any] | None = None,
+    registry_goals: list[dict[str, Any]] | None = None,
 ) -> status_collection.StatusCollectionContext:
     runtime_root = tmp_path / "runtime"
     runtime_root.mkdir()
     return status_collection.StatusCollectionContext(
-        load_registry=lambda _path: {"common_runtime_root": str(runtime_root)},
+        load_registry=lambda _path: {
+            "common_runtime_root": str(runtime_root),
+            "goals": registry_goals or [],
+        },
         resolve_runtime_root=lambda _registry, _override, **_kwargs: runtime_root,
         collect_global_registry_health=lambda **_kwargs: {
             "ok": True,
@@ -228,6 +232,56 @@ def test_status_collection_keeps_configured_goal_channel_rows(
     )
 
     assert payload["goal_channel_notification_projection"] == projection
+
+
+def test_stopped_scope_filters_goal_channel_rows_and_requests_archive_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        status_collection,
+        "collect_runtime_projection_route_diagnostics",
+        lambda **_kwargs: {"available": False},
+    )
+    queue_calls: list[dict[str, Any]] = []
+    context = _context(
+        tmp_path,
+        registry_goals=[
+            {"id": "active-goal", "activation_state": "active"},
+            {"id": "stopped-goal", "activation_state": "stopped"},
+        ],
+        notification_projection={
+            "schema_version": "loopx_goal_channel_notification_projection_v0",
+            "goals": [
+                {"goal_id": "active-goal", "configured": True},
+                {"goal_id": "stopped-goal", "configured": True},
+            ],
+        },
+    )
+    base_builder = context.build_attention_queue
+    context = status_collection.StatusCollectionContext(
+        **{
+            **context.__dict__,
+            "build_attention_queue": lambda **kwargs: (
+                queue_calls.append(kwargs),
+                base_builder(**kwargs),
+            )[1],
+        }
+    )
+
+    payload = status_collection.collect_status(
+        registry_path=tmp_path / "registry.json",
+        runtime_root_override=None,
+        scan_roots=[tmp_path],
+        limit=5,
+        context=context,
+        activation_state_filter="stopped",
+    )
+
+    assert queue_calls[0]["include_stopped_goal_context"] is True
+    assert payload["goal_channel_notification_projection"]["goals"] == [
+        {"goal_id": "stopped-goal", "configured": True}
+    ]
 
 
 def test_status_projection_cache_separates_capability_envelopes(

@@ -24,6 +24,7 @@ import {
   fetchPeriodicReportProjection,
   periodicReportApiUrls,
   resolveLocalStatusUrl,
+  scopedStatusUrl,
 } from "../data/local-status-query";
 import {
   ChatApiError,
@@ -52,6 +53,17 @@ import {
   type ProtectedActionProposal,
   type TodoProposal,
 } from "../data/chat";
+import {
+  beginStatusRequest,
+  createStatusRequestFence,
+  resetStatusRequestFence,
+  reserveStatusSourceSelection,
+  statusRequestCanCommit,
+  statusRequestIsCurrent,
+  type StatusRequest,
+  type StatusRequestFence,
+} from "../data/status-request-fence";
+import { mergeScopedStatusProjections } from "../data/status-merge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -73,6 +85,7 @@ import {
   type WorkspaceTimelineItem,
   type WorkspaceWorker,
   type WorkspaceGoalNotification,
+  type WorkspaceGoalArchiveLoadState,
   type WorkspaceActionPreview,
   type WorkspaceActionPreviewRequest,
 } from "../features/personal-workspace/personal-workspace-model";
@@ -132,74 +145,6 @@ type DataSource =
   | { kind: "example"; label: string }
   | { kind: "file"; label: string }
   | { kind: "url"; label: string };
-
-type StatusRequestFence = {
-  loadedUrl: string | null;
-  projectionRevision: number;
-  requestedUrl: string | null;
-  selectionRevision: number;
-};
-
-type StatusRequest = {
-  background: boolean;
-  projectionRevision: number;
-  selectionRevision: number;
-  url: string;
-};
-
-function reserveStatusSourceSelection(fence: StatusRequestFence, url: string) {
-  fence.selectionRevision += 1;
-  fence.requestedUrl = url;
-  return fence.selectionRevision;
-}
-
-function beginStatusRequest(
-  fence: StatusRequestFence,
-  url: string,
-  options: { background: boolean; selectionRevision?: number },
-): StatusRequest | null {
-  if (options.background) {
-    if (fence.requestedUrl !== null || fence.loadedUrl !== url) return null;
-    return {
-      background: true,
-      projectionRevision: fence.projectionRevision,
-      selectionRevision: fence.selectionRevision,
-      url,
-    };
-  }
-  const selectionRevision = options.selectionRevision ?? fence.selectionRevision + 1;
-  if (options.selectionRevision !== undefined && fence.selectionRevision !== selectionRevision) {
-    return null;
-  }
-  fence.selectionRevision = selectionRevision;
-  fence.projectionRevision += 1;
-  fence.requestedUrl = url;
-  return {
-    background: false,
-    projectionRevision: fence.projectionRevision,
-    selectionRevision,
-    url,
-  };
-}
-
-function statusRequestIsCurrent(fence: StatusRequestFence, request: StatusRequest) {
-  return fence.projectionRevision === request.projectionRevision
-    && fence.selectionRevision === request.selectionRevision;
-}
-
-function statusRequestCanCommit(fence: StatusRequestFence, request: StatusRequest) {
-  return statusRequestIsCurrent(fence, request) && (
-    !request.background
-    || (fence.requestedUrl === null && fence.loadedUrl === request.url)
-  );
-}
-
-function resetStatusRequestFence(fence: StatusRequestFence) {
-  fence.projectionRevision += 1;
-  fence.selectionRevision += 1;
-  fence.requestedUrl = null;
-  fence.loadedUrl = null;
-}
 
 async function fetchStatusPayload(url: string) {
   const response = await fetch(url, { cache: "no-store" });
@@ -1304,12 +1249,14 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
   };
 }
 function PersonalGoalHome({
+  goalArchiveLoadState,
   isLoading,
   onGoalActivationStateChange,
   onGoalDeleted,
   onSelectGoal,
   onReconcileStatus,
   onRefresh,
+  onRetryGoalArchive,
   payload,
   rows,
   selectedGoalId,
@@ -1317,12 +1264,14 @@ function PersonalGoalHome({
   theme,
   toggleTheme,
 }: {
+  goalArchiveLoadState: WorkspaceGoalArchiveLoadState;
   isLoading: boolean;
   onGoalActivationStateChange: (goalId: string, activationState: "active" | "stopped") => void;
   onGoalDeleted: (goalId: string) => void;
   onSelectGoal: (goalId: string) => void;
   onReconcileStatus: () => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
+  onRetryGoalArchive: () => void | Promise<void>;
   payload: StatusPayload;
   rows: GoalDirectoryRow[];
   selectedGoalId: string;
@@ -2583,6 +2532,7 @@ function PersonalGoalHome({
           onGoalActivationStateChange,
           onGoalDeleted,
           onReconcileStatus,
+          onRetryGoalArchive,
           onExportOutput: async (output) => {
             const contents = [
               `# ${output.title}`,
@@ -2609,6 +2559,7 @@ function PersonalGoalHome({
           onSendMessage: async (message, agentId, goalId, attachments) => sendManagerQuestion(message, { agentId, goalId, attachments }),
           onStartNewRunSession: startNewManagerSession,
         }}
+        goalArchiveLoadState={goalArchiveLoadState}
         model={workspaceModel}
         readOnly={readOnly}
         selectedAgentId={selectedAgent.agentId}
@@ -2711,17 +2662,18 @@ export function DashboardPage() {
   const [statusUrl, setStatusUrl] = useState(search.statusUrl);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [goalArchiveLoadState, setGoalArchiveLoadState] = useState<WorkspaceGoalArchiveLoadState>({
+    error: null,
+    phase: "idle",
+  });
   const [requestedStatusUrl, setRequestedStatusUrl] = useState<string | null>(
     search.statusUrl.trim() || null,
   );
   const [exampleModeRequested, setExampleModeRequested] = useState(false);
   const suppressedStatusUrlRef = useRef<string | null>(null);
-  const statusRequestFenceRef = useRef<StatusRequestFence>({
-    loadedUrl: null,
-    projectionRevision: 0,
-    requestedUrl: search.statusUrl.trim() || null,
-    selectionRevision: 0,
-  });
+  const statusRequestFenceRef = useRef<StatusRequestFence>(
+    createStatusRequestFence(search.statusUrl.trim() || null),
+  );
   const routeStatusRequestUrl = !exampleModeRequested && source.kind === "example"
     ? search.statusUrl.trim()
     : "";
@@ -2745,9 +2697,72 @@ export function DashboardPage() {
     [runHistory.goals, queue.items],
   );
 
+  function loadGoalArchive(url: string, request: StatusRequest, resyncAttempt = 0) {
+    setGoalArchiveLoadState({ error: null, phase: "loading" });
+    void fetchStatusPayload(scopedStatusUrl(url, "stopped", window.location.href))
+      .then((archivePayload) => {
+        if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
+        const archiveRevision = archivePayload.goal_projection?.registry_revision ?? null;
+        const revisionMismatch = request.registryRevision !== null
+          && request.registryRevision !== undefined
+          && archiveRevision !== null
+          && request.registryRevision !== archiveRevision;
+        setPayload((current) => mergeScopedStatusProjections(current, archivePayload));
+        if (revisionMismatch && resyncAttempt < 1) {
+          void loadFromUrl(url, { background: true, resyncAttempt: resyncAttempt + 1 });
+          return;
+        }
+        setGoalArchiveLoadState(
+          revisionMismatch
+            ? { error: "Goal 状态在加载历史时发生变化，请重试。", phase: "error" }
+            : { error: null, phase: "ready" },
+        );
+      })
+      .catch((error) => {
+        if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
+        setGoalArchiveLoadState({ error: formatStatusError(error), phase: "error" });
+      });
+  }
+
+  function retryGoalArchive() {
+    const url = source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl);
+    const request = beginStatusRequest(statusRequestFenceRef.current, url, { background: true });
+    if (request) loadGoalArchive(url, request);
+  }
+
+  async function commitLoadedStatus(
+    url: string,
+    nextPayload: StatusPayload,
+    request: StatusRequest,
+  ) {
+    if (request.background) {
+      setPayload((current) => mergeScopedStatusProjections(current, nextPayload));
+      return true;
+    }
+    const nextSource: DataSource = { kind: "url", label: url };
+    statusRequestFenceRef.current.loadedUrl = url;
+    setPayload(nextPayload);
+    setSource(nextSource);
+    setStatusUrl(url);
+    await navigate({
+      search: (current) => ({
+        ...current,
+        statusUrl: url,
+      }),
+    });
+    if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return false;
+    statusRequestFenceRef.current.requestedUrl = null;
+    setRequestedStatusUrl(null);
+    return true;
+  }
+
   async function loadFromUrl(
     url: string,
-    options: { background?: boolean; selectionRevision?: number } = {},
+    options: {
+      background?: boolean;
+      resyncAttempt?: number;
+      selectionRevision?: number;
+    } = {},
   ) {
     const trimmed = url.trim();
     const background = options.background === true;
@@ -2766,28 +2781,21 @@ export function DashboardPage() {
       setRequestedStatusUrl(trimmed);
       setIsLoading(true);
       setLoadError(null);
+      setGoalArchiveLoadState({ error: null, phase: "idle" });
     }
     try {
-      const nextPayload = await fetchStatusPayload(trimmed);
+      const nextPayload = await fetchStatusPayload(
+        scopedStatusUrl(trimmed, "active", window.location.href),
+      );
       if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
-      if (background) {
-        setPayload(nextPayload);
+      request.registryRevision = nextPayload.goal_projection?.registry_revision ?? null;
+      if (!await commitLoadedStatus(trimmed, nextPayload, request)) return;
+      if (nextPayload.goal_projection?.scope !== "active"
+        || nextPayload.goal_projection.complete) {
+        setGoalArchiveLoadState({ error: null, phase: "ready" });
         return;
       }
-      const nextSource: DataSource = { kind: "url", label: trimmed };
-      statusRequestFenceRef.current.loadedUrl = trimmed;
-      setPayload(nextPayload);
-      setSource(nextSource);
-      setStatusUrl(trimmed);
-      await navigate({
-        search: (current) => ({
-          ...current,
-          statusUrl: trimmed,
-        }),
-      });
-      if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return;
-      statusRequestFenceRef.current.requestedUrl = null;
-      setRequestedStatusUrl(null);
+      loadGoalArchive(trimmed, request, options.resyncAttempt ?? 0);
     } catch (error) {
       if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return;
       if (!background) setLoadError(formatStatusError(error));
@@ -2875,6 +2883,7 @@ export function DashboardPage() {
     setRequestedStatusUrl(null);
     setLoadError(null);
     setIsLoading(false);
+    setGoalArchiveLoadState({ error: null, phase: "ready" });
     void navigate({
       search: (current) => ({
         ...current,
@@ -2927,7 +2936,8 @@ export function DashboardPage() {
       }
       return;
     }
-    if (search.goalId && !goalIds.has(search.goalId)) {
+    if (search.goalId && !goalIds.has(search.goalId)
+      && goalArchiveLoadState.phase !== "loading") {
       void navigate({
         search: (current) => ({
           ...current,
@@ -2935,7 +2945,7 @@ export function DashboardPage() {
         }),
       });
     }
-  }, [goalRows, navigate, search.goalId, search.statusUrl, source.kind]);
+  }, [goalArchiveLoadState.phase, goalRows, navigate, search.goalId, search.statusUrl, source.kind]);
 
   function selectGoal(goalId: string) {
     void navigate({
@@ -2962,6 +2972,7 @@ export function DashboardPage() {
 
   return (
     <PersonalGoalHome
+      goalArchiveLoadState={goalArchiveLoadState}
       isLoading={isLoading}
       onGoalActivationStateChange={(goalId, activationState) => {
         statusRequestFenceRef.current.projectionRevision += 1;
@@ -2976,6 +2987,7 @@ export function DashboardPage() {
         source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl),
         { background: true },
       )}
+      onRetryGoalArchive={retryGoalArchive}
       onRefresh={() => loadFromUrl(source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl))}
       payload={payload}
       rows={goalRows}

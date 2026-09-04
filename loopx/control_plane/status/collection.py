@@ -2,17 +2,44 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from ..goals.contract_health import project_contract_health_for_goal
+from ..goals.activation import (
+    GoalActivationState,
+    goal_activation_state,
+    normalize_goal_activation_state,
+)
 from ..runtime.runtime_projection_route import (
     collect_runtime_projection_route_diagnostics,
 )
+from ...registry import registry_goals
 
 
 StatusCallback = Callable[..., Any]
+
+
+def registry_activation_revision(registry: dict[str, Any]) -> str:
+    """Stable fingerprint of the registry's goal activation partition.
+
+    Two scoped snapshots (active vs stopped) can be merged safely only when
+    this revision matches: it changes exactly when a goal is stopped or
+    resumed between the two requests. A mismatched revision means the merge
+    may duplicate or omit goals, so consumers should keep the projection
+    incomplete and resync instead of trusting the concatenated view.
+    """
+    entries = sorted(
+        (str(goal.get("id") or ""), goal_activation_state(goal).value)
+        for goal in registry_goals(registry)
+    )
+    digest = hashlib.sha256(
+        json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"registry_activation_v1:{digest[:16]}"
 
 
 @dataclass(frozen=True)
@@ -45,6 +72,7 @@ def collect_status(
     available_capabilities: Any = None,
     include_public_boundary_scan: bool = True,
     recent_run_limit: int | None = None,
+    activation_state_filter: GoalActivationState | str | None = None,
 ) -> dict[str, Any]:
     display_limit = max(0, limit)
     control_plane_limit = max(
@@ -53,6 +81,11 @@ def collect_status(
         max(0, recent_run_limit) if recent_run_limit is not None else 0,
     )
     goal_filter = str(goal_id or "").strip() or None
+    activation_filter = (
+        normalize_goal_activation_state(activation_state_filter)
+        if activation_state_filter is not None
+        else None
+    )
     registry = context.load_registry(registry_path)
     runtime_root = context.resolve_runtime_root(
         registry,
@@ -71,6 +104,7 @@ def collect_status(
         goal_id=goal_filter,
         limit=control_plane_limit,
         include_runtime_goals=include_runtime_goals,
+        activation_state_filter=activation_filter,
     )
     contract = context.check_contract(
         registry_path=registry_path,
@@ -79,6 +113,7 @@ def collect_status(
         limit=limit,
         goal_id_filter=goal_filter,
         include_public_boundary_scan=include_public_boundary_scan,
+        activation_state_filter=activation_filter,
     )
     contract = project_contract_health_for_goal(contract, goal_id=goal_filter)
     queue = context.build_attention_queue(
@@ -88,6 +123,9 @@ def collect_status(
         runtime_root=runtime_root,
         include_task_graph=include_task_graph,
         goal_id_filter=goal_filter,
+        include_stopped_goal_context=(
+            activation_filter is GoalActivationState.STOPPED
+        ),
     )
     runtime_summaries = context.build_runtime_summaries(
         history=history,
@@ -106,6 +144,7 @@ def collect_status(
         registry_path=registry_path,
         runtime_root=runtime_root,
         goal_id=goal_filter,
+        activation_state_filter=activation_filter,
     )
     runtime_projection_route_health = {
         "healthy": (
@@ -143,6 +182,15 @@ def collect_status(
         **runtime_summaries,
         "promotion_gate": promotion_gate,
     }
+    if activation_filter is not None:
+        payload["goal_projection"] = {
+            "schema_version": "loopx_goal_projection_scope_v0",
+            "scope": activation_filter.value,
+            "complete": False,
+            "projected_goal_count": int(history.get("goal_count") or 0),
+            "registry_goal_count": len(registry_goals(registry)),
+            "registry_revision": registry_activation_revision(registry),
+        }
     payload["runtime_projection_routes"] = runtime_projection_route_health
     agent_management_projection = context.build_agent_management_projection(
         payload,
@@ -158,6 +206,23 @@ def collect_status(
                 goal_id=goal_filter,
             )
         )
+        if activation_filter is not None and isinstance(
+            goal_channel_notification_projection, dict
+        ):
+            projected_goal_ids = {
+                str(goal.get("id") or "")
+                for goal in registry_goals(registry)
+                if goal_activation_state(goal) is activation_filter
+            }
+            goal_channel_notification_projection = {
+                **goal_channel_notification_projection,
+                "goals": [
+                    row
+                    for row in goal_channel_notification_projection.get("goals") or []
+                    if isinstance(row, dict)
+                    and str(row.get("goal_id") or "") in projected_goal_ids
+                ],
+            }
     except Exception:
         goal_channel_notification_projection = None
     notification_rows = (

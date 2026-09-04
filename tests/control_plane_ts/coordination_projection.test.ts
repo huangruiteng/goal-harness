@@ -8,12 +8,16 @@ import type {
   AuthorityStoreCommit,
   AuthorityStoreCommitResult,
 } from "../../loopx/control_plane/coordination/authority_store.ts";
+import { canonicalAuthoritySha256 } from "../../loopx/control_plane/coordination/authority_store_codec.ts";
+import type { JsonObject } from "../../loopx/control_plane/effect_program.ts";
 import {
   commitCoordinationProjectionMutation,
   indexCoordinationProjection,
   indexCoordinationProjectionTodos,
   prepareCoordinationProjectionCommit,
   reduceCoordinationProjection,
+  TODO_CANONICAL_READ_RECORD_FIELDS,
+  TODO_CANONICAL_READ_RECORD_SCHEMA,
 } from "../../loopx/control_plane/coordination/coordination_projection.ts";
 import { FileAuthorityStore } from "../../loopx/control_plane/coordination/file_authority_store.ts";
 
@@ -137,6 +141,89 @@ test("coordination projection reducer fails closed on partial or invalid batches
     ]),
     /more than once/,
   );
+});
+
+test("canonical Todo mutation rejects a replacement that drops existing consumer fields", () => {
+  const todo = {
+    schema_version: "todo_item_v0",
+    todo_id: "todo_a",
+    role: "agent",
+    status: "open",
+    done: false,
+    text: "Qualify provider cutover",
+    archive_state: "active",
+    source_section: "Agent Todo",
+    priority: "P0",
+    title: "Provider cutover",
+    resume_when: "material_change:todo_monitor",
+    evidence: "receipt:cqr_example",
+  };
+  const projection = {
+    goal_id: "goal-a",
+    todos: [todo],
+    leases: [],
+    todo_read_model: {
+      schema_version: TODO_CANONICAL_READ_RECORD_SCHEMA,
+      todo_count: 1,
+      records_sha256: canonicalAuthoritySha256([todo]),
+      contract_fields: [...TODO_CANONICAL_READ_RECORD_FIELDS],
+    },
+  };
+
+  assert.throws(
+    () => reduceCoordinationProjection(projection, "goal-a", [{
+      kind: "todo_upsert",
+      todo: {
+        schema_version: "todo_item_v0",
+        todo_id: "todo_a",
+        role: "agent",
+        status: "done",
+        done: true,
+        text: "Qualify provider cutover",
+        archive_state: "active",
+        source_section: "Agent Todo",
+      },
+    }]),
+    /omits existing fields: evidence, priority, resume_when, title/,
+  );
+
+  const reduced = reduceCoordinationProjection(projection, "goal-a", [{
+    kind: "todo_upsert",
+    todo: { ...todo, status: "done", done: true },
+  }]);
+  assert.deepEqual((reduced.todos as JsonObject[])[0], {
+    ...todo,
+    status: "done",
+    done: true,
+  });
+
+  const explicitlyCleared = reduceCoordinationProjection(projection, "goal-a", [{
+    kind: "todo_upsert",
+    todo: { ...todo, resume_when: null, evidence: null },
+  }]);
+  assert.deepEqual((explicitlyCleared.todos as JsonObject[])[0], {
+    ...todo,
+    resume_when: null,
+    evidence: null,
+  });
+
+  const inserted = reduceCoordinationProjection(projection, "goal-a", [{
+    kind: "todo_upsert",
+    todo: {
+      schema_version: "todo_item_v0",
+      todo_id: "todo_b",
+      role: "agent",
+      status: "open",
+      done: false,
+      text: "Review cutover evidence",
+      archive_state: "active",
+      source_section: "Agent Todo",
+    },
+  }]);
+  assert.deepEqual((inserted.todos as JsonObject[]).map((record) => record.todo_id), [
+    "todo_a",
+    "todo_b",
+  ]);
 });
 
 test("coordination projection commit derives one auditable atomic transaction", () => {

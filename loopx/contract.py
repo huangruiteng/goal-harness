@@ -13,6 +13,11 @@ from .control_plane.goals.contract_health import (
     contract_error_views,
     project_contract_health_for_goal,
 )
+from .control_plane.goals.activation import (
+    GoalActivationState,
+    goal_activation_state,
+    normalize_goal_activation_state,
+)
 from .control_plane.runtime.run_index_duplicates import (
     classify_index_duplicate_records,
     index_identity,
@@ -360,12 +365,19 @@ def _active_state_todo_contract_diagnostics(
     registry: dict[str, Any],
     *,
     goal_id_filter: str | None = None,
+    activation_state_filter: GoalActivationState | str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     diagnostics: list[dict[str, Any]] = []
     checked = 0
     for goal in registry_goals(registry):
         goal_id = str(goal.get("id") or "")
         if goal_id_filter and goal_id != goal_id_filter:
+            continue
+        if (
+            activation_state_filter is not None
+            and goal_activation_state(goal)
+            is not normalize_goal_activation_state(activation_state_filter)
+        ):
             continue
 
         def add_error(code: str, message: str) -> None:
@@ -651,11 +663,18 @@ def _active_state_projection_gap_warnings(
     registry: dict[str, Any],
     *,
     goal_id_filter: str | None = None,
+    activation_state_filter: GoalActivationState | str | None = None,
 ) -> list[str]:
     warnings: list[str] = []
     for goal in registry_goals(registry):
         goal_id = str(goal.get("id") or "")
         if goal_id_filter and goal_id != goal_id_filter:
+            continue
+        if (
+            activation_state_filter is not None
+            and goal_activation_state(goal)
+            is not normalize_goal_activation_state(activation_state_filter)
+        ):
             continue
         repo_text = str(goal.get("repo") or "").strip()
         if not repo_text:
@@ -856,6 +875,7 @@ def check_contract(
     limit: int,
     allow_missing_registry: bool = False,
     goal_id_filter: str | None = None,
+    activation_state_filter: GoalActivationState | str | None = None,
     include_public_boundary_scan: bool = True,
 ) -> dict[str, Any]:
     error_diagnostics: list[dict[str, Any]] = []
@@ -909,6 +929,7 @@ def check_contract(
         _active_state_todo_contract_diagnostics(
             registry,
             goal_id_filter=goal_id_filter,
+            activation_state_filter=activation_state_filter,
         )
     )
     if checked_user_gates:
@@ -918,6 +939,7 @@ def check_contract(
         _active_state_projection_gap_warnings(
             registry,
             goal_id_filter=goal_id_filter,
+            activation_state_filter=activation_state_filter,
         )
     )
 
@@ -936,6 +958,7 @@ def check_contract(
         runtime_root=runtime_root,
         goal_id=goal_id_filter,
         limit=limit,
+        activation_state_filter=activation_state_filter,
     )
     checks.append(f"run-history goals={history.get('goal_count')} runs={history.get('run_count')}")
     for item in history.get("goals") or []:

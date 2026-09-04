@@ -3,6 +3,8 @@ from __future__ import annotations
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
 from loopx.cli_commands import todo as todo_command
 from loopx.cli_commands import task_lease as task_lease_command
 from loopx.control_plane import effect_runtime
@@ -23,6 +25,26 @@ from loopx.control_plane.coordination.runtime_shadow import (
     resolve_coordination_runtime_shadow_config,
     rollback_coordination_runtime_shadow,
 )
+
+
+def _canonical_todo(
+    *,
+    todo_id: str = "todo_one",
+    role: str = "agent",
+    status: str = "open",
+    **fields: object,
+) -> dict[str, object]:
+    return {
+        "schema_version": "todo_item_v0",
+        "todo_id": todo_id,
+        "role": role,
+        "status": status,
+        "done": status == "done",
+        "text": f"{status} {todo_id}",
+        "archive_state": "active",
+        "source_section": "User Todo" if role == "user" else "Agent Todo",
+        **fields,
+    }
 
 
 def test_runtime_shadow_todo_read_candidate_is_default_off_and_typed(
@@ -412,22 +434,32 @@ def test_runtime_shadow_qualification_is_default_off_and_forwards_policy(
     ]
 
 
-def test_todo_projection_is_compact_stable_and_excludes_private_fields() -> None:
+def test_todo_projection_is_complete_stable_and_declares_read_model_contract() -> None:
     projection = build_todo_runtime_shadow_projection(
         goal_id="goal-a",
         todos=[
             {
+                "schema_version": "todo_item_v0",
                 "todo_id": "todo_b",
                 "role": "agent",
                 "status": "open",
+                "done": False,
+                "text": "Qualify provider cutover",
+                "archive_state": "active",
+                "source_section": "Agent Todo",
                 "claimed_by": "agent-a",
-                "note": "private narrative must not enter coordination",
-                "evidence": "large evidence must stay in its owning ledger",
+                "note": "operator note retained by local canonical authority",
+                "evidence": "durable evidence retained for Todo list semantics",
             },
             {
+                "schema_version": "todo_item_v0",
                 "todo_id": "todo_a",
                 "role": "user",
                 "status": "done",
+                "done": True,
+                "text": "Approve provider cutover",
+                "archive_state": "active",
+                "source_section": "User Todo",
                 "successor_todo_ids": ["todo_b"],
             },
             {"status": "open"},
@@ -438,9 +470,20 @@ def test_todo_projection_is_compact_stable_and_excludes_private_fields() -> None
         "todo_a",
         "todo_b",
     ]
-    assert "note" not in projection["todos"][1]
-    assert "evidence" not in projection["todos"][1]
+    assert projection["todos"][1]["note"] == "operator note retained by local canonical authority"
+    assert projection["todos"][1]["evidence"] == "durable evidence retained for Todo list semantics"
     assert projection["leases"] == []
+    assert projection["todo_read_model"]["todo_count"] == 2
+    assert "text" in projection["todo_read_model"]["contract_fields"]
+    assert "resume_when" in projection["todo_read_model"]["contract_fields"]
+
+
+def test_todo_projection_rejects_incomplete_consumer_semantics() -> None:
+    with pytest.raises(ValueError, match="omits required fields"):
+        build_todo_runtime_shadow_projection(
+            goal_id="goal-a",
+            todos=[{"todo_id": "todo_incomplete", "status": "open"}],
+        )
 
 
 def test_committed_todo_hook_has_no_default_output_or_runtime_call(
@@ -504,9 +547,7 @@ def test_committed_todo_hook_dispatches_after_explicit_opt_in(
     monkeypatch.setattr(
         todo_command,
         "list_goal_todos",
-        lambda **_kwargs: {
-            "todos": [{"todo_id": "todo_one", "role": "agent", "status": "done"}]
-        },
+        lambda **_kwargs: {"todos": [_canonical_todo(status="done")]},
     )
     captured: dict[str, object] = {}
 
@@ -536,9 +577,7 @@ def test_committed_todo_hook_dispatches_after_explicit_opt_in(
     assert result == {"status": "applied"}
     assert captured["operation_id"] == "todo-shadow:event-a"
     assert captured["event_kind"] == "todo_complete"
-    assert captured["projection"]["todos"] == [
-        {"todo_id": "todo_one", "role": "agent", "status": "done"}
-    ]
+    assert captured["projection"]["todos"] == [_canonical_todo(status="done")]
 
 
 def test_committed_todo_hook_reaches_the_file_shadow_through_typescript(
@@ -569,14 +608,7 @@ def test_committed_todo_hook_reaches_the_file_shadow_through_typescript(
         todo_command,
         "list_goal_todos",
         lambda **_kwargs: {
-            "todos": [
-                {
-                    "todo_id": "todo_one",
-                    "role": "agent",
-                    "status": "open",
-                    "claimed_by": "agent-a",
-                }
-            ]
+            "todos": [_canonical_todo(claimed_by="agent-a")]
         },
     )
     monkeypatch.setattr(
@@ -627,12 +659,21 @@ def test_runtime_shadow_inspection_reaches_file_store_through_typescript(
             }
         },
     }
-    projection = {
-        "schema_version": "projection_v0",
-        "goal_id": "goal-a",
-        "todos": [{"todo_id": "todo_one", "status": "open"}],
-        "leases": [],
-    }
+    projection = build_todo_runtime_shadow_projection(
+        goal_id="goal-a",
+        todos=[
+            {
+                "schema_version": "todo_item_v0",
+                "todo_id": "todo_one",
+                "role": "agent",
+                "status": "open",
+                "done": False,
+                "text": "qualify",
+                "archive_state": "active",
+                "source_section": "Agent Todo",
+            }
+        ],
+    )
     runtime_root = tmp_path / "state"
     monkeypatch.setattr(
         effect_runtime,
@@ -687,12 +728,21 @@ def test_runtime_shadow_qualification_reaches_file_store_through_typescript(
             }
         },
     }
-    projection = {
-        "schema_version": "projection_v0",
-        "goal_id": "goal-a",
-        "todos": [{"todo_id": "todo_one", "status": "open"}],
-        "leases": [],
-    }
+    projection = build_todo_runtime_shadow_projection(
+        goal_id="goal-a",
+        todos=[
+            {
+                "schema_version": "todo_item_v0",
+                "todo_id": "todo_one",
+                "role": "agent",
+                "status": "open",
+                "done": False,
+                "text": "qualify",
+                "archive_state": "active",
+                "source_section": "Agent Todo",
+            }
+        ],
+    )
     runtime_root = tmp_path / "state"
     monkeypatch.setattr(
         effect_runtime,
@@ -791,9 +841,7 @@ def test_committed_task_lease_hook_dispatches_full_coordination_snapshot(
     monkeypatch.setattr(
         task_lease_command,
         "list_goal_todos",
-        lambda **_kwargs: {
-            "todos": [{"todo_id": "todo_one", "role": "agent", "status": "open"}]
-        },
+        lambda **_kwargs: {"todos": [_canonical_todo()]},
     )
     monkeypatch.setattr(
         task_lease_command,
@@ -876,9 +924,7 @@ def test_committed_task_lease_hook_reaches_file_shadow_through_typescript(
     monkeypatch.setattr(
         task_lease_command,
         "list_goal_todos",
-        lambda **_kwargs: {
-            "todos": [{"todo_id": "todo_one", "role": "agent", "status": "open"}]
-        },
+        lambda **_kwargs: {"todos": [_canonical_todo()]},
     )
     lease_dir = tmp_path / "state" / "goals" / "goal-a" / "task-leases"
     lease_dir.mkdir(parents=True)

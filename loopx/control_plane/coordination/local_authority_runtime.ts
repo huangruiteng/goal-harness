@@ -6,6 +6,7 @@ import {
   commitCoordinationProjectionMutation,
   indexCoordinationProjection,
   indexCoordinationProjectionTodos,
+  validateCoordinationTodoReadModel,
   type CoordinationProjectionMutation,
 } from "./coordination_projection.ts";
 import type { AuthorityStore, AuthorityStoreReceiptResult } from "./authority_store.ts";
@@ -34,6 +35,10 @@ export const LOCAL_COORDINATION_TODO_READ_REQUEST_SCHEMA =
   "loopx_local_coordination_todo_read_request_v0";
 export const LOCAL_COORDINATION_TODO_READ_RESULT_SCHEMA =
   "loopx_local_coordination_todo_read_result_v0";
+export const LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA =
+  "loopx_local_coordination_todo_list_request_v0";
+export const LOCAL_COORDINATION_TODO_LIST_RESULT_SCHEMA =
+  "loopx_local_coordination_todo_list_result_v0";
 export const LOCAL_COORDINATION_PROMOTION_REQUEST_SCHEMA =
   "loopx_local_coordination_promotion_request_v0";
 export const LOCAL_COORDINATION_PROMOTION_RESULT_SCHEMA =
@@ -513,6 +518,7 @@ export async function readLocalCoordinationTodo(
       };
     }
     const projection = indexCoordinationProjectionTodos(head.head, goalId);
+    validateCoordinationTodoReadModel(head.head, goalId);
     const todo = projection.todos.get(todoId);
     return {
       schema_version: LOCAL_COORDINATION_TODO_READ_RESULT_SCHEMA,
@@ -532,6 +538,57 @@ export async function readLocalCoordinationTodo(
       status: "failed",
       reason_code: "invalid_local_coordination_todo_read_request",
       reason: error instanceof Error ? error.message : "invalid Todo read request",
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  }
+}
+
+/** Provider-first Todo collection read. Missing/unavailable state never falls back. */
+export async function listLocalCoordinationTodos(
+  value: unknown,
+  dependencies: LocalAuthorityRuntimeDependencies = {},
+): Promise<JsonObject> {
+  try {
+    const input = requireJsonObject(value, "local coordination Todo list request");
+    if (input.schema_version !== LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA) {
+      throw new Error("local coordination Todo list request schema mismatch");
+    }
+    const root = runtimeRoot(input.runtime_root);
+    const goalId = requireAuthorityStoreId(input.goal_id, "goal id");
+    const store = dependencies.createStore?.(authorityDirectory(root), goalId) ??
+      new FileAuthorityStore(authorityDirectory(root), goalId);
+    const head = await store.loadAuthority();
+    if (head.status !== "loaded") {
+      return {
+        schema_version: LOCAL_COORDINATION_TODO_LIST_RESULT_SCHEMA,
+        ...head,
+        source_authority: "file_v0",
+        decision_read_from_provider: true,
+        legacy_fallback_used: false,
+      };
+    }
+    const projection = indexCoordinationProjectionTodos(head.head, goalId);
+    const todoReadModel = validateCoordinationTodoReadModel(head.head, goalId);
+    return {
+      schema_version: LOCAL_COORDINATION_TODO_LIST_RESULT_SCHEMA,
+      status: "loaded",
+      todos: projection.todo_ids.map((todoId) => projection.todos.get(todoId)!),
+      todo_ids: projection.todo_ids,
+      todo_read_model: todoReadModel,
+      provider_revision: head.provider_revision,
+      cursor: head.cursor,
+      source_authority: "file_v0",
+      decision_read_from_provider: true,
+      legacy_fallback_used: false,
+    };
+  } catch (error) {
+    return {
+      schema_version: LOCAL_COORDINATION_TODO_LIST_RESULT_SCHEMA,
+      status: "failed",
+      reason_code: "invalid_local_coordination_todo_list_request",
+      reason: error instanceof Error ? error.message : "invalid Todo list request",
       source_authority: "file_v0",
       decision_read_from_provider: true,
       legacy_fallback_used: false,

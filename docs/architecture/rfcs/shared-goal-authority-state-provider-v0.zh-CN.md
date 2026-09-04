@@ -853,7 +853,9 @@ Stage 3/4 qualification 必须保持以下 ownership 与 proof 边界：
    把现有 Markdown/task-lease writer shadow 到 `FileAuthorityStore`；验证 parity、
    crash recovery、migration 与一键 rollback。随后通过一个单独评审的 promotion，
    让 file aggregate 成为本地 coordination authority，并 fence legacy writer；
-   只有晋升后 Markdown 与 task-lease 文件才退为 projection。
+   只有晋升后 Markdown 与 task-lease 文件才退为 projection。仅证明 projection
+   结构或 head digest 相等仍然不够；promotion 还必须在精确的 qualified revision
+   上证明 provider 完整复现 Todo 消费方可见语义。
 5. **Stage 3——远端单向 shadow parity。** 晋升后的本地 `FileAuthorityStore` 仍是
    唯一 authority；将已提交观察投影到 NoKV 或 PostgreSQL 候选。Provider parity
    只对比 Todo/claim、lease fence、
@@ -1022,9 +1024,10 @@ task-lease writer。
 
 - legacy Markdown Todo writer 或 task-lease writer 先成功提交且继续作为 canonical；
   只有 primary mutation 成功后才派发 shadow；
-- Python adapter 把已提交的 Todo 与 lease read model 收敛为 coordination 自有字段，
-  按稳定 Todo identity 排序，再通过既有 TypeScript effect runtime 发送一份提交后
-  projection；
+- Python adapter 通过 `todo list` 共用的 canonical read-record 合同投影已提交 Todo
+  view，完整保留消费方可见的 identity、文本、优先级、过滤、continuation、resume、
+  调度、归档、完成、note 与 evidence 字段；随后按稳定 Todo identity 排序，并把该
+  view 与紧凑 lease 一起通过既有 TypeScript effect runtime 发送；
 - TypeScript owner 在同一笔 `AuthorityStore` transaction 中写 projection 与 operation
   receipt。写前先查询既有 receipt；同一 operation id 搭配不同 normalized content
   会被拒绝；provider-revision contention 只做固定次数重试；ambiguous commit 只能
@@ -1080,6 +1083,23 @@ event/receipt/projection identity，以及当前 legacy/file head digest，并�
 `qualified`、`insufficient_evidence` 或 `drifted`。replay 不增加 operation 计数，缺少
 覆盖会让 gate 失败，所有结果仍明确声明 `decision_read_from_shadow=false`。
 
+结构 parity 不等于消费语义 parity。因此，可 promotion 的 projection 还必须携带一个
+版本化 Todo read-model receipt，其中包含精确字段合同、记录数和 canonical record
+digest。TypeScript 会在 qualification、promotion 以及每次 provider-first collection
+read 时，对 deterministic provider records 校验该 receipt；schema 缺失、digest 过期、
+字段合同被截断、记录数不符或顺序不稳定都会 fail closed。provider-first mutation 必须
+在同一原子 head 更新中重算 receipt。新增 Todo 消费字段属于合同变更，必须重新
+qualification，不能宽松 fallback。
+
+任何真实 Goal promotion 前，还必须在同一个 revision 上分别让 legacy source 与
+provider round-trip 经过既有消费 pipeline。语义矩阵至少覆盖：user/agent role；open、
+done、blocked、deferred；优先级与排序；claim、exclusion、bound-agent、global-gate
+过滤；resume condition；successor/continuation；continuous monitor 的 cadence、due、
+watch-only 与 material generation；note、evidence、completion、archival；以及 Markdown
+文件不可用后的 provider-only read。任一差异都阻止 promotion，并保持 legacy authority。
+synthetic stub 可作为单元测试，但不能替代真实复杂 Goal qualification。真实 Goal 内容
+只保留在本机；公开证据只包含脱敏 coverage、计数、精确 revision 标识与 digest。
+
 下一个只读 seam 会演练未来 read flip 所需的 provider 读取形态，但不授予它 authority：
 
 ```bash
@@ -1118,6 +1138,12 @@ fail-closed write-check hook；promotion 可按 operation receipt 重放，provi
 lock，再 engage fence，从而保证不存在某次 legacy write 已通过检查、却在 cutover 后才
 提交。provider-first CLI 路由和持锁 promotion operation 仍是下一切片；在它们落地前，
 本集成选择阻断 split-brain 写入，而不会静默回退。
+
+Todo collection-read 切片只在 durable fence 已存在时把 `loopx todo list` 路由到
+`FileAuthorityStore`。它与 legacy 路径复用同一套过滤、排序、resume 和 summary
+pipeline；Markdown 缺失时仍可执行 provider-only read，并在响应中携带 authority
+receipt。provider 缺失、损坏、协议漂移或 Todo read-model 语义漂移都会 fail closed；
+cutover 后禁止回退 Markdown。
 
 完成续接（continuation）的持久化读回
 （`durable_completion.py`：`read_persisted_todo_record` /
@@ -1249,6 +1275,66 @@ visible governance 台账中属 coverage-only。该接受允许内聚的 referen
 围栏、authorization publisher、provider binding、projection 翻转、rollback 与
 retention 决策，不能用一个会制造第二 writer 的诊断 CLI 代替。本状态节声明的是已
 证明的合同，不是已 ship 的生产能力。
+
+#### Stage ladder 端到端证据（2026-09-03）
+
+本分支上存在一条增量式端到端 "stage ladder"：它通过真实的
+`python -m loopx.cli` 逐行演练本 RFC 每个已完成阶段的声明，并按行给出可机器
+判定的结论：`loopx/control_plane/testing/authority_e2e_ladder.py`（行注册表、
+runner、`loopx_shared_goal_authority_e2e_report_v0` JSON 报告、退出策略与隐私
+扫描）、`loopx/control_plane/testing/authority_e2e_fixtures.py`（goal 工作区、
+CLI runner、observation-lock 窗口、候选回读）、只读 TypeScript 探针
+`tests/control_plane_ts/authority_store_readback_probe.ts`、pytest 投影
+`tests/control_plane/test_shared_goal_authority_e2e.py`，以及入口
+`examples/shared-goal-authority-e2e/ladder.py`。
+
+按阶段，本增量实现：
+
+- Stage 0：`s0.file_matrix_twelve_rows` 运行保留的 live matrix 脚本，要求 file
+  provider 上恰好十二个共享场景行全为 true；`s0.nokv_live_matrix` 要求 live
+  NoKV 栈上同样的行加 `restored_lineage_fails_closed` 全为 true，且 file/NoKV
+  逐行结果一致。
+- Stage 1：`s1.cli_document_decodes_through_ts_store` 通过产品 CLI 写入三次
+  observation（`todo add`、`task-lease acquire`、`todo update`），再经
+  `FileAuthorityStore` 的 `loadAuthority`、分页 `scanCommitted` 与
+  `readReceipt` 回读：cursor 为 `3`、三个 operation id 按序一致、首条 receipt
+  可找到。
+- Stage 2A：`s2a.nokv_live_qualification` 对一个已存在的 workbench 以新铸的
+  tenant/goal 运行已合并的 live 资格探针
+  （`examples/nokv-authority-store/live-qualification.ts --execute-live`），要求
+  `ok=true`、单节点 store conformance 范围、每项 check 通过、NoKV SDK `0.11.0`
+  / API `1`，且不宣称晋升或可用性。
+- Stage 2B：`s2b.postgresql_conformance_live` 在 node TAP reporter 下运行
+  PostgreSQL 集成测试文件，要求至少九个 pass、零 fail、零 skip。
+- Stage 2C 观察基础：七个 `s2c1.*` 行移植本地 shadow CLI E2E 与迁移断言，并钉住单一
+  lineage 保证。
+  configure 往返先预览、再开启、回读、最后关闭 observer；每个 writer family
+  （handoff-mode、todo add/update/complete/supersede/capture-followups/
+  archive-completed、task-lease acquire/renew/transfer）都以
+  `primary_writeback_preserved`、`provider_to_local_writes=false`、
+  `candidate_read_for_decision=false` 完成 capture，而幂等 re-acquire 不产生
+  observation；default-off goal 保持隔离；候选失败不推翻主写；POSIX SIGKILL
+  落在崩溃间隙时只丢失该次 observation；`--runtime-root` 与 `common_runtime_root`
+  不同时，todo add、task-lease acquire、todo update、follow-up 捕获与带 lease 的
+  complete 仍落入同一个 store identity，registry root 既不产生候选 lineage 也不
+  产生 lease 状态；`migrate-state` 在不携带 legacy 字节的前提下建立新 lineage。
+
+Live 行按环境门控（`LOOPX_TEST_POSTGRES_URL`；`NOKV_COORDINATION_LIVE=1` 加
+`NOKV_*` 栈变量；`LOOPX_NOKV_AUTHORITY_LIVE=1` 加 `LOOPX_NOKV_AUTHORITY_*` 输入）。
+没有栈时它们报告 `unverified`，除非传入 `--allow-unverified`，否则 ladder 以非零
+退出；unverified 行永不计为 green。pending 行同样是未兑现的义务：选中它而不传
+`--allow-pending` 就非零退出，所以一份零执行的报告不可能显示为 green。
+报告绑定 LoopX commit、工作树是否 dirty、探针 digest 与经哈希的连接事实；其隐私
+扫描会把任何临时根目录、home 目录、连接 URL 或配置路径的泄露改写为
+`fail/privacy_violation`；仅出现在 bindings 块的泄露会被抹除并同样判定为失败，
+`summary.privacy_violations` 阻止 green 退出，任何开关都不能放宽。
+
+交付边界：test-only。没有任何生产入口构造任何 store；ladder 不新增产品路径，
+只经保留的 TypeScript store 读取候选。Stage 2C parity 后半段
+（`s2c2.*`：outbox 条目、幂等 drain、drain 前与 drain 中的 SIGKILL、带 pending
+条目的 rollback、parity 相等与分歧、迁移 seed-and-drain、增长
+度量）以 pending 行声明，而非宣称已完成。本小节记录的是上述阶段的可执行证据；
+它不晋升任何 provider，也不完成 Stage 2C promotion。
 
 ### P0：合同与 deterministic proof
 

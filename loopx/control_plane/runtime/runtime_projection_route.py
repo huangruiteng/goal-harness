@@ -6,6 +6,11 @@ import os
 from pathlib import Path
 from typing import Any, Iterable
 
+from ..goals.activation import (
+    GoalActivationState,
+    goal_activation_state,
+    normalize_goal_activation_state,
+)
 from ...history import load_index, load_registry
 from ...paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
 from ...registry import registry_goals
@@ -491,6 +496,7 @@ def _source_routes_for_registry(
     registry_path: Path,
     runtime_root: Path,
     goal_id: str | None,
+    activation_state_filter: GoalActivationState | str | None = None,
 ) -> list[tuple[Path, Path, str, str | None]]:
     registry = load_registry(registry_path)
     is_global = bool(registry.get("registry_role") == "global-local") or _same_path(
@@ -501,6 +507,12 @@ def _source_routes_for_registry(
     for goal in registry_goals(registry):
         current_goal_id = str(goal.get("id") or "")
         if not current_goal_id or (goal_id and current_goal_id != goal_id):
+            continue
+        if (
+            activation_state_filter is not None
+            and goal_activation_state(goal)
+            is not normalize_goal_activation_state(activation_state_filter)
+        ):
             continue
         source_registry = (
             _resolved_source_registry(goal, registry_path=registry_path)
@@ -531,12 +543,14 @@ def collect_runtime_projection_route_diagnostics(
     registry_path: Path,
     runtime_root: Path,
     goal_id: str | None = None,
+    activation_state_filter: GoalActivationState | str | None = None,
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     source_routes = _source_routes_for_registry(
         registry_path=registry_path,
         runtime_root=runtime_root,
         goal_id=goal_id,
+        activation_state_filter=activation_state_filter,
     )
     registry = load_registry(registry_path)
     registry_is_global = bool(registry.get("registry_role") == "global-local") or _same_path(

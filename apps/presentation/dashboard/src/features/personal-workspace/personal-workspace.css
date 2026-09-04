@@ -124,10 +124,12 @@
 .personal-stopped-goals > summary { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 34px; padding: 5px 10px; border-radius: 9px; color: var(--pw-muted); cursor: pointer; font-size: 11px; font-weight: 650; letter-spacing: .04em; list-style: none; }
 .personal-stopped-goals > summary::-webkit-details-marker { display: none; }
 .personal-stopped-goals > summary:hover { background: rgb(255 255 255 / 55%); color: var(--pw-text); }
-.personal-stopped-goals > summary svg { transition: transform .14s ease; }
-.personal-stopped-goals[open] > summary svg { transform: rotate(180deg); }
+.personal-stopped-goals > summary > svg:first-child { transition: transform .14s ease; }
+.personal-stopped-goals[open] > summary > svg:first-child { transform: rotate(180deg); }
 .personal-stopped-goals > summary small { min-width: 22px; padding: 2px 6px; border-radius: 99px; background: #ebe9e3; text-align: center; }
 .personal-goal-list.is-stopped { margin-top: 2px; opacity: .82; }
+.personal-stopped-goal-error { display: grid; gap: 7px; margin: 6px 8px; padding: 9px 10px; border: 1px solid #edc1ba; border-radius: 9px; background: var(--pw-red-bg); color: var(--pw-red); font-size: 11px; line-height: 1.45; }
+.personal-stopped-goal-error button { justify-self: start; min-height: 28px; padding: 0 9px; border: 1px solid currentColor; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-weight: 650; }
 
 .personal-priority-dot { width: 7px; height: 7px; border-radius: 50%; background: #aab2bf; }
 .personal-priority-dot.is-high { background: #dd5b47; }
@@ -184,8 +186,9 @@
 .personal-refresh-control.is-error small { color: var(--pw-danger); }
 .personal-icon-button { display: inline-grid; flex: 0 0 36px; place-items: center; width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0; border: 1px solid var(--pw-line); border-radius: 10px; background: #fff; color: var(--pw-muted); cursor: pointer; }
 .personal-icon-button:hover { border-color: var(--pw-line-strong); color: var(--pw-text); }
-.personal-channel-scroll { overflow: auto; min-width: 0; padding: 22px max(26px, calc((100% - 820px) / 2)); }
+.personal-channel-scroll { overflow: auto; min-width: 0; min-height: 0; padding: 22px max(26px, calc((100% - 820px) / 2)); }
 .personal-channel-scroll:has(.personal-task-kanban) { padding-inline: max(26px, calc((100vw - 1240px) / 2 - 150px)); }
+.personal-channel-scroll:has(.personal-task-board) { overflow: hidden; }
 .personal-manager-greeting { display: flex; align-items: center; gap: 14px; padding: 18px 20px; margin-bottom: 16px; }
 .personal-home-lanes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .personal-system-health-banner { margin-bottom: 16px; padding: 12px 16px; border: 1px solid #fecaca; border-radius: 12px; background: #fef2f2; color: #991b1b; }
@@ -578,7 +581,8 @@
 .personal-task-lane-filter small { color: var(--pw-faint); font-size: 10.5px; }
 .personal-task-lane-filter label { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 9px; border: 1px solid var(--pw-line-strong); border-radius: 8px; background: var(--pw-bg); }
 .personal-task-lane-filter select { max-width: 300px; border: 0; outline: 0; background: transparent; color: var(--pw-text); font: inherit; font-size: 11.5px; font-weight: 600; appearance: none; }
-.personal-task-kanban { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 12px; align-items: start; }
+.personal-task-board { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; }
+.personal-task-kanban { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); flex: 1; gap: 12px; align-items: stretch; min-height: 0; }
 .personal-task-chat-receipt { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 12px; border: 1px solid #d8e2f8; border-radius: 10px; background: #f8faff; box-shadow: 0 1px 3px rgb(47 102 233 / 4%); }
 .personal-task-chat-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--pw-blue-soft); color: var(--pw-blue-ink); }
 .personal-task-chat-receipt > div { min-width: 0; }
@@ -592,27 +596,36 @@
 .personal-task-chat-receipt footer { display: flex; gap: 6px; }
 .personal-task-chat-receipt footer button { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 3px 8px; border: 1px solid #b9c9ee; border-radius: 7px; background: #fff; color: var(--pw-blue-ink); cursor: pointer; font-size: 10.5px; font-weight: 650; white-space: nowrap; }
 .personal-task-chat-receipt footer button:hover { border-color: var(--pw-blue); background: var(--pw-blue-soft); }
-.personal-task-kanban .personal-object-list { display: flex; flex-direction: column; gap: 8px; padding: 8px; background: #f6f4ee; }
-.personal-task-kanban .personal-object-list > header { display: flex; align-items: center; gap: 8px; min-height: 0; padding: 6px 8px 2px; border-bottom: 0; }
+.personal-task-kanban .personal-object-list { display: flex; flex-direction: column; min-height: 0; padding: 0; background: #f6f4ee; }
+.personal-task-kanban .personal-object-list > header { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; min-height: 38px; padding: 10px 16px 7px; border-bottom: 1px solid rgb(224 221 212 / 72%); background: #f6f4ee; }
 .personal-task-kanban .personal-object-list > header > strong { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: 12px; }
 .personal-task-kanban .personal-object-list > header > span { margin-left: auto; }
+.personal-task-lane-scroll { display: flex; flex: 1 1 auto; flex-direction: column; gap: 8px; min-height: 0; padding: 8px; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-color: #bebbb2 transparent; scrollbar-gutter: stable; scrollbar-width: thin; scroll-padding-block: 8px; -webkit-overflow-scrolling: touch; }
+.personal-task-lane-scroll:focus-visible { outline: 2px solid var(--pw-blue); outline-offset: -3px; }
+.personal-task-lane-scroll.has-overflow-before { box-shadow: inset 0 12px 10px -13px rgb(52 49 43 / 58%); }
+.personal-task-lane-scroll.has-overflow-after { box-shadow: inset 0 -16px 12px -15px rgb(52 49 43 / 70%); }
+.personal-task-lane-scroll.has-overflow-before.has-overflow-after { box-shadow: inset 0 12px 10px -13px rgb(52 49 43 / 58%), inset 0 -16px 12px -15px rgb(52 49 43 / 70%); }
+.personal-task-lane-scroll::-webkit-scrollbar { width: 10px; }
+.personal-task-lane-scroll::-webkit-scrollbar-track { background: transparent; }
+.personal-task-lane-scroll::-webkit-scrollbar-thumb { min-height: 40px; border: 3px solid transparent; border-radius: 999px; background: #bebbb2; background-clip: padding-box; }
+.personal-task-lane-scroll::-webkit-scrollbar-thumb:hover { background: #97938a; background-clip: padding-box; }
 .personal-kanban-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pw-faint); }
 .personal-kanban-dot.tone-attention { background: var(--pw-amber); }
 .personal-kanban-dot.tone-progress { background: var(--pw-blue); }
 .personal-kanban-dot.tone-schedule { background: #8a6fd6; }
 .personal-kanban-dot.tone-done { background: var(--pw-green); }
-.personal-task-kanban .personal-object-list > button, .personal-task-kanban .personal-task-card > button { grid-template-columns: 18px minmax(0, 1fr); column-gap: 8px; row-gap: 6px; min-height: 0; padding: 10px 12px; border: 1px solid var(--pw-line); border-radius: 10px; background: #fff; box-shadow: 0 1px 3px rgb(30 28 20 / 6%); }
-.personal-task-kanban .personal-object-list > button:hover, .personal-task-kanban .personal-task-card > button:hover { background: #fff; border-color: var(--pw-line-strong); box-shadow: 0 2px 8px rgb(30 28 20 / 9%); }
-.personal-task-kanban .personal-object-list > button > small, .personal-task-kanban .personal-task-card > button > small { grid-column: 1 / -1; flex-wrap: wrap; white-space: normal; justify-content: flex-start; text-align: left; }
-.personal-task-kanban .personal-object-list > button:last-child { border-bottom: 1px solid var(--pw-line); }
-.personal-task-kanban .personal-object-list > button:last-child:hover { border-color: var(--pw-line-strong); }
+.personal-task-kanban .personal-task-lane-scroll > button, .personal-task-kanban .personal-task-card > button { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; column-gap: 8px; row-gap: 6px; width: 100%; min-height: 0; padding: 10px 12px; border: 1px solid var(--pw-line); border-radius: 10px; background: #fff; color: inherit; text-align: left; cursor: pointer; box-shadow: 0 1px 3px rgb(30 28 20 / 6%); }
+.personal-task-kanban .personal-task-lane-scroll > button:hover, .personal-task-kanban .personal-task-card > button:hover { background: #fff; border-color: var(--pw-line-strong); box-shadow: 0 2px 8px rgb(30 28 20 / 9%); }
+.personal-task-kanban .personal-task-lane-scroll > button > small, .personal-task-kanban .personal-task-card > button > small { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; white-space: normal; justify-content: flex-start; text-align: left; }
+.personal-task-kanban .personal-task-lane-scroll > button:last-child { border-bottom: 1px solid var(--pw-line); }
+.personal-task-kanban .personal-task-lane-scroll > button:last-child:hover { border-color: var(--pw-line-strong); }
 .personal-task-card { position: relative; }
 .personal-task-card > button { width: 100%; display: grid; align-items: start; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .personal-task-card-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .12s ease; }
 .personal-task-card:hover .personal-task-card-actions, .personal-task-card:focus-within .personal-task-card-actions { opacity: 1; }
 .personal-task-card.has-session .personal-task-card-actions { opacity: 1; }
 .personal-task-card.is-selected > button,
-.personal-task-kanban .personal-object-list > button.is-selected { border-color: #7c9df1; background: #f5f8ff; box-shadow: 0 0 0 2px rgb(47 102 233 / 12%), 0 4px 14px rgb(30 52 104 / 10%); }
+.personal-task-kanban .personal-task-lane-scroll > button.is-selected { border-color: #7c9df1; background: #f5f8ff; box-shadow: 0 0 0 2px rgb(47 102 233 / 12%), 0 4px 14px rgb(30 52 104 / 10%); }
 .personal-task-card.is-selected::before { position: absolute; z-index: 2; top: 8px; bottom: 8px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--pw-blue); content: ""; }
 .personal-task-card-actions button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--pw-line-strong); border-radius: 7px; background: #fff; color: var(--pw-muted); cursor: pointer; box-shadow: 0 1px 3px rgb(30 28 20 / 12%); }
 .personal-task-card-actions button:hover { color: var(--pw-text); border-color: var(--pw-text); }
@@ -934,6 +947,11 @@
   .personal-goal-tabs { grid-column: 1 / -1; order: 4; margin-left: 0; overflow-x: auto; align-self: auto; }
   .personal-channel-actions .personal-live-indicator { display: none; }
   .personal-channel-scroll, .personal-composer-wrap { padding-left: 14px; padding-right: 14px; }
+  .personal-channel-scroll:has(.personal-task-board) { overflow-y: auto; }
+  .personal-task-board { height: auto; min-height: 100%; }
+  .personal-task-kanban, .personal-workspace-shell.has-drawer .personal-task-kanban, .personal-workspace-shell.has-task-inspector .personal-task-kanban { grid-template-columns: minmax(0, 1fr); width: 100%; height: auto; }
+  .personal-task-kanban .personal-object-list { min-height: auto; }
+  .personal-task-lane-scroll, .personal-task-lane-scroll.has-overflow-before, .personal-task-lane-scroll.has-overflow-after { flex: none; min-height: auto; padding-right: 8px; overflow: visible; box-shadow: none; scrollbar-gutter: auto; }
   .personal-quick-prompts { overflow-x: auto; }
   .personal-quick-prompts button { flex: 0 0 auto; min-height: 36px; }
   .personal-timeline-row, .personal-output-row { grid-template-columns: 34px minmax(0, 1fr) 14px; gap: 9px; padding: 10px 12px; }
@@ -993,7 +1011,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .personal-timeline-row, .personal-diagnostics-trigger svg, .personal-workspace-sidebar, .personal-stopped-goals > summary svg { transition: none; }
+  .personal-timeline-row, .personal-diagnostics-trigger svg, .personal-workspace-sidebar, .personal-stopped-goals > summary > svg:first-child { transition: none; }
   .personal-goal-lifecycle.is-pending svg { animation: none; }
   .personal-spin { animation: none; }
 }
@@ -1270,8 +1288,9 @@
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-object-list > button:hover { background: #fff8d6; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-row-status { border: 2px solid #141414; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-object-list { background: #fff; }
-.personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-object-list > button, .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-card > button { border: 2px solid #141414; border-radius: 4px; box-shadow: 2px 2px 0 #141414; }
-.personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-object-list > button:hover, .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-card:hover > button { background: #fff; border-color: #141414; box-shadow: 4px 4px 0 #141414; transform: translate(-1px, -1px); }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-object-list > header { background: #fff; border-bottom: 2px solid #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-lane-scroll > button, .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-card > button { border: 2px solid #141414; border-radius: 4px; box-shadow: 2px 2px 0 #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-lane-scroll > button:hover, .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-card:hover > button { background: #fff; border-color: #141414; box-shadow: 4px 4px 0 #141414; transform: translate(-1px, -1px); }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-object-list > header > span { padding: 1px 7px; border-radius: 3px; background: #141414; color: #fff; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-kanban-dot { width: 10px; height: 10px; border: 2px solid #141414; border-radius: 2px; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-kanban-dot.tone-attention { background: #ff9d5c; }

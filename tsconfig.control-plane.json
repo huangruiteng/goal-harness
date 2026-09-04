@@ -31,6 +31,7 @@
     "loopx/control_plane/coordination/postgresql_authority_store.ts",
     "loopx/control_plane/agents/delivery_workspace.ts",
     "loopx/control_plane/goals/vision_checkpoint.ts",
+    "loopx/control_plane/goals/shared_goal_alignment.ts",
     "loopx/control_plane/quota/settlement_workspace_causality.ts",
     "loopx/control_plane/quota/settlement_readback.ts",
     "loopx/control_plane/quota/monitor_poll_commit.ts",
@@ -70,6 +71,7 @@
     "tests/control_plane_ts/nokv_authority_store.test.ts",
     "tests/control_plane_ts/nokv_jsonl_transport.test.ts",
     "tests/control_plane_ts/nokv_stage2a_qualification_harness.test.ts",
+    "tests/control_plane_ts/authority_store_readback_probe.ts",
     "tests/control_plane_ts/postgresql_authority_store.integration.test.ts",
     "tests/control_plane_ts/delivery_continuity.test.ts",
     "tests/control_plane_ts/delivery_workspace.test.ts",
@@ -92,6 +94,7 @@
     "tests/control_plane_ts/task_lease_acquire_cli.test.ts",
     "tests/control_plane_ts/turn_journal.test.ts",
     "tests/control_plane_ts/turn_journal_effects.test.ts",
-    "tests/control_plane_ts/vision_checkpoint.test.ts"
+    "tests/control_plane_ts/vision_checkpoint.test.ts",
+    "tests/control_plane_ts/shared_goal_alignment.test.ts"
   ]
 }

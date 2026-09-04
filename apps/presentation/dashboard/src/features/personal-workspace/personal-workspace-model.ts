@@ -314,6 +314,10 @@ export type PersonalHomeCompatibleModel = {
   workers?: WorkspaceWorker[];
 };
 
+export type WorkspaceGoalArchiveLoadState =
+  | { phase: "idle" | "loading" | "ready"; error: null }
+  | { phase: "error"; error: string };
+
 export type PersonalWorkspaceCallbacks = {
   onApplyProposal?: (proposal: WorkspaceActionPreview) => void | Promise<void>;
   onApplyAttention?: (attention: WorkspaceAttention) => void;
@@ -333,6 +337,7 @@ export type PersonalWorkspaceCallbacks = {
   onGoalDeleted?: (goalId: string) => void;
   onReconcileStatus?: () => void | Promise<void>;
   onRefresh?: () => void | Promise<void>;
+  onRetryGoalArchive?: () => void | Promise<void>;
   onPreviewAction?: (request: WorkspaceActionPreviewRequest) => WorkspaceActionPreview | Promise<WorkspaceActionPreview>;
   onRequestGoalCreate?: () => WorkspaceActionPreview | Promise<WorkspaceActionPreview | void> | void;
   onRequestScheduleConfig?: (kind: WorkspaceScheduleKind, goalId: string | null) => WorkspaceActionPreview | Promise<WorkspaceActionPreview | void> | void;

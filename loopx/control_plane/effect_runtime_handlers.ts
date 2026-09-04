@@ -77,6 +77,7 @@ import {
   writeSchedulerState,
 } from "./scheduler/state_store.ts";
 import { buildVisionCheckpoint } from "./goals/vision_checkpoint.ts";
+import { projectSharedGoalAlignment } from "./goals/shared_goal_alignment.ts";
 import {
   evaluateDeliveryRoute,
 } from "./turn_driver/delivery_continuity.ts";
@@ -109,6 +110,7 @@ import {
 } from "./coordination/runtime_shadow.ts";
 import {
   mutateLocalCoordinationAuthority,
+  listLocalCoordinationTodos,
   promoteLocalCoordinationAuthority,
   readLocalCoordinationTodo,
 } from "./coordination/local_authority_runtime.ts";
@@ -362,6 +364,7 @@ export function createEffectRuntimeHandlers(
     ["work_item.planning_inventory.detail", projectTodoPlanningInventoryDetail],
     ["work_item.refresh_recommendation.resolve", resolveRefreshRecommendation],
     ["goal.vision_checkpoint.evaluate", buildVisionCheckpoint],
+    ["goal.shared_goal_alignment.project", projectSharedGoalAlignment],
     ["agent.delivery_workspace.evaluate", evaluateDeliveryWorkspace],
     [
       "quota.delivery_workspace_causality.evaluate",
@@ -387,6 +390,7 @@ export function createEffectRuntimeHandlers(
     ["coordination.local_authority.promote", promoteLocalCoordinationAuthority],
     ["coordination.local_authority.mutate", mutateLocalCoordinationAuthority],
     ["coordination.local_authority.todo_read", readLocalCoordinationTodo],
+    ["coordination.local_authority.todo_list", listLocalCoordinationTodos],
     [
       "coordination.local_authority.legacy_writer_fence.engage",
       engageLegacyCoordinationWriterFence,

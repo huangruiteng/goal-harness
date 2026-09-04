@@ -899,23 +899,27 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed_url = urlparse(self.path)
         path = parsed_url.path
+        # Keep blank values so `?goal_activation=` and repeated values like
+        # `?goal_activation=active&goal_activation=` fail closed with HTTP 400
+        # instead of being silently dropped by the default parse_qs behavior.
+        query = parse_qs(parsed_url.query, keep_blank_values=True)
         if path == "/healthz":
             self._send_json({"ok": True})
             return
         if path == DEFAULT_REVIEW_MATERIAL_PATH:
-            self._handle_review_material(parse_qs(parsed_url.query))
+            self._handle_review_material(query)
             return
         if path == DEFAULT_EXTENSION_PRESENTATION_SURFACES_PATH:
             self._handle_extension_presentation_surfaces()
             return
         if path == DEFAULT_EXTENSION_PROJECTION_PATH:
-            self._handle_extension_projection(parse_qs(parsed_url.query))
+            self._handle_extension_projection(query)
             return
         if path == DEFAULT_PERIODIC_REPORT_INDEX_PATH:
-            self._handle_periodic_report_index(parse_qs(parsed_url.query))
+            self._handle_periodic_report_index(query)
             return
         if path == DEFAULT_PERIODIC_REPORT_PROJECTION_PATH:
-            self._handle_periodic_report_projection(parse_qs(parsed_url.query))
+            self._handle_periodic_report_projection(query)
             return
         if path == DEFAULT_SSH_HOSTS_PATH:
             self._handle_ssh_hosts()
@@ -939,6 +943,20 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        activation_values = query.get("goal_activation", [])
+        if len(activation_values) > 1 or (
+            activation_values and activation_values[0] not in {"active", "stopped"}
+        ):
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": "goal_activation must be active or stopped",
+                },
+                status=400,
+            )
+            return
+        activation_state_filter = activation_values[0] if activation_values else None
+
         try:
             payload = collect_status(
                 registry_path=self.server.registry_path,
@@ -946,6 +964,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
                 scan_roots=self.server.scan_roots,
                 limit=self.server.limit,
                 include_public_boundary_scan=False,
+                activation_state_filter=activation_state_filter,
             )
             payload["local_dashboard_api"] = self._local_dashboard_api_payload()
         except Exception as exc:  # noqa: BLE001 - the HTTP layer should preserve diagnostics.

@@ -726,6 +726,17 @@ export const statusContractSchema = z.object({
   reload_hint: "scripts/macos-dashboard-launchagent.sh restart",
 });
 
+export const goalProjectionScopeSchema = z.object({
+  schema_version: z.literal("loopx_goal_projection_scope_v0"),
+  scope: z.enum(["all", "active", "stopped"]),
+  complete: z.boolean(),
+  projected_goal_count: z.number().int().nonnegative(),
+  registry_goal_count: z.number().int().nonnegative(),
+  // Stable fingerprint of the registry's goal activation partition. Two
+  // scoped snapshots are safe to merge only when their revisions match.
+  registry_revision: z.string().optional().nullable(),
+});
+
 export const localDashboardApiSchema = z.object({
   source: z.string().optional().default("serve-status"),
   status_url: z.string().optional().nullable(),
@@ -908,6 +919,7 @@ export const statusPayloadSchema = z.object({
   goal_count: z.number(),
   run_count: z.number(),
   status_contract: statusContractSchema,
+  goal_projection: goalProjectionScopeSchema.optional().nullable().default(null),
   local_dashboard_api: localDashboardApiSchema,
   contract: z.object({
     ok: z.boolean(),
@@ -999,6 +1011,7 @@ export type PeriodicReportDetailRef = z.infer<typeof periodicReportDetailRefSche
 export type PeriodicReportProjection = z.infer<typeof periodicReportProjectionSchema>;
 export type GoalActivationState = "active" | "stopped";
 export type StatusContract = NonNullable<z.infer<typeof statusContractSchema>>;
+export type GoalProjectionScope = z.infer<typeof goalProjectionScopeSchema>;
 export type QueueItem = z.infer<typeof queueItemSchema>;
 export type HumanReward = z.infer<typeof humanRewardSchema>;
 export type OperatorGate = z.infer<typeof operatorGateSchema>;

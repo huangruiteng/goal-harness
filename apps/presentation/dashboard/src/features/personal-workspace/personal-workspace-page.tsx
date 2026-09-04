@@ -32,6 +32,7 @@ import type {
   WorkspaceActionPreviewRequest,
   WorkspaceDrawerSelection,
   WorkspaceGoal,
+  WorkspaceGoalArchiveLoadState,
   WorkspaceGoalTab,
   WorkspaceImageAttachment,
   WorkspaceModel,
@@ -674,6 +675,7 @@ function readImageAttachment(file: File, t: WorkspaceTranslate): Promise<Workspa
 export function PersonalWorkspacePage({
   agents = [{ agentId: "codex", available: true, capability: "代码与项目执行", label: "Codex" }],
   callbacks = {},
+  goalArchiveLoadState = { error: null, phase: "ready" },
   model,
   readOnly = false,
   selectedAgentId: controlledAgentId,
@@ -682,6 +684,7 @@ export function PersonalWorkspacePage({
 }: {
   agents?: WorkspaceAgentOption[];
   callbacks?: PersonalWorkspaceCallbacks;
+  goalArchiveLoadState?: WorkspaceGoalArchiveLoadState;
   model: WorkspaceModel;
   ownerLabel?: string;
   readOnly?: boolean;
@@ -1901,9 +1904,13 @@ export function PersonalWorkspacePage({
         <GoalSidebar
           attentionCount={managerNeedsYouCount}
           goals={workspaceGoals}
+          goalArchiveLoadState={goalArchiveLoadState}
           lifecycleBusyGoalIds={lifecycleBusyGoalIds}
           onRequestGoalCreate={readOnly ? undefined : requestGoalCreate}
           onRequestGoalLifecycle={readOnly ? undefined : (goal, operation) => void requestGoalLifecycle(goal, operation)}
+          onRetryGoalArchive={callbacks.onRetryGoalArchive || callbacks.onRefresh
+            ? () => void (callbacks.onRetryGoalArchive ?? callbacks.onRefresh)?.()
+            : undefined}
           onOpenSettings={readOnly ? undefined : () => setSelection({ kind: "settings" })}
           onSelectGoal={selectGoal}
           selectedGoalId={selectedGoalId}

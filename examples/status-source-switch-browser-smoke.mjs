@@ -112,7 +112,7 @@ async function main() {
       });
     });
     const installStatusRoute = async (url, key) => {
-      await page.route(url, async (route) => {
+      await page.route(`${url}*`, async (route) => {
         state.statusRequestsByPort.set(key, (state.statusRequestsByPort.get(key) ?? 0) + 1);
         state.statusStartedByPort.get(key)?.();
         await state.statusGates.get(key);
@@ -138,7 +138,9 @@ async function main() {
     await remoteAStatusStarted.promise;
     await selectSource(page, sourceSelect, "Remote B");
     await page.getByText("Remote B Goal Only", { exact: true }).first().waitFor({ state: "visible", timeout: 10_000 });
-    const remoteAResponse = page.waitForResponse("http://127.0.0.1:8876/status.json");
+    const remoteAResponse = page.waitForResponse(
+      (response) => response.url().startsWith("http://127.0.0.1:8876/status.json"),
+    );
     remoteAStatusGate.resolve();
     await remoteAResponse;
     await page.evaluate(() => new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame))));
