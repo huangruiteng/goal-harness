@@ -129,6 +129,37 @@ managed launcher, startup readiness, and first-session `loopx` skill
 discovery. It requires Docker, `uv`, and network access for base images and
 never opens a browser or configures a model provider.
 
+## Shadow observer (default off)
+
+`src/observer.ts` is the `dsh-session-events` provider for the LoopX
+[Reliability Diagnostics](../../loopx/capabilities/reliability_diagnostics/README.md)
+capability: an L1 shadow observer that consumes read-only harness events and
+appends compact, public-safe envelopes plus an observer stats record to
+`<loopx-runtime-root>/reliability_diagnostics/<goal-id>.ndjson`. It is a
+separate module from the Driver with no shared send path: it never calls
+`agent.send`, touches the inbox, invokes the LoopX CLI, schedules, retries,
+stops, or resumes anything. Every hook body and every flush is isolated, so an
+observer failure is counted into the receipt instead of reaching DSH.
+
+It is off unless one exact goal is declared before DSH starts:
+
+```bash
+export LOOPX_DSH_SHADOW_OBSERVER_GOAL_ID=<goal-id>
+# optional: LOOPX_DSH_SHADOW_OBSERVER_LEDGER_DIR, LOOPX_DSH_SHADOW_OBSERVER_BUFFER_BOUND (default 256)
+loopx reliability-diagnostics receipt --goal-id <goal-id> --format json
+loopx reliability-diagnostics status  --goal-id <goal-id> --format json
+```
+
+With the variable unset the Driver row registers no observer hook and writes no
+file. When set, the observer consumes `agent/session-start`, `agent/status`,
+`agent/error`, `agent/pre-step` (pass-through), `session/event`, and
+`session/disposed`; it skips `assistant/chunk` and records tool names, turn and
+step numbers, end reasons, and ids only, never arguments, outputs, prompts, or
+paths. Sequence gaps, bounded-buffer drops, declared clock uncertainty, and
+the always-empty outbound endpoint list make the run's admissibility as passive
+evidence auditable from the receipt. In this slice every session in the DSH
+process is attributed to the single declared goal.
+
 ## GoalBar authority and privacy boundary
 
 `/loopx` is registered with Connection authority `loopback`. Loopback is a
