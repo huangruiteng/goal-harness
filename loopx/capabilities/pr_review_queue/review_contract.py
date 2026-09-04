@@ -433,7 +433,8 @@ def build_review_execution_contract() -> dict[str, Any]:
                 "rule": (
                     "Default behavior changes in runtime or automatically loaded "
                     "instruction surfaces must be disclosed through renamed smokes, "
-                    "docs, or release notes. Flag silent changes that alter existing "
+                    "docs, or release notes. Flag silent behavior changes that alter "
+                    "existing "
                     "automation or ordinary agent behavior without naming the old and "
                     "new default."
                 ),
