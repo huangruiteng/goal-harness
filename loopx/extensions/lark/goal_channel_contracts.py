@@ -262,18 +262,6 @@ def quota_human_gate_state_generation(
         "gate_identity": quota_human_gate_identity(quota_packet),
         "items": material_items,
     }
-    interaction = quota_packet.get("interaction_contract")
-    interaction = interaction if isinstance(interaction, Mapping) else {}
-    user_channel = interaction.get("user_channel")
-    user_channel = user_channel if isinstance(user_channel, Mapping) else {}
-    raw_actions = user_channel.get("actions")
-    actions = (
-        [public_safe_compact_text(action, limit=300) for action in raw_actions[:3]]
-        if isinstance(raw_actions, list)
-        else []
-    )
-    if any(actions):
-        material["actions"] = [action for action in actions if action]
     if not material_items:
         material["state"] = str(quota_packet.get("state") or "")
         material["question"] = public_safe_compact_text(

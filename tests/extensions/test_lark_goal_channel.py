@@ -1083,7 +1083,12 @@ def test_notify_gate_uses_material_state_generation_not_projection_copy(
         "text": "Approve the bounded external write.",
     }
 
-    def packet(*, prompt: str, recommended_action: str) -> dict[str, Any]:
+    def packet(
+        *,
+        prompt: str,
+        recommended_action: str,
+        projected_action: str,
+    ) -> dict[str, Any]:
         return {
             "state": "operator_gate",
             "notify_user_on_gate": True,
@@ -1094,7 +1099,7 @@ def test_notify_gate_uses_material_state_generation_not_projection_copy(
                 "user_channel": {
                     "action_required": True,
                     "notify": "NOTIFY",
-                    "actions": [item["text"]],
+                    "actions": [projected_action],
                 }
             },
         }
@@ -1105,6 +1110,7 @@ def test_notify_gate_uses_material_state_generation_not_projection_copy(
         quota_packet=packet(
             prompt="Approve the bounded external write.",
             recommended_action="Wait for the owner decision.",
+            projected_action="- [ ] [P0] Approve the bounded external write.",
         ),
         runner=runner,
     )
@@ -1114,6 +1120,7 @@ def test_notify_gate_uses_material_state_generation_not_projection_copy(
         quota_packet=packet(
             prompt="Current recommendation: approve the bounded external write.",
             recommended_action="Keep waiting for the same owner decision.",
+            projected_action="1. Approve the bounded external write.",
         ),
         runner=runner,
     )
@@ -1122,6 +1129,139 @@ def test_notify_gate_uses_material_state_generation_not_projection_copy(
     assert second["status"] == "already_sent"
     assert first["idempotency_key"] == second["idempotency_key"]
     assert sum("+messages-send" in args for args in calls) == 1
+
+
+def test_notify_gate_does_not_apply_legacy_receipt_to_unknown_material_state(
+    tmp_path: Path,
+) -> None:
+    binding_path = _gate_test_binding(tmp_path)
+    binding = read_goal_channel_binding(binding_path)
+    binding["bindings"][GOAL_ID]["receipts"] = {
+        "sha256:legacy": {
+            "kind": "gate_notification",
+            "gate_identity": "todo_gate_fixture",
+            "message_id": GATE_MESSAGE_ID,
+            "verified_at": "2026-08-08T00:00:00+00:00",
+        }
+    }
+    write_goal_channel_binding(binding_path, binding)
+    calls: list[list[str]] = []
+    result = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet={
+            "state": "operator_gate",
+            "notify_user_on_gate": True,
+            "gate_prompt": "Approve the changed bounded external write.",
+            "user_todo_summary": {
+                "gate_open_items": [
+                    {
+                        "todo_id": "todo_gate_fixture",
+                        "status": "open",
+                        "task_class": "user_gate",
+                        "updated_at": "2026-08-08T01:00:00Z",
+                        "text": "Approve the changed bounded external write.",
+                    }
+                ]
+            },
+        },
+        runner=_fake_runner(calls),
+    )
+
+    assert result["status"] == "sent_verified"
+    assert sum("+messages-send" in args for args in calls) == 1
+
+
+def test_notify_gate_preserves_exact_legacy_delivery_for_same_target(
+    tmp_path: Path,
+) -> None:
+    binding_path = _gate_test_binding(tmp_path)
+    quota_packet = {
+        "state": "operator_gate",
+        "notify_user_on_gate": True,
+        "gate_prompt": "Approve the bounded external write.",
+        "user_todo_summary": {
+            "gate_open_items": [
+                {
+                    "todo_id": "todo_gate_fixture",
+                    "task_class": "user_gate",
+                    "text": "Approve the bounded external write.",
+                }
+            ]
+        },
+    }
+    legacy_key = goal_channel_contracts.semantic_key(
+        GOAL_ID,
+        "lark",
+        "notify_gate",
+        "todo_gate_fixture",
+        "Approve the bounded external write.",
+        CHAT_ID,
+    )
+    binding = read_goal_channel_binding(binding_path)
+    binding["bindings"][GOAL_ID]["receipts"] = {
+        legacy_key: {
+            "kind": "gate_notification",
+            "gate_identity": "todo_gate_fixture",
+            "message_id": GATE_MESSAGE_ID,
+            "verified_at": "2026-08-08T00:00:00+00:00",
+        }
+    }
+    write_goal_channel_binding(binding_path, binding)
+    calls: list[list[str]] = []
+    result = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=quota_packet,
+        runner=_fake_runner(calls),
+    )
+
+    assert result["status"] == "already_sent"
+    assert sum("+messages-send" in args for args in calls) == 0
+
+
+def test_notify_gate_sends_same_generation_once_to_replacement_channel(
+    tmp_path: Path,
+) -> None:
+    binding_path = _gate_test_binding(tmp_path)
+    calls: list[list[str]] = []
+    runner = _fake_runner(calls)
+    quota_packet = {
+        "state": "operator_gate",
+        "notify_user_on_gate": True,
+        "gate_prompt": "Approve the bounded external write.",
+        "user_todo_summary": {
+            "gate_open_items": [
+                {
+                    "todo_id": "todo_gate_fixture",
+                    "status": "open",
+                    "task_class": "user_gate",
+                    "updated_at": "2026-08-08T00:00:00Z",
+                    "text": "Approve the bounded external write.",
+                }
+            ]
+        },
+    }
+    first = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=quota_packet,
+        runner=runner,
+    )
+    binding = read_goal_channel_binding(binding_path)
+    binding["bindings"][GOAL_ID]["channel"]["chat_id"] = "oc_second_fixture"
+    write_goal_channel_binding(binding_path, binding)
+    second = _notify_test_gate(
+        tmp_path=tmp_path,
+        binding_path=binding_path,
+        quota_packet=quota_packet,
+        runner=runner,
+    )
+
+    assert first["status"] == "sent_verified"
+    assert second["status"] == "sent_verified"
+    assert first["idempotency_key"] != second["idempotency_key"]
+    assert sum("+messages-send" in args for args in calls) == 2
 
 
 def test_notify_gate_resends_for_material_transition_or_one_reminder_window(

@@ -566,7 +566,7 @@ def notify_lark_goal_channel_gate(
     cli_bin = str(identity_config.get("cli_bin") or DEFAULT_CLI_BIN)
     identity = str(identity_config.get("sender_identity") or "")
     profile = str(identity_config.get("sender_profile") or "") or None
-    message, _question = gate_message(
+    message, question = gate_message(
         goal_id=goal_id,
         objective=goal_objective(goal),
         quota_packet=quota_packet,
@@ -576,6 +576,7 @@ def notify_lark_goal_channel_gate(
     state_generation = quota_human_gate_state_generation(quota_packet)
     reminder_generation = quota_human_gate_reminder_generation(quota_packet)
     delivery_generation = reminder_generation or "material_state"
+    target_generation = semantic_key("lark_goal_channel_target_v0", chat_id)
     key = semantic_key(
         goal_id,
         "lark",
@@ -599,22 +600,42 @@ def notify_lark_goal_channel_gate(
             idempotency_key=key,
             receipt_id=f"receipt_{key.removeprefix('sha256:')[:16]}",
         )
+    legacy_key = semantic_key(
+        goal_id,
+        "lark",
+        "notify_gate",
+        gate_identity,
+        question,
+        chat_id,
+    )
+    legacy_receipt = _mapping(receipts.get(legacy_key))
+    if legacy_receipt and not legacy_receipt.get("state_generation"):
+        return operation_packet(
+            ok=True,
+            goal_id=goal_id,
+            operation="notify_gate",
+            execute=execute,
+            status="already_sent",
+            public_summary="the exact legacy human gate delivery was already sent",
+            readback_verified=legacy_receipt.get("readback_verified") is not False,
+            idempotency_key=key,
+            receipt_id=f"receipt_{legacy_key.removeprefix('sha256:')[:16]}",
+        )
     same_gate_receipts = [
         receipt
         for receipt in receipts.values()
         if isinstance(receipt, Mapping)
         and receipt.get("kind") == "gate_notification"
         and str(receipt.get("gate_identity") or "") == gate_identity
+        and str(receipt.get("target_generation") or "") == target_generation
     ]
     same_state_receipts = [
         receipt
         for receipt in same_gate_receipts
         if str(receipt.get("state_generation") or "") == state_generation
     ]
-    legacy_receipts = [
-        receipt for receipt in same_gate_receipts if not receipt.get("state_generation")
-    ]
     if same_state_receipts and reminder_generation is None:
+        matched_receipt = same_state_receipts[-1]
         return operation_packet(
             ok=True,
             goal_id=goal_id,
@@ -622,18 +643,7 @@ def notify_lark_goal_channel_gate(
             execute=execute,
             status="already_sent",
             public_summary="the unchanged human gate generation was already sent",
-            readback_verified=True,
-            idempotency_key=key,
-        )
-    if legacy_receipts and reminder_generation is None:
-        return operation_packet(
-            ok=True,
-            goal_id=goal_id,
-            operation="notify_gate",
-            execute=execute,
-            status="already_sent",
-            public_summary="a legacy receipt already covers this human gate",
-            readback_verified=True,
+            readback_verified=matched_receipt.get("readback_verified") is not False,
             idempotency_key=key,
         )
     if not execute:
@@ -745,6 +755,7 @@ def notify_lark_goal_channel_gate(
     mutable_receipts[key] = {
         "kind": "gate_notification",
         "gate_identity": gate_identity,
+        "target_generation": target_generation,
         "state_generation": state_generation,
         "delivery_generation": delivery_generation,
         "message_id": message_id,
