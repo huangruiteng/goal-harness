@@ -160,6 +160,18 @@ fn release_launchers_publish_the_stable_process_fingerprint() {
 }
 
 #[test]
+fn platform_managed_services_have_stable_launchd_labels() {
+    assert_eq!(
+        platform_managed_service_label(ServiceKind::Status),
+        "com.loopx.status"
+    );
+    assert_eq!(
+        platform_managed_service_label(ServiceKind::Chat),
+        "com.loopx.chat"
+    );
+}
+
+#[test]
 fn stale_listener_verification_rejects_the_entire_pid_set_on_mismatch() {
     let executable = "/fixture/bin/loopx";
     let confirmed = ListenerProcess {

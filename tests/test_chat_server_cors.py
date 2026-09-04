@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import threading
+from pathlib import Path
 
 from loopx.chat_server import ChatHTTPServer, ChatRequestHandler
 from loopx.extensions.lark.cli_resolution import LarkCliResolution
@@ -12,6 +13,10 @@ def _start_server() -> tuple[ChatHTTPServer, threading.Thread]:
     server = ChatHTTPServer(("127.0.0.1", 0), ChatRequestHandler)
     server.verbose = False
     server.selected_goal_id = None
+    server.registry_path = Path("/tmp/loopx-test-registry.json")
+    server.runtime_root_override = None
+    server.scan_roots = []
+    server.limit = 20
     server.runtime_controller = _RuntimeController()
     server.lark_cli_resolution = LarkCliResolution(
         command=None,
@@ -38,10 +43,11 @@ def _request(
     *,
     method: str,
     origin: str | None,
+    path: str = "/api/chat/capabilities",
 ) -> http.client.HTTPResponse:
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     headers = {"Origin": origin} if origin else {}
-    connection.request(method, "/api/chat/capabilities", headers=headers)
+    connection.request(method, path, headers=headers)
     return connection.getresponse()
 
 
@@ -124,6 +130,56 @@ def test_chat_options_exposes_loopback_preflight_only() -> None:
         assert response.getheader("Access-Control-Allow-Methods") == (
             "GET, POST, DELETE, OPTIONS"
         )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_chat_status_forwards_valid_goal_activation_scope(monkeypatch) -> None:
+    calls: list[str | None] = []
+
+    def fake_collect_status(**kwargs):
+        calls.append(kwargs.get("activation_state_filter"))
+        return {"ok": True, "scope": kwargs.get("activation_state_filter")}
+
+    monkeypatch.setattr("loopx.chat_status_api.collect_status", fake_collect_status)
+    server, thread = _start_server()
+    try:
+        response = _request(
+            server.server_address[1],
+            method="GET",
+            origin=None,
+            path="/status.json?goal_activation=active",
+        )
+        payload = json.loads(response.read().decode("utf-8"))
+
+        assert response.status == 200
+        assert payload == {"ok": True, "scope": "active"}
+        assert calls == ["active"]
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_chat_status_rejects_invalid_goal_activation_scope(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "loopx.chat_status_api.collect_status",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("must fail before collection")),
+    )
+    server, thread = _start_server()
+    try:
+        response = _request(
+            server.server_address[1],
+            method="GET",
+            origin=None,
+            path="/status.json?goal_activation=active&goal_activation=stopped",
+        )
+        payload = json.loads(response.read().decode("utf-8"))
+
+        assert response.status == 400
+        assert payload["error_code"] == "invalid_goal_activation"
     finally:
         server.shutdown()
         thread.join(timeout=5)

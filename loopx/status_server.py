@@ -102,6 +102,15 @@ CONFIGURE_GOAL_REQUEST_FIELDS = {
 CONFIGURE_GOAL_APPLY_FIELDS = CONFIGURE_GOAL_REQUEST_FIELDS | {"preview_id"}
 
 
+def parse_goal_activation_filter(query: dict[str, list[str]]) -> str | None:
+    """Parse the shared scoped-status query without accepting ambiguous input."""
+
+    values = query.get("goal_activation", [])
+    if len(values) > 1 or (values and values[0] not in {"active", "stopped"}):
+        raise ValueError("goal_activation must be active or stopped")
+    return values[0] if values else None
+
+
 def is_loopback_host(host: str) -> bool:
     hostname = host.strip().lower()
     return hostname in {"127.0.0.1", "localhost", "::1", "[::1]"}
@@ -943,19 +952,17 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
-        activation_values = query.get("goal_activation", [])
-        if len(activation_values) > 1 or (
-            activation_values and activation_values[0] not in {"active", "stopped"}
-        ):
+        try:
+            activation_state_filter = parse_goal_activation_filter(query)
+        except ValueError as exc:
             self._send_json(
                 {
                     "ok": False,
-                    "error": "goal_activation must be active or stopped",
+                    "error": str(exc),
                 },
                 status=400,
             )
             return
-        activation_state_filter = activation_values[0] if activation_values else None
 
         try:
             payload = collect_status(

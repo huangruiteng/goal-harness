@@ -1,7 +1,10 @@
 mod services;
 
 use services::ServiceSet;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use tauri::{
     ipc::CapabilityBuilder, AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder,
 };
@@ -27,6 +30,8 @@ pub fn run() {
     let services = Arc::new(Mutex::new(None::<ServiceSet>));
     let services_for_setup = Arc::clone(&services);
     let navigation_origin: Url = web_origin.parse().expect("valid desktop origin");
+    let shutting_down = Arc::new(AtomicBool::new(false));
+    let shutting_down_for_setup = Arc::clone(&shutting_down);
 
     let builder = tauri::Builder::default()
         .plugin(
@@ -37,36 +42,6 @@ pub fn run() {
         )
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
-            let started = match ServiceSet::start() {
-                Ok(services) => services,
-                Err(error) => {
-                    // Soft gate: surface a service/runtime mismatch as a clear
-                    // owner-facing reminder instead of panicking the shell.
-                    let message = format!(
-                        "LoopX 检测到正在运行的服务来自不同的安装版本，已停止本次启动。\n\n详情：{error}\n\n请先退出旧的 loopx dashboard 或 LoopX App，再重新打开 LoopX。"
-                    );
-                    let _ = rfd::MessageDialog::new()
-                        .set_title("LoopX")
-                        .set_description(&message)
-                        .set_level(rfd::MessageLevel::Warning)
-                        .show();
-                    eprintln!("LoopX service error: {error}");
-                    app.handle().exit(1);
-                    return Ok(());
-                }
-            };
-            let healed = started.healed;
-            *services_for_setup.lock().expect("service state lock") = Some(started);
-
-            if healed {
-                let _ = app
-                    .notification()
-                    .builder()
-                    .title("LoopX")
-                    .body("已自动升级到当前 LoopX 版本，服务已重启。")
-                    .show();
-            }
-
             let origin: Url = web_origin.parse()?;
             app.add_capability(
                 CapabilityBuilder::new("desktop-loopx-chat")
@@ -74,12 +49,62 @@ pub fn run() {
                     .window("main"),
             )?;
 
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(origin))
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("LoopX")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(960.0, 640.0)
-                .on_navigation(move |url| url.origin() == navigation_origin.origin())
+                .on_navigation(move |url| {
+                    url.scheme() == "tauri" || url.origin() == navigation_origin.origin()
+                })
                 .build()?;
+
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                while !shutting_down_for_setup.load(Ordering::Acquire) {
+                    match ServiceSet::start() {
+                        Ok(mut started) => {
+                            if shutting_down_for_setup.load(Ordering::Acquire) {
+                                started.stop();
+                                return;
+                            }
+                            let healed = started.healed;
+                            *services_for_setup.lock().expect("service state lock") = Some(started);
+                            if healed {
+                                let _ = handle
+                                    .notification()
+                                    .builder()
+                                    .title("LoopX")
+                                    .body("已自动升级到当前 LoopX 版本，服务已重启。")
+                                    .show();
+                            }
+                            if let Some(window) = handle.get_webview_window("main") {
+                                let _ = window.navigate(origin);
+                            }
+                            return;
+                        }
+                        Err(error) => {
+                            let message =
+                                format!("LoopX 本地服务暂时无法启动：{error}。正在自动重试…");
+                            eprintln!("LoopX service error: {error}");
+                            if let Some(window) = handle.get_webview_window("main") {
+                                if let Ok(encoded) = serde_json::to_string(&message) {
+                                    let _ =
+                                        window.eval(format!("window.loopxBootFailed({encoded})"));
+                                }
+                            }
+                            for _ in 0..10 {
+                                if shutting_down_for_setup.load(Ordering::Acquire) {
+                                    return;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                            }
+                            if let Some(window) = handle.get_webview_window("main") {
+                                let _ = window.eval("window.loopxBootRetrying()");
+                            }
+                        }
+                    }
+                }
+            });
             Ok(())
         });
 
@@ -88,6 +113,7 @@ pub fn run() {
         .expect("failed to build LoopX desktop shell");
     app.run(move |_app, event| {
         if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
+            shutting_down.store(true, Ordering::Release);
             if let Ok(mut guard) = services.lock() {
                 if let Some(current) = guard.as_mut() {
                     current.stop();
@@ -96,4 +122,19 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn startup_surface_is_visible_and_names_automatic_recovery() {
+        let html = include_str!("../../static/index.html");
+        let script = include_str!("../../static/boot.js");
+
+        assert!(html.contains("正在启动本地控制面"));
+        assert!(html.contains("aria-busy=\"true\""));
+        assert!(html.contains("aria-live=\"polite\""));
+        assert!(script.contains("正在自动重试"));
+        assert!(script.contains("window.loopxBootRetrying"));
+    }
 }
