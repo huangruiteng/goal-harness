@@ -1913,9 +1913,9 @@ export function PersonalWorkspacePage({
           lifecycleBusyGoalIds={lifecycleBusyGoalIds}
           onRequestGoalCreate={readOnly ? undefined : requestGoalCreate}
           onRequestGoalLifecycle={readOnly ? undefined : (goal, operation) => void requestGoalLifecycle(goal, operation)}
-          onRetryGoalArchive={callbacks.onRetryGoalArchive
-            ? () => void callbacks.onRetryGoalArchive?.()
-            : callbacks.onRefresh ? () => void callbacks.onRefresh?.() : undefined}
+          onRetryGoalArchive={callbacks.onRetryGoalArchive || callbacks.onRefresh
+            ? () => void (callbacks.onRetryGoalArchive ?? callbacks.onRefresh)?.()
+            : undefined}
           onOpenSettings={readOnly ? undefined : () => setSelection({ kind: "settings" })}
           onSelectGoal={selectGoal}
           selectedGoalId={selectedGoalId}

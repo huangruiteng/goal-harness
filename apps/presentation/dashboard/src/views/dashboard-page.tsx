@@ -2730,6 +2730,32 @@ export function DashboardPage() {
     if (request) loadGoalArchive(url, request);
   }
 
+  async function commitLoadedStatus(
+    url: string,
+    nextPayload: StatusPayload,
+    request: StatusRequest,
+  ) {
+    if (request.background) {
+      setPayload((current) => mergeScopedStatusProjections(current, nextPayload));
+      return true;
+    }
+    const nextSource: DataSource = { kind: "url", label: url };
+    statusRequestFenceRef.current.loadedUrl = url;
+    setPayload(nextPayload);
+    setSource(nextSource);
+    setStatusUrl(url);
+    await navigate({
+      search: (current) => ({
+        ...current,
+        statusUrl: url,
+      }),
+    });
+    if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return false;
+    statusRequestFenceRef.current.requestedUrl = null;
+    setRequestedStatusUrl(null);
+    return true;
+  }
+
   async function loadFromUrl(
     url: string,
     options: {
@@ -2763,24 +2789,7 @@ export function DashboardPage() {
       );
       if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
       request.registryRevision = nextPayload.goal_projection?.registry_revision ?? null;
-      if (background) {
-        setPayload((current) => mergeScopedStatusProjections(current, nextPayload));
-      } else {
-        const nextSource: DataSource = { kind: "url", label: trimmed };
-        statusRequestFenceRef.current.loadedUrl = trimmed;
-        setPayload(nextPayload);
-        setSource(nextSource);
-        setStatusUrl(trimmed);
-        await navigate({
-          search: (current) => ({
-            ...current,
-            statusUrl: trimmed,
-          }),
-        });
-        if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return;
-        statusRequestFenceRef.current.requestedUrl = null;
-        setRequestedStatusUrl(null);
-      }
+      if (!await commitLoadedStatus(trimmed, nextPayload, request)) return;
       if (nextPayload.goal_projection?.scope !== "active"
         || nextPayload.goal_projection.complete) {
         setGoalArchiveLoadState({ error: null, phase: "ready" });

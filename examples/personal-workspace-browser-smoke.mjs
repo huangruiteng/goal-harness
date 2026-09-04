@@ -65,6 +65,41 @@ async function visibleElementCount(locator) {
   }).length);
 }
 
+function capturedStatusGeneration(state) {
+  if (!state.captureNextStatusGeneration) return state.goalActivationStates;
+  if (!state.capturedStatusGeneration) {
+    state.capturedStatusGeneration = new Map(state.goalActivationStates);
+  }
+  return state.capturedStatusGeneration;
+}
+
+function filterStatusFixtureToScope(fixture, statusGeneration, scope) {
+  const activationForGoal = (goalId) => statusGeneration.get(goalId) ?? "active";
+  const matchesScope = (goalId) => activationForGoal(goalId) === scope;
+  fixture.attention_queue.items = fixture.attention_queue.items.filter((item) => matchesScope(item.goal_id));
+  fixture.attention_queue.item_count = fixture.attention_queue.items.length;
+  if (fixture.todo_index?.items) {
+    fixture.todo_index.items = fixture.todo_index.items.filter((item) => matchesScope(item.goal_id));
+    fixture.todo_index.total_count = fixture.todo_index.items.length;
+  }
+  if (fixture.usage_summary?.goals) {
+    fixture.usage_summary.goals = fixture.usage_summary.goals.filter((item) => matchesScope(item.goal_id));
+  }
+  if (fixture.event_ledger_summary?.goals) {
+    fixture.event_ledger_summary.goals = fixture.event_ledger_summary.goals.filter((item) => matchesScope(item.goal_id));
+  }
+  if (fixture.decision_freshness_summary?.items) {
+    fixture.decision_freshness_summary.items = fixture.decision_freshness_summary.items.filter((item) => matchesScope(item.goal_id));
+  }
+  if (fixture.agent_management_projection?.agents) {
+    fixture.agent_management_projection.agents = fixture.agent_management_projection.agents.filter((agent) =>
+      (agent.goal_ids ?? []).some(matchesScope) || matchesScope(agent.current_todo?.goal_id));
+  }
+  if (fixture.goal_channel_notification_projection?.goals) {
+    fixture.goal_channel_notification_projection.goals = fixture.goal_channel_notification_projection.goals.filter((item) => matchesScope(item.goal_id));
+  }
+}
+
 async function installApi(page) {
   let turnCounter = 0;
   const runtime = page.__loopxRuntime ??= { actionProposals: new Map(), larkConnections: [], messages: new Map(), sessions: new Map(), turnMessages: new Map() };
@@ -109,9 +144,7 @@ async function installApi(page) {
   await page.route(`http://127.0.0.1:${port}/status.json*`, async (route) => {
     state.statusRequestCount += 1;
     const fixture = structuredClone(require(resolve(repoRoot, "examples/status.example.json")));
-    const statusGeneration = state.captureNextStatusGeneration
-      ? (state.capturedStatusGeneration ??= new Map(state.goalActivationStates))
-      : state.goalActivationStates;
+    const statusGeneration = capturedStatusGeneration(state);
     fixture.local_dashboard_api = {
       ...(fixture.local_dashboard_api ?? {}),
       periodic_report_index_url: "/periodic-report-workspace",
@@ -269,32 +302,6 @@ async function installApi(page) {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([goalId, activationState]) => `${goalId}:${activationState}`)
       .join("|");
-    const filterScopedRows = (scope) => {
-      const activationForGoal = (goalId) => statusGeneration.get(goalId) ?? "active";
-      const matchesScope = (goalId) => activationForGoal(goalId) === scope;
-      fixture.attention_queue.items = fixture.attention_queue.items.filter((item) => matchesScope(item.goal_id));
-      fixture.attention_queue.item_count = fixture.attention_queue.items.length;
-      if (fixture.todo_index?.items) {
-        fixture.todo_index.items = fixture.todo_index.items.filter((item) => matchesScope(item.goal_id));
-        fixture.todo_index.total_count = fixture.todo_index.items.length;
-      }
-      if (fixture.usage_summary?.goals) {
-        fixture.usage_summary.goals = fixture.usage_summary.goals.filter((item) => matchesScope(item.goal_id));
-      }
-      if (fixture.event_ledger_summary?.goals) {
-        fixture.event_ledger_summary.goals = fixture.event_ledger_summary.goals.filter((item) => matchesScope(item.goal_id));
-      }
-      if (fixture.decision_freshness_summary?.items) {
-        fixture.decision_freshness_summary.items = fixture.decision_freshness_summary.items.filter((item) => matchesScope(item.goal_id));
-      }
-      if (fixture.agent_management_projection?.agents) {
-        fixture.agent_management_projection.agents = fixture.agent_management_projection.agents.filter((agent) =>
-          (agent.goal_ids ?? []).some(matchesScope) || matchesScope(agent.current_todo?.goal_id));
-      }
-      if (fixture.goal_channel_notification_projection?.goals) {
-        fixture.goal_channel_notification_projection.goals = fixture.goal_channel_notification_projection.goals.filter((item) => matchesScope(item.goal_id));
-      }
-    };
     const delayMs = state.nextStatusDelayMs;
     state.nextStatusDelayMs = 0;
     if (delayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, delayMs));
@@ -313,7 +320,7 @@ async function installApi(page) {
         registry_revision: registryRevision,
       };
       fixture.run_history.goals = fixture.run_history.goals.filter((goal) => goal.activation_state !== "stopped");
-      filterScopedRows("active");
+      filterStatusFixtureToScope(fixture, statusGeneration, "active");
       // Freeze only the first half of the active-first read. The stopped
       // request must observe the registry after the intervening lifecycle
       // change so this fixture exercises the cross-snapshot revision fence.
@@ -342,7 +349,7 @@ async function installApi(page) {
         registry_revision: registryRevision,
       };
       fixture.run_history.goals = fixture.run_history.goals.filter((goal) => goal.activation_state === "stopped");
-      filterScopedRows("stopped");
+      filterStatusFixtureToScope(fixture, statusGeneration, "stopped");
     } else {
       fixture.goal_projection = {
         schema_version: "loopx_goal_projection_scope_v0",

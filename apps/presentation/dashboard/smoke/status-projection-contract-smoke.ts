@@ -19,7 +19,7 @@ function basePayload(overrides: Record<string, unknown> = {}): ReturnType<typeof
   return parseStatusPayload({
     ok: true,
     registry: "registry.json",
-    runtime_root: "/tmp/runtime",
+    runtime_root: "fixture-runtime",
     goal_count: 0,
     run_count: 0,
     status_contract: {
