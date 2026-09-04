@@ -8,6 +8,7 @@ on:
       - "apps/presentation/dashboard/**"
       - "examples/desktop-icon-alpha-smoke.py"
       - "examples/desktop-release-workflow-smoke.py"
+      - "scripts/desktop_release_artifacts.py"
   release:
     types: [published]
   workflow_dispatch:
@@ -102,56 +103,20 @@ jobs:
         working-directory: apps/desktop/loopx-control-plane
         run: npm run build -- --bundles ${{ matrix.bundles }} --no-sign
 
-      - name: Build signed macOS release bundles
+      - name: Build integrity-signed macOS release bundles
         if: github.event_name != 'pull_request' && runner.os == 'macOS'
         working-directory: apps/desktop/loopx-control-plane
         env:
           RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          for name in \
-            APPLE_CERTIFICATE \
-            APPLE_CERTIFICATE_PASSWORD \
-            KEYCHAIN_PASSWORD \
-            APPLE_ID \
-            APPLE_PASSWORD \
-            APPLE_TEAM_ID
-          do
-            if [[ -z "${!name:-}" ]]; then
-              echo "::error title=Missing Apple signing secret::${name} is required for a macOS desktop release"
-              exit 1
-            fi
-          done
           release_version="${RELEASE_TAG#v}"
           if [[ ! "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error title=Invalid desktop release version::${RELEASE_TAG} is not a supported release tag"
             exit 1
           fi
           npm run build -- --bundles ${{ matrix.bundles }} \
-            --config "{\"version\":\"${release_version}\"}"
-
-      - name: Notarize macOS disk image
-        if: github.event_name != 'pull_request' && runner.os == 'macOS'
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          dmg_path="$(find apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
-          test -n "${dmg_path}"
-          xcrun notarytool submit "${dmg_path}" \
-            --apple-id "${APPLE_ID}" \
-            --password "${APPLE_PASSWORD}" \
-            --team-id "${APPLE_TEAM_ID}" \
-            --wait
-          xcrun stapler staple "${dmg_path}"
+            --config "{\"version\":\"${release_version}\",\"bundle\":{\"macOS\":{\"signingIdentity\":\"-\"}}}"
 
       - name: Build Windows release bundles
         if: github.event_name != 'pull_request' && runner.os == 'Windows'
@@ -169,7 +134,7 @@ jobs:
           npm run build -- --bundles ${{ matrix.bundles }} --no-sign \
             --config "{\"version\":\"${release_version}\"}"
 
-      - name: Verify signed and notarized macOS bundles
+      - name: Verify macOS desktop bundles
         if: github.event_name != 'pull_request' && runner.os == 'macOS'
         shell: bash
         run: |
@@ -178,11 +143,8 @@ jobs:
           dmg_path="$(find apps/desktop/loopx-control-plane/src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
           test -n "${dmg_path}"
           codesign --verify --deep --strict --verbose=2 "${app_path}"
-          spctl --assess --type execute --verbose=4 "${app_path}"
-          xcrun stapler validate "${app_path}"
-          codesign --verify --deep --strict --verbose=2 "${dmg_path}"
-          spctl --assess --type open --context context:primary-signature --verbose=4 "${dmg_path}"
-          xcrun stapler validate "${dmg_path}"
+          codesign --display --verbose=4 "${app_path}" 2>&1 \
+            | grep -q '^Signature=adhoc$'
           hdiutil verify "${dmg_path}"
 
       - name: Collect macOS desktop bundles
@@ -226,23 +188,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out release workflow source
+        uses: actions/checkout@v7
+
       - name: Download desktop artifacts
         uses: actions/download-artifact@v7
         with:
           pattern: loopx-*
           path: dist/desktop
           merge-multiple: true
-
-      - name: Generate desktop checksums
-        run: |
-          set -euo pipefail
-          cd dist/desktop
-          find . -maxdepth 1 -type f ! -name DESKTOP-SHA256SUMS -printf '%f\n' \
-            | LC_ALL=C sort \
-            | while IFS= read -r artifact; do sha256sum "${artifact}"; done \
-            > DESKTOP-SHA256SUMS
-          test -s DESKTOP-SHA256SUMS
-          sha256sum --check DESKTOP-SHA256SUMS
 
       - name: Resolve release identity
         id: identity
@@ -257,15 +211,129 @@ jobs:
             exit 1
           fi
           echo "release-tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "release-version=${release_tag#v}" >> "${GITHUB_OUTPUT}"
 
-      - name: Upload desktop artifacts to GitHub Release
+      - name: Validate target release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+        run: gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+
+      - name: Back up existing desktop release assets
+        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
         run: |
           set -euo pipefail
-          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+          mkdir -p dist/previous-desktop
+          mapfile -t assets < <(
+            gh release view "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json assets \
+              --jq '.assets[].name | select(. == "DESKTOP-SHA256SUMS" or (startswith("LoopX") and (endswith(".dmg") or endswith(".zip") or endswith(".exe") or endswith(".msi"))))'
+          )
+          for asset in "${assets[@]}"; do
+            gh release download "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pattern "${asset}" \
+              --dir dist/previous-desktop
+          done
+          {
+            echo "release_tag=${RELEASE_TAG}"
+            echo "asset_count=${#assets[@]}"
+            printf '%s\n' "${assets[@]}"
+          } > dist/previous-desktop/ASSET-INVENTORY.txt
+          cd dist/previous-desktop
+          find . -maxdepth 1 -type f \
+            ! -name PREVIOUS-DESKTOP-SHA256SUMS \
+            -printf '%f\n' \
+            | LC_ALL=C sort \
+            | while IFS= read -r artifact; do
+                sha256sum "${artifact}"
+              done \
+            > PREVIOUS-DESKTOP-SHA256SUMS
+
+      - name: Preserve previous desktop release assets
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: previous-desktop-${{ steps.identity.outputs.release-tag }}-${{ github.run_id }}
+          path: dist/previous-desktop
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Validate complete rebuild and generate desktop checksums
+        env:
+          RELEASE_VERSION: ${{ steps.identity.outputs.release-version }}
+        run: |
+          set -euo pipefail
+          python scripts/desktop_release_artifacts.py write-checksums \
+            --dist-dir dist/desktop \
+            --version "${RELEASE_VERSION}" \
+            --output dist/desktop/DESKTOP-SHA256SUMS
+          python scripts/desktop_release_artifacts.py verify-checksums \
+            --dist-dir dist/desktop \
+            --version "${RELEASE_VERSION}" \
+            --checksum-file dist/desktop/DESKTOP-SHA256SUMS
+          cd dist/desktop
+          sha256sum --check DESKTOP-SHA256SUMS
+
+      - name: Replace complete desktop binary set
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --json assets \
+            --jq 'any(.assets[]; .name == "DESKTOP-SHA256SUMS")' \
+            | grep -qx true
+          then
+            gh release delete-asset "${RELEASE_TAG}" DESKTOP-SHA256SUMS \
+              --repo "${GITHUB_REPOSITORY}" \
+              --yes
+          fi
           gh release upload "${RELEASE_TAG}" \
-            dist/desktop/* \
+            dist/desktop/*.dmg \
+            dist/desktop/*.zip \
+            dist/desktop/*.exe \
+            dist/desktop/*.msi \
             --repo "${GITHUB_REPOSITORY}" \
             --clobber
+
+      - name: Replace desktop checksum manifest last
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+        run: |
+          gh release upload "${RELEASE_TAG}" \
+            dist/desktop/DESKTOP-SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+
+      - name: Verify published desktop release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.release-tag }}
+          RELEASE_VERSION: ${{ steps.identity.outputs.release-version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/published-desktop
+          for asset in \
+            LoopX.app.zip \
+            "LoopX_${RELEASE_VERSION}_aarch64.dmg" \
+            "LoopX_${RELEASE_VERSION}_x64-setup.exe" \
+            "LoopX_${RELEASE_VERSION}_x64_en-US.msi" \
+            DESKTOP-SHA256SUMS
+          do
+            gh release download "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pattern "${asset}" \
+              --dir dist/published-desktop
+          done
+          python scripts/desktop_release_artifacts.py verify-checksums \
+            --dist-dir dist/published-desktop \
+            --version "${RELEASE_VERSION}" \
+            --checksum-file dist/published-desktop/DESKTOP-SHA256SUMS

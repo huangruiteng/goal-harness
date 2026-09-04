@@ -1,0 +1,161 @@
+{
+  "ok": true,
+  "schema_version": "benchmark_study_dashboard_v0",
+  "benchmark_id": "example-swe@1",
+  "study_id": "four-arm-demo-v1",
+  "status": "provisional",
+  "design": {
+    "protocol_id": "solver-v1",
+    "comparison_protocol_id": "paired-v1",
+    "baseline_arm_id": "goal_plain",
+    "case_set": { "case_set_id": "public-demo-cases", "case_ids": ["case-api-contract", "case-state-transition"] },
+    "metric_catalog": [
+      { "metric_name": "feature", "role": "primary", "unit": "tests", "higher_is_better": true, "binary": false },
+      { "metric_name": "preservation", "role": "guardrail", "unit": "tests", "higher_is_better": true, "binary": false },
+      { "metric_name": "reward", "role": "guardrail", "higher_is_better": true, "binary": true }
+    ],
+    "labels": { "title": "Four-arm software-engineering study" }
+  },
+  "campaign": {
+    "intended_case_count": 2,
+    "intended_arm_count": 4,
+    "intended_cell_denominator": 8,
+    "selected_score_countable_cell_count": 6,
+    "selected_score_countable_coverage_rate": 0.75,
+    "complete_declared_design_case_count": 1,
+    "ambiguous_score_countable_cell_count": 0,
+    "in_flight_run_count": 2,
+    "matched_pair_countable_count": 3,
+    "factorial_contrast_count": 1,
+    "factorial_contrast_countable_count": 1,
+    "runtime_observation_count": 6,
+    "runtime_classification_counts": { "running_qualified": 2, "terminal_qualified": 4 }
+  },
+  "arms": [
+    {
+      "arm_id": "goal_plain", "arm_role": "baseline", "factor_assignments": { "orchestrator": "goal", "domain_hint": "none" },
+      "protocol_counts": { "goal-v1": 2 }, "runner_revision_counts": { "runner-demo-1": 2 }, "orchestrator_runtime_counts": {},
+      "intended_case_count": 2, "run_count": 2, "terminal_run_count": 2, "selected_score_countable_case_count": 2, "coverage_rate": 1,
+      "metrics": {
+        "feature": { "case_denominator": 2, "value_sum": 17, "value_mean": 8.5, "value_median": 8.5, "value_min": 7, "value_max": 10, "case_macro_rate": 0.85, "suite_micro_rate": 0.85, "suite_micro_numerator": 17, "suite_micro_denominator": 20 },
+        "preservation": { "case_denominator": 2, "value_sum": 40, "value_mean": 20, "value_median": 20, "value_min": 20, "value_max": 20, "case_macro_rate": 1, "suite_micro_rate": 1, "suite_micro_numerator": 40, "suite_micro_denominator": 40 },
+        "reward": { "case_denominator": 2, "value_sum": 1, "value_mean": 0.5, "value_median": 0.5, "value_min": 0, "value_max": 1 }
+      },
+      "binary_outcomes": { "reward": { "success_count": 1, "case_denominator": 2, "success_rate": 0.5 } },
+      "effort": { "duration_ms": { "denominator": 2, "mean": 5400000, "median": 5400000 } }, "failure_class_counts": { "contract_miss": 1 }
+    },
+    {
+      "arm_id": "loopx_plain", "arm_role": "treatment", "factor_assignments": { "orchestrator": "loopx", "domain_hint": "none" },
+      "protocol_counts": { "loopx-v1": 2 }, "runner_revision_counts": { "runner-demo-1": 2 }, "orchestrator_runtime_counts": { "{\"provider_id\": \"loopx\", \"revision\": \"loopx-demo-1\"}": 2 },
+      "intended_case_count": 2, "run_count": 2, "terminal_run_count": 1, "selected_score_countable_case_count": 1, "coverage_rate": 0.5,
+      "metrics": {
+        "feature": { "case_denominator": 1, "value_sum": 10, "value_mean": 10, "value_median": 10, "value_min": 10, "value_max": 10, "case_macro_rate": 1, "suite_micro_rate": 1, "suite_micro_numerator": 10, "suite_micro_denominator": 10 },
+        "preservation": { "case_denominator": 1, "value_sum": 20, "value_mean": 20, "value_median": 20, "value_min": 20, "value_max": 20, "case_macro_rate": 1, "suite_micro_rate": 1, "suite_micro_numerator": 20, "suite_micro_denominator": 20 },
+        "reward": { "case_denominator": 1, "value_sum": 1, "value_mean": 1, "value_median": 1, "value_min": 1, "value_max": 1 }
+      },
+      "binary_outcomes": { "reward": { "success_count": 1, "case_denominator": 1, "success_rate": 1 } },
+      "effort": { "duration_ms": { "denominator": 1, "mean": 7200000, "median": 7200000 } }, "failure_class_counts": {}
+    },
+    {
+      "arm_id": "goal_hint", "arm_role": "control", "factor_assignments": { "orchestrator": "goal", "domain_hint": "swe" },
+      "protocol_counts": { "goal-hint-v1": 2 }, "runner_revision_counts": { "runner-demo-1": 2 }, "orchestrator_runtime_counts": {},
+      "intended_case_count": 2, "run_count": 2, "terminal_run_count": 2, "selected_score_countable_case_count": 2, "coverage_rate": 1,
+      "metrics": {
+        "feature": { "case_denominator": 2, "value_sum": 19, "value_mean": 9.5, "value_median": 9.5, "value_min": 9, "value_max": 10, "case_macro_rate": 0.95, "suite_micro_rate": 0.95, "suite_micro_numerator": 19, "suite_micro_denominator": 20 },
+        "preservation": { "case_denominator": 2, "value_sum": 40, "value_mean": 20, "value_median": 20, "value_min": 20, "value_max": 20, "case_macro_rate": 1, "suite_micro_rate": 1, "suite_micro_numerator": 40, "suite_micro_denominator": 40 },
+        "reward": { "case_denominator": 2, "value_sum": 1, "value_mean": 0.5, "value_median": 0.5, "value_min": 0, "value_max": 1 }
+      },
+      "binary_outcomes": { "reward": { "success_count": 1, "case_denominator": 2, "success_rate": 0.5 } },
+      "effort": { "duration_ms": { "denominator": 2, "mean": 6000000, "median": 6000000 } }, "failure_class_counts": { "edge_case_miss": 1 }
+    },
+    {
+      "arm_id": "loopx_hint", "arm_role": "treatment", "factor_assignments": { "orchestrator": "loopx", "domain_hint": "swe" },
+      "protocol_counts": { "loopx-hint-v1": 1 }, "runner_revision_counts": { "runner-demo-1": 1 }, "orchestrator_runtime_counts": { "{\"provider_id\": \"loopx\", \"revision\": \"loopx-demo-1\"}": 1 },
+      "intended_case_count": 2, "run_count": 1, "terminal_run_count": 1, "selected_score_countable_case_count": 1, "coverage_rate": 0.5,
+      "metrics": {
+        "feature": { "case_denominator": 1, "value_sum": 10, "value_mean": 10, "value_median": 10, "value_min": 10, "value_max": 10, "case_macro_rate": 1, "suite_micro_rate": 1, "suite_micro_numerator": 10, "suite_micro_denominator": 10 },
+        "preservation": { "case_denominator": 1, "value_sum": 20, "value_mean": 20, "value_median": 20, "value_min": 20, "value_max": 20, "case_macro_rate": 1, "suite_micro_rate": 1, "suite_micro_numerator": 20, "suite_micro_denominator": 20 },
+        "reward": { "case_denominator": 1, "value_sum": 1, "value_mean": 1, "value_median": 1, "value_min": 1, "value_max": 1 }
+      },
+      "binary_outcomes": { "reward": { "success_count": 1, "case_denominator": 1, "success_rate": 1 } },
+      "effort": { "duration_ms": { "denominator": 1, "mean": 7800000, "median": 7800000 } }, "failure_class_counts": {}
+    }
+  ],
+  "contrasts": {
+    "loopx_plain": { "matched_pair_denominator": 1, "primary_metric_directions": { "improved": 0, "flat": 1, "regressed": 0 }, "binary_metric_transitions": { "reward": { "0_to_1": 0, "1_to_0": 0, "same": 1 } } },
+    "goal_hint": { "matched_pair_denominator": 2, "primary_metric_directions": { "improved": 1, "flat": 1, "regressed": 0 }, "binary_metric_transitions": { "reward": { "0_to_1": 0, "1_to_0": 0, "same": 2 } } }
+  },
+  "factorial_contrasts": [],
+  "cases": [
+    {
+      "case_id": "case-api-contract", "complete_declared_design": true,
+      "eligible_comparisons": [
+        { "comparison_id": "run-goal-api->run-loopx-api", "comparison_anchor_run_id": "run-goal-api", "candidate_run_id": "run-loopx-api", "candidate_arm_id": "loopx_plain", "primary_metric": "feature", "matched_pair_countable": true, "metric_deltas": { "feature": { "baseline_value": 10, "candidate_value": 10, "delta": 0, "direction": "flat" }, "preservation": { "baseline_value": 20, "candidate_value": 20, "delta": 0, "direction": "flat" }, "reward": { "baseline_value": 1, "candidate_value": 1, "delta": 0, "direction": "flat" } } },
+        { "comparison_id": "run-goal-api->run-goal-hint-api", "comparison_anchor_run_id": "run-goal-api", "candidate_run_id": "run-goal-hint-api", "candidate_arm_id": "goal_hint", "primary_metric": "feature", "matched_pair_countable": true, "metric_deltas": { "feature": { "baseline_value": 10, "candidate_value": 10, "delta": 0, "direction": "flat" }, "preservation": { "baseline_value": 20, "candidate_value": 20, "delta": 0, "direction": "flat" }, "reward": { "baseline_value": 1, "candidate_value": 1, "delta": 0, "direction": "flat" } } }
+      ],
+      "largest_eligible_primary_contrast": { "comparison_id": "run-goal-api->run-loopx-api", "comparison_anchor_run_id": "run-goal-api", "candidate_run_id": "run-loopx-api", "candidate_arm_id": "loopx_plain", "primary_metric": "feature", "matched_pair_countable": true, "metric_deltas": { "feature": { "baseline_value": 10, "candidate_value": 10, "delta": 0, "direction": "flat" }, "preservation": { "baseline_value": 20, "candidate_value": 20, "delta": 0, "direction": "flat" }, "reward": { "baseline_value": 1, "candidate_value": 1, "delta": 0, "direction": "flat" } } },
+      "arms": [
+        { "arm_id": "goal_plain", "selected_run_id": "run-goal-api", "score_countable": true, "metrics": { "feature": { "value": 10, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 1, "higher_is_better": true } }, "effort": { "duration_ms": 3600000 }, "insight": null },
+        { "arm_id": "loopx_plain", "selected_run_id": "run-loopx-api", "score_countable": true, "metrics": { "feature": { "value": 10, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 1, "higher_is_better": true } }, "effort": { "duration_ms": 7200000 }, "insight": null },
+        { "arm_id": "goal_hint", "selected_run_id": "run-goal-hint-api", "score_countable": true, "metrics": { "feature": { "value": 10, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 1, "higher_is_better": true } }, "effort": { "duration_ms": 4800000 }, "insight": null },
+        { "arm_id": "loopx_hint", "selected_run_id": "run-loopx-hint-api", "score_countable": true, "metrics": { "feature": { "value": 10, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 1, "higher_is_better": true } }, "effort": { "duration_ms": 7800000 }, "insight": null }
+      ]
+    },
+    {
+      "case_id": "case-state-transition", "complete_declared_design": false,
+      "eligible_comparisons": [
+        { "comparison_id": "run-goal-state->run-goal-hint-state", "comparison_anchor_run_id": "run-goal-state", "candidate_run_id": "run-goal-hint-state", "candidate_arm_id": "goal_hint", "primary_metric": "feature", "matched_pair_countable": true, "metric_deltas": { "feature": { "baseline_value": 7, "candidate_value": 9, "delta": 2, "direction": "improved" }, "preservation": { "baseline_value": 20, "candidate_value": 20, "delta": 0, "direction": "flat" }, "reward": { "baseline_value": 0, "candidate_value": 0, "delta": 0, "direction": "flat" } } }
+      ],
+      "largest_eligible_primary_contrast": { "comparison_id": "run-goal-state->run-goal-hint-state", "comparison_anchor_run_id": "run-goal-state", "candidate_run_id": "run-goal-hint-state", "candidate_arm_id": "goal_hint", "primary_metric": "feature", "matched_pair_countable": true, "metric_deltas": { "feature": { "baseline_value": 7, "candidate_value": 9, "delta": 2, "direction": "improved" }, "preservation": { "baseline_value": 20, "candidate_value": 20, "delta": 0, "direction": "flat" }, "reward": { "baseline_value": 0, "candidate_value": 0, "delta": 0, "direction": "flat" } } },
+      "arms": [
+        { "arm_id": "goal_plain", "selected_run_id": "run-goal-state", "score_countable": true, "metrics": { "feature": { "value": 7, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 0, "higher_is_better": true } }, "effort": { "duration_ms": 7200000 }, "insight": null },
+        { "arm_id": "loopx_plain", "selected_run_id": null, "score_countable": false, "metrics": {}, "effort": {}, "insight": null },
+        { "arm_id": "goal_hint", "selected_run_id": "run-goal-hint-state", "score_countable": true, "metrics": { "feature": { "value": 9, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 0, "higher_is_better": true } }, "effort": { "duration_ms": 7200000 }, "insight": null },
+        { "arm_id": "loopx_hint", "selected_run_id": null, "score_countable": false, "metrics": {}, "effort": {}, "insight": null }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "run-goal-api", "case_id": "case-api-contract", "arm_id": "goal_plain", "arm_role": "baseline", "status": "completed", "protocol_id": "goal-v1", "runner_revision": "runner-demo-1", "observed_at": "2026-09-02T12:00:00+00:00",
+      "metrics": { "feature": { "value": 10, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 1, "higher_is_better": true } },
+      "countability": { "integrity_qualified": true, "official_result_present": true, "score_countable": true }, "treatment_fidelity": "not_applicable", "effort": { "duration_ms": 3600000, "agent_steps": 42, "token_count": 120000 },
+      "redacted_insight": { "failure_class": "none", "causal_summary": "The implementation matched the declared public API from an external caller.", "expectedness": "expected", "implication": "Keep the external contract check.", "next_probe": "Repeat on the state-transition case.", "confidence": "high", "evidence_refs": ["public-receipt:demo123"] },
+      "upload_provenance": { "producer_id": "example-adapter", "producer_version": "1.0.0", "observed_at": "2026-09-02T12:00:00+00:00", "source_revision": "demo-source-1" }
+    },
+    {
+      "run_id": "run-loopx-api", "case_id": "case-api-contract", "arm_id": "loopx_plain", "arm_role": "treatment", "status": "completed", "protocol_id": "loopx-v1", "runner_revision": "runner-demo-1", "observed_at": "2026-09-02T14:00:00+00:00",
+      "metrics": { "feature": { "value": 10, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 1, "higher_is_better": true } },
+      "countability": { "integrity_qualified": true, "official_result_present": true, "score_countable": true }, "treatment_fidelity": "qualified", "effort": { "duration_ms": 7200000 }, "redacted_insight": null,
+      "upload_provenance": { "producer_id": "example-adapter", "producer_version": "1.0.0", "observed_at": "2026-09-02T14:00:00+00:00", "source_revision": "demo-source-1" }
+    },
+    {
+      "run_id": "run-goal-state", "case_id": "case-state-transition", "arm_id": "goal_plain", "arm_role": "baseline", "status": "completed", "protocol_id": "goal-v1", "runner_revision": "runner-demo-1", "observed_at": "2026-09-02T16:00:00+00:00",
+      "metrics": { "feature": { "value": 7, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 0, "higher_is_better": true } },
+      "countability": { "integrity_qualified": true, "official_result_present": true, "score_countable": true }, "treatment_fidelity": "not_applicable", "effort": { "duration_ms": 7200000 }, "redacted_insight": null,
+      "upload_provenance": { "producer_id": "example-adapter", "producer_version": "1.0.0", "observed_at": "2026-09-02T16:00:00+00:00", "source_revision": "demo-source-1" }
+    },
+    {
+      "run_id": "run-goal-hint-api", "case_id": "case-api-contract", "arm_id": "goal_hint", "arm_role": "control", "status": "completed", "protocol_id": "goal-hint-v1", "runner_revision": "runner-demo-1", "observed_at": "2026-09-02T17:00:00+00:00",
+      "metrics": { "feature": { "value": 10, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 1, "higher_is_better": true } },
+      "countability": { "integrity_qualified": true, "official_result_present": true, "score_countable": true }, "treatment_fidelity": "qualified", "effort": { "duration_ms": 4800000 }, "redacted_insight": null,
+      "upload_provenance": { "producer_id": "example-adapter", "producer_version": "1.0.0", "observed_at": "2026-09-02T17:00:00+00:00", "source_revision": "demo-source-1" }
+    },
+    {
+      "run_id": "run-loopx-hint-api", "case_id": "case-api-contract", "arm_id": "loopx_hint", "arm_role": "treatment", "status": "completed", "protocol_id": "loopx-hint-v1", "runner_revision": "runner-demo-1", "observed_at": "2026-09-02T18:00:00+00:00",
+      "metrics": { "feature": { "value": 10, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 1, "higher_is_better": true } },
+      "countability": { "integrity_qualified": true, "official_result_present": true, "score_countable": true }, "treatment_fidelity": "qualified", "effort": { "duration_ms": 7800000 }, "redacted_insight": null,
+      "upload_provenance": { "producer_id": "example-adapter", "producer_version": "1.0.0", "observed_at": "2026-09-02T18:00:00+00:00", "source_revision": "demo-source-1" }
+    },
+    {
+      "run_id": "run-goal-hint-state", "case_id": "case-state-transition", "arm_id": "goal_hint", "arm_role": "control", "status": "completed", "protocol_id": "goal-hint-v1", "runner_revision": "runner-demo-1", "observed_at": "2026-09-02T19:00:00+00:00",
+      "metrics": { "feature": { "value": 9, "total": 10, "unit": "tests", "higher_is_better": true }, "preservation": { "value": 20, "total": 20, "unit": "tests", "higher_is_better": true }, "reward": { "value": 0, "higher_is_better": true } },
+      "countability": { "integrity_qualified": true, "official_result_present": true, "score_countable": true }, "treatment_fidelity": "qualified", "effort": { "duration_ms": 7200000 }, "redacted_insight": null,
+      "upload_provenance": { "producer_id": "example-adapter", "producer_version": "1.0.0", "observed_at": "2026-09-02T19:00:00+00:00", "source_revision": "demo-source-1" }
+    }
+  ],
+  "authority": { "score_source": "benchmark_experiment_board_row_v0", "matched_comparison_source": "benchmark_experiment_board_v0", "factorial_comparison_source": null, "manifest_changes_scores": false, "dashboard_is_execution_authority": false },
+  "public_boundary": { "raw_task_recorded": false, "raw_trajectory_recorded": false, "hidden_evaluation_recorded": false, "raw_verifier_output_recorded": false, "credentials_recorded": false, "local_paths_recorded": false },
+  "write_performed": false,
+  "network_access_performed": false
+}

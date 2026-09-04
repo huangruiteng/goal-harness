@@ -2,19 +2,29 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .global_registry import write_json
-from .paths import DEFAULT_RUNTIME_ROOT
 from .registry import registry_goals
 
 
 LEGACY_RUNTIME_ROOT = Path.home() / ".codex" / "goal-harness"
 LEGACY_GLOBAL_REGISTRY = LEGACY_RUNTIME_ROOT / "registry.global.json"
+AUTHORITY_SHADOW_CONFIG_SCHEMA = "loopx_local_authority_shadow_config_v0"
+MIGRATION_SHADOW_SEED_EVIDENCE_SCHEMA = "loopx_state_migration_shadow_seed_evidence_v0"
+_SHADOW_EVIDENCE_OUTCOMES = {
+    "captured",
+    "replayed",
+    "ambiguous_reconciled",
+    "ambiguous_unproved",
+    "unavailable",
+    "failed",
+    "protocol_mismatch",
+    "conflict_retry_required",
+}
 
 
 def now_local() -> str:
@@ -131,7 +141,7 @@ def copy_active_state_files(
     for source_goal, target_goal in pairs:
         source_path = resolve_goal_state(source_goal.get("repo"), source_goal.get("state_file"))
         target_path = resolve_goal_state(target_goal.get("repo"), target_goal.get("state_file"))
-        row = {
+        row: dict[str, Any] = {
             "goal_id": target_goal.get("id"),
             "source": str(source_path) if source_path else None,
             "target": str(target_path) if target_path else None,
@@ -171,7 +181,7 @@ def copy_runtime_goal_dirs(
         new_goal_id = goal_id_map.get(old_goal_id, old_goal_id)
         source_dir = legacy_runtime_root.expanduser() / "goals" / old_goal_id
         target_dir = target_runtime_root.expanduser() / "goals" / new_goal_id
-        row = {
+        row: dict[str, Any] = {
             "source": str(source_dir),
             "target": str(target_dir),
             "goal_id": new_goal_id,
@@ -203,6 +213,104 @@ def copy_runtime_goal_dirs(
                     row["copied_file_count"] += 1
             row["copied"] = True
         results.append(row)
+    return results
+
+
+def _uses_file_authority_shadow(goal: dict[str, Any]) -> bool:
+    coordination = goal.get("coordination")
+    if not isinstance(coordination, dict):
+        return False
+    config = coordination.get("authority_shadow")
+    return (
+        isinstance(config, dict)
+        and config.get("schema_version") == AUTHORITY_SHADOW_CONFIG_SCHEMA
+        and config.get("mode") == "file_one_way"
+    )
+
+
+def _shadow_seed_evidence(
+    *,
+    goal_id: str,
+    attempted: bool,
+    outcome: str,
+    reason_code: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": MIGRATION_SHADOW_SEED_EVIDENCE_SCHEMA,
+        "goal_id": goal_id,
+        "attempted": attempted,
+        "outcome": outcome,
+        "reason_code": reason_code,
+    }
+
+
+def _shadow_seed_result(*, goal_id: str, result: object) -> dict[str, Any]:
+    outcome = result.get("outcome") if isinstance(result, dict) else None
+    if outcome not in _SHADOW_EVIDENCE_OUTCOMES:
+        return _shadow_seed_evidence(
+            goal_id=goal_id,
+            attempted=True,
+            outcome="failed",
+            reason_code="post_migration_shadow_seed_invalid_evidence",
+        )
+
+    reason_code = (
+        None
+        if outcome in {"captured", "replayed", "ambiguous_reconciled"}
+        else f"post_migration_shadow_seed_{outcome}"
+    )
+    return _shadow_seed_evidence(
+        goal_id=goal_id,
+        attempted=True,
+        outcome=str(outcome),
+        reason_code=reason_code,
+    )
+
+
+def seed_migrated_authority_shadows(
+    *,
+    goals: list[dict[str, Any]],
+    target_registry_path: Path,
+    target_runtime_root: Path,
+    execute: bool,
+) -> list[dict[str, Any]]:
+    """Plan or seed fresh candidate lineage from migrated local authority."""
+
+    results: list[dict[str, Any]] = []
+    for goal in goals:
+        if not _uses_file_authority_shadow(goal):
+            continue
+        goal_id = str(goal.get("id") or "")
+        if not execute:
+            results.append(
+                _shadow_seed_evidence(
+                    goal_id=goal_id,
+                    attempted=False,
+                    outcome="planned",
+                )
+            )
+            continue
+        try:
+            from .control_plane.coordination.local_authority_shadow_adapter import (
+                observe_local_authority_commit,
+            )
+
+            result = observe_local_authority_commit(
+                registry_path=target_registry_path,
+                runtime_root=target_runtime_root,
+                goal_id=goal_id,
+                observation_trigger="state_migration_seed",
+            )
+            results.append(_shadow_seed_result(goal_id=goal_id, result=result))
+        except Exception:
+            results.append(
+                _shadow_seed_evidence(
+                    goal_id=goal_id,
+                    attempted=True,
+                    outcome="failed",
+                    reason_code="post_migration_shadow_seed_failed",
+                )
+            )
     return results
 
 
@@ -282,6 +390,13 @@ def migrate_legacy_state(
     if execute:
         write_json(target_registry_path, target_payload)
 
+    authority_shadow_seeds = seed_migrated_authority_shadows(
+        goals=incoming_goals,
+        target_registry_path=target_registry_path,
+        target_runtime_root=target_runtime_root,
+        execute=execute,
+    )
+
     return {
         "ok": True,
         "schema_version": "loopx_state_migration_v0",
@@ -299,6 +414,7 @@ def migrate_legacy_state(
         "project_registry_goal_count": len(target_payload.get("goals", [])),
         "active_state": active_state_results,
         "runtime_goals": runtime_results,
+        "authority_shadow_seeds": authority_shadow_seeds,
     }
 
 
@@ -338,6 +454,16 @@ def render_state_migration_markdown(payload: dict[str, Any]) -> str:
             )
             if row.get("skipped_reason"):
                 lines.append(f"  - skipped_reason: `{row.get('skipped_reason')}`")
+    authority_shadow_seeds = payload.get("authority_shadow_seeds") or []
+    if authority_shadow_seeds:
+        lines.extend(["", "## Authority Shadow Seeds"])
+        for row in authority_shadow_seeds:
+            lines.append(
+                f"- `{row.get('goal_id')}` outcome=`{row.get('outcome')}` "
+                f"attempted=`{row.get('attempted')}`"
+            )
+            if row.get("reason_code"):
+                lines.append(f"  - reason_code: `{row.get('reason_code')}`")
     global_sync = payload.get("global_sync")
     if isinstance(global_sync, dict):
         lines.extend(["", "## Global Sync"])

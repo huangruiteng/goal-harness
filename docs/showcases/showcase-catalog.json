@@ -1,6 +1,6 @@
 {
   "schema_version": "loopx_showcase_catalog_v1",
-  "updated_at": "2026-08-07",
+  "updated_at": "2026-09-04",
   "redaction_policy": {
     "public_repo_may_include": [
       "sanitized domain labels",
@@ -1157,6 +1157,124 @@
           }
         }
       ]
+    },
+    {
+      "id": "2026-09-dsh-loopx-replan",
+      "date": "2026-09",
+      "title": "DSH × LoopX Replan",
+      "status": "reproducible_synthetic_demo",
+      "case_type": "reproducible_demo",
+      "evidence_strength": "real_recording_with_reproducible_fixture",
+      "case_page": "docs/showcases/cases/dsh-loopx-replan-demo.md",
+      "demo_command": "python3 examples/dsh-loopx-demo-smoke.py",
+      "recording_path": "docs/assets/showcases/dsh-loopx/dsh-loopx-quickstart-replan.mp4",
+      "page_assets": "shared",
+      "domain": "agent-host-integration",
+      "audience": [
+        "DSH user",
+        "agent-platform-developer",
+        "long-running-agent-operator"
+      ],
+      "pattern_tags": [
+        "deepseek_harness",
+        "native_skill_activation",
+        "vision_replan",
+        "decision_evidence",
+        "goalbar_closeout"
+      ],
+      "headline": "A real DSH session changes a logging-library decision after a serverless constraint while preserving the original evidence and successor work.",
+      "problem": "A new material constraint can invalidate an agent's earlier decision, but ordinary chat correction can erase why the plan changed and what still needs validation.",
+      "loopx_behavior": [
+        "activate explicitly through the native DSH skill picker",
+        "retain the initial decision and evidence",
+        "record a Replan when the serverless constraint changes the ranking",
+        "bind successor implementation and tests to the same durable Goal",
+        "close the visible GoalBar only after the revised work settles"
+      ],
+      "user_value": "The user can change a material constraint without losing the decision trail, while DSH remains the execution host and LoopX keeps the work frontier visible.",
+      "evidence_assets": [
+        {
+          "path": "docs/assets/showcases/dsh-loopx/dsh-loopx-cover.png",
+          "alt": "DSH × LoopX demo cover showing explicit skill activation, durable work, and a real Replan from Pino to Roarr",
+          "caption": "Public cover derived from the edited DSH recording; the linked case provides the video, fixture, and evidence boundary."
+        }
+      ],
+      "evidence_boundary": "Edited real DSH recording plus a synthetic public fixture and tests; credentials, provider configuration, raw reasoning, setup retries, local LoopX state, and the unedited recording are excluded.",
+      "frontend_card": {
+        "visual_metaphor": "one visible DSH Goal changes route while its earlier decision remains connected to the evidence",
+        "primary_metric_hint": "One recorded Replan changes 12 packages to 4 and closes 3/3 tests with GoalBar 2/2.",
+        "badges": [
+          "DSH",
+          "real recording",
+          "reproducible"
+        ],
+        "story_beats": [
+          "the user selects the LoopX skill inside DSH",
+          "the agent initially chooses Pino",
+          "a serverless constraint triggers an explicit Replan to Roarr",
+          "the revised CLI passes three behavior tests and closes two Todos"
+        ]
+      },
+      "localized_pages": {
+        "zh": "docs/showcases/cases/dsh-loopx-replan-demo.html",
+        "en": "docs/showcases/cases/dsh-loopx-replan-demo.en.html"
+      },
+      "localizations": {
+        "zh": {
+          "title": "DSH × LoopX：约束变化后的显式 Replan",
+          "headline": "真实 DSH 会话在新增 serverless 约束后修正日志库决策，同时保留原始证据和后继工作。",
+          "proof_point": "宿主原生 Agent 可以改变计划，同时保留旧计划为何被替代的证据。",
+          "loopx_intervention": "原生 Skill 激活、Replan、后继 Todo、证据与 GoalBar",
+          "problem": "新的关键约束可能推翻 Agent 的旧决策；普通聊天修正容易抹掉计划为什么变化、后续还需验证什么。",
+          "loopx_behavior": [
+            "在 DSH 技能选择器中显式激活 loopx",
+            "保留初始决策和证据",
+            "serverless 约束改变排序时记录 Replan",
+            "把后继实现与测试绑定到同一个持久 Goal",
+            "修订后的工作完成后才关闭可见 GoalBar"
+          ],
+          "user_value": "用户可以改变关键约束而不丢失决策链；DSH 继续负责执行，LoopX 让工作前沿持续可见。",
+          "evidence_boundary": "经编辑的真实 DSH 录屏，加上合成的公开 fixture 与测试；不包含凭证、provider 配置、原始推理、安装重试、本地 LoopX 状态或未剪辑录屏。"
+        }
+      },
+      "showcase_rank": 11,
+      "showcase_table": {
+        "proof_point": "A host-native agent can change plans without erasing why the old plan was superseded.",
+        "loopx_intervention": "native skill activation, Replan, successor Todo, evidence, GoalBar"
+      },
+      "evidence_metrics": [
+        {
+          "value": "60s",
+          "labels": {
+            "zh": "真实录屏",
+            "en": "real recording"
+          }
+        },
+        {
+          "value": "12→4",
+          "labels": {
+            "zh": "依赖包数量",
+            "en": "dependency packages"
+          }
+        },
+        {
+          "value": "3/3",
+          "labels": {
+            "zh": "行为测试",
+            "en": "behavior tests"
+          }
+        },
+        {
+          "value": "2/2",
+          "labels": {
+            "zh": "GoalBar Todo",
+            "en": "GoalBar Todos"
+          }
+        }
+      ],
+      "interactive_page": "docs/showcases/cases/dsh-loopx-replan-demo.html",
+      "interactive_page_zh": "docs/showcases/cases/dsh-loopx-replan-demo.html",
+      "interactive_page_en": "docs/showcases/cases/dsh-loopx-replan-demo.en.html"
     },
     {
       "id": "2026-06-20-creator-operator-case-spec",

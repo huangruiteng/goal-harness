@@ -28,6 +28,11 @@ routing:
   session-affinity: true
   session-affinity-ttl: "1h"
 
+# Runtime contract (adapter/CPA implementation, not a native YAML key): when a
+# successful account reset receipt is newer than the observation that created
+# a quota cooldown, invalidate that cooldown and re-probe the account before
+# selecting a fallback. A fresh quota-limited probe may create a new cooldown.
+
 codex:
   stream-bootstrap-buffering: true
   optimize-multi-agent-v2: false
@@ -38,3 +43,7 @@ codex:
 # members. Preserve both model and service tier for ordinary selectors; if an
 # ordinary selector already carries `priority`, apply the same Fast-capable-only
 # admission so the native Fast entry cannot reach a non-Fast fallback.
+# Also inspect the host-required tool item transport. A Code Mode request that
+# requires `custom_tool_call` may traverse only profiles that declare and
+# preserve that item type; a generic function-only compatibility provider must
+# fail closed before the first visible output or tool call.

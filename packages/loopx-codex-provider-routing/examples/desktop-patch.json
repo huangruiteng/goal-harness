@@ -1,0 +1,13 @@
+{
+  "desktop_patch": {
+    "anchor_state": "patched_unique",
+    "changed_file_count": 2,
+    "header_integrity_matches_bundle_metadata": true,
+    "heartbeat_readback_succeeded": true,
+    "launch_succeeded": true,
+    "per_file_integrity_match_count": 2,
+    "signature_valid": true
+  },
+  "operation": "qualify_desktop_patch",
+  "schema_version": "loopx_codex_provider_routing_request_v0"
+}

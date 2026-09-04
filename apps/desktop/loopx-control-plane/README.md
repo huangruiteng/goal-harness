@@ -15,13 +15,10 @@ desktop release workflow succeeds:
 The desktop shell still depends on a local `loopx` command at runtime. Install
 or update the LoopX CLI first, then open the desktop app.
 
-Official macOS release artifacts must be signed with an Apple Developer ID
-certificate and notarized before upload. Maintainers configure
-`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`,
-`APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` as GitHub Actions secrets.
-Pull requests still build unsigned preview artifacts, but the release workflow
-fails closed when those secrets are unavailable rather than publishing a DMG
-that macOS Gatekeeper rejects.
+Published macOS preview artifacts use ad-hoc code signing to verify bundle
+integrity without requiring an Apple Developer account. They are not signed
+with a Developer ID and are not notarized, so macOS may require the operator
+to approve the first launch in System Settings > Privacy & Security.
 
 ## Runtime Model
 
@@ -105,11 +102,14 @@ npm run build
 `src-tauri/target/release/bundle/`. The release workflow builds macOS `.dmg`
 and `.app.zip` artifacts on macOS, Windows `.msi` and `.exe` artifacts on
 Windows, and uploads them to the GitHub Release that triggered the workflow.
-It notarizes both the app and its disk image, then validates macOS code
-signing, Gatekeeper assessment, and both stapled tickets before upload. A
-separate `DESKTOP-SHA256SUMS` manifest covers all desktop artifacts attached
-by the workflow, and release builds use the Git tag as the desktop bundle
-version.
+It verifies the ad-hoc macOS app signature and disk-image integrity before
+upload. A separate `DESKTOP-SHA256SUMS` manifest covers all desktop artifacts
+attached by the workflow, and release builds use the Git tag as the desktop
+bundle version. A manual rerun for an existing tag is an explicit full desktop
+republish: it rebuilds both macOS and Windows assets, preserves the previous
+desktop set as a short-lived workflow artifact, validates the complete new
+four-file set, replaces all desktop binaries, and uploads the new checksum
+manifest last. Binary hashes may therefore change after a manual rerun.
 
 ## Disable Or Remove
 

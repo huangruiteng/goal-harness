@@ -350,6 +350,38 @@ def main() -> int:
     )
     assert auto["eligible_candidates"]["image"] == ["codex-a", "codex-b"]
     assert auto["eligible_candidates"]["text"] == ["codex-a", "codex-b", "ark-text"]
+    assert next(
+        profile for profile in catalog["profiles"] if profile["id"] == "ark-text"
+    )["tool_transports"] == ["function_call"]
+    legacy_source = copy.deepcopy(_source())
+    for profile in legacy_source["profiles"]:
+        profile.pop("tool_transports")
+    legacy_catalog = compile_catalog(legacy_source)
+    assert next(
+        profile for profile in legacy_catalog["profiles"] if profile["id"] == "codex-a"
+    )["tool_transports"] == ["function_call"]
+    legacy_standard = normalize_selector_request(
+        {
+            "catalog_source": legacy_source,
+            "model_selector": "codex-a/gpt-5.6-sol",
+            "required_tool_transport": "function_call",
+        }
+    )
+    assert legacy_standard["eligible_candidates"] == [
+        "codex-a",
+        "codex-b",
+        "ark-text",
+    ]
+    expect_error(
+        lambda: normalize_selector_request(
+            {
+                "catalog_source": legacy_source,
+                "model_selector": "codex-a/gpt-5.6-sol",
+                "required_tool_transport": "custom_tool_call",
+            }
+        ),
+        "legacy catalog inferred unproven custom_tool_call support",
+    )
     assert auto["fast_candidates"] == ["codex-a", "codex-b"]
     assert auto["routing_policy"]["session_affinity"] == "hint_revalidated_per_attempt"
     assert auto["ring_id"] == "codex-accounts"
@@ -403,6 +435,31 @@ def main() -> int:
     )
     assert normalized_standard["normalized_model_selector"] == ("codex-b/gpt-5.6-sol")
     assert normalized_standard["service_tier"] == {"action": "preserve"}
+    normalized_code_mode = normalize_selector_request(
+        {
+            "catalog_source": _source(),
+            "model_selector": "codex-b/gpt-5.6-sol",
+            "required_tool_transport": "custom_tool_call",
+        }
+    )
+    assert normalized_code_mode["eligible_candidates"] == ["codex-b", "codex-a"]
+    assert normalized_code_mode["fallback_policy"] == "required_tool_transport_only"
+    custom_preserving_source = copy.deepcopy(_source())
+    custom_preserving_source["profiles"][2]["tool_transports"].append(
+        "custom_tool_call"
+    )
+    normalized_custom_adapter = normalize_selector_request(
+        {
+            "catalog_source": custom_preserving_source,
+            "model_selector": "auto/gpt-5.6-sol",
+            "required_tool_transport": "custom_tool_call",
+        }
+    )
+    assert normalized_custom_adapter["eligible_candidates"] == [
+        "codex-a",
+        "codex-b",
+        "ark-text",
+    ]
     normalized_standard_priority = normalize_selector_request(
         {
             "catalog_source": _source(),
@@ -437,6 +494,19 @@ def main() -> int:
     )
     runtime = project_runtime_status(preferred_fallback)
     assert runtime["execution"]["fallback_used"] is True
+
+    code_mode_to_ark = _runtime_status()
+    code_mode_to_ark["execution_observation"].update(
+        {
+            "required_tool_transport": "custom_tool_call",
+            "attempted_profiles": ["codex-a", "codex-b", "ark-text"],
+            "selected_profile": "ark-text",
+        }
+    )
+    expect_error(
+        lambda: project_runtime_status(code_mode_to_ark),
+        "custom_tool_call request was allowed to fall back to function-only provider",
+    )
 
     fast_fallback = _runtime_status()
     fast_fallback["execution_observation"].update(
@@ -695,17 +765,23 @@ def main() -> int:
             "target_ref": "public-target-ref",
             "changed_seams": [
                 "transport_pool",
+                "desktop_runtime_patch",
                 "modality_routing",
                 "request_normalizer",
+                "quota_recovery",
                 "settings_revision",
+                "tool_transport",
             ],
         }
     )
     assert "h2_reuse" in plan["required_checks"]
+    assert "asar_member_integrity" in plan["required_checks"]
     assert "no_eligible_fail_closed" in plan["required_checks"]
     assert "ordinary_selector_preserved" in plan["required_checks"]
     assert "effective_priority_admission" in plan["required_checks"]
     assert "turn_revision_match" in plan["required_checks"]
+    assert "stale_cooldown_invalidation" in plan["required_checks"]
+    assert "custom_tool_item_preserved" in plan["required_checks"]
 
     integration_request = json.loads(
         (PACKAGE_ROOT / "examples" / "integration-candidate.json").read_text()
@@ -761,8 +837,12 @@ def main() -> int:
         "normalize-request.json",
         "runtime-status.json",
         "qualification-snapshot.json",
+        "desktop-patch.json",
         "heartbeat-transport.json",
         "host-control-recovery.json",
+        "outage-recovery.json",
+        "quota-recovery.json",
+        "tool-transport.json",
         "integration-candidate.json",
         "upgrade-request.json",
     ):

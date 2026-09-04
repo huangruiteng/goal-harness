@@ -24,6 +24,44 @@ TASK_LEASE_LIFECYCLE_NATIVE_SCHEMA_VERSION = "loopx_task_lease_lifecycle_native_
 TASK_LEASE_AUTHORITY_SNAPSHOT_ATTEMPTS = 3
 
 
+def _attach_local_authority_shadow(
+    result: dict[str, Any],
+    *,
+    registry_path: Path | None,
+    runtime_root: Path,
+    goal_id: str,
+    todo_id: str,
+    operation: str,
+) -> dict[str, Any]:
+    """Observe a committed public lease mutation without changing its verdict."""
+
+    if registry_path is None:
+        return result
+    lease = result.get("lease") if isinstance(result.get("lease"), dict) else {}
+    observation_trigger = ":".join(
+        (
+            f"task_lease_{operation}",
+            str(todo_id),
+            str(lease.get("version") or "none"),
+            str(lease.get("lease_epoch") or "none"),
+            str(lease.get("updated_at") or lease.get("released_at") or "unknown"),
+        )
+    )
+    from ..coordination.local_authority_shadow_adapter import (
+        observe_local_authority_commit,
+    )
+
+    evidence = observe_local_authority_commit(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=str(goal_id),
+        observation_trigger=observation_trigger,
+    )
+    if evidence is not None:
+        result["authority_shadow"] = evidence
+    return result
+
+
 def _authority_source_receipt(source_id: str, path: Path) -> dict[str, Any]:
     resolved = path.expanduser().resolve(strict=False)
     try:
@@ -280,6 +318,43 @@ def task_lease_acquire_authority_facts(
     )
 
 
+def _require_native_acquire_shape(payload: object) -> dict[str, Any]:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != TASK_LEASE_SCHEMA_VERSION
+        or payload.get("action") != "acquire"
+        or not isinstance(payload.get("ok"), bool)
+    ):
+        raise RuntimeError("native task-lease acquire result shape mismatch")
+    return payload
+
+
+def _finalize_native_acquire_result(
+    payload: dict[str, Any],
+    *,
+    authority: dict[str, Any],
+    registry_path: Path,
+    runtime_root: Path,
+    goal_id: str,
+    todo_id: str,
+    legacy_provider_projection: bool,
+) -> dict[str, Any]:
+    result = dict(payload)
+    if legacy_provider_projection and result.get("ok") is True:
+        result["handoff_mode"] = authority.get("handoff_mode") or HANDOFF_MODE_LEGACY
+        result.pop("settlement", None)
+    if result.get("ok") is True and result.get("acquired") is True:
+        result = _attach_local_authority_shadow(
+            result,
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            todo_id=todo_id,
+            operation="acquire",
+        )
+    return result
+
+
 def execute_native_task_lease_acquire(
     *,
     registry_path: Path,
@@ -315,30 +390,23 @@ def execute_native_task_lease_acquire(
             "expected_version": expected_version,
             "authority": authority,
         }
-        payload = effect_runtime_result(
-            "task_lease.acquire.native",
-            request,
-            timeout=15.0,
+        payload = _require_native_acquire_shape(
+            effect_runtime_result("task_lease.acquire.native", request, timeout=15.0)
         )
-        if (
-            not isinstance(payload, dict)
-            or payload.get("schema_version") != TASK_LEASE_SCHEMA_VERSION
-            or payload.get("action") != "acquire"
-            or not isinstance(payload.get("ok"), bool)
-        ):
-            raise RuntimeError("native task-lease acquire result shape mismatch")
         if (
             payload.get("error_code") == "authority_source_changed"
             and attempt + 1 < TASK_LEASE_AUTHORITY_SNAPSHOT_ATTEMPTS
         ):
             continue
-        result = dict(payload)
-        if _legacy_provider_projection and result.get("ok") is True:
-            result["handoff_mode"] = (
-                authority.get("handoff_mode") or HANDOFF_MODE_LEGACY
-            )
-            result.pop("settlement", None)
-        return result
+        return _finalize_native_acquire_result(
+            payload,
+            authority=authority,
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=str(goal_id),
+            todo_id=str(todo_id),
+            legacy_provider_projection=_legacy_provider_projection,
+        )
     raise RuntimeError("native task-lease acquire exhausted source-CAS retries")
 
 
@@ -592,6 +660,24 @@ def execute_native_task_lease_lifecycle(
             result["handoff_mode"] = authority["handoff_mode"]
         if _legacy_provider_projection:
             result.pop("settlement", None)
+        committed_mutation = (
+            normalized_operation == "renew" and result.get("renewed") is True
+        ) or (
+            normalized_operation == "transfer"
+            and result.get("transferred") is True
+        ) or (
+            normalized_operation == "release"
+            and result.get("released") is True
+        )
+        if committed_mutation and result.get("idempotent") is not True:
+            result = _attach_local_authority_shadow(
+                result,
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=str(goal_id),
+                todo_id=str(todo_id),
+                operation=normalized_operation,
+            )
         # lock_token is an internal bridge value.  Callers that need a held
         # fence read it from the nested native payload before redacting it.
         return result

@@ -41,7 +41,18 @@ qualification.
   request tier to `priority`; an ordinary selector preserves the caller's
   service tier. If that preserved tier is `priority`, candidate admission still
   switches to Fast-capable-only, so the native Fast entry cannot reach Ark.
-  The operation accepts no prompt, auth or request body.
+  The operation accepts no prompt, auth or request body. A caller may require
+  `custom_tool_call`; providers that only preserve ordinary `function_call`
+  items are then removed before traversal, so Code Mode fails closed instead
+  of reaching an incompatible fallback. Missing capability metadata is treated
+  as function-only, including for catalogs generated before version 0.7.0;
+  custom transport support must be declared explicitly after qualification.
+
+`qualify_desktop_patch`
+: Checks the public-safe post-build evidence for a patched desktop runtime:
+  one versioned patch anchor, every changed file's ASAR integrity, the ASAR
+  header digest stored in bundle metadata, code signature, launch and heartbeat
+  readback. It diagnoses upgrade drift but never edits or signs an App bundle.
 
 `qualify_snapshot`
 : Checks the content-free App/CPA readback: visible and hidden routes, input
@@ -65,6 +76,25 @@ qualification.
   qualification also requires proof that the next observed action followed the
   preserved instruction; HTTP success alone cannot pass. Unknown, paired or
   empty outputs must remain a typed `409` failure.
+
+`qualify_quota_recovery`
+: Orders a successful account quota reset against the cooldown observation that
+  preceded it. A newer reset must invalidate the old cooldown and trigger a
+  bounded account probe before fallback is admitted; only a fresh quota-limited
+  probe may create a replacement cooldown.
+
+`qualify_outage_recovery`
+: Orders the end of a provider-wide incident against the stale native cooldown
+  and degraded fallback affinity it created. A recovery signal newer than the
+  cooldown source must invalidate the cooldown, run a bounded probe and clear
+  or revalidate the fallback binding before a native-capability request is
+  admitted. Text-only traffic may remain on the fallback only while the probe
+  still reports an outage.
+
+`qualify_tool_transport`
+: Checks that a requested tool item type survives provider adaptation and that
+  host dispatch completes. In particular, Code Mode `custom_tool_call` must not
+  be downgraded to `function_call {"input": ...}`.
 
 `project_runtime_status`
 : Joins a stable, route-independent host ChatGPT identity state with a
@@ -112,6 +142,22 @@ loopx extension run loopx-codex-provider-routing \
   --execute \
   --format json
 loopx extension run loopx-codex-provider-routing \
+  --input-json packages/loopx-codex-provider-routing/examples/desktop-patch.json \
+  --execute \
+  --format json
+loopx extension run loopx-codex-provider-routing \
+  --input-json packages/loopx-codex-provider-routing/examples/quota-recovery.json \
+  --execute \
+  --format json
+loopx extension run loopx-codex-provider-routing \
+  --input-json packages/loopx-codex-provider-routing/examples/outage-recovery.json \
+  --execute \
+  --format json
+loopx extension run loopx-codex-provider-routing \
+  --input-json packages/loopx-codex-provider-routing/examples/tool-transport.json \
+  --execute \
+  --format json
+loopx extension run loopx-codex-provider-routing \
   --input-json packages/loopx-codex-provider-routing/examples/integration-candidate.json \
   --execute \
   --format json
@@ -129,7 +175,11 @@ The earlier operator scripts split into three classes:
 | --- | --- |
 | Secret-free profile/catalog compiler | Migrated into `compile_catalog` and strengthened with modality/service-tier eligibility |
 | Fast selector catalog generation and request-tier normalization | Migrated into `compile_catalog` plus `normalize_selector_request`; the CPA adapter remains the online enforcement point |
+| Code Mode tool-shape admission and readback | Migrated into profile `tool_transports`, `normalize_selector_request` and `qualify_tool_transport`; an incompatible fallback fails before first output |
 | App/CPA model readback assertions | Migrated as the content-free `qualify_snapshot` contract |
+| Patched desktop ASAR/signature/launch checks | Migrated as `qualify_desktop_patch`; the effectful bundle patcher stays operator-owned |
+| Quota reset versus cached cooldown reconciliation | Migrated as `qualify_quota_recovery`; live cooldown invalidation and probing stay CPA-owned |
+| Provider incident end versus stale native cooldown and degraded fallback affinity | Migrated as `qualify_outage_recovery`; live invalidation, bounded probe and binding revalidation stay CPA-owned |
 | Ordered PR/patch candidate inventory and drift detection | Migrated as `reconcile_integration_candidate`; Git composition remains owned by LoopX core `integration-branch` |
 | Upgrade matrix, snapshot order and rollback triggers | Migrated as `upgrade_plan`; effect execution remains operator-owned |
 | CPA process launcher, OAuth login/reconcile, Ark key loading | Excluded; these are provider runtime and credential lifecycle, not LoopX state |
@@ -147,6 +197,7 @@ integration because it is useful beyond CPA.
 
 ```bash
 python3 packages/loopx-codex-provider-routing/smoke/codex_provider_routing_smoke.py
+python3 packages/loopx-codex-provider-routing/smoke/recovery_contracts_smoke.py
 python3 -m pytest -q tests/extensions/test_colocated_extension_layout.py
 loopx check --scan-path packages/loopx-codex-provider-routing
 ```

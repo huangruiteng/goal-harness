@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SHOWCASE_DIR = REPO_ROOT / "docs" / "showcases"
 CASES_DIR = SHOWCASE_DIR / "cases"
 CATALOG = SHOWCASE_DIR / "showcase-catalog.json"
+SHARED_STYLESHEET = SHOWCASE_DIR / "showcase-page.css"
 HARDWARE_CASE_ID = "2026-06-19-dynamic-workflow-hardware-agent"
 HARDWARE_CANONICAL_PAGE = CASES_DIR / "0619-dynamic-workflow-hardware-agent.html"
 
@@ -706,21 +707,20 @@ def localized(case: dict[str, Any], lang: str, key: str) -> str:
 
 def table_for(case: dict[str, Any], lang: str) -> dict[str, str]:
     copy = copy_for(case, lang)
-    if copy:
-        return {
-            "proof_point": str(copy.get("proof_point") or ""),
-            "loopx_intervention": str(copy.get("loopx_intervention") or ""),
-        }
     table = case.get("showcase_table")
     if isinstance(table, dict):
-        return {
-            "proof_point": str(table.get("proof_point") or ""),
-            "loopx_intervention": str(table.get("loopx_intervention") or ""),
-        }
-    return SHOWCASE_TABLE.get(str(case.get("id")), {
-        "proof_point": str(case.get("headline") or ""),
-        "loopx_intervention": ", ".join(first_items(case.get("pattern_tags"), 4)),
-    })
+        fallback = table
+    else:
+        fallback = SHOWCASE_TABLE.get(str(case.get("id")), {
+            "proof_point": str(case.get("headline") or ""),
+            "loopx_intervention": ", ".join(first_items(case.get("pattern_tags"), 4)),
+        })
+    return {
+        "proof_point": str(copy.get("proof_point") or fallback.get("proof_point") or ""),
+        "loopx_intervention": str(
+            copy.get("loopx_intervention") or fallback.get("loopx_intervention") or ""
+        ),
+    }
 
 
 def details_for(case: dict[str, Any], lang: str) -> dict[str, Any]:
@@ -878,13 +878,16 @@ def display_badges(case: dict[str, Any], lang: str, raw_tags: list[str], limit: 
     return labels
 
 
-def css() -> str:
+def css(*, shared_asset: bool = False) -> str:
+    selection_background = "#39417d" if shared_asset else "color-mix(in srgb,var(--accent,#6e79d6) 34%,transparent)"
+    navigation_background = "#19191d" if shared_asset else "rgba(255,255,255,.025)"
+    source_wrap = "overflow-wrap:anywhere" if shared_asset else "word-break:break-word"
     return """
   *{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
   body{background:#0b0b0c;color:#f1f2f3;font-family:'Geist',system-ui,-apple-system,BlinkMacSystemFont,sans-serif;-webkit-font-smoothing:antialiased}
   a{color:inherit}
-  ::selection{background:color-mix(in srgb,var(--accent,#6e79d6) 34%,transparent);color:#fff}
+  ::selection{background:__SELECTION_BACKGROUND__;color:#fff}
   .gh{min-height:100vh;position:relative;overflow-x:hidden;--accent:#6e79d6}
   .grain{position:fixed;inset:0;pointer-events:none;opacity:.025;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
   article{position:relative;max-width:800px;margin:0 auto;padding:76px 28px 130px}
@@ -897,7 +900,7 @@ def css() -> str:
   code{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:#c4c7cc}
   .accent{font-size:clamp(17px,2.1vw,21px);font-weight:500;color:var(--accent);letter-spacing:-.01em;margin-bottom:22px}
   .nav{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 28px}
-  .nav a,.case-link{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.04em;text-decoration:none;color:#c4c7cc;border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:7px 10px;background:rgba(255,255,255,.025)}
+  .nav a,.case-link{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.04em;text-decoration:none;color:#c4c7cc;border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:7px 10px;background:__NAVIGATION_BACKGROUND__}
   .nav a:hover,.case-link:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent);color:#f4f4f5}
   .section-head{margin-top:74px;display:flex;align-items:baseline;gap:13px;margin-bottom:20px}
   .section-head span{font-family:'Geist Mono',ui-monospace,monospace;font-size:13px;color:var(--accent)}
@@ -924,7 +927,7 @@ def css() -> str:
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
   .source-ref span{font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.04em}
-  .source-ref code{color:#aeb3ba;word-break:break-word}
+  .source-ref code{color:#aeb3ba;__SOURCE_WRAP__}
   .boundary-box{border-left:2px solid var(--accent);background:#0e0e10;padding:18px 20px;margin-top:16px;border-radius:0 8px 8px 0}
   .flow{display:flex;flex-direction:column}
   .flow li{display:grid;grid-template-columns:28px 1fr;gap:14px;list-style:none}
@@ -954,16 +957,23 @@ def css() -> str:
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
   @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
-"""
+""".replace("__SELECTION_BACKGROUND__", selection_background).replace(
+        "__NAVIGATION_BACKGROUND__", navigation_background
+    ).replace("__SOURCE_WRAP__", source_wrap)
 
 
-def html_head(title: str) -> str:
+def html_head(title: str, *, current: Path | None = None, shared_asset: bool = False) -> str:
+    stylesheet = (
+        f'  <link rel="stylesheet" href="{esc(rel_href(current, SHARED_STYLESHEET))}">'
+        if shared_asset and current is not None
+        else f"  <style>{css()}</style>"
+    )
     return f"""<head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{esc(title)}</title>
   <link rel="icon" href="data:,">
-  <style>{css()}</style>
+{stylesheet}
 </head>"""
 
 
@@ -1095,9 +1105,13 @@ def render_case_page(case: dict[str, Any], lang: str, primary: bool) -> str:
     evidence_assets = render_evidence_assets(case, output)
     outcome_block = render_text_stack([str(item) for item in details.get("user_outcome", [])])
     sources_block = render_source_refs([(str(label), str(path)) for label, path in details.get("source_refs", [])], output)
+    shared_assets = case.get("page_assets") == "shared"
+    diagram = control_diagram(case, lang)
+    if shared_assets:
+        diagram = " ".join(line.strip() for line in diagram.splitlines() if line.strip())
     return f"""<!doctype html>
 <html lang="{esc(ui(lang, "html_lang"))}">
-{html_head("LoopX Showcase: " + title)}
+{html_head("LoopX Showcase: " + title, current=output, shared_asset=shared_assets)}
 <body>
 <div class="gh">
   <div class="grain"></div>
@@ -1108,7 +1122,7 @@ def render_case_page(case: dict[str, Any], lang: str, primary: bool) -> str:
     <div class="accent">{esc(headline)}</div>
     <p>{esc(localized(case, lang, "user_value"))}</p>
     <div class="chips">{badges(tags)}{appendix}</div>
-    {control_diagram(case, lang)}
+    {diagram}
 
     <div class="section-head"><span>01</span><h2>{esc(ui(lang, "context"))}</h2></div>
     {context_block}
@@ -1286,6 +1300,8 @@ def generate(write_files: bool) -> list[Path]:
     outputs: list[Path] = []
     if write_files:
         CATALOG.write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        write(SHARED_STYLESHEET, css(shared_asset=True))
+    outputs.append(SHARED_STYLESHEET)
     for case in primary + appendix:
         for lang in ("zh", "en"):
             output = case_html_path(case, lang)
@@ -1308,6 +1324,9 @@ def check() -> None:
     expected_catalog = json.dumps(catalog, ensure_ascii=False, indent=2) + "\n"
     if CATALOG.read_text(encoding="utf-8") != expected_catalog:
         raise AssertionError("showcase catalog is not normalized; run examples/showcase-html-pages.py")
+    expected_stylesheet = clean(css(shared_asset=True))
+    if SHARED_STYLESHEET.read_text(encoding="utf-8") != expected_stylesheet:
+        raise AssertionError("shared showcase stylesheet is stale; run examples/showcase-html-pages.py")
     cases = catalog["cases"]
     primary, appendix = ordered_cases(cases)
     for case in primary + appendix:

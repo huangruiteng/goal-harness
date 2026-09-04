@@ -551,6 +551,47 @@ def test_resume_does_not_clear_a_healthy_active_turn(
         )
 
 
+def test_resume_with_unhealthy_adapter_fails_interrupted_turn_before_restore(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatSessionStore(tmp_path)
+    session = store.create_session(
+        goal_id="goal-one",
+        agent_id="codex",
+        executor_endpoint_id="codex",
+        adapter_kind="codex_app_server",
+        upstream_thread_id="thread-one",
+        upstream_mode="chat",
+    )
+    session_id = str(session["session_id"])
+    turn, _created = store.create_turn(
+        session_id,
+        client_turn_id="interrupted-resume-turn",
+        message="fail this interrupted turn",
+    )
+    runtime = ChatRuntimeController(store=store, codex_bin="missing-codex")
+    unhealthy_adapter = _HealthyChatAdapter()
+    monkeypatch.setattr(unhealthy_adapter, "healthcheck", lambda: False)
+    runtime.adapters[session_id] = unhealthy_adapter  # type: ignore[assignment]
+    replacement_adapter = _HealthyChatAdapter()
+    monkeypatch.setattr(runtime, "_start_adapter", lambda **_kwargs: replacement_adapter)
+
+    restored = runtime.resume_session(
+        session_id=session_id,
+        work_dir=tmp_path,
+        objective="resume this session",
+    )
+
+    interrupted = store.load_turn(session_id, str(turn["turn_id"]))
+    assert interrupted is not None
+    assert interrupted["status"] == "failed"
+    assert interrupted["error_code"] == "server_restarted"
+    assert restored["status"] == "ready"
+    assert restored["active_turn_id"] is None
+    assert unhealthy_adapter.closed is True
+
+
 def test_resume_cannot_reopen_a_session_closed_during_restore(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -573,7 +614,7 @@ def test_resume_cannot_reopen_a_session_closed_during_restore(
         runtime.adapters[session_id] = adapter  # type: ignore[assignment]
         return adapter
 
-    monkeypatch.setattr(runtime, "_ensure_adapter", close_before_restore)
+    monkeypatch.setattr(runtime, "_ensure_adapter_locked", close_before_restore)
 
     with pytest.raises(KeyError, match="chat session was not found"):
         runtime.resume_session(
@@ -630,18 +671,83 @@ def test_close_wins_during_adapter_start_without_reopening_session(
     worker = threading.Thread(target=resume)
     worker.start()
     assert start_entered.wait(timeout=2)
-    assert runtime.close_session(session_id) is True
+
+    close_result: list[bool] = []
+    close_worker = threading.Thread(
+        target=lambda: close_result.append(runtime.close_session(session_id))
+    )
+    close_worker.start()
+    time.sleep(0.1)
+    assert close_result == []
     release_start.set()
     worker.join(timeout=2)
+    close_worker.join(timeout=2)
 
-    assert len(resume_error) == 1
-    assert isinstance(resume_error[0], KeyError)
-    assert str(resume_error[0]) == "'chat session was not found'"
+    assert not close_worker.is_alive()
+    assert resume_error == []
+    assert close_result == [True]
     persisted = store.load_session(session_id)
     assert persisted is not None
     assert persisted["status"] == "closed"
     assert session_id not in runtime.adapters
     assert adapter.closed is True
+
+
+def test_concurrent_resume_starts_one_managed_adapter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChatSessionStore(tmp_path)
+    session = store.create_session(
+        goal_id="goal-one",
+        agent_id="codex",
+        executor_endpoint_id="codex",
+        adapter_kind="codex_app_server",
+        upstream_thread_id="thread-one",
+        upstream_mode="chat",
+    )
+    session_id = str(session["session_id"])
+    runtime = ChatRuntimeController(store=store, codex_bin="missing-codex")
+    first_start = threading.Event()
+    allow_first_start = threading.Event()
+    start_calls: list[dict[str, object]] = []
+
+    def start_adapter(**kwargs: object) -> _HealthyChatAdapter:
+        start_calls.append(kwargs)
+        if len(start_calls) == 1:
+            first_start.set()
+            assert allow_first_start.wait(timeout=2)
+        return _HealthyChatAdapter()
+
+    monkeypatch.setattr(runtime, "_start_adapter", start_adapter)
+    errors: list[Exception] = []
+
+    def resume() -> None:
+        try:
+            runtime.resume_session(
+                session_id=session_id,
+                work_dir=tmp_path,
+                objective="resume this session",
+            )
+        except Exception as exc:  # pragma: no cover - surfaced by the assertion below.
+            errors.append(exc)
+
+    first = threading.Thread(target=resume)
+    second = threading.Thread(target=resume)
+    first.start()
+    assert first_start.wait(timeout=2)
+    second.start()
+    time.sleep(0.1)
+    assert len(start_calls) == 1
+    allow_first_start.set()
+    first.join(timeout=3)
+    second.join(timeout=3)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert len(start_calls) == 1
+    assert runtime.adapters[session_id].upstream_thread_id == "thread-one"
 
 
 def test_restore_ready_does_not_clear_a_new_active_turn(

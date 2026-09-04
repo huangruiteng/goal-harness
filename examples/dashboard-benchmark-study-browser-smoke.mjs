@@ -1,0 +1,163 @@
+#!/usr/bin/env node
+// Browser-level smoke for the public-safe, read-only benchmark study route.
+
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const dashboardDir = resolve(repoRoot, "apps/presentation/dashboard");
+const port = Number(process.env.LOOPX_BENCHMARK_STUDY_SMOKE_PORT ?? "5199");
+
+function loadPlaywright() {
+  const candidates = [
+    process.env.LOOPX_PLAYWRIGHT_PACKAGE,
+    resolve(dashboardDir, "node_modules/playwright"),
+    resolve(homedir(), ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright"),
+  ].filter(Boolean);
+  try {
+    return require("playwright");
+  } catch {
+    // Try the explicitly configured or bundled runtime below.
+  }
+  for (const candidate of candidates) {
+    if (!candidate || !existsSync(candidate)) continue;
+    try {
+      return require(candidate);
+    } catch {
+      // Keep looking.
+    }
+  }
+  throw new Error("Playwright package not found; install playwright or set LOOPX_PLAYWRIGHT_PACKAGE");
+}
+
+async function launchBrowser(chromium) {
+  try {
+    return await chromium.launch({ channel: "chrome", headless: true });
+  } catch {
+    return chromium.launch({ headless: true });
+  }
+}
+
+function startDashboardServer() {
+  const viteBin = resolve(dashboardDir, "node_modules/vite/bin/vite.js");
+  if (!existsSync(viteBin)) throw new Error(`Vite package not installed: ${viteBin}`);
+  return spawn(process.execPath, [viteBin, "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
+    cwd: dashboardDir,
+    stdio: "ignore",
+  });
+}
+
+async function waitForDashboard(url) {
+  const deadline = Date.now() + 20_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 250));
+  }
+  throw lastError ?? new Error(`Timed out waiting for ${url}`);
+}
+
+async function assertNoHorizontalOverflow(page, label) {
+  const dimensions = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    scroll: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+  }));
+  if (dimensions.scroll > dimensions.viewport + 2) {
+    throw new Error(`${label} horizontal overflow: viewport=${dimensions.viewport} scroll=${dimensions.scroll}`);
+  }
+}
+
+async function assertCommonSurface(page, label) {
+  await page.waitForSelector("main.benchmark-page", { timeout: 10_000 });
+  const body = await page.locator("body").innerText();
+  for (const required of [
+    "Four-arm software-engineering study",
+    "Derived read-only projection",
+    "Score-countable cells",
+    "RUNTIME HEALTH",
+    "Dashboard cannot launch, grade, or mutate runs.",
+  ]) {
+    if (!body.includes(required)) throw new Error(`${label} missing text: ${required}`);
+  }
+  if (await page.locator("form").count()) throw new Error(`${label} unexpectedly exposes a form`);
+  if (await page.locator('input, textarea, select, [contenteditable="true"]').count()) {
+    throw new Error(`${label} unexpectedly exposes editable controls`);
+  }
+  await assertNoHorizontalOverflow(page, label);
+}
+
+async function main() {
+  const { chromium } = loadPlaywright();
+  const server = startDashboardServer();
+  let browser;
+  const pageErrors = [];
+  try {
+    const url = `http://127.0.0.1:${port}/benchmarks/study`;
+    await waitForDashboard(url);
+    browser = await launchBrowser(chromium);
+
+    const desktop = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+    desktop.on("pageerror", (error) => pageErrors.push(error.message));
+    await desktop.goto(url, { waitUntil: "networkidle" });
+    await assertCommonSurface(desktop, "desktop campaign");
+    if ((await desktop.getByRole("navigation", { name: "Benchmark dashboard views" }).count()) !== 1) {
+      throw new Error("benchmark view navigation must expose one accessible label");
+    }
+    if ((await desktop.getByText("6 / 8", { exact: true }).count()) !== 1) {
+      throw new Error("campaign countability denominator is not rendered exactly once");
+    }
+
+    await desktop.getByRole("button", { name: "Arms", exact: true }).click();
+    await desktop.getByText("2/2 countable", { exact: true }).first().waitFor();
+    await desktop.getByText("goal-v1 (2)", { exact: true }).waitFor();
+    await desktop.getByText("contract_miss (1)", { exact: true }).waitFor();
+    await desktop.getByRole("button", { name: "Cases", exact: true }).click();
+    await desktop.getByRole("columnheader", { name: "Largest eligible delta", exact: true }).waitFor();
+    await desktop.getByText("goal_hint: +2", { exact: true }).waitFor();
+    await desktop.getByText("preservation: 20/20 tests", { exact: true }).first().waitFor();
+    await desktop.getByText("reward: 0", { exact: true }).first().waitFor();
+    await desktop.getByRole("button", { name: /Countable/ }).first().click();
+    await desktop.getByRole("complementary", { name: /Run detail for/ }).waitFor();
+    await desktop.getByText("Upload provenance", { exact: true }).waitFor();
+    await desktop.getByText("Implication: Keep the external contract check.", { exact: true }).waitFor();
+    await desktop.getByText("Evidence: public-receipt:demo123", { exact: true }).waitFor();
+
+    const refresh = desktop.getByRole("button", { name: "Refresh local readback", exact: true });
+    if ((await refresh.count()) !== 1) throw new Error("readback refresh must be a real accessible button");
+    await refresh.focus();
+    if (!(await refresh.evaluate((element) => element === document.activeElement))) {
+      throw new Error("readback refresh is not keyboard focusable");
+    }
+
+    const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    mobile.on("pageerror", (error) => pageErrors.push(error.message));
+    await mobile.goto(url, { waitUntil: "networkidle" });
+    await assertCommonSurface(mobile, "mobile campaign");
+
+    const rejected = await browser.newPage({ viewport: { width: 800, height: 700 } });
+    await rejected.goto(`${url}?dashboardUrl=${encodeURIComponent("https://example.com/study.json")}`, { waitUntil: "networkidle" });
+    await rejected.getByText("Benchmark dashboard source must use same-origin local readback", { exact: true }).waitFor();
+
+    if (pageErrors.length) throw new Error(`browser errors: ${pageErrors.join(" | ")}`);
+    console.log("benchmark study browser smoke passed");
+  } finally {
+    await browser?.close();
+    server.kill("SIGTERM");
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

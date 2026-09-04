@@ -11,6 +11,7 @@ import { DashboardPage } from "./views/dashboard-page";
 import { DeprecatedFrontstageOpsPage } from "./views/deprecated/frontstage-ops-page";
 import { FrontstageDeveloperPage } from "./views/frontstage-developer-page";
 import { FrontstagePage } from "./views/frontstage-page";
+import { BenchmarkStudyPage } from "./views/benchmark-study-page";
 
 const searchSchema = z.object({
   goalId: z.string().optional().default(""),
@@ -26,6 +27,12 @@ const frontstageSearchSchema = z.object({
 });
 
 const deprecatedFrontstageOpsSearchSchema = frontstageSearchSchema.omit({ mode: true });
+
+const benchmarkStudySearchSchema = z.object({
+  dashboardUrl: z.string().optional().default(""),
+  view: z.enum(["campaign", "arms", "cases", "runs"]).optional().default("campaign"),
+  runId: z.string().optional().default(""),
+});
 
 function FrontstageRoutePage() {
   const search = frontstageRoute.useSearch();
@@ -94,11 +101,19 @@ export const frontstageDeveloperRoute = createRoute({
   component: FrontstageDeveloperPage,
 });
 
+export const benchmarkStudyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/benchmarks/study",
+  validateSearch: (search) => benchmarkStudySearchSchema.parse(search),
+  component: BenchmarkStudyPage,
+});
+
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
   frontstageRoute,
   deprecatedFrontstageOpsRoute,
   frontstageDeveloperRoute,
+  benchmarkStudyRoute,
 ]);
 
 function routerBasepathFromViteBase(baseUrl: string) {

@@ -220,6 +220,7 @@ class ChatRuntimeController:
         self.turn_done_events: dict[tuple[str, str], threading.Event] = {}
         self.lock = threading.RLock()
         self.session_open_locks: dict[tuple[str, str, str], threading.Lock] = {}
+        self.session_adapter_locks: dict[str, threading.Lock] = {}
         self.session_queue_workers: set[str] = set()
         self.session_queue_threads: dict[str, threading.Thread] = {}
         self.closed = threading.Event()
@@ -398,6 +399,10 @@ class ChatRuntimeController:
                 self.adapters[persisted["session_id"]] = adapter
             return persisted, False
 
+    def _session_adapter_lock(self, session_id: str) -> threading.Lock:
+        with self.lock:
+            return self.session_adapter_locks.setdefault(session_id, threading.Lock())
+
     def _ensure_adapter(
         self,
         session: dict[str, Any],
@@ -406,6 +411,26 @@ class ChatRuntimeController:
         objective: str,
     ) -> ChatRuntimeAdapter:
         session_id = str(session["session_id"])
+        with self._session_adapter_lock(session_id):
+            return self._ensure_adapter_locked(
+                session,
+                work_dir=work_dir,
+                objective=objective,
+            )
+
+    def _ensure_adapter_locked(
+        self,
+        session: dict[str, Any],
+        *,
+        work_dir: Path,
+        objective: str,
+        interrupted_turn_id: str | None = None,
+    ) -> ChatRuntimeAdapter:
+        session_id = str(session["session_id"])
+        current_session = self.store.load_session(session_id)
+        if current_session is None or current_session.get("status") == "closed":
+            raise KeyError("chat session was not found")
+        session = current_session
         if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
             raise CodexChatAgentError(
                 "The attached host Session must be served by its existing host bridge.",
@@ -419,7 +444,7 @@ class ChatRuntimeController:
                 current.close_session()
                 self.adapters.pop(session_id, None)
         self.store.update_session(session_id, status="resuming", last_error_code=None)
-        active_turn_id = session.get("active_turn_id")
+        active_turn_id = interrupted_turn_id or session.get("active_turn_id")
         if active_turn_id:
             active = self.store.load_turn(session_id, str(active_turn_id))
             if active and active.get("status") not in TERMINAL_TURN_STATES:
@@ -533,13 +558,18 @@ class ChatRuntimeController:
                 message=message,
                 origin="web",
             )
-        adapter = self._ensure_adapter(session, work_dir=work_dir, objective=objective)
-        turn, created = self.store.create_turn(
-            session_id,
-            client_turn_id=client_turn_id,
-            message=message,
-            attachments=attachments,
-        )
+        with self._session_adapter_lock(session_id):
+            adapter = self._ensure_adapter_locked(
+                session,
+                work_dir=work_dir,
+                objective=objective,
+            )
+            turn, created = self.store.create_turn(
+                session_id,
+                client_turn_id=client_turn_id,
+                message=message,
+                attachments=attachments,
+            )
         if not created:
             return turn, False
         worker = threading.Thread(
@@ -985,65 +1015,73 @@ class ChatRuntimeController:
         raise TimeoutError("chat turn wait timed out")
 
     def close_session(self, session_id: str) -> bool:
-        session = self.store.load_session(session_id)
-        if session is None:
-            return False
-        if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
-            return self.store.close_attached_session(session_id)
-        closed = self.store.close_managed_session(session_id)
-        if not closed:
-            return False
-        with self.lock:
-            adapter = self.adapters.pop(session_id, None)
-            event_buffers = [
-                buffer
-                for (buffer_session_id, _), buffer in self.turn_event_buffers.items()
-                if buffer_session_id == session_id
-            ]
-        for event_buffer in event_buffers:
-            event_buffer.close()
-        if adapter is not None:
-            adapter.close_session()
-        return True
+        with self._session_adapter_lock(session_id):
+            session = self.store.load_session(session_id)
+            if session is None:
+                return False
+            if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
+                return self.store.close_attached_session(session_id)
+            closed = self.store.close_managed_session(session_id)
+            if not closed:
+                return False
+            with self.lock:
+                adapter = self.adapters.pop(session_id, None)
+                event_buffers = [
+                    buffer
+                    for (buffer_session_id, _), buffer in self.turn_event_buffers.items()
+                    if buffer_session_id == session_id
+                ]
+            for event_buffer in event_buffers:
+                event_buffer.close()
+            if adapter is not None:
+                adapter.close_session()
+            return True
 
     def resume_session(self, *, session_id: str, work_dir: Path, objective: str) -> dict[str, Any]:
-        session = self.store.load_session(session_id)
-        if session is None or session.get("status") == "closed":
-            raise KeyError("chat session was not found")
-        if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
-            if session.get("active_turn_id"):
-                return session
-            restored = self.store.update_session(
-                session_id,
-                status="ready",
-                active_turn_id=None,
-                last_error_code=None,
-            )
-            return restored
-        with self.lock:
-            current = self.adapters.get(session_id)
-            adapter_healthy = current is not None and current.healthcheck()
-        session, active_turn_preserved = self.store.prepare_managed_session_resume(
-            session_id,
-            preserve_active_turn=adapter_healthy,
-        )
-        if active_turn_preserved:
-            return session
-        adapter = self._ensure_adapter(session, work_dir=work_dir, objective=objective)
-        try:
-            return self.store.restore_managed_session_if_idle(
-                session_id,
-                upstream_thread_id=adapter.upstream_thread_id,
-                upstream_mode=self._managed_upstream_mode(session),
-            )
-        except KeyError:
+        with self._session_adapter_lock(session_id):
+            session = self.store.load_session(session_id)
+            if session is None or session.get("status") == "closed":
+                raise KeyError("chat session was not found")
+            if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
+                if session.get("active_turn_id"):
+                    return session
+                restored = self.store.update_session(
+                    session_id,
+                    status="ready",
+                    active_turn_id=None,
+                    last_error_code=None,
+                )
+                return restored
             with self.lock:
-                owns_adapter = self.adapters.get(session_id) is adapter
+                current = self.adapters.get(session_id)
+                adapter_healthy = current is not None and current.healthcheck()
+            session, active_turn_preserved = self.store.prepare_managed_session_resume(
+                session_id,
+                preserve_active_turn=adapter_healthy,
+            )
+            if active_turn_preserved:
+                return session
+            interrupted_turn_id = str(session.get("active_turn_id") or "") or None
+            adapter = self._ensure_adapter_locked(
+                session,
+                work_dir=work_dir,
+                objective=objective,
+                interrupted_turn_id=interrupted_turn_id,
+            )
+            try:
+                return self.store.restore_managed_session_if_idle(
+                    session_id,
+                    upstream_thread_id=adapter.upstream_thread_id,
+                    upstream_mode=self._managed_upstream_mode(session),
+                )
+            except KeyError:
+                with self.lock:
+                    owns_adapter = self.adapters.get(session_id) is adapter
+                    if owns_adapter:
+                        self.adapters.pop(session_id, None)
                 if owns_adapter:
-                    self.adapters.pop(session_id, None)
-            if owns_adapter:
-                adapter.close_session()
-            raise
+                    adapter.close_session()
+                raise
 
     def close(self) -> None:
         self.closed.set()

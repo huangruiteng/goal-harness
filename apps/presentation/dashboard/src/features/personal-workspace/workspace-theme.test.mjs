@@ -43,6 +43,7 @@ assert.match(styles, /personal-task-card > button > strong { font-size: 13px; fo
 assert.match(styles, /personal-files-list { border-radius: 12px/, "LoopX Files uses the standard card radius");
 assert.match(styles, /personal-icon-button {[^}]*flex: 0 0 36px;[^}]*min-width: 36px;[^}]*min-height: 36px;/, "Header icon buttons keep a stable square footprint");
 assert.match(styles, /personal-live-indicator {[^}]*flex: 0 0 auto;[^}]*white-space: nowrap;/, "Live status stays on one line when the header narrows");
+assert.match(styles, /@media \(max-width: 720px\) {[\s\S]*personal-home-lane,[\s\S]*personal-task-kanban \.personal-object-list { border-left: 0; border-top: 1px solid #ebebeb;/, "Mobile LoopX lanes use horizontal rather than vertical separators");
 assert.match(styles, /personal-select-listbox[\s\S]*border-radius: 12px/, "Workspace select menus use the card radius");
 assert.match(styles, /personal-channel-title h1 { font-size: 20px/, "LoopX standard uses the panel heading size");
 assert.match(select, /aria-haspopup="listbox"/, "Workspace select exposes combobox semantics");

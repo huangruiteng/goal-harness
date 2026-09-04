@@ -8,6 +8,11 @@ import {
 } from "../effect_runtime_errors.ts";
 import { atomicWriteJson, withFileMutationLock } from "../effect_runtime_io.ts";
 import {
+  checkLegacyCoordinationWriteAllowed,
+  legacyCoordinationLeaseLockPath,
+  LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
+} from "../coordination/legacy_writer_fence.ts";
+import {
   settlementIdentity,
   type JsonObject,
 } from "../effect_program.ts";
@@ -1355,8 +1360,24 @@ export async function executeTaskLeaseAcquire(
 
   try {
     return await withFileMutationLock(
-      taskLeaseLockPath(request),
-      () => commitAcquire(request, dependencies),
+      legacyCoordinationLeaseLockPath(request.runtime_root, request.goal_id),
+      () => withFileMutationLock(taskLeaseLockPath(request), async () => {
+        const writerGuard = await checkLegacyCoordinationWriteAllowed({
+          schema_version: LEGACY_COORDINATION_WRITE_CHECK_REQUEST_SCHEMA,
+          runtime_root: request.runtime_root,
+          goal_id: request.goal_id,
+        });
+        if (writerGuard.status !== "allowed") {
+          throw new TaskLeaseAcquireError(
+            writerGuard.status === "blocked"
+              ? "legacy task-lease writer is fenced; use the canonical file authority"
+              : String(writerGuard.reason ?? "legacy writer fence check failed"),
+            String(writerGuard.reason_code ?? "legacy_writer_fence_check_failed"),
+            writerGuard,
+          );
+        }
+        return await commitAcquire(request, dependencies);
+      }),
     );
   } catch (error) {
     if (error instanceof TaskLeaseAcquireError) {

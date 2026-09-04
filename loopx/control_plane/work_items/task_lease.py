@@ -262,6 +262,7 @@ def hold_handoff_lease_holder_gate(
     goal_id: str,
     todo_id: str,
     actor_agent_id: str | None,
+    runtime_root: Path | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Hold the per-goal lease lock while proving the actor owns the lease.
 
@@ -289,7 +290,8 @@ def hold_handoff_lease_holder_gate(
                 "reason": "missing_actor",
             },
         )
-    runtime_root = runtime_root_from_registry(registry_path, None)
+    if runtime_root is None:
+        runtime_root = runtime_root_from_registry(registry_path, None)
     result = _execute_native_task_lease_lifecycle(
         runtime_root=runtime_root,
         registry_path=registry_path,
@@ -362,6 +364,7 @@ def hold_task_lease_mutation_fence(
     expected_version: int | None = None,
     require_active_when_key_supplied: bool = True,
     handoff: dict[str, Any] | None = None,
+    runtime_root: Path | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Hold the per-goal lease lock while one todo lifecycle write commits.
 
@@ -384,7 +387,8 @@ def hold_task_lease_mutation_fence(
 
     normalized_goal_id = normalize_goal_id(goal_id)
     normalized_todo_id = normalize_lease_todo_id(todo_id)
-    runtime_root = runtime_root_from_registry(registry_path, None)
+    if runtime_root is None:
+        runtime_root = runtime_root_from_registry(registry_path, None)
     handoff = handoff or {}
     result = _execute_native_task_lease_lifecycle(
         runtime_root=runtime_root,
@@ -474,6 +478,7 @@ def enter_terminal_todo_lease_fence(
     mutation_authority: dict[str, Any],
     idempotency_key: str | None = None,
     expected_version: int | None = None,
+    runtime_root: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Resolve the goal handoff and hold the lease fence for one terminal write.
 
@@ -502,6 +507,7 @@ def enter_terminal_todo_lease_fence(
                 idempotency_key is not None or expected_version is not None
             ),
             handoff=handoff,
+            runtime_root=runtime_root,
         )
     )
     return handoff, fence
@@ -552,8 +558,19 @@ def runtime_root_from_registry(
     registry_path: Path,
     runtime_root_override: str | None,
 ) -> Path:
+    """Effective runtime root for lease state: override, else registry root.
+
+    A relative ``common_runtime_root`` resolves against the registry's project
+    root, matching the observation hooks, so the lease files and every
+    candidate observation of one goal share a single root.
+    """
+
     registry = load_registry(registry_path)
-    return resolve_runtime_root(registry, runtime_root_override)
+    return resolve_runtime_root(
+        registry,
+        runtime_root_override,
+        registry_path=registry_path,
+    )
 
 
 def task_lease_todo_projection(

@@ -4,14 +4,17 @@
   "upgrade": {
     "changed_seams": [
       "history_projection",
+      "desktop_runtime_patch",
       "integration_candidate",
       "transport_pool",
       "model_catalog",
       "modality_routing",
       "request_normalizer",
+      "quota_recovery",
       "retry_policy",
       "route_fallback",
-      "settings_revision"
+      "settings_revision",
+      "tool_transport"
     ],
     "current_ref": "public-current-ref",
     "target_ref": "public-target-ref"

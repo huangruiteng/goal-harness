@@ -70,9 +70,6 @@ def test_blocked_visible_todo_is_not_counted_as_runnable(monkeypatch, tmp_path) 
     }
 
     monkeypatch.setattr(summary_all, "collect_status", lambda **_: status_payload)
-    monkeypatch.setattr(summary_all, "load_registry", lambda _: {})
-    monkeypatch.setattr(summary_all, "resolve_runtime_root", lambda *_: tmp_path)
-    monkeypatch.setattr(summary_all, "collect_history", lambda **_: {"runs": []})
     monkeypatch.setattr(
         summary_all,
         "build_quota_should_run",
@@ -102,6 +99,50 @@ def test_blocked_visible_todo_is_not_counted_as_runnable(monkeypatch, tmp_path) 
                 "Wait for the projected user/controller decision before "
                 "running the blocked path."
             ),
+        }
+    ]
+
+
+def test_summary_all_reuses_status_recent_run_projection(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    recent_run = {
+        "goal_id": "progress-goal",
+        "generated_at": "2099-01-01T00:00:00Z",
+        "classification": "state_refreshed",
+        "recommended_action": "Continue the bounded work.",
+    }
+    status_payload = {
+        "ok": True,
+        "attention_queue": {"items": []},
+        "global_registry": {"findings": []},
+        "run_history": {"recent_runs": [recent_run]},
+    }
+    calls: list[dict[str, object]] = []
+
+    def collect_status(**kwargs: object) -> dict[str, object]:
+        calls.append(kwargs)
+        return status_payload
+
+    monkeypatch.setattr(summary_all, "collect_status", collect_status)
+
+    payload = summary_all.build_summary_all(
+        registry_path=tmp_path / "registry.json",
+        runtime_root_override=None,
+        scan_roots=[],
+        agent_id=None,
+        time_range="99999d",
+        limit=3,
+    )
+
+    assert calls[0]["recent_run_limit"] == 6
+    assert payload["recent_progress"] == [
+        {
+            "goal_id": "progress-goal",
+            "generated_at": "2099-01-01T00:00:00Z",
+            "classification": "state_refreshed",
+            "recommended_action": "Continue the bounded work.",
         }
     ]
 

@@ -461,9 +461,11 @@ todo 已提交就要求调用方重新发一条 operation。
 未知 command type fail closed。transfer 或 delegated assignment、任意 todo/gate
 mutation、quota reservation 与 external effect 仍需要后续 runtime 合同与
 qualification；非空 write scope 与跨 todo scope-overlap 拒绝同样需要后续 command
-contract 与 qualification。下面的可恢复执行动词是 Stage 3 切片；第 5 节的步骤
-1-4 与 7-10（identity、digest、replay、CAS、reload、rebase、budget）对每个动词
-原样适用，只有每动词的前置条件与迁移（步骤 5-6）不同。
+contract 与 qualification。下面的可恢复执行动词在 #3669 历史实施序列中曾称为
+Stage 3；按照第 11 节当前的交付编号，已合入的这部分属于 Stage 0 reference foundation，
+不是第 11 节的 Stage 3 远端 shadow 阶段。第 5 节的步骤 1-4 与 7-10
+（identity、digest、replay、CAS、reload、rebase、budget）对每个动词原样适用，只有
+每动词的前置条件与迁移（步骤 5-6）不同。
 
 ### 5.2 `renew_work`
 
@@ -867,6 +869,36 @@ Stage 3/4 qualification 必须保持以下 ownership 与 proof 边界：
    LoopX service 成为唯一 writer。本地 `.loopx` 退为 cache、offline projection 与
    诊断材料。绝不长期维持 dual-write 或 dual-master。
 
+#### Stage 2C 观察基础：本地提交后 capture
+
+Stage 2C 的前半段是一个显式开启、默认关闭的产品路径。先预览，再开启：
+
+```bash
+loopx configure-goal --goal-id GOAL --local-authority-shadow-file
+loopx configure-goal --goal-id GOAL --local-authority-shadow-file --execute
+```
+
+Todo、handoff-mode、follow-up 与 task-lease facade 会在本地主写返回成功后，采样
+完整当前本地投影，再让 `FileAuthorityStore` 保存该 snapshot。
+`observation_trigger` 只记录为何开始采样，不是主写 transaction identity；并发主写
+因此可能出现在该次 snapshot 中。`captured` 或 `replayed` 只证明候选侧 observation
+commit，不表示已经对比 source 与 candidate；结果明确携带
+`parity_verdict=not_evaluated`。
+
+候选数据位于 legacy 单 Goal runtime tree
+之外的 `authority-shadow/file/`，因此 state migration 不会复制 store identity 或
+revision；真正执行迁移时，会从迁移后的本地主状态为目标端建立一条新 lineage。
+候选失败只形成 observation result，不会推翻已经完成的本地写入。
+
+用
+`loopx configure-goal --goal-id GOAL --clear-local-authority-shadow --execute`
+即可关闭 observer。这里回退的只是观察路径：Markdown 与 task-lease 文件始终是
+canonical。本切片不会读取候选来决策，不会 fence legacy writer，不会资格化远端
+provider，也没有完成 Stage 2C 后半段的本地 canonical promotion。若进程恰好在本地
+提交后、observer 调用前崩溃，该次 observation 可能丢失；后续成功写入或 migration
+seed 会刷新完整当前投影，但这里不宣称已有 durable shadow outbox 或与主写 transaction
+关联的 receipt。这套 plumbing 不是 parity evidence，不能单独支持 Stage 2C promotion。
+
 ### 实施前置条件：先让本地文件模式经过同一协调合同
 
 在接入 live NoKV 或其他远端 provider 之前，runtime 应先把当前 todo/lease 写路径中的
@@ -1077,6 +1109,15 @@ fail-closed write-check hook；promotion 可按 operation receipt 重放，provi
 并选择 promoted mode 之前，这些仍只是切换机械结构，不代表生产权威源已经翻转。
 后续必须接齐所有 legacy writer、显式配置与 rollback，并证明默认 legacy 兼容性，
 才能启用本地 promotion。
+
+第一块生产 fencing 集成现在已经收口了上述工作中的写入侧：所有 Python Todo mutation
+都会在持有现有 active-state mutation lock 时检查 TypeScript 权威拥有的 durable fence；
+原生 TypeScript task-lease 的 acquire / renew / transfer / release 也会在持有 lease lock
+时检查同一个 fence。fence 不存在时保持零 runtime 调用的默认兼容路径；fence 存在、
+不可读或不合法时一律 fail closed。后续 promotion orchestrator 必须先取得这两把 legacy
+lock，再 engage fence，从而保证不存在某次 legacy write 已通过检查、却在 cutover 后才
+提交。provider-first CLI 路由和持锁 promotion operation 仍是下一切片；在它们落地前，
+本集成选择阻断 split-brain 写入，而不会静默回退。
 
 完成续接（continuation）的持久化读回
 （`durable_completion.py`：`read_persisted_todo_record` /

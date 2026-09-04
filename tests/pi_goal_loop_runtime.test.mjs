@@ -121,10 +121,21 @@ function backoffDecision() {
       action: "backoff_waiting_for_user",
       reset_policy: { reset_token: "wait-1" },
       unchanged_poll: {
+        limits: { local_scheduler: 3 },
+        after_limits: { local_scheduler: "stop_tick_loop" },
+        final_quota_replan_check_enabled: true,
+        final_quota_replan_check_action: "rerun_quota_should_run_once",
+      },
+      cold_path_detail: {
         local_scheduler: {
           recommended_interval_minutes: 3,
           example_progression_minutes: [3, 6, 12],
           unchanged_poll_limit: 3,
+          after_limit: "stop_tick_loop",
+          final_quota_replan_check: {
+            enabled: true,
+            action: "rerun_quota_should_run_once",
+          },
         },
       },
     },
@@ -185,8 +196,9 @@ function harness(initialDecision) {
   const loop = createGoalLoop({
     quotaProbe: async () => {
       calls.quota += 1
-      if (decision instanceof Error) throw decision
-      return decision
+      const value = typeof decision === "function" ? decision(calls.quota) : decision
+      if (value instanceof Error) throw value
+      return value
     },
     sendMessage: (prompt) => {
       calls.send += 1
@@ -515,13 +527,14 @@ test("coalesces concurrent settles into one quota decision", async () => {
 })
 
 
-test("wait plan stops at the unchanged-poll limit", () => {
+test("wait plan marks the third unchanged poll for a final check", () => {
   const binding = {
     schedulerToken: "wait-1",
-    unchangedPolls: 3,
+    unchangedPolls: 2,
   }
   const plan = waitPlan(backoffDecision(), binding)
   assert.equal(plan.stop, true)
+  assert.equal(plan.finalCheck, true)
   assert.equal(plan.minutes, DEFAULT_RETRY_MINUTES)
 })
 
@@ -546,6 +559,73 @@ test("wait plan resets the unchanged count when the scheduler token changes", ()
   const plan = waitPlan(backoffDecision(), binding)
   assert.equal(plan.stop, false)
   assert.equal(plan.unchangedPolls, 1)
+  assert.equal(plan.minutes, 3)
+})
+
+
+test("third unchanged poll stops only after an unchanged final quota probe", async () => {
+  const fixture = harness(backoffDecision())
+  const key = "session-final-probe-stop"
+  fixture.loop.bind(key, fixture.services)
+  await fixture.activate(key)
+  await fixture.store.write(key, {
+    schedulerToken: "wait-1",
+    unchangedPolls: 2,
+  })
+
+  await fixture.loop.settle(key)
+
+  assert.equal(fixture.calls.quota, 2)
+  assert.equal(fixture.calls.send, 0)
+  assert.equal(fixture.scheduled.length, 0)
+})
+
+
+test("final quota probe follows a changed run-now decision", async () => {
+  const runNow = {
+    should_run: true,
+    effective_action: "normal_run",
+    scheduler_hint: {
+      action: "run_now",
+      cadence_class: "active_work",
+      reset_policy: { reset_token: "run-2" },
+    },
+  }
+  const fixture = harness((probeNumber) =>
+    probeNumber === 1 ? backoffDecision() : runNow)
+  const key = "session-final-probe-run-now"
+  fixture.loop.bind(key, fixture.services)
+  await fixture.activate(key)
+  await fixture.store.write(key, {
+    schedulerToken: "wait-1",
+    unchangedPolls: 2,
+  })
+
+  await fixture.loop.settle(key)
+
+  assert.equal(fixture.calls.quota, 2)
+  assert.equal(fixture.calls.send, 1)
+  assert.equal(fixture.scheduled.length, 0)
+})
+
+
+test("failed final quota probe schedules a bounded retry", async () => {
+  const fixture = harness((probeNumber) =>
+    probeNumber === 2 ? new Error("final probe failed") : backoffDecision())
+  const key = "session-final-probe-retry"
+  fixture.loop.bind(key, fixture.services)
+  await fixture.activate(key)
+  await fixture.store.write(key, {
+    schedulerToken: "wait-1",
+    unchangedPolls: 2,
+  })
+
+  await fixture.loop.settle(key)
+
+  assert.equal(fixture.calls.quota, 2)
+  assert.equal(fixture.calls.send, 0)
+  assert.equal(fixture.scheduled.length, 1)
+  assert.equal(fixture.scheduled[0].delayMs, DEFAULT_RETRY_MINUTES * 60_000)
 })
 
 

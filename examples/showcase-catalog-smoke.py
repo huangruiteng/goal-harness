@@ -154,6 +154,16 @@ def main() -> int:
                 localized_case = case.get("localizations", {}).get(lang, {})
                 expected_boundary = localized_case.get("evidence_boundary", case.get("evidence_boundary"))
                 assert str(expected_boundary) in localized_text, localized_page
+            if case.get("page_assets") == "shared":
+                table = case.get("showcase_table", {})
+                localized_table = case.get("localizations", {}).get(lang, {})
+                expected_proof = localized_table.get("proof_point", table.get("proof_point"))
+                expected_intervention = localized_table.get(
+                    "loopx_intervention", table.get("loopx_intervention")
+                )
+                assert expected_proof and str(expected_proof) in localized_text, localized_page
+                assert expected_intervention and str(expected_intervention) in localized_text, localized_page
+                assert 'href="../showcase-page.css"' in localized_text, localized_page
 
         demo_command = case.get("demo_command")
         if case.get("status") == "reproducible_synthetic_demo":

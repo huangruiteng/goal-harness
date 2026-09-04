@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 from loopx.capabilities.periodic_report.pending_intent import (
+    _atomic_write_text,
     _periodic_report_delivery_binding_ref,
     consume_pending_periodic_report_intent,
     pending_periodic_report_intents,
@@ -464,6 +466,215 @@ def test_consumption_is_local_and_exact_replay_does_not_duplicate_gate(
     assert quota["user_todo_summary"]["open_count"] == 0
 
 
+def test_report_artifacts_leave_no_temp_residue(tmp_path: Path) -> None:
+    registry, runtime = _fixture(tmp_path)
+
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    _write_editorial_response(required)
+    first = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+
+    assert first["status"] == "approval_pending"
+    artifact_dir = Path(first["artifacts"]["markdown_path"]).parent
+    names = sorted(item.name for item in artifact_dir.iterdir())
+    for expected in (
+        "generation-bundle.json",
+        "publication-candidate.json",
+        "report.html",
+        "report.md",
+    ):
+        assert expected in names
+    assert not [name for name in names if name.endswith(".tmp")]
+    html = Path(first["artifacts"]["html_path"]).read_text(encoding="utf-8")
+    assert html.rstrip().endswith("</html>")
+    assert Path(first["artifacts"]["markdown_path"]).read_text(encoding="utf-8").strip()
+
+
+def test_atomic_write_text_keeps_target_intact_when_replace_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "report.md"
+    _atomic_write_text(target, "previous content")
+    assert target.read_text(encoding="utf-8") == "previous content"
+
+    def _boom(source: object, destination: object) -> None:
+        raise OSError("simulated interruption before rename")
+
+    monkeypatch.setattr(
+        "loopx.capabilities.periodic_report.pending_intent.os.replace", _boom
+    )
+    with pytest.raises(OSError, match="simulated interruption"):
+        _atomic_write_text(target, "new content")
+
+    assert target.read_text(encoding="utf-8") == "previous content"
+    assert not [item for item in tmp_path.iterdir() if item.name.endswith(".tmp")]
+
+
+def test_report_markdown_not_left_behind_when_rename_is_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    _write_editorial_response(required)
+
+    real_replace = os.replace
+
+    def _interrupt_at_report_md(source: object, destination: object) -> None:
+        if Path(str(destination)).name == "report.md":
+            raise OSError("simulated interruption before report.md rename")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(
+        "loopx.capabilities.periodic_report.pending_intent.os.replace",
+        _interrupt_at_report_md,
+    )
+    with pytest.raises(OSError, match="before report.md rename"):
+        consume_pending_periodic_report_intent(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            execute=True,
+        )
+
+    assert list(runtime.rglob("report.md")) == []
+
+
+def test_report_html_not_left_behind_when_rename_is_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    required = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    _write_editorial_response(required)
+
+    real_replace = os.replace
+
+    def _interrupt_at_report_html(source: object, destination: object) -> None:
+        if Path(str(destination)).name == "report.html":
+            raise OSError("simulated interruption before report.html rename")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(
+        "loopx.capabilities.periodic_report.pending_intent.os.replace",
+        _interrupt_at_report_html,
+    )
+    with pytest.raises(OSError, match="before report.html rename"):
+        consume_pending_periodic_report_intent(
+            registry_path=registry,
+            runtime_root=runtime,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            execute=True,
+        )
+
+    assert list(runtime.rglob("report.html")) == []
+    assert not [
+        item for item in runtime.rglob("*") if item.name.endswith(".tmp")
+    ]
+
+
+def test_atomic_write_temp_file_stays_in_directory_and_never_collides_with_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "report.html"
+
+    observed: list[tuple[Path, Path]] = []
+    real_replace = os.replace
+
+    def _tracking_replace(source: object, destination: object) -> None:
+        observed.append((Path(str(source)), Path(str(destination))))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(
+        "loopx.capabilities.periodic_report.pending_intent.os.replace",
+        _tracking_replace,
+    )
+    _atomic_write_text(target, "tracked content")
+
+    assert len(observed) == 1
+    source, destination = observed[0]
+    assert source.parent == destination.parent == tmp_path
+    assert source.name.startswith(".report.html.")
+    assert source.name.endswith(".tmp")
+    assert source != destination
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["report.html"]
+    assert target.read_text(encoding="utf-8") == "tracked content"
+
+
+def test_atomic_write_text_consecutive_rewrites_replace_content_without_residue(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "report.md"
+    drafts = ("first draft", "second draft", "final draft")
+    for content in drafts:
+        _atomic_write_text(target, content)
+        assert target.read_text(encoding="utf-8") == content
+        assert sorted(item.name for item in tmp_path.iterdir()) == ["report.md"]
+
+    _atomic_write_text(target, drafts[-1])
+    assert target.read_text(encoding="utf-8") == drafts[-1]
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["report.md"]
+
+
+def test_atomic_write_text_large_multi_segment_content_keeps_head_and_tail(
+    tmp_path: Path,
+) -> None:
+    segment = "数据段落" * 40 + "\n"
+    content = "<!-- head-marker -->\n" + segment * 2000 + "<!-- tail-marker -->\n"
+    target = tmp_path / "report.md"
+
+    _atomic_write_text(target, content)
+
+    written = target.read_text(encoding="utf-8")
+    assert written == content
+    assert len(written) == len(content)
+    assert written.startswith("<!-- head-marker -->")
+    assert written.rstrip().endswith("<!-- tail-marker -->")
+
+
+def test_atomic_write_text_fsync_failure_cleans_temp_and_keeps_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "report.md"
+    _atomic_write_text(target, "previous content")
+    assert target.read_text(encoding="utf-8") == "previous content"
+
+    def _boom(fd: object) -> None:
+        raise OSError("simulated fsync failure")
+
+    monkeypatch.setattr(
+        "loopx.capabilities.periodic_report.pending_intent.os.fsync", _boom
+    )
+    with pytest.raises(OSError, match="simulated fsync failure"):
+        _atomic_write_text(target, "new content")
+
+    assert target.read_text(encoding="utf-8") == "previous content"
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["report.md"]
+
+
 def test_consumption_uses_the_stage_progress_snapshot(tmp_path: Path) -> None:
     registry, runtime = _fixture(tmp_path)
     sidecar = next(
@@ -511,6 +722,37 @@ def test_consumption_uses_the_stage_progress_snapshot(tmp_path: Path) -> None:
     assert not any(
         "Follow-up work added after stage completion" in fact["title"] for fact in facts
     )
+
+
+def test_consumption_skips_done_todos_without_valid_completion_timestamps(
+    tmp_path: Path,
+) -> None:
+    registry, runtime = _fixture(tmp_path)
+    state_path = registry.parent / "ACTIVE_GOAL_STATE.md"
+    state_path.write_text(
+        state_path.read_text(encoding="utf-8")
+        + "- [x] Handwritten outcome without a timestamp.\n"
+        "  <!-- loopx:todo todo_id=todo_handwritten status=done"
+        f" task_class=advancement_task claimed_by={AGENT_ID} -->\n",
+        encoding="utf-8",
+    )
+
+    result = consume_pending_periodic_report_intent(
+        registry_path=registry,
+        runtime_root=runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        execute=True,
+    )
+    assert result["status"] == "editorial_required"
+    request = json.loads(
+        Path(result["editorial_request_path"]).read_text(encoding="utf-8")
+    )
+    facts = request["facts"]
+
+    assert [fact["source_ref"] for fact in facts] == ["todo:todo_finished"]
+    assert facts[0]["completed_at"] == "2026-08-30T09:00:00Z"
+    assert not any("Handwritten outcome" in fact["title"] for fact in facts)
 
 
 def test_publication_candidate_keeps_the_trigger_snapshot_baseline(

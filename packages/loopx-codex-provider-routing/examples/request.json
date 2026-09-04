@@ -11,7 +11,11 @@
         ],
         "priority": 300,
         "provider": "codex",
-        "supports_fast": true
+        "supports_fast": true,
+        "tool_transports": [
+          "function_call",
+          "custom_tool_call"
+        ]
       },
       {
         "id": "codex-b",
@@ -21,7 +25,11 @@
         ],
         "priority": 200,
         "provider": "codex",
-        "supports_fast": true
+        "supports_fast": true,
+        "tool_transports": [
+          "function_call",
+          "custom_tool_call"
+        ]
       },
       {
         "id": "ark-text",
@@ -30,7 +38,10 @@
         ],
         "priority": 100,
         "provider": "openai_compatibility",
-        "supports_fast": false
+        "supports_fast": false,
+        "tool_transports": [
+          "function_call"
+        ]
       }
     ],
     "rings": [

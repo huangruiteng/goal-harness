@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from itertools import pairwise
 from typing import Any
 
@@ -12,6 +13,10 @@ RESPONSE_SCHEMA_VERSION = "loopx_codex_provider_routing_response_v0"
 INTEGRATION_CANDIDATE_SCHEMA_VERSION = "codex_provider_integration_candidate_v0"
 HEARTBEAT_TRANSPORT_SCHEMA_VERSION = "codex_app_heartbeat_transport_qualification_v0"
 HOST_CONTROL_RECOVERY_SCHEMA_VERSION = "codex_host_control_recovery_qualification_v0"
+DESKTOP_PATCH_SCHEMA_VERSION = "codex_desktop_patch_qualification_v0"
+QUOTA_RECOVERY_SCHEMA_VERSION = "codex_quota_recovery_qualification_v0"
+TOOL_TRANSPORT_SCHEMA_VERSION = "codex_tool_transport_qualification_v0"
+OUTAGE_RECOVERY_SCHEMA_VERSION = "codex_outage_recovery_qualification_v0"
 
 RECOVERABLE_HOST_CONTROL_NAMES = {
     "automation_update",
@@ -38,12 +43,15 @@ FORBIDDEN_KEYS = {
 }
 ALLOWED_MODALITIES = {"text", "image"}
 ALLOWED_PROVIDERS = {"codex", "openai_compatibility"}
+ALLOWED_TOOL_TRANSPORTS = {"function_call", "custom_tool_call"}
 ALLOWED_REASONING_LEVELS = {"low", "medium", "high", "xhigh", "max", "ultra"}
 ALLOWED_CHANGE_SEAMS = {
+    "desktop_runtime_patch",
     "history_projection",
     "integration_candidate",
     "modality_routing",
     "model_catalog",
+    "quota_recovery",
     "request_normalizer",
     "retry_policy",
     "route_fallback",
@@ -51,6 +59,7 @@ ALLOWED_CHANGE_SEAMS = {
     "sse_lifecycle",
     "ssh_bridge",
     "transport_pool",
+    "tool_transport",
 }
 SYMBOLIC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 MODEL_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9./-]{0,127}$")
@@ -101,6 +110,419 @@ def _boolean(value: Any, field: str, *, default: bool | None = None) -> bool:
     if not isinstance(value, bool):
         raise TypeError(f"{field} must be a boolean")
     return value
+
+
+def _utc_datetime(value: Any, field: str) -> datetime:
+    timestamp = _timestamp(value, field)
+    return datetime.fromisoformat(timestamp)
+
+
+def qualify_desktop_patch(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Qualify an already-built, patched Codex desktop runtime."""
+
+    reject_private_material(observation)
+    _reject_unexpected_keys(
+        observation,
+        {
+            "anchor_state",
+            "changed_file_count",
+            "per_file_integrity_match_count",
+            "header_integrity_matches_bundle_metadata",
+            "signature_valid",
+            "launch_succeeded",
+            "heartbeat_readback_succeeded",
+        },
+        "desktop_patch",
+    )
+    anchor_state = _non_empty_string(
+        observation.get("anchor_state"), "desktop_patch.anchor_state"
+    )
+    if anchor_state not in {
+        "unpatched_unique",
+        "patched_unique",
+        "unsupported",
+        "ambiguous",
+    }:
+        raise ValueError("desktop_patch.anchor_state is unsupported")
+    changed_file_count = observation.get("changed_file_count")
+    match_count = observation.get("per_file_integrity_match_count")
+    if (
+        not isinstance(changed_file_count, int)
+        or isinstance(changed_file_count, bool)
+        or changed_file_count < 0
+    ):
+        raise TypeError(
+            "desktop_patch.changed_file_count must be a non-negative integer"
+        )
+    if (
+        not isinstance(match_count, int)
+        or isinstance(match_count, bool)
+        or match_count < 0
+    ):
+        raise TypeError(
+            "desktop_patch.per_file_integrity_match_count must be a non-negative "
+            "integer"
+        )
+    if changed_file_count == 0:
+        raise ValueError("desktop_patch.changed_file_count must be positive")
+    if match_count > changed_file_count:
+        raise ValueError(
+            "desktop_patch.per_file_integrity_match_count exceeds changed files"
+        )
+
+    anchor_failure_codes = {
+        "unpatched_unique": "desktop_patch_not_applied",
+        "unsupported": "desktop_patch_anchor_unsupported",
+        "ambiguous": "desktop_patch_anchor_ambiguous",
+    }
+    checks = [
+        {
+            "id": "patched_anchor_unique",
+            "passed": anchor_state == "patched_unique",
+            "failure_code": anchor_failure_codes.get(
+                anchor_state, "desktop_patch_anchor_not_unique"
+            ),
+        },
+        {
+            "id": "per_file_integrity",
+            "passed": match_count == changed_file_count,
+            "failure_code": "asar_file_integrity_stale",
+        },
+        {
+            "id": "header_integrity",
+            "passed": _boolean(
+                observation.get("header_integrity_matches_bundle_metadata"),
+                "desktop_patch.header_integrity_matches_bundle_metadata",
+            ),
+            "failure_code": "asar_header_integrity_stale",
+        },
+        {
+            "id": "signature",
+            "passed": _boolean(
+                observation.get("signature_valid"),
+                "desktop_patch.signature_valid",
+            ),
+            "failure_code": "desktop_signature_invalid",
+        },
+        {
+            "id": "launch",
+            "passed": _boolean(
+                observation.get("launch_succeeded"),
+                "desktop_patch.launch_succeeded",
+            ),
+            "failure_code": "desktop_launch_failed",
+        },
+        {
+            "id": "heartbeat_readback",
+            "passed": _boolean(
+                observation.get("heartbeat_readback_succeeded"),
+                "desktop_patch.heartbeat_readback_succeeded",
+            ),
+            "failure_code": "heartbeat_transport_readback_failed",
+        },
+    ]
+    failure_codes = [check["failure_code"] for check in checks if not check["passed"]]
+    return {
+        "schema_version": DESKTOP_PATCH_SCHEMA_VERSION,
+        "qualified": not failure_codes,
+        "failure_codes": failure_codes,
+        "checks": checks,
+        "required_order": [
+            "match_exactly_one_versioned_anchor",
+            "apply_length_preserving_patch",
+            "refresh_changed_file_integrity",
+            "refresh_asar_header_integrity_in_bundle_metadata",
+            "sign_runtime",
+            "launch_runtime",
+            "read_back_heartbeat_transport",
+        ],
+        "responsible_layer": "codex_desktop_runtime_builder",
+        "effect_boundary": "content_free_observation_only",
+    }
+
+
+def qualify_outage_recovery(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Qualify state transitions after a provider-wide outage ends.
+
+    A provider incident (for example repeated 4xx/5xx across every native
+    profile) creates two kinds of state: a cooldown on native profiles and a
+    degraded affinity to a text-only fallback. Once a recovery signal newer
+    than the cooldown source is observed, both must be revalidated before a
+    request that needs native capabilities is admitted.
+    """
+
+    reject_private_material(observation)
+    _reject_unexpected_keys(
+        observation,
+        {
+            "outage_ended",
+            "outage_ended_observed_at",
+            "cooldown_source_observed_at",
+            "cooldown_expires_at",
+            "cooldown_invalidated",
+            "post_recovery_probe",
+            "degraded_fallback_binding_cleared",
+            "native_capability_requested",
+            "fallback_attempted",
+        },
+        "outage_recovery",
+    )
+    outage_ended = _boolean(
+        observation.get("outage_ended"), "outage_recovery.outage_ended"
+    )
+    cooldown_source_at = _utc_datetime(
+        observation.get("cooldown_source_observed_at"),
+        "outage_recovery.cooldown_source_observed_at",
+    )
+    cooldown_expires_at = _utc_datetime(
+        observation.get("cooldown_expires_at"),
+        "outage_recovery.cooldown_expires_at",
+    )
+    if cooldown_expires_at <= cooldown_source_at:
+        raise ValueError("outage_recovery cooldown expiry must follow its source")
+    invalidated = _boolean(
+        observation.get("cooldown_invalidated"),
+        "outage_recovery.cooldown_invalidated",
+    )
+    probe = _non_empty_string(
+        observation.get("post_recovery_probe"),
+        "outage_recovery.post_recovery_probe",
+    )
+    if probe not in {"not_attempted", "success", "still_outage", "transport_failed"}:
+        raise ValueError("outage_recovery.post_recovery_probe is unsupported")
+    degraded_cleared = _boolean(
+        observation.get("degraded_fallback_binding_cleared"),
+        "outage_recovery.degraded_fallback_binding_cleared",
+    )
+    native_requested = _boolean(
+        observation.get("native_capability_requested"),
+        "outage_recovery.native_capability_requested",
+    )
+    fallback_attempted = _boolean(
+        observation.get("fallback_attempted"),
+        "outage_recovery.fallback_attempted",
+    )
+
+    if outage_ended:
+        outage_ended_at = _utc_datetime(
+            observation.get("outage_ended_observed_at"),
+            "outage_recovery.outage_ended_observed_at",
+        )
+        if outage_ended_at <= cooldown_source_at:
+            raise ValueError("outage end must follow the cooldown source")
+        checks = [
+            {
+                "id": "stale_cooldown_invalidated",
+                "passed": invalidated,
+                "failure_code": "stale_outage_cooldown_retained",
+            },
+            {
+                "id": "recovery_probe_performed",
+                "passed": probe in {"success", "still_outage"},
+                "failure_code": "recovery_probe_missing",
+            },
+            {
+                "id": "fallback_gated_by_probe",
+                "passed": not fallback_attempted or probe == "still_outage",
+                "failure_code": "fallback_selected_after_recovery_probe",
+            },
+        ]
+        expected_action = "invalidate_cooldown_and_revalidate_affinity"
+    else:
+        checks = [
+            {
+                "id": "cooldown_retained_without_outage_end",
+                "passed": not invalidated,
+                "failure_code": "cooldown_invalidated_without_outage_end",
+            }
+        ]
+        expected_action = "retain_cooldown_until_recovery_observed"
+    checks.append(
+        {
+            "id": "degraded_binding_not_used_for_native",
+            "passed": not native_requested
+            or (
+                not fallback_attempted
+                and (not outage_ended or degraded_cleared)
+            ),
+            "failure_code": "degraded_fallback_binding_used_for_native_request",
+        }
+    )
+    failure_codes = [check["failure_code"] for check in checks if not check["passed"]]
+    return {
+        "schema_version": OUTAGE_RECOVERY_SCHEMA_VERSION,
+        "qualified": not failure_codes,
+        "failure_codes": failure_codes,
+        "outage_ended": outage_ended,
+        "expected_action": expected_action,
+        "checks": checks,
+        "required_contract": {
+            "incident_cooldown": "outage_end_newer_than_source_invalidates_cooldown",
+            "recovery_gate": "bounded_probe_before_fallback_admission",
+            "degraded_affinity": (
+                "fallback_binding_revalidated_before_native_capability_request"
+            ),
+            "native_capability": "fail_closed_when_no_eligible_native_provider",
+        },
+        "responsible_layer": "cpa_provider_health_state_and_selector",
+        "effect_boundary": "content_free_observation_only",
+    }
+
+
+def qualify_quota_recovery(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Ensure an applied account reset invalidates older provider cooldown state."""
+
+    reject_private_material(observation)
+    _reject_unexpected_keys(
+        observation,
+        {
+            "reset_outcome",
+            "reset_observed_at",
+            "cooldown_source_observed_at",
+            "cooldown_expires_at",
+            "cooldown_invalidated",
+            "post_reset_probe",
+            "fallback_attempted",
+        },
+        "quota_recovery",
+    )
+    reset_outcome = _non_empty_string(
+        observation.get("reset_outcome"), "quota_recovery.reset_outcome"
+    )
+    if reset_outcome not in {"applied", "not_applied"}:
+        raise ValueError("quota_recovery.reset_outcome is unsupported")
+    reset_at = _utc_datetime(
+        observation.get("reset_observed_at"), "quota_recovery.reset_observed_at"
+    )
+    cooldown_source_at = _utc_datetime(
+        observation.get("cooldown_source_observed_at"),
+        "quota_recovery.cooldown_source_observed_at",
+    )
+    cooldown_expires_at = _utc_datetime(
+        observation.get("cooldown_expires_at"),
+        "quota_recovery.cooldown_expires_at",
+    )
+    if cooldown_expires_at <= cooldown_source_at:
+        raise ValueError("quota_recovery cooldown expiry must follow its source")
+    invalidated = _boolean(
+        observation.get("cooldown_invalidated"),
+        "quota_recovery.cooldown_invalidated",
+    )
+    probe = _non_empty_string(
+        observation.get("post_reset_probe"), "quota_recovery.post_reset_probe"
+    )
+    if probe not in {"not_attempted", "success", "quota_limited", "transport_failed"}:
+        raise ValueError("quota_recovery.post_reset_probe is unsupported")
+    fallback_attempted = _boolean(
+        observation.get("fallback_attempted"),
+        "quota_recovery.fallback_attempted",
+    )
+
+    reset_supersedes_cooldown = (
+        reset_outcome == "applied" and reset_at > cooldown_source_at
+    )
+    if reset_supersedes_cooldown:
+        checks = [
+            {
+                "id": "cooldown_invalidated",
+                "passed": invalidated,
+                "failure_code": "stale_quota_cooldown_retained",
+            },
+            {
+                "id": "account_reprobed",
+                "passed": probe in {"success", "quota_limited"},
+                "failure_code": "post_reset_probe_missing",
+            },
+            {
+                "id": "fallback_gated_by_probe",
+                "passed": not fallback_attempted or probe == "quota_limited",
+                "failure_code": "fallback_selected_before_recovered_account_probe",
+            },
+        ]
+        expected_action = "invalidate_and_probe"
+    else:
+        checks = [
+            {
+                "id": "cooldown_retained_without_newer_reset",
+                "passed": not invalidated,
+                "failure_code": "cooldown_invalidated_without_newer_reset",
+            }
+        ]
+        expected_action = "retain_cooldown"
+    failure_codes = [check["failure_code"] for check in checks if not check["passed"]]
+    return {
+        "schema_version": QUOTA_RECOVERY_SCHEMA_VERSION,
+        "qualified": not failure_codes,
+        "failure_codes": failure_codes,
+        "reset_supersedes_cooldown": reset_supersedes_cooldown,
+        "expected_action": expected_action,
+        "checks": checks,
+        "required_contract": {
+            "reset_receipt_ordering": "newer_reset_invalidates_older_cooldown",
+            "fallback_gate": "probe_recovered_account_before_fallback",
+            "new_quota_limit": "a_new_probe_may_create_a_new_cooldown",
+        },
+        "responsible_layer": "cpa_provider_health_state",
+        "effect_boundary": "content_free_observation_only",
+    }
+
+
+def qualify_tool_transport(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Qualify the response item shape used to dispatch one tool call."""
+
+    reject_private_material(observation)
+    _reject_unexpected_keys(
+        observation,
+        {"requested_transport", "observed_transport", "dispatch_outcome"},
+        "tool_transport",
+    )
+    requested = _non_empty_string(
+        observation.get("requested_transport"),
+        "tool_transport.requested_transport",
+    )
+    observed = _non_empty_string(
+        observation.get("observed_transport"),
+        "tool_transport.observed_transport",
+    )
+    if requested not in ALLOWED_TOOL_TRANSPORTS:
+        raise ValueError("tool_transport.requested_transport is unsupported")
+    if observed not in ALLOWED_TOOL_TRANSPORTS:
+        raise ValueError("tool_transport.observed_transport is unsupported")
+    outcome = _non_empty_string(
+        observation.get("dispatch_outcome"), "tool_transport.dispatch_outcome"
+    )
+    if outcome not in {"completed", "not_dispatched", "rejected_incompatible_payload"}:
+        raise ValueError("tool_transport.dispatch_outcome is unsupported")
+    checks = [
+        {
+            "id": "transport_preserved",
+            "passed": requested == observed,
+            "failure_code": "tool_transport_downgraded",
+        },
+        {
+            "id": "dispatch_completed",
+            "passed": outcome == "completed",
+            "failure_code": "tool_dispatch_incomplete",
+        },
+    ]
+    failure_codes = [check["failure_code"] for check in checks if not check["passed"]]
+    return {
+        "schema_version": TOOL_TRANSPORT_SCHEMA_VERSION,
+        "qualified": not failure_codes,
+        "failure_codes": failure_codes,
+        "checks": checks,
+        "required_contract": {
+            "admission_filter": "required_tool_transport",
+            "custom_tool_call": "preserve_raw_code_payload_and_item_type",
+            "on_no_eligible_provider": "fail_closed_before_first_output",
+        },
+        "responsible_layer": (
+            "provider_response_adapter"
+            if requested != observed
+            else "codex_app_tool_dispatch"
+        ),
+        "effect_boundary": "content_free_observation_only",
+    }
 
 
 def qualify_heartbeat_transport(observation: Mapping[str, Any]) -> dict[str, Any]:
@@ -375,11 +797,18 @@ def _compile_profiles(raw_profiles: Any) -> dict[str, dict[str, Any]]:
         )
         if not modalities or not set(modalities) <= ALLOWED_MODALITIES:
             raise ValueError(f"profile {profile_id} has unsupported input modalities")
+        tool_transports = _string_list(
+            raw.get("tool_transports", ["function_call"]),
+            f"profiles[{index}].tool_transports",
+        )
+        if not tool_transports or not set(tool_transports) <= ALLOWED_TOOL_TRANSPORTS:
+            raise ValueError(f"profile {profile_id} has unsupported tool transports")
         profiles[profile_id] = {
             "id": profile_id,
             "provider": provider,
             "priority": priority,
             "input_modalities": modalities,
+            "tool_transports": tool_transports,
             "supports_fast": _boolean(
                 raw.get("supports_fast"),
                 f"profiles[{index}].supports_fast",
@@ -435,6 +864,7 @@ def _eligible_profiles(
     *,
     required_modalities: set[str],
     require_fast: bool = False,
+    required_tool_transport: str | None = None,
 ) -> list[str]:
     eligible: list[str] = []
     for profile_id in candidates:
@@ -442,6 +872,11 @@ def _eligible_profiles(
         if not required_modalities <= set(profile["input_modalities"]):
             continue
         if require_fast and not profile["supports_fast"]:
+            continue
+        if (
+            required_tool_transport is not None
+            and required_tool_transport not in profile["tool_transports"]
+        ):
             continue
         eligible.append(profile_id)
     return eligible
@@ -652,7 +1087,9 @@ def compile_catalog(source: Mapping[str, Any]) -> dict[str, Any]:
                 if supports_fast and mode != "alias"
                 else [],
                 "routing_policy": {
-                    "candidate_filter": "required_modalities_and_service_tier",
+                    "candidate_filter": (
+                        "required_modalities_service_tier_and_tool_transport"
+                    ),
                     "on_no_eligible_provider": "fail_closed_before_first_output",
                     "session_affinity": "hint_revalidated_per_attempt"
                     if mode in {"auto", "preferred"}
@@ -745,7 +1182,12 @@ def normalize_selector_request(normalization: Mapping[str, Any]) -> dict[str, An
     reject_private_material(normalization)
     _reject_unexpected_keys(
         normalization,
-        {"catalog_source", "model_selector", "service_tier"},
+        {
+            "catalog_source",
+            "model_selector",
+            "service_tier",
+            "required_tool_transport",
+        },
         "normalization",
     )
     source = normalization.get("catalog_source")
@@ -778,6 +1220,26 @@ def normalize_selector_request(normalization: Mapping[str, Any]) -> dict[str, An
     )
     eligible_candidates = selector["candidates"]
     fallback_policy = selector["fallback_policy"]
+    required_tool_transport = normalization.get("required_tool_transport")
+    if required_tool_transport is not None:
+        required_tool_transport = _non_empty_string(
+            required_tool_transport, "normalization.required_tool_transport"
+        )
+        if required_tool_transport not in ALLOWED_TOOL_TRANSPORTS:
+            raise ValueError("normalization.required_tool_transport is unsupported")
+        profiles = {item["id"]: item for item in catalog["profiles"]}
+        eligible_candidates = _eligible_profiles(
+            eligible_candidates,
+            profiles,
+            required_modalities=set(),
+            required_tool_transport=required_tool_transport,
+        )
+        fallback_policy = "required_tool_transport_only"
+        if not eligible_candidates:
+            raise ValueError(
+                f"selector {selector_slug} has no provider for "
+                f"{required_tool_transport}"
+            )
     if effective_fast:
         profiles = {item["id"]: item for item in catalog["profiles"]}
         eligible_candidates = _eligible_profiles(
@@ -785,10 +1247,15 @@ def normalize_selector_request(normalization: Mapping[str, Any]) -> dict[str, An
             profiles,
             required_modalities=set(),
             require_fast=True,
+            required_tool_transport=required_tool_transport,
         )
         if not eligible_candidates:
             raise ValueError(f"selector {selector_slug} has no Fast-capable candidates")
-        fallback_policy = "fast_capable_only"
+        fallback_policy = (
+            "fast_and_required_tool_transport_only"
+            if required_tool_transport is not None
+            else "fast_capable_only"
+        )
 
     return {
         "original_model_selector": selector_slug,
@@ -797,6 +1264,7 @@ def normalize_selector_request(normalization: Mapping[str, Any]) -> dict[str, An
         "service_tier": tier_action,
         "fallback_policy": fallback_policy,
         "eligible_candidates": eligible_candidates,
+        "required_tool_transport": required_tool_transport,
     }
 
 
@@ -862,12 +1330,14 @@ def _eligible_route_order(
     *,
     modality: str,
     fast: bool,
+    required_tool_transport: str | None,
 ) -> list[str]:
     return _eligible_profiles(
         route["candidates"],
         profiles,
         required_modalities={modality},
         require_fast=fast,
+        required_tool_transport=required_tool_transport,
     )
 
 
@@ -878,8 +1348,15 @@ def _legal_attempt_orders(
     *,
     modality: str,
     fast: bool,
+    required_tool_transport: str | None,
 ) -> list[list[str]]:
-    eligible = _eligible_route_order(route, profiles, modality=modality, fast=fast)
+    eligible = _eligible_route_order(
+        route,
+        profiles,
+        modality=modality,
+        fast=fast,
+        required_tool_transport=required_tool_transport,
+    )
     if route["entrypoint"] != "affinity_then_first":
         return [eligible]
     ring = rings[route["ring_id"]]
@@ -948,6 +1425,7 @@ def project_runtime_status(status: Mapping[str, Any]) -> dict[str, Any]:
             "attempted_profiles",
             "selected_profile",
             "outcome",
+            "required_tool_transport",
         },
         "status.execution_observation",
     )
@@ -972,6 +1450,16 @@ def project_runtime_status(status: Mapping[str, Any]) -> dict[str, Any]:
         if selector_defaults_fast and not declared_fast:
             raise ValueError("a Fast selector cannot report a non-Fast execution")
         fast = declared_fast
+    required_tool_transport = observation.get("required_tool_transport")
+    if required_tool_transport is not None:
+        required_tool_transport = _non_empty_string(
+            required_tool_transport,
+            "status.execution_observation.required_tool_transport",
+        )
+        if required_tool_transport not in ALLOWED_TOOL_TRANSPORTS:
+            raise ValueError(
+                "status.execution_observation.required_tool_transport is unsupported"
+            )
     observed_at = _timestamp(
         observation.get("observed_at"), "status.execution_observation.observed_at"
     )
@@ -982,7 +1470,12 @@ def project_runtime_status(status: Mapping[str, Any]) -> dict[str, Any]:
     if not attempted:
         raise ValueError("execution observation needs at least one attempted profile")
     legal_orders = _legal_attempt_orders(
-        route, rings, profiles, modality=modality, fast=fast
+        route,
+        rings,
+        profiles,
+        modality=modality,
+        fast=fast,
+        required_tool_transport=required_tool_transport,
     )
     matching_orders = [
         order for order in legal_orders if attempted == order[: len(attempted)]
@@ -1090,6 +1583,7 @@ def project_runtime_status(status: Mapping[str, Any]) -> dict[str, Any]:
             "routing_mode": route["routing_mode"],
             "modality": modality,
             "fast": fast,
+            "required_tool_transport": required_tool_transport,
             "legal_attempt_orders": legal_orders,
         },
         "execution": execution,
@@ -1314,6 +1808,14 @@ def build_upgrade_plan(upgrade: Mapping[str, Any]) -> dict[str, Any]:
             "foreign_reasoning",
             "tool_causality",
         ],
+        "desktop_runtime_patch": [
+            "versioned_anchor_unique",
+            "asar_member_integrity",
+            "asar_header_integrity",
+            "desktop_signature",
+            "desktop_launch",
+            "heartbeat_transport_readback",
+        ],
         "integration_candidate": [
             "exact_base_head",
             "exact_ordered_source_heads",
@@ -1322,11 +1824,23 @@ def build_upgrade_plan(upgrade: Mapping[str, Any]) -> dict[str, Any]:
         ],
         "sse_lifecycle": ["unique_terminal", "active_item_pairing"],
         "retry_policy": ["bounded_attempts", "ttfb_p50_p95", "commit_barrier"],
+        "quota_recovery": [
+            "reset_receipt_ordering",
+            "stale_cooldown_invalidation",
+            "post_reset_account_probe",
+            "fallback_probe_gate",
+        ],
         "transport_pool": [
             "h2_reuse",
             "tls_resumption",
             "draining_rebuild",
             "no_replay",
+        ],
+        "tool_transport": [
+            "custom_tool_candidate_admission",
+            "custom_tool_item_preserved",
+            "tool_dispatch_completed",
+            "incompatible_fallback_fail_closed",
         ],
         "model_catalog": [
             "visible_routes",

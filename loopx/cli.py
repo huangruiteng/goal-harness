@@ -807,6 +807,7 @@ def main(argv: list[str] | None = None) -> int:
         registry_path=registry_path,
         output_format=output_format,
         print_payload=print_payload,
+        runtime_root_arg=args.runtime_root,
     )
     if handoff_mode_result is not None:
         return handoff_mode_result

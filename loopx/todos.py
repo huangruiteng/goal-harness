@@ -6,16 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from .agent_registry import registered_agent_ids_from_registry, require_registered_agent_id
-from .file_lock import exclusive_file_lock
 from .history import load_registry
 from .paths import resolve_runtime_root
 from .rollout_event_log import load_rollout_events, rollout_event_log_path
 from .state_refresh import now_local, resolve_goal_state
-from .status import (
-    MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE,
-    active_state_event_projection_fields,
-)
-from .control_plane.todos.active_state_todo_parser import parse_active_state_todos
+from .status import MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE
 from .control_plane.todos.contract import (
     TodoContinuationPolicy,
     TODO_STATUS_DEFERRED,
@@ -91,16 +86,15 @@ from .control_plane.todos.list_projection import (
     AGENT_LANE_OVERLAY_FULL_DETAIL_COLD_PATH,
     EXPLICIT_LIMIT_OVERLAY_FULL_DETAIL_COLD_PATH,
     compact_agent_lane_todo_summary,
-    compact_explicit_limit_todo_summary,
     compact_thin_todo_list_payload,
     compact_todo_projection_overlay,
     todo_item_relations,
     todo_list_projection_contract,
 )
+from .control_plane.todos.goal_todo_projection import goal_todo_summaries
 from .control_plane.todos import monitor_metadata as todo_monitor_metadata
 from .control_plane.todos.external_wait_writeback import plan_todo_external_wait_update
 from .control_plane.todos.mutation_authority import authorize_todo_lifecycle_mutation, todo_update_authority_action
-from .control_plane.todos.todo_summary import compact_todo_group, todo_item_status
 from .control_plane.todos.succession_warning import build_open_parent_successor_advisory
 from .control_plane.todos.todo_index import MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL
 from .control_plane.todos.text import (
@@ -121,10 +115,15 @@ from .control_plane.todos.write_policy import (
     require_user_todo_task_class,
     resolve_user_gate_global_gate_update,
 )
+from .control_plane.coordination.legacy_writer_fence import legacy_todo_write_transaction
 from .control_plane.todos.handoff_mode import (
     enter_added_todo_ownership_handoff_gate,
     enter_todo_ownership_handoff_gate,
     resolve_todo_completion_handoff,
+)
+from .control_plane.coordination.local_authority_shadow_adapter import (
+    effective_runtime_root,
+    observe_todo_local_authority_commit as _shadow_todo,
 )
 from .control_plane.work_items.task_lease import (
     enter_terminal_todo_lease_fence,
@@ -175,194 +174,6 @@ def resolve_todo_state_path(
     return resolved_project, resolved_state_file
 
 
-def empty_todo_summary(*, role: str) -> dict[str, Any]:
-    return {
-        "schema_version": "todo_summary_v0",
-        "role": role,
-        "source_section": TODO_SECTION_HEADINGS[role],
-        "total_count": 0,
-        "open_count": 0,
-        "done_count": 0,
-        "items": [],
-        "first_open_items": [],
-    }
-
-
-def _user_todo_visible_to_agent(item: dict[str, Any], agent_id: str) -> bool:
-    if bool(item.get("global_gate")):
-        return True
-    blocks_agent = normalize_todo_blocks_agent(item.get("blocks_agent"))
-    if blocks_agent:
-        return blocks_agent == agent_id
-    bound_agent = normalize_todo_bound_agent(item.get("bound_agent"))
-    if bound_agent:
-        return bound_agent == agent_id
-    return True
-
-
-def filtered_todo_summary(
-    summary: dict[str, Any] | None,
-    *,
-    role: str,
-    status: str | None = None,
-    todo_id: str | None = None,
-    agent_id: str | None = None,
-    resume_source_items: list[dict[str, Any]] | None = None,
-    rollout_events: list[dict[str, Any]] | None = None,
-    item_limit: int | None = None,
-) -> dict[str, Any]:
-    items = list((summary or {}).get("items") or [])
-    normalized_status = normalize_todo_status(status)
-    if normalized_status:
-        items = [item for item in items if todo_item_status(item) == normalized_status]
-    normalized_todo_id = normalize_todo_id(todo_id) if todo_id else None
-    if normalized_todo_id:
-        items = [
-            item
-            for item in items
-            if normalize_todo_id(item.get("todo_id")) == normalized_todo_id
-        ]
-    normalized_agent_id = normalize_todo_claimed_by(agent_id) if agent_id else None
-    if normalized_agent_id:
-        if role == "agent":
-            items = [
-                item
-                for item in items
-                if normalized_agent_id
-                not in normalize_todo_excluded_agents(item.get("excluded_agents"))
-                and (
-                    not normalize_todo_claimed_by(item.get("claimed_by"))
-                    or normalize_todo_claimed_by(item.get("claimed_by"))
-                    == normalized_agent_id
-                )
-            ]
-        elif role == "user":
-            items = [
-                item
-                for item in items
-                if _user_todo_visible_to_agent(item, normalized_agent_id)
-            ]
-    source_section = str((summary or {}).get("source_section") or TODO_SECTION_HEADINGS[role])
-    return (
-        compact_todo_group(
-            items,
-            source_section=source_section,
-            role=role,
-            resume_source_items=resume_source_items,
-            rollout_events=rollout_events,
-            item_limit=item_limit,
-        )
-        or empty_todo_summary(role=role)
-    )
-
-
-def _summary_items(fields: dict[str, Any], role: str) -> list[dict[str, Any]]:
-    summary = fields.get(f"{role}_todos") if isinstance(fields, dict) else None
-    if not isinstance(summary, dict):
-        return []
-    return [item for item in summary.get("items") or [] if isinstance(item, dict)]
-
-
-def _merge_todo_projection_fields(
-    *,
-    markdown_fields: dict[str, Any],
-    event_fields: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    merged: dict[str, Any] = {}
-    merged_items: dict[str, list[dict[str, Any]]] = {"user": [], "agent": []}
-    source_sections: dict[str, str] = {}
-    overlay: dict[str, Any] = {
-        "schema_version": "todo_list_projection_overlay_v0",
-        "base": "markdown_active_state",
-        "overlay": "event_projection",
-        "markdown_only_todo_ids": [],
-        "event_only_todo_ids": [],
-        "overlaid_todo_ids": [],
-    }
-
-    # A todo_id is goal-wide identity. Merge both sources before splitting by
-    # role so an event-projected role change replaces the stale Markdown item.
-    by_id: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
-    markdown_ids: set[str] = set()
-    markdown_ids_by_role: dict[str, set[str]] = {"user": set(), "agent": set()}
-    event_ids: set[str] = set()
-    event_order: list[str] = []
-    for role in ("user", "agent"):
-        markdown_items = _summary_items(markdown_fields, role)
-        for item in markdown_items:
-            todo_id = normalize_todo_id(item.get("todo_id")) or build_todo_id(
-                role=role,
-                source_section=item.get("source_section"),
-                index=item.get("index"),
-                text=item.get("text"),
-            )
-            if todo_id not in by_id:
-                order.append(todo_id)
-            markdown_ids.add(todo_id)
-            markdown_ids_by_role[role].add(todo_id)
-            by_id[todo_id] = dict(item)
-
-    for role in ("user", "agent"):
-        event_items = _summary_items(event_fields, role)
-        for item in event_items:
-            todo_id = normalize_todo_id(item.get("todo_id")) or build_todo_id(
-                role=role,
-                source_section=item.get("source_section"),
-                index=item.get("index"),
-                text=item.get("text"),
-            )
-            if todo_id not in by_id:
-                order.append(todo_id)
-            if todo_id not in event_ids:
-                event_order.append(todo_id)
-                event_ids.add(todo_id)
-            by_id[todo_id] = dict(item)
-
-    markdown_only_todo_ids: list[str] = []
-    seen_markdown_only_ids: set[str] = set()
-    for role in ("user", "agent"):
-        for todo_id in sorted(markdown_ids_by_role[role] - event_ids):
-            if todo_id not in seen_markdown_only_ids:
-                markdown_only_todo_ids.append(todo_id)
-                seen_markdown_only_ids.add(todo_id)
-    overlay["markdown_only_todo_ids"] = markdown_only_todo_ids
-    overlay["event_only_todo_ids"] = [
-        todo_id for todo_id in event_order if todo_id not in markdown_ids
-    ]
-    overlay["overlaid_todo_ids"] = [
-        todo_id for todo_id in event_order if todo_id in markdown_ids
-    ]
-
-    for todo_id in order:
-        item = by_id[todo_id]
-        final_role = "user" if item.get("role") == "user" else "agent"
-        merged_items[final_role].append(item)
-
-    for role in ("user", "agent"):
-        source_section = str(
-            (markdown_fields.get(f"{role}_todos") or {}).get("source_section")
-            or (event_fields.get(f"{role}_todos") or {}).get("source_section")
-            or TODO_SECTION_HEADINGS[role]
-        )
-        source_sections[role] = source_section
-
-    resume_source_items = [*merged_items["user"], *merged_items["agent"]]
-    for role in ("user", "agent"):
-        if not merged_items[role]:
-            continue
-        summary = compact_todo_group(
-            merged_items[role],
-            source_section=source_sections[role],
-            role=role,
-            resume_source_items=resume_source_items,
-            item_limit=None,
-        )
-        if summary:
-            merged[f"{role}_todos"] = summary
-    return merged, overlay
-
-
 def list_goal_todos(
     *,
     registry_path: Path,
@@ -403,71 +214,25 @@ def list_goal_todos(
         limit=MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
     )
 
-    projection_fields = active_state_event_projection_fields(
-        goal,
-        state_path=resolved_state_file,
-        item_limit=None,
-        rollout_events=rollout_events,
-    )
-    projection_has_todos = bool(
-        projection_fields.get("user_todos") or projection_fields.get("agent_todos")
-    )
-    markdown_fields = parse_active_state_todos(
-        resolved_state_file.read_text(encoding="utf-8"),
-        goal=goal,
-        state_path=resolved_state_file,
-        item_limit=None,
-        rollout_events=rollout_events,
-    )
-    markdown_has_todos = bool(
-        markdown_fields.get("user_todos") or markdown_fields.get("agent_todos")
-    )
-    projection_overlay: dict[str, Any] | None = None
-    if projection_has_todos and markdown_has_todos:
-        fields, projection_overlay = _merge_todo_projection_fields(
-            markdown_fields=markdown_fields,
-            event_fields=projection_fields,
-        )
-        source = "event_projection_with_markdown_overlay"
-    elif projection_has_todos:
-        fields = projection_fields
-        source = "event_projection"
-    else:
-        fields = markdown_fields
-        source = "markdown_active_state"
-
     roles = [role] if role else ["user", "agent"]
-    resume_source_items = [
-        *_summary_items(fields, "user"),
-        *_summary_items(fields, "agent"),
-    ]
-    summaries: dict[str, dict[str, Any]] = {}
-    todos: list[dict[str, Any]] = []
-    unfiltered_count = 0
-    uncapped_todo_count = 0
-    for item_role in roles:
-        key = f"{item_role}_todos"
-        raw_summary = fields.get(key) if isinstance(fields, dict) else None
-        unfiltered_count += len((raw_summary or {}).get("items") or [])
-        summary = filtered_todo_summary(
-            raw_summary,
-            role=item_role,
-            status=status,
-            todo_id=normalized_todo_id,
-            agent_id=normalized_agent_id,
-            resume_source_items=resume_source_items,
-            rollout_events=rollout_events,
-            item_limit=limit,
-        )
-        if limit is not None:
-            summary = compact_explicit_limit_todo_summary(
-                summary,
-                role=item_role,
-                item_limit=limit,
-            )
-        summaries[key] = summary
-        todos.extend(summary.get("items") or [])
-        uncapped_todo_count += int(summary.get("total_count") or 0)
+    projected = goal_todo_summaries(
+        goal,
+        state_text=resolved_state_file.read_text(encoding="utf-8"),
+        state_path=resolved_state_file,
+        rollout_events=rollout_events,
+        roles=roles,
+        status=status,
+        todo_id=normalized_todo_id,
+        agent_id=normalized_agent_id,
+        limit=limit,
+    )
+    source = projected.source
+    projection_fields = projected.projection_fields
+    projection_overlay = projected.projection_overlay
+    summaries = projected.summaries
+    todos = projected.todos
+    unfiltered_count = projected.unfiltered_count
+    uncapped_todo_count = projected.uncapped_todo_count
 
     matched_todo_count = len(todos)
     agent_lane_hot_path = bool(
@@ -873,6 +638,7 @@ def add_goal_todo(
     *,
     registry_path: Path,
     goal_id: str,
+    runtime_root_arg: str | None = None,
     role: str,
     text: str,
     status: str | None = None,
@@ -908,6 +674,7 @@ def add_goal_todo(
     state_file: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    shadow_runtime_root = effective_runtime_root(registry_path, runtime_root_arg)
     if role not in TODO_SECTION_HEADINGS:
         raise ValueError("todo role must be one of: user, agent")
     require_user_todo_task_class(
@@ -956,10 +723,8 @@ def add_goal_todo(
         state_file=state_file,
     )
 
-    with exclusive_file_lock(
-        resolved_state_file,
-        agent_id=agent_id or claimed_by,
-        operation="todo_add",
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, agent_id or claimed_by, "todo_add", dry_run,
     ), ExitStack() as handoff_gate_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -1072,6 +837,7 @@ def add_goal_todo(
             text=todo_text,
             claimed_by=effective_claimed_by,
             actor_agent_id=effective_agent_id or effective_claimed_by,
+            runtime_root=shadow_runtime_root,
         )
         add_result = add_todo_to_lines(
             lines,
@@ -1164,12 +930,13 @@ def add_goal_todo(
         "updated_at": updated_at if changed else None,
         **handoff_gate,
     }
-    return _attach_todo_write_correctness_dry_run_packet(
+    payload = _attach_todo_write_correctness_dry_run_packet(
         payload,
         goal_id=goal_id,
         write_class="todo_add",
         state_text=original,
     )
+    return _shadow_todo(payload, registry_path, goal_id, "todo_add", runtime_root=shadow_runtime_root)
 
 
 def resolve_todo_state(
@@ -1193,6 +960,7 @@ def update_goal_todo(
     *,
     registry_path: Path,
     goal_id: str,
+    runtime_root_arg: str | None = None,
     todo_id: str,
     text: str | None = None,
     status: str | None = None,
@@ -1233,6 +1001,7 @@ def update_goal_todo(
     state_file: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    shadow_runtime_root = effective_runtime_root(registry_path, runtime_root_arg)
     if excluded_agents and clear_excluded_agents:
         raise ValueError(
             "todo update accepts either excluded_agents or clear_excluded_agents, not both"
@@ -1273,10 +1042,8 @@ def update_goal_todo(
             return validation_failure
     external_wait_transition: dict[str, Any] | None = None
     resume_monitor_generation: int | None = None
-    with exclusive_file_lock(
-        resolved_state_file,
-        agent_id=agent_id or claimed_by,
-        operation="todo_update",
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, agent_id or claimed_by, "todo_update", dry_run,
     ), ExitStack() as handoff_gate_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -1372,6 +1139,7 @@ def update_goal_todo(
             mutation_authority=mutation_authority,
             actor_agent_id=effective_agent_id or effective_claimed_by,
             ownership_mutation=(claimed_by is not None or clear_claim) and target_role == "agent",
+            runtime_root=shadow_runtime_root,
         )
         target_task_class = task_class or str(existing_block.get("task_class") or "")
         if target_role == "user" and claimed_by:
@@ -1622,18 +1390,20 @@ def update_goal_todo(
         payload["external_wait_transition"] = external_wait_transition
     if monitor_poll_transition is not None:
         payload["monitor_poll_transition"] = monitor_poll_transition
-    return _attach_todo_write_correctness_dry_run_packet(
+    payload = _attach_todo_write_correctness_dry_run_packet(
         payload,
         goal_id=goal_id,
         write_class=write_class,
         state_text=original,
     )
+    return _shadow_todo(payload, registry_path, goal_id, write_class, runtime_root=shadow_runtime_root)
 
 
 def complete_goal_todo(
     *,
     registry_path: Path,
     goal_id: str,
+    runtime_root_arg: str | None = None,
     todo_id: str,
     role: str | None = None,
     decision_outcome: str | None = None,
@@ -1663,6 +1433,7 @@ def complete_goal_todo(
     state_file: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    shadow_runtime_root = effective_runtime_root(registry_path, runtime_root_arg)
     if next_task_repository and not next_agent_todo:
         raise ValueError("--next-task-repository requires --next-agent-todo")
     if next_required_capabilities and not next_agent_todo:
@@ -1699,10 +1470,8 @@ def complete_goal_todo(
     validation_failure = validation_gate.get("failure")
     if validation_failure is not None:
         return validation_failure
-    with exclusive_file_lock(
-        resolved_state_file,
-        agent_id=agent_id or claimed_by,
-        operation="todo_complete",
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, agent_id or claimed_by, "todo_complete", dry_run,
     ), ExitStack() as lease_fence_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -1788,6 +1557,7 @@ def complete_goal_todo(
                     or task_lease_expected_version is not None
                 ),
                 handoff=completion_handoff,
+                runtime_root=shadow_runtime_root,
             )
         )
         completion_state = completion_transaction.get("completion_state")
@@ -1858,7 +1628,10 @@ def complete_goal_todo(
                     task_lease_fence,
                     committed=bool(event_result.get("changed")) and not dry_run,
                 )
-                return event_result
+                write_class = "todo_complete_event_projection"
+                return _shadow_todo(
+                    event_result, registry_path, goal_id, write_class, runtime_root=shadow_runtime_root
+                )
         if not isinstance(completion_state, dict):
             raise RuntimeError(
                 "TypeScript Todo completion transaction did not authorize a commit"
@@ -2016,12 +1789,13 @@ def complete_goal_todo(
     if effective_decision_outcome:
         result["decision_outcome"] = effective_decision_outcome
     result["self_merged"] = effective_self_merged
-    return result
+    return _shadow_todo(result, registry_path, goal_id, "todo_complete", runtime_root=shadow_runtime_root)
 
 def supersede_goal_todo(
     *,
     registry_path: Path,
     goal_id: str,
+    runtime_root_arg: str | None = None,
     todo_id: str,
     role: str | None = None,
     reason: str | None = None,
@@ -2041,6 +1815,7 @@ def supersede_goal_todo(
     state_file: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    shadow_runtime_root = effective_runtime_root(registry_path, runtime_root_arg)
     if next_task_repository and not next_agent_todo:
         raise ValueError("--next-task-repository requires --next-agent-todo")
     if next_required_capabilities and not next_agent_todo:
@@ -2055,8 +1830,8 @@ def supersede_goal_todo(
         project=project,
         state_file=state_file,
     )
-    with exclusive_file_lock(
-        resolved_state_file, agent_id=agent_id, operation="todo_supersede",
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, agent_id, "todo_supersede", dry_run,
     ), ExitStack() as lease_fence_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
@@ -2081,6 +1856,7 @@ def supersede_goal_todo(
             lease_fence_stack, registry_path=registry_path, goal_id=goal_id, todo_id=todo_id,
             todo=authority_todo, actor_agent_id=agent_id, state_text=original, mutation_authority=mutation_authority,
             idempotency_key=task_lease_idempotency_key, expected_version=task_lease_expected_version,
+            runtime_root=shadow_runtime_root,
         )
         effective_next_claimed_by = (
             require_registered_agent_id(registry_path=registry_path, goal_id=goal_id, agent_id=next_claimed_by, field="next_claimed_by")
@@ -2211,7 +1987,7 @@ def supersede_goal_todo(
         if changed and not dry_run:
             resolved_state_file.write_text(new_text, encoding="utf-8")
         release_verified_task_lease_fence(task_lease_fence, committed=changed and not dry_run)
-    return {
+    result = {
         "ok": True,
         "dry_run": dry_run,
         "superseded": True,
@@ -2225,18 +2001,21 @@ def supersede_goal_todo(
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,
     }
+    return _shadow_todo(result, registry_path, goal_id, "todo_supersede", runtime_root=shadow_runtime_root)
 
 
 def archive_completed_todos(
     *,
     registry_path: Path,
     goal_id: str,
+    runtime_root_arg: str | None = None,
     role: str = "agent",
     max_active_done: int = ARCHIVE_COMPLETED_DEFAULT_MAX_ACTIVE_DONE,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = True,
 ) -> dict[str, Any]:
+    shadow_runtime_root = effective_runtime_root(registry_path, runtime_root_arg)
     if role not in TODO_SECTION_HEADINGS:
         raise ValueError("todo role must be one of: user, agent")
     if max_active_done < 0:
@@ -2248,7 +2027,9 @@ def archive_completed_todos(
         state_file=state_file,
     )
 
-    with exclusive_file_lock(resolved_state_file, operation="todo_archive_completed"):
+    with legacy_todo_write_transaction(
+        registry_path, goal_id, resolved_state_file, None, "todo_archive_completed", dry_run,
+    ):
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         archive_result = archive_completed_todo_lines(
@@ -2266,7 +2047,7 @@ def archive_completed_todos(
         if changed and not dry_run:
             resolved_state_file.write_text(new_text, encoding="utf-8")
 
-    return {
+    result = {
         "ok": True,
         "dry_run": dry_run,
         "goal_id": goal_id,
@@ -2275,3 +2056,6 @@ def archive_completed_todos(
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,
     }
+    return _shadow_todo(
+        result, registry_path, goal_id, "todo_archive_completed", runtime_root=shadow_runtime_root
+    )

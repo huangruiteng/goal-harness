@@ -59,7 +59,11 @@ default; pass `--wake-cmd` only to trigger a bounded headless turn (for example
 `loopx turn run-once ... --execute`). It cannot type into a visible TUI, so it
 does not replace the interactive host loop. A launchd template ships at
 `examples/external-scheduler-worker.launchd.plist` and the contract is guarded
-by `examples/external-scheduler-worker-smoke.py`.
+by `examples/external-scheduler-worker-smoke.py`. Producer-generated bounded-wait
+scheduler hints have a thin consumer-parity contract with Pi, including the
+final quota/replan recheck triggered by the third unchanged poll; it is guarded
+by `tests/test_host_loop_runtime_parity.py` and the Pi runtime tests in
+`tests/pi_goal_loop_runtime.test.mjs`.
 
 ## External Tool Extension Candidates
 

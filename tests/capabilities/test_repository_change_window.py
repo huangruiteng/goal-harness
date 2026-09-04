@@ -484,6 +484,8 @@ def test_reference_guard_uses_fake_clock_and_shared_linked_worktree_state(
     assert allowed_ssh["status"] == "allowed"
     assert allowed_ssh["guarded_change"] is False
     assert allowed_ssh["previous_hook_invoked"] is False
+    assert allowed_ssh["policy_evaluated"] is False
+    assert allowed_ssh["reason"] == "read_only_ssh_transport"
     with pytest.raises(ValueError, match="unsupported Git SSH service"):
         run_git_hook_provider(
             repo_path=linked,
@@ -537,6 +539,51 @@ def test_reference_guard_uses_fake_clock_and_shared_linked_worktree_state(
         and item["status"] == "unexpected_managed_hook"
         for item in drifted_status["checks"]
     )
+
+
+def test_read_only_ssh_transport_survives_provider_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repository(tmp_path, monkeypatch)
+    runtime_root = tmp_path / "runtime"
+    install_git_hook_provider(
+        repo_path=repo,
+        policy=_weekday_policy(),
+        enforcement_level=EnforcementLevel.REFERENCE_GUARD,
+        execute=True,
+    )
+    _git(repo, "config", "--local", "--unset", "core.hooksPath")
+    assert git_hook_provider_status(repo_path=repo)["status"] == "drifted"
+
+    for service in ("git-upload-pack", "git-upload-archive"):
+        allowed = run_git_hook_provider(
+            repo_path=repo,
+            runtime_root=runtime_root,
+            event="ssh-transport",
+            hook_args=("git@github.com", f"{service} 'example/repo.git'"),
+            now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+        )
+        assert allowed == {
+            "ok": True,
+            "schema_version": "repository_change_window_hook_result_v1",
+            "status": "allowed",
+            "event": "ssh-transport",
+            "exit_code": 0,
+            "guarded_change": False,
+            "previous_hook_invoked": False,
+            "policy_evaluated": False,
+            "reason": "read_only_ssh_transport",
+        }
+
+    guarded = run_git_hook_provider(
+        repo_path=repo,
+        runtime_root=runtime_root,
+        event="ssh-transport",
+        hook_args=("git@github.com", "git-receive-pack 'example/repo.git'"),
+        now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
+    )
+    assert guarded["status"] == "provider_drift"
 
 
 def test_provider_detects_incompatible_hook_runtime(

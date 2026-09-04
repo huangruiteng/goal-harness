@@ -441,3 +441,235 @@ def test_snapshot_applies_cursor_before_the_six_item_report_limit(
     assert second is not None
     assert len(second["items"]) == 1
     assert second["items"][0]["title"] == "Completed item 0."
+
+
+def test_snapshot_skips_done_items_without_valid_completion_timestamps(
+    tmp_path: Path,
+) -> None:
+    state = (
+        "# Goal\n\n## User Todo\n\n## Agent Todo\n\n"
+        "- [x] Valid outcome with receipt.\n"
+        "  <!-- loopx:todo todo_id=todo_valid status=done task_class=advancement_task "
+        f"claimed_by={AGENT_ID} updated_at=2026-08-01T07:00:00Z -->\n"
+        "- [x] Handwritten outcome without a timestamp.\n"
+        "  <!-- loopx:todo todo_id=todo_handwritten status=done"
+        f" task_class=advancement_task claimed_by={AGENT_ID} -->\n"
+        "- [x] Naive timestamp outcome.\n"
+        "  <!-- loopx:todo todo_id=todo_naive status=done task_class=advancement_task "
+        f"claimed_by={AGENT_ID} updated_at=2026-08-01T07:30:00 -->\n"
+    )
+    snapshot = build_project_progress_snapshot_from_state(
+        state_text=state,
+        goal={"id": GOAL_ID},
+        state_path=tmp_path / "goal.md",
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        completed_at="2026-08-01T08:00:00Z",
+    )
+
+    assert snapshot is not None
+    assert [item["source_ref"] for item in snapshot["items"]] == ["todo:todo_valid"]
+    assert snapshot["items"][0]["completed_at"] == "2026-08-01T07:00:00Z"
+
+    handwritten_only = (
+        "# Goal\n\n## User Todo\n\n## Agent Todo\n\n"
+        "- [x] Handwritten outcome without a timestamp.\n"
+        "  <!-- loopx:todo todo_id=todo_handwritten status=done"
+        f" task_class=advancement_task claimed_by={AGENT_ID} -->\n"
+    )
+    assert (
+        build_project_progress_snapshot_from_state(
+            state_text=handwritten_only,
+            goal={"id": GOAL_ID},
+            state_path=tmp_path / "goal.md",
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            completed_at="2026-08-01T08:00:00Z",
+        )
+        is None
+    )
+
+
+def test_snapshot_accepts_offset_and_z_suffix_timestamps_with_subsecond_precision(
+    tmp_path: Path,
+) -> None:
+    state = (
+        "# Goal\n\n## User Todo\n\n## Agent Todo\n\n"
+        "- [x] Completed exactly at the stage boundary.\n"
+        "  <!-- loopx:todo todo_id=todo_boundary status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T08:00:00Z"
+        " completed_at=2026-08-01T08:00:00Z -->\n"
+        "- [x] Offset-suffix outcome with microseconds.\n"
+        "  <!-- loopx:todo todo_id=todo_offset status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T07:30:00.123456+00:00"
+        " completed_at=2026-08-01T07:30:00.123456+00:00 -->\n"
+        "- [x] Z-suffix outcome with milliseconds.\n"
+        "  <!-- loopx:todo todo_id=todo_zulu status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T07:00:00.500Z"
+        " completed_at=2026-08-01T07:00:00.500Z -->\n"
+    )
+    snapshot = build_project_progress_snapshot_from_state(
+        state_text=state,
+        goal={"id": GOAL_ID},
+        state_path=tmp_path / "goal.md",
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        completed_at="2026-08-01T08:00:00+00:00",
+    )
+
+    assert snapshot is not None
+    assert [item["source_ref"] for item in snapshot["items"]] == [
+        "todo:todo_boundary",
+        "todo:todo_offset",
+        "todo:todo_zulu",
+    ]
+    assert [item["completed_at"] for item in snapshot["items"]] == [
+        "2026-08-01T08:00:00Z",
+        "2026-08-01T07:30:00.123456+00:00",
+        "2026-08-01T07:00:00.500Z",
+    ]
+
+
+def test_snapshot_skips_done_items_completed_after_the_stage_boundary(
+    tmp_path: Path,
+) -> None:
+    state = (
+        "# Goal\n\n## User Todo\n\n## Agent Todo\n\n"
+        "- [x] Completion stamped after the stage.\n"
+        "  <!-- loopx:todo todo_id=todo_future status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T07:00:00Z"
+        " completed_at=2026-08-01T09:30:00Z -->\n"
+        "- [x] Whole item updated after the stage.\n"
+        "  <!-- loopx:todo todo_id=todo_late status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T09:00:00Z"
+        " completed_at=2026-08-01T09:00:00Z -->\n"
+        "- [x] Completion stamped inside the stage.\n"
+        "  <!-- loopx:todo todo_id=todo_instage status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T07:10:00Z"
+        " completed_at=2026-08-01T07:10:00Z -->\n"
+    )
+    snapshot = build_project_progress_snapshot_from_state(
+        state_text=state,
+        goal={"id": GOAL_ID},
+        state_path=tmp_path / "goal.md",
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        completed_at="2026-08-01T08:00:00Z",
+    )
+
+    assert snapshot is not None
+    assert [item["source_ref"] for item in snapshot["items"]] == [
+        "todo:todo_instage"
+    ]
+    assert snapshot["items"][0]["completed_at"] == "2026-08-01T07:10:00Z"
+
+
+def test_snapshot_falls_back_to_updated_at_and_skips_unusable_timestamps(
+    tmp_path: Path,
+) -> None:
+    state = (
+        "# Goal\n\n## User Todo\n\n## Agent Todo\n\n"
+        "- [x] Outcome relying on the updated_at fallback.\n"
+        "  <!-- loopx:todo todo_id=todo_fallback status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T07:00:00Z -->\n"
+        "- [x] Outcome with neither timestamp present.\n"
+        "  <!-- loopx:todo todo_id=todo_missing status=done"
+        f" task_class=advancement_task claimed_by={AGENT_ID} -->\n"
+        "- [x] Outcome with both timestamps unreadable.\n"
+        "  <!-- loopx:todo todo_id=todo_garbage status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=not-a-date"
+        " completed_at=garbage -->\n"
+        "- [x] Non-date updated_at with a readable completed_at.\n"
+        "  <!-- loopx:todo todo_id=todo_numeric status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=12345"
+        " completed_at=2026-08-01T07:20:00Z -->\n"
+    )
+    snapshot = build_project_progress_snapshot_from_state(
+        state_text=state,
+        goal={"id": GOAL_ID},
+        state_path=tmp_path / "goal.md",
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        completed_at="2026-08-01T08:00:00Z",
+    )
+
+    assert snapshot is not None
+    assert [item["source_ref"] for item in snapshot["items"]] == [
+        "todo:todo_fallback"
+    ]
+    assert snapshot["items"][0]["completed_at"] == "2026-08-01T07:00:00Z"
+
+
+def test_snapshot_rejects_invalid_stage_completion_timestamps(
+    tmp_path: Path,
+) -> None:
+    state = (
+        "# Goal\n\n## User Todo\n\n## Agent Todo\n\n"
+        "- [x] Valid outcome that must not be reached.\n"
+        "  <!-- loopx:todo todo_id=todo_valid status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T07:00:00Z -->\n"
+    )
+    for invalid_stage in ("2026-08-01T08:00:00", "not-a-timestamp"):
+        with pytest.raises(ValueError, match="stage completion timestamp"):
+            build_project_progress_snapshot_from_state(
+                state_text=state,
+                goal={"id": GOAL_ID},
+                state_path=tmp_path / "goal.md",
+                goal_id=GOAL_ID,
+                agent_id=AGENT_ID,
+                completed_at=invalid_stage,
+            )
+
+
+def test_snapshot_keeps_valid_item_order_and_ids_when_invalid_items_are_skipped(
+    tmp_path: Path,
+) -> None:
+    state = (
+        "# Goal\n\n## User Todo\n\n## Agent Todo\n\n"
+        "- [x] Valid outcome finished first.\n"
+        "  <!-- loopx:todo todo_id=todo_valid_late status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T07:30:00Z -->\n"
+        "- [x] Naive timestamp outcome sorted first.\n"
+        "  <!-- loopx:todo todo_id=todo_naive_first status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T07:50:00 -->\n"
+        "- [x] Valid completion stamped after the stage.\n"
+        "  <!-- loopx:todo todo_id=todo_future_mid status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T07:20:00Z"
+        " completed_at=2026-08-01T09:00:00Z -->\n"
+        "- [x] Valid outcome finished last.\n"
+        "  <!-- loopx:todo todo_id=todo_valid_early status=done"
+        " task_class=advancement_task"
+        f" claimed_by={AGENT_ID} updated_at=2026-08-01T07:10:00Z -->\n"
+    )
+    snapshot = build_project_progress_snapshot_from_state(
+        state_text=state,
+        goal={"id": GOAL_ID},
+        state_path=tmp_path / "goal.md",
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        completed_at="2026-08-01T08:00:00Z",
+    )
+
+    assert snapshot is not None
+    assert [item["source_ref"] for item in snapshot["items"]] == [
+        "todo:todo_valid_late",
+        "todo:todo_valid_early",
+    ]
+    assert [item["item_id"] for item in snapshot["items"]] == [
+        "completed_1",
+        "completed_3",
+    ]
+    assert [item["value_rank"] for item in snapshot["items"]] == [10, 12]
