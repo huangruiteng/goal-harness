@@ -55,6 +55,11 @@ assert.match(
   /@media \(max-width: 720px\)[\s\S]*\.personal-channel-scroll:has\(\.personal-task-board\) \{ overflow-y: auto; \}[\s\S]*\.personal-task-lane-scroll,[^}]*\{[^}]*overflow: visible;/,
   "Narrow screens fall back to one page scroller instead of nested scroll traps",
 );
+assert.match(
+  styles,
+  /\[data-pw-theme="brutal"\] \.personal-task-kanban \.personal-task-lane-scroll > button[^}]*border: 2px solid #141414;/,
+  "The brutal theme follows direct task buttons into the lane scroller",
+);
 
 function loadPlaywright() {
   try {
@@ -148,6 +153,21 @@ async function main() {
     assert.equal(initial.overflowY, "auto", "Desktop task lanes must own vertical scrolling");
     assert.ok(initial.scrollHeight > initial.clientHeight, `Expected lane overflow: ${JSON.stringify(initial)}`);
     assert.ok(await lane.evaluate((element) => element.classList.contains("has-overflow-after")), "Overflowing lane must show a continuation cue");
+
+    const shell = page.locator(".personal-workspace-shell");
+    await shell.evaluate((element) => { element.dataset.pwTheme = "brutal"; });
+    const directTaskButton = page.getByRole("region", { name: "待你确认" }).locator(":scope > button").first();
+    await directTaskButton.waitFor({ state: "visible" });
+    const brutalRest = await directTaskButton.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { borderWidth: style.borderWidth, boxShadow: style.boxShadow };
+    });
+    assert.equal(brutalRest.borderWidth, "2px", "Brutal task buttons must retain their high-contrast border");
+    assert.notEqual(brutalRest.boxShadow, "none", "Brutal task buttons must retain their hard shadow");
+    await directTaskButton.hover();
+    const brutalHover = await directTaskButton.evaluate((element) => getComputedStyle(element).boxShadow);
+    assert.notEqual(brutalHover, brutalRest.boxShadow, "Brutal task buttons must retain their hover feedback");
+    await shell.evaluate((element) => { element.dataset.pwTheme = "paper"; });
 
     await lane.focus();
     await page.keyboard.press("End");

@@ -1090,8 +1090,8 @@
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-row-status { border: 2px solid #141414; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-object-list { background: #fff; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-object-list > header { background: #fff; border-bottom: 2px solid #141414; }
-.personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-object-list > button, .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-card > button { border: 2px solid #141414; border-radius: 4px; box-shadow: 2px 2px 0 #141414; }
-.personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-object-list > button:hover, .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-card:hover > button { background: #fff; border-color: #141414; box-shadow: 4px 4px 0 #141414; transform: translate(-1px, -1px); }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-lane-scroll > button, .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-card > button { border: 2px solid #141414; border-radius: 4px; box-shadow: 2px 2px 0 #141414; }
+.personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-lane-scroll > button:hover, .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-task-card:hover > button { background: #fff; border-color: #141414; box-shadow: 4px 4px 0 #141414; transform: translate(-1px, -1px); }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-task-kanban .personal-object-list > header > span { padding: 1px 7px; border-radius: 3px; background: #141414; color: #fff; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-kanban-dot { width: 10px; height: 10px; border: 2px solid #141414; border-radius: 2px; }
 .personal-workspace-shell[data-pw-theme="brutal"] .personal-kanban-dot.tone-attention { background: #ff9d5c; }
