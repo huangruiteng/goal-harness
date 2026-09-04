@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -22,6 +23,9 @@ from loopx.capabilities.reliability_diagnostics.intake import STATS_FIELDS
 ROOT = Path(__file__).resolve().parents[2]
 OBSERVER_TS = ROOT / "packages/dsh-loopx-plugin/src/observer.ts"
 DRIVER_TS = ROOT / "packages/dsh-loopx-plugin/src/driver.ts"
+CORDIS_PATCH = ROOT / "packages/dsh-loopx-plugin/cordis.patch.yml"
+PACKAGE_JSON = ROOT / "packages/dsh-loopx-plugin/package.json"
+TSDOWN_CONFIG = ROOT / "packages/dsh-loopx-plugin/tsdown.config.ts"
 
 
 def test_catalog_declares_dsh_provider_without_claiming_readiness() -> None:
@@ -69,14 +73,29 @@ def test_typescript_observer_shares_field_names_and_has_no_control_path() -> Non
     assert "from './managed-runtime" not in source
     assert ".send(" not in source
     assert ".inbox" not in source
+    assert "@deepseek-ai/dsh-agent" not in source
+    assert "ctx.on('agent/" not in source
     assert "outbound_endpoints: []" in source
     assert "observation_entered_worker_context: false" in source
+    assert "observation_entered_scheduler_inputs: false" in source
 
 
-def test_driver_applies_observer_only_when_enabled() -> None:
-    source = DRIVER_TS.read_text(encoding="utf-8")
-    assert "resolveShadowObserverConfig()" in source
-    assert "if (observerConfig !== undefined) applyObserver(ctx, observerConfig)" in source
-    # The driver must never hand its instance or send path to the observer.
-    assert "applyObserver(ctx, observerConfig)" in source
-    assert "applyObserver(ctx, observerConfig, driver" not in source
+def test_observer_is_a_separate_default_off_plugin_row() -> None:
+    driver = DRIVER_TS.read_text(encoding="utf-8")
+    observer = OBSERVER_TS.read_text(encoding="utf-8")
+    patch = CORDIS_PATCH.read_text(encoding="utf-8")
+    build = TSDOWN_CONFIG.read_text(encoding="utf-8")
+    manifest = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+
+    assert "observer" not in driver.lower()
+    assert "export const inject: readonly string[] = []" in observer
+    assert "ctx.on('session/created'" in observer
+    assert "ctx.on('session/event'" in observer
+    assert "ctx.on('session/disposed'" in observer
+    assert "loopx-shadow-observer" in patch
+    assert "name: dsh-loopx-plugin/observer" in patch
+    assert "observer: 'build-temp/host/observer.js'" in build
+    assert manifest["exports"]["./observer"] == {
+        "types": "./lib/types/observer.d.ts",
+        "default": "./lib/observer.js",
+    }

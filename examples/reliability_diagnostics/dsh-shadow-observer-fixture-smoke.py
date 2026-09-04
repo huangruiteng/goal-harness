@@ -61,6 +61,7 @@ def run_cli(*args: str, runtime_root: Path, stdin: str | None = None) -> dict[st
 def assert_no_outbound_control(receipt: dict, projection: dict) -> None:
     assert receipt["outbound_endpoints"] == [], receipt
     assert receipt["observation_entered_worker_context"] is False, receipt
+    assert receipt["observation_entered_scheduler_inputs"] is False, receipt
     assert projection["mode"] == "read_only", projection
     assert projection["authority"] == "none", projection
     assert projection["worker_influence"] == "none", projection
@@ -73,12 +74,16 @@ def assert_bounded_failure(result: dict) -> None:
     receipt = result["receipt"]
     stats = result["stats"]
     fixture_records = dsh_fixture_records()
-    # Every fixture record is accounted for exactly once: persisted, rejected, or dropped.
-    assert len(fixture_records) == (
-        receipt["observed_event_count"]
+    # Every fixture record is observed once, then accepted, rejected, or dropped.
+    assert len(fixture_records) == receipt["observed_event_count"], (
+        len(fixture_records),
+        receipt,
+    )
+    assert receipt["observed_event_count"] == (
+        receipt["accepted_event_count"]
         + receipt["rejected_event_count"]
         + receipt["backpressure_drop_count"]
-    ), (len(fixture_records), receipt)
+    ), receipt
     assert stats["buffer_bound"] == FIXTURE_BUFFER_BOUND
     assert receipt["backpressure_drop_count"] == 3, receipt
     # Sequence 10 and the rejected sequence 19 are visible as gaps; trailing
@@ -87,6 +92,12 @@ def assert_bounded_failure(result: dict) -> None:
     assert receipt["clock"]["max_uncertainty_ms"] == FIXTURE_UNCERTAIN_CLOCK_MS
     assert receipt["rejected_by_reason"] == {"raw_material_field_rejected": 1}, receipt
     assert receipt["observer_failure_count"] == 0
+    assert receipt["persisted_event_count"] == receipt["accepted_event_count"]
+    assert receipt["event_sources"] == [
+        "session/created",
+        "session/disposed",
+        "session/event",
+    ]
     assert receipt["status"] == "degraded", receipt
     assert set(receipt["reason_codes"]) == {
         "sequence_gap",
@@ -134,12 +145,12 @@ def assert_cli_readback(result: dict) -> None:
         status = run_cli("status", "--goal-id", FIXTURE_GOAL_ID, runtime_root=runtime_root)
         assert status["projection"] == result["projection"], status
 
-        # A control-shaped record is refused at the ledger door and quarantines the receipt.
+        # A refused input leaves a durable invalid gate record in the ledger.
         poisoned = dict(result["ledger_records"][0])
         poisoned["command"] = {"kind": "stop"}
         rejected = run_cli("ingest", "--goal-id", FIXTURE_GOAL_ID, "--input", "-", runtime_root=runtime_root, stdin=json.dumps(poisoned) + "\n")
         assert rejected["rejected_by_reason"] == {"control_field_rejected": 1}, rejected
-        assert run_cli("receipt", "--goal-id", FIXTURE_GOAL_ID, runtime_root=runtime_root)["receipt"]["status"] == "quarantined"
+        assert run_cli("receipt", "--goal-id", FIXTURE_GOAL_ID, runtime_root=runtime_root)["receipt"]["status"] == "invalid"
 
 
 def main() -> int:

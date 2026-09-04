@@ -30,6 +30,7 @@ from loopx.capabilities.reliability_diagnostics import (
     EnvelopeRejection,
     ObserverEnvelopeError,
     ObserverEventKind,
+    ObserverRunIdentity,
     ReceiptReason,
     ReceiptStatus,
     ShadowObserverIntake,
@@ -46,10 +47,24 @@ from loopx.capabilities.reliability_diagnostics import (
     run_dsh_fixture,
 )
 from loopx.capabilities.reliability_diagnostics.envelope import classify_rejected_field
+from loopx.cli_commands.reliability_diagnostics import _ingest
 
 GOAL = "goal-observer"
 SESSION = "session-observer"
 T0 = "2026-09-01T10:00:00+00:00"
+OBSERVER = "observer-1"
+RUN_IDENTITY = ObserverRunIdentity(
+    worker_id="worker-1",
+    model_id="model-1",
+    task_id="task-1",
+    environment_id="environment-1",
+    tools_id="tools-1",
+    budget_id="budget-1",
+    adapter_revision="adapter-1",
+    observer_revision="observer-revision-1",
+)
+EVENT_SOURCES = ["dsh-agent-hooks", "dsh-session-events"]
+SOURCE_FIELDS = ["agent.id", "event.data", "event.seq", "event.time", "event.type", "session.id"]
 
 
 def envelope(
@@ -64,6 +79,7 @@ def envelope(
         "schema_version": OBSERVER_ENVELOPE_SCHEMA_VERSION,
         "capability_id": CAPABILITY_ID,
         "provider_id": DSH_PROVIDER_ID,
+        "observer_id": OBSERVER,
         "goal_id": GOAL,
         "session_id": SESSION,
         "sequence": sequence,
@@ -78,22 +94,31 @@ def envelope(
 
 
 def stats(**overrides: Any) -> dict[str, Any]:
+    accepted = overrides.get("accepted_event_count", 1)
+    rejected = overrides.get("rejected_event_count", 0)
+    dropped = overrides.get("backpressure_drop_count", 0)
     record: dict[str, Any] = {
         "schema_version": OBSERVER_STATS_SCHEMA_VERSION,
         "capability_id": CAPABILITY_ID,
         "provider_id": DSH_PROVIDER_ID,
-        "observer_id": "observer-1",
+        "observer_id": OBSERVER,
         "goal_id": GOAL,
+        "run_identity": RUN_IDENTITY.as_dict(),
+        "event_sources": EVENT_SOURCES,
+        "source_fields_consumed": SOURCE_FIELDS,
         "emitted_at": T0,
-        "observed_event_count": 1,
-        "accepted_event_count": 1,
-        "rejected_event_count": 0,
+        "observed_event_count": accepted + rejected + dropped,
+        "accepted_event_count": accepted,
+        "rejected_event_count": rejected,
         "rejected_by_reason": {},
         "buffer_bound": 8,
         "backpressure_drop_count": 0,
         "observer_failure_count": 0,
+        "peak_buffered_event_count": min(accepted, 8),
+        "flush_attempt_count": 1,
         "outbound_endpoints": [],
         "observation_entered_worker_context": False,
+        "observation_entered_scheduler_inputs": False,
         "clock_source": ClockSource.HARNESS_EVENT_TIME.value,
     }
     record.update(overrides)
@@ -192,6 +217,9 @@ def intake(bound: int = 8) -> ShadowObserverIntake:
         observer_id="observer-1",
         goal_id=GOAL,
         clock_source=ClockSource.FIXTURE,
+        run_identity=RUN_IDENTITY,
+        event_sources=tuple(EVENT_SOURCES),
+        source_fields_consumed=tuple(SOURCE_FIELDS),
         buffer_bound=bound,
     )
 
@@ -211,6 +239,12 @@ def test_intake_bounds_buffer_and_counts_drops_without_raising() -> None:
     assert record["backpressure_drop_count"] == 3
     assert record["outbound_endpoints"] == []
     assert record["observation_entered_worker_context"] is False
+    assert record["observation_entered_scheduler_inputs"] is False
+    assert record["observed_event_count"] == (
+        record["accepted_event_count"]
+        + record["rejected_event_count"]
+        + record["backpressure_drop_count"]
+    )
     assert normalize_observer_stats(record).backpressure_drop_count == 3
 
 
@@ -257,6 +291,25 @@ def test_stats_record_rejects_unknown_fields() -> None:
         normalize_observer_stats(stats(send_path="agent.send"))
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"emitted_at": "not-a-time"},
+        {"emitted_at": "2026-09-01T10:00:00"},
+        {"accepted_event_count": 999, "observed_event_count": 1},
+        {"run_identity": {"worker_id": "worker-1"}},
+        {"event_sources": []},
+        {"source_fields_consumed": ["event.type", "event.type"]},
+        {"peak_buffered_event_count": 9},
+    ],
+)
+def test_stats_record_rejects_inconsistent_or_incomplete_evidence(
+    mutation: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError):
+        normalize_observer_stats(stats(**mutation))
+
+
 # --- receipt ---------------------------------------------------------------
 
 
@@ -267,7 +320,12 @@ def test_receipt_without_observations_is_invalid() -> None:
 
 
 def test_receipt_is_valid_for_contiguous_stream_with_stats() -> None:
-    receipt = receipt_for(envelope(0), envelope(1, observed_at=at(1)), envelope(2, observed_at=at(2)), stats())
+    receipt = receipt_for(
+        envelope(0),
+        envelope(1, observed_at=at(1)),
+        envelope(2, observed_at=at(2)),
+        stats(accepted_event_count=3),
+    )
     assert receipt["status"] == ReceiptStatus.VALID.value
     assert receipt["reason_codes"] == []
     assert receipt["outbound_endpoints"] == []
@@ -277,14 +335,23 @@ def test_receipt_is_valid_for_contiguous_stream_with_stats() -> None:
 
 
 def test_receipt_counts_sequence_gaps_as_lost_events() -> None:
-    receipt = receipt_for(envelope(0), envelope(4, observed_at=at(1)), envelope(5, observed_at=at(2)), stats())
+    receipt = receipt_for(
+        envelope(0),
+        envelope(4, observed_at=at(1)),
+        envelope(5, observed_at=at(2)),
+        stats(accepted_event_count=3),
+    )
     assert receipt["lost_event_count"] == 3
     assert receipt["status"] == ReceiptStatus.DEGRADED.value
     assert receipt["reason_codes"] == [ReceiptReason.SEQUENCE_GAP.value]
 
 
 def test_receipt_counts_duplicate_sequences_separately() -> None:
-    receipt = receipt_for(envelope(0), envelope(0, observed_at=at(1)), stats())
+    receipt = receipt_for(
+        envelope(0),
+        envelope(0, observed_at=at(1)),
+        stats(accepted_event_count=2),
+    )
     assert receipt["duplicate_sequence_count"] == 1
     assert receipt["lost_event_count"] == 0
     assert ReceiptReason.SEQUENCE_DUPLICATE.value in receipt["reason_codes"]
@@ -303,10 +370,10 @@ def test_receipt_quarantines_observer_failure_and_control_fields(stats_override:
     assert receipt["reason_codes"] == [reason.value]
 
 
-def test_receipt_quarantines_malformed_ledger_records() -> None:
+def test_receipt_invalidates_malformed_ledger_records() -> None:
     receipt = receipt_for(envelope(0), stats(), {"schema_version": "unknown"}, malformed=1)
     assert receipt["ledger_invalid_record_count"] == 2
-    assert receipt["status"] == ReceiptStatus.QUARANTINED.value
+    assert receipt["status"] == ReceiptStatus.INVALID.value
 
 
 @pytest.mark.parametrize(
@@ -329,13 +396,34 @@ def test_receipt_invalidates_any_outbound_or_worker_context_path(stats_override:
         ([envelope(0, clock={"source": "observer_wall_clock", "uncertainty_ms": 1001}), stats()], ReceiptReason.CLOCK_UNCERTAINTY_EXCEEDED),
         ([envelope(0), stats(backpressure_drop_count=2)], ReceiptReason.BACKPRESSURE_DROP),
         ([envelope(0), stats(rejected_event_count=1, rejected_by_reason={"raw_material_field_rejected": 1})], ReceiptReason.RAW_MATERIAL_REJECTED),
-        ([envelope(0)], ReceiptReason.OBSERVER_STATS_MISSING),
     ],
 )
 def test_receipt_degrades_but_keeps_evidence(records: list[dict[str, Any]], reason: ReceiptReason) -> None:
     receipt = receipt_for(*records)
     assert receipt["status"] == ReceiptStatus.DEGRADED.value
     assert receipt["reason_codes"] == [reason.value]
+
+
+def test_receipt_without_stats_is_invalid() -> None:
+    receipt = receipt_for(envelope(0))
+    assert receipt["status"] == ReceiptStatus.INVALID.value
+    assert receipt["reason_codes"] == [ReceiptReason.OBSERVER_STATS_MISSING.value]
+
+
+def test_receipt_invalidates_unlinked_stats_and_identity_rejection() -> None:
+    unlinked = receipt_for(envelope(0), stats(provider_id="other-provider"))
+    assert unlinked["status"] == ReceiptStatus.INVALID.value
+    assert ReceiptReason.OBSERVER_STATS_MISMATCH.value in unlinked["reason_codes"]
+
+    rejected = receipt_for(
+        envelope(0),
+        stats(
+            rejected_event_count=1,
+            rejected_by_reason={EnvelopeRejection.IDENTITY_INVALID.value: 1},
+        ),
+    )
+    assert rejected["status"] == ReceiptStatus.INVALID.value
+    assert ReceiptReason.IDENTITY_REJECTED.value in rejected["reason_codes"]
 
 
 def test_receipt_clock_uncertainty_at_threshold_is_visible_not_degraded() -> None:
@@ -346,7 +434,8 @@ def test_receipt_clock_uncertainty_at_threshold_is_visible_not_degraded() -> Non
 
 def test_receipt_sums_latest_stats_per_observer_instance() -> None:
     receipt = receipt_for(
-        envelope(0),
+        envelope(0, observer_id="a"),
+        envelope(0, observer_id="b", session_id="session-b"),
         stats(observer_id="a", backpressure_drop_count=1),
         stats(observer_id="a", backpressure_drop_count=4),
         stats(observer_id="b", backpressure_drop_count=2),
@@ -375,7 +464,7 @@ def test_projection_stall_requires_active_stage_and_silence() -> None:
     running = projection_for(
         envelope(0, ObserverEventKind.TURN_STARTED),
         envelope(1, ObserverEventKind.STEP_STARTED, observed_at=at(1)),
-        stats(),
+        stats(accepted_event_count=2),
         as_of=at(6 * 60),
         stall_threshold_ms=300_000,
     )
@@ -386,7 +475,7 @@ def test_projection_stall_requires_active_stage_and_silence() -> None:
     idle = projection_for(
         envelope(0, ObserverEventKind.TURN_STARTED),
         envelope(1, ObserverEventKind.TURN_ENDED, observed_at=at(1), summary={"reason": "completed"}),
-        stats(),
+        stats(accepted_event_count=2),
         as_of=at(6 * 60),
     )
     assert idle["stage"] == DiagnosticStage.IDLE.value
@@ -399,9 +488,9 @@ def test_projection_repetition_counts_consecutive_identical_tool_runs() -> None:
         envelope(index, ObserverEventKind.TOOL_CALLED, observed_at=at(index), summary={"tool_name": tool})
         for index, tool in enumerate(tools)
     ]
-    projection = projection_for(*records, stats())
+    projection = projection_for(*records, stats(accepted_event_count=len(records)))
     assert projection["repetition"] == {"detected": True, "threshold": 3, "longest_tool_run": 3, "tool_name": "read"}
-    below = projection_for(*records[:2], stats())
+    below = projection_for(*records[:2], stats(accepted_event_count=2))
     assert below["repetition"]["detected"] is False
 
 
@@ -409,7 +498,7 @@ def test_projection_recovery_and_stage_transitions() -> None:
     unrecovered = projection_for(
         envelope(0, ObserverEventKind.STEP_STARTED),
         envelope(1, ObserverEventKind.AGENT_ERROR, observed_at=at(1), summary={"error_class": "Timeout"}),
-        stats(),
+        stats(accepted_event_count=2),
     )
     assert unrecovered["stage"] == DiagnosticStage.ERRORED.value
     assert unrecovered["recovery"] == {"error_count": 1, "recovered_error_count": 0, "unrecovered_error_count": 1}
@@ -420,16 +509,36 @@ def test_projection_recovery_and_stage_transitions() -> None:
         envelope(1, ObserverEventKind.AGENT_ERROR, observed_at=at(1)),
         envelope(2, ObserverEventKind.STEP_ENDED, observed_at=at(2)),
         envelope(3, ObserverEventKind.SESSION_DISPOSED, observed_at=at(3)),
-        stats(),
+        stats(accepted_event_count=4),
     )
     assert recovered["stage"] == DiagnosticStage.DISPOSED.value
     assert recovered["recovery"]["unrecovered_error_count"] == 0
     assert recovered["recovery"]["recovered_error_count"] == 1
     assert recovered["signals"] == []
 
+    terminal_error = projection_for(
+        envelope(
+            0,
+            ObserverEventKind.TURN_ENDED,
+            summary={"turn": 1, "reason": "error"},
+        ),
+        stats(),
+    )
+    assert terminal_error["stage"] == DiagnosticStage.ERRORED.value
+    assert terminal_error["recovery"] == {
+        "error_count": 1,
+        "recovered_error_count": 0,
+        "unrecovered_error_count": 1,
+    }
+    assert DiagnosticSignal.UNRECOVERED_ERROR.value in terminal_error["signals"]
+
 
 def test_projection_surfaces_event_loss_and_integrity() -> None:
-    projection = projection_for(envelope(0), envelope(3, observed_at=at(1)), stats())
+    projection = projection_for(
+        envelope(0),
+        envelope(3, observed_at=at(1)),
+        stats(accepted_event_count=2),
+    )
     assert DiagnosticSignal.EVENT_LOSS.value in projection["signals"]
     assert projection["integrity"]["status"] == ReceiptStatus.DEGRADED.value
     assert projection["evidence"]["lost_event_count"] == 2
@@ -459,6 +568,39 @@ def test_ledger_append_is_line_oriented_and_tolerates_malformed_lines(tmp_path: 
     assert malformed == 1
 
 
+def test_ingest_persists_a_durable_gate_for_refused_input(tmp_path: Path) -> None:
+    source = tmp_path / "observer.ndjson"
+    source.write_text(
+        "\n".join(
+            [
+                json.dumps(envelope(0)),
+                "not json",
+                json.dumps(envelope(1, goal_id="other-goal")),
+                json.dumps(stats()),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    path = ledger_path(tmp_path, GOAL)
+    result = _ingest(path, GOAL, str(source))
+
+    assert result["accepted_envelope_count"] == 1
+    assert result["passthrough_stats_count"] == 1
+    assert result["malformed_line_count"] == 1
+    assert result["rejected_by_reason"] == {
+        EnvelopeRejection.IDENTITY_INVALID.value: 1,
+        EnvelopeRejection.SCHEMA_MISMATCH.value: 1,
+    }
+    assert result["ingest_gate_recorded"] is True
+    records, malformed = read_ledger_records(path)
+    assert malformed == 0
+    assert records[-1]["schema_version"] == "reliability_ingest_violation_v0"
+    receipt = build_integrity_receipt(read_ledger(records, goal_id=GOAL))
+    assert receipt["status"] == ReceiptStatus.INVALID.value
+    assert ReceiptReason.LEDGER_RECORD_INVALID.value in receipt["reason_codes"]
+
+
 # --- fixture ---------------------------------------------------------------
 
 
@@ -476,4 +618,9 @@ def test_dsh_fixture_exercises_every_contract_hazard_and_stays_degraded() -> Non
     assert receipt["outbound_endpoints"] == []
     assert receipt["observer_failure_count"] == 0
     assert "transcript" not in json.dumps(result["ledger_records"])
-    assert len(dsh_fixture_records()) == receipt["observed_event_count"] + receipt["rejected_event_count"] + receipt["backpressure_drop_count"]
+    assert len(dsh_fixture_records()) == receipt["observed_event_count"]
+    assert receipt["observed_event_count"] == (
+        receipt["accepted_event_count"]
+        + receipt["rejected_event_count"]
+        + receipt["backpressure_drop_count"]
+    )

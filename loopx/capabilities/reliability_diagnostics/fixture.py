@@ -20,7 +20,7 @@ from .envelope import (
     ClockSource,
     ObserverEventKind,
 )
-from .intake import ShadowObserverIntake
+from .intake import ObserverRunIdentity, ShadowObserverIntake
 from .projection import build_diagnostic_projection
 from .receipt import build_integrity_receipt, read_ledger
 
@@ -31,6 +31,16 @@ FIXTURE_OBSERVER_ID = "dsh-session-events-fixture"
 FIXTURE_BUFFER_BOUND = 20
 FIXTURE_UNCERTAIN_CLOCK_MS = 1500
 FIXTURE_START = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+FIXTURE_RUN_IDENTITY = ObserverRunIdentity(
+    worker_id="dsh-worker-fixture",
+    model_id="model-fixture",
+    task_id="task-fixture",
+    environment_id="environment-fixture",
+    tools_id="tools-fixture",
+    budget_id="budget-fixture",
+    adapter_revision="dsh-adapter-fixture",
+    observer_revision="observer-fixture",
+)
 
 
 def _envelope(
@@ -47,6 +57,7 @@ def _envelope(
         "schema_version": OBSERVER_ENVELOPE_SCHEMA_VERSION,
         "capability_id": CAPABILITY_ID,
         "provider_id": DSH_PROVIDER_ID,
+        "observer_id": FIXTURE_OBSERVER_ID,
         "goal_id": FIXTURE_GOAL_ID,
         "session_id": FIXTURE_SESSION_ID,
         "agent_id": FIXTURE_AGENT_ID,
@@ -110,6 +121,23 @@ def run_dsh_fixture() -> dict[str, Any]:
         observer_id=FIXTURE_OBSERVER_ID,
         goal_id=FIXTURE_GOAL_ID,
         clock_source=ClockSource.FIXTURE,
+        run_identity=FIXTURE_RUN_IDENTITY,
+        event_sources=("session/created", "session/disposed", "session/event"),
+        source_fields_consumed=(
+            "event.data.callId",
+            "event.data.error.code",
+            "event.data.id",
+            "event.data.message.source.callId",
+            "event.data.name",
+            "event.data.reason.kind",
+            "event.data.source.kind",
+            "event.data.step",
+            "event.data.turn",
+            "event.seq",
+            "event.time",
+            "event.type",
+            "session.id",
+        ),
         buffer_bound=FIXTURE_BUFFER_BOUND,
     )
     accepted = [intake.observe(record) for record in dsh_fixture_records()]

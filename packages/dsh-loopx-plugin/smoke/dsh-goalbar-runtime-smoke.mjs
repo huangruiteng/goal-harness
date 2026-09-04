@@ -46,6 +46,7 @@ const packedStaticEntries = new Set([
   'package/lib/driver.js',
   'package/lib/index.js',
   'package/lib/init-command.js',
+  'package/lib/observer.js',
   'package/lib/types/cli.d.ts',
   'package/lib/types/client/LoopXGoalBar.d.ts',
   'package/lib/types/client/index.d.ts',
@@ -1007,6 +1008,7 @@ esac
       ['loopx-goalbar', packageId],
       ['loopx-init-command', `${packageId}/init-command`],
       ['loopx-driver', `${packageId}/driver`],
+      ['loopx-shadow-observer', `${packageId}/observer`],
     ]) {
       const row = installedDump.indexOf(`id: ${id}`)
       assert(
