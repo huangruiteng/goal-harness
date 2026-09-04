@@ -442,6 +442,22 @@ def _monitor_lane_rule(
                     ),
                 }
             )
+        non_runnable_non_monitor_count = max(
+            0,
+            int(lane.get("non_runnable_non_monitor_count") or 0),
+        )
+        if non_runnable_non_monitor_count:
+            reason = (
+                "no executable advancement todo is runnable; "
+                f"{non_runnable_non_monitor_count} non-monitor todo(s) are "
+                "blocked or otherwise non-executable, and the remaining "
+                "schedulable work is non-due monitor-class"
+            )
+        else:
+            reason = (
+                "all visible open agent todos are monitor-class work with no "
+                "material transition to record"
+            )
         return _recommendation(
             {
                 "recommended_mode": "monitor_quiet_until_material_transition",
@@ -449,10 +465,7 @@ def _monitor_lane_rule(
                     "do not append quota spend until a material monitor transition, "
                     "regression, or concrete blocker is validated and written back"
                 ),
-                "reason": (
-                    "all visible open agent todos are monitor-class work with no "
-                    "material transition to record"
-                ),
+                "reason": reason,
             }
         )
     if must_attempt_work is not True or facts.has_user_todos:
