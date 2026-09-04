@@ -82,6 +82,7 @@ scoring/   评分/聚合/可视化（口径见 _common.py）
 skills/    两个五模式 benchmark skill
 runtime/   模式框架 + turn 驱动，含 automation 唤醒循环 loopx_turn_runner.py（见 runtime/RUNTIME.md）
 data.json  pinned public-safe 聚合产物
+case_insights.json  非官方 draft case-insight 记录（scoring/case_insights.py 由 data.json 生成）
 ```
 
 依赖 `loopx.capabilities.benchmark_toolkit` 与 harbor；内部网络拓扑与凭证未内嵌。
