@@ -1640,6 +1640,10 @@ async function main() {
     await page.locator(".personal-channel-timeline").waitFor({ state: "visible" });
     await page.screenshot({ path: resolve(outputDir, "goal-chat-loopx-theme.png"), fullPage: false, animations: "disabled" });
     await defaultTasksTab.click();
+    const desktopNavigationTrigger = page.locator(".personal-mobile-menu");
+    if (await desktopNavigationTrigger.isVisible()) {
+      throw new Error("Mobile-only Goal navigation trigger leaked into the persistent desktop sidebar layout");
+    }
     const fullDesktopViewport = page.viewportSize();
     await page.setViewportSize({ width: 900, height: 720 });
     const compactHeaderButtons = [
