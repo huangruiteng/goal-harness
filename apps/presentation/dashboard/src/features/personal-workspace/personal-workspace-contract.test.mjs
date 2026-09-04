@@ -350,7 +350,8 @@ assert.match(chatData, /capability_catalog: capabilityConfigurationCatalogSchema
 assert.match(chatData, /goalConfigurationInspectionSchema/, "Goal settings validate the shared capability catalog inspection");
 assert.match(chatData, /fetchGoalConfiguration\(goalId: string\)/, "Goal settings use a dedicated path-free configuration inspection endpoint");
 assert.match(goalCapabilitySettings, /restoreInheritance/, "Goal overrides expose an explicit path back to live machine defaults");
-assert.match(goalCapabilitySettings, /preview\.action === "delete" \? null : draft/, "Applying a delete preview clears the complete Goal override");
+assert.match(goalCapabilitySettings, /projectEditableCapabilityConfiguration/, "Goal writes project read models onto editor-owned fields");
+assert.match(goalCapabilitySettings, /status === "partial_write"/, "Goal settings preserve partial-write recovery outcomes");
 assert.match(chatData, /namespace_configuration:\s*namespaceConfiguration/, "The browser patches one owned namespace without round-tripping private namespaces");
 assert.match(chatData, /operation:\s*"remove"/, "The browser uses an explicit typed removal operation");
 assert.match(chatData, /z\.enum\(\["create", "update", "delete", "unchanged"\]\)/, "Machine previews recognize deletion as a first-class action");

@@ -628,6 +628,11 @@
 .personal-capability-error span { display: grid; gap: 2px; }
 .personal-capability-error small { color: var(--pw-muted); }
 .personal-capability-error button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: auto; padding: 0 12px; border: 1px solid currentColor; border-radius: 9px; background: transparent; color: inherit; cursor: pointer; }
+.personal-capability-recovery { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 9px; margin: 0 20px 16px; padding: 12px; border: 1px solid #dfc98d; border-radius: 10px; background: #fffaf0; color: #74530d; font-size: 11px; line-height: 1.5; }
+.personal-capability-recovery div { display: grid; gap: 3px; }
+.personal-capability-recovery p { margin: 0; }
+.personal-capability-recovery small { color: var(--pw-muted); overflow-wrap: anywhere; }
+.personal-capability-recovery button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 10px; border: 1px solid currentColor; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
 .personal-task-lane-filter > div { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--pw-muted); }
 .personal-task-lane-filter > div > span { display: grid; gap: 1px; }
 .personal-task-lane-filter strong { color: var(--pw-text); font-size: 12px; }

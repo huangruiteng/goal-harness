@@ -226,6 +226,46 @@ class _PeriodicClearHandler(_MutationHandler):
         return write
 
 
+class _PartialWriteHandler(_MutationHandler):
+    def _goal_configuration_writer(self):
+        def write(*, execute: bool, **kwargs: Any) -> dict[str, Any]:
+            assert kwargs["goal_id"] == "goal-example"
+            assert kwargs["explore_graph_enabled"] is True
+            if not execute:
+                return {
+                    **_catalog_payload(explore_enabled=True),
+                    "ok": True,
+                    "changed": True,
+                    "changed_fields": ["explore_graph"],
+                }
+            self.applied = True
+            return {
+                **_catalog_payload(explore_enabled=True),
+                "ok": False,
+                "written": True,
+                "partial_write": True,
+                "changed": True,
+                "changed_fields": ["explore_graph"],
+                "error": "configure-goal shared registry readback did not verify",
+                "recommended_action": (
+                    "rerun loopx sync-global --goal-id goal-example after repairing "
+                    "the shared runtime route"
+                ),
+            }
+
+        return write
+
+
+class _PartialWriteReadbackFailureHandler(_PartialWriteHandler):
+    def _goal_configuration_reader(self):
+        def read(**_kwargs: Any) -> dict[str, Any]:
+            if self.applied:
+                raise OSError("source readback unavailable")
+            return _catalog_payload(explore_enabled=False)
+
+        return read
+
+
 def test_goal_configuration_inspection_is_path_free_and_revisioned() -> None:
     handler = _Handler(
         f"{CHAT_GOAL_CONFIGURATION_PATH}?goal_id=goal-example",
@@ -370,6 +410,57 @@ def test_goal_configuration_clear_override_is_revision_locked() -> None:
         if item["capability_id"] == "periodic_report"
     )
     assert periodic["effective_configuration"]["source"] == "machine_default"
+
+
+def test_goal_configuration_apply_preserves_partial_write_receipt() -> None:
+    body = {
+        "goal_id": "goal-example",
+        "capability_id": "explore_graph",
+        "configuration": {"enabled": True},
+    }
+    preview_handler = _PartialWriteHandler(body)
+    preview_handler._goal_configuration_update(execute=False)
+    preview = preview_handler.responses[0]
+
+    apply_handler = _PartialWriteHandler(
+        {**body, "expected_plan_revision": preview["plan_revision"]}
+    )
+    apply_handler.path = CHAT_GOAL_CONFIGURATION_APPLY_PATH
+    apply_handler._goal_configuration_update(execute=True)
+
+    receipt = apply_handler.responses[0]
+    assert receipt["status_code"] == 207
+    assert receipt["ok"] is False
+    assert receipt["status"] == "partial_write"
+    assert receipt["source_written"] is True
+    assert receipt["shared_sync_pending"] is True
+    assert receipt["readback_verified"] is True
+    assert receipt["goal_configuration"] == {"enabled": True}
+    assert receipt["recommended_action"].startswith("rerun loopx sync-global")
+    assert "prior state was preserved" not in receipt.get("error", "")
+
+
+def test_goal_configuration_partial_write_survives_source_readback_failure() -> None:
+    body = {
+        "goal_id": "goal-example",
+        "capability_id": "explore_graph",
+        "configuration": {"enabled": True},
+    }
+    preview_handler = _PartialWriteReadbackFailureHandler(body)
+    preview_handler._goal_configuration_update(execute=False)
+    preview = preview_handler.responses[0]
+    apply_handler = _PartialWriteReadbackFailureHandler(
+        {**body, "expected_plan_revision": preview["plan_revision"]}
+    )
+    apply_handler._goal_configuration_update(execute=True)
+
+    receipt = apply_handler.responses[0]
+    assert receipt["status_code"] == 207
+    assert receipt["status"] == "partial_write"
+    assert receipt["source_written"] is True
+    assert receipt["readback_verified"] is False
+    assert receipt["applied_revision"] is None
+    assert receipt["goal_configuration"] is None
 
 
 def test_goal_configuration_service_rechecks_revision_before_write(

@@ -1020,6 +1020,29 @@ export const goalConfigurationTransactionSchema = goalConfigurationMutationBaseS
   readback_verified: z.literal(true),
 });
 
+export const goalConfigurationPartialWriteSchema = z.object({
+  ok: z.literal(false),
+  schema_version: z.literal("goal_configuration_transaction_v0"),
+  status: z.literal("partial_write"),
+  goal_id: z.string(),
+  capability_id: z.string(),
+  plan_revision: z.string(),
+  applied_revision: z.string().nullable(),
+  source_written: z.literal(true),
+  shared_sync_pending: z.literal(true),
+  readback_verified: z.boolean(),
+  changed_fields: z.array(z.string()),
+  goal_configuration: z.record(z.string(), z.unknown()).nullable(),
+  capability_catalog: capabilityConfigurationCatalogSchema,
+  error: z.string(),
+  recommended_action: z.string(),
+});
+
+export const goalConfigurationApplyResultSchema = z.union([
+  goalConfigurationTransactionSchema,
+  goalConfigurationPartialWriteSchema,
+]);
+
 const machineConfigurationBaseSchema = z.object({
   ok: z.literal(true),
   available_namespaces: z.array(z.string()),
@@ -1087,6 +1110,8 @@ export type CapabilityConfigurationEditor = z.infer<typeof capabilityConfigurati
 export type GoalConfigurationInspection = z.infer<typeof goalConfigurationInspectionSchema>;
 export type GoalConfigurationPreview = z.infer<typeof goalConfigurationPreviewSchema>;
 export type GoalConfigurationTransaction = z.infer<typeof goalConfigurationTransactionSchema>;
+export type GoalConfigurationPartialWrite = z.infer<typeof goalConfigurationPartialWriteSchema>;
+export type GoalConfigurationApplyResult = z.infer<typeof goalConfigurationApplyResultSchema>;
 export type MachineConfigurationInspection = z.infer<typeof machineConfigurationInspectionSchema>;
 export type MachineConfigurationPreview = z.infer<typeof machineConfigurationPreviewSchema>;
 export type MachineConfigurationTransaction = z.infer<typeof machineConfigurationTransactionSchema>;
@@ -1128,7 +1153,7 @@ export async function applyGoalConfiguration(
   configuration: Record<string, unknown> | null,
   expectedPlanRevision: string,
 ) {
-  return goalConfigurationTransactionSchema.parse(
+  return goalConfigurationApplyResultSchema.parse(
     await requestJson<unknown>("/api/chat/goal-configuration/apply", {
       method: "POST",
       body: JSON.stringify({

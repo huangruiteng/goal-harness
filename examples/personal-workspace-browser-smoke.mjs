@@ -125,6 +125,7 @@ async function installApi(page) {
       ["archived-notes", "stopped"],
     ]),
     interrupts: [],
+    goalConfigurationRequests: [],
     larkWrites: [],
     actionTransitions: [],
     allowNextHeartbeatApply: false,
@@ -429,6 +430,90 @@ async function installApi(page) {
   await page.route("**/api/chat/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/chat/goal-configuration" && request.method() === "GET") {
+      const goalId = url.searchParams.get("goal_id");
+      const periodicConfiguration = {
+        schema_version: "periodic_report_machine_defaults_v0",
+        enabled: true,
+        inheritance: "live_machine_default",
+        profile_preset: "weekly-progress",
+        route_ref: "loopx-manager",
+        timezone: "Asia/Shanghai",
+      };
+      await route.fulfill({ contentType: "application/json", json: {
+        ok: true,
+        schema_version: "goal_configuration_inspection_v0",
+        status: "configured",
+        goal_id: goalId,
+        revision: "sha256:goal-current",
+        available_capabilities: ["periodic_report"],
+        capability_catalog: {
+          schema_version: "capability_configuration_catalog_v0",
+          capabilities: [{
+            capability_id: "periodic_report",
+            display_name: "Periodic reports",
+            description: "Publish bounded progress reports.",
+            available_scopes: ["machine", "goal"],
+            machine_namespace: "periodic_report",
+            goal_feature_id: "periodic_report",
+            effective_value_policy: "goal_override_over_live_machine_default",
+            default: { enabled: false, timezone: "UTC" },
+            machine_current: periodicConfiguration,
+            effective_configuration: {
+              schema_version: "capability_configuration_resolution_v0",
+              capability_id: "periodic_report",
+              source: "machine_default",
+              configuration: periodicConfiguration,
+              inherited: true,
+              goal_override_present: false,
+              machine_default_present: true,
+              effective_revision: "sha256:periodic-effective",
+            },
+            configuration_editor: {
+              schema_version: "capability_configuration_editor_v0",
+              editable: true,
+              supported_scopes: ["machine", "goal"],
+              writable_scopes: ["machine", "goal"],
+              fields: [
+                { key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false },
+                { key: "profile_preset", label: "Profile preset", description: "", input_kind: "text", required: false },
+                { key: "route_ref", label: "Goal Channel route", description: "", input_kind: "text", required: false },
+                { key: "timezone", label: "Timezone", description: "", input_kind: "text", required: true },
+              ],
+            },
+          }],
+        },
+      }, status: 200 });
+      return;
+    }
+    if (url.pathname === "/api/chat/goal-configuration/preview" && request.method() === "POST") {
+      const body = request.postDataJSON();
+      state.goalConfigurationRequests.push({ phase: "preview", ...body });
+      await route.fulfill({ contentType: "application/json", json: {
+        ok: true, schema_version: "goal_configuration_update_plan_v0", status: "preview",
+        action: "create", current_revision: "absent", desired_revision: "sha256:desired",
+        base_revision: "sha256:goal-current", plan_revision: "sha256:goal-plan", writes_required: 1,
+        goal_id: body.goal_id, capability_id: body.capability_id,
+        changed_fields: ["periodic_report"], goal_configuration: body.configuration,
+        capability_catalog: { schema_version: "capability_configuration_catalog_v0", capabilities: [] },
+      }, status: 201 });
+      return;
+    }
+    if (url.pathname === "/api/chat/goal-configuration/apply" && request.method() === "POST") {
+      const body = request.postDataJSON();
+      state.goalConfigurationRequests.push({ phase: "apply", ...body });
+      await route.fulfill({ contentType: "application/json", json: {
+        ok: false, schema_version: "goal_configuration_transaction_v0", status: "partial_write",
+        goal_id: body.goal_id, capability_id: body.capability_id,
+        plan_revision: body.expected_plan_revision, applied_revision: "sha256:goal-applied",
+        source_written: true, shared_sync_pending: true, readback_verified: true,
+        changed_fields: ["periodic_report"], goal_configuration: body.configuration,
+        capability_catalog: { schema_version: "capability_configuration_catalog_v0", capabilities: [] },
+        error: "shared projection did not synchronize",
+        recommended_action: `rerun loopx sync-global --goal-id ${body.goal_id}`,
+      }, status: 207 });
+      return;
+    }
     const resumedEvents = url.pathname.match(/^\/api\/chat\/sessions\/([^/]+)\/turns\/([^/]+)\/events$/);
     if (resumedEvents && request.method() === "GET") {
       const sessionId = resumedEvents[1];
@@ -1266,6 +1351,18 @@ async function main() {
     await capabilityMenuItem.click();
     await page.getByRole("heading", { level: 1, name: "Goal 能力", exact: true }).waitFor({ state: "visible" });
     if (await page.locator(".personal-workspace-shell").count()) throw new Error("Unified Goal capability action did not open the Settings surface");
+    await page.getByRole("button", { name: "预览变更", exact: true }).click();
+    await page.getByText("锁定 revision 的变更预览", { exact: true }).waitFor({ state: "visible" });
+    const goalConfigurationPreview = api.goalConfigurationRequests.find((item) => item.phase === "preview");
+    const projectedKeys = Object.keys(goalConfigurationPreview?.configuration ?? {}).sort();
+    if (JSON.stringify(projectedKeys) !== JSON.stringify(["enabled", "profile_preset", "route_ref", "timezone"])) {
+      throw new Error(`Goal configuration preview leaked hidden machine fields: ${JSON.stringify(goalConfigurationPreview)}`);
+    }
+    await page.getByRole("button", { name: "应用此预览", exact: true }).click();
+    await page.getByText("Goal 值已保存；共享投影仍需修复", { exact: true }).waitFor({ state: "visible" });
+    if (!(await page.getByText(/loopx sync-global --goal-id/u).isVisible())) throw new Error("Partial Goal write did not expose its reconciliation action");
+    const goalConfigurationApply = api.goalConfigurationRequests.find((item) => item.phase === "apply");
+    if (goalConfigurationApply?.expected_plan_revision !== "sha256:goal-plan") throw new Error("Goal configuration apply lost its reviewed plan revision");
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
     await page.getByRole("button", { name: "Tasks", current: "page" }).waitFor({ state: "visible" });
     await page.getByRole("button", { name: "打开 Goal 详情或能力配置" }).click();

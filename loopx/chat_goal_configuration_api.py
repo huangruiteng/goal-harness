@@ -373,7 +373,67 @@ class GoalConfigurationRequestMixin:
                 **options,
             )
             if not applied.get("ok"):
-                raise RuntimeError("Goal configuration apply did not verify")
+                if not (
+                    applied.get("written") and applied.get("partial_write")
+                ):
+                    raise RuntimeError("Goal configuration apply did not verify")
+                try:
+                    readback = self._goal_configuration_reader()(
+                        registry_path=self.server.registry_path,
+                        goal_id=goal_id,
+                        execute=False,
+                    )
+                    readback_public = _public_goal_configuration(
+                        readback,
+                        machine_namespaces=(
+                            self._goal_configuration_machine_namespaces()
+                        ),
+                    )
+                    readback_configuration = _capability_entry(
+                        readback_public, capability_id
+                    ).get("current")
+                    source_readback_verified = (
+                        readback_configuration == desired_configuration
+                    )
+                except Exception:  # noqa: BLE001 - retain the partial-write fact.
+                    readback_public = desired_public
+                    readback_configuration = None
+                    source_readback_verified = False
+                self._send_json(
+                    {
+                        "ok": False,
+                        "schema_version": "goal_configuration_transaction_v0",
+                        "status": "partial_write",
+                        "goal_id": goal_id,
+                        "capability_id": capability_id,
+                        "plan_revision": plan["plan_revision"],
+                        "applied_revision": (
+                            readback_public["revision"]
+                            if source_readback_verified
+                            else None
+                        ),
+                        "source_written": True,
+                        "shared_sync_pending": True,
+                        "readback_verified": source_readback_verified,
+                        "changed_fields": list(
+                            applied.get("changed_fields") or []
+                        ),
+                        "goal_configuration": readback_configuration,
+                        "capability_catalog": readback_public[
+                            "capability_catalog"
+                        ],
+                        "error": str(
+                            applied.get("error")
+                            or "Goal configuration shared projection did not synchronize"
+                        ),
+                        "recommended_action": str(
+                            applied.get("recommended_action")
+                            or f"rerun loopx sync-global --goal-id {goal_id}"
+                        ),
+                    },
+                    status=207,
+                )
+                return
             readback = self._goal_configuration_reader()(
                 registry_path=self.server.registry_path,
                 goal_id=goal_id,
