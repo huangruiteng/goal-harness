@@ -114,6 +114,54 @@ test("Turn envelope transaction owns compaction and signature construction", () 
   );
 });
 
+test("monitor-only capsule preserves the non-runnable non-monitor count", () => {
+  const source = payload();
+  source.should_run = false;
+  source.effective_action = "monitor_quiet_skip";
+  source.protocol_action_packet = {};
+  source.interaction_contract = {
+    schema_version: "loopx_interaction_contract_v0",
+    mode: "monitor_quiet_until_material_transition",
+    user_channel: { action_required: false, notify: "DONT_NOTIFY" },
+    agent_channel: {
+      must_attempt: false,
+      delivery_allowed: false,
+      quiet_noop_allowed: true,
+    },
+    cli_channel: {
+      next_cli_actions: [],
+      spend_allowed_now: false,
+      spend_after_validation: false,
+    },
+  };
+  source.work_lane_contract = {
+    schema_version: "work_lane_contract_v0",
+    lane: "continuous_monitor",
+    obligation: "quiet_until_material_monitor_transition",
+    must_attempt_work: false,
+    reason_codes: ["non_runnable_non_monitor_todos_present"],
+    non_runnable_non_monitor_count: 2,
+  };
+
+  const envelope = buildTurnEnvelope({
+    payload: source,
+    protocol_action_fields: {
+      actor: "agent",
+      user_action_required: false,
+      agent_action_required: false,
+      quiet_noop_allowed: true,
+      lane: "continuous_monitor",
+      llm: "no_api",
+      agent_action:
+        "quiet until a material monitor transition, regression, or concrete blocker appears",
+    },
+    scheduler_execution_args: "",
+  });
+  const capsule = envelope.contract_capsule as Record<string, unknown>;
+
+  assert.deepEqual(capsule.work_lane_contract, source.work_lane_contract);
+});
+
 test("planning detail stays cold while its action dimension remains signed", () => {
   const source = payload();
   source.planning_horizon = {

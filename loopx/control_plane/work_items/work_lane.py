@@ -702,13 +702,10 @@ def build_work_lane_contract(
                 "must_attempt_work": False,
                 "reason_codes": [
                     *(
-                        [
-                            "monitor_only_schedule",
-                            "non_runnable_non_monitor_todos_present",
-                        ]
+                        ["non_runnable_non_monitor_todos_present"]
                         if non_runnable_non_monitor_count
                         else ["monitor_todo_only"]
-                    )
+                    ),
                 ],
                 "non_runnable_non_monitor_count": non_runnable_non_monitor_count,
                 "monitor_policy": "write_once_per_material_transition_else_no_spend",

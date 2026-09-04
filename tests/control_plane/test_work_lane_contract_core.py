@@ -127,9 +127,34 @@ def test_quiet_monitor_explains_blocked_non_monitor_todos() -> None:
 
     assert guard["effective_action"] == "monitor_quiet_skip"
     assert lane["non_runnable_non_monitor_count"] == 2
-    assert "non_runnable_non_monitor_todos_present" in lane["reason_codes"]
+    assert lane["reason_codes"] == ["non_runnable_non_monitor_todos_present"]
     assert "no executable advancement todo is runnable" in guard["reason"]
     assert "all visible open agent todos are monitor-class" not in guard["reason"]
+
+
+def test_true_monitor_only_lane_keeps_existing_reason_code() -> None:
+    payload = _status(
+        agent_todo_items=[
+            {
+                "index": 1,
+                "text": "[P3] Check the dependency next week.",
+                "role": "agent",
+                "status": "open",
+                "priority": "P3",
+                "task_class": "continuous_monitor",
+                "action_kind": "monitor",
+                "next_due_at": "2999-01-01T00:00:00+00:00",
+            },
+        ],
+        next_action="Wait for a material dependency transition.",
+    )
+
+    guard = build_quota_should_run(payload, goal_id=GOAL_ID)
+    lane = guard["work_lane_contract"]
+
+    assert guard["effective_action"] == "monitor_quiet_skip"
+    assert lane["non_runnable_non_monitor_count"] == 0
+    assert lane["reason_codes"] == ["monitor_todo_only"]
 
 
 def test_work_lane_context_progress_scope_sources() -> None:
