@@ -687,11 +687,16 @@ def _read_state_text(path: Path) -> str:
 
 def _event_present(sources: _GoalSources, event_id: str) -> bool:
     from ...event_sourced_state import AppendOnlyStateEventStore
-    from ...status import state_event_log_candidates
+    from ..goals.active_state_event_projection import state_event_log_candidates
+    from ..goals.path_resolution import resolve_goal_local_path
 
     if sources.goal is None:
         return False
-    for candidate in state_event_log_candidates(sources.goal, state_path=sources.state_path):
+    for candidate in state_event_log_candidates(
+        sources.goal,
+        state_path=sources.state_path,
+        resolve_goal_local_path=resolve_goal_local_path,
+    ):
         if not candidate.exists():
             continue
         for event in AppendOnlyStateEventStore(candidate).load():
