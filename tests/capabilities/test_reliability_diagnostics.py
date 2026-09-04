@@ -64,7 +64,14 @@ RUN_IDENTITY = ObserverRunIdentity(
     observer_revision="observer-revision-1",
 )
 EVENT_SOURCES = ["dsh-agent-hooks", "dsh-session-events"]
-SOURCE_FIELDS = ["agent.id", "event.data", "event.seq", "event.time", "event.type", "session.id"]
+SOURCE_FIELDS = [
+    "agent.id",
+    "event.data",
+    "event.seq",
+    "event.time",
+    "event.type",
+    "session.id",
+]
 
 
 def envelope(
@@ -130,20 +137,29 @@ def at(seconds: int) -> str:
 
 
 def receipt_for(*records: dict[str, Any], malformed: int = 0) -> dict[str, Any]:
-    return build_integrity_receipt(read_ledger(records, goal_id=GOAL, malformed_line_count=malformed))
+    return build_integrity_receipt(
+        read_ledger(records, goal_id=GOAL, malformed_line_count=malformed)
+    )
 
 
 # --- envelope schema -------------------------------------------------------
 
 
 def test_envelope_schema_has_no_control_or_raw_material_fields() -> None:
-    flattened = {name.replace("_", "") for name in ENVELOPE_FIELDS | SUMMARY_FIELDS | SOURCE_REF_FIELDS}
+    flattened = {
+        name.replace("_", "")
+        for name in ENVELOPE_FIELDS | SUMMARY_FIELDS | SOURCE_REF_FIELDS
+    }
     assert not flattened & CONTROL_FIELD_FAMILIES
     assert not flattened & RAW_MATERIAL_FIELD_FAMILIES
 
 
 def test_valid_envelope_round_trips() -> None:
-    record = envelope(3, ObserverEventKind.TOOL_CALLED, summary={"turn": 1, "step": 2, "tool_name": "bash"})
+    record = envelope(
+        3,
+        ObserverEventKind.TOOL_CALLED,
+        summary={"turn": 1, "step": 2, "tool_name": "bash"},
+    )
     record["source_refs"]["tool_call_id"] = "call-9"
     normalized = normalize_observer_envelope(record)
     assert normalized.event_kind is ObserverEventKind.TOOL_CALLED
@@ -152,7 +168,18 @@ def test_valid_envelope_round_trips() -> None:
 
 @pytest.mark.parametrize(
     "field",
-    ["command", "send", "schedule", "retry", "stop", "resume", "gate", "toolCall", "worker_state", "callback"],
+    [
+        "command",
+        "send",
+        "schedule",
+        "retry",
+        "stop",
+        "resume",
+        "gate",
+        "toolCall",
+        "worker_state",
+        "callback",
+    ],
 )
 def test_control_shaped_fields_are_rejected_as_control(field: str) -> None:
     record = envelope(1, **{field: {"kind": "continue"}})
@@ -162,24 +189,32 @@ def test_control_shaped_fields_are_rejected_as_control(field: str) -> None:
     assert excinfo.value.reason is EnvelopeRejection.CONTROL_FIELD_REJECTED
 
 
-@pytest.mark.parametrize("field", ["transcript", "tool_output", "stdout", "cwd", "messages", "arguments"])
+@pytest.mark.parametrize(
+    "field", ["transcript", "tool_output", "stdout", "cwd", "messages", "arguments"]
+)
 def test_raw_material_fields_are_rejected_and_classified(field: str) -> None:
+    record = envelope(1, **{field: "protected"})
     with pytest.raises(ObserverEnvelopeError) as excinfo:
-        normalize_observer_envelope(envelope(1, **{field: "protected"}))
+        normalize_observer_envelope(record)
     assert excinfo.value.reason is EnvelopeRejection.RAW_MATERIAL_FIELD_REJECTED
 
 
 def test_raw_material_inside_summary_is_rejected() -> None:
+    record = envelope(1, summary={"text": "hello"})
     with pytest.raises(ObserverEnvelopeError) as excinfo:
-        normalize_observer_envelope(envelope(1, summary={"text": "hello"}))
+        normalize_observer_envelope(record)
     assert excinfo.value.reason is EnvelopeRejection.RAW_MATERIAL_FIELD_REJECTED
 
 
 def test_unknown_field_is_rejected_as_unsupported() -> None:
+    record = envelope(1, colour="blue")
     with pytest.raises(ObserverEnvelopeError) as excinfo:
-        normalize_observer_envelope(envelope(1, colour="blue"))
+        normalize_observer_envelope(record)
     assert excinfo.value.reason is EnvelopeRejection.UNSUPPORTED_FIELD_REJECTED
-    assert classify_rejected_field("agentSend") is EnvelopeRejection.UNSUPPORTED_FIELD_REJECTED
+    assert (
+        classify_rejected_field("agentSend")
+        is EnvelopeRejection.UNSUPPORTED_FIELD_REJECTED
+    )
 
 
 @pytest.mark.parametrize(
@@ -191,16 +226,33 @@ def test_unknown_field_is_rejected_as_unsupported() -> None:
         ({"sequence": True}, EnvelopeRejection.SEQUENCE_INVALID),
         ({"sequence": -4}, EnvelopeRejection.SEQUENCE_INVALID),
         ({"observed_at": "2026-09-01T10:00:00"}, EnvelopeRejection.CLOCK_INVALID),
-        ({"clock": {"source": "gps", "uncertainty_ms": 0}}, EnvelopeRejection.CLOCK_INVALID),
-        ({"clock": {"source": "fixture", "uncertainty_ms": -1}}, EnvelopeRejection.CLOCK_INVALID),
+        (
+            {"clock": {"source": "gps", "uncertainty_ms": 0}},
+            EnvelopeRejection.CLOCK_INVALID,
+        ),
+        (
+            {"clock": {"source": "fixture", "uncertainty_ms": -1}},
+            EnvelopeRejection.CLOCK_INVALID,
+        ),
         ({"event_kind": "prompt_injected"}, EnvelopeRejection.EVENT_KIND_INVALID),
-        ({"summary": {"tool_name": "bash -c 'rm -rf'"}}, EnvelopeRejection.SUMMARY_INVALID),
+        (
+            {"summary": {"tool_name": "bash -c 'rm -rf'"}},
+            EnvelopeRejection.SUMMARY_INVALID,
+        ),
         ({"summary": {"turn": "one"}}, EnvelopeRejection.SUMMARY_INVALID),
-        ({"source_refs": {"tool_call_id": "/Users/someone/call"}}, EnvelopeRejection.SOURCE_REF_INVALID),
-        ({"source_refs": {"tool_call_id": "sk-abcdefghijklmnop0123"}}, EnvelopeRejection.PUBLIC_SAFETY_VIOLATION),
+        (
+            {"source_refs": {"tool_call_id": "/Users/someone/call"}},
+            EnvelopeRejection.SOURCE_REF_INVALID,
+        ),
+        (
+            {"source_refs": {"tool_call_id": "sk-abcdefghijklmnop0123"}},
+            EnvelopeRejection.PUBLIC_SAFETY_VIOLATION,
+        ),
     ],
 )
-def test_malformed_envelopes_carry_typed_reasons(mutation: dict[str, Any], reason: EnvelopeRejection) -> None:
+def test_malformed_envelopes_carry_typed_reasons(
+    mutation: dict[str, Any], reason: EnvelopeRejection
+) -> None:
     record = envelope(1)
     record.update(mutation)
     with pytest.raises(ObserverEnvelopeError) as excinfo:
@@ -226,7 +278,16 @@ def intake(bound: int = 8) -> ShadowObserverIntake:
 
 def test_intake_exposes_no_control_surface() -> None:
     names = {name.lower() for name in dir(ShadowObserverIntake)}
-    assert not names & {"send", "command", "schedule", "retry", "stop", "resume", "pause", "inject"}
+    assert not names & {
+        "send",
+        "command",
+        "schedule",
+        "retry",
+        "stop",
+        "resume",
+        "pause",
+        "inject",
+    }
 
 
 def test_intake_bounds_buffer_and_counts_drops_without_raising() -> None:
@@ -287,8 +348,9 @@ def test_intake_rejects_and_counts_by_reason() -> None:
 
 
 def test_stats_record_rejects_unknown_fields() -> None:
+    record = stats(send_path="agent.send")
     with pytest.raises(ValueError, match="unsupported fields"):
-        normalize_observer_stats(stats(send_path="agent.send"))
+        normalize_observer_stats(record)
 
 
 @pytest.mark.parametrize(
@@ -306,8 +368,9 @@ def test_stats_record_rejects_unknown_fields() -> None:
 def test_stats_record_rejects_inconsistent_or_incomplete_evidence(
     mutation: dict[str, Any],
 ) -> None:
+    record = stats(**mutation)
     with pytest.raises(ValueError):
-        normalize_observer_stats(stats(**mutation))
+        normalize_observer_stats(record)
 
 
 # --- receipt ---------------------------------------------------------------
@@ -361,17 +424,27 @@ def test_receipt_counts_duplicate_sequences_separately() -> None:
     ("stats_override", "reason"),
     [
         ({"observer_failure_count": 1}, ReceiptReason.OBSERVER_FAILURE),
-        ({"rejected_event_count": 1, "rejected_by_reason": {"control_field_rejected": 1}}, ReceiptReason.CONTROL_FIELD_REJECTED),
+        (
+            {
+                "rejected_event_count": 1,
+                "rejected_by_reason": {"control_field_rejected": 1},
+            },
+            ReceiptReason.CONTROL_FIELD_REJECTED,
+        ),
     ],
 )
-def test_receipt_quarantines_observer_failure_and_control_fields(stats_override: dict[str, Any], reason: ReceiptReason) -> None:
+def test_receipt_quarantines_observer_failure_and_control_fields(
+    stats_override: dict[str, Any], reason: ReceiptReason
+) -> None:
     receipt = receipt_for(envelope(0), stats(**stats_override))
     assert receipt["status"] == ReceiptStatus.QUARANTINED.value
     assert receipt["reason_codes"] == [reason.value]
 
 
 def test_receipt_invalidates_malformed_ledger_records() -> None:
-    receipt = receipt_for(envelope(0), stats(), {"schema_version": "unknown"}, malformed=1)
+    receipt = receipt_for(
+        envelope(0), stats(), {"schema_version": "unknown"}, malformed=1
+    )
     assert receipt["ledger_invalid_record_count"] == 2
     assert receipt["status"] == ReceiptStatus.INVALID.value
 
@@ -379,13 +452,25 @@ def test_receipt_invalidates_malformed_ledger_records() -> None:
 @pytest.mark.parametrize(
     ("stats_override", "reason"),
     [
-        ({"outbound_endpoints": ["loopx-continuation"]}, ReceiptReason.OUTBOUND_ENDPOINT_CONFIGURED),
-        ({"observation_entered_worker_context": True}, ReceiptReason.OBSERVATION_ENTERED_WORKER_CONTEXT),
+        (
+            {"outbound_endpoints": ["loopx-continuation"]},
+            ReceiptReason.OUTBOUND_ENDPOINT_CONFIGURED,
+        ),
+        (
+            {"observation_entered_worker_context": True},
+            ReceiptReason.OBSERVATION_ENTERED_WORKER_CONTEXT,
+        ),
     ],
 )
-def test_receipt_invalidates_any_outbound_or_worker_context_path(stats_override: dict[str, Any], reason: ReceiptReason) -> None:
-    receipt = receipt_for(envelope(0), stats(observer_failure_count=1, **stats_override))
-    assert receipt["status"] == ReceiptStatus.INVALID.value  # invalid outranks quarantined
+def test_receipt_invalidates_any_outbound_or_worker_context_path(
+    stats_override: dict[str, Any], reason: ReceiptReason
+) -> None:
+    receipt = receipt_for(
+        envelope(0), stats(observer_failure_count=1, **stats_override)
+    )
+    assert (
+        receipt["status"] == ReceiptStatus.INVALID.value
+    )  # invalid outranks quarantined
     assert reason.value in receipt["reason_codes"]
     assert ReceiptReason.OBSERVER_FAILURE.value in receipt["reason_codes"]
 
@@ -393,12 +478,34 @@ def test_receipt_invalidates_any_outbound_or_worker_context_path(stats_override:
 @pytest.mark.parametrize(
     ("records", "reason"),
     [
-        ([envelope(0, clock={"source": "observer_wall_clock", "uncertainty_ms": 1001}), stats()], ReceiptReason.CLOCK_UNCERTAINTY_EXCEEDED),
-        ([envelope(0), stats(backpressure_drop_count=2)], ReceiptReason.BACKPRESSURE_DROP),
-        ([envelope(0), stats(rejected_event_count=1, rejected_by_reason={"raw_material_field_rejected": 1})], ReceiptReason.RAW_MATERIAL_REJECTED),
+        (
+            [
+                envelope(
+                    0, clock={"source": "observer_wall_clock", "uncertainty_ms": 1001}
+                ),
+                stats(),
+            ],
+            ReceiptReason.CLOCK_UNCERTAINTY_EXCEEDED,
+        ),
+        (
+            [envelope(0), stats(backpressure_drop_count=2)],
+            ReceiptReason.BACKPRESSURE_DROP,
+        ),
+        (
+            [
+                envelope(0),
+                stats(
+                    rejected_event_count=1,
+                    rejected_by_reason={"raw_material_field_rejected": 1},
+                ),
+            ],
+            ReceiptReason.RAW_MATERIAL_REJECTED,
+        ),
     ],
 )
-def test_receipt_degrades_but_keeps_evidence(records: list[dict[str, Any]], reason: ReceiptReason) -> None:
+def test_receipt_degrades_but_keeps_evidence(
+    records: list[dict[str, Any]], reason: ReceiptReason
+) -> None:
     receipt = receipt_for(*records)
     assert receipt["status"] == ReceiptStatus.DEGRADED.value
     assert receipt["reason_codes"] == [reason.value]
@@ -427,8 +534,14 @@ def test_receipt_invalidates_unlinked_stats_and_identity_rejection() -> None:
 
 
 def test_receipt_clock_uncertainty_at_threshold_is_visible_not_degraded() -> None:
-    receipt = receipt_for(envelope(0, clock={"source": "observer_wall_clock", "uncertainty_ms": 1000}), stats())
-    assert receipt["clock"] == {"sources": ["harness_event_time", "observer_wall_clock"], "max_uncertainty_ms": 1000}
+    receipt = receipt_for(
+        envelope(0, clock={"source": "observer_wall_clock", "uncertainty_ms": 1000}),
+        stats(),
+    )
+    assert receipt["clock"] == {
+        "sources": ["harness_event_time", "observer_wall_clock"],
+        "max_uncertainty_ms": 1000,
+    }
     assert receipt["status"] == ReceiptStatus.VALID.value
 
 
@@ -457,7 +570,10 @@ def test_projection_declares_read_only_boundary() -> None:
     assert projection["authority"] == "none"
     assert projection["write_scope"] == "diagnostic_ledger_only"
     assert projection["worker_influence"] == "none"
-    assert set(projection) & {"command", "next_action", "recommended_action", "gate"} == set()
+    assert (
+        set(projection) & {"command", "next_action", "recommended_action", "gate"}
+        == set()
+    )
 
 
 def test_projection_stall_requires_active_stage_and_silence() -> None:
@@ -474,7 +590,12 @@ def test_projection_stall_requires_active_stage_and_silence() -> None:
 
     idle = projection_for(
         envelope(0, ObserverEventKind.TURN_STARTED),
-        envelope(1, ObserverEventKind.TURN_ENDED, observed_at=at(1), summary={"reason": "completed"}),
+        envelope(
+            1,
+            ObserverEventKind.TURN_ENDED,
+            observed_at=at(1),
+            summary={"reason": "completed"},
+        ),
         stats(accepted_event_count=2),
         as_of=at(6 * 60),
     )
@@ -485,11 +606,21 @@ def test_projection_stall_requires_active_stage_and_silence() -> None:
 def test_projection_repetition_counts_consecutive_identical_tool_runs() -> None:
     tools = ["read", "read", "bash", "read", "read", "read"]
     records = [
-        envelope(index, ObserverEventKind.TOOL_CALLED, observed_at=at(index), summary={"tool_name": tool})
+        envelope(
+            index,
+            ObserverEventKind.TOOL_CALLED,
+            observed_at=at(index),
+            summary={"tool_name": tool},
+        )
         for index, tool in enumerate(tools)
     ]
     projection = projection_for(*records, stats(accepted_event_count=len(records)))
-    assert projection["repetition"] == {"detected": True, "threshold": 3, "longest_tool_run": 3, "tool_name": "read"}
+    assert projection["repetition"] == {
+        "detected": True,
+        "threshold": 3,
+        "longest_tool_run": 3,
+        "tool_name": "read",
+    }
     below = projection_for(*records[:2], stats(accepted_event_count=2))
     assert below["repetition"]["detected"] is False
 
@@ -497,11 +628,20 @@ def test_projection_repetition_counts_consecutive_identical_tool_runs() -> None:
 def test_projection_recovery_and_stage_transitions() -> None:
     unrecovered = projection_for(
         envelope(0, ObserverEventKind.STEP_STARTED),
-        envelope(1, ObserverEventKind.AGENT_ERROR, observed_at=at(1), summary={"error_class": "Timeout"}),
+        envelope(
+            1,
+            ObserverEventKind.AGENT_ERROR,
+            observed_at=at(1),
+            summary={"error_class": "Timeout"},
+        ),
         stats(accepted_event_count=2),
     )
     assert unrecovered["stage"] == DiagnosticStage.ERRORED.value
-    assert unrecovered["recovery"] == {"error_count": 1, "recovered_error_count": 0, "unrecovered_error_count": 1}
+    assert unrecovered["recovery"] == {
+        "error_count": 1,
+        "recovered_error_count": 0,
+        "unrecovered_error_count": 1,
+    }
     assert DiagnosticSignal.UNRECOVERED_ERROR.value in unrecovered["signals"]
 
     recovered = projection_for(
@@ -549,12 +689,17 @@ def test_projection_surfaces_event_loss_and_integrity() -> None:
 
 def test_ledger_ref_is_relative_and_goal_scoped(tmp_path: Path) -> None:
     assert ledger_ref("goal:alpha") == "reliability_diagnostics/goal_alpha.ndjson"
-    assert ledger_path(tmp_path, "goal-a") == tmp_path / "reliability_diagnostics" / "goal-a.ndjson"
+    assert (
+        ledger_path(tmp_path, "goal-a")
+        == tmp_path / "reliability_diagnostics" / "goal-a.ndjson"
+    )
     with pytest.raises(ValueError):
         ledger_ref("../escape")
 
 
-def test_ledger_append_is_line_oriented_and_tolerates_malformed_lines(tmp_path: Path) -> None:
+def test_ledger_append_is_line_oriented_and_tolerates_malformed_lines(
+    tmp_path: Path,
+) -> None:
     path = ledger_path(tmp_path, GOAL)
     assert append_ledger_records(path, [envelope(0)]) == 1
     assert append_ledger_records(path, []) == 0

@@ -189,8 +189,8 @@ export function resolveShadowObserverConfig(
 function validRunIdentity(value: unknown): value is ObserverRunIdentity {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
-  const actual = Object.keys(record).sort()
-  const expected = [...RUN_IDENTITY_FIELDS].sort()
+  const actual = Object.keys(record).sort((left, right) => left.localeCompare(right))
+  const expected = [...RUN_IDENTITY_FIELDS].sort((left, right) => left.localeCompare(right))
   return actual.length === expected.length
     && expected.every((field, index) => actual[index] === field)
     && RUN_IDENTITY_FIELDS.every((field) => {
@@ -220,13 +220,11 @@ async function appendLedgerLines(path: string, lines: readonly string[]): Promis
 }
 
 function token(value: unknown): string | undefined {
-  const text = String(value ?? '')
-  return SUMMARY_TOKEN.test(text) ? text : undefined
+  return typeof value === 'string' && SUMMARY_TOKEN.test(value) ? value : undefined
 }
 
 function identity(value: unknown): string | undefined {
-  const text = String(value ?? '')
-  return IDENTITY_TOKEN.test(text) ? text : undefined
+  return typeof value === 'string' && IDENTITY_TOKEN.test(value) ? value : undefined
 }
 
 function count(value: unknown): number | undefined {

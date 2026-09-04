@@ -86,39 +86,61 @@ class LedgerReading:
 
     @property
     def ordered_envelopes(self) -> list[ObserverEnvelope]:
-        return sorted(self.envelopes, key=lambda item: (item.observed_at, item.session_id, item.sequence))
+        return sorted(
+            self.envelopes,
+            key=lambda item: (item.observed_at, item.session_id, item.sequence),
+        )
 
 
-def read_ledger(records: Iterable[Any], *, goal_id: str, malformed_line_count: int = 0) -> LedgerReading:
+def _append_envelope_record(
+    reading: LedgerReading,
+    record: Mapping[str, Any],
+) -> None:
+    envelope = normalize_observer_envelope(record)
+    if envelope.goal_id != reading.goal_id:
+        raise ObserverEnvelopeError(
+            EnvelopeRejection.IDENTITY_INVALID, "goal_id does not match ledger"
+        )
+    reading.envelopes.append(envelope)
+
+
+def _store_stats_record(
+    reading: LedgerReading,
+    record: Mapping[str, Any],
+) -> None:
+    stats = normalize_observer_stats(record)
+    if stats.goal_id != reading.goal_id:
+        raise ValueError("goal_id does not match ledger")
+    previous = reading.stats.get(stats.observer_id)
+    if previous is not None and (
+        previous.provider_id != stats.provider_id
+        or previous.run_identity != stats.run_identity
+    ):
+        raise ValueError("observer stats identity changed within one ledger")
+    reading.stats[stats.observer_id] = stats
+
+
+def _read_ledger_record(reading: LedgerReading, record: Mapping[str, Any]) -> None:
+    schema = record.get("schema_version")
+    if schema == OBSERVER_ENVELOPE_SCHEMA_VERSION:
+        _append_envelope_record(reading, record)
+        return
+    if schema == OBSERVER_STATS_SCHEMA_VERSION:
+        _store_stats_record(reading, record)
+        return
+    raise ValueError("unknown ledger record schema")
+
+
+def read_ledger(
+    records: Iterable[Any], *, goal_id: str, malformed_line_count: int = 0
+) -> LedgerReading:
     reading = LedgerReading(goal_id=goal_id, invalid_record_count=malformed_line_count)
     for record in records:
         if not isinstance(record, Mapping):
             reading.invalid_record_count += 1
             continue
-        schema = record.get("schema_version")
         try:
-            if schema == OBSERVER_ENVELOPE_SCHEMA_VERSION:
-                envelope = normalize_observer_envelope(record)
-                if envelope.goal_id != goal_id:
-                    raise ObserverEnvelopeError(
-                        EnvelopeRejection.IDENTITY_INVALID, "goal_id does not match ledger"
-                    )
-                reading.envelopes.append(envelope)
-            elif schema == OBSERVER_STATS_SCHEMA_VERSION:
-                stats = normalize_observer_stats(record)
-                if stats.goal_id != goal_id:
-                    raise ValueError("goal_id does not match ledger")
-                # Stats are cumulative per observer instance; the latest wins,
-                # but one observer id may never change its identity mid-ledger.
-                previous = reading.stats.get(stats.observer_id)
-                if previous is not None and (
-                    previous.provider_id != stats.provider_id
-                    or previous.run_identity != stats.run_identity
-                ):
-                    raise ValueError("observer stats identity changed within one ledger")
-                reading.stats[stats.observer_id] = stats
-            else:
-                raise ValueError("unknown ledger record schema")
+            _read_ledger_record(reading, record)
         except ValueError:
             reading.invalid_record_count += 1
     return reading
@@ -142,6 +164,151 @@ def _sequence_accounting(envelopes: Iterable[ObserverEnvelope]) -> tuple[int, in
     return lost, duplicates
 
 
+@dataclass(frozen=True)
+class _ReceiptFacts:
+    lost_event_count: int
+    duplicate_sequence_count: int
+    rejected_by_reason: dict[str, int]
+    outbound_endpoints: list[str]
+    entered_worker_context: bool
+    entered_scheduler_inputs: bool
+    observer_failure_count: int
+    backpressure_drop_count: int
+    max_clock_uncertainty_ms: int
+    clock_sources: list[str]
+    envelopes_by_observer: dict[str, list[ObserverEnvelope]]
+    stats_mismatch: bool
+
+
+def _group_envelopes_by_observer(
+    envelopes: Iterable[ObserverEnvelope],
+) -> dict[str, list[ObserverEnvelope]]:
+    grouped: dict[str, list[ObserverEnvelope]] = defaultdict(list)
+    for envelope in envelopes:
+        grouped[envelope.observer_id].append(envelope)
+    return grouped
+
+
+def _observer_stats_mismatch(
+    reading: LedgerReading,
+    envelopes_by_observer: Mapping[str, list[ObserverEnvelope]],
+) -> bool:
+    for observer_id, observer_envelopes in envelopes_by_observer.items():
+        observer_stats = reading.stats.get(observer_id)
+        if observer_stats is None:
+            continue
+        provider_ids = {item.provider_id for item in observer_envelopes}
+        if provider_ids != {
+            observer_stats.provider_id
+        } or observer_stats.accepted_event_count != len(observer_envelopes):
+            return True
+    return any(
+        item.accepted_event_count and observer_id not in envelopes_by_observer
+        for observer_id, item in reading.stats.items()
+    )
+
+
+def _collect_receipt_facts(
+    reading: LedgerReading,
+    envelopes: list[ObserverEnvelope],
+    stats: list[ObserverStats],
+) -> _ReceiptFacts:
+    lost, duplicates = _sequence_accounting(envelopes)
+    rejected_by_reason: dict[str, int] = defaultdict(int)
+    for item in stats:
+        for reason, count in item.rejected_by_reason.items():
+            rejected_by_reason[reason] += count
+    envelopes_by_observer = _group_envelopes_by_observer(envelopes)
+    return _ReceiptFacts(
+        lost_event_count=lost,
+        duplicate_sequence_count=duplicates,
+        rejected_by_reason=dict(rejected_by_reason),
+        outbound_endpoints=sorted(
+            {endpoint for item in stats for endpoint in item.outbound_endpoints}
+        ),
+        entered_worker_context=any(
+            item.observation_entered_worker_context for item in stats
+        ),
+        entered_scheduler_inputs=any(
+            item.observation_entered_scheduler_inputs for item in stats
+        ),
+        observer_failure_count=sum(item.observer_failure_count for item in stats),
+        backpressure_drop_count=sum(item.backpressure_drop_count for item in stats),
+        max_clock_uncertainty_ms=max(
+            (item.clock.uncertainty_ms for item in envelopes), default=0
+        ),
+        clock_sources=sorted(
+            {item.clock.source.value for item in envelopes}
+            | {item.clock_source.value for item in stats}
+        ),
+        envelopes_by_observer=envelopes_by_observer,
+        stats_mismatch=_observer_stats_mismatch(reading, envelopes_by_observer),
+    )
+
+
+def _receipt_reasons(
+    reading: LedgerReading,
+    envelopes: list[ObserverEnvelope],
+    facts: _ReceiptFacts,
+    *,
+    clock_uncertainty_degraded_ms: int,
+) -> set[ReceiptReason]:
+    missing_stats = bool(envelopes) and any(
+        observer_id not in reading.stats for observer_id in facts.envelopes_by_observer
+    )
+    rejected = facts.rejected_by_reason
+    candidates = (
+        (not envelopes, ReceiptReason.NO_OBSERVATIONS),
+        (bool(facts.outbound_endpoints), ReceiptReason.OUTBOUND_ENDPOINT_CONFIGURED),
+        (
+            facts.entered_worker_context,
+            ReceiptReason.OBSERVATION_ENTERED_WORKER_CONTEXT,
+        ),
+        (
+            facts.entered_scheduler_inputs,
+            ReceiptReason.OBSERVATION_ENTERED_SCHEDULER_INPUTS,
+        ),
+        (bool(facts.observer_failure_count), ReceiptReason.OBSERVER_FAILURE),
+        (
+            bool(rejected.get(EnvelopeRejection.CONTROL_FIELD_REJECTED.value)),
+            ReceiptReason.CONTROL_FIELD_REJECTED,
+        ),
+        (bool(reading.invalid_record_count), ReceiptReason.LEDGER_RECORD_INVALID),
+        (missing_stats, ReceiptReason.OBSERVER_STATS_MISSING),
+        (facts.stats_mismatch, ReceiptReason.OBSERVER_STATS_MISMATCH),
+        (bool(facts.lost_event_count), ReceiptReason.SEQUENCE_GAP),
+        (bool(facts.duplicate_sequence_count), ReceiptReason.SEQUENCE_DUPLICATE),
+        (bool(facts.backpressure_drop_count), ReceiptReason.BACKPRESSURE_DROP),
+        (
+            bool(rejected.get(EnvelopeRejection.RAW_MATERIAL_FIELD_REJECTED.value)),
+            ReceiptReason.RAW_MATERIAL_REJECTED,
+        ),
+        (
+            bool(rejected.get(EnvelopeRejection.UNSUPPORTED_FIELD_REJECTED.value)),
+            ReceiptReason.UNSUPPORTED_FIELD_REJECTED,
+        ),
+        (
+            bool(rejected.get(EnvelopeRejection.IDENTITY_INVALID.value)),
+            ReceiptReason.IDENTITY_REJECTED,
+        ),
+        (
+            facts.max_clock_uncertainty_ms > clock_uncertainty_degraded_ms,
+            ReceiptReason.CLOCK_UNCERTAINTY_EXCEEDED,
+        ),
+    )
+    return {reason for applies, reason in candidates if applies}
+
+
+def _receipt_status(reasons: set[ReceiptReason]) -> ReceiptStatus:
+    if reasons & _INVALID_REASONS:
+        return ReceiptStatus.INVALID
+    if reasons & _QUARANTINE_REASONS:
+        return ReceiptStatus.QUARANTINED
+    if reasons:
+        return ReceiptStatus.DEGRADED
+    return ReceiptStatus.VALID
+
+
 def build_integrity_receipt(
     reading: LedgerReading,
     *,
@@ -149,85 +316,14 @@ def build_integrity_receipt(
 ) -> dict[str, Any]:
     envelopes = reading.ordered_envelopes
     stats = list(reading.stats.values())
-    lost, duplicates = _sequence_accounting(envelopes)
-    rejected_by_reason: dict[str, int] = defaultdict(int)
-    for item in stats:
-        for reason, count in item.rejected_by_reason.items():
-            rejected_by_reason[reason] += count
-    outbound_endpoints = sorted({endpoint for item in stats for endpoint in item.outbound_endpoints})
-    entered_worker_context = any(item.observation_entered_worker_context for item in stats)
-    entered_scheduler_inputs = any(
-        item.observation_entered_scheduler_inputs for item in stats
+    facts = _collect_receipt_facts(reading, envelopes, stats)
+    reasons = _receipt_reasons(
+        reading,
+        envelopes,
+        facts,
+        clock_uncertainty_degraded_ms=clock_uncertainty_degraded_ms,
     )
-    observer_failures = sum(item.observer_failure_count for item in stats)
-    backpressure_drops = sum(item.backpressure_drop_count for item in stats)
-    max_uncertainty = max((item.clock.uncertainty_ms for item in envelopes), default=0)
-    clock_sources = sorted({item.clock.source.value for item in envelopes} | {item.clock_source.value for item in stats})
-
-    envelopes_by_observer: dict[str, list[ObserverEnvelope]] = defaultdict(list)
-    for envelope in envelopes:
-        envelopes_by_observer[envelope.observer_id].append(envelope)
-    stats_mismatch = False
-    for observer_id, observer_envelopes in envelopes_by_observer.items():
-        observer_stats = reading.stats.get(observer_id)
-        if observer_stats is None:
-            continue
-        if (
-            {item.provider_id for item in observer_envelopes}
-            != {observer_stats.provider_id}
-            or observer_stats.accepted_event_count != len(observer_envelopes)
-        ):
-            stats_mismatch = True
-    if any(
-        item.accepted_event_count and observer_id not in envelopes_by_observer
-        for observer_id, item in reading.stats.items()
-    ):
-        stats_mismatch = True
-
-    reasons: set[ReceiptReason] = set()
-    if not envelopes:
-        reasons.add(ReceiptReason.NO_OBSERVATIONS)
-    if outbound_endpoints:
-        reasons.add(ReceiptReason.OUTBOUND_ENDPOINT_CONFIGURED)
-    if entered_worker_context:
-        reasons.add(ReceiptReason.OBSERVATION_ENTERED_WORKER_CONTEXT)
-    if entered_scheduler_inputs:
-        reasons.add(ReceiptReason.OBSERVATION_ENTERED_SCHEDULER_INPUTS)
-    if observer_failures:
-        reasons.add(ReceiptReason.OBSERVER_FAILURE)
-    if rejected_by_reason.get(EnvelopeRejection.CONTROL_FIELD_REJECTED.value):
-        reasons.add(ReceiptReason.CONTROL_FIELD_REJECTED)
-    if reading.invalid_record_count:
-        reasons.add(ReceiptReason.LEDGER_RECORD_INVALID)
-    if envelopes and any(
-        observer_id not in reading.stats for observer_id in envelopes_by_observer
-    ):
-        reasons.add(ReceiptReason.OBSERVER_STATS_MISSING)
-    if stats_mismatch:
-        reasons.add(ReceiptReason.OBSERVER_STATS_MISMATCH)
-    if lost:
-        reasons.add(ReceiptReason.SEQUENCE_GAP)
-    if duplicates:
-        reasons.add(ReceiptReason.SEQUENCE_DUPLICATE)
-    if backpressure_drops:
-        reasons.add(ReceiptReason.BACKPRESSURE_DROP)
-    if rejected_by_reason.get(EnvelopeRejection.RAW_MATERIAL_FIELD_REJECTED.value):
-        reasons.add(ReceiptReason.RAW_MATERIAL_REJECTED)
-    if rejected_by_reason.get(EnvelopeRejection.UNSUPPORTED_FIELD_REJECTED.value):
-        reasons.add(ReceiptReason.UNSUPPORTED_FIELD_REJECTED)
-    if rejected_by_reason.get(EnvelopeRejection.IDENTITY_INVALID.value):
-        reasons.add(ReceiptReason.IDENTITY_REJECTED)
-    if max_uncertainty > clock_uncertainty_degraded_ms:
-        reasons.add(ReceiptReason.CLOCK_UNCERTAINTY_EXCEEDED)
-
-    if reasons & _INVALID_REASONS:
-        status = ReceiptStatus.INVALID
-    elif reasons & _QUARANTINE_REASONS:
-        status = ReceiptStatus.QUARANTINED
-    elif reasons:
-        status = ReceiptStatus.DEGRADED
-    else:
-        status = ReceiptStatus.VALID
+    status = _receipt_status(reasons)
 
     return {
         "schema_version": INTEGRITY_RECEIPT_SCHEMA_VERSION,
@@ -235,28 +331,34 @@ def build_integrity_receipt(
         "goal_id": reading.goal_id,
         "status": status.value,
         "reason_codes": sorted(reason.value for reason in reasons),
-        "provider_ids": sorted({item.provider_id for item in envelopes} | {item.provider_id for item in stats}),
-        "observer_ids": sorted(set(reading.stats) | set(envelopes_by_observer)),
+        "provider_ids": sorted(
+            {item.provider_id for item in envelopes}
+            | {item.provider_id for item in stats}
+        ),
+        "observer_ids": sorted(set(reading.stats) | set(facts.envelopes_by_observer)),
         "session_count": len({item.session_id for item in envelopes}),
         "observed_event_count": sum(item.observed_event_count for item in stats),
         "accepted_event_count": sum(item.accepted_event_count for item in stats),
         "persisted_event_count": len(envelopes),
-        "lost_event_count": lost,
-        "duplicate_sequence_count": duplicates,
+        "lost_event_count": facts.lost_event_count,
+        "duplicate_sequence_count": facts.duplicate_sequence_count,
         "ledger_invalid_record_count": reading.invalid_record_count,
-        "rejected_event_count": sum(rejected_by_reason.values()),
-        "rejected_by_reason": dict(sorted(rejected_by_reason.items())),
+        "rejected_event_count": sum(facts.rejected_by_reason.values()),
+        "rejected_by_reason": dict(sorted(facts.rejected_by_reason.items())),
         "buffer_bound": max((item.buffer_bound for item in stats), default=None),
-        "backpressure_drop_count": backpressure_drops,
-        "observer_failure_count": observer_failures,
+        "backpressure_drop_count": facts.backpressure_drop_count,
+        "observer_failure_count": facts.observer_failure_count,
         "peak_buffered_event_count": max(
             (item.peak_buffered_event_count for item in stats), default=0
         ),
         "flush_attempt_count": sum(item.flush_attempt_count for item in stats),
-        "clock": {"sources": clock_sources, "max_uncertainty_ms": max_uncertainty},
-        "outbound_endpoints": outbound_endpoints,
-        "observation_entered_worker_context": entered_worker_context,
-        "observation_entered_scheduler_inputs": entered_scheduler_inputs,
+        "clock": {
+            "sources": facts.clock_sources,
+            "max_uncertainty_ms": facts.max_clock_uncertainty_ms,
+        },
+        "outbound_endpoints": facts.outbound_endpoints,
+        "observation_entered_worker_context": facts.entered_worker_context,
+        "observation_entered_scheduler_inputs": facts.entered_scheduler_inputs,
         "run_identities": [
             item.run_identity.as_dict()
             for item in sorted(stats, key=lambda candidate: candidate.observer_id)
@@ -268,7 +370,9 @@ def build_integrity_receipt(
             {field for item in stats for field in item.source_fields_consumed}
         ),
         "event_kinds_consumed": sorted({item.event_kind.value for item in envelopes}),
-        "summary_fields_consumed": sorted({key for item in envelopes for key in item.summary}),
+        "summary_fields_consumed": sorted(
+            {key for item in envelopes for key in item.summary}
+        ),
         "observed_from": envelopes[0].observed_at if envelopes else None,
         "observed_until": envelopes[-1].observed_at if envelopes else None,
     }

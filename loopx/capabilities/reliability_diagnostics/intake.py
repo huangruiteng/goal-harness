@@ -157,12 +157,136 @@ def _token_list(value: Any, *, name: str) -> tuple[str, ...]:
     if (
         not isinstance(value, list)
         or not value
-        or any(not isinstance(item, str) or not _ENDPOINT_PATTERN.match(item) for item in value)
+        or any(
+            not isinstance(item, str) or not _ENDPOINT_PATTERN.match(item)
+            for item in value
+        )
     ):
-        raise ValueError(f"observer stats {name} must be a non-empty list of compact tokens")
+        raise ValueError(
+            f"observer stats {name} must be a non-empty list of compact tokens"
+        )
     if len(set(value)) != len(value):
         raise ValueError(f"observer stats {name} must not contain duplicates")
     return tuple(value)
+
+
+@dataclass(frozen=True)
+class _ValidatedStatsCounts:
+    observed: int
+    accepted: int
+    rejected: int
+    dropped: int
+    buffer_bound: int
+    peak_buffered: int
+
+
+def _stats_identity(record: Mapping[str, Any]) -> tuple[str, str, str]:
+    if not isinstance(record, Mapping):
+        raise ValueError("observer stats must be an object")
+    unknown = sorted(str(key) for key in record if str(key) not in STATS_FIELDS)
+    if unknown:
+        raise ValueError(f"observer stats carry unsupported fields: {unknown}")
+    if record.get("schema_version") != OBSERVER_STATS_SCHEMA_VERSION:
+        raise ValueError(
+            f"observer stats schema must be {OBSERVER_STATS_SCHEMA_VERSION}"
+        )
+    if record.get("capability_id") != CAPABILITY_ID:
+        raise ValueError(f"observer stats capability must be {CAPABILITY_ID}")
+    return (
+        _identity_token(record.get("provider_id"), name="provider_id"),
+        _identity_token(record.get("observer_id"), name="observer_id"),
+        _identity_token(record.get("goal_id"), name="goal_id"),
+    )
+
+
+def _stats_emitted_at(record: Mapping[str, Any]) -> str:
+    emitted_at = record.get("emitted_at")
+    if not isinstance(emitted_at, str):
+        raise ValueError(
+            "observer stats emitted_at must be timezone-aware ISO-8601 text"
+        )
+    try:
+        parsed_emitted_at = datetime.fromisoformat(emitted_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(
+            "observer stats emitted_at must be timezone-aware ISO-8601 text"
+        ) from exc
+    if parsed_emitted_at.tzinfo is None:
+        raise ValueError("observer stats emitted_at must carry a timezone")
+    return emitted_at
+
+
+def _stats_rejection_counts(record: Mapping[str, Any]) -> dict[str, int]:
+    reasons = record.get("rejected_by_reason") or {}
+    if not isinstance(reasons, Mapping):
+        raise ValueError("observer stats rejected_by_reason must be an object")
+    return {
+        EnvelopeRejection(str(key)).value: _count(
+            value, name=f"rejected_by_reason.{key}"
+        )
+        for key, value in reasons.items()
+    }
+
+
+def _stats_endpoints(record: Mapping[str, Any]) -> tuple[str, ...]:
+    endpoints = record.get("outbound_endpoints")
+    if not isinstance(endpoints, list) or any(
+        not isinstance(item, str) or not _ENDPOINT_PATTERN.match(item)
+        for item in endpoints
+    ):
+        raise ValueError(
+            "observer stats outbound_endpoints must be a list of endpoint ids"
+        )
+    return tuple(endpoints)
+
+
+def _stats_boolean(record: Mapping[str, Any], name: str) -> bool:
+    value = record.get(name)
+    if not isinstance(value, bool):
+        raise ValueError(f"observer stats {name} must be boolean")
+    return value
+
+
+def _stats_counts(
+    record: Mapping[str, Any],
+    rejected_by_reason: Mapping[str, int],
+) -> _ValidatedStatsCounts:
+    buffer_bound = _count(record.get("buffer_bound"), name="buffer_bound")
+    if not 1 <= buffer_bound <= MAX_BUFFER_BOUND:
+        raise ValueError(
+            f"observer stats buffer_bound must be within 1..{MAX_BUFFER_BOUND}"
+        )
+    counts = _ValidatedStatsCounts(
+        observed=_count(
+            record.get("observed_event_count"), name="observed_event_count"
+        ),
+        accepted=_count(
+            record.get("accepted_event_count"), name="accepted_event_count"
+        ),
+        rejected=_count(
+            record.get("rejected_event_count"), name="rejected_event_count"
+        ),
+        dropped=_count(
+            record.get("backpressure_drop_count"), name="backpressure_drop_count"
+        ),
+        buffer_bound=buffer_bound,
+        peak_buffered=_count(
+            record.get("peak_buffered_event_count"), name="peak_buffered_event_count"
+        ),
+    )
+    if counts.rejected != sum(rejected_by_reason.values()):
+        raise ValueError(
+            "observer stats rejected_event_count must equal rejected_by_reason"
+        )
+    if counts.observed != counts.accepted + counts.rejected + counts.dropped:
+        raise ValueError(
+            "observer stats observed_event_count must equal accepted + rejected + dropped"
+        )
+    if counts.peak_buffered > counts.buffer_bound:
+        raise ValueError(
+            "observer stats peak_buffered_event_count exceeds buffer_bound"
+        )
+    return counts
 
 
 def normalize_observer_run_identity(value: Any) -> ObserverRunIdentity:
@@ -183,87 +307,33 @@ def normalize_observer_run_identity(value: Any) -> ObserverRunIdentity:
 def normalize_observer_stats(record: Mapping[str, Any]) -> ObserverStats:
     """Validate one stats record written by any observer implementation."""
 
-    if not isinstance(record, Mapping):
-        raise ValueError("observer stats must be an object")
-    unknown = sorted(str(key) for key in record if str(key) not in STATS_FIELDS)
-    if unknown:
-        raise ValueError(f"observer stats carry unsupported fields: {unknown}")
-    if record.get("schema_version") != OBSERVER_STATS_SCHEMA_VERSION:
-        raise ValueError(f"observer stats schema must be {OBSERVER_STATS_SCHEMA_VERSION}")
-    if record.get("capability_id") != CAPABILITY_ID:
-        raise ValueError(f"observer stats capability must be {CAPABILITY_ID}")
-    for key in ("provider_id", "observer_id", "goal_id"):
-        _identity_token(record.get(key), name=key)
-    emitted_at = record.get("emitted_at")
-    if not isinstance(emitted_at, str):
-        raise ValueError("observer stats emitted_at must be timezone-aware ISO-8601 text")
-    try:
-        parsed_emitted_at = datetime.fromisoformat(emitted_at.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("observer stats emitted_at must be timezone-aware ISO-8601 text") from exc
-    if parsed_emitted_at.tzinfo is None:
-        raise ValueError("observer stats emitted_at must carry a timezone")
-    reasons = record.get("rejected_by_reason") or {}
-    if not isinstance(reasons, Mapping):
-        raise ValueError("observer stats rejected_by_reason must be an object")
-    normalized_reasons = {
-        EnvelopeRejection(str(key)).value: _count(value, name=f"rejected_by_reason.{key}")
-        for key, value in reasons.items()
-    }
-    endpoints = record.get("outbound_endpoints")
-    if not isinstance(endpoints, list) or any(
-        not isinstance(item, str) or not _ENDPOINT_PATTERN.match(item)
-        for item in endpoints
-    ):
-        raise ValueError("observer stats outbound_endpoints must be a list of endpoint ids")
-    entered = record.get("observation_entered_worker_context")
-    if not isinstance(entered, bool):
-        raise ValueError("observer stats observation_entered_worker_context must be boolean")
-    entered_scheduler = record.get("observation_entered_scheduler_inputs")
-    if not isinstance(entered_scheduler, bool):
-        raise ValueError(
-            "observer stats observation_entered_scheduler_inputs must be boolean"
-        )
-    buffer_bound = _count(record.get("buffer_bound"), name="buffer_bound")
-    if not 1 <= buffer_bound <= MAX_BUFFER_BOUND:
-        raise ValueError(f"observer stats buffer_bound must be within 1..{MAX_BUFFER_BOUND}")
-    observed = _count(record.get("observed_event_count"), name="observed_event_count")
-    accepted = _count(record.get("accepted_event_count"), name="accepted_event_count")
-    rejected = _count(record.get("rejected_event_count"), name="rejected_event_count")
-    dropped = _count(record.get("backpressure_drop_count"), name="backpressure_drop_count")
-    if rejected != sum(normalized_reasons.values()):
-        raise ValueError(
-            "observer stats rejected_event_count must equal rejected_by_reason"
-        )
-    if observed != accepted + rejected + dropped:
-        raise ValueError(
-            "observer stats observed_event_count must equal accepted + rejected + dropped"
-        )
-    peak_buffered = _count(
-        record.get("peak_buffered_event_count"), name="peak_buffered_event_count"
-    )
-    if peak_buffered > buffer_bound:
-        raise ValueError("observer stats peak_buffered_event_count exceeds buffer_bound")
+    provider_id, observer_id, goal_id = _stats_identity(record)
+    emitted_at = _stats_emitted_at(record)
+    normalized_reasons = _stats_rejection_counts(record)
+    endpoints = _stats_endpoints(record)
+    entered = _stats_boolean(record, "observation_entered_worker_context")
+    entered_scheduler = _stats_boolean(record, "observation_entered_scheduler_inputs")
+    counts = _stats_counts(record, normalized_reasons)
     return ObserverStats(
-        provider_id=str(record["provider_id"]),
-        observer_id=str(record["observer_id"]),
-        goal_id=str(record["goal_id"]),
+        provider_id=provider_id,
+        observer_id=observer_id,
+        goal_id=goal_id,
         run_identity=normalize_observer_run_identity(record.get("run_identity")),
         event_sources=_token_list(record.get("event_sources"), name="event_sources"),
         source_fields_consumed=_token_list(
             record.get("source_fields_consumed"), name="source_fields_consumed"
         ),
         emitted_at=emitted_at,
-        observed_event_count=observed,
-        accepted_event_count=accepted,
-        rejected_event_count=rejected,
+        observed_event_count=counts.observed,
+        accepted_event_count=counts.accepted,
+        rejected_event_count=counts.rejected,
         rejected_by_reason=normalized_reasons,
-        buffer_bound=buffer_bound,
-        backpressure_drop_count=dropped,
+        buffer_bound=counts.buffer_bound,
+        backpressure_drop_count=counts.dropped,
         observer_failure_count=_count(
             record.get("observer_failure_count"), name="observer_failure_count"
         ),
-        peak_buffered_event_count=peak_buffered,
+        peak_buffered_event_count=counts.peak_buffered,
         flush_attempt_count=_count(
             record.get("flush_attempt_count"), name="flush_attempt_count"
         ),
@@ -306,9 +376,7 @@ class ShadowObserverIntake:
             raise ValueError("run_identity must be an ObserverRunIdentity")
         normalize_observer_run_identity(self.run_identity.as_dict())
         _token_list(list(self.event_sources), name="event_sources")
-        _token_list(
-            list(self.source_fields_consumed), name="source_fields_consumed"
-        )
+        _token_list(list(self.source_fields_consumed), name="source_fields_consumed")
 
     @property
     def buffered_count(self) -> int:
