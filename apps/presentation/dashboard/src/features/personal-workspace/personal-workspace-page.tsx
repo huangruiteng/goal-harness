@@ -1261,11 +1261,11 @@ export function PersonalWorkspacePage({
           ...(!heartbeat && operation === "run_now" && schedule.sessionId ? { session_id: schedule.sessionId } : {}),
           ...(!heartbeat ? { todo_id: schedule.scheduleId } : {}),
         },
-        summary: operation === "pause" ? `暂停自动运行：${schedule.label}`
-          : operation === "resume" ? `恢复自动运行：${schedule.label}`
-            : operation === "run_now" ? `立即运行：${schedule.label}`
-              : operation === "stop" ? `停止自动运行：${schedule.label}`
-                : `编辑自动运行生命周期：${schedule.label}`,
+        summary: operation === "pause" ? t("proposal.summary.schedulePause", { label: schedule.label })
+          : operation === "resume" ? t("proposal.summary.scheduleResume", { label: schedule.label })
+            : operation === "run_now" ? t("proposal.summary.scheduleRunNow", { label: schedule.label })
+              : operation === "stop" ? t("proposal.summary.scheduleStop", { label: schedule.label })
+                : t("proposal.summary.scheduleEdit", { label: schedule.label }),
       });
     },
   };
@@ -1376,7 +1376,10 @@ export function PersonalWorkspacePage({
           context: { kind: "goal", goal_id: selectedGoalId, natural_language: message },
           idempotencyKey: `workspace-agent-bind-${selectedGoalId}-${requestedAgent.agentId}-${Date.now().toString(36)}`,
           normalizedParameters: { agent_id: requestedAgent.agentId, goal_id: selectedGoalId },
-          summary: `将 ${requestedAgent.label} 绑定到 ${selectedGoal?.title ?? selectedGoalId}`,
+          summary: t("proposal.summary.bindAgent", {
+            agent: requestedAgent.label,
+            goal: selectedGoal?.title ?? selectedGoalId,
+          }),
         });
         return;
       }
@@ -1392,7 +1395,7 @@ export function PersonalWorkspacePage({
               start_execution: true,
               text: message,
             },
-            summary: `交给 Agent 执行：${message.slice(0, 120)}`,
+            summary: t("proposal.summary.delegateAgent", { message: message.slice(0, 120) }),
           });
           return;
         }
@@ -1407,7 +1410,7 @@ export function PersonalWorkspacePage({
             goal_id: selectedGoalId,
             text: todoTextFromMessage(message),
           },
-          summary: `创建 Todo：${todoTextFromMessage(message)}`,
+          summary: t("proposal.summary.todoCreate", { text: todoTextFromMessage(message) }),
         });
         return;
       }
@@ -1432,7 +1435,7 @@ export function PersonalWorkspacePage({
             operation: todoOperation,
             todo_id: matchedTodo.todoId,
           },
-          summary: `更新 Todo：${matchedTodo.text}`,
+          summary: t("proposal.summary.todoUpdate", { text: matchedTodo.text }),
         });
         return;
       }
@@ -1614,7 +1617,7 @@ export function PersonalWorkspacePage({
                 items={items}
                 onDraftTaskFromMessage={readOnly ? undefined : (reply) => {
                   const taskDraft = sanitizeTaskDraftFromReply(reply);
-                  setComposer(`创建一个 Task：${taskDraft}`);
+                  setComposer(t("proposal.summary.createTaskComposer", { draft: taskDraft }));
                   setActionFeedback(t("feedback.taskDraftCreated"));
                   window.requestAnimationFrame(() => composerRef.current?.focus());
                 }}
@@ -1624,7 +1627,7 @@ export function PersonalWorkspacePage({
                   context: { goal_id: todo.goalId, kind: "todo", todo_id: todo.todoId },
                   idempotencyKey: `workspace-todo-${todo.todoId}-complete-${Date.now().toString(36)}`,
                   normalizedParameters: { goal_id: todo.goalId, operation: "complete", todo_id: todo.todoId },
-                  summary: `标记完成：${todo.text}`,
+                  summary: t("proposal.summary.todoComplete", { text: todo.text }),
                 })}
                 onSelect={setSelection}
                 userTodos={model.userTodos}
@@ -1668,7 +1671,7 @@ export function PersonalWorkspacePage({
                 onClose={() => setGoalConversationReceiptVisible(false)}
                 onDraftTask={selectedGoalTab === "tasks" ? (reply) => {
                   const taskDraft = sanitizeTaskDraftFromReply(reply);
-                  setComposer(`创建一个 Task：${taskDraft}`);
+                  setComposer(t("proposal.summary.createTaskComposer", { draft: taskDraft }));
                   setActionFeedback(t("feedback.taskDraftCreated"));
                   window.requestAnimationFrame(() => composerRef.current?.focus());
                 } : undefined}

@@ -171,7 +171,11 @@ export function StatusSourceSwitcher({
           }}
           value={activeSource.id}
         >
-          {sources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
+          {sources.map((source) => (
+            <option key={source.id} value={source.id}>
+              {source.kind === "local" ? t("source.localLabel") : source.label}
+            </option>
+          ))}
           {configuredHosts.length > 0 ? (
             <optgroup label={t("source.configuredGroup", { count: configuredHosts.length })}>
               {configuredHosts

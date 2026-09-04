@@ -72,11 +72,11 @@ import {
 import { routeWorkspaceInput } from "../features/personal-workspace/personal-workspace-router";
 
 const protectedOperationLabels: Record<ProtectedActionProposal["operation"], string> = {
-  delete: "删除",
-  deploy: "部署",
-  merge: "合并",
-  payment: "付款",
-  release: "发布",
+  delete: "Delete",
+  deploy: "Deploy",
+  merge: "Merge",
+  payment: "Payment",
+  release: "Release",
 };
 
 function semanticProtectedActionPreview(
@@ -100,7 +100,7 @@ function semanticProtectedActionPreview(
     },
     idempotencyKey: `workspace-semantic-protected-${goalId}-${Date.now().toString(36)}`,
     normalizedParameters: { goal_id: goalId, status: "operator_gate_requested" },
-    summary: `请求受保护操作：${protectedOperationLabels[proposal.operation]} · ${proposal.target}`,
+    summary: `Protected operation requested: ${protectedOperationLabels[proposal.operation]} · ${proposal.target}`,
   };
 }
 import type { StatusSourceControl } from "../features/personal-workspace/status-source-switcher";

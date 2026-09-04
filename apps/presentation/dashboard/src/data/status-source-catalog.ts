@@ -21,7 +21,7 @@ export type StatusSourceStorage = Pick<Storage, "getItem" | "setItem">;
 export const localStatusSource: StatusSource = {
   id: "local",
   kind: "local",
-  label: "本机",
+  label: "Local",
   readOnly: false,
   statusUrl: defaultLocalStatusSourceUrl,
 };
