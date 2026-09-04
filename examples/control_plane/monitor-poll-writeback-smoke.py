@@ -1153,6 +1153,7 @@ def assert_writeback_helper_preview_contract() -> None:
         generated_at = "2026-01-01T00:05:00+00:00"
         preview = write_monitor_poll_todo_state(
             registry_path=registry_path,
+            runtime_root=runtime_root_from_registry(registry_path),
             goal_id=GOAL_ID,
             generated_at=generated_at,
             execute=False,
