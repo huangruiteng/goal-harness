@@ -83,12 +83,15 @@ Missing bindings, local-user mode, identity drift, or incomplete readback fail
 closed; no environment-default or user-identity fallback exists.
 
 The governed pending-intent consumer persists the normalized generation bundle
-and writes one blocked, agent-owned delivery successor before creating the
-approval gate. The gate links to that successor and covers its exact decision
-scope. Approval removes only that scope and resumes the successor, making the
-external action visible to quota; rejection or cancellation keeps it blocked.
-This prevents an approved report from disappearing into a quiet terminal or
-monitor-only projection.
+and writes one runnable, agent-owned delivery successor. The current effective
+`periodic_report` subscription is re-read before consumption; `enabled: true`
+with an explicit `route_ref` is the standing authority for this automatic
+stage-boundary delivery. Disabling the subscription suppresses the action.
+The successor remains bound to the frozen generation digest, current Goal,
+required provider capabilities, configured Goal Channel, project Bot identity,
+and exact readback. This makes the external action visible to quota without a
+second per-report approval while still failing closed on route or identity
+drift.
 
 `periodic_report_project_progress_projection_v0` is the built-in,
 domain-neutral source input. It groups typed project facts into progress,
@@ -280,9 +283,10 @@ optional hook failures remain isolated and cannot roll back the primary
 writeback or alter quota-spend eligibility.
 
 Recorded trigger intent means neither report generation nor publication. A
-later governed executor must evaluate the intent, and composition, rendering,
-content checks, owner approval, and external sink delivery remain separately
-authorized steps.
+later governed executor must evaluate the intent. Composition, rendering, and
+content checks remain separate from external delivery; an enabled effective
+subscription supplies standing delivery authority, while the extension and
+exact sink readback retain effect authority.
 
 ## Request and identity
 

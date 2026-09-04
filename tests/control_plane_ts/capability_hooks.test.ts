@@ -325,7 +325,7 @@ test("verified capability candidate projects separate preparation and delivery a
   );
 });
 
-test("pending capability intent projects local generation without delivery authority", () => {
+test("pending periodic report projects generation with configured standing delivery authority", () => {
   const result = validateInteractionProjectionHookInvocation({
     registration: {
       schema_version: CAPABILITY_HOOK_REGISTRATION_SCHEMA_VERSION,
@@ -355,10 +355,10 @@ test("pending capability intent projects local generation without delivery autho
         agent_id: "agent-example",
         state: "pending",
         action_kind: "consume_periodic_report_intent",
-        action_summary: "Generate the exact local report draft.",
+        action_summary: "Generate the exact report and queue configured delivery.",
         command: "loopx periodic-report consume-pending --goal-id goal-example --agent-id agent-example --execute",
         generation_authorized: true,
-        external_delivery_authorized: false,
+        external_delivery_authorized: true,
         agent_read_required: true,
       },
     },
@@ -366,7 +366,7 @@ test("pending capability intent projects local generation without delivery autho
   assert.equal(result.status, "projected");
   assert.equal(
     (result.projection as JsonObject).external_delivery_authorized,
-    false,
+    true,
   );
   assert.equal(
     (result.projection as JsonObject).agent_read_required,
