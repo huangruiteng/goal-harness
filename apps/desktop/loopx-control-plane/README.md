@@ -24,11 +24,13 @@ to approve the first launch in System Settings > Privacy & Security.
 
 The shell:
 
-1. verifies or starts `loopx serve-status` on `127.0.0.1:8766`;
-2. verifies or starts `loopx chat` on `127.0.0.1:8767`;
-3. loads the versioned LoopX Chat workspace from the local Chat service;
-4. opens the existing personal workspace in one native window;
-5. terminates only the service process groups it started when the window exits.
+1. immediately renders an embedded startup surface instead of a blank WebView;
+2. verifies or starts `loopx serve-status` on `127.0.0.1:8766`;
+3. verifies or starts `loopx chat` on `127.0.0.1:8767`;
+4. loads the versioned LoopX Chat workspace only after its lightweight
+   capabilities endpoint is readable, retrying transient service replacement;
+5. opens the existing personal workspace in one native window;
+6. terminates only the service process groups it started when the window exits.
 
 An unknown process on either LoopX port is a hard startup error. Existing
 services are reused only after a successful response exposes both the exact
@@ -47,6 +49,11 @@ their internal Python entry module. The shell also recognizes the historical
 fixed-CLI and lightweight-entrypoint launcher shapes, so upgrading LoopX can
 replace an already-running older service without asking the operator to find
 and stop it manually.
+
+On macOS, when the standard `com.loopx.status` or `com.loopx.chat` LaunchAgent
+is loaded, Desktop keeps launchd as the single service owner. After replacing a
+stale listener it requests a launchd wake and waits through the throttle
+interval instead of racing a second Desktop-owned process onto the same port.
 
 The WebView is pinned to the loopback Chat origin served by the installed
 LoopX release. Dashboard requests to the status and Chat services remain
