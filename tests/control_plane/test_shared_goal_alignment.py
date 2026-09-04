@@ -795,6 +795,47 @@ def test_active_lease_owner_mismatch_projects_conflict_fact(
     assert projection["conflict_facts"] == ["lease_owner_mismatch"]
 
 
+@pytest.mark.parametrize(
+    "lease_owner",
+    [
+        pytest.param(None, id="missing-owner"),
+        pytest.param("", id="empty-owner"),
+        pytest.param("Not A Valid Agent Id!!", id="malformed-owner"),
+    ],
+)
+def test_active_lease_without_a_valid_owner_fails_closed(
+    tmp_path: Path,
+    lease_owner: str | None,
+) -> None:
+    # An active hard lease that survives lease_is_active() but carries no
+    # normalizable owner is corrupt authority: the projection must fail
+    # closed instead of silently reporting the claim as conflict-free.
+    lease: dict[str, object] = {
+        "schema_version": "task_lease_v0",
+        "goal_id": GOAL_ID,
+        "todo_id": "todo_lane_a",
+        "status": "active",
+        "expires_at": "2098-03-04T00:00:00Z",
+        "lease_epoch": 3,
+        "version": 1,
+    }
+    if lease_owner is not None:
+        lease["owner"] = lease_owner
+    paths = _write_fixture(
+        tmp_path,
+        todo_specs=_default_todo_specs(),
+        events=_default_events(),
+        leases={"todo_lane_a": lease},
+    )
+
+    with pytest.raises(ValueError, match="no valid owner"):
+        project_shared_goal_alignment(
+            goal_id=GOAL_ID,
+            agent_id="agent-a",
+            project=paths["project"],
+        )
+
+
 def test_projection_is_deterministic_across_repeated_calls(
     tmp_path: Path,
 ) -> None:

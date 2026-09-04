@@ -328,6 +328,15 @@ function decodeClaims(
             raw.lease_owner,
             `shared_goal_alignment.claims[${index}].lease_owner`,
           );
+    // Lease facts travel as a pair: an active lease must carry both a
+    // positive generation and a valid owner. A half-present pair is corrupt
+    // authority — accepting it would let the reducer project the broken
+    // lease as conflict-free, so decode rejects it at the boundary.
+    if ((leaseEpoch !== null) !== (leaseOwner !== null)) {
+      throw new EffectRuntimeRequestError(
+        `shared_goal_alignment.claims[${index}].lease_epoch and lease_owner must be both present for an active lease or both null without one`,
+      );
+    }
     return {
       todo_id: todoId(raw.todo_id, `shared_goal_alignment.claims[${index}].todo_id`),
       claimed_by: claimedBy,

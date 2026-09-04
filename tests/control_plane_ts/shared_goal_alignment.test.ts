@@ -159,6 +159,64 @@ test("a matching lease owner is not a conflict", () => {
   assert.ok(!result.conflict_facts.includes("lease_owner_mismatch"));
 });
 
+test("half-present lease epoch/owner pairs are rejected", () => {
+  // Lease facts travel as a pair: an active lease must carry both a
+  // positive generation and a valid owner. A half-present pair is corrupt
+  // authority that must fail closed at decode instead of projecting the
+  // claim as conflict-free alignment.
+  const epochWithoutOwner = {
+    todo_id: "todo_lane_a",
+    claimed_by: "agent-a",
+    lease_epoch: 4,
+  };
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({ claims: [{ ...epochWithoutOwner, lease_owner: null }] }),
+      ),
+    /lease_epoch and lease_owner must be both present/,
+  );
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({ claims: [epochWithoutOwner] }),
+      ),
+    /lease_epoch and lease_owner must be both present/,
+  );
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({
+          claims: [
+            {
+              todo_id: "todo_lane_a",
+              claimed_by: "agent-a",
+              lease_epoch: 5,
+              lease_owner: "",
+            },
+          ],
+        }),
+      ),
+    /lease_owner must be a non-empty string/,
+  );
+  assert.throws(
+    () =>
+      projectSharedGoalAlignment(
+        baseRequest({
+          claims: [
+            {
+              todo_id: "todo_lane_a",
+              claimed_by: "agent-a",
+              lease_epoch: null,
+              lease_owner: "agent-b",
+            },
+          ],
+        }),
+      ),
+    /lease_epoch and lease_owner must be both present/,
+  );
+});
+
 test("request schema mismatch is rejected", () => {
   assert.throws(
     () =>

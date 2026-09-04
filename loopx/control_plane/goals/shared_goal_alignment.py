@@ -279,10 +279,17 @@ def _claim_lease_facts(
     )
     if not lease or not lease_is_active(lease):
         return {"lease_epoch": None, "lease_owner": None}
-    return {
-        "lease_epoch": lease_epoch(lease),
-        "lease_owner": normalize_todo_claimed_by(lease.get("owner")),
-    }
+    owner = normalize_todo_claimed_by(lease.get("owner"))
+    if not owner:
+        # An active hard lease without a valid owner is corrupt authority.
+        # Projecting it as lease facts with a null owner would let the
+        # reducer treat the broken lease as "no conflict"; fail closed
+        # before the typed request is built instead.
+        raise ValueError(
+            "active task lease has no valid owner: "
+            f"goal={goal_id} todo={todo_id}"
+        )
+    return {"lease_epoch": lease_epoch(lease), "lease_owner": owner}
 
 
 def project_shared_goal_alignment(
