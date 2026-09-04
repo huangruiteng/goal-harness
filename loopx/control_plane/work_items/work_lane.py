@@ -625,7 +625,7 @@ def build_work_lane_contract(
             selected = blocked_by_monitor_items[0] if blocked_by_monitor_items else {}
             reason_codes = ["resume_blocked_by_open_monitor"]
             if monitor_only_schedule:
-                reason_codes.insert(0, "monitor_only_schedule")
+                reason_codes.insert(0, "monitor_todo_only")
             return {
                 "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
                 "lane": "advancement_task",
@@ -650,7 +650,7 @@ def build_work_lane_contract(
         if monitor_only_schedule:
             if first_due_monitor:
                 return due_monitor_contract(
-                    reason_codes=["monitor_only_schedule", "monitor_due"]
+                    reason_codes=["monitor_todo_only", "monitor_due"]
                 )
             if next_action_requires_advancement:
                 return {
@@ -660,7 +660,7 @@ def build_work_lane_contract(
                     "obligation": "materialize_advancement_todo_or_blocker",
                     "must_attempt_work": True,
                     "reason_codes": [
-                        "monitor_only_schedule",
+                        "monitor_todo_only",
                         "next_action_requires_advancement",
                     ],
                     "monitor_policy": "material_transition_only",
@@ -677,7 +677,7 @@ def build_work_lane_contract(
                     "obligation": "repair_monitor_schedule_metadata",
                     "must_attempt_work": True,
                     "reason_codes": [
-                        "monitor_only_schedule",
+                        "monitor_todo_only",
                         "monitor_schedule_metadata_gap",
                     ],
                     "monitor_policy": "repair_schedule_metadata_before_quiet_wait",
@@ -701,12 +701,14 @@ def build_work_lane_contract(
                 "obligation": "quiet_until_material_monitor_transition",
                 "must_attempt_work": False,
                 "reason_codes": [
-                    "monitor_only_schedule",
                     *(
-                        ["non_runnable_non_monitor_todos_present"]
+                        [
+                            "monitor_only_schedule",
+                            "non_runnable_non_monitor_todos_present",
+                        ]
                         if non_runnable_non_monitor_count
-                        else []
-                    ),
+                        else ["monitor_todo_only"]
+                    )
                 ],
                 "non_runnable_non_monitor_count": non_runnable_non_monitor_count,
                 "monitor_policy": "write_once_per_material_transition_else_no_spend",
@@ -723,7 +725,7 @@ def build_work_lane_contract(
         if effective_due_monitor_preemption:
             reason_codes.append("due_monitor_priority_preempts_advancement")
     elif monitor_only_schedule:
-        reason_codes.append("monitor_only_schedule")
+        reason_codes.append("monitor_todo_only")
         if first_due_monitor:
             reason_codes.append("monitor_due")
     else:
