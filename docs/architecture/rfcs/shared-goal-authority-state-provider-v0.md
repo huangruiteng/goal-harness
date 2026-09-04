@@ -14,8 +14,9 @@
   remains candidate evidence, not a merge gate or authority promotion
 - PostgreSQL baseline: the TypeScript Stage 2B candidate implements the store
   contract, transaction-local tenant context, forced row-level security, and
-  has passed a real PostgreSQL 16 transaction matrix. No shared authority
-  service, runtime caller, principal authentication/tenant authorization, or
+  bounded canonical commit admission, and has passed a real PostgreSQL 16
+  transaction matrix. No shared authority service, runtime caller, principal
+  authentication/tenant authorization, measured capacity/retention profile, or
   authority promotion ships yet
 - Language note: the
   [Chinese version](./shared-goal-authority-state-provider-v0.zh-CN.md) and this
@@ -1258,6 +1259,13 @@ projection-plus-receipt commit, CAS contention, historical receipt replay,
 operation fencing, ordered cursor scans, isolation of returned values, and
 pre-write rejection of malformed JSON.
 
+The PostgreSQL adapter also applies one provider-local resource guard before it
+opens a connection: a commit whose canonical envelope exceeds the configured
+`max_commit_bytes` is rejected as typed `store_capacity_exhausted`. The default
+is 16 MiB and a deployment may lower it. This is an admission ceiling for one
+atomic operation, not measured throughput evidence and not a retention or
+partitioning design; those promotion holds remain open.
+
 Real PostgreSQL qualification starts here, not at shadow or canary. A
 PostgreSQL 16 instance passed the shared conformance matrix, same-head
 concurrent CAS, tenant-scoped reuse of the same goal and operation ids,
@@ -1276,10 +1284,11 @@ The database runtime-role and RLS behavior within the service trust boundary is
 now implemented and qualified. Service API authentication,
 principal-to-tenant authorization, the production runtime caller,
 restore-incarnation rotation, pool
-exhaustion/cancellation/failover, one-way shadow parity, the TEST ONLY canary,
-and authority-source promotion remain explicit holds. The next PostgreSQL
-slice must qualify the authenticated service/deployment and failure boundary;
-it must not treat database RLS as that missing API authorization layer.
+exhaustion/cancellation/failover, retention/partitioning/measured capacity,
+one-way shadow parity, the TEST ONLY canary, and authority-source promotion
+remain explicit holds. The next PostgreSQL slice must qualify the authenticated
+service/deployment and failure boundary; it must not treat database RLS or the
+single-commit admission ceiling as those missing service and capacity layers.
 
 The file-backed provider contract and executor are Stage 2; their first slice
 is merged on `main` through #3529, and the evidence behind it is recorded in
@@ -2158,14 +2167,11 @@ that rewrite total. This rate is already enough to require provider-specific
 capacity, latency, response-size, and recovery tests. Retaining everything in
 one document is acceptable only for promotion bootstrap and bounded test goals.
 
-### Sequence
+### Parallel delivery plan
 
-A. transaction-bound capture feeding `coordination.runtime_shadow.commit`,
-retiring the duplicate observation lineage; B. freeze and test the complete
-Todo/lease manifests and omission/explicit-clear rules; C. implement the common
-authority binding and profile conformance, including retention/capacity for the
-selected provider; D. add provider-first CLI routing, the lock-owning promotion
-orchestrator, and compatibility projection outbox on the shipped kernel; E. a
-separately reviewed promotion PR deletes the reference-only duplicate aggregate,
-flips holds and stage literals, and updates the execution ledger. A profile is
-eligible only after A-D pass for its exact implementation and lineage.
+| Lane | May start | Scope and exit condition | Dependency |
+| --- | --- | --- | --- |
+| P. PostgreSQL provider plane | Now, from current `main` | Keep the existing `AuthorityStore` contract; finish schema migration/install ownership, authenticated service and tenant authorization, restore-incarnation rotation, pool/cancellation/failover behavior, and reviewed indexes, partitioning, retention, and measured capacity. Live PostgreSQL conformance remains mandatory. | Does not depend on #3870 and must not stack on its branch. This lane alone creates no runtime caller or promotion claim. |
+| C. Canonical transaction capture | Now, by revising or replacing #3870 | Make the outbox transport complete versioned Todo/lease records into `coordination.runtime_shadow.commit`; retire the duplicate observation/local-shadow lineage and prove omission/explicit-clear behavior. | Can run in parallel with P, but both C and the selected provider profile must finish before parity or promotion integration. |
+| I. Binding and qualification integration | After P and C | Bind one exact provider lineage, field manifest, source revision, digest, and cursor; run sustained transaction parity and provider-specific recovery/capacity qualification without consulting legacy state for missing fields. | This is the merge point between provider work and capture work. |
+| F. Promotion and cleanup | After I and explicit maintainer approval | Add provider-first CLI routing, the lock-owning promotion orchestrator, compatibility projection outbox, post-promotion fenced export/rollback, then delete duplicate reference aggregates and flip the reviewed stage/hold declarations. | No profile is eligible until its exact implementation and lineage pass P, C, and I. |

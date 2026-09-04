@@ -13,9 +13,10 @@
   验证只接受这份 SDK 合同与本 checkout 的 helper；它仍是候选证据，不是合并门槛
   或 authority promotion
 - PostgreSQL 基线：TypeScript Stage 2B candidate 已实现 store contract、
-  transaction-local tenant context 与 forced row-level security，且已通过真实
-  PostgreSQL 16 transaction matrix；shared authority service、runtime caller、
-  principal authentication/tenant authorization 与 authority promotion 均尚未交付
+  transaction-local tenant context、forced row-level security 与有界 canonical
+  commit admission，且已通过真实 PostgreSQL 16 transaction matrix；shared
+  authority service、runtime caller、principal authentication/tenant authorization、
+  实测 capacity/retention profile 与 authority promotion 均尚未交付
 - 语言说明：[英文版](./shared-goal-authority-state-provider-v0.md)与本中文版互为
   语义镜像；两者不一致属于缺陷
 
@@ -1015,6 +1016,12 @@ conformance suite，覆盖 projection-plus-receipt 原子提交、CAS contention
 replay、operation fencing、有序 cursor scan、返回值隔离，以及 malformed JSON 在写前
 被拒绝。
 
+PostgreSQL adapter 还会在打开连接之前执行一项 provider-local 资源门禁：canonical commit
+envelope 超过配置的 `max_commit_bytes` 时，写入以 typed
+`store_capacity_exhausted` 被拒绝。默认值为 16 MiB，部署可以调低。它只是单笔原子操作的
+准入上限，不是实测 throughput 证据，也不是 retention/partitioning 设计；这些晋升 hold
+仍然开放。
+
 真实 PostgreSQL qualification 从这里开始，而不是等到 shadow 或 canary。一个真实
 PostgreSQL 16 实例已通过共享 conformance matrix、同一 head 的并发 CAS、不同 tenant
 复用相同 goal 与 operation id、transaction rollback 后不暴露 head 或 receipt、已提交
@@ -1028,10 +1035,11 @@ row，跨 context 写入失败，runtime role 也不能修改行政 metadata。F
 保持不变，Agent 也不能获得注入的 pool。Service trust boundary 内的数据库
 runtime-role/RLS 行为现已实现并完成资格化。Service API authentication、
 principal-to-tenant authorization、production runtime caller、restore
-incarnation rotation、pool exhaustion/cancellation/failover、单向 shadow parity、TEST
-ONLY canary 与 authority-source promotion 仍是显式 hold。下一个 PostgreSQL 切片必须
-资格化 authenticated service/deployment 与 failure boundary，不能把 database RLS 当成
-仍缺失的 API authorization layer。
+incarnation rotation、pool exhaustion/cancellation/failover、retention/partitioning/实测
+capacity、单向 shadow parity、TEST ONLY canary 与 authority-source promotion 仍是显式
+hold。下一个 PostgreSQL 切片必须资格化 authenticated service/deployment 与 failure
+boundary，不能把 database RLS 或单笔 commit 准入上限当成仍缺失的 service 与 capacity
+层。
 
 File-backed provider 合同与 executor 属于 Stage 2；其第一个切片已通过 #3529
 合入 `main`，证据记录在下方的 Stage 2 状态小节。该切片证明 aggregate 与 provider
@@ -1714,12 +1722,11 @@ record layout，不能由重写总量直接推断。这一频率已经要求逐 
 latency、response size 与 recovery。单文档全量保留只适用于 promotion bootstrap 与
 有界 test goal。
 
-### 顺序
+### 并行交付计划
 
-A. 用 transaction-bound capture 喂给 `coordination.runtime_shadow.commit`，退役重复
-observation lineage；B. 冻结并测试完整 Todo/lease manifest，以及 omission/explicit-clear
-规则；C. 实现共同 authority binding 与 profile conformance，包括所选 provider 的
-retention/capacity；D. 在已交付 kernel 上加入 provider-first CLI routing、持锁 promotion
-orchestrator 与兼容投影 outbox；E. 单独评审的 promotion PR 删除 reference-only 重复
-aggregate，翻转 hold 与 stage literal，并更新执行台账。任何 profile 只有在其精确实现与
-lineage 上通过 A-D 后才具备晋升资格。
+| Lane | 何时开始 | 范围与退出条件 | 依赖 |
+| --- | --- | --- | --- |
+| P. PostgreSQL provider plane | 现在，从当前 `main` 开始 | 保持既有 `AuthorityStore` 合同；完成 schema migration/install ownership、authenticated service 与 tenant authorization、restore-incarnation rotation、pool/cancellation/failover 行为，以及经评审的 index、partition、retention 与实测 capacity。真实 PostgreSQL conformance 始终是强制门禁。 | 不依赖 #3870，也不得叠在其分支上。仅完成本 lane 不产生 runtime caller 或 promotion 声明。 |
+| C. Canonical transaction capture | 现在，通过修订或替代 #3870 | 让 outbox 把完整、带版本的 Todo/lease record 传给 `coordination.runtime_shadow.commit`；退役重复 observation/local-shadow lineage，并证明 omission/explicit-clear 行为。 | 可与 P 并行；但 C 与选定 provider profile 都完成后，才能进入 parity 或 promotion 集成。 |
+| I. Binding 与资格集成 | P 与 C 完成后 | 绑定一个精确 provider lineage、field manifest、source revision、digest 与 cursor；运行持续 transaction parity，以及 provider-specific recovery/capacity qualification；缺字段时不得查询 legacy state 补齐。 | 这是 provider 工作与 capture 工作的汇合点。 |
+| F. Promotion 与清理 | I 完成且 maintainer 显式批准后 | 加入 provider-first CLI routing、持锁 promotion orchestrator、兼容投影 outbox、晋升后 fenced export/rollback；随后删除重复 reference aggregate，并翻转经评审的 stage/hold 声明。 | 一个 profile 的精确实现与 lineage 通过 P、C、I 前，不具备晋升资格。 |
