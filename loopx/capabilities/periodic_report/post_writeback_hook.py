@@ -312,6 +312,8 @@ def build_periodic_report_post_writeback_projection(
         }
     if project_progress is not None:
         result["project_progress"] = project_progress
+    if isinstance(available_capabilities, list) and available_capabilities:
+        result["available_capabilities"] = list(available_capabilities)
     return result
 
 
@@ -362,6 +364,13 @@ def periodic_report_post_writeback_hook(
             intent_payload["project_progress"] = dict(project_progress)
         if isinstance(last_report, Mapping):
             intent_payload["last_report"] = dict(last_report)
+        observed_capabilities = (
+            projection.get("available_capabilities")
+            if isinstance(projection, Mapping)
+            else None
+        )
+        if isinstance(observed_capabilities, list) and observed_capabilities:
+            intent_payload["available_capabilities"] = list(observed_capabilities)
         return _result(
             status="intent",
             intent={
@@ -379,7 +388,12 @@ def periodic_report_post_writeback_hook(
         capability_id="periodic-report",
         event_kinds=("refresh_state", "todo_complete"),
         intent_kinds=(PERIODIC_REPORT_TRIGGER_EVALUATION_INTENT,),
-        requested_read_scope=("stage_completion", "project_progress", "last_report"),
+        requested_read_scope=(
+            "stage_completion",
+            "project_progress",
+            "last_report",
+            "available_capabilities",
+        ),
         producer=producer,
         policy_version=policy_version,
     )
