@@ -44,6 +44,38 @@ const periodicReportProjection = {
   truth_contract: { published_cursor_is_source_of_truth: true, generation_receipt_is_delivery_receipt: false, projection_is_writable: false, browser_write_api: false },
 };
 
+function periodicReportCapability({ effectiveConfiguration, machineCurrent } = {}) {
+  return {
+    capability_id: "periodic_report",
+    display_name: "Periodic reports",
+    description: "Turn validated Goal progress into a reviewable report draft.",
+    available_scopes: ["machine", "goal"],
+    machine_namespace: "periodic_report",
+    goal_feature_id: "periodic_report",
+    effective_value_policy: "goal_override_over_live_machine_default",
+    default: {
+      schema_version: "periodic_report_machine_defaults_v0",
+      enabled: false,
+      inheritance: "live_machine_default",
+      timezone: "UTC",
+    },
+    ...(machineCurrent ? { machine_current: machineCurrent } : {}),
+    ...(effectiveConfiguration ? { effective_configuration: effectiveConfiguration } : {}),
+    configuration_editor: {
+      schema_version: "capability_configuration_editor_v0",
+      editable: true,
+      supported_scopes: ["machine", "goal"],
+      writable_scopes: ["machine", "goal"],
+      fields: [
+        { key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false },
+        { key: "profile_preset", label: "Profile preset", description: "", input_kind: "text", required: false },
+        { key: "route_ref", label: "Goal Channel route", description: "", input_kind: "text", required: false },
+        { key: "timezone", label: "Timezone", description: "", input_kind: "text", required: true },
+      ],
+    },
+  };
+}
+
 function startServer() {
   if (packaged) {
     return spawn(process.env.LOOPX_PYTHON_BIN || "python3", [
@@ -143,6 +175,7 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
     goalSubagentWrites: [],
     interrupts: [],
     goalConfigurationRequests: [],
+    machineConfigurationRequests: [],
     larkWrites: [],
     actionTransitions: [],
     allowNextHeartbeatApply: false,
@@ -482,16 +515,86 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
   await page.route("**/api/chat/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const periodicConfiguration = {
+      schema_version: "periodic_report_machine_defaults_v0",
+      enabled: true,
+      inheritance: "live_machine_default",
+      profile_preset: "weekly-progress",
+      route_ref: "report-route",
+      timezone: "Asia/Shanghai",
+    };
+    const machineConfigurationBase = {
+      ok: true,
+      available_namespaces: ["periodic_report"],
+      namespace_catalog: {
+        schema_version: "machine_configuration_catalog_v0",
+        namespaces: [{
+          namespace: "periodic_report",
+          title: "Periodic reports",
+          description: "Governed report defaults.",
+          schema_versions: ["periodic_report_machine_defaults_v0"],
+          configuration_template: periodicConfiguration,
+          template_status: "ready",
+        }],
+      },
+      capability_catalog: {
+        schema_version: "capability_configuration_catalog_v0",
+        capabilities: [periodicReportCapability({ machineCurrent: periodicConfiguration })],
+      },
+      changed_namespaces: [],
+      machine_configuration: {
+        schema_version: "loopx_machine_configuration_v0",
+        namespaces: { periodic_report: periodicConfiguration },
+      },
+    };
+    if (url.pathname === "/api/chat/machine-configuration" && request.method() === "GET") {
+      await route.fulfill({ contentType: "application/json", json: {
+        ...machineConfigurationBase,
+        schema_version: "machine_configuration_inspection_v0",
+        status: "configured",
+        revision: "sha256:machine-current",
+      }, status: 200 });
+      return;
+    }
+    if (url.pathname === "/api/chat/machine-configuration/preview" && request.method() === "POST") {
+      const body = request.postDataJSON();
+      state.machineConfigurationRequests.push({ phase: "preview", ...body });
+      await route.fulfill({ contentType: "application/json", json: {
+        ...machineConfigurationBase,
+        schema_version: "machine_configuration_update_plan_v0",
+        status: "preview",
+        action: "update",
+        current_revision: "sha256:machine-current",
+        desired_revision: "sha256:machine-desired",
+        plan_revision: "sha256:machine-plan",
+        writes_required: 1,
+        changed_namespaces: [body.namespace],
+        machine_configuration: {
+          schema_version: "loopx_machine_configuration_v0",
+          namespaces: { periodic_report: body.namespace_configuration },
+        },
+      }, status: 201 });
+      return;
+    }
+    if (url.pathname === "/api/chat/machine-configuration/apply" && request.method() === "POST") {
+      const body = request.postDataJSON();
+      state.machineConfigurationRequests.push({ phase: "apply", ...body });
+      await route.fulfill({ contentType: "application/json", json: {
+        ...machineConfigurationBase,
+        schema_version: "machine_configuration_transaction_v0",
+        status: "applied",
+        plan_revision: body.expected_plan_revision,
+        transaction_id: "machine-transaction",
+        readback_verified: true,
+        rollback_available: true,
+        applied_revision: "sha256:machine-desired",
+        prior_revision: "sha256:machine-current",
+        changed_namespaces: [body.namespace],
+      }, status: 200 });
+      return;
+    }
     if (url.pathname === "/api/chat/goal-configuration" && request.method() === "GET") {
       const goalId = url.searchParams.get("goal_id");
-      const periodicConfiguration = {
-        schema_version: "periodic_report_machine_defaults_v0",
-        enabled: true,
-        inheritance: "live_machine_default",
-        profile_preset: "weekly-progress",
-        route_ref: "loopx-manager",
-        timezone: "Asia/Shanghai",
-      };
       await route.fulfill({ contentType: "application/json", json: {
         ok: true,
         schema_version: "goal_configuration_inspection_v0",
@@ -501,17 +604,9 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
         available_capabilities: ["periodic_report"],
         capability_catalog: {
           schema_version: "capability_configuration_catalog_v0",
-          capabilities: [{
-            capability_id: "periodic_report",
-            display_name: "Periodic reports",
-            description: "Publish bounded progress reports.",
-            available_scopes: ["machine", "goal"],
-            machine_namespace: "periodic_report",
-            goal_feature_id: "periodic_report",
-            effective_value_policy: "goal_override_over_live_machine_default",
-            default: { enabled: false, timezone: "UTC" },
-            machine_current: periodicConfiguration,
-            effective_configuration: {
+          capabilities: [periodicReportCapability({
+            machineCurrent: periodicConfiguration,
+            effectiveConfiguration: {
               schema_version: "capability_configuration_resolution_v0",
               capability_id: "periodic_report",
               source: "machine_default",
@@ -521,19 +616,7 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
               machine_default_present: true,
               effective_revision: "sha256:periodic-effective",
             },
-            configuration_editor: {
-              schema_version: "capability_configuration_editor_v0",
-              editable: true,
-              supported_scopes: ["machine", "goal"],
-              writable_scopes: ["machine", "goal"],
-              fields: [
-                { key: "enabled", label: "Enabled", description: "", input_kind: "boolean", required: false },
-                { key: "profile_preset", label: "Profile preset", description: "", input_kind: "text", required: false },
-                { key: "route_ref", label: "Goal Channel route", description: "", input_kind: "text", required: false },
-                { key: "timezone", label: "Timezone", description: "", input_kind: "text", required: true },
-              ],
-            },
-          }],
+          })],
         },
       }, status: 200 });
       return;
@@ -1687,6 +1770,11 @@ async function main() {
     await capabilityMenuItem.click();
     await page.getByRole("heading", { level: 1, name: "Goal 能力", exact: true }).waitFor({ state: "visible" });
     if (await page.locator(".personal-workspace-shell").count()) throw new Error("Unified Goal capability action did not open the Settings surface");
+    await page.getByRole("heading", { level: 2, name: "周期报告", exact: true }).waitFor({ state: "visible" });
+    for (const label of [/^启用$/u, /^报告 Profile/u, /^Goal Channel 路由/u, /^时区/u]) {
+      await page.getByLabel(label).waitFor({ state: "visible" });
+    }
+    await page.screenshot({ path: resolve(outputDir, "goal-capability-zh-cn.png"), fullPage: false, animations: "disabled" });
     await page.getByRole("button", { name: "预览变更", exact: true }).click();
     await page.getByText("锁定 revision 的变更预览", { exact: true }).waitFor({ state: "visible" });
     const goalConfigurationPreview = api.goalConfigurationRequests.find((item) => item.phase === "preview");
@@ -1715,6 +1803,52 @@ async function main() {
     if (await page.locator(".personal-channel-composer").count()) throw new Error("Workspace Settings left the chat composer visible");
     if (await page.locator("[data-context-drawer]").count()) throw new Error("Workspace Settings left the context drawer visible");
     await page.screenshot({ path: resolve(outputDir, "workspace-settings.png"), fullPage: false, animations: "disabled" });
+
+    await page.getByRole("button", { name: /机器配置/ }).click();
+    await page.getByRole("heading", { level: 1, name: "机器配置", exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("heading", { level: 2, name: "周期报告", exact: true }).waitFor({ state: "visible" });
+    for (const label of [/^启用$/u, /^报告 Profile/u, /^Goal Channel 路由/u, /^时区/u]) {
+      await page.getByLabel(label).waitFor({ state: "visible" });
+    }
+    await page.getByText("开启后将在已验证的阶段节点自动投递", { exact: true }).waitFor({ state: "visible" });
+    await page.getByText(/启用此订阅即授予持续投递权/u).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "预览变更", exact: true }).click();
+    await page.getByText("审阅机器配置变更", { exact: true }).waitFor({ state: "visible" });
+    const machineConfigurationPreview = api.machineConfigurationRequests.find((item) => item.phase === "preview");
+    const machineKeys = Object.keys(machineConfigurationPreview?.namespace_configuration ?? {}).sort((left, right) => left.localeCompare(right));
+    if (JSON.stringify(machineKeys) !== JSON.stringify(["enabled", "inheritance", "profile_preset", "route_ref", "schema_version", "timezone"])) {
+      throw new Error(`Machine guided editor lost capability-owned hidden fields: ${JSON.stringify(machineConfigurationPreview)}`);
+    }
+    await page.getByRole("button", { name: "应用已审阅预览", exact: true }).click();
+    await page.getByText("机器策略已应用，并通过回读校验。", { exact: true }).waitFor({ state: "visible" });
+    const machineConfigurationApply = api.machineConfigurationRequests.find((item) => item.phase === "apply");
+    if (machineConfigurationApply?.expected_plan_revision !== "sha256:machine-plan") throw new Error("Machine configuration apply lost its reviewed plan revision");
+    await page.screenshot({ path: resolve(outputDir, "machine-capability-behavior-zh-cn.png"), fullPage: false, animations: "disabled" });
+
+    await page.getByRole("button", { name: /语言/ }).click();
+    await page.getByRole("radio", { name: /English/ }).click();
+    await page.getByRole("button", { name: /Machine configuration/ }).click();
+    await page.getByRole("heading", { level: 2, name: "Periodic reports", exact: true }).waitFor({ state: "visible" });
+    for (const label of [/^Enabled$/u, /^Report profile/u, /^Goal Channel route/u, /^Timezone/u]) {
+      await page.getByLabel(label).waitFor({ state: "visible" });
+    }
+    await page.getByText("Enabled means automatic delivery at validated stage boundaries", { exact: true }).waitFor({ state: "visible" });
+    await page.screenshot({ path: resolve(outputDir, "machine-capability-en.png"), fullPage: false, animations: "disabled" });
+    await page.getByRole("button", { name: /Language/ }).click();
+    await page.getByRole("radio", { name: /Simplified Chinese/ }).click();
+    await page.getByRole("button", { name: /机器配置/ }).click();
+    await page.locator(".personal-settings-body").evaluate((element) => element.scrollTo({ top: 0 }));
+    await page.screenshot({ path: resolve(outputDir, "machine-capability-zh-cn.png"), fullPage: false, animations: "disabled" });
+    const settingsViewport = page.viewportSize();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(200);
+    const machineOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (machineOverflow > 1) throw new Error(`Machine capability settings overflow the mobile viewport by ${machineOverflow}px`);
+    await page.screenshot({ path: resolve(outputDir, "machine-capability-mobile-zh-cn.png"), fullPage: false, animations: "disabled" });
+    await page.setViewportSize(settingsViewport);
+    await page.waitForTimeout(200);
+    await page.getByRole("button", { name: /Lark/ }).click();
+
     await page.getByRole("button", { name: /连接 Lark App/ }).click();
     const connectDialog = page.getByRole("dialog", { name: "连接 Lark App" });
     await connectDialog.waitFor({ state: "visible" });

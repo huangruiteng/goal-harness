@@ -15,7 +15,10 @@ const larkSettings = source("./lark-settings-page.tsx");
 const machineSettings = source("./machine-configuration-settings.tsx");
 const goalCapabilitySettings = source("./goal-capability-settings.tsx");
 const capabilityFields = source("./capability-configuration-fields.tsx");
+const capabilityLocalization = source("./capability-localization.ts");
+const capabilityWorkbench = source("./capability-workbench.tsx");
 const i18n = source("./i18n.tsx");
+const workspaceTheme = source("./workspace-theme.ts");
 const statusSourceSwitcher = source("./status-source-switcher.tsx");
 const workspaceSettings = source("./workspace-settings-page.tsx");
 const styles = source("./personal-workspace.css");
@@ -253,7 +256,7 @@ assert.match(page, /home\.history/, "Manager home renders localized history copy
 assert.match(page, /personal-home-board/, "Manager home uses the four-lane workspace board");
 assert.doesNotMatch(page, /personal-worker-strip/, "Manager home omits the redundant Agent worker strip");
 assert.doesNotMatch(header, /切换到野兽主题|切换到默认主题/, "Workspace header does not expose theme switching");
-assert.match(page, /loopx-pw-theme/, "Theme preference persists across reloads");
+assert.match(workspaceTheme, /workspaceThemeStorageKey = "loopx-pw-theme"/, "Theme preference persists across reloads");
 assert.match(dashboard, /function isManagerProjectionQuestion[\s\S]*我现在该做什么[\s\S]*哪些 Goal 在等我[\s\S]*Agent 在做什么/, "Manager projection questions use stable intent phrases instead of exact button copy");
 assert.match(dashboard, /targetContextId === "manager" && isManagerProjectionQuestion\(question\)/, "Manager projection questions remain on the cross-Goal manager route when the user adds a read-only boundary");
 assert.match(dashboard, /const asksForNextAction[\s\S]*if \(asksForNextAction\)[\s\S]*personalManagerMatches\(question, \["状态"/, "A next-step question outranks a read-only boundary that mentions state");
@@ -356,18 +359,47 @@ assert.match(styles, /personal-settings-sidebar/, "Settings page owns its own si
 assert.match(styles, /personal-settings-page\[data-pw-theme="brutal"\]/, "Settings page owns its high-contrast theme styles");
 assert.match(workspaceSettings, /role="radiogroup"/, "Settings expose theme and language selection as accessible radio groups");
 assert.match(workspaceSettings, /setLocale\(option\.value\)/, "Settings updates the workspace locale");
-assert.match(machineSettings, /available_namespaces/, "Machine configuration renders backend-registered namespaces");
-assert.match(machineSettings, /periodicReportNamespace = "periodic_report"/, "Periodic reports are a typed namespace consumer");
+assert.match(machineSettings, /available_scopes\.includes\("machine"\)/, "Machine configuration only renders capabilities that grant machine-scope configuration");
+assert.match(machineSettings, /selected\.capability_id === "periodic_report"/, "Periodic reports expose their governed activation semantics");
 assert.match(machineSettings, /previewMachineConfiguration\(/, "Machine settings require a preview before apply");
 assert.match(machineSettings, /applyMachineConfiguration\([\s\S]*preview\.plan_revision/, "Machine settings apply the exact reviewed revision");
 assert.match(machineSettings, /previewMachineConfigurationRollback\(/, "Machine settings preview rollback before execution");
 assert.match(machineSettings, /liveDefaultDescription/, "Live defaults and Goal overrides are explained together");
-assert.match(machineSettings, /namespace_catalog/, "Machine settings discover capability namespaces from the registry catalog");
-assert.match(machineSettings, /personal-machine-json-editor/, "Every registered namespace has a generic JSON editor fallback");
-assert.match(machineSettings, /selectedNamespace,\s*desiredNamespaceConfiguration/, "Preview targets the selected namespace instead of a periodic-report constant");
-assert.match(machineSettings, /previewMachineConfigurationRemoval\(selectedNamespace\)/, "Configured namespaces expose a typed removal preview");
-assert.match(machineSettings, /applyMachineConfigurationRemoval\(selectedNamespace, preview\.plan_revision\)/, "Removal applies the exact reviewed revision");
-assert.match(machineSettings, /configuredNamespaces\.has\(selectedNamespace\)/, "Only configured namespaces expose removal");
+assert.match(machineSettings, /inspection\?\.capability_catalog\.capabilities/, "Machine settings discover capabilities from the shared registry catalog");
+assert.match(machineSettings, /personal-capability-json-editor/, "Every machine-configurable capability keeps an advanced JSON fallback");
+assert.match(machineSettings, /selected\.machine_namespace, desiredConfiguration/, "Preview targets the selected capability namespace");
+assert.match(machineSettings, /previewMachineConfigurationRemoval\(selected\.machine_namespace\)/, "Configured capabilities expose a typed removal preview");
+assert.match(machineSettings, /applyMachineConfigurationRemoval\(selected\.machine_namespace, preview\.plan_revision\)/, "Removal applies the exact reviewed revision");
+assert.match(machineSettings, /const configured = Boolean\(/, "Only configured capabilities expose removal");
+assert.match(machineSettings, /periodicReportActivationDescription/, "Machine periodic reports explain stage-triggered automatic delivery");
+assert.match(i18n, /Enabled means automatic delivery at validated stage boundaries/, "English machine settings name automatic stage delivery");
+assert.match(i18n, /开启后将在已验证的阶段节点自动投递/, "Chinese machine settings name automatic stage delivery");
+assert.match(machineSettings, /localizedCapabilityFieldCopy\(locale\)/, "Machine capability fields follow the selected locale");
+assert.match(goalCapabilitySettings, /localizedCapabilityFieldCopy\(locale\)/, "Goal capability fields follow the selected locale");
+assert.match(machineSettings, /<CapabilityCatalogNavigation/, "Machine settings use the shared capability catalog navigation");
+assert.match(goalCapabilitySettings, /<CapabilityCatalogNavigation/, "Goal settings use the shared capability catalog navigation");
+assert.match(machineSettings, /<CapabilityDetailHeader/, "Machine settings use the shared capability detail header");
+assert.match(goalCapabilitySettings, /<CapabilityDetailHeader/, "Goal settings use the shared capability detail header");
+assert.match(capabilityWorkbench, /localizeCapability\(rawCapability, locale\)/, "Shared navigation localizes capability metadata without changing capability ids");
+for (const capabilityId of [
+  "change_quality_qualification",
+  "explore_graph",
+  "explore_harness",
+  "lark_event_inbox",
+  "lark_kanban_heartbeat_sync",
+  "local_authority_shadow",
+  "multi_subagent",
+  "peer_task_coordination",
+  "periodic_report",
+  "reward_memory",
+]) {
+  const matches = capabilityLocalization.match(new RegExp(`${capabilityId}:`, "g")) ?? [];
+  assert.equal(matches.length, 2, `${capabilityId} has English and Simplified Chinese metadata`);
+}
+for (const fieldKey of ["allowed_domains", "coordinator_agent_id", "enabled", "max_children", "profile", "profile_preset", "route_ref", "safe_fix", "strict_receipt", "timezone"]) {
+  const matches = capabilityLocalization.match(new RegExp(`${fieldKey}:`, "g")) ?? [];
+  assert.equal(matches.length, 2, `${fieldKey} has English and Simplified Chinese field copy`);
+}
 assert.doesNotMatch(machineSettings, /password|secret|credential/i, "Machine settings do not collect credentials");
 assert.match(chatData, /machineConfigurationSchema/, "Machine configuration uses a typed frontend contract");
 assert.match(chatData, /machineConfigurationCatalogSchema/, "The frontend validates the generic namespace catalog");

@@ -1,82 +1,78 @@
-import { useEffect, useId, useMemo, useState } from "react";
-import { Check, RotateCcw, ServerCog, ShieldCheck, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Check, Code2, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 
 import {
   applyMachineConfiguration,
   applyMachineConfigurationRemoval,
   applyMachineConfigurationRollback,
   fetchMachineConfiguration,
-  periodicReportMachineConfigurationSchema,
   previewMachineConfiguration,
   previewMachineConfigurationRemoval,
   previewMachineConfigurationRollback,
+  type CapabilityConfigurationCatalog,
   type MachineConfigurationInspection,
-  type MachineConfigurationNamespaceDescriptor,
   type MachineConfigurationPreview,
   type MachineConfigurationRollbackPlan,
   type MachineConfigurationTransaction,
 } from "../../data/chat";
-import { useWorkspaceI18n } from "./i18n";
+import { projectEditableCapabilityConfiguration } from "../../data/capability-configuration";
 import { CapabilityConfigurationFields } from "./capability-configuration-fields";
+import { localizeCapability, localizedCapabilityFieldCopy } from "./capability-localization";
+import { CapabilityCatalogNavigation, CapabilityDetailHeader } from "./capability-workbench";
+import { useWorkspaceI18n } from "./i18n";
 
-type PeriodicReportDraft = {
-  enabled: boolean;
-  profilePreset: string;
-  routeRef: string;
-  timezone: string;
-};
+type CapabilityDescriptor = CapabilityConfigurationCatalog["capabilities"][number];
+type EditorMode = "guided" | "json";
 
-const periodicReportNamespace = "periodic_report";
-
-function localTimezone() {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+function formattedValue(value: Record<string, unknown> | undefined) {
+  return value ? JSON.stringify(value, null, 2) : "—";
 }
 
-function emptyPeriodicReportDraft(): PeriodicReportDraft {
-  return {
-    enabled: false,
-    profilePreset: "weekly-progress",
-    routeRef: "",
-    timezone: localTimezone(),
-  };
+function configurationObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
-function draftFromInspection(inspection: MachineConfigurationInspection): PeriodicReportDraft {
-  const candidate = inspection.machine_configuration?.namespaces[periodicReportNamespace];
-  const parsed = periodicReportMachineConfigurationSchema.safeParse(candidate);
-  if (!parsed.success) return emptyPeriodicReportDraft();
-  return {
-    enabled: parsed.data.enabled,
-    profilePreset: parsed.data.profile_preset ?? "weekly-progress",
-    routeRef: parsed.data.route_ref ?? "",
-    timezone: parsed.data.timezone,
-  };
-}
-
-function configurationFromDraft(draft: PeriodicReportDraft): Record<string, unknown> {
-  return {
-    schema_version: "periodic_report_machine_defaults_v0",
-    enabled: draft.enabled,
-    inheritance: "live_machine_default",
-    profile_preset: draft.profilePreset.trim(),
-    route_ref: draft.routeRef.trim(),
-    timezone: draft.timezone.trim(),
-  };
-}
-
-function jsonDraftForNamespace(
-  inspection: MachineConfigurationInspection,
-  descriptor: MachineConfigurationNamespaceDescriptor,
+function currentConfiguration(
+  inspection: MachineConfigurationInspection | null,
+  capability: CapabilityDescriptor | undefined,
 ) {
-  const configured = inspection.machine_configuration?.namespaces[descriptor.namespace];
-  return JSON.stringify(configured ?? descriptor.configuration_template, null, 2);
+  const namespace = capability?.machine_namespace;
+  return namespace ? inspection?.machine_configuration?.namespaces[namespace] : undefined;
 }
 
-function parseNamespaceDraft(value: string): Record<string, unknown> | null {
+function completeMachineConfiguration(
+  capability: CapabilityDescriptor,
+  current: Record<string, unknown> | undefined,
+  draft: Record<string, unknown>,
+) {
+  return {
+    ...configurationObject(capability.default),
+    ...configurationObject(current),
+    ...draft,
+  };
+}
+
+function validGuidedDraft(capability: CapabilityDescriptor, value: Record<string, unknown>) {
+  for (const field of capability.configuration_editor.fields) {
+    const item = value[field.key];
+    if (field.required && (item === undefined || item === null || item === "")) return false;
+  }
+  if (capability.capability_id === "periodic_report" && value.enabled === true) {
+    return Boolean(String(value.profile_preset ?? "").trim()
+      && String(value.route_ref ?? "").trim()
+      && String(value.timezone ?? "").trim());
+  }
+  return true;
+}
+
+function parseJsonObject(value: string) {
   try {
     const parsed: unknown = JSON.parse(value);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    return parsed as Record<string, unknown>;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
   } catch {
     return null;
   }
@@ -89,13 +85,12 @@ function shortRevision(value: string | undefined) {
 }
 
 export function MachineConfigurationSettings() {
-  const { t } = useWorkspaceI18n();
-  const enabledId = useId();
+  const { locale, t } = useWorkspaceI18n();
   const [inspection, setInspection] = useState<MachineConfigurationInspection | null>(null);
-  const [draft, setDraft] = useState<PeriodicReportDraft>(emptyPeriodicReportDraft);
-  const [selectedNamespace, setSelectedNamespace] = useState(periodicReportNamespace);
-  const [editorMode, setEditorMode] = useState<"form" | "json">("form");
+  const [selectedCapabilityId, setSelectedCapabilityId] = useState("");
+  const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [jsonDraft, setJsonDraft] = useState("{}");
+  const [editorMode, setEditorMode] = useState<EditorMode>("guided");
   const [preview, setPreview] = useState<MachineConfigurationPreview | null>(null);
   const [previewOperation, setPreviewOperation] = useState<"upsert" | "remove">("upsert");
   const [transaction, setTransaction] = useState<MachineConfigurationTransaction | null>(null);
@@ -104,20 +99,33 @@ export function MachineConfigurationSettings() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const capabilities = inspection?.capability_catalog.capabilities.filter(
+    (capability) => capability.available_scopes.includes("machine"),
+  ) ?? [];
+  const selectedRaw = capabilities.find(
+    (capability) => capability.capability_id === selectedCapabilityId,
+  ) ?? capabilities[0];
+  const selected = selectedRaw ? localizeCapability(selectedRaw, locale) : undefined;
+  const selectedCurrent = currentConfiguration(inspection, selected);
+  const configured = Boolean(selected?.machine_namespace && selectedCurrent);
+  const editorAvailable = Boolean(
+    selected?.configuration_editor.editable
+    && selected.configuration_editor.writable_scopes.includes("machine"),
+  );
+  const parsedJsonDraft = useMemo(() => parseJsonObject(jsonDraft), [jsonDraft]);
+  const desiredConfiguration = selected
+    ? editorMode === "json"
+      ? parsedJsonDraft
+      : completeMachineConfiguration(selected, selectedCurrent, draft)
+    : null;
+  const editorValid = Boolean(
+    selected && (editorMode === "json"
+      ? parsedJsonDraft
+      : validGuidedDraft(selected, desiredConfiguration ?? {})),
+  );
+
   async function reload() {
-    const next = await fetchMachineConfiguration();
-    setInspection(next);
-    setDraft(draftFromInspection(next));
-    setSelectedNamespace((current) => {
-      const namespace = next.available_namespaces.includes(current)
-        ? current
-        : next.available_namespaces[0] ?? periodicReportNamespace;
-      const descriptor = next.namespace_catalog.namespaces.find(
-        (item) => item.namespace === namespace,
-      );
-      if (descriptor) setJsonDraft(jsonDraftForNamespace(next, descriptor));
-      return namespace;
-    });
+    setInspection(await fetchMachineConfiguration());
   }
 
   useEffect(() => {
@@ -126,14 +134,9 @@ export function MachineConfigurationSettings() {
       .then((next) => {
         if (!active) return;
         setInspection(next);
-        setDraft(draftFromInspection(next));
-        const namespace = next.available_namespaces[0] ?? periodicReportNamespace;
-        const descriptor = next.namespace_catalog.namespaces.find(
-          (item) => item.namespace === namespace,
-        );
-        setSelectedNamespace(namespace);
-        setEditorMode(namespace === periodicReportNamespace ? "form" : "json");
-        if (descriptor) setJsonDraft(jsonDraftForNamespace(next, descriptor));
+        setSelectedCapabilityId(next.capability_catalog.capabilities.find(
+          (capability) => capability.available_scopes.includes("machine"),
+        )?.capability_id ?? "");
       })
       .catch((cause: unknown) => {
         if (active) setError(cause instanceof Error ? cause.message : t("machine.loadError"));
@@ -144,99 +147,63 @@ export function MachineConfigurationSettings() {
     return () => { active = false; };
   }, [t]);
 
-  const draftValid = Boolean(
-    draft.timezone.trim()
-    && (!draft.enabled || (draft.profilePreset.trim() && draft.routeRef.trim())),
-  );
-  const namespaces = inspection?.available_namespaces ?? [periodicReportNamespace];
-  const namespaceDescriptors = inspection?.namespace_catalog.namespaces ?? [];
-  const selectedDescriptor = namespaceDescriptors.find(
-    (item) => item.namespace === selectedNamespace,
-  );
-  const selectedCapability = inspection?.capability_catalog.capabilities.find(
-    (item) => item.machine_namespace === selectedNamespace,
-  );
-  const parsedJsonDraft = useMemo(() => parseNamespaceDraft(jsonDraft), [jsonDraft]);
-  const usesJsonEditor = selectedNamespace !== periodicReportNamespace || editorMode === "json";
-  const desiredNamespaceConfiguration = usesJsonEditor
-    ? parsedJsonDraft
-    : configurationFromDraft(draft);
-  const editorValid = usesJsonEditor ? Boolean(parsedJsonDraft) : draftValid;
-  const configuredNamespaces = useMemo(
-    () => new Set(Object.keys(inspection?.machine_configuration?.namespaces ?? {})),
-    [inspection],
-  );
-
-  function updateDraft(patch: Partial<PeriodicReportDraft>) {
-    setDraft((current) => ({ ...current, ...patch }));
+  useEffect(() => {
+    if (!selected) return;
+    const current = currentConfiguration(inspection, selected);
+    const editable = projectEditableCapabilityConfiguration(
+      selected.configuration_editor,
+      current ?? selected.default,
+      selected.default,
+    );
+    const complete = completeMachineConfiguration(selected, current, editable);
+    setDraft(editable);
+    setJsonDraft(JSON.stringify(complete, null, 2));
+    setEditorMode(editorAvailable ? "guided" : "json");
     setPreview(null);
     setPreviewOperation("upsert");
     setRollbackPlan(null);
+  }, [inspection, selectedCapabilityId, locale]);
+
+  function changeDraft(key: string, value: boolean | number | string | string[]) {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setPreview(null);
+    setPreviewOperation("upsert");
     setError(null);
     setNotice(null);
   }
 
-  function updateJsonDraft(value: string) {
-    setJsonDraft(value);
-    setPreview(null);
-    setPreviewOperation("upsert");
-    setRollbackPlan(null);
-    setError(null);
-    setNotice(null);
-  }
-
-  function selectNamespace(namespace: string) {
-    if (namespace === selectedNamespace) return;
-    setSelectedNamespace(namespace);
-    setEditorMode(namespace === periodicReportNamespace ? "form" : "json");
-    const descriptor = namespaceDescriptors.find((item) => item.namespace === namespace);
-    if (inspection && descriptor) {
-      setJsonDraft(jsonDraftForNamespace(inspection, descriptor));
-    }
-    setPreview(null);
-    setPreviewOperation("upsert");
-    setRollbackPlan(null);
-    setError(null);
-    setNotice(null);
-  }
-
-  function selectEditorMode(mode: "form" | "json") {
+  function changeMode(mode: EditorMode) {
+    if (!selected) return;
     if (mode === "json") {
-      setJsonDraft(JSON.stringify(configurationFromDraft(draft), null, 2));
+      setJsonDraft(JSON.stringify(
+        completeMachineConfiguration(selected, selectedCurrent, draft),
+        null,
+        2,
+      ));
+    } else if (parsedJsonDraft) {
+      setDraft(projectEditableCapabilityConfiguration(
+        selected.configuration_editor,
+        parsedJsonDraft,
+        selected.default,
+      ));
     } else {
-      const parsed = periodicReportMachineConfigurationSchema.safeParse(
-        parseNamespaceDraft(jsonDraft),
-      );
-      if (!parsed.success) {
-        setError(t("machine.jsonInvalid"));
-        return;
-      }
-      setDraft({
-        enabled: parsed.data.enabled,
-        profilePreset: parsed.data.profile_preset ?? "weekly-progress",
-        routeRef: parsed.data.route_ref ?? "",
-        timezone: parsed.data.timezone,
-      });
+      setError(t("machine.jsonInvalid"));
+      return;
     }
     setEditorMode(mode);
     setPreview(null);
     setPreviewOperation("upsert");
-    setRollbackPlan(null);
     setError(null);
-    setNotice(null);
   }
 
   async function createPreview() {
-    if (!editorValid || !desiredNamespaceConfiguration || busy) return;
+    if (!selected?.machine_namespace || !desiredConfiguration || !editorValid || busy) return;
     setBusy("preview");
     setError(null);
     setNotice(null);
     try {
       setPreviewOperation("upsert");
-      setPreview(await previewMachineConfiguration(
-        selectedNamespace,
-        desiredNamespaceConfiguration,
-      ));
+      setPreview(await previewMachineConfiguration(selected.machine_namespace, desiredConfiguration));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("machine.previewError"));
     } finally {
@@ -245,13 +212,13 @@ export function MachineConfigurationSettings() {
   }
 
   async function createRemovalPreview() {
-    if (!configuredNamespaces.has(selectedNamespace) || busy) return;
+    if (!selected?.machine_namespace || !configured || busy) return;
     setBusy("preview");
     setError(null);
     setNotice(null);
     try {
       setPreviewOperation("remove");
-      setPreview(await previewMachineConfigurationRemoval(selectedNamespace));
+      setPreview(await previewMachineConfigurationRemoval(selected.machine_namespace));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("machine.previewError"));
     } finally {
@@ -260,29 +227,21 @@ export function MachineConfigurationSettings() {
   }
 
   async function applyPreview() {
-    if (
-      !preview
-      || busy
-      || (previewOperation === "upsert" && !desiredNamespaceConfiguration)
-    ) return;
+    if (!selected?.machine_namespace || !preview || busy || (previewOperation === "upsert" && !desiredConfiguration)) return;
     setBusy("apply");
     setError(null);
-    const appliedOperation = previewOperation;
+    const operation = previewOperation;
     try {
-      const result = appliedOperation === "remove"
-        ? await applyMachineConfigurationRemoval(selectedNamespace, preview.plan_revision)
-        : await applyMachineConfiguration(
-          selectedNamespace,
-          desiredNamespaceConfiguration!,
-          preview.plan_revision,
-        );
+      const result = operation === "remove"
+        ? await applyMachineConfigurationRemoval(selected.machine_namespace, preview.plan_revision)
+        : await applyMachineConfiguration(selected.machine_namespace, desiredConfiguration!, preview.plan_revision);
       setTransaction(result);
       setPreview(null);
       setPreviewOperation("upsert");
       setRollbackPlan(null);
       await reload();
       setNotice(result.status === "applied"
-        ? t(appliedOperation === "remove" ? "machine.removed" : "machine.applied")
+        ? t(operation === "remove" ? "machine.removed" : "machine.applied")
         : t("machine.unchanged"));
     } catch (cause) {
       setPreview(null);
@@ -311,10 +270,7 @@ export function MachineConfigurationSettings() {
     setBusy("rollback");
     setError(null);
     try {
-      await applyMachineConfigurationRollback(
-        transaction.transaction_id,
-        rollbackPlan.plan_revision,
-      );
+      await applyMachineConfigurationRollback(transaction.transaction_id, rollbackPlan.plan_revision);
       setTransaction(null);
       setRollbackPlan(null);
       setPreview(null);
@@ -331,214 +287,103 @@ export function MachineConfigurationSettings() {
   if (busy === "load") {
     return <div className="personal-machine-loading" role="status">{t("common.loading")}</div>;
   }
-
-  const workflow = (
-    <>
-      {error ? <p className="personal-machine-error" role="alert">{error}</p> : null}
-      {notice ? <p className="personal-machine-notice" role="status" aria-live="polite"><Check aria-hidden size={16} />{notice}</p> : null}
-
-      {preview ? (
-        <section aria-label={t("machine.preview")} className="personal-machine-preview">
-          <header><strong>{t("machine.preview")}</strong><span>{t(`machine.action.${preview.action}`)}</span></header>
-          <dl>
-            <div><dt>{t("machine.currentRevision")}</dt><dd title={preview.current_revision}>{shortRevision(preview.current_revision)}</dd></div>
-            <div><dt>{t("machine.desiredRevision")}</dt><dd title={preview.desired_revision}>{shortRevision(preview.desired_revision)}</dd></div>
-            <div><dt>{t("machine.changedNamespaces")}</dt><dd>{preview.changed_namespaces.join(", ") || t("common.none")}</dd></div>
-          </dl>
-          <p>{t("machine.previewLocked")}</p>
-        </section>
-      ) : null}
-
-      {transaction?.rollback_available && transaction.transaction_id ? (
-        <section className="personal-machine-rollback">
-          <div>
-            <strong>{t("machine.rollbackAvailable")}</strong>
-            <p>{rollbackPlan ? t("machine.rollbackPreviewDescription") : t("machine.rollbackDescription")}</p>
-          </div>
-          <button
-            className="personal-secondary-action"
-            disabled={Boolean(busy) || Boolean(rollbackPlan && !rollbackPlan.rollback_allowed)}
-            onClick={() => void (rollbackPlan ? applyRollback() : previewRollback())}
-            type="button"
-          >
-            <RotateCcw aria-hidden size={15} />
-            {busy === "rollback" || busy === "rollback-preview"
-              ? t("common.loading")
-              : rollbackPlan ? t("machine.confirmRollback") : t("machine.previewRollback")}
-          </button>
-        </section>
-      ) : null}
-
-      <footer>
-        {configuredNamespaces.has(selectedNamespace) ? (
-          <button
-            className="personal-danger-action"
-            disabled={Boolean(busy)}
-            onClick={() => void createRemovalPreview()}
-            type="button"
-          >
-            <Trash2 aria-hidden size={15} />
-            {busy === "preview" && previewOperation === "remove"
-              ? t("common.loading")
-              : t("machine.previewRemoval")}
-          </button>
-        ) : null}
-        <button
-          className="personal-secondary-action"
-          disabled={Boolean(busy) || !editorValid}
-          type="submit"
-        >
-          {busy === "preview" ? t("common.loading") : t("machine.previewChanges")}
-        </button>
-        <button
-          className="personal-primary-action"
-          disabled={Boolean(busy) || !preview}
-          onClick={() => void applyPreview()}
-          type="button"
-        >
-          {busy === "apply" ? t("common.loading") : t("machine.applyPreview")}
-        </button>
-      </footer>
-    </>
-  );
+  if (!selected) {
+    return <p className="personal-capability-empty">{t("machine.capabilityEmpty")}</p>;
+  }
 
   return (
-    <div className="personal-machine-layout">
-      <aside aria-label={t("machine.namespaces")} className="personal-machine-namespaces">
-        <div>
-          <small>{t("machine.registry")}</small>
-          <strong>{t("machine.namespaces")}</strong>
-        </div>
-        <nav>
-          {namespaces.map((namespace) => (
-            <button
-              aria-current={selectedNamespace === namespace ? "page" : undefined}
-              key={namespace}
-              onClick={() => selectNamespace(namespace)}
-              type="button"
-            >
-              <span>{namespace === periodicReportNamespace
-                ? t("machine.periodicReport")
-                : namespaceDescriptors.find((item) => item.namespace === namespace)?.title ?? namespace}</span>
-              <small>{configuredNamespaces.has(namespace) ? t("machine.configured") : t("machine.absent")}</small>
-            </button>
-          ))}
-        </nav>
-      </aside>
+    <section className="personal-capability-settings" data-revision={inspection?.revision}>
+      <div className="personal-capability-scope-note">
+        <ShieldCheck aria-hidden size={17} />
+        <p><strong>{t("machine.liveDefault")}</strong>{t("machine.liveDefaultDescription")}</p>
+      </div>
 
-      <section className="personal-machine-content">
-        <div className="personal-machine-summary">
-          <div>
-            <span className="personal-settings-icon"><ServerCog aria-hidden size={18} /></span>
-            <span>
-              <small>{t("machine.machinePolicy")}</small>
-              <strong>{inspection?.status === "configured" ? t("machine.configured") : t("machine.absent")}</strong>
-            </span>
+      <div className="personal-capability-layout">
+        <CapabilityCatalogNavigation capabilities={capabilities} locale={locale} onSelect={setSelectedCapabilityId} scope="machine" selectedCapabilityId={selected.capability_id} t={t} />
+
+        <article className="personal-capability-detail">
+          <CapabilityDetailHeader capability={selectedRaw} locale={locale} />
+
+          <div className="personal-capability-value-grid">
+            <section><strong>{t("machine.currentValue")}</strong><pre>{formattedValue(selectedCurrent)}</pre></section>
+            <section><strong>{t("capabilities.defaultValue")}</strong><pre>{formattedValue(selected.default)}</pre></section>
           </div>
-          <dl>
-            <div><dt>{t("machine.revision")}</dt><dd title={inspection?.revision}>{shortRevision(inspection?.revision)}</dd></div>
-            <div><dt>{t("machine.namespaceCount")}</dt><dd>{namespaces.length}</dd></div>
-          </dl>
-        </div>
 
-        {selectedNamespace === periodicReportNamespace ? (
-          <div className="personal-machine-editor-bar">
-            <small>{t("machine.editorMode")}</small>
-            <div aria-label={t("machine.editorMode")} className="personal-machine-editor-mode" role="group">
-              <button aria-pressed={editorMode === "form"} onClick={() => selectEditorMode("form")} type="button">
-                {t("machine.visualEditor")}
-              </button>
-              <button aria-pressed={editorMode === "json"} onClick={() => selectEditorMode("json")} type="button">
-                {t("machine.jsonEditor")}
-              </button>
+          <p className="personal-capability-effective-source">
+            <ShieldCheck aria-hidden size={15} />
+            <span><strong>{t("capabilities.effectiveSource")}</strong>{configured ? t("capabilities.source.machine_default") : t("capabilities.source.capability_default")}</span>
+          </p>
+
+          <section className={`personal-capability-editor-status ${editorAvailable ? "is-preview" : "is-read-only"}`}>
+            {editorAvailable ? <ShieldCheck aria-hidden size={18} /> : <AlertTriangle aria-hidden size={18} />}
+            <div>
+              <strong>{editorAvailable ? t("capabilities.editorPrepared") : t("machine.editorUnavailable")}</strong>
+              <p>{editorAvailable ? t("machine.revisionLockedReady") : t("machine.editorUnavailableDescription")}</p>
             </div>
-          </div>
-        ) : null}
+          </section>
 
-        {selectedNamespace === periodicReportNamespace && editorMode === "form" ? (
-          <form className="personal-machine-editor" onSubmit={(event) => { event.preventDefault(); void createPreview(); }}>
-            <header>
-              <div>
-                <small>{periodicReportNamespace}</small>
-                <h2>{t("machine.periodicReport")}</h2>
-                <p>{t("machine.periodicReportDescription")}</p>
-              </div>
-              <label className="personal-machine-switch" htmlFor={enabledId}>
-                <span>{draft.enabled ? t("common.on") : t("common.off")}</span>
-                <input
-                  checked={draft.enabled}
-                  id={enabledId}
-                  onChange={(event) => updateDraft({ enabled: event.target.checked })}
-                  type="checkbox"
-                />
-              </label>
-            </header>
-
-            <div className="personal-machine-scope-note">
+          {selected.capability_id === "periodic_report" ? (
+            <section className="personal-capability-behavior-note">
               <ShieldCheck aria-hidden size={18} />
-              <div>
-                <strong>{t("machine.liveDefault")}</strong>
-                <p>{t("machine.liveDefaultDescription")}</p>
-              </div>
+              <div><strong>{t("machine.periodicReportActivation")}</strong><p>{t("machine.periodicReportActivationDescription")}</p></div>
+            </section>
+          ) : null}
+
+          <div className="personal-capability-editor-mode">
+            <span>{t("machine.editorMode")}</span>
+            <div role="group" aria-label={t("machine.editorMode")}>
+              <button aria-pressed={editorMode === "guided"} disabled={!editorAvailable} onClick={() => changeMode("guided")} type="button">{t("machine.visualEditor")}</button>
+              <button aria-pressed={editorMode === "json"} onClick={() => changeMode("json")} type="button"><Code2 aria-hidden size={14} />{t("machine.jsonEditor")}</button>
             </div>
+          </div>
 
-            {selectedCapability ? (
-              <CapabilityConfigurationFields
-                copy={{
-                  profile_preset: { description: t("machine.profilePresetHelp"), label: t("machine.profilePreset") },
-                  route_ref: { description: t("machine.routeRefHelp"), label: t("machine.routeRef") },
-                  timezone: { description: t("machine.timezoneHelp"), label: t("machine.timezone") },
-                }}
-                disabled={!draft.enabled || Boolean(busy)}
-                editor={selectedCapability.configuration_editor}
-                omitKeys={["enabled"]}
-                onChange={(key, value) => {
-                  if (key === "profile_preset" && typeof value === "string") updateDraft({ profilePreset: value });
-                  if (key === "route_ref" && typeof value === "string") updateDraft({ routeRef: value });
-                  if (key === "timezone" && typeof value === "string") updateDraft({ timezone: value });
-                }}
-                value={{
-                  profile_preset: draft.profilePreset,
-                  route_ref: draft.routeRef,
-                  timezone: draft.timezone,
-                }}
-              />
-            ) : null}
-
-            {!draftValid ? <p className="personal-machine-validation" role="alert">{t("machine.requiredFields")}</p> : null}
-            {workflow}
-          </form>
-        ) : (
-          <form className="personal-machine-editor personal-machine-json-editor" onSubmit={(event) => { event.preventDefault(); void createPreview(); }}>
-            <header>
-              <div>
-                <small>{selectedNamespace}</small>
-                <h2>{selectedNamespace === periodicReportNamespace
-                  ? t("machine.periodicReport")
-                  : selectedDescriptor?.title ?? selectedNamespace}</h2>
-                <p>{selectedNamespace === periodicReportNamespace
-                  ? t("machine.periodicReportDescription")
-                  : selectedDescriptor?.description || t("machine.genericNamespaceDescription")}</p>
-              </div>
-            </header>
-            <label htmlFor="machine-configuration-json">
+          {editorMode === "guided" ? (
+            <section className="personal-capability-field-summary">
+              <strong>{t("capabilities.fields")}</strong>
+              <CapabilityConfigurationFields copy={localizedCapabilityFieldCopy(locale)} disabled={Boolean(busy)} editor={selected.configuration_editor} onChange={changeDraft} value={draft} />
+              {!editorValid ? <p className="personal-machine-validation" role="alert">{t("machine.requiredFields")}</p> : null}
+            </section>
+          ) : (
+            <label className="personal-capability-json-editor" htmlFor="machine-configuration-json">
               <span>{t("machine.jsonConfiguration")}</span>
-              <textarea
-                aria-describedby="machine-configuration-json-help"
-                disabled={Boolean(busy)}
-                id="machine-configuration-json"
-                onChange={(event) => updateJsonDraft(event.target.value)}
-                rows={14}
-                spellCheck={false}
-                value={jsonDraft}
-              />
+              <textarea aria-describedby="machine-configuration-json-help" disabled={Boolean(busy)} id="machine-configuration-json" onChange={(event) => { setJsonDraft(event.target.value); setPreview(null); setError(null); }} rows={12} spellCheck={false} value={jsonDraft} />
               <small id="machine-configuration-json-help">{t("machine.jsonConfigurationHelp")}</small>
+              {!parsedJsonDraft ? <span className="personal-machine-validation" role="alert">{t("machine.jsonInvalid")}</span> : null}
             </label>
-            {!parsedJsonDraft ? <p className="personal-machine-validation" role="alert">{t("machine.jsonInvalid")}</p> : null}
-            {workflow}
-          </form>
-        )}
-      </section>
-    </div>
+          )}
+
+          {error ? <p className="personal-machine-error" role="alert">{error}</p> : null}
+          {notice ? <p className="personal-machine-notice" role="status" aria-live="polite"><Check aria-hidden size={16} />{notice}</p> : null}
+
+          {preview ? (
+            <section aria-label={t("machine.preview")} className="personal-machine-preview">
+              <header><strong>{t("machine.preview")}</strong><span>{t(`machine.action.${preview.action}`)}</span></header>
+              <dl>
+                <div><dt>{t("machine.currentRevision")}</dt><dd title={preview.current_revision}>{shortRevision(preview.current_revision)}</dd></div>
+                <div><dt>{t("machine.desiredRevision")}</dt><dd title={preview.desired_revision}>{shortRevision(preview.desired_revision)}</dd></div>
+                <div><dt>{t("machine.changedNamespaces")}</dt><dd>{preview.changed_namespaces.join(", ") || t("common.none")}</dd></div>
+              </dl>
+              <p>{t("machine.previewLocked")}</p>
+            </section>
+          ) : null}
+
+          {transaction?.rollback_available && transaction.transaction_id ? (
+            <section className="personal-machine-rollback">
+              <div><strong>{t("machine.rollbackAvailable")}</strong><p>{rollbackPlan ? t("machine.rollbackPreviewDescription") : t("machine.rollbackDescription")}</p></div>
+              <button className="personal-secondary-action" disabled={Boolean(busy) || Boolean(rollbackPlan && !rollbackPlan.rollback_allowed)} onClick={() => void (rollbackPlan ? applyRollback() : previewRollback())} type="button">
+                <RotateCcw aria-hidden size={15} />
+                {busy === "rollback" || busy === "rollback-preview" ? t("common.loading") : rollbackPlan ? t("machine.confirmRollback") : t("machine.previewRollback")}
+              </button>
+            </section>
+          ) : null}
+
+          <footer className="personal-capability-actions">
+            {configured ? <button className="is-danger" disabled={Boolean(busy)} onClick={() => void createRemovalPreview()} type="button"><Trash2 aria-hidden size={15} />{t("machine.previewRemoval")}</button> : null}
+            <button disabled={Boolean(busy) || !editorValid} onClick={() => void createPreview()} type="button">{busy === "preview" ? t("common.loading") : t("machine.previewChanges")}</button>
+            <button className="is-primary" disabled={Boolean(busy) || !preview} onClick={() => void applyPreview()} type="button">{busy === "apply" ? t("common.loading") : t("machine.applyPreview")}</button>
+          </footer>
+        </article>
+      </div>
+    </section>
   );
 }

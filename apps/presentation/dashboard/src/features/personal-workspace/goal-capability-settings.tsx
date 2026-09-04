@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, LoaderCircle, RefreshCw, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
 
 import {
   applyGoalConfiguration,
@@ -13,6 +13,8 @@ import {
 import { projectEditableCapabilityConfiguration } from "../../data/capability-configuration";
 import { useWorkspaceI18n } from "./i18n";
 import { CapabilityConfigurationFields } from "./capability-configuration-fields";
+import { localizeCapability, localizedCapabilityFieldCopy } from "./capability-localization";
+import { CapabilityCatalogNavigation, CapabilityDetailHeader } from "./capability-workbench";
 
 function formattedValue(value: Record<string, unknown> | undefined) {
   return value ? JSON.stringify(value, null, 2) : "—";
@@ -150,7 +152,7 @@ function CapabilityMutationFeedback({ mutationError, onApplied, partialWrite, pr
 }
 
 function CapabilityCatalog({ catalog, goalId, onApplied }: CapabilityCatalogProps) {
-  const { t } = useWorkspaceI18n();
+  const { locale, t } = useWorkspaceI18n();
   const [selectedCapabilityId, setSelectedCapabilityId] = useState(
     catalog.capabilities[0]?.capability_id ?? "",
   );
@@ -159,27 +161,31 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: CapabilityCatalogProp
       ?? catalog.capabilities[0],
     [catalog.capabilities, selectedCapabilityId],
   );
-  const capabilityMutation = useCapabilityMutation({ goalId, onApplied, selected, t });
+  const localizedSelected = useMemo(
+    () => selected ? localizeCapability(selected, locale) : undefined,
+    [locale, selected],
+  );
+  const capabilityMutation = useCapabilityMutation({ goalId, onApplied, selected: localizedSelected, t });
   const { apply, changeDraft, error: mutationError, mutation, preview: requestPreview } = capabilityMutation;
   const { busy, draft, partialWrite, preview } = mutation;
 
-  if (!selected) {
+  if (!selected || !localizedSelected) {
     return <p className="personal-capability-empty">{t("capabilities.empty")}</p>;
   }
 
-  const supportsGoal = selected.available_scopes.includes("goal");
+  const supportsGoal = localizedSelected.available_scopes.includes("goal");
   const editorAvailable = supportsGoal
-    && selected.configuration_editor.editable
-    && selected.configuration_editor.writable_scopes.includes("goal");
-  const readOnlyReason = selected.configuration_editor.read_only_reason
+    && localizedSelected.configuration_editor.editable
+    && localizedSelected.configuration_editor.writable_scopes.includes("goal");
+  const readOnlyReason = localizedSelected.configuration_editor.read_only_reason
     ?? (!supportsGoal ? t("capabilities.machineOnly") : t("capabilities.previewOnly"));
 
   async function createPreview() {
-    if (!editorAvailable || busy) return;
+    if (!localizedSelected || !editorAvailable || busy) return;
     const writableDraft = projectEditableCapabilityConfiguration(
-      selected.configuration_editor,
+      localizedSelected.configuration_editor,
       draft,
-      selected.default,
+      localizedSelected.default,
     );
     await requestPreview(writableDraft);
   }
@@ -191,48 +197,33 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: CapabilityCatalogProp
 
   return (
     <div className="personal-capability-layout">
-      <nav aria-label={t("capabilities.catalog")} className="personal-capability-list">
-        {catalog.capabilities.map((capability) => (
-          <button
-            aria-current={selected.capability_id === capability.capability_id ? "page" : undefined}
-            key={capability.capability_id}
-            onClick={() => setSelectedCapabilityId(capability.capability_id)}
-            type="button"
-          >
-            <span>
-              <strong>{capability.display_name}</strong>
-              <small>{capability.capability_id}</small>
-            </span>
-            <em>{capability.available_scopes.includes("goal") ? t("capabilities.goalScope") : t("capabilities.machineScope")}</em>
-          </button>
-        ))}
-      </nav>
+      <CapabilityCatalogNavigation
+        capabilities={catalog.capabilities}
+        locale={locale}
+        onSelect={setSelectedCapabilityId}
+        scope="goal"
+        selectedCapabilityId={localizedSelected.capability_id}
+        t={t}
+      />
 
       <article className="personal-capability-detail">
-        <header>
-          <span className="personal-settings-icon"><SlidersHorizontal aria-hidden size={18} /></span>
-          <div>
-            <small>{selected.capability_id}</small>
-            <h2>{selected.display_name}</h2>
-            <p>{selected.description}</p>
-          </div>
-        </header>
+        <CapabilityDetailHeader capability={selected} locale={locale} />
 
         <div className="personal-capability-value-grid">
           <section>
             <strong>{t("capabilities.goalValue")}</strong>
-            <pre>{formattedValue(selected.current)}</pre>
+            <pre>{formattedValue(localizedSelected.current)}</pre>
           </section>
           <section>
-            <strong>{selected.machine_current ? t("capabilities.machineValue") : t("capabilities.defaultValue")}</strong>
-            <pre>{formattedValue(selected.machine_current ?? selected.default)}</pre>
+            <strong>{localizedSelected.machine_current ? t("capabilities.machineValue") : t("capabilities.defaultValue")}</strong>
+            <pre>{formattedValue(localizedSelected.machine_current ?? localizedSelected.default)}</pre>
           </section>
         </div>
 
-        {selected.effective_configuration ? (
+        {localizedSelected.effective_configuration ? (
           <p className="personal-capability-effective-source">
             <ShieldCheck aria-hidden size={15} />
-            <span><strong>{t("capabilities.effectiveSource")}</strong>{t(`capabilities.source.${selected.effective_configuration.source}`)}</span>
+            <span><strong>{t("capabilities.effectiveSource")}</strong>{t(`capabilities.source.${localizedSelected.effective_configuration.source}`)}</span>
           </p>
         ) : null}
 
@@ -249,7 +240,8 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: CapabilityCatalogProp
             <strong>{t("capabilities.fields")}</strong>
             <CapabilityConfigurationFields
               disabled={Boolean(busy)}
-              editor={selected.configuration_editor}
+              copy={localizedCapabilityFieldCopy(locale)}
+              editor={localizedSelected.configuration_editor}
               onChange={changeDraft}
               value={draft}
             />
@@ -258,7 +250,7 @@ function CapabilityCatalog({ catalog, goalId, onApplied }: CapabilityCatalogProp
         <CapabilityMutationFeedback mutationError={mutationError} onApplied={onApplied} partialWrite={partialWrite} preview={preview} />
         {editorAvailable ? (
           <footer className="personal-capability-actions">
-            {selected.current && selected.available_scopes.includes("machine") ? (
+            {localizedSelected.current && localizedSelected.available_scopes.includes("machine") ? (
               <button disabled={Boolean(busy)} onClick={() => void createClearPreview()} type="button">
                 {t("capabilities.restoreInheritance")}
               </button>
