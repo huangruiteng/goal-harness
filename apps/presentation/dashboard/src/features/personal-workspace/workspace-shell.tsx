@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { useWorkspaceI18n } from "./i18n";
+import type { WorkspaceTheme } from "./workspace-theme";
 
 export function WorkspaceShell({
   drawer,
@@ -10,7 +11,7 @@ export function WorkspaceShell({
   mobileSidebarOpen = false,
   onCloseMobileSidebar,
   sidebar,
-  theme = "paper",
+  theme = "loopx",
 }: {
   drawer?: ReactNode;
   drawerMode?: "inspector" | "inspector-full" | "panel";
@@ -19,7 +20,7 @@ export function WorkspaceShell({
   mobileSidebarOpen?: boolean;
   onCloseMobileSidebar?: () => void;
   sidebar: ReactNode;
-  theme?: "brutal" | "paper";
+  theme?: WorkspaceTheme;
 }) {
   const { t } = useWorkspaceI18n();
   const sidebarRef = useRef<HTMLElement>(null);

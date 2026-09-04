@@ -7,6 +7,7 @@ import { LarkSettingsPage } from "./lark-settings-page";
 import { GoalCapabilitySettings } from "./goal-capability-settings";
 import { MachineConfigurationSettings } from "./machine-configuration-settings";
 import type { WorkspaceGoal } from "./personal-workspace-model";
+import type { WorkspaceTheme } from "./workspace-theme";
 
 type WorkspaceSettingsTab = "machine" | "capabilities" | "lark" | "appearance" | "language";
 
@@ -34,8 +35,8 @@ export function WorkspaceSettingsPage({
   initialTab?: WorkspaceSettingsTab;
   onChanged: () => void;
   onClose: () => void;
-  onThemeChange: (theme: "brutal" | "paper") => void;
-  theme: "brutal" | "paper";
+  onThemeChange: (theme: WorkspaceTheme) => void;
+  theme: WorkspaceTheme;
 }) {
   const { locale, setLocale, t } = useWorkspaceI18n();
   const [tab, setTab] = useState<WorkspaceSettingsTab>(initialTab);
@@ -142,6 +143,11 @@ export function WorkspaceSettingsPage({
             <h3>{t("settings.appearance")}</h3>
             <p>{t("settings.themeDescription")}</p>
             <div className="personal-settings-choice-group" role="radiogroup" aria-label={t("settings.workspaceTheme")}>
+              <button aria-checked={theme === "loopx"} onClick={() => onThemeChange("loopx")} role="radio" type="button">
+                <span className="personal-settings-theme-swatch is-loopx" />
+                <strong>{t("settings.themeLoopx")}</strong>
+                <small>{t("settings.themeLoopxDescription")}</small>
+              </button>
               <button aria-checked={theme === "paper"} onClick={() => onThemeChange("paper")} role="radio" type="button">
                 <span className="personal-settings-theme-swatch is-paper" />
                 <strong>{t("settings.themeDefault")}</strong>

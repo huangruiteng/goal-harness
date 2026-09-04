@@ -4,6 +4,7 @@ import { Bot, ChevronDown, Eye, Info, Menu, RefreshCw, SlidersHorizontal } from 
 import { localizedGoalState, useWorkspaceI18n } from "./i18n";
 import type { WorkspaceAgentOption, WorkspaceGoal, WorkspaceGoalTab } from "./personal-workspace-model";
 import { goalUsageLabel } from "./personal-workspace-model";
+import { WorkspaceSelect } from "./workspace-select";
 
 export function ChannelHeader({
   agents,
@@ -128,22 +129,19 @@ export function ChannelHeader({
         {readOnlySourceLabel ? (
           <span className="personal-read-only-source" title={t("header.readOnlySourceDescription", { source: readOnlySourceLabel })}><Eye size={15} />{readOnlySourceLabel}<small>{t("common.readOnly")}</small></span>
         ) : (
-          <label className="personal-agent-select">
-            <Bot size={16} />
-            <small>{t("header.chatRuntime")}</small>
-            <select
-              aria-label={t("header.selectChatRuntime")}
-              onChange={(event) => onSelectAgent(event.target.value)}
-              value={selectedAgentId}
-            >
-              {agents.map((agent) => (
-                <option disabled={!agent.available} key={agent.agentId} value={agent.agentId}>
-                  {agent.label}{agent.available ? "" : ` · ${t("header.agentUnavailable")}`}
-                </option>
-              ))}
-            </select>
-            <ChevronDown aria-hidden size={14} />
-          </label>
+          <WorkspaceSelect
+            ariaLabel={t("header.selectChatRuntime")}
+            className="personal-agent-select"
+            icon={<Bot size={16} />}
+            onChange={onSelectAgent}
+            options={agents.map((agent) => ({
+              disabled: !agent.available,
+              label: `${agent.label}${agent.available ? "" : ` · ${t("header.agentUnavailable")}`}`,
+              value: agent.agentId,
+            }))}
+            prefixLabel={t("header.chatRuntime")}
+            value={selectedAgentId}
+          />
         )}
         <span className="personal-live-indicator"><i />{t("header.live")}</span>
         {onRefresh ? (

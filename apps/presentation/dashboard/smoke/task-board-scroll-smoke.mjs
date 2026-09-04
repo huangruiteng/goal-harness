@@ -136,7 +136,7 @@ async function main() {
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1512, height: 760 } });
     const fixture = statusFixture();
-    await page.route(`http://127.0.0.1:${port}/status.json`, (route) => route.fulfill({ contentType: "application/json", json: fixture, status: 200 }));
+    await page.route(`http://127.0.0.1:${port}/status.json**`, (route) => route.fulfill({ contentType: "application/json", json: fixture, status: 200 }));
     await page.route("**/api/**", (route) => route.fulfill({ contentType: "application/json", json: { ok: true }, status: 200 }));
     await page.goto(url, { waitUntil: "networkidle" });
     await page.locator(".personal-goal-link").filter({ hasText: /loopx-meta|LoopX/i }).first().click();

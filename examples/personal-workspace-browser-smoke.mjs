@@ -1249,12 +1249,57 @@ async function main() {
     if (api.durableWriteCount !== writesBeforeGoalCreate + 1) throw new Error("Repeated proposal apply duplicated durable state");
     pass(9, "A repeated apply request kept one durable resource and one first-turn resource key.");
     await page.getByRole("button", { name: /关闭详情/ }).click();
+    const actionReceiptClose = page.getByRole("button", { name: "关闭操作回执", exact: true });
+    if (await actionReceiptClose.isVisible().catch(() => false)) await actionReceiptClose.click();
 
     const goalButton = page.locator(".personal-goal-link").first();
     await goalButton.click();
     const goalNavigation = page.getByRole("navigation", { name: "Goal 视图" });
     const defaultTasksTab = goalNavigation.getByRole("button", { name: "Tasks" });
     if (await defaultTasksTab.getAttribute("aria-current") !== "page") throw new Error("Selecting a Goal did not prioritize its Tasks view");
+    await page.screenshot({ path: resolve(outputDir, "goal-tasks-loopx-theme.png"), fullPage: false, animations: "disabled" });
+    await goalNavigation.getByRole("button", { name: "Files" }).click();
+    const publicFiles = page.locator(".personal-files-list > button");
+    await publicFiles.first().waitFor({ state: "visible" });
+    await page.screenshot({ path: resolve(outputDir, "goal-files-loopx-theme.png"), fullPage: false, animations: "disabled" });
+    await goalNavigation.getByRole("button", { name: "Chat" }).click();
+    await page.locator(".personal-channel-timeline").waitFor({ state: "visible" });
+    await page.screenshot({ path: resolve(outputDir, "goal-chat-loopx-theme.png"), fullPage: false, animations: "disabled" });
+    await defaultTasksTab.click();
+    const fullDesktopViewport = page.viewportSize();
+    await page.setViewportSize({ width: 900, height: 720 });
+    const compactHeaderButtons = [
+      page.locator(".personal-mobile-menu"),
+      page.locator(".personal-refresh-control .personal-icon-button"),
+    ];
+    for (const button of compactHeaderButtons) {
+      const box = await button.boundingBox();
+      if (!box || Math.abs(box.width - 36) > 0.5 || Math.abs(box.height - 36) > 0.5) {
+        throw new Error(`Compact header icon button was compressed: ${JSON.stringify(box)}`);
+      }
+    }
+    const compactGoalSettingsBox = await page.locator(".personal-goal-tools-trigger").boundingBox();
+    if (!compactGoalSettingsBox || compactGoalSettingsBox.width < 40 || compactGoalSettingsBox.height < 36) {
+      throw new Error(`Compact Goal settings trigger was compressed: ${JSON.stringify(compactGoalSettingsBox)}`);
+    }
+    const compactHeaderLayout = await page.evaluate(() => {
+      const live = document.querySelector(".personal-live-indicator");
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        liveHeight: live?.getBoundingClientRect().height ?? 0,
+        liveScrollWidth: live?.scrollWidth ?? 0,
+        liveWidth: live?.getBoundingClientRect().width ?? 0,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    if (compactHeaderLayout.liveScrollWidth > compactHeaderLayout.liveWidth + 1 || compactHeaderLayout.liveHeight > 36) {
+      throw new Error(`Compact header live status wrapped: ${JSON.stringify(compactHeaderLayout)}`);
+    }
+    if (compactHeaderLayout.documentWidth > compactHeaderLayout.viewportWidth + 1) {
+      throw new Error(`Compact header caused horizontal overflow: ${JSON.stringify(compactHeaderLayout)}`);
+    }
+    await page.screenshot({ path: resolve(outputDir, "goal-header-compact-width.png"), fullPage: false, animations: "disabled" });
+    if (fullDesktopViewport) await page.setViewportSize(fullDesktopViewport);
     await page.locator(".personal-goal-link", { hasText: "Progress Projection" }).click();
     await page.getByRole("heading", { name: "Progress Projection" }).waitFor({ state: "visible" });
     const progressHeader = page.locator(".personal-channel-title p");
@@ -1705,17 +1750,28 @@ async function main() {
     }
     pass(10, "Continuation mapped to heartbeat.bind and bounded monitoring mapped to monitor.create/continuous_monitor UI.");
 
-    const agentSelect = page.getByLabel("选择聊天 Runtime");
-    const unavailableAgent = agentSelect.locator('option[value="offline-agent"]');
-    if ((await unavailableAgent.count()) !== 1) throw new Error(`Unavailable Agent missing; options=${await agentSelect.locator("option").allTextContents()}`);
-    const unavailableDisabled = (await unavailableAgent.getAttribute("disabled")) !== null;
+    const agentSelect = page.getByRole("combobox", { name: "选择聊天 Runtime" });
+    await agentSelect.click();
+    const agentListbox = page.getByRole("listbox", { name: "选择聊天 Runtime" });
+    const unavailableAgent = agentListbox.getByRole("option", { name: /Offline Agent · 不可用/ });
+    if ((await unavailableAgent.count()) !== 1) throw new Error(`Unavailable Agent missing; options=${await agentListbox.getByRole("option").allTextContents()}`);
+    const unavailableDisabled = await unavailableAgent.isDisabled();
     const unavailableLabel = await unavailableAgent.textContent();
     if (!unavailableDisabled || !unavailableLabel?.includes("不可用")) {
       throw new Error(`Unavailable Agent is selectable or lacks explanation; disabled=${unavailableDisabled}; label=${unavailableLabel}`);
     }
+    await page.screenshot({ path: resolve(outputDir, "agent-select-open.png"), fullPage: false, animations: "disabled" });
+    await page.keyboard.press("ArrowDown");
+    const focusedAgentOption = await page.locator(":focus").textContent();
+    if (!focusedAgentOption?.includes("Claude Code")) throw new Error(`Agent keyboard navigation did not advance: ${focusedAgentOption}`);
+    await page.keyboard.press("Escape");
+    if (await agentListbox.isVisible().catch(() => false)) throw new Error("Agent menu did not close on Escape");
+    if (!(await agentSelect.evaluate((element) => element === document.activeElement))) throw new Error("Agent menu did not restore trigger focus");
     pass(14, "Codex remained the healthy default and the unavailable Agent option was disabled with explanation.");
-    await agentSelect.selectOption("claude-code");
-    if ((await agentSelect.inputValue()) !== "claude-code") throw new Error("Healthy Agent selection did not update");
+    await agentSelect.click();
+    const reopenedAgentListbox = page.getByRole("listbox", { name: "选择聊天 Runtime" });
+    await reopenedAgentListbox.getByRole("option", { name: "Claude Code", exact: true }).click();
+    if ((await agentSelect.getAttribute("data-value")) !== "claude-code") throw new Error("Healthy Agent selection did not update");
     await page.getByRole("button", { name: "刷新状态" }).click();
 
     await page.locator(".personal-run-row").first().click();
@@ -1830,15 +1886,17 @@ async function main() {
     await remote.getByLabel("名称").fill("Remote build host");
     await remote.getByLabel("本地转发 URL").fill("http://127.0.0.1:8976/status.json");
     await remote.getByRole("button", { name: "添加只读来源" }).click();
-    const remoteSourceSelect = remote.getByLabel("选择控制面来源");
-    // 3 saved sources (本机 + remote-lab + Remote build host) plus the
-    // quick-add optgroup exposing the remaining configured host (remote-build).
-    if (await remoteSourceSelect.locator("option").count() !== 4) throw new Error("Multiple SSH tunnel sources were not retained in the source catalog");
-    if (await remoteSourceSelect.locator("optgroup").count() !== 1) throw new Error("Configured SSH Host quick-add group is missing");
-    await remoteSourceSelect.selectOption({ label: "remote-build" });
+    const remoteSourceSelect = remote.getByRole("combobox", { name: "选择控制面来源" });
+    await remoteSourceSelect.click();
+    const remoteSourceListbox = remote.getByRole("listbox", { name: "选择控制面来源" });
+    if (await remoteSourceListbox.getByRole("option").count() !== 4) throw new Error("Multiple SSH tunnel sources were not retained in the source catalog");
+    if (await remoteSourceListbox.locator(".personal-select-group-label").count() !== 1) throw new Error("Configured SSH Host quick-add group is missing");
+    await remote.screenshot({ path: resolve(outputDir, "control-plane-select-open.png"), fullPage: false, animations: "disabled" });
+    await remoteSourceListbox.getByRole("option", { name: "remote-build", exact: true }).click();
     await remote.locator(".personal-read-only-source", { hasText: "remote-build" }).waitFor({ state: "visible", timeout: 10_000 });
     pass(21, "Quick-add configured SSH host from the control-plane source dropdown.");
-    await remoteSourceSelect.selectOption({ label: "remote-lab" });
+    await remoteSourceSelect.click();
+    await remote.getByRole("listbox", { name: "选择控制面来源" }).getByRole("option", { name: "remote-lab", exact: true }).click();
     await remote.locator(".personal-read-only-source", { hasText: "remote-lab" }).waitFor({ state: "visible", timeout: 10_000 });
     await remote.locator(".personal-channel-composer").waitFor({ state: "detached", timeout: 3_000 });
     await remote.screenshot({ path: resolve(outputDir, "remote-read-only-source.png"), fullPage: false, animations: "disabled" });
@@ -1870,6 +1928,14 @@ async function main() {
     await installApi(mobile);
     await mobile.goto(url, { waitUntil: "networkidle" });
     await mobile.getByTestId("personal-goal-home").waitFor({ state: "visible" });
+    const mobileLaneSeparators = await mobile.locator(".personal-home-lane").evaluateAll((lanes) => lanes.map((lane) => {
+      const style = getComputedStyle(lane);
+      return { borderLeftWidth: style.borderLeftWidth, borderTopWidth: style.borderTopWidth };
+    }));
+    if (mobileLaneSeparators.some((lane) => lane.borderLeftWidth !== "0px")
+      || mobileLaneSeparators.slice(1).some((lane) => lane.borderTopWidth !== "1px")) {
+      throw new Error(`Mobile lanes did not switch to horizontal separators: ${JSON.stringify(mobileLaneSeparators)}`);
+    }
     const mobileOverflow = await mobile.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     if (mobileOverflow > 1) throw new Error(`Mobile workspace has ${mobileOverflow}px horizontal overflow`);
     await mobile.screenshot({ path: resolve(outputDir, "mobile-first-screen.png"), fullPage: false, animations: "disabled" });
@@ -1941,7 +2007,6 @@ async function main() {
     if (mobileGoalOverflow > 1) throw new Error(`Mobile Goal header has ${mobileGoalOverflow}px horizontal overflow`);
     await mobile.screenshot({ path: resolve(outputDir, "mobile-goal-settings-menu.png"), fullPage: false, animations: "disabled" });
     await mobile.close();
-
     const progressive = await browser.newPage({ viewport: { width: 1512, height: 982 } });
     const progressiveApi = await installApi(progressive);
     progressiveApi.nextFullStatusDelayMs = 1_500;
@@ -1996,17 +2061,24 @@ async function main() {
     pass(22, "A stopped-archive failure keeps active Goals usable and offers a retry that restores the stopped section without a full-page error.");
     await progressiveError.close();
 
-    if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "paper") throw new Error("Personal workspace did not start with the default theme");
+    if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "loopx") throw new Error("Personal workspace did not start with the LoopX standard theme");
     if (await page.getByRole("button", { name: /切换到野兽主题|切换到默认主题/ }).count()) throw new Error("Workspace header still exposes the old theme toggle");
     await page.getByRole("button", { name: "设置", exact: true }).click();
     await page.getByRole("button", { name: /外观/ }).click();
     await page.getByRole("radio", { name: /高对比/ }).click();
     if (await page.locator(".personal-settings-page").getAttribute("data-pw-theme") !== "brutal") throw new Error("Settings did not enable the high-contrast theme");
-    await page.getByRole("radio", { name: /默认/ }).click();
-    if (await page.locator(".personal-settings-page").getAttribute("data-pw-theme") !== "paper") throw new Error("Settings did not restore the default theme");
+    await page.getByRole("radio", { name: /纸张/ }).click();
+    if (await page.locator(".personal-settings-page").getAttribute("data-pw-theme") !== "paper") throw new Error("Settings did not enable the paper theme");
+    await page.getByRole("radio", { name: /LoopX 标准/ }).click();
+    if (await page.locator(".personal-settings-page").getAttribute("data-pw-theme") !== "loopx") throw new Error("Settings did not restore the LoopX standard theme");
+    if (await page.evaluate(() => localStorage.getItem("loopx-pw-theme")) !== "loopx") throw new Error("LoopX standard theme was not persisted");
+    await page.screenshot({ path: resolve(outputDir, "desktop-settings-loopx-theme.png"), fullPage: false, animations: "disabled" });
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
-    if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "paper") throw new Error("Workspace did not apply the Settings theme readback");
-    pass(16, "The Settings appearance tab toggles the high-contrast theme and returns to the default theme.");
+    if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "loopx") throw new Error("Workspace did not apply the LoopX standard theme readback");
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByTestId("personal-goal-home").waitFor({ state: "visible" });
+    if (await page.locator(".personal-workspace-shell").getAttribute("data-pw-theme") !== "loopx") throw new Error("LoopX standard theme did not survive reload");
+    pass(16, "The Settings appearance tab switches among all three themes and restores the LoopX standard default.");
     await page.locator(".personal-manager-link").first().click();
     await page.waitForTimeout(600);
     const workerCards = await page.locator(".personal-worker-strip > button").count();

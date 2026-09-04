@@ -54,7 +54,12 @@ function deferred() {
 }
 
 async function selectedSourceLabel(select) {
-  return select.evaluate((element) => element.selectedOptions[0]?.textContent?.trim() ?? "");
+  return select.locator(".personal-select-value").innerText();
+}
+
+async function selectSource(page, select, label) {
+  await select.click();
+  await page.getByRole("listbox", { name: "选择控制面来源" }).getByRole("option", { name: label, exact: true }).click();
 }
 
 async function main() {
@@ -123,15 +128,15 @@ async function main() {
     await page.getByText("Local Goal Only", { exact: true }).first().waitFor({ state: "visible", timeout: 10_000 });
     if ((state.statusRequestsByPort.get("local") ?? 0) === 0) throw new Error("The bare Dashboard did not request its same-origin /status.json source");
     if ((state.statusRequestsByPort.get("8766") ?? 0) !== 0) throw new Error("The bare Dashboard bypassed the Vite proxy and requested browser-local port 8766");
-    const sourceSelect = page.getByLabel("选择控制面来源");
+    const sourceSelect = page.getByRole("combobox", { name: "选择控制面来源" });
 
     const remoteAStatusGate = deferred();
     const remoteAStatusStarted = deferred();
     state.statusGates.set("8876", remoteAStatusGate.promise);
     state.statusStartedByPort.set("8876", remoteAStatusStarted.resolve);
-    await sourceSelect.selectOption({ label: "Remote A" });
+    await selectSource(page, sourceSelect, "Remote A");
     await remoteAStatusStarted.promise;
-    await sourceSelect.selectOption({ label: "Remote B" });
+    await selectSource(page, sourceSelect, "Remote B");
     await page.getByText("Remote B Goal Only", { exact: true }).first().waitFor({ state: "visible", timeout: 10_000 });
     const remoteAResponse = page.waitForResponse(
       (response) => response.url().startsWith("http://127.0.0.1:8876/status.json"),
@@ -149,9 +154,9 @@ async function main() {
     const remoteAEnsureStarted = deferred();
     state.ensureGates.set("Remote A", remoteAEnsureGate.promise);
     state.ensureStartedByHost.set("Remote A", remoteAEnsureStarted.resolve);
-    await sourceSelect.selectOption({ label: "Remote A" });
+    await selectSource(page, sourceSelect, "Remote A");
     await remoteAEnsureStarted.promise;
-    await sourceSelect.selectOption({ label: "本机" });
+    await selectSource(page, sourceSelect, "本机");
     await page.getByText("Local Goal Only", { exact: true }).first().waitFor({ state: "visible", timeout: 10_000 });
     const remoteAEnsureResponse = page.waitForResponse((response) => response.url().endsWith("/api/ssh-source/ensure"));
     remoteAEnsureGate.resolve();

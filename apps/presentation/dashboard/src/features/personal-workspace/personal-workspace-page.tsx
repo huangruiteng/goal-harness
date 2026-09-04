@@ -44,6 +44,7 @@ import type {
 import { goalTitleFor, workspaceHomeLaneForGoal } from "./personal-workspace-model";
 import { routeWorkspaceInput } from "./personal-workspace-router";
 import { WorkspaceSettingsPage } from "./workspace-settings-page";
+import { readWorkspaceTheme, writeWorkspaceTheme, type WorkspaceTheme } from "./workspace-theme";
 import { WorkspaceShell } from "./workspace-shell";
 import type { StatusSourceControl } from "./status-source-switcher";
 import "./personal-workspace.css";
@@ -173,7 +174,7 @@ function GoalOutputsView({
 }) {
   const { locale, t } = useWorkspaceI18n();
   return (
-    <section className="personal-object-list" data-testid="personal-goal-outputs">
+    <section className="personal-object-list personal-files-list" data-testid="personal-goal-outputs">
       <header><strong>{t("files.title")}</strong><span>{items.length}</span></header>
       {reportState?.loading ? (
         <p className="personal-object-list-state" role="status"><RefreshCw className="is-spinning" size={14} />{t("files.loadingReports")}</p>
@@ -186,7 +187,7 @@ function GoalOutputsView({
       ) : null}
       {items.map((item) => (
         <button data-output-kind={item.output.kind} key={item.id} onClick={() => onSelect({ item: item.output, kind: "output" })} type="button">
-          <span>{item.output.kind === "report" ? "▤" : "↗"}</span>
+          <span className="personal-file-icon"><FileText size={16} /></span>
           <strong>{item.output.title}</strong>
           {item.output.report ? <em>{t("files.reportDelta", { added: item.output.report.addedCount, changed: item.output.report.changedCount })}</em> : null}
           <p>{item.output.summary ?? item.output.safePreview ?? item.output.kind ?? t("files.emptySummary")}</p>
@@ -722,13 +723,7 @@ export function PersonalWorkspacePage({
   const [refreshState, setRefreshState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [sessionProposalIds, setSessionProposalIds] = useState<string[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [theme, setTheme] = useState<"brutal" | "paper">(() => {
-    try {
-      return window.localStorage.getItem("loopx-pw-theme") === "brutal" ? "brutal" : "paper";
-    } catch {
-      return "paper";
-    }
-  });
+  const [theme, setTheme] = useState<WorkspaceTheme>(readWorkspaceTheme);
   const [goalContexts, setGoalContexts] = useState<Record<string, GoalRepositoryContext>>({});
   const [larkConnections, setLarkConnections] = useState<LarkGoalConnection[]>([]);
   const digestInitRef = useRef(false);
@@ -1435,9 +1430,9 @@ export function PersonalWorkspacePage({
     callbacks.onSelectAgent?.(agentId);
   }
 
-  function updateTheme(next: "brutal" | "paper") {
+  function updateTheme(next: WorkspaceTheme) {
     setTheme(next);
-    try { window.localStorage.setItem("loopx-pw-theme", next); } catch { /* Keep the in-memory preference. */ }
+    writeWorkspaceTheme(next);
   }
 
   async function sendMessage(messageOverride?: string) {
