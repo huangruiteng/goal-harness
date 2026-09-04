@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .goal_channel_contracts import (
-    DEFAULT_GATE_COOLDOWN_SECONDS,
     binding_for_goal,
     clear_human_gate_auto_notify_marker,
     gate_message,
@@ -16,9 +14,11 @@ from .goal_channel_contracts import (
     human_gate_auto_notify_marker_path,
     now_iso,
     operation_packet,
-    parse_time,
     provider_idempotency_key,
     quota_human_gate_identity,
+    quota_human_gate_notification_suppressed,
+    quota_human_gate_reminder_generation,
+    quota_human_gate_state_generation,
     quota_selects_human_gate,
     read_goal_channel_binding,
     save_goal_binding,
@@ -266,7 +266,8 @@ def doctor_lark_goal_channel(
             cli_bin=cli_bin,
             profile=profile,
             identity="bot",
-            expected_bot_name=str(identity_config.get("bot_display_name") or "") or None,
+            expected_bot_name=str(identity_config.get("bot_display_name") or "")
+            or None,
         )
         and verified_app_id(
             runner=runner,
@@ -490,7 +491,6 @@ def notify_lark_goal_channel_gate(
     binding_path: Path,
     quota_packet: Mapping[str, Any],
     provider_target: Mapping[str, Any] | None = None,
-    cooldown_seconds: int = DEFAULT_GATE_COOLDOWN_SECONDS,
     execute: bool = False,
     runner: CommandRunner = default_subprocess_runner,
 ) -> dict[str, Any]:
@@ -539,6 +539,16 @@ def notify_lark_goal_channel_gate(
             blocker="channel_binding_incomplete",
             public_summary="complete Goal Channel setup before notifying a human gate",
         )
+    if quota_human_gate_notification_suppressed(quota_packet):
+        return operation_packet(
+            ok=False,
+            goal_id=goal_id,
+            operation="notify_gate",
+            execute=execute,
+            status="suppressed",
+            blocker="notification_cooldown_active",
+            public_summary="the current human gate notification is in cooldown",
+        )
     if not quota_selects_human_gate(quota_packet):
         return operation_packet(
             ok=False,
@@ -556,54 +566,39 @@ def notify_lark_goal_channel_gate(
     cli_bin = str(identity_config.get("cli_bin") or DEFAULT_CLI_BIN)
     identity = str(identity_config.get("sender_identity") or "")
     profile = str(identity_config.get("sender_profile") or "") or None
-    message, question = gate_message(
+    message, _question = gate_message(
         goal_id=goal_id,
         objective=goal_objective(goal),
         quota_packet=quota_packet,
         kanban_url=str(kanban.get("base_url") or ""),
     )
     gate_identity = quota_human_gate_identity(quota_packet)
+    state_generation = quota_human_gate_state_generation(quota_packet)
+    reminder_generation = quota_human_gate_reminder_generation(quota_packet)
+    delivery_generation = reminder_generation or "material_state"
     key = semantic_key(
         goal_id,
         "lark",
         "notify_gate",
         gate_identity,
-        question,
+        state_generation,
+        delivery_generation,
         chat_id,
     )
     receipts = _mapping(binding.get("receipts"))
     existing_receipt = _mapping(receipts.get(key))
     if existing_receipt:
-        existing_message_id = str(existing_receipt.get("message_id") or "")
-        existing_verified = bool(
-            identity == "bot"
-            and MESSAGE_ID_PATTERN.fullmatch(existing_message_id)
-            and message_readback_verified(
-                runner=runner,
-                cli_bin=cli_bin,
-                profile=profile,
-                identity="bot",
-                message_id=existing_message_id,
-                expected_text=message,
-            )
+        return operation_packet(
+            ok=True,
+            goal_id=goal_id,
+            operation="notify_gate",
+            execute=execute,
+            status="already_sent",
+            public_summary="the same human gate generation was already sent",
+            readback_verified=existing_receipt.get("readback_verified") is not False,
+            idempotency_key=key,
+            receipt_id=f"receipt_{key.removeprefix('sha256:')[:16]}",
         )
-        if existing_verified:
-            return operation_packet(
-                ok=True,
-                goal_id=goal_id,
-                operation="notify_gate",
-                execute=execute,
-                status="already_sent",
-                public_summary="the same human gate notification was already sent",
-                readback_verified=True,
-                idempotency_key=key,
-                receipt_id=f"receipt_{key.removeprefix('sha256:')[:16]}",
-            )
-        receipts = {
-            receipt_key: receipt
-            for receipt_key, receipt in receipts.items()
-            if receipt_key != key
-        }
     same_gate_receipts = [
         receipt
         for receipt in receipts.values()
@@ -611,42 +606,36 @@ def notify_lark_goal_channel_gate(
         and receipt.get("kind") == "gate_notification"
         and str(receipt.get("gate_identity") or "") == gate_identity
     ]
-    cooldown = quota_packet.get("user_gate_notification_cooldown")
-    if (
-        same_gate_receipts
-        and isinstance(cooldown, Mapping)
-        and cooldown.get("notification_suppressed") is True
-    ):
+    same_state_receipts = [
+        receipt
+        for receipt in same_gate_receipts
+        if str(receipt.get("state_generation") or "") == state_generation
+    ]
+    legacy_receipts = [
+        receipt for receipt in same_gate_receipts if not receipt.get("state_generation")
+    ]
+    if same_state_receipts and reminder_generation is None:
         return operation_packet(
-            ok=False,
+            ok=True,
             goal_id=goal_id,
             operation="notify_gate",
             execute=execute,
-            status="suppressed",
-            blocker="notification_cooldown_active",
-            public_summary="the current human gate notification is in cooldown",
+            status="already_sent",
+            public_summary="the unchanged human gate generation was already sent",
+            readback_verified=True,
+            idempotency_key=key,
         )
-    latest_gate_time = max(
-        (
-            parsed
-            for receipt in same_gate_receipts
-            if (parsed := parse_time(receipt.get("verified_at"))) is not None
-        ),
-        default=None,
-    )
-    if latest_gate_time is not None:
-        elapsed = (datetime.now(timezone.utc) - latest_gate_time).total_seconds()
-        if elapsed < max(0, cooldown_seconds):
-            return operation_packet(
-                ok=False,
-                goal_id=goal_id,
-                operation="notify_gate",
-                execute=execute,
-                status="suppressed",
-                blocker="notification_cooldown_active",
-                public_summary="a recent human gate notification is still in cooldown",
-                idempotency_key=key,
-            )
+    if legacy_receipts and reminder_generation is None:
+        return operation_packet(
+            ok=True,
+            goal_id=goal_id,
+            operation="notify_gate",
+            execute=execute,
+            status="already_sent",
+            public_summary="a legacy receipt already covers this human gate",
+            readback_verified=True,
+            idempotency_key=key,
+        )
     if not execute:
         return operation_packet(
             ok=True,
@@ -667,7 +656,8 @@ def notify_lark_goal_channel_gate(
             cli_bin=cli_bin,
             profile=profile,
             identity="bot",
-            expected_bot_name=str(identity_config.get("bot_display_name") or "") or None,
+            expected_bot_name=str(identity_config.get("bot_display_name") or "")
+            or None,
         )
         and verified_app_id(
             runner=runner,
@@ -751,6 +741,24 @@ def notify_lark_goal_channel_gate(
         message_id=message_id,
         expected_text=message,
     )
+    mutable_receipts = dict(receipts)
+    mutable_receipts[key] = {
+        "kind": "gate_notification",
+        "gate_identity": gate_identity,
+        "state_generation": state_generation,
+        "delivery_generation": delivery_generation,
+        "message_id": message_id,
+        "verified_at": now_iso(),
+        "readback_verified": verified,
+    }
+    mutable_binding = dict(raw_binding)
+    mutable_binding["receipts"] = mutable_receipts
+    save_goal_binding(
+        binding_path=binding_path,
+        payload=payload,
+        goal_id=goal_id,
+        binding=mutable_binding,
+    )
     if not verified:
         return operation_packet(
             ok=False,
@@ -763,21 +771,6 @@ def notify_lark_goal_channel_gate(
             external_write_performed=True,
             idempotency_key=key,
         )
-    mutable_receipts = dict(receipts)
-    mutable_receipts[key] = {
-        "kind": "gate_notification",
-        "gate_identity": gate_identity,
-        "message_id": message_id,
-        "verified_at": now_iso(),
-    }
-    mutable_binding = dict(raw_binding)
-    mutable_binding["receipts"] = mutable_receipts
-    save_goal_binding(
-        binding_path=binding_path,
-        payload=payload,
-        goal_id=goal_id,
-        binding=mutable_binding,
-    )
     return operation_packet(
         ok=True,
         goal_id=goal_id,

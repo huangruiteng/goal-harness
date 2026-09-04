@@ -183,7 +183,15 @@ def register_goal_channel_commands(
     add_subcommand_format(notify)
     _add_common_args(notify)
     notify.add_argument("--agent-id")
-    notify.add_argument("--cooldown-seconds", type=int, default=3600)
+    notify.add_argument(
+        "--cooldown-seconds",
+        type=int,
+        default=None,
+        help=(
+            "Accepted for compatibility; delivery repeats only for a material "
+            "gate-state generation or an explicit quota reminder window."
+        ),
+    )
     notify.add_argument("--execute", action="store_true")
 
     runtime = sub.add_parser(
@@ -561,9 +569,7 @@ def handle_goal_channel_command(
             goal_id=goal_id,
             binding_path_arg=getattr(args, "binding_path", None),
         )
-        default_binding_path = default_goal_channel_binding_path(
-            source_registry_path
-        )
+        default_binding_path = default_goal_channel_binding_path(source_registry_path)
     else:
         binding_path = None
         default_binding_path = None
@@ -760,7 +766,6 @@ def handle_goal_channel_command(
                             goal_id=goal_id,
                             agent_id=args.agent_id,
                         ),
-                        cooldown_seconds=max(0, args.cooldown_seconds),
                         execute=execute,
                     )
                 else:

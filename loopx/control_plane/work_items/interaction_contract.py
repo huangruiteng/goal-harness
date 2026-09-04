@@ -1203,20 +1203,20 @@ def _build_interaction_user_channel(
     user_required: bool,
 ) -> dict[str, Any]:
     actions = projected_user_channel_actions(payload, limit=3)
+    notification_suppressed = _user_gate_notification_suppressed(payload)
     non_blocking_notice = bool(
         not user_required
+        and not notification_suppressed
         and user_channel_notice_todo_actions(payload.get("user_todo_summary"), limit=3)
     )
+    notify = heartbeat_recommendation.get("notify", "DONT_NOTIFY")
+    if user_required or non_blocking_notice:
+        notify = "NOTIFY"
+    if notification_suppressed or _user_gate_scope_projection_repair_active(payload):
+        notify = "DONT_NOTIFY"
     channel: dict[str, Any] = {
         "action_required": user_required,
-        "notify": "NOTIFY"
-        if user_required or non_blocking_notice
-        else "DONT_NOTIFY"
-        if (
-            _user_gate_notification_suppressed(payload)
-            or _user_gate_scope_projection_repair_active(payload)
-        )
-        else heartbeat_recommendation.get("notify", "DONT_NOTIFY"),
+        "notify": notify,
     }
     if actions:
         channel["max_items"] = 3

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,8 @@ from .private_json import write_private_json_atomic
 
 GOAL_CHANNEL_BINDING_SCHEMA_VERSION = "loopx_goal_channel_lark_binding_v0"
 GOAL_CHANNEL_OPERATION_SCHEMA_VERSION = "loopx_goal_channel_operation_v0"
+# Compatibility export for older callers. Scheduler-projected reminder windows
+# now own repeat-notification timing.
 DEFAULT_GATE_COOLDOWN_SECONDS = 3600
 HUMAN_GATE_AUTO_NOTIFY_SETTING = "human_gate_auto_notify_enabled"
 HUMAN_GATE_AUTO_NOTIFY_MARKER_SCHEMA_VERSION = (
@@ -29,6 +32,9 @@ PRIVATE_PACKET_KEYS = {
     "sender_profile",
     "table_id",
 }
+GATE_ACTION_PREFIX = re.compile(
+    r"^(?:(?:[-*•]|\d+[.)])\s*)?(?:\[[ xX]\]\s*)?(?:\[P\d+\]\s*)?"
+)
 
 
 def default_goal_channel_binding_path(registry_path: Path) -> Path:
@@ -52,8 +58,7 @@ def read_goal_channel_binding(path: Path) -> dict[str, Any]:
         raise ValueError("Goal Channel binding root must be a JSON object")
     if payload.get("schema_version") != GOAL_CHANNEL_BINDING_SCHEMA_VERSION:
         raise ValueError(
-            "Goal Channel binding must use "
-            f"{GOAL_CHANNEL_BINDING_SCHEMA_VERSION}"
+            f"Goal Channel binding must use {GOAL_CHANNEL_BINDING_SCHEMA_VERSION}"
         )
     bindings = payload.get("bindings")
     if not isinstance(bindings, dict):
@@ -206,7 +211,142 @@ def quota_human_gate_identity(quota_packet: Mapping[str, Any]) -> str:
     ).strip()
 
 
+def _quota_human_gate_items(
+    quota_packet: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    summary = quota_packet.get("user_todo_summary")
+    summary = summary if isinstance(summary, Mapping) else {}
+    for key in ("gate_open_items", "first_open_items"):
+        raw_items = summary.get(key)
+        if not isinstance(raw_items, list):
+            continue
+        items = [dict(item) for item in raw_items if isinstance(item, Mapping)]
+        if items:
+            return items[:3]
+    return []
+
+
+def quota_human_gate_state_generation(
+    quota_packet: Mapping[str, Any],
+) -> str:
+    """Fingerprint the material state of the currently projected human gate."""
+
+    material_items = []
+    for item in _quota_human_gate_items(quota_packet):
+        material_items.append(
+            {
+                key: item.get(key)
+                for key in (
+                    "todo_id",
+                    "gate_id",
+                    "status",
+                    "task_class",
+                    "updated_at",
+                    "material_change_generation",
+                    "decision_scope",
+                    "decision_outcome",
+                    "blocks_agent",
+                    "global_gate",
+                    "unblocks_todo_id",
+                )
+                if item.get(key) is not None
+            }
+        )
+        text = public_safe_compact_text(
+            item.get("text") or item.get("title"),
+            limit=300,
+        )
+        if text:
+            material_items[-1]["text"] = text
+    material: dict[str, Any] = {
+        "gate_identity": quota_human_gate_identity(quota_packet),
+        "items": material_items,
+    }
+    interaction = quota_packet.get("interaction_contract")
+    interaction = interaction if isinstance(interaction, Mapping) else {}
+    user_channel = interaction.get("user_channel")
+    user_channel = user_channel if isinstance(user_channel, Mapping) else {}
+    raw_actions = user_channel.get("actions")
+    actions = (
+        [public_safe_compact_text(action, limit=300) for action in raw_actions[:3]]
+        if isinstance(raw_actions, list)
+        else []
+    )
+    if any(actions):
+        material["actions"] = [action for action in actions if action]
+    if not material_items:
+        material["state"] = str(quota_packet.get("state") or "")
+        material["question"] = public_safe_compact_text(
+            quota_packet.get("gate_prompt")
+            or quota_packet.get("operator_question")
+            or quota_packet.get("reason"),
+            limit=900,
+        )
+    return semantic_key(
+        "human_gate_state_v0",
+        json.dumps(
+            material,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+
+
+def quota_human_gate_reminder_generation(
+    quota_packet: Mapping[str, Any],
+) -> str | None:
+    cooldown = quota_packet.get("user_gate_notification_cooldown")
+    if (
+        not isinstance(cooldown, Mapping)
+        or cooldown.get("notification_due") is not True
+    ):
+        return None
+    reminder_identity = {
+        key: cooldown.get(key)
+        for key in (
+            "policy",
+            "failed_at",
+            "next_reminder_at",
+            "cooldown_minutes",
+            "reminder_window_minutes",
+        )
+        if cooldown.get(key) is not None
+    }
+    return semantic_key(
+        "human_gate_reminder_v0",
+        json.dumps(
+            reminder_identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+
+
+def quota_human_gate_notification_suppressed(
+    quota_packet: Mapping[str, Any],
+) -> bool:
+    cooldown = quota_packet.get("user_gate_notification_cooldown")
+    return bool(
+        isinstance(cooldown, Mapping)
+        and cooldown.get("notification_suppressed") is True
+    )
+
+
 def quota_selects_human_gate(quota_packet: Mapping[str, Any]) -> bool:
+    if quota_human_gate_notification_suppressed(quota_packet):
+        return False
+    interaction = quota_packet.get("interaction_contract")
+    if isinstance(interaction, Mapping):
+        user_channel = interaction.get("user_channel")
+        if isinstance(user_channel, Mapping):
+            if user_channel.get("notify") != "NOTIFY":
+                return False
+            if user_channel.get("action_required") is True or bool(
+                user_channel.get("actions")
+            ):
+                return True
     return bool(
         quota_packet.get("state") == "operator_gate"
         or quota_packet.get("notify_user_on_gate") is True
@@ -354,35 +494,47 @@ def gate_message(
         or "A human decision is required.",
         limit=900,
     )
-    summary = quota_packet.get("user_todo_summary")
-    summary = summary if isinstance(summary, Mapping) else {}
-    raw_items = summary.get("first_executable_items") or summary.get(
-        "first_open_items"
+    interaction = quota_packet.get("interaction_contract")
+    interaction = interaction if isinstance(interaction, Mapping) else {}
+    user_channel = interaction.get("user_channel")
+    user_channel = user_channel if isinstance(user_channel, Mapping) else {}
+    raw_actions = user_channel.get("actions")
+    action_lines = (
+        [public_safe_compact_text(action, limit=300) for action in raw_actions[:3]]
+        if isinstance(raw_actions, list)
+        else []
     )
-    items = raw_items if isinstance(raw_items, list) else []
-    todo_lines = [
-        public_safe_compact_text(
-            item.get("text") or item.get("title"),
-            limit=300,
-        )
-        for item in items[:3]
-        if isinstance(item, Mapping)
-    ]
+    if not any(action_lines):
+        action_lines = [
+            public_safe_compact_text(
+                item.get("text") or item.get("title"),
+                limit=300,
+            )
+            for item in _quota_human_gate_items(quota_packet)
+        ]
+    unique_actions: list[str] = []
+    for action in action_lines or [question]:
+        cleaned = GATE_ACTION_PREFIX.sub("", action.strip()).strip()
+        if cleaned and cleaned not in unique_actions:
+            unique_actions.append(cleaned)
     lines = [
-        f"LoopX human gate for {goal_id}",
-        f"Objective: {objective}",
-        f"Action required: {question}",
+        "LoopX · Action required",
+        "",
+        f"Goal: {goal_id}",
     ]
-    if todo_lines:
-        lines.append("Open user actions:")
-        lines.extend(f"- {line}" for line in todo_lines if line)
-    lines.append("Reply with the requested decision or context; LoopX will validate it.")
-    next_action = public_safe_compact_text(
-        quota_packet.get("recommended_action"),
-        limit=300,
+    if objective and objective != goal_id:
+        lines.append(f"Objective: {objective}")
+    lines.extend(["", "Please confirm:"])
+    lines.extend(
+        f"{index}. {action}" for index, action in enumerate(unique_actions, start=1)
     )
-    if next_action:
-        lines.append(f"Next safe action while waiting: {next_action}")
+    lines.extend(
+        [
+            "",
+            "Reply: approve / reject / done / still pending, plus a one-sentence reason.",
+            "Unchanged gate state will stay quiet until an explicit reminder window.",
+        ]
+    )
     if kanban_url:
-        lines.append(f"Kanban: {kanban_url}")
+        lines.extend(["", f"Kanban: {kanban_url}"])
     return "\n".join(lines), question

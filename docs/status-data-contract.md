@@ -1399,6 +1399,13 @@ remain visible, while `interaction_contract.user_channel` becomes
 `action_required=false`, `notify=DONT_NOTIFY` until the bounded reminder window
 or a material gate/host change. Other blocker-push
 cases may still be de-duplicated when the same blocker was surfaced recently.
+
+The suppression decision also removes `actions` and `non_blocking` from the
+final user channel, so a remaining `user_action` cannot re-promote the same
+contract to `NOTIFY`. Provider sinks must deduplicate delivery by gate identity
+plus material state generation, with an additional reminder generation only
+for an explicitly due reminder window; presentation text is not delivery
+identity.
 Eligible monitor-only no-transition polls keep open user todos in
 `user_todo_summary`, but do not force repeated notification or set
 `requires_user_action=true`; they should surface as a quiet
