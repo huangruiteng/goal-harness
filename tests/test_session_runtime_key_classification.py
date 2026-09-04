@@ -23,8 +23,10 @@ from loopx.session_runtime import (
         "created_at", "session_id", "artifact_id",
         # pointers and counts that merely contain a raw-looking word
         "trace_id", "message_id", "catalog_id", "dialog_id", "login_at", "log_count",
+        "conversation_id",
         # usage metrics
         "token_count", "tokens_used", "max_tokens", "input_tokens", "output_tokens",
+        "prompt_tokens", "prompt_token_count", "completion_tokens",
     ],
 )
 def test_compact_keys(key: str) -> None:
@@ -112,6 +114,12 @@ def test_raw_words_outrank_the_tokens_metric_rule(
         ("api_key_id", RawMaterialCategory.CREDENTIAL),
         ("access_token_ref", RawMaterialCategory.CREDENTIAL),
         ("tool_result_ref", RawMaterialCategory.RAW_OUTPUT),
+        # neighbours of the explicit safe collisions stay fail-closed
+        ("prompt_id", RawMaterialCategory.TRANSCRIPT),
+        ("prompt_text_tokens", RawMaterialCategory.TRANSCRIPT),
+        ("conversation_ref", RawMaterialCategory.TRANSCRIPT),
+        ("conversation_log_count", RawMaterialCategory.TRANSCRIPT),
+        ("messages_count", RawMaterialCategory.TRANSCRIPT),
     ],
 )
 def test_raw_evidence_outranks_generic_pointer_suffix(

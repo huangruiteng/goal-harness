@@ -62,8 +62,11 @@ TIMESTAMP_KEYS = ("created_at", "event_at", "updated_at", "timestamp")
 # carries raw-material meaning. Keep these exceptions explicit and reviewable.
 EXPLICIT_COMPACT_COLLISION_KEYS = frozenset(
     {
+        "conversation_id",
         "log_count",
         "message_id",
+        "prompt_token_count",
+        "prompt_tokens",
         "trace_id",
     }
 )

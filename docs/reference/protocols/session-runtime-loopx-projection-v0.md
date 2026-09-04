@@ -76,7 +76,8 @@ to build the bounded projection.
 - **compact**: keys the projection reads, timestamps, usage metrics
   (`*_tokens`), and pointers/counts (`*_id`, `*_ref`, `*_count`, `*_at`) only
   when no raw-material word or phrase is present. Known collisions such as
-  `trace_id`, `message_id`, and `log_count` are explicit safe exceptions.
+  `trace_id`, `message_id`, `conversation_id`, `log_count`, `prompt_tokens`,
+  and `prompt_token_count` are explicit safe exceptions.
 - **raw material**: credentials, messages/transcripts, logs, local paths, and raw tool
   output. Sets `raw_material_detected`, lists `raw_material_key_names` and
   `raw_material_categories`, and turns `agent_can_continue` off.

@@ -174,7 +174,9 @@ forms such as `tokens_used` are compact, but a raw-material word or phrase in
 the same key takes precedence over both metric and pointer shortcuts
 (`tokens_password`, `raw_tokens`, `secret_id`, and `api_key_id` are raw).
 `trace_id` is an explicitly safe pointer; `trace`, `stack_trace`, and
-`trace_path` are logs. `log_count` is an explicitly safe aggregate. `log`
+`trace_path` are logs. `log_count`, `prompt_tokens`, and `prompt_token_count`
+are explicitly safe aggregates and `conversation_id` is an explicitly safe
+pointer; every other `prompt*`, `message*`, or `conversation*` key stays raw. `log`
 matches only as a whole word, so `catalog_id`, `login_at`, and `changelog` are
 not flagged.
 
