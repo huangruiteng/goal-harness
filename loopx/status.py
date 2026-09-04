@@ -1123,6 +1123,7 @@ def build_attention_queue(
     runtime_root: Path | None = None,
     include_task_graph: bool = False,
     goal_id_filter: str | None = None,
+    include_stopped_goal_context: bool = False,
 ) -> dict[str, Any]:
     queue = _build_attention_queue_read_model(
         contract=contract,
@@ -1164,6 +1165,7 @@ def build_attention_queue(
         runtime_root=runtime_root,
         include_task_graph=include_task_graph,
         goal_id_filter=goal_id_filter,
+        include_stopped_goal_context=include_stopped_goal_context,
     )
     if runtime_root is not None:
         for item in queue.get("items") or []:

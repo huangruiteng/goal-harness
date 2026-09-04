@@ -99,6 +99,9 @@ async function installApi(page) {
     nextStatusDelayMs: 0,
     nextFullStatusDelayMs: 0,
     failNextFullStatus: false,
+    captureNextStatusGeneration: false,
+    capturedStatusGeneration: null,
+    activationChangeAfterCapturedActive: null,
     statusRequestCount: 0,
     turnRequests: [],
     get larkConnections() { return runtime.larkConnections; },
@@ -106,6 +109,9 @@ async function installApi(page) {
   await page.route(`http://127.0.0.1:${port}/status.json*`, async (route) => {
     state.statusRequestCount += 1;
     const fixture = structuredClone(require(resolve(repoRoot, "examples/status.example.json")));
+    const statusGeneration = state.captureNextStatusGeneration
+      ? (state.capturedStatusGeneration ??= new Map(state.goalActivationStates))
+      : state.goalActivationStates;
     fixture.local_dashboard_api = {
       ...(fixture.local_dashboard_api ?? {}),
       periodic_report_index_url: "/periodic-report-workspace",
@@ -119,7 +125,7 @@ async function installApi(page) {
       { id: "archived-notes", display_name: "Archived Notes" },
     ];
     for (const directoryGoal of directoryFixtures) {
-      const activation_state = state.goalActivationStates.get(directoryGoal.id) ?? "active";
+      const activation_state = statusGeneration.get(directoryGoal.id) ?? "active";
       const existingGoal = fixture.run_history.goals.find((goal) => goal.id === directoryGoal.id);
       if (existingGoal) {
         existingGoal.activation_state = activation_state;
@@ -259,6 +265,36 @@ async function installApi(page) {
     const isActiveScope = goalActivationScope === "active";
     const activeGoalCount = fixture.run_history.goals.filter((goal) => goal.activation_state !== "stopped").length;
     const stoppedGoalCount = fixture.run_history.goals.length - activeGoalCount;
+    const registryRevision = [...statusGeneration.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([goalId, activationState]) => `${goalId}:${activationState}`)
+      .join("|");
+    const filterScopedRows = (scope) => {
+      const activationForGoal = (goalId) => statusGeneration.get(goalId) ?? "active";
+      const matchesScope = (goalId) => activationForGoal(goalId) === scope;
+      fixture.attention_queue.items = fixture.attention_queue.items.filter((item) => matchesScope(item.goal_id));
+      fixture.attention_queue.item_count = fixture.attention_queue.items.length;
+      if (fixture.todo_index?.items) {
+        fixture.todo_index.items = fixture.todo_index.items.filter((item) => matchesScope(item.goal_id));
+        fixture.todo_index.total_count = fixture.todo_index.items.length;
+      }
+      if (fixture.usage_summary?.goals) {
+        fixture.usage_summary.goals = fixture.usage_summary.goals.filter((item) => matchesScope(item.goal_id));
+      }
+      if (fixture.event_ledger_summary?.goals) {
+        fixture.event_ledger_summary.goals = fixture.event_ledger_summary.goals.filter((item) => matchesScope(item.goal_id));
+      }
+      if (fixture.decision_freshness_summary?.items) {
+        fixture.decision_freshness_summary.items = fixture.decision_freshness_summary.items.filter((item) => matchesScope(item.goal_id));
+      }
+      if (fixture.agent_management_projection?.agents) {
+        fixture.agent_management_projection.agents = fixture.agent_management_projection.agents.filter((agent) =>
+          (agent.goal_ids ?? []).some(matchesScope) || matchesScope(agent.current_todo?.goal_id));
+      }
+      if (fixture.goal_channel_notification_projection?.goals) {
+        fixture.goal_channel_notification_projection.goals = fixture.goal_channel_notification_projection.goals.filter((item) => matchesScope(item.goal_id));
+      }
+    };
     const delayMs = state.nextStatusDelayMs;
     state.nextStatusDelayMs = 0;
     if (delayMs > 0) await new Promise((resolveWait) => setTimeout(resolveWait, delayMs));
@@ -274,8 +310,20 @@ async function installApi(page) {
         complete: false,
         projected_goal_count: activeGoalCount,
         registry_goal_count: fixture.run_history.goals.length,
+        registry_revision: registryRevision,
       };
       fixture.run_history.goals = fixture.run_history.goals.filter((goal) => goal.activation_state !== "stopped");
+      filterScopedRows("active");
+      // Freeze only the first half of the active-first read. The stopped
+      // request must observe the registry after the intervening lifecycle
+      // change so this fixture exercises the cross-snapshot revision fence.
+      state.captureNextStatusGeneration = false;
+      state.capturedStatusGeneration = null;
+      if (state.activationChangeAfterCapturedActive) {
+        const { goalId, activationState } = state.activationChangeAfterCapturedActive;
+        state.goalActivationStates.set(goalId, activationState);
+        state.activationChangeAfterCapturedActive = null;
+      }
     } else if (goalActivationScope === "stopped") {
       const fullDelayMs = state.nextFullStatusDelayMs;
       state.nextFullStatusDelayMs = 0;
@@ -291,8 +339,10 @@ async function installApi(page) {
         complete: false,
         projected_goal_count: stoppedGoalCount,
         registry_goal_count: fixture.run_history.goals.length,
+        registry_revision: registryRevision,
       };
       fixture.run_history.goals = fixture.run_history.goals.filter((goal) => goal.activation_state === "stopped");
+      filterScopedRows("stopped");
     } else {
       fixture.goal_projection = {
         schema_version: "loopx_goal_projection_scope_v0",
@@ -300,6 +350,7 @@ async function installApi(page) {
         complete: true,
         projected_goal_count: fixture.run_history.goals.length,
         registry_goal_count: fixture.run_history.goals.length,
+        registry_revision: registryRevision,
       };
     }
     await route.fulfill({ contentType: "application/json", json: fixture, status: 200 });
@@ -782,6 +833,15 @@ async function main() {
     const stoppedDirectory = page.locator(".personal-stopped-goals");
     if (!(await stoppedDirectory.isVisible()) || await stoppedDirectory.getAttribute("open") !== null) throw new Error("Stopped Goals are not available in a collapsed directory section");
     await page.waitForFunction(() => document.querySelectorAll(".personal-stopped-goals .personal-goal-row").length === 2, null, { timeout: 3_000 });
+    await stoppedDirectory.locator("summary").click();
+    await page.locator(".personal-goal-link").filter({ hasText: "Legacy Benchmark" }).click();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("goalId") === "legacy-benchmark");
+    const stoppedGoalBody = await page.locator(".personal-channel").innerText();
+    if (!stoppedGoalBody.includes("Legacy Benchmark") || !stoppedGoalBody.includes("历史、Todo 和证据仍保留")) {
+      throw new Error(`Stopped Goal lost its archive context after merge: ${stoppedGoalBody.slice(0, 1200)}`);
+    }
+    await page.locator(".personal-goal-link").filter({ hasText: "Product Release" }).click();
+    await stoppedDirectory.locator("summary").click();
     const writesBeforeLifecyclePreview = api.durableWriteCount;
     const statusRequestsBeforeStop = api.statusRequestCount;
     api.nextLifecyclePreviewDelayMs = 900;
@@ -1768,6 +1828,26 @@ async function main() {
     if ((await progressive.locator(".personal-goal-list:not(.is-stopped) .personal-goal-row").count()) !== 5) throw new Error("Active Goal directory regressed after the stopped archive loaded");
     pass(21, "The stopped archive loads after active Goals: active Goals are interactive first, the stopped section shows an accessible loading state, then stopped Goals arrive without replacing the page.");
     await progressive.close();
+
+    const revisionRace = await browser.newPage({ viewport: { width: 1512, height: 982 } });
+    const revisionRaceApi = await installApi(revisionRace);
+    revisionRaceApi.captureNextStatusGeneration = true;
+    revisionRaceApi.activationChangeAfterCapturedActive = {
+      goalId: "product-release",
+      activationState: "stopped",
+    };
+    revisionRaceApi.nextFullStatusDelayMs = 800;
+    await revisionRace.goto(url, { waitUntil: "domcontentloaded" });
+    await revisionRace.getByTestId("personal-goal-home").waitFor({ state: "visible", timeout: 10_000 });
+    await revisionRace.locator(".personal-stopped-goals .personal-goal-row").first().waitFor({ state: "attached", timeout: 6_000 });
+    await revisionRace.waitForFunction(() => document.querySelectorAll(".personal-goal-list:not(.is-stopped) .personal-goal-row").length === 4, null, { timeout: 6_000 });
+    if (await revisionRace.locator(".personal-stopped-goal-error").count()) {
+      throw new Error("Registry revision mismatch did not converge after the bounded automatic resync");
+    }
+    if (await revisionRace.locator(".personal-goal-row").filter({ hasText: "Product Release" }).count() !== 1) {
+      throw new Error("Registry revision race duplicated or omitted Product Release");
+    }
+    await revisionRace.close();
 
     const progressiveError = await browser.newPage({ viewport: { width: 1512, height: 982 } });
     const errorApi = await installApi(progressiveError);

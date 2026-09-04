@@ -53,6 +53,17 @@ import {
   type ProtectedActionProposal,
   type TodoProposal,
 } from "../data/chat";
+import {
+  beginStatusRequest,
+  createStatusRequestFence,
+  resetStatusRequestFence,
+  reserveStatusSourceSelection,
+  statusRequestCanCommit,
+  statusRequestIsCurrent,
+  type StatusRequest,
+  type StatusRequestFence,
+} from "../data/status-request-fence";
+import { mergeScopedStatusProjections } from "../data/status-merge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -134,102 +145,6 @@ type DataSource =
   | { kind: "example"; label: string }
   | { kind: "file"; label: string }
   | { kind: "url"; label: string };
-
-type StatusRequestFence = {
-  loadedUrl: string | null;
-  projectionRevision: number;
-  requestedUrl: string | null;
-  selectionRevision: number;
-};
-
-type StatusRequest = {
-  background: boolean;
-  projectionRevision: number;
-  selectionRevision: number;
-  url: string;
-};
-
-function reserveStatusSourceSelection(fence: StatusRequestFence, url: string) {
-  fence.selectionRevision += 1;
-  fence.requestedUrl = url;
-  return fence.selectionRevision;
-}
-
-function beginStatusRequest(
-  fence: StatusRequestFence,
-  url: string,
-  options: { background: boolean; selectionRevision?: number },
-): StatusRequest | null {
-  if (options.background) {
-    if (fence.requestedUrl !== null || fence.loadedUrl !== url) return null;
-    return {
-      background: true,
-      projectionRevision: fence.projectionRevision,
-      selectionRevision: fence.selectionRevision,
-      url,
-    };
-  }
-  const selectionRevision = options.selectionRevision ?? fence.selectionRevision + 1;
-  if (options.selectionRevision !== undefined && fence.selectionRevision !== selectionRevision) {
-    return null;
-  }
-  fence.selectionRevision = selectionRevision;
-  fence.projectionRevision += 1;
-  fence.requestedUrl = url;
-  return {
-    background: false,
-    projectionRevision: fence.projectionRevision,
-    selectionRevision,
-    url,
-  };
-}
-
-function statusRequestIsCurrent(fence: StatusRequestFence, request: StatusRequest) {
-  return fence.projectionRevision === request.projectionRevision
-    && fence.selectionRevision === request.selectionRevision;
-}
-
-function statusRequestCanCommit(fence: StatusRequestFence, request: StatusRequest) {
-  return statusRequestIsCurrent(fence, request) && (
-    !request.background
-    || (fence.requestedUrl === null && fence.loadedUrl === request.url)
-  );
-}
-
-function resetStatusRequestFence(fence: StatusRequestFence) {
-  fence.projectionRevision += 1;
-  fence.selectionRevision += 1;
-  fence.requestedUrl = null;
-  fence.loadedUrl = null;
-}
-
-function mergeStoppedGoalProjection(
-  current: StatusPayload,
-  archive: StatusPayload,
-): StatusPayload {
-  if (archive.goal_projection?.scope !== "stopped") return archive;
-  const activeGoals = current.run_history.goals.filter(
-    (goal) => goal.activation_state !== "stopped",
-  );
-  const stoppedGoals = archive.run_history.goals.filter(
-    (goal) => goal.activation_state === "stopped",
-  );
-  const goals = [...activeGoals, ...stoppedGoals];
-  return {
-    ...current,
-    goal_projection: {
-      ...archive.goal_projection,
-      scope: "all",
-      complete: true,
-      projected_goal_count: goals.length,
-    },
-    run_history: {
-      ...current.run_history,
-      goal_count: goals.length,
-      goals,
-    },
-  };
-}
 
 async function fetchStatusPayload(url: string) {
   const response = await fetch(url, { cache: "no-store" });
@@ -2756,12 +2671,9 @@ export function DashboardPage() {
   );
   const [exampleModeRequested, setExampleModeRequested] = useState(false);
   const suppressedStatusUrlRef = useRef<string | null>(null);
-  const statusRequestFenceRef = useRef<StatusRequestFence>({
-    loadedUrl: null,
-    projectionRevision: 0,
-    requestedUrl: search.statusUrl.trim() || null,
-    selectionRevision: 0,
-  });
+  const statusRequestFenceRef = useRef<StatusRequestFence>(
+    createStatusRequestFence(search.statusUrl.trim() || null),
+  );
   const routeStatusRequestUrl = !exampleModeRequested && source.kind === "example"
     ? search.statusUrl.trim()
     : "";
@@ -2785,13 +2697,26 @@ export function DashboardPage() {
     [runHistory.goals, queue.items],
   );
 
-  function loadGoalArchive(url: string, request: StatusRequest) {
+  function loadGoalArchive(url: string, request: StatusRequest, resyncAttempt = 0) {
     setGoalArchiveLoadState({ error: null, phase: "loading" });
     void fetchStatusPayload(scopedStatusUrl(url, "stopped", window.location.href))
       .then((archivePayload) => {
         if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
-        setPayload((current) => mergeStoppedGoalProjection(current, archivePayload));
-        setGoalArchiveLoadState({ error: null, phase: "ready" });
+        const archiveRevision = archivePayload.goal_projection?.registry_revision ?? null;
+        const revisionMismatch = request.registryRevision !== null
+          && request.registryRevision !== undefined
+          && archiveRevision !== null
+          && request.registryRevision !== archiveRevision;
+        setPayload((current) => mergeScopedStatusProjections(current, archivePayload));
+        if (revisionMismatch && resyncAttempt < 1) {
+          void loadFromUrl(url, { background: true, resyncAttempt: resyncAttempt + 1 });
+          return;
+        }
+        setGoalArchiveLoadState(
+          revisionMismatch
+            ? { error: "Goal 状态在加载历史时发生变化，请重试。", phase: "error" }
+            : { error: null, phase: "ready" },
+        );
       })
       .catch((error) => {
         if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
@@ -2807,7 +2732,11 @@ export function DashboardPage() {
 
   async function loadFromUrl(
     url: string,
-    options: { background?: boolean; selectionRevision?: number } = {},
+    options: {
+      background?: boolean;
+      resyncAttempt?: number;
+      selectionRevision?: number;
+    } = {},
   ) {
     const trimmed = url.trim();
     const background = options.background === true;
@@ -2833,29 +2762,9 @@ export function DashboardPage() {
         scopedStatusUrl(trimmed, "active", window.location.href),
       );
       if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
+      request.registryRevision = nextPayload.goal_projection?.registry_revision ?? null;
       if (background) {
-        setPayload((current) => {
-          if (nextPayload.goal_projection?.scope !== "active") return nextPayload;
-          const stoppedGoals = current.run_history.goals.filter(
-            (goal) => goal.activation_state === "stopped",
-          );
-          if (stoppedGoals.length === 0) return nextPayload;
-          const goals = [...nextPayload.run_history.goals, ...stoppedGoals];
-          return {
-            ...nextPayload,
-            goal_projection: {
-              ...nextPayload.goal_projection,
-              scope: "all",
-              complete: false,
-              projected_goal_count: goals.length,
-            },
-            run_history: {
-              ...nextPayload.run_history,
-              goal_count: goals.length,
-              goals,
-            },
-          };
-        });
+        setPayload((current) => mergeScopedStatusProjections(current, nextPayload));
       } else {
         const nextSource: DataSource = { kind: "url", label: trimmed };
         statusRequestFenceRef.current.loadedUrl = trimmed;
@@ -2877,7 +2786,7 @@ export function DashboardPage() {
         setGoalArchiveLoadState({ error: null, phase: "ready" });
         return;
       }
-      loadGoalArchive(trimmed, request);
+      loadGoalArchive(trimmed, request, options.resyncAttempt ?? 0);
     } catch (error) {
       if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return;
       if (!background) setLoadError(formatStatusError(error));

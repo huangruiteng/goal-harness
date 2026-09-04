@@ -168,7 +168,16 @@ def assert_context_orchestration() -> None:
     def build_attention_queue(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["include_task_graph"] is False, kwargs
         assert kwargs["goal_id_filter"] == GOAL_ID, kwargs
-        return record("build_attention_queue", {"items": [], "item_count": 0})
+        return record(
+            "build_attention_queue",
+            {
+                "items": [],
+                "item_count": 0,
+                "include_stopped_goal_context": kwargs.get(
+                    "include_stopped_goal_context"
+                ),
+            },
+        )
 
     context = collection_read_model.StatusCollectionContext(
         load_registry=load_registry,
@@ -226,6 +235,7 @@ def assert_context_orchestration() -> None:
     assert contract_call[1]["activation_state_filter"] == "active", contract_call
     assert payload["goal_projection"]["scope"] == "active", payload["goal_projection"]
     assert payload["goal_projection"]["complete"] is False, payload["goal_projection"]
+    assert payload["attention_queue"]["include_stopped_goal_context"] is False, payload
     assert payload["runtime_root"] == str(runtime_root), payload
     assert payload["run_history"]["display_limit"] == 2, payload
     assert payload["todo_index"]["limit"] == 240, payload

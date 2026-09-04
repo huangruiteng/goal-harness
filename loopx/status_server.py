@@ -899,7 +899,10 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed_url = urlparse(self.path)
         path = parsed_url.path
-        query = parse_qs(parsed_url.query)
+        # Keep blank values so `?goal_activation=` and repeated values like
+        # `?goal_activation=active&goal_activation=` fail closed with HTTP 400
+        # instead of being silently dropped by the default parse_qs behavior.
+        query = parse_qs(parsed_url.query, keep_blank_values=True)
         if path == "/healthz":
             self._send_json({"ok": True})
             return

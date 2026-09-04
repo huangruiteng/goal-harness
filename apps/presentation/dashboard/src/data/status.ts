@@ -732,6 +732,9 @@ export const goalProjectionScopeSchema = z.object({
   complete: z.boolean(),
   projected_goal_count: z.number().int().nonnegative(),
   registry_goal_count: z.number().int().nonnegative(),
+  // Stable fingerprint of the registry's goal activation partition. Two
+  // scoped snapshots are safe to merge only when their revisions match.
+  registry_revision: z.string().optional().nullable(),
 });
 
 export const localDashboardApiSchema = z.object({

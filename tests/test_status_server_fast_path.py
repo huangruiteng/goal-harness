@@ -121,3 +121,33 @@ def test_status_service_identity_is_public_and_versioned(tmp_path: Path) -> None
         "release_id",
         "source_revision",
     }
+
+
+def test_status_endpoint_rejects_blank_goal_activation_scope(tmp_path: Path) -> None:
+    """A blank `?goal_activation=` value must fail closed with HTTP 400."""
+    with _status_server(tmp_path) as base_url:
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(
+                f"{base_url}{DEFAULT_STATUS_PATH}?goal_activation=",
+                timeout=5,
+            )
+
+    assert raised.value.code == 400
+    payload = json.loads(raised.value.read().decode("utf-8"))
+    assert payload["error"] == "goal_activation must be active or stopped"
+
+
+def test_status_endpoint_rejects_mixed_blank_goal_activation_scope(
+    tmp_path: Path,
+) -> None:
+    """`?goal_activation=active&goal_activation=` must not collapse to one value."""
+    with _status_server(tmp_path) as base_url:
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(
+                f"{base_url}{DEFAULT_STATUS_PATH}?goal_activation=active&goal_activation=",
+                timeout=5,
+            )
+
+    assert raised.value.code == 400
+    payload = json.loads(raised.value.read().decode("utf-8"))
+    assert payload["error"] == "goal_activation must be active or stopped"
