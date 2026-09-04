@@ -39,7 +39,13 @@ class SupervisorRollbackMode(str, Enum):
 
 
 def supervisor_event_log_path(runtime_root: Path, goal_id: str) -> Path:
-    return runtime_root.expanduser() / "goals" / str(goal_id) / SUPERVISOR_EVENT_LOG_NAME
+    # Supervisor events share the same goal-scoped storage boundary as rollout
+    # events; validate before constructing a path so CLI reads and writes cannot
+    # escape the runtime goals directory.
+    from ...history import validate_goal_id_path_segment
+
+    safe_goal_id = validate_goal_id_path_segment(goal_id)
+    return runtime_root.expanduser() / "goals" / safe_goal_id / SUPERVISOR_EVENT_LOG_NAME
 
 
 def _tokens(values: Any, *, field: str, required: bool) -> list[str]:
@@ -78,13 +84,16 @@ def build_supervisor_proposal_event(
     decision: Mapping[str, Any],
     recorded_at: str | None = None,
 ) -> dict[str, Any]:
+    from ...history import validate_goal_id_path_segment
+
+    safe_goal_id = validate_goal_id_path_segment(goal_id)
     normalized = normalize_supervisor_decision(decision, supervisor=supervisor)
     _reject_inline_secrets(normalized, field="decision")
     decision_id = str(normalized["decision_id"])
     supervisor_agent_id = str(supervisor.get("agent_id") or "")
     return make_state_event(
         event_id=f"supervisor-proposal-{decision_id}",
-        goal_id=goal_id,
+        goal_id=safe_goal_id,
         event_type=SUPERVISOR_PROPOSED,
         refs={
             "decision_id": decision_id,
@@ -189,6 +198,9 @@ def build_supervisor_receipt_event(
     host_capabilities: list[str] | tuple[str, ...] | None = None,
     recorded_at: str | None = None,
 ) -> dict[str, Any]:
+    from ...history import validate_goal_id_path_segment
+
+    safe_goal_id = validate_goal_id_path_segment(goal_id)
     proposal = proposal_event.get("payload")
     if not isinstance(proposal, Mapping):
         raise ValueError("proposal event is missing payload")
@@ -199,7 +211,7 @@ def build_supervisor_receipt_event(
     )
     return make_state_event(
         event_id=f"supervisor-receipt-{normalized['receipt_id']}",
-        goal_id=goal_id,
+        goal_id=safe_goal_id,
         event_type=SUPERVISOR_RECEIPT_RECORDED,
         refs={
             "decision_id": normalized["decision_id"],

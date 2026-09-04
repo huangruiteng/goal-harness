@@ -186,10 +186,16 @@ def _idempotency_body(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def rollout_event_log_path(runtime_root: Path, goal_id: str) -> Path:
+    # Goal ids are used as directory names throughout the control plane. Keep
+    # this shared path helper fail-closed so every reader and writer inherits
+    # the same single-segment boundary.
+    from .history import validate_goal_id_path_segment
+
+    safe_goal_id = validate_goal_id_path_segment(goal_id)
     return (
         runtime_root.expanduser()
         / "goals"
-        / str(goal_id)
+        / safe_goal_id
         / DEFAULT_ROLLOUT_EVENT_LOG_NAME
     )
 
@@ -235,8 +241,9 @@ def build_rollout_event(
     local paths out of the payload.
     """
 
-    if not str(goal_id).strip():
-        raise ValueError("goal_id is required")
+    from .history import validate_goal_id_path_segment
+
+    safe_goal_id = validate_goal_id_path_segment(goal_id)
     private_kind = (
         str(private_source_kind).strip()
         if private_source_kind
@@ -259,7 +266,7 @@ def build_rollout_event(
     ]
     payload: dict[str, Any] = {
         "schema_version": ROLLOUT_EVENT_SCHEMA_VERSION,
-        "goal_id": str(goal_id).strip(),
+        "goal_id": safe_goal_id,
         "event_kind": _normalized_event_kind(event_kind),
         "recorded_at": recorded_at or _now_iso(),
         "boundary": {
