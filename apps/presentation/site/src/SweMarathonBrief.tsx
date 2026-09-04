@@ -20,6 +20,11 @@ const publicAnalysisUrl =
   "https://github.com/huangruiteng/loopx/pull/3887#issuecomment-5535839229";
 const repositoryStudyUrl =
   "https://github.com/huangruiteng/loopx/tree/main/benchmark/swe-marathon";
+const researchContributors = [
+  { handle: "BouwenZhou", href: "https://bouwenzhou.github.io/" },
+  { handle: "piaji-68", href: "https://github.com/piaji-68" },
+  { handle: "Wanli-Lee", href: "https://wanli-lee.github.io/" },
+] as const;
 
 const studyObservation = caseInsights.study_observations[0];
 const behaviorMetrics = studyObservation.metrics;
@@ -146,8 +151,8 @@ export function SweMarathonBrief() {
         <span className="bm-edition">RESEARCH BRIEF / 01</span>
         <div className="bm-top-actions">
           <div className="bm-language" aria-label="Language">
-            <button className={language === "en" ? "is-active" : ""} onClick={() => setLocale("en")} type="button">EN</button>
-            <button className={language === "zh" ? "is-active" : ""} onClick={() => setLocale("zh")} type="button">中文</button>
+            <button aria-pressed={language === "en"} className={language === "en" ? "is-active" : ""} onClick={() => setLocale("en")} type="button">EN</button>
+            <button aria-pressed={language === "zh"} className={language === "zh" ? "is-active" : ""} onClick={() => setLocale("zh")} type="button">中文</button>
           </div>
           <a href={repositoryStudyUrl} target="_blank" rel="noreferrer">
             {c.source} <ExternalLink size={13} />
@@ -168,7 +173,17 @@ export function SweMarathonBrief() {
               ) : c.title}
             </h1>
             <p className="bm-deck">{c.deck}</p>
-            <span className="bm-evidence-tag"><ShieldCheck size={14} /> {c.evidenceTag}</span>
+            <div className="bm-hero-meta">
+              <span className="bm-evidence-tag"><ShieldCheck aria-hidden="true" size={14} /> {c.evidenceTag}</span>
+              <p className="bm-contributors">
+                <span>{c.contributorsLabel}</span>
+                {researchContributors.map((contributor) => (
+                  <a href={contributor.href} key={contributor.handle} rel="noreferrer" target="_blank">
+                    @{contributor.handle}<ExternalLink aria-hidden="true" size={11} />
+                  </a>
+                ))}
+              </p>
+            </div>
           </div>
         </section>
 

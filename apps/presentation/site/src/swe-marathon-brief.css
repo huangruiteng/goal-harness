@@ -117,8 +117,7 @@
 .bm-hero {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 20px;
-  padding-block: 48px 32px;
+  padding-block: 36px 28px;
 }
 
 .bm-eyebrow,
@@ -126,7 +125,7 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  margin: 0 0 22px;
+  margin: 0 0 16px;
   color: var(--bm-blue);
   font-family: "Geist Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
@@ -136,21 +135,21 @@
 }
 
 .bm-hero h1 {
-  max-width: 1180px;
+  max-width: 960px;
   margin: 0;
-  font-size: clamp(46px, 5.4vw, 76px);
-  font-weight: 540;
-  letter-spacing: -0.065em;
-  line-height: 0.96;
+  font-size: clamp(42px, 4vw, 60px);
+  font-weight: 560;
+  letter-spacing: -0.055em;
+  line-height: 1;
   text-wrap: balance;
 }
 
 .bm-deck {
-  max-width: 980px;
-  margin: 24px 0 20px;
+  max-width: 720px;
+  margin: 18px 0 16px;
   color: var(--bm-body);
-  font-size: clamp(17px, 1.35vw, 21px);
-  line-height: 1.48;
+  font-size: clamp(16px, 1.1vw, 18px);
+  line-height: 1.5;
 }
 
 .bm-evidence-tag {
@@ -166,6 +165,69 @@
   font-family: "Geist Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
   font-weight: 650;
+}
+
+.bm-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+}
+
+.bm-contributors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  margin: 0;
+  color: var(--bm-muted);
+  font-family: "Geist Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.bm-contributors > span {
+  color: var(--bm-ink);
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bm-contributors a {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  min-height: 28px;
+  text-underline-offset: 3px;
+}
+
+@media (min-width: 981px) {
+  .bm-hero-copy {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(340px, 0.65fr);
+    column-gap: 56px;
+    align-items: end;
+  }
+
+  .bm-hero-copy .bm-eyebrow {
+    grid-column: 1 / -1;
+  }
+
+  .bm-hero-copy h1 {
+    grid-row: 2 / span 2;
+    grid-column: 1;
+    align-self: center;
+  }
+
+  .bm-hero-copy .bm-deck {
+    grid-row: 2;
+    grid-column: 2;
+    margin: 0 0 14px;
+  }
+
+  .bm-hero-copy .bm-hero-meta {
+    grid-row: 3;
+    grid-column: 2;
+  }
 }
 
 .bm-hero-metrics {
@@ -295,8 +357,8 @@
 .bm-section {
   display: grid;
   grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.48fr);
-  gap: 36px 64px;
-  padding-block: 72px;
+  gap: 32px 48px;
+  padding-block: 56px;
   border-top: 1px solid var(--bm-border);
 }
 
@@ -304,7 +366,7 @@
 .bm-boundary h2 {
   max-width: 970px;
   margin: 0;
-  font-size: clamp(36px, 3.7vw, 56px);
+  font-size: clamp(32px, 3vw, 48px);
   font-weight: 540;
   letter-spacing: -0.055em;
   line-height: 1.02;
@@ -314,24 +376,24 @@
   max-width: 780px;
   margin: 18px 0 0;
   color: var(--bm-body);
-  font-size: 17px;
+  font-size: 16px;
 }
 
 .bm-section-lead-wide {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.55fr);
-  gap: 28px 64px;
+  grid-template-columns: minmax(0, 1.75fr) minmax(300px, 0.65fr);
+  gap: 20px 48px;
 }
 
 .bm-summary {
-  gap: 28px;
-  padding-block: 40px 56px;
+  gap: 20px;
+  padding-block: 32px 44px;
 }
 
 .bm-section-lead-wide .bm-kicker {
   grid-column: 1 / -1;
-  margin-bottom: -16px;
+  margin-bottom: -10px;
 }
 
 .bm-section-lead-wide > p:last-child {
@@ -428,8 +490,8 @@
 .bm-fact-grid article {
   display: flex;
   flex-direction: column;
-  min-height: 150px;
-  padding: 20px;
+  min-height: 132px;
+  padding: 18px;
   border-right: 1px solid var(--bm-border);
   border-bottom: 1px solid var(--bm-border);
   background: var(--bm-surface);
@@ -541,6 +603,11 @@
   border-bottom: 1px solid var(--bm-border);
   vertical-align: middle;
   font-size: 13px;
+}
+
+.bm-table-wrap.bm-executive-table th,
+.bm-table-wrap.bm-executive-table td {
+  padding: 11px 14px;
 }
 
 .bm-table-wrap thead th {
@@ -1093,12 +1160,11 @@
   }
 
   .bm-hero {
-    gap: 38px;
-    padding-block: 56px 32px;
+    padding-block: 40px 28px;
   }
 
   .bm-hero h1 {
-    font-size: clamp(46px, 14vw, 66px);
+    font-size: clamp(40px, 12vw, 54px);
   }
 
   .bm-hero-metrics,
@@ -1135,13 +1201,13 @@
   }
 
   .bm-section {
-    gap: 36px;
-    padding-block: 72px;
+    gap: 28px;
+    padding-block: 48px;
   }
 
   .bm-section-lead h2,
   .bm-boundary h2 {
-    font-size: clamp(36px, 11vw, 50px);
+    font-size: clamp(30px, 9vw, 42px);
   }
 
   .bm-horizon {
