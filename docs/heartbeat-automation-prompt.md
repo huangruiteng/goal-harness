@@ -549,10 +549,11 @@ If `automation_update` is unavailable in the session and
 `fallback_hint.cli_args` (`loopx-apply-rrule`) once instead. It backs up
 `codex-dev.db`, syncs the automation TOML and SQLite row, and runs the bound
 ACK; direct SQLite edits bypass the app API, so this is a bounded fallback and
-never the routine path. The bridge treats the provided turn id as its parent
-and derives a stable child receipt id for the internal quota query, so it does
-not reuse the already-settled heartbeat receipt. When the automation id could
-not be resolved,
+never the routine path. The bridge reuses the provided parent Turn for its
+internal `quota should-run` query. That same-Turn replay preserves the committed
+receipt's bound Todo, observed capabilities, and settlement identity; an
+explicitly conflicting identity still fails closed. When the automation id
+could not be resolved,
 `fallback_hint.available=false` and the pasteable heartbeat gate is the correct
 stop - never guess an automation id.
 

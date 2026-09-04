@@ -156,6 +156,19 @@ def test_default_app_stores_follow_codex_home_and_capabilities_are_explicit(
     assert explicit.capability == ["network"]
 
 
+def test_heartbeat_guide_matches_parent_turn_replay_contract() -> None:
+    guide = (
+        Path(__file__).parents[1] / "docs/heartbeat-automation-prompt.md"
+    ).read_text(encoding="utf-8")
+
+    assert "reuses the provided parent Turn" in guide
+    assert "same-Turn replay preserves the committed" in guide
+    assert "bound Todo, observed capabilities, and settlement identity" in guide
+    assert "explicitly conflicting identity still fails closed" in guide
+    assert "derives a stable child receipt id" not in guide
+    assert "does not reuse the already-settled heartbeat receipt" not in guide
+
+
 def test_should_run_failure_reports_structured_stdout(
     tmp_path: Path,
     monkeypatch,
