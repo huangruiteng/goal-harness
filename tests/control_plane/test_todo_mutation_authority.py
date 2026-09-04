@@ -1693,6 +1693,7 @@ def test_monitor_writeback_propagates_multi_agent_actor(tmp_path: Path) -> None:
 
     result = write_monitor_poll_todo_state(
         registry_path=registry,
+        runtime_root=tmp_path / "runtime",
         goal_id=GOAL_ID,
         generated_at="2026-07-18T00:15:00+00:00",
         execute=False,

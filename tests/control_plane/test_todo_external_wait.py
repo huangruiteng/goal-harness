@@ -106,6 +106,7 @@ def test_monitor_change_wait_binds_generation_and_resumes_only_after_increment(
 
     unchanged = write_monitor_poll_todo_state(
         registry_path=registry,
+        runtime_root=tmp_path / "runtime",
         goal_id=GOAL_ID,
         execute=True,
         reason_summary="external review remains unchanged",
@@ -121,6 +122,7 @@ def test_monitor_change_wait_binds_generation_and_resumes_only_after_increment(
 
     changed = write_monitor_poll_todo_state(
         registry_path=registry,
+        runtime_root=tmp_path / "runtime",
         goal_id=GOAL_ID,
         execute=True,
         reason_summary="external review produced a typed material change",
@@ -139,6 +141,7 @@ def test_monitor_change_wait_binds_generation_and_resumes_only_after_increment(
 
     replay = write_monitor_poll_todo_state(
         registry_path=registry,
+        runtime_root=tmp_path / "runtime",
         goal_id=GOAL_ID,
         execute=True,
         reason_summary="replay the same material observation",
@@ -243,6 +246,7 @@ def test_monitor_provider_effect_replay_does_not_advance_counters(
     registry, state_file = _write_fixture(tmp_path)
     kwargs = {
         "registry_path": registry,
+        "runtime_root": tmp_path / "runtime",
         "goal_id": GOAL_ID,
         "execute": True,
         "generated_at": "2026-08-25T01:00:00Z",
@@ -298,6 +302,7 @@ def test_monitor_provider_effect_replay_reuses_material_successor(
     successor_text = "Advance the material monitor transition."
     kwargs = {
         "registry_path": registry,
+        "runtime_root": tmp_path / "runtime",
         "goal_id": GOAL_ID,
         "execute": True,
         "generated_at": "2026-08-25T01:00:00Z",
@@ -352,6 +357,7 @@ def test_overlapping_material_polls_recompute_generation_after_wait_baseline(
         second_poll = executor.submit(
             write_monitor_poll_todo_state,
             registry_path=registry,
+            runtime_root=tmp_path / "runtime",
             goal_id=GOAL_ID,
             execute=True,
             generated_at="2026-08-25T02:01:00Z",
@@ -364,6 +370,7 @@ def test_overlapping_material_polls_recompute_generation_after_wait_baseline(
 
         first_poll = write_monitor_poll_todo_state(
             registry_path=registry,
+            runtime_root=tmp_path / "runtime",
             goal_id=GOAL_ID,
             execute=True,
             generated_at="2026-08-25T02:00:00Z",

@@ -281,6 +281,7 @@ def test_runtime_writeback_can_read_legacy_unbounded_monitor(tmp_path: Path) -> 
 
     result = write_monitor_poll_todo_state(
         registry_path=registry,
+        runtime_root=tmp_path / "runtime",
         goal_id=GOAL_ID,
         generated_at="2026-08-11T00:00:00Z",
         execute=False,

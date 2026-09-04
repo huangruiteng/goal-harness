@@ -555,9 +555,11 @@ def _provider_writeback(
     plan: Mapping[str, Any],
     *,
     registry_path: Path,
+    runtime_root: Path,
 ) -> dict[str, Any]:
     result = write_monitor_poll_todo_state(
         registry_path=registry_path,
+        runtime_root=runtime_root,
         goal_id=str(plan.get("goal_id") or ""),
         generated_at=str(plan.get("generated_at") or ""),
         execute=plan.get("execute") is True,
@@ -716,7 +718,11 @@ def record_quota_monitor_poll_for_decision(
             raise TypeError("TypeScript monitor-poll preflight omitted provider plan")
         if registry_path is None:
             raise ValueError("monitor todo writeback requires registry_path")
-        provider_receipt = _provider_writeback(plan, registry_path=registry_path)
+        provider_receipt = _provider_writeback(
+            plan,
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+        )
         status_warning = None
         if execute:
             after_status, status_warning = _reload_status_after_monitor_writeback(

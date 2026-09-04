@@ -168,6 +168,7 @@ def resolve_monitor_todo_item(
 def write_monitor_poll_todo_state(
     *,
     registry_path: Path,
+    runtime_root: Path,
     goal_id: str,
     generated_at: str,
     execute: bool,
@@ -190,6 +191,16 @@ def write_monitor_poll_todo_state(
     next_claimed_by: str | None = None,
     agent_id: str | None = None,
 ) -> dict[str, Any] | None:
+    """Apply one monitor poll observation as a complete Todo writeback.
+
+    ``runtime_root`` is the effective runtime root of the calling CLI
+    composition (the ``--runtime-root`` override when given).  Every legacy
+    Todo mutation below shares that root, so the writer fence and the todo
+    mutex of a promotion cannot split from the writeback path.  The parameter
+    is required on purpose: callers must compose the root instead of relying
+    on a registry-derived fallback that promotion cannot fence.
+    """
+
     from ...todos import add_goal_todo, update_goal_todo
 
     if not todo_id and not target_key:
@@ -237,6 +248,7 @@ def write_monitor_poll_todo_state(
         todo_id=resolved_todo_id,
         role="agent",
         reason=reason_summary,
+        runtime_root_arg=str(runtime_root),
         monitor_metadata=MonitorPollObservation(
             generated_at=generated_at,
             result_hash=safe_result_hash,
@@ -268,6 +280,7 @@ def write_monitor_poll_todo_state(
                 goal_id=goal_id,
                 role="agent",
                 text=next_agent_todo,
+                runtime_root_arg=str(runtime_root),
                 task_class=TODO_TASK_CLASS_ADVANCEMENT,
                 action_kind=successor_route["action_kind"],
                 task_repository=successor_route["task_repository"],
@@ -286,6 +299,7 @@ def write_monitor_poll_todo_state(
                 goal_id=goal_id,
                 role="user",
                 text=next_user_todo,
+                runtime_root_arg=str(runtime_root),
                 task_class=effective_next_user_task_class,
                 action_kind=(
                     "gate"
