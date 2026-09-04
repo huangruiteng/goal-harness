@@ -228,6 +228,46 @@ describe('shadow observer envelopes', () => {
     expect(envelopes.map(item => item.sequence)).toEqual([0, 1, 2, 3])
   })
 
+  it('waits for the catch-up batch requested during an in-flight flush', async () => {
+    let releaseFirst = () => {}
+    let releaseSecond = () => {}
+    let markSecondStarted = () => {}
+    const firstGate = new Promise<void>(resolve => { releaseFirst = resolve })
+    const secondGate = new Promise<void>(resolve => { releaseSecond = resolve })
+    const secondStarted = new Promise<void>(resolve => { markSecondStarted = resolve })
+    const appended: string[][] = []
+    const observer = new ShadowObserver({
+      config: { ...config, bufferBound: 1 },
+      now: () => 1_756_728_000_000,
+      observerId: 'observer-fixture',
+      appendLines: async (_path, lines) => {
+        appended.push([...lines])
+        if (appended.length === 1) await firstGate
+        if (appended.length === 2) {
+          markSecondStarted()
+          await secondGate
+        }
+      },
+    })
+    const session = fakeSession()
+    observer.observeSessionEvent(session, sessionEvent('step/start', 1, 1_756_728_001_000, { turn: 1, step: 1 }))
+    observer.observeSessionEvent(session, sessionEvent('step/start', 2, 1_756_728_002_000, { turn: 1, step: 2 }))
+
+    let completed = false
+    const completion = observer.flush().then(() => { completed = true })
+    releaseFirst()
+    await secondStarted
+    expect(completed).toBe(false)
+    releaseSecond()
+    await completion
+
+    const envelopes = parsed(appended).filter(
+      (record): record is ObserverEnvelope => record.schema_version === OBSERVER_ENVELOPE_SCHEMA_VERSION,
+    )
+    expect(envelopes.map(item => item.sequence)).toEqual([0, 1])
+    expect(observer.stats().flush_attempt_count).toBe(2)
+  })
+
   it('preserves the typed DSH turn-end reason used by recovery diagnostics', async () => {
     const { appended, observer } = observerWithCapture()
     observer.observeSessionEvent(
@@ -259,6 +299,19 @@ describe('shadow observer envelopes', () => {
     expect(stats.observed_event_count).toBe(
       stats.accepted_event_count + stats.rejected_event_count + stats.backpressure_drop_count,
     )
+  })
+
+  it('contains logger failures while reporting an observer failure', async () => {
+    const observer = new ShadowObserver({
+      config,
+      observerId: 'observer-fixture',
+      appendLines: async () => { throw new Error('disk full') },
+      warn: () => { throw new Error('logger unavailable') },
+    })
+    observer.observeSessionCreated(fakeSession())
+    await expect(observer.flush()).resolves.toBeUndefined()
+    expect(observer.stats().observer_failure_count).toBe(1)
+    expect(observer.stats().backpressure_drop_count).toBe(1)
   })
 
   it('rejects rather than attributing another session to the configured goal', () => {

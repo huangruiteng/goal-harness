@@ -392,32 +392,42 @@ export class ShadowObserver {
 
   /** Write buffered envelopes plus a stats record; never rejects. */
   async flush(): Promise<void> {
-    if (this.flushing !== undefined) {
-      this.flushRequested = true
-      await this.flushing
-      return
+    this.flushRequested = true
+    let operation = this.flushing
+    if (operation === undefined) {
+      operation = this.flushRequestedBatches()
+      this.flushing = operation
     }
+    await operation
+  }
+
+  private async flushRequestedBatches(): Promise<void> {
+    try {
+      while (this.flushRequested) {
+        this.flushRequested = false
+        await this.flushBatch()
+      }
+    } finally {
+      // Clear ownership before resolving so a later caller either joins this
+      // drain or starts the next one; it can never observe a resolved owner.
+      this.flushing = undefined
+    }
+  }
+
+  private async flushBatch(): Promise<void> {
     const taken = this.buffer
     this.buffer = []
     this.flushAttemptCount += 1
-    const lines = [...taken, this.stats()].map(record => JSON.stringify(record))
-    this.flushing = this.appendLines(this.path, lines).then(
-      () => undefined,
-      (error: unknown) => {
-        this.observerFailureCount += 1
-        this.acceptedEventCount -= taken.length
-        this.backpressureDropCount += taken.length
-        this.warn(`dsh-loopx shadow observer flush failed: ${error instanceof Error ? error.name : 'unknown'}`)
-      },
-    )
     try {
-      await this.flushing
-    } finally {
-      this.flushing = undefined
-    }
-    if (this.flushRequested) {
-      this.flushRequested = false
-      await this.flush()
+      const lines = [...taken, this.stats()].map(record => JSON.stringify(record))
+      await this.appendLines(this.path, lines)
+    } catch (error: unknown) {
+      this.observerFailureCount += 1
+      this.acceptedEventCount -= taken.length
+      this.backpressureDropCount += taken.length
+      this.safeWarn(
+        `dsh-loopx shadow observer flush failed: ${error instanceof Error ? error.name : 'unknown'}`,
+      )
     }
   }
 
@@ -436,7 +446,9 @@ export class ShadowObserver {
       this.observerFailureCount += 1
       if (this.observedEventCount === observedBefore) this.observedEventCount += 1
       this.reject('observer_internal_failure')
-      this.warn(`dsh-loopx shadow observer hook failed: ${error instanceof Error ? error.name : 'unknown'}`)
+      this.safeWarn(
+        `dsh-loopx shadow observer hook failed: ${error instanceof Error ? error.name : 'unknown'}`,
+      )
     }
   }
 
@@ -499,6 +511,14 @@ export class ShadowObserver {
     this.observedEventCount += 1
     this.reject('identity_invalid')
     return true
+  }
+
+  private safeWarn(message: string): void {
+    try {
+      this.warn(message)
+    } catch {
+      // Logging is observational too; it must never reach the worker.
+    }
   }
 
   private requestFlush(): void {
