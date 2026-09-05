@@ -872,12 +872,14 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
     }
     if (url.pathname === "/api/chat/lark/connections" && request.method() === "POST") {
       const body = request.postDataJSON();
+      const connectionId = `lark-${body.goal_id}-${body.agent_id ?? "default"}`;
       if (body.execute) {
         const fixture = require(resolve(repoRoot, "examples/status.example.json"));
         const goal = (fixture.run_history?.goals ?? []).find((item) => item.id === body.goal_id);
-        runtime.larkConnections = runtime.larkConnections.filter((item) => item.goal_id !== body.goal_id);
+        runtime.larkConnections = runtime.larkConnections.filter((item) => item.connection_id !== connectionId);
         runtime.larkConnections.push({
           agent_id: body.agent_id ?? null,
+          connection_id: connectionId,
           app_label: "LoopX Mew", app_ref: body.app_ref, chat_name: body.chat_name, enabled: true,
           capture_scope: body.capture_scope,
           event_count: 0, health_error_code: "lark_event_delivery_unverified",
@@ -897,8 +899,8 @@ async function installApi(page, { goalSubagentConfigurationEnabled = true } = {}
       return;
     }
     if (url.pathname === "/api/chat/lark/connections" && request.method() === "DELETE") {
-      const goalId = url.searchParams.get("goal_id");
-      runtime.larkConnections = runtime.larkConnections.filter((item) => item.goal_id !== goalId);
+      const connectionId = url.searchParams.get("connection_id");
+      runtime.larkConnections = runtime.larkConnections.filter((item) => item.connection_id !== connectionId);
       await route.fulfill({ contentType: "application/json", json: { ok: true, status: "disconnected" }, status: 200 });
       return;
     }
@@ -2168,6 +2170,10 @@ async function main() {
     if (JSON.stringify(ingressOptions) !== JSON.stringify(["live_steering", "session_queue", "async_inbox"])) throw new Error(`Lark Agent ingress modes drifted: ${JSON.stringify(ingressOptions)}`);
     await ingressGroup.getByLabel("异步收件箱").check();
     await connectDialog.getByLabel("目标 Agent").waitFor({ state: "visible" });
+    await connectDialog.getByLabel("绑定到 Goal").selectOption("multi-agent-projection");
+    const agentOptions = await connectDialog.getByLabel("目标 Agent").locator("option").evaluateAll((items) => items.map((item) => item.value));
+    if (JSON.stringify([...agentOptions].sort()) !== JSON.stringify(["codex-latest-lane", "codex-older-lane"])) throw new Error(`Lark omitted a peer Agent: ${JSON.stringify(agentOptions)}`);
+    await connectDialog.getByLabel("目标 Agent").selectOption("codex-older-lane");
     await connectDialog.getByLabel("回复方式").selectOption("topic_reply");
     await page.screenshot({ path: resolve(outputDir, "lark-routing-modes.png"), fullPage: false, animations: "disabled" });
     await connectDialog.getByRole("button", { name: "连接", exact: true }).click();
@@ -2186,6 +2192,7 @@ async function main() {
     if (api.larkWrites.length !== 1 || api.larkWrites[0].execute !== true) throw new Error("Lark connect did not perform exactly one approved external write");
     if (api.larkWrites[0].capture_scope !== "configured_chat_all" || api.larkWrites[0].incoming_mode !== "all") throw new Error(`Lark capture mode was not projected: ${JSON.stringify(api.larkWrites[0])}`);
     if (api.larkWrites[0].ingress_mode !== "async_inbox" || !api.larkWrites[0].agent_id) throw new Error(`Lark Agent inbox mode lost its Agent binding: ${JSON.stringify(api.larkWrites[0])}`);
+    if (api.larkWrites[0].agent_id !== "codex-older-lane" || api.larkWrites[0].goal_id !== "multi-agent-projection") throw new Error("Lark replaced the selected peer with the default Agent");
     if (api.larkWrites[0].reply_mode !== "topic_reply") throw new Error(`Lark reply mode was not projected: ${JSON.stringify(api.larkWrites[0])}`);
     Object.assign(api.larkConnections[0], {
       event_count: 1,
@@ -2214,7 +2221,22 @@ async function main() {
     if (await editDialog.getByLabel("接收范围").inputValue() !== "configured_chat_all") throw new Error("Lark edit mode did not restore capture_scope");
     if (!await editDialog.getByRole("group", { name: "Agent 入站方式" }).getByLabel("异步收件箱").isChecked()) throw new Error("Lark edit mode did not restore ingress_mode");
     if (await editDialog.getByLabel("目标 Agent").inputValue() !== api.larkWrites[0].agent_id) throw new Error("Lark edit mode did not restore agent_id");
+    await editDialog.getByLabel("目标 Agent").selectOption("codex-latest-lane");
+    await editDialog.getByRole("button", { name: "保存连接", exact: true }).click();
+    await editDialog.waitFor({ state: "hidden" });
+    if (api.larkWrites.length !== 2 || api.larkConnections.length !== 2) throw new Error("Peer Agent route did not coexist");
+    if (!api.larkConnections.some((item) => item.agent_id === "codex-older-lane") || !api.larkConnections.some((item) => item.agent_id === "codex-latest-lane")) throw new Error("One-click Goal Channel lost a peer Agent route");
+    const removedConnection = api.larkConnections.find((item) => item.agent_id === "codex-older-lane");
+    const originalAgent = removedConnection.agent_id;
+    removedConnection.agent_id = "removed-peer";
+    await page.getByRole("button", { name: "返回工作区", exact: true }).click();
+    await page.getByRole("button", { name: "设置", exact: true }).click();
+    await page.locator(".personal-lark-table-row", { hasText: "removed-peer" }).getByRole("button", { name: /配置/ }).click();
+    await editDialog.getByRole("alert").filter({ hasText: "不会自动替换" }).waitFor({ state: "visible" });
+    if (!(await editDialog.getByRole("button", { name: "保存连接", exact: true }).isDisabled())) throw new Error("Removed recipient remained connectable");
+    if (await editDialog.getByLabel("目标 Agent").inputValue() !== "removed-peer") throw new Error("Removed recipient silently fell back to another Agent");
     await editDialog.getByRole("button", { name: "取消" }).click();
+    removedConnection.agent_id = originalAgent;
     await page.screenshot({ path: resolve(outputDir, "lark-goal-connections.png"), fullPage: false, animations: "disabled" });
     await page.getByRole("button", { name: "返回工作区", exact: true }).click();
     await selectProductReleaseGoal();

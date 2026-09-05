@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import re
 from collections.abc import Mapping
+from contextlib import nullcontext
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, ParamSpec, TypeVar
 
 from ...control_plane.runtime.public_safety import public_safe_compact_text
 from ...registry import registry_goals
+from ...file_lock import exclusive_file_lock
 from .private_json import write_private_json_atomic
 
 
 GOAL_CHANNEL_BINDING_SCHEMA_VERSION = "loopx_goal_channel_lark_binding_v0"
 GOAL_CHANNEL_OPERATION_SCHEMA_VERSION = "loopx_goal_channel_operation_v0"
+GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION = "loopx_goal_channel_connection_set_v0"
 # Compatibility export for older callers. Scheduler-projected reminder windows
 # now own repeat-notification timing.
 DEFAULT_GATE_COOLDOWN_SECONDS = 3600
@@ -35,6 +40,37 @@ PRIVATE_PACKET_KEYS = {
 GATE_ACTION_PREFIX = re.compile(
     r"^(?:(?:[-*•]|\d+[.)])\s*)?(?:\[[ xX]\]\s*)?(?:\[P\d+\]\s*)?"
 )
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def serialize_goal_binding_mutation(function: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Serialize a complete binding read/effect/write transaction.
+
+    All public binding writers share this lock, including setup recovery and
+    notification receipts. Locking only the final rename cannot protect the
+    snapshot read before a provider call. Preview remains non-mutating.
+    Decorate entrypoints, not save helpers, to avoid nested kernel locks.
+    """
+    execute_parameter = inspect.signature(function).parameters.get("execute")
+    execute_default = execute_parameter.default if execute_parameter else True
+
+    @wraps(function)
+    def serialized(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        binding_path = kwargs["binding_path"]
+        if not isinstance(binding_path, Path):
+            raise TypeError("binding_path must be a Path")
+        lock = (
+            exclusive_file_lock(binding_path, operation="lark_goal_binding")
+            if kwargs.get("execute", execute_default)
+            else nullcontext()
+        )
+        with lock:
+            return function(*args, **kwargs)
+
+    return serialized
 
 
 def default_goal_channel_binding_path(registry_path: Path) -> Path:
@@ -92,16 +128,54 @@ def goal_from_registry(
     return match
 
 
-def binding_for_goal(
+def goal_channel_connection_id(goal_id: str, agent_id: str | None) -> str:
+    """Return a stable public-safe identity for one Goal recipient route."""
+    lane = str(agent_id or "notification-default").strip()
+    digest = hashlib.sha256(f"{goal_id}\0{lane}".encode()).hexdigest()[:20]
+    return f"lark_{digest}"
+
+
+def bindings_for_goal(
     payload: Mapping[str, Any],
     goal_id: str,
     *,
     provider_target: Mapping[str, Any] | None = None,
-) -> dict[str, Any] | None:
+) -> list[dict[str, Any]]:
     bindings = payload.get("bindings")
-    binding = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
-    if not isinstance(binding, Mapping):
-        return None
+    stored = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
+    if not isinstance(stored, Mapping):
+        return []
+    raw_connections = stored.get("connections")
+    if stored.get(
+        "schema_version"
+    ) == GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION and isinstance(
+        raw_connections, Mapping
+    ):
+        candidates = [
+            {**dict(item), "connection_id": str(connection_id)}
+            for connection_id, item in raw_connections.items()
+            if isinstance(item, Mapping)
+        ]
+    else:
+        candidates = [
+            {
+                **dict(stored),
+                "connection_id": goal_channel_connection_id(
+                    goal_id, str(stored.get("agent_id") or "") or None
+                ),
+            }
+        ]
+    return [
+        _resolve_goal_binding(candidate, provider_target=provider_target)
+        for candidate in candidates
+    ]
+
+
+def _resolve_goal_binding(
+    binding: Mapping[str, Any],
+    *,
+    provider_target: Mapping[str, Any] | None,
+) -> dict[str, Any]:
     resolved = dict(binding)
     target_ref = str(resolved.get("target_ref") or "")
     if not target_ref or provider_target is None:
@@ -132,6 +206,46 @@ def binding_for_goal(
     }
     resolved["identity"] = dict(target_identity)
     return resolved
+
+
+def binding_for_goal(
+    payload: Mapping[str, Any],
+    goal_id: str,
+    *,
+    provider_target: Mapping[str, Any] | None = None,
+    agent_id: str | None = None,
+    connection_id: str | None = None,
+) -> dict[str, Any] | None:
+    candidates = bindings_for_goal(
+        payload,
+        goal_id,
+        provider_target=provider_target,
+    )
+    if connection_id:
+        return next(
+            (item for item in candidates if item.get("connection_id") == connection_id),
+            None,
+        )
+    if agent_id is not None:
+        return next(
+            (item for item in candidates if item.get("agent_id") == agent_id),
+            None,
+        )
+    bindings = payload.get("bindings")
+    stored = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
+    default_id = (
+        str(stored.get("default_connection_id") or "")
+        if isinstance(stored, Mapping)
+        else ""
+    )
+    if default_id:
+        selected = next(
+            (item for item in candidates if item.get("connection_id") == default_id),
+            None,
+        )
+        if selected is not None:
+            return selected
+    return candidates[0] if candidates else None
 
 
 def human_gate_auto_notify_enabled(binding: Mapping[str, Any] | None) -> bool:
@@ -349,7 +463,29 @@ def save_goal_binding(
     goal_id: str,
     binding: Mapping[str, Any],
 ) -> None:
+    """Compatibility writer for the Goal's explicit default connection.
+
+    Existing notification/setup callers intentionally address the default
+    route. Preserve peer Agent routes when the Goal has migrated to a
+    connection set instead of collapsing the set back to v0.
+    """
     bindings = payload.get("bindings")
+    stored = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
+    if (
+        isinstance(stored, Mapping)
+        and stored.get("schema_version") == GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION
+    ):
+        save_goal_connection(
+            binding_path=binding_path,
+            payload=payload,
+            goal_id=goal_id,
+            binding={
+                **dict(binding),
+                "connection_id": str(stored.get("default_connection_id") or ""),
+            },
+            make_default=True,
+        )
+        return
     mutable_bindings = dict(bindings) if isinstance(bindings, Mapping) else {}
     mutable_bindings[goal_id] = dict(binding)
     write_goal_channel_binding(
@@ -359,6 +495,62 @@ def save_goal_binding(
             "bindings": mutable_bindings,
         },
     )
+
+
+def save_goal_connection(
+    *,
+    binding_path: Path,
+    payload: Mapping[str, Any],
+    goal_id: str,
+    binding: Mapping[str, Any],
+    make_default: bool = False,
+) -> str:
+    """Upsert one Agent route while retaining v0 single-binding read compatibility."""
+    connection_id = str(
+        binding.get("connection_id") or ""
+    ) or goal_channel_connection_id(
+        goal_id,
+        str(binding.get("agent_id") or "") or None,
+    )
+    all_bindings = payload.get("bindings")
+    mutable_bindings = dict(all_bindings) if isinstance(all_bindings, Mapping) else {}
+    stored = mutable_bindings.get(goal_id)
+    if (
+        isinstance(stored, Mapping)
+        and stored.get("schema_version") == GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION
+        and isinstance(stored.get("connections"), Mapping)
+    ):
+        connections = dict(stored["connections"])
+        default_id = str(stored.get("default_connection_id") or "")
+    else:
+        connections = {}
+        default_id = ""
+        if isinstance(stored, Mapping):
+            legacy_id = goal_channel_connection_id(
+                goal_id,
+                str(stored.get("agent_id") or "") or None,
+            )
+            connections[legacy_id] = dict(stored)
+            default_id = legacy_id
+    connections[connection_id] = {
+        **dict(binding),
+        "connection_id": connection_id,
+    }
+    if make_default or not default_id:
+        default_id = connection_id
+    mutable_bindings[goal_id] = {
+        "schema_version": GOAL_CHANNEL_CONNECTION_SET_SCHEMA_VERSION,
+        "default_connection_id": default_id,
+        "connections": connections,
+    }
+    write_goal_channel_binding(
+        binding_path,
+        {
+            "schema_version": GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
+            "bindings": mutable_bindings,
+        },
+    )
+    return connection_id
 
 
 def semantic_key(*parts: str) -> str:

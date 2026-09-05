@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 import pytest
@@ -21,7 +23,12 @@ from loopx.extensions.lark.goal_channel import (
 from loopx.extensions.lark.goal_channel_runtime import (
     auto_notify_lark_goal_channel_gate,
 )
-from loopx.extensions.lark.goal_channel_contracts import write_goal_channel_binding
+from loopx.extensions.lark.goal_channel_contracts import (
+    goal_channel_connection_id,
+    write_goal_channel_binding,
+)
+from loopx.extensions.lark.goal_topic_connections import disconnect_lark_goal_topic
+from loopx.file_lock import exclusive_file_lock, LockAcquireTimeoutError
 from loopx.extensions.lark.presentation.kanban import (
     lark_kanban_schema_payload,
     save_lark_kanban_board_config,
@@ -439,6 +446,67 @@ def test_private_binding_atomic_failure_preserves_existing_file(
     assert binding_path.read_bytes() == original_bytes
     assert binding_path.stat().st_mode & 0o777 == 0o600
     assert list(binding_path.parent.glob(f".{binding_path.name}.*.tmp")) == []
+
+
+def test_setup_and_disconnect_share_a_complete_file_transaction(tmp_path: Path) -> None:
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    entered, release, disconnect_started = Event(), Event(), Event()
+    calls: list[list[str]] = []
+    runner = _fake_runner(calls)
+
+    def delayed_runner(args, cwd, timeout):
+        if "+chat-create" in args:
+            entered.set()
+            assert release.wait(3)
+        return runner(args, cwd, timeout)
+
+    def disconnect():
+        disconnect_started.set()
+        return disconnect_lark_goal_topic(
+            binding_path=binding_path,
+            goal_id=GOAL_ID,
+            connection_id=goal_channel_connection_id(GOAL_ID, None),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        setup = pool.submit(
+            setup_lark_goal_channel,
+            registry=_registry(tmp_path),
+            registry_path=tmp_path / ".loopx" / "registry.json",
+            goal_id=GOAL_ID,
+            binding_path=binding_path,
+            kanban_config_path=tmp_path / ".loopx" / "lark-kanban.json",
+            bot_app_id="cli_public_fixture",
+            execute=True,
+            runner=delayed_runner,
+        )
+        try:
+            assert entered.wait(3)
+            # Real kernel lock must cover provider effects, not only final save.
+            with pytest.raises(LockAcquireTimeoutError):
+                with exclusive_file_lock(binding_path, timeout_seconds=0):
+                    pass
+            removed = pool.submit(disconnect)
+            assert disconnect_started.wait(3)
+        finally:
+            release.set()
+        assert setup.result()["ok"]
+        assert removed.result()["status"] == "disconnected"
+    assert GOAL_ID not in read_goal_channel_binding(binding_path)["bindings"]
+
+
+def test_default_setup_preview_does_not_create_a_lock(tmp_path: Path) -> None:
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    result = setup_lark_goal_channel(
+        registry=_registry(tmp_path),
+        registry_path=tmp_path / ".loopx" / "registry.json",
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        runner=_fake_runner([]),
+    )
+    assert result["status"] == "preview_ready"
+    assert not binding_path.exists()
+    assert not binding_path.with_name(binding_path.name + ".lock").exists()
 
 
 def test_setup_execute_persists_private_binding_after_verified_pin(
