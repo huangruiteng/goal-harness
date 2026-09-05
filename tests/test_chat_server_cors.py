@@ -46,12 +46,13 @@ def test_completed_todos_are_scoped_paginated_and_redacted(monkeypatch) -> None:
                 for index in range(3)
             ] + [
                 {"todo_id": "todo_monitor", "done": True, "task_class": "continuous_monitor"},
+                {"text": "no identity", "done": True, "task_class": "advancement_task", "archive_state": "active"},
                 {"todo_id": "todo_archive", "done": True, "task_class": "advancement_task", "archive_state": "archive"},
                 {"todo_id": "todo_open", "done": False, "task_class": "advancement_task"},
             ],
         }
 
-    monkeypatch.setattr("loopx.chat_server.list_goal_todos", read_todos)
+    monkeypatch.setattr("loopx.chat_completed_todos_api.list_goal_todos", read_todos)
     server, thread = _start_server()
     try:
         response = _request(server.server_address[1], method="GET", origin=None,
@@ -74,11 +75,28 @@ def test_completed_todos_are_scoped_paginated_and_redacted(monkeypatch) -> None:
         server.server_close()
 
 
+def test_completed_todos_report_unknown_goal_as_not_found(monkeypatch) -> None:
+    def unknown_goal(**kwargs):
+        raise ValueError("unknown goal")
+
+    monkeypatch.setattr("loopx.chat_completed_todos_api.list_goal_todos", unknown_goal)
+    server, thread = _start_server()
+    try:
+        response = _request(server.server_address[1], method="GET", origin=None,
+                            path="/api/chat/todos/completed?goal_id=missing")
+        response.read()
+        assert response.status == 404
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 def test_completed_todos_reject_invalid_queries_before_reading(monkeypatch) -> None:
     def unexpected_read(**kwargs):
         raise AssertionError("must not read task state")
 
-    monkeypatch.setattr("loopx.chat_server.list_goal_todos", unexpected_read)
+    monkeypatch.setattr("loopx.chat_completed_todos_api.list_goal_todos", unexpected_read)
     server, thread = _start_server()
     try:
         for query in ("", "goal_id=", "goal_id=test&limit=0", "goal_id=test&offset=-1",
