@@ -126,6 +126,7 @@ from .control_plane.coordination.local_authority import (
     read_canonical_todos_if_promoted,
 )
 from .control_plane.todos.provider_compatibility_edit import edit_canonical_todo_if_promoted
+from .control_plane.todos.provider_create import create_canonical_todo_if_promoted
 from .control_plane.todos.handoff_mode import (
     enter_added_todo_ownership_handoff_gate,
     enter_todo_ownership_handoff_gate,
@@ -452,6 +453,7 @@ def add_todo_to_lines(
     normalized_status = normalize_todo_status(status) if status else TODO_STATUS_OPEN
     if status and not normalized_status:
         raise ValueError("todo status must be one of: open, done, blocked, deferred")
+    assert normalized_status is not None
     normalized_resume_when = require_supported_todo_resume_when(resume_when)
     normalized_monitor_metadata = todo_monitor_metadata.require_monitor_metadata_scope(
         monitor_metadata=monitor_metadata,
@@ -757,6 +759,141 @@ def add_goal_todo(
     if normalized_status == TODO_STATUS_DONE:
         raise ValueError("todo add cannot create completed work; add it open and use `loopx todo complete`")
     todo_text = normalize_new_todo(text)
+    if validation_command and validation_command_json:
+        raise ValueError(
+            "--validation-command and --validation-command-json are mutually "
+            "exclusive; declare the validation command in exactly one form"
+        )
+    validation_argv = completion_validation_module.normalize_validation_command_json(
+        validation_command_json
+    )
+    if validation_timeout_seconds is not None:
+        if not validation_command and validation_argv is None:
+            raise ValueError(
+                "--validation-timeout-seconds requires --validation-command "
+                "or --validation-command-json"
+            )
+        if not (
+            1 <= validation_timeout_seconds
+            <= completion_validation_module.COMPLETION_VALIDATION_TIMEOUT_MAX_SECONDS
+        ):
+            raise ValueError(
+                "--validation-timeout-seconds must be between 1 and "
+                f"{completion_validation_module.COMPLETION_VALIDATION_TIMEOUT_MAX_SECONDS}"
+            )
+    effective_claimed_by = (
+        require_registered_agent_id(
+            registry_path=registry_path, goal_id=goal_id, agent_id=claimed_by,
+        ) if claimed_by else None
+    )
+    effective_agent_id = (
+        require_registered_agent_id(
+            registry_path=registry_path, goal_id=goal_id, agent_id=agent_id,
+            field="agent_id",
+        ) if agent_id else None
+    )
+    registered_agents = registered_agent_ids_from_registry(registry_path, goal_id)
+    inferred_blocks_agent = blocks_agent
+    if (
+        effective_agent_id and not inferred_blocks_agent and role == "user"
+        and task_class == TODO_TASK_CLASS_USER_GATE
+    ):
+        inferred_blocks_agent = effective_agent_id
+    effective_blocks_agent = (
+        require_registered_agent_id(
+            registry_path=registry_path, goal_id=goal_id,
+            agent_id=inferred_blocks_agent, field="blocks_agent",
+        ) if inferred_blocks_agent else None
+    )
+    inferred_bound_agent = bound_agent
+    if role == "user" and not inferred_bound_agent and not goal_bound:
+        if effective_agent_id:
+            inferred_bound_agent = effective_agent_id
+        elif task_class == TODO_TASK_CLASS_USER_GATE and effective_blocks_agent:
+            inferred_bound_agent = effective_blocks_agent
+        elif len(registered_agents) == 1:
+            inferred_bound_agent = registered_agents[0]
+    effective_bound_agent = (
+        require_registered_agent_id(
+            registry_path=registry_path, goal_id=goal_id,
+            agent_id=inferred_bound_agent, field="bound_agent",
+        ) if inferred_bound_agent else None
+    )
+    effective_goal_bound = bool(goal_bound or global_gate)
+    effective_excluded_agents = require_registered_todo_excluded_agents(
+        registry_path=registry_path, goal_id=goal_id,
+        excluded_agents=excluded_agents,
+    )
+    if role != "agent" and effective_excluded_agents:
+        raise ValueError("excluded_agents is only valid for agent todos")
+    require_user_gate_scope(
+        registry_path=registry_path, goal_id=goal_id, role=role,
+        task_class=task_class, blocks_agent=effective_blocks_agent,
+        global_gate=True if global_gate else None,
+    )
+    require_user_todo_binding(
+        registry_path=registry_path, goal_id=goal_id, role=role,
+        task_class=task_class, bound_agent=effective_bound_agent,
+        goal_bound=effective_goal_bound, blocks_agent=effective_blocks_agent,
+        global_gate=True if global_gate else None,
+    )
+    normalized_unblocks_todo_id = normalize_todo_id(unblocks_todo_id) if unblocks_todo_id else None
+    if unblocks_todo_id and not normalized_unblocks_todo_id:
+        raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
+    normalized_resume_when = require_supported_todo_resume_when(resume_when)
+    if normalized_status == TODO_STATUS_DEFERRED and not normalized_resume_when:
+        raise ValueError("deferred todo add requires --resume-when with a supported condition")
+    updated_at = now_local()
+    normalized_monitor_metadata = todo_monitor_metadata.require_monitor_metadata_scope(
+        monitor_metadata=monitor_metadata, role=role, task_class=task_class,
+        generated_at=updated_at,
+    )
+    todo_monitor_metadata.require_continuous_monitor_boundedness(
+        task_class=task_class, resume_when=normalized_resume_when,
+        monitor_metadata=normalized_monitor_metadata,
+    )
+    canonical_create = create_canonical_todo_if_promoted(
+        registry_path=registry_path,
+        runtime_root=shadow_runtime_root,
+        goal_id=goal_id,
+        role=role,
+        text=todo_text,
+        status=normalized_status,
+        actor_agent_id=effective_agent_id or effective_claimed_by,
+        claimed_by=effective_claimed_by,
+        metadata={
+            "task_class": task_class,
+            "action_kind": action_kind,
+            "task_domain": task_domain,
+            "capability_binding_ref": capability_binding_ref,
+            "task_repository": task_repository,
+            "continuation_policy": continuation_policy,
+            "required_write_scopes": required_write_scopes,
+            "required_capabilities": required_capabilities,
+            "target_capabilities": target_capabilities,
+            "explore_result_node_refs": explore_result_node_refs,
+            "decision_scope": decision_scope,
+            "required_decision_scopes": required_decision_scopes,
+            "bound_agent": effective_bound_agent,
+            "goal_bound": True if role == "user" and effective_goal_bound else None,
+            "blocks_agent": effective_blocks_agent,
+            "excluded_agents": effective_excluded_agents,
+            "global_gate": True if global_gate else None,
+            "unblocks_todo_id": normalized_unblocks_todo_id,
+            "replan_obligation_id": replan_obligation_id,
+            "resume_when": normalized_resume_when,
+            "validation_command": validation_command,
+            "validation_command_argv": validation_argv,
+            "validation_label": validation_label,
+            "validation_timeout_seconds": validation_timeout_seconds,
+            **normalized_monitor_metadata,
+            "note": note,
+            "updated_at": updated_at,
+        },
+        dry_run=dry_run,
+    )
+    if canonical_create is not None:
+        return canonical_create
     resolved_project, resolved_state_file = resolve_todo_state_path(
         registry_path=registry_path,
         goal_id=goal_id,
@@ -775,105 +912,6 @@ def add_goal_todo(
             write_class="todo_add", original_text=original,
         )
         lines = original.splitlines()
-        updated_at = now_local()
-        effective_claimed_by = (
-            require_registered_agent_id(
-                registry_path=registry_path,
-                goal_id=goal_id,
-                agent_id=claimed_by,
-            )
-            if claimed_by
-            else None
-        )
-        effective_agent_id = (
-            require_registered_agent_id(
-                registry_path=registry_path,
-                goal_id=goal_id,
-                agent_id=agent_id,
-                field="agent_id",
-            )
-            if agent_id
-            else None
-        )
-        registered_agents = registered_agent_ids_from_registry(registry_path, goal_id)
-        inferred_blocks_agent = blocks_agent
-        if (
-            effective_agent_id
-            and not inferred_blocks_agent
-            and role == "user"
-            and task_class == TODO_TASK_CLASS_USER_GATE
-        ):
-            inferred_blocks_agent = effective_agent_id
-        effective_blocks_agent = (
-            require_registered_agent_id(
-                registry_path=registry_path,
-                goal_id=goal_id,
-                agent_id=inferred_blocks_agent,
-                field="blocks_agent",
-            )
-            if inferred_blocks_agent
-            else None
-        )
-        inferred_bound_agent = bound_agent
-        if role == "user" and not inferred_bound_agent and not goal_bound:
-            if effective_agent_id:
-                inferred_bound_agent = effective_agent_id
-            elif task_class == TODO_TASK_CLASS_USER_GATE and effective_blocks_agent:
-                inferred_bound_agent = effective_blocks_agent
-            elif len(registered_agents) == 1:
-                inferred_bound_agent = registered_agents[0]
-        effective_bound_agent = (
-            require_registered_agent_id(
-                registry_path=registry_path,
-                goal_id=goal_id,
-                agent_id=inferred_bound_agent,
-                field="bound_agent",
-            )
-            if inferred_bound_agent
-            else None
-        )
-        effective_goal_bound = bool(goal_bound or global_gate)
-        effective_excluded_agents = require_registered_todo_excluded_agents(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            excluded_agents=excluded_agents,
-        )
-        if role != "agent" and effective_excluded_agents:
-            raise ValueError("excluded_agents is only valid for agent todos")
-        require_user_gate_scope(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            role=role,
-            task_class=task_class,
-            blocks_agent=effective_blocks_agent,
-            global_gate=True if global_gate else None,
-        )
-        require_user_todo_binding(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            role=role,
-            task_class=task_class,
-            bound_agent=effective_bound_agent,
-            goal_bound=effective_goal_bound,
-            blocks_agent=effective_blocks_agent,
-            global_gate=True if global_gate else None,
-        )
-        normalized_unblocks_todo_id = normalize_todo_id(unblocks_todo_id) if unblocks_todo_id else None
-        if unblocks_todo_id and not normalized_unblocks_todo_id:
-            raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
-        normalized_resume_when = require_supported_todo_resume_when(resume_when)
-        if normalized_status == TODO_STATUS_DEFERRED and not normalized_resume_when:
-            raise ValueError("deferred todo add requires --resume-when with a supported condition")
-        normalized_monitor_metadata = todo_monitor_metadata.require_monitor_metadata_scope(
-            monitor_metadata=monitor_metadata,
-            role=role,
-            task_class=task_class, generated_at=updated_at,
-        )
-        todo_monitor_metadata.require_continuous_monitor_boundedness(
-            task_class=task_class,
-            resume_when=normalized_resume_when,
-            monitor_metadata=normalized_monitor_metadata,
-        )
         handoff_gate = enter_added_todo_ownership_handoff_gate(
             handoff_gate_stack,
             lines=lines,

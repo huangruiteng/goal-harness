@@ -1898,6 +1898,14 @@ provider transaction 接到同一个 TS decision；Python 默认路径只保留�
 投影兼容职责。它关闭 claim policy 的双实现，但不把 Markdown 提升为 authority，
 也不替代剩余 create/update/complete/archive 的统一 transaction 与 projection outbox。
 
+随后的 `create` 切片让 promotion 后的 `todo add` 进入原生 provider transaction。
+旧 CLI 表面仍保留，但参数验证之后只跨一次 typed boundary；语义重复判断、actor/owner
+资格、CAS、replay receipt 与 projection outbox mutation 都由 TypeScript 持有。真实
+subprocess CLI 的 preview/apply 测试会先删除 Markdown state file，并证明它不会被重新
+创建。这消除了 promoted goal 上 create 的 Markdown 提交权威，但不宣称
+update/complete/archive 已可用于活跃 goal promote；这些命令要等各自 transaction
+类型进入同一 runtime boundary 前继续被 fence。
+
 file-v0 只用于有界 conformance 与 import 演练。第 7.2 节嵌入式存储切片与 provider-first
 Todo caller 同时推进，在长程本地资格化与晋升前汇合。PostgreSQL service/deployment
 继续并行，不成为本地晋升的依赖；NoKV 独立通过自己的 lineage/recovery 资格门禁。

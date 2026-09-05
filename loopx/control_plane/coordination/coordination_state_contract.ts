@@ -56,12 +56,14 @@ export interface TodoProjectionMetadata {
 
 export function canonicalTodoDomainRecord(value: unknown, label = "Todo domain record"): TodoDomainRecord {
   const record = canonicalCoordinationRecord(value, TODO_DOMAIN_RECORD_CONTRACT, label);
+  const terminal = record.status === "done" || record.status === "deferred";
   if (record.schema_version !== TODO_DOMAIN_ITEM_SCHEMA ||
       typeof record.todo_id !== "string" || !record.todo_id ||
       (record.role !== "user" && record.role !== "agent") ||
       typeof record.status !== "string" ||
       !["open", "done", "blocked", "deferred"].includes(String(record.status)) ||
-      typeof record.done !== "boolean" || typeof record.text !== "string" ||
+      typeof record.done !== "boolean" || record.done !== terminal ||
+      typeof record.text !== "string" ||
       (record.archive_state !== "active" && record.archive_state !== "archive")) {
     throw new AuthorityStoreProtocolError(`${label} has invalid required semantics`);
   }

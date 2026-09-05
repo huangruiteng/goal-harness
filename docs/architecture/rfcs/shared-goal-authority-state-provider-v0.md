@@ -2394,6 +2394,16 @@ compatibility duties. This closes duplicate claim policy; it neither promotes
 Markdown to authority nor replaces the remaining unified
 create/update/complete/archive transactions and projection outbox.
 
+The following `create` slice routes promoted `todo add` through a native
+provider transaction. The legacy CLI surface remains, but after argument
+validation it performs one typed crossing; TypeScript owns semantic duplicate
+resolution, actor/owner eligibility, CAS, replay receipts, and the projection
+outbox mutation. A deleted Markdown state file stays absent in real subprocess
+CLI preview and apply tests. This removes Markdown commit authority for create
+on promoted goals without claiming that update/complete/archive are ready for
+live promotion; those commands remain fenced until their own transaction
+types land behind the same runtime boundary.
+
 Use file-v0 for bounded conformance and import rehearsal only. Start the
 Section 7.2 embedded-store slice alongside the provider-first Todo caller; both
 converge before long-goal local qualification and promotion. PostgreSQL
