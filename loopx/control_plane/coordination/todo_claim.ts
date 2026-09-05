@@ -173,7 +173,7 @@ function rejectIneligibleTodo(
   if (todo.status !== "open") {
     return decisionFailure(
       "todo_not_open",
-      "Todo claim requires status=open",
+      "todo claim requires status=open",
       { todo_status: todo.status },
     );
   }
