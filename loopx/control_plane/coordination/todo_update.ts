@@ -9,6 +9,7 @@ import {
 } from "./authority_store_codec.ts";
 import {
   TODO_DOMAIN_ITEM_SCHEMA,
+  canonicalCoordinationTodoRecord,
   canonicalTodoDomainRecord,
 } from "./coordination_state_contract.ts";
 import {
@@ -164,7 +165,11 @@ export async function executeCoordinationTodoUpdate(
   next.last_actor_agent_id = input.actor_agent_id;
   next.updated_at = input.now.toISOString().replace(/\.\d{3}Z$/u, "Z");
   try {
-    canonicalTodoDomainRecord({...next, schema_version: TODO_DOMAIN_ITEM_SCHEMA}, "updated Todo");
+    if (todo.schema_version === TODO_DOMAIN_ITEM_SCHEMA) {
+      canonicalTodoDomainRecord(next, "updated Todo");
+    } else {
+      canonicalCoordinationTodoRecord(next, "updated Todo");
+    }
   } catch (error) {
     return failure("invalid_coordination_todo_update",
       error instanceof Error ? error.message : "invalid updated Todo");

@@ -17,6 +17,7 @@ import {
 import { prepareCoordinationProjectionCommit } from "../../loopx/control_plane/coordination/coordination_projection.ts";
 import { executeCoordinationTodoClaim } from "../../loopx/control_plane/coordination/todo_claim.ts";
 import { executeCoordinationTodoCreate } from "../../loopx/control_plane/coordination/todo_create.ts";
+import { executeCoordinationTodoUpdate } from "../../loopx/control_plane/coordination/todo_update.ts";
 import { editCoordinationTodo, TODO_COMPATIBILITY_EDIT_SCHEMA } from "../../loopx/control_plane/coordination/todo_compatibility_edit.ts";
 
 export interface AuthorityStoreConformanceFixture {
@@ -426,6 +427,49 @@ export function registerAuthorityStoreConformance(
         assert.equal((await editCoordinationTodo(store, {...request, ...invalid})).status, "failed");
       }
       assert.deepEqual(await store.loadAuthority(), afterRace);
+    });
+    test(`${providerName} conformance: provider-neutral Todo update is atomic and replayable (${native ? "native" : "v0"})`, async (t) => {
+      const {store, contender} = await factory(t);
+      const goalId = "goal-claim";
+      const initialized = await store.commitAuthority({
+        expected_provider_revision: null, operation_id: "init-update",
+        events: [], receipts: [], next_projection: todoClaimProjection(goalId, native),
+      });
+      assert.equal(initialized.status, "applied");
+      assert.equal((await executeCoordinationTodoClaim(store, {
+        goal_id: goalId, todo_id: "todo-claim", claimed_by: "agent-a",
+        actor_agent_id: "agent-a", expected_role: "agent",
+        registered_agents: ["agent-a", "agent-b"], operation_id: "claim-before-update",
+        dry_run: false, now: new Date("2026-09-05T05:15:00Z"),
+      })).status, "applied");
+      const request = {goal_id: goalId, todo_id: "todo-claim", expected_role: "agent",
+        actor_agent_id: "agent-a", registered_agents: ["agent-a", "agent-b"],
+        operation_id: "update-native", patch: {text: "Updated provider-neutrally"},
+        clear_fields: ["note"], dry_run: false,
+        now: new Date("2026-09-05T05:30:00Z")};
+      const preview = await executeCoordinationTodoUpdate(store, {...request, dry_run: true});
+      assert.equal(preview.status, "planned");
+      const [first, second] = await Promise.all([
+        executeCoordinationTodoUpdate(store, request),
+        executeCoordinationTodoUpdate(contender, {...request, operation_id: "update-contender",
+          patch: {text: "Concurrent update"}}),
+      ]);
+      assert.deepEqual([first.status, second.status].sort(), ["applied", "conflict"]);
+      const appliedRequest = first.status === "applied" ? request : {...request,
+        operation_id: "update-contender", patch: {text: "Concurrent update"}};
+      assert.equal((await executeCoordinationTodoUpdate(store, appliedRequest)).status, "replayed");
+      assert.equal((await executeCoordinationTodoUpdate(store, {...appliedRequest,
+        patch: {text: "Changed intent"}})).reason_code,
+      "coordination_operation_identity_mismatch");
+      const loaded = await store.loadAuthority();
+      assert.equal(loaded.status, "loaded");
+      if (loaded.status !== "loaded") return;
+      const updated = (loaded.head.todos as Record<string, unknown>[])[0]!;
+      assert.equal(updated.text, appliedRequest.patch.text);
+      assert.equal(updated.note, undefined);
+      assert.equal(updated.claimed_by, "agent-a");
+      assert.equal(updated.last_actor_agent_id, "agent-a");
+      assert.equal((loaded.head.todo_read_model as Record<string, unknown>).todo_count, 1);
     });
     test(`${providerName} conformance: provider-neutral Todo claim transaction (${native ? "native" : "v0"})`, async (t) => {
       const { store } = await factory(t);
