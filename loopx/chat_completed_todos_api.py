@@ -36,7 +36,7 @@ class ChatCompletedTodosRequestMixin:
     def _compact_todo_record(self, item: dict[str, object], *, protected_paths: list[Path]) -> dict[str, object]:
         raise NotImplementedError
 
-    def _completed_todos(self) -> None:
+    def _active_completed_todos(self) -> None:
         query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
         if set(query) - _ALLOWED_QUERY_KEYS or any(len(values) != 1 for values in query.values()):
             self._send_error("invalid completed task query")
