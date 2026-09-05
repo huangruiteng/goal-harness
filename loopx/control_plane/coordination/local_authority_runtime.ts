@@ -589,6 +589,11 @@ export async function createLocalCoordinationTodo(
   value: unknown,
   dependencies: LocalAuthorityRuntimeDependencies = {},
 ): Promise<JsonObject> {
+  const providerEvidence = {
+    source_authority: "file_v0",
+    decision_read_from_provider: true,
+    legacy_fallback_used: false,
+  };
   try {
     const input = requireJsonObject(value, "local coordination Todo create request");
     if (input.schema_version !== LOCAL_COORDINATION_TODO_CREATE_REQUEST_SCHEMA) {
@@ -619,9 +624,7 @@ export async function createLocalCoordinationTodo(
     });
     return {
       ...result,
-      source_authority: "file_v0",
-      decision_read_from_provider: true,
-      legacy_fallback_used: false,
+      ...providerEvidence,
     };
   } catch (error) {
     return {
@@ -629,9 +632,7 @@ export async function createLocalCoordinationTodo(
       status: "failed",
       reason_code: "invalid_local_coordination_todo_create_request",
       reason: error instanceof Error ? error.message : "invalid Todo create request",
-      source_authority: "file_v0",
-      decision_read_from_provider: true,
-      legacy_fallback_used: false,
+      ...providerEvidence,
     };
   }
 }
